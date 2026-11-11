@@ -150,3 +150,6 @@
 .inbox-row .num { color: var(--muted); }
 .inbox-row .asks { display: flex; gap: 0.3rem; flex: none; }
 .inbox-row .when { flex: none; font-size: 0.9em; }
+/* A scheme drawn from its last payload while it refreshes (#538): a small ring after "Minions", after a beat. */
+.sidebar[aria-busy='true'] > summary .label::after { content: ''; display: inline-block; width: 0.75em; height: 0.75em; margin-left: 0.45em; vertical-align: -0.05em; box-sizing: border-box; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: nav-busy-in 0s 0.2s both, scheme-spin 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .sidebar[aria-busy='true'] > summary .label::after { animation: nav-busy-in 0s 0.2s both; } }

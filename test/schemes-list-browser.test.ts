@@ -1,5 +1,6 @@
 // The schemes list on a scheme page (#491): a failed fetch of api/projects (the restart gap, a dropped
 // connection) keeps the schemes already shown and tries again, rather than blanking the list until a reload.
+// And going back to a scheme draws it from its payload as you left it, refreshing it in place behind (#538).
 // Citadel's real front end (public/index.html) in headless Chromium (test/browser.ts), with fetch answered
 // in the page so nothing reaches a server.
 import assert from 'node:assert/strict';
@@ -23,6 +24,10 @@ const STUB = `<script>
   addEventListener('unhandledrejection', (e) => errors.push(String(e.reason?.stack ?? e.reason)));
   window.failProjects = Number(new URLSearchParams(location.search).get('fail') ?? 0);
   const schemes = [{ id: 1, name: 'Alpha', inbox: 0, icon: null }, { id: 2, name: 'Beta', inbox: 0, icon: null }];
+  // Each scheme's one minion; window.hold, when set, keeps a scheme's payload waiting until it resolves.
+  window.titles = { 1: 'Alpha one', 2: 'Beta one' };
+  window.hold = null;
+  const minion = (id) => ({ id: id * 100 + 1, project_id: id, kind: 'ticket', number: 1, title: titles[id], status: 'idle', updated_at: 0 });
   const coordinator = (id) => ({ id: id * 100, project_id: id, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 });
   const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   window.fetch = async (input) => {
@@ -33,7 +38,8 @@ const STUB = `<script>
     let m;
     if ((m = path.match(/^api\\/projects\\/(\\d+)$/))) {
       const p = schemes.find((s) => s.id === Number(m[1]));
-      return reply(200, { project: { ...p, instructions: '' }, coordinator: coordinator(p.id), tickets: [], seen: {}, person_notes: {}, pins: [] });
+      await window.hold;
+      return reply(200, { project: { ...p, instructions: '' }, coordinator: coordinator(p.id), tickets: [minion(p.id)], dismissed: 0, seen: {}, person_notes: {}, pins: [] });
     }
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: coordinator(Number(m[1]) / 100) });
     if (/^api\\/tickets\\/\\d+\\/events$/.test(path)) return reply(200, url.search.includes('after=') ? [] : { events: [], tasks: [], more: false });
@@ -95,4 +101,19 @@ test('a page whose first schemes fetch fails fills the list in once a retry gets
   const page = await browser.page(`${base}?fail=1#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'Alpha to open', `document.querySelector('.scheme-crumb [data-project-name="1"]')`);
   await waitFor(page, 'the retry to fill the list', `document.querySelectorAll('#schemes-shelf .scheme-row').length === 2`);
+});
+
+test('going back to a scheme draws it as you left it at once, with a ring by Minions, then refreshes it in place', { skip }, async () => {
+  const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
+  const row = (title: string) => `[...document.querySelectorAll('#threads .thread-row')].some((r) => r.textContent.includes('${title}'))`;
+  await waitFor(page, 'Alpha with its minion', row('Alpha one'));
+  await page.eval(`location.hash = '#/p/2'`);
+  await waitFor(page, 'Beta with its minion', row('Beta one'));
+  // Alpha's minion is renamed while you're away, and the server is slow to say so.
+  await page.eval(`titles[1] = 'Alpha renamed'; window.hold = new Promise((r) => { window.release = r; }); location.hash = '#/p/1'`);
+  await waitFor(page, 'Alpha drawn without waiting for the server', `document.querySelector('.scheme-crumb [data-project-name="1"]') && ${row('Alpha one')}`);
+  assert.equal(await page.eval(`document.querySelector('#app .sidebar').getAttribute('aria-busy')`), 'true', 'the Minions panel says it is refreshing');
+  await page.eval(`window.release()`);
+  await waitFor(page, 'the refresh to bring the new title', row('Alpha renamed'));
+  await waitFor(page, 'the ring to go', `!document.querySelector('#app .sidebar').hasAttribute('aria-busy')`);
 });

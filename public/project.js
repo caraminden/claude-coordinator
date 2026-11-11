@@ -3,8 +3,8 @@ import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, sch
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
-import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
-import { chatSection, chatView, mountChat } from './thread.js';
+import { artifactBrowser, artifactViewer, renderArtifactHead, setArtifacts, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
+import { chatSection, chatView, mountChat, renderTicketHead } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import { forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
@@ -59,6 +59,11 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && document.getElementById('threads')) {
     if (await switchChat(main, seq)) return;
   }
+  // A scheme you were on earlier this session draws from its payload as you left it and refreshes in place
+  // behind (#538), unless the link is to a minion that payload doesn't have.
+  rememberScheme();
+  const last = main.kind === 'chat' ? schemeCache.get(projectId) : null;
+  const stale = last && (main.number == null || last.tickets.some((t) => t.number === main.number)) ? last : null;
   // The chat's history starts with the scheme when its id is known already: a link's, or the Taskmaster's from the
   // scheme list (#538), so a switch takes one round trip, not two. A wrong guess is dropped below.
   const early = main.kind !== 'chat' ? null : main.id ?? (main.number == null ? view?.projects?.find((p) => p.id === projectId)?.coordinator_id : null);
@@ -66,7 +71,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const earlyPage = early && !earlyCached ? loadEvents(early).catch(() => null) : null;
   // The scheme list is redrawn behind on a switch (refreshSchemes below); only a first load waits for it, for the shelf.
   const known = view?.projects?.length ? view.projects : null;
-  const [{ project, coordinator, tickets: open, dismissed, seen, person_notes, pins }, artifacts, shared, projects, machines] = await Promise.all([
+  const [{ project, coordinator, tickets: open, dismissed, seen, person_notes, pins }, artifacts, shared, projects, machines] = stale
+    ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes }, stale.artifacts, stale.shared, known, stale.machines]
+    : await Promise.all([
     // The dismissed minions come behind the first paint (loadDismissed): most of a big scheme's payload (#538).
     api(`api/projects/${projectId}?tickets=open`),
     // An empty shelf beats a broken page if the server is older than this front end.
@@ -181,7 +188,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderSchemesShelf();
   if (!projects || known) refreshSchemes();
   // The recap waits on it: it lists minions dismissed while you were away.
-  if (!findClosed && dismissed) view.dismissedLoad = loadDismissed(projectId);
+  if (stale) view.dismissedLoad = refreshScheme(projectId);
+  else if (!findClosed && dismissed) view.dismissedLoad = loadDismissed(projectId);
   renderMachineWarning();
   renderHiddenNote();
   refreshInbox();
@@ -193,6 +201,57 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (!chatId) return window.scrollTo(0, 0);
   revealActiveRow();
   await mountChat(chatId, ticket, page, cached?.fresh);
+}
+
+// The schemes you've left this session, each as you left it, most recent last (#538).
+const schemeCache = new Map();
+const SCHEME_CACHE = 6;
+
+function rememberScheme() {
+  if (view?.kind !== 'project' || !view.tickets) return;
+  const { projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, machines } = view;
+  schemeCache.delete(projectId);
+  schemeCache.set(projectId, { project, coordinator, tickets: [...tickets.values()], seen, personNotes, pins, artifacts, shared, machines });
+  if (schemeCache.size > SCHEME_CACHE) schemeCache.delete(schemeCache.keys().next().value);
+}
+
+/**
+ * Bring a scheme drawn from its last payload up to date in place (#538), with a ring by "Minions" meanwhile,
+ * then fetch its dismissed minions. A failed refresh leaves what's drawn: the stream's next resync redoes it.
+ */
+async function refreshScheme(projectId) {
+  const list = view.tickets;
+  const panel = document.querySelector('#app .sidebar');
+  panel?.setAttribute('aria-busy', 'true');
+  const got = await Promise.all([
+    api(`api/projects/${projectId}?tickets=open`),
+    api(`api/projects/${projectId}/artifacts`).catch(() => view.artifacts),
+    api(`api/projects/${projectId}/shared`).catch(() => view.shared),
+    api('api/machines').catch(() => view.machines),
+  ]).catch(() => null);
+  panel?.removeAttribute('aria-busy');
+  if (view?.kind !== 'project' || view.tickets !== list) return; // a newer load of the scheme drew its own
+  if (got) {
+    const [{ project, coordinator, tickets: open, seen, person_notes, pins }, artifacts, shared, machines] = got;
+    const now = new Set(open.map((t) => t.id));
+    // Dismissed since you left: gone until the dismissed list below brings it back as it is now.
+    for (const [id, t] of list) if (t.status !== 'closed' && !now.has(id)) list.delete(id);
+    // The stream may have brought a newer copy while this was on its way: that one stays.
+    for (const t of open) if (!(list.get(t.id)?.updated_at > t.updated_at)) list.set(t.id, t);
+    if (!(view.coordinator.updated_at > coordinator.updated_at)) view.coordinator = coordinator;
+    Object.assign(view, { project, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, machines });
+    const shown = view.id === view.coordinator.id ? view.coordinator : list.get(view.id);
+    if (shown && shown !== view.ticket) {
+      view.ticket = shown;
+      renderTicketHead();
+    }
+    renderSidebar();
+    setArtifacts(artifacts, shared);
+    renderGithubStrip();
+    renderMachineWarning();
+    renderHiddenNote();
+  }
+  await loadDismissed(projectId);
 }
 
 /**

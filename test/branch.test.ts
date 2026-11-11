@@ -85,6 +85,18 @@ test("another scheme's work, or an unknown running commit, has no deploy stage",
   assert.equal((await status('t/6', null))?.deploy, null);
 });
 
+test('a branch only fast-forwarded to a newer main has nothing of its own, so it is not "merged" (#468 S07-1)', async () => {
+  git(repo, 'branch', 't/8', 'main');
+  commit(repo);
+  git(repo, 'checkout', '-q', 't/8');
+  git(repo, 'merge', '-q', '--ff-only', 'main');
+  git(repo, 'checkout', '-q', 'main');
+  const s = await status('t/8');
+  assert.equal(s?.empty, true);
+  assert.equal(s?.merged, false);
+  assert.equal(shipLine(s, 0, null), null);
+});
+
 test('the ship line says where the change is, and why it is not moving', () => {
   const base: BranchStatus = { branch: 't/7', tip: 'abcdef0123', base: 'main', ahead: 0, merged: true, empty: false, pr: null, deploy: { pulled: false, live: false } };
   const line = (s: Partial<BranchStatus>, turns = 0, failure: string | null = null) => shipLine({ ...base, ...s }, turns, failure);

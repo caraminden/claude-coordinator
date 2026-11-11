@@ -68,9 +68,15 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
   const bases = [];
   if (await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${localDefault}`], repoDir)) bases.push(localDefault);
   if (originHead) bases.push(originHead);
+  // Its reflog says whether the minion committed since it started: a branch only fast-forwarded to a
+  // newer main has a new tip but none of its own work (as `committed` in src/wake.ts). With no reflog
+  // (they expire), a branch whose newest commit predates the ticket is still where it was cut from.
+  const reflog = (await tryGit(['reflog', 'show', '--date=unix', '--format=%gd %gs', `refs/heads/${branch}`], repoDir) ?? '')
+    .split('\n').map((line) => line.match(/@\{(\d+)\}\s+(.*)$/)).filter((m) => !!m);
   const tipTime = Number(await tryGit(['log', '-1', '--format=%ct', branch], repoDir)) * 1000;
-  // A branch whose newest commit predates the ticket is still where it was cut from.
-  const empty = !tipTime || tipTime < startedAt;
+  const empty = reflog.length
+    ? !reflog.some((m) => Number(m[1]) >= Math.floor(startedAt / 1000) && /^(commit(?! \(merge\))|cherry-pick|revert)\b/.test(m[2]))
+    : !tipTime || tipTime < startedAt;
   let ahead = 0;
   let merged = false;
   for (const base of bases) {

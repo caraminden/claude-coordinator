@@ -5,7 +5,13 @@ import { usage } from './core.js';
 
 /** What re-reading the minion's context costs a new payer, at $8 per million tokens (the handoff's rate). */
 const loadCost = (t) => (t.context_tokens ? `~$${((t.context_tokens * 8) / 1e6).toFixed(2)}` : null);
-const time = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+/** "4:03 PM" today, "Sun 4:03 PM" on another day, with the date too six days or more out (a weekly limit). */
+const time = (ms, now = Date.now()) => {
+  const at = new Date(ms);
+  const clock = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (at.toDateString() === new Date(now).toDateString()) return clock;
+  return `${at.toLocaleDateString([], { weekday: 'short', ...(ms - now >= 6 * 86_400_000 && { month: 'short', day: 'numeric' }) })} ${clock}`;
+};
 const mine = (t) => !!t.payer && !!account && t.payer.id === account.payer;
 /** Your own week, as your meter shows it; only your own plan's is shown to you. */
 const myWeek = () => (usage?.weekly ? `wk ${Math.round(Math.min(1, Math.max(0, usage.weekly.utilization)) * 100)}%` : null);

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { MAX_LIMIT_RESUMES, parseResetTime, Runner } from '../src/runner.ts';
+import { clockTime, MAX_LIMIT_RESUMES, parseResetTime, Runner } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
@@ -94,6 +94,17 @@ test('the reset time comes from Claude\'s words, in the zone they name', () => {
   assert.equal(parseResetTime('resets 3pm (Not/AZone)', now), null);
 });
 
+test('the resume time says its day when it is not today, and its date a week or so out (#468 S12-9)', () => {
+  const now = Date.parse('2026-10-29T10:00:00Z'); // Thursday 3am in Los Angeles
+  const LA = 'America/Los_Angeles';
+  assert.equal(clockTime(Date.parse('2026-10-29T22:30:00Z'), LA, now), '3:30pm');
+  assert.equal(clockTime(Date.parse('2026-10-30T09:00:00Z'), LA, now), 'Fri 2:00am');
+  // A weekly limit: days off.
+  assert.equal(clockTime(Date.parse('2026-11-01T23:03:00Z'), LA, now), 'Sun 3:03pm'); // PST by then
+  // Seven days on is Thursday again: the date too, so it can't read as today.
+  assert.equal(clockTime(Date.parse('2026-11-05T19:00:00Z'), LA, now), 'Thu, Nov 5 11:00am');
+});
+
 test('a usage limit waits quietly: limited, no error, no push, the resume time on the minion', async () => {
   const resetsAt = Date.now() + 2 * 60 * 60 * 1000;
   store.setSetting('usage', { session: { utilization: 1, resetsAt, status: 'rejected' }, weekly: null, updatedAt: Date.now() });
@@ -101,7 +112,8 @@ test('a usage limit waits quietly: limited, no error, no push, the resume time o
   const t = await turn(id, LIMIT);
   assert.equal(t.status, 'error');
   assert.equal(t.state, 'limited');
-  assert.match(t.note!, /^Usage limit, resumes \d{1,2}:\d\d[ap]m$/);
+  // Two hours out: tomorrow's weekday too when this runs after 10pm.
+  assert.match(t.note!, /^Usage limit, resumes (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d[ap]m$/);
   assert.equal(runner.view(t).limit_resume_at, resetsAt, 'the reset from the rate-limit event beats the words');
   assert.deepEqual(events(id, 'error'), []);
   assert.match(events(id, 'note').at(-1)!, /hit your 5-hour limit[\s\S]*resumes by itself at/);

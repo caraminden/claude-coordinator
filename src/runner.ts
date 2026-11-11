@@ -326,9 +326,15 @@ export function parseResetTime(text: string, now = Date.now()): number | null {
   }
 }
 
-/** "3:31pm", in the account's zone when Claude named it. */
-function clockTime(ms: number, tz?: string): string {
-  const say = (timeZone?: string) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone }).replace(' ', '').toLowerCase();
+/** "3:31pm", in the account's zone when Claude named it; "Fri 3:31pm" on another day, "Thu, Nov 5 3:31pm" six days or more out (a weekly limit). */
+export function clockTime(ms: number, tz?: string, now = Date.now()): string {
+  const say = (timeZone?: string) => {
+    const time = new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone }).replace(' ', '').toLowerCase();
+    const day = (at: number) => new Date(at).toLocaleDateString('en-US', { timeZone });
+    if (day(ms) === day(now)) return time;
+    const far = ms - now >= 6 * 86_400_000;
+    return `${new Date(ms).toLocaleDateString('en-US', { weekday: 'short', ...(far && { month: 'short', day: 'numeric' }), timeZone })} ${time}`;
+  };
   try {
     return say(tz);
   } catch {

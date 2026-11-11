@@ -10,7 +10,7 @@ import { after, test } from 'node:test';
 const templates = join(import.meta.dirname, '..', 'kit', 'skills', 'scheme-setup', 'templates');
 const root = mkdtempSync(join(tmpdir(), 'scheme-land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
-const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+const env = { ...process.env, DEPLOY_LOCKED: undefined, DEPLOY_TESTED: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 let n = 0;

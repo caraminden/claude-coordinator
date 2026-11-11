@@ -238,8 +238,13 @@ restart() {
 
 deploy() {
   init_state
-  # DEPLOY_LOCKED: run by tools/land.sh, which already holds the lock on fd 9.
-  [ -n "${DEPLOY_LOCKED:-}" ] || exec 9>"$STATE/lock"
+  # DEPLOY_LOCKED: run by tools/land.sh, which already holds the lock on fd 9. Trusted (DEPLOY_TESTED with it) only
+  # when fd 9 really is this lock file: a leaked env (a test run under a deploy, a nested run) must still lock (#514).
+  local inherited=
+  if [ -n "${DEPLOY_LOCKED:-}" ]; then
+    if [ /dev/fd/9 -ef "$STATE/lock" ]; then inherited=1; else say "DEPLOY_LOCKED is set but fd 9 isn't the deploy lock; taking the lock"; fi
+  fi
+  [ -n "$inherited" ] || { exec 9>"$STATE/lock"; DEPLOY_TESTED=; }
   flock -w 900 9 || { say "another deploy has held the lock for 15 min; try again later"; exit 1; }
   [ -f "$STATE/FAILED" ] && say "warning: the last rollback failed too (see journalctl --user -u $UNIT); carrying on" && rm -f "$STATE/FAILED"
   if [ -n "$(git_live status --porcelain --untracked-files=no)" ]; then

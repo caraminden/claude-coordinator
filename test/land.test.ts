@@ -318,6 +318,34 @@ test('deploy.sh on its own, or told of a different tested commit, still runs the
   }
 });
 
+// DEPLOY_LOCKED and DEPLOY_TESTED leaked into a deploy land.sh didn't start (an inherited env, a test run under
+// a deploy, a nested run): with no fd 9, or fd 9 on another file, it takes the lock itself and runs the tests (#514).
+test('deploy.sh told DEPLOY_LOCKED without the lock on fd 9 takes the lock itself and runs the tests', async () => {
+  for (const fd9 of ['', 'exec 9>/dev/null; ']) {
+    await withRealDeploy(async (r, run, runs) => {
+      r.commit(r.source, 'b.txt', 'theirs\n');
+      const lock = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'lock');
+      mkdirSync(join(lock, '..'), { recursive: true });
+      // Someone else holds the lock for a while: the deploy must wait for it rather than go ahead.
+      const holder = spawn('flock', [lock, 'sleep', '2'], { stdio: 'ignore' });
+      const released = new Promise((ok) => holder.once('exit', ok));
+      while (spawnSync('flock', ['-n', lock, 'true']).status === 0) await new Promise((ok) => setTimeout(ok, 20));
+      const script = join(r.dir, 'leaky.sh');
+      writeFileSync(script, `${fd9}exec bash ${JSON.stringify(join(import.meta.dirname, '..', 'tools', 'deploy.sh'))}\n`);
+      let holderDone = false;
+      void released.then(() => (holderDone = true));
+      const res = await run(script, r.source, { DEPLOY_LOCKED: '1', DEPLOY_TESTED: git(r.source, 'rev-parse', 'main') });
+      await released;
+      assert.ok(holderDone, `the deploy waited for the lock (fd9: ${fd9 || 'closed'})`);
+      assert.match(res.stderr, /taking the lock/, fd9);
+      assert.match(res.stderr, /running the tests/, fd9);
+      assert.doesNotMatch(res.stderr, /skipping the tests/, fd9);
+      assert.deepEqual(runs(), [r.live], fd9);
+      assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.source, 'rev-parse', 'main'), fd9);
+    });
+  }
+});
+
 // A person pressing Stop, or a Bash time limit, ends the whole run with a signal (#468 S10-5).
 test('a land killed while the deploy tests the live checkout puts the checkout and main back', async () => {
   const r = setup();

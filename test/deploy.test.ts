@@ -16,7 +16,8 @@ testPins();
 // deploy reports; the script tells front-end-only changes from the rest.
 const repo = join(import.meta.dirname, '..');
 // The scripts refuse to run in a person's Claude container (COORDINATOR_CONTAINER=1); these tests stand in for the host.
-const hostEnv = { ...process.env, COORDINATOR_CONTAINER: undefined };
+// DEPLOY_LOCKED and DEPLOY_TESTED leak in when this suite runs under a deploy (#514).
+const hostEnv = { ...process.env, COORDINATOR_CONTAINER: undefined, DEPLOY_LOCKED: undefined, DEPLOY_TESTED: undefined };
 const root = mkdtempSync(join(tmpdir(), 'deploy-test-'));
 const procs: ChildProcess[] = [];
 after(async () => {

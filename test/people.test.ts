@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { adminOwned, lendsMachine, mayReceive, messageScope, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
-import { Store } from '../src/db.ts';
+import { askerKey, Store } from '../src/db.ts';
 import { bootServer, PASSWORD, until, type Booted, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'people-'));
@@ -118,6 +118,40 @@ test("turns run for people allowed on the server's login; anyone else's message 
   assert.match(turnRefusal(store, his, 'Josh', (uid) => (uid === josh.id ? 'expired' : null))!, /Josh's Claude sign-in expired/);
   assert.match(turnRefusal(store, his, 'GitHub', () => null)!, /its owner, Josh, links/);
   assert.ok(adminOwned(store, citadel) && !adminOwned(store, games));
+});
+
+// The check is on the Claude the turn would run on (runner.ts turnPerson), not always the owner's (#468 S02-2).
+test("a message from no person is checked against the person its turn would run for", () => {
+  const { store, josh, olive, games } = world();
+  store.addMember(games.id, olive.id);
+  const linked = (ids: number[]) => (uid: number) => (ids.includes(uid) ? ('linked' as const) : null);
+  // Olive's minion in Josh's scheme: a CI result or a wake runs as Olive, so her link decides, not Josh's.
+  const made = store.createTicket({ project_id: games.id, title: 'T', permission_mode: 'default', created_by: 'Olive' });
+  store.updateTicket(made.id, { person_id: olive.id });
+  const hers = store.getTicket(made.id)!;
+  assert.equal(turnRefusal(store, hers, 'GitHub', linked([olive.id])), null, "the owner's missing link doesn't hold her minion's turn");
+  assert.match(turnRefusal(store, hers, 'GitHub', linked([josh.id]))!, /Turns for Olive start once they link/, "the owner's link doesn't run a turn on her unlinked Claude");
+  store.updateUser(olive.id, { disabled_at: Date.now() });
+  assert.match(turnRefusal(store, hers, 'GitHub', linked([josh.id, olive.id]))!, /Olive's login is disabled/);
+  store.updateUser(olive.id, { disabled_at: null });
+  // A minion with no person still falls back to the owner.
+  const none = store.createTicket({ project_id: games.id, title: 'T', permission_mode: 'default', created_by: 'x' });
+  assert.match(turnRefusal(store, none, 'GitHub', linked([olive.id]))!, /its owner, Josh, links/);
+  assert.equal(turnRefusal(store, none, 'GitHub', linked([josh.id])), null);
+  // A relay runs as the asker of the turn that sent it, when they are in this scheme...
+  const from = store.createTicket({ project_id: games.id, title: 'sender', permission_mode: 'default', created_by: 'x' });
+  store.setSetting(askerKey(from.id), olive.id);
+  assert.equal(turnRefusal(store, none, 'Games Taskmaster', linked([olive.id]), from.id), null);
+  assert.match(turnRefusal(store, none, 'Games Taskmaster', linked([josh.id]), from.id)!, /Turns for Olive start/);
+  // ...and as the owner when they aren't (#211): Pat's ask relayed into Josh's scheme needs Josh's link.
+  const pat = store.createUser({ name: 'Pat', login: 'pat' });
+  const pats = store.createProject('Pats', null, pat.id);
+  const patsTm = store.createTicket({ project_id: pats.id, title: 'tm', permission_mode: 'default', created_by: 'x' });
+  store.setSetting(askerKey(patsTm.id), pat.id);
+  assert.match(turnRefusal(store, none, 'Pats Taskmaster', linked([pat.id]), patsTm.id)!, /its owner, Josh, links/);
+  assert.equal(turnRefusal(store, none, 'Pats Taskmaster', linked([josh.id]), patsTm.id), null);
+  // A person's own message is still theirs, whatever the minion's person.
+  assert.match(turnRefusal(store, hers, 'Josh', linked([olive.id]))!, /Turns for Josh start/);
 });
 
 test('a machine goes to exactly the schemes on its list, even a non-admin\'s, and a new one to none (#303, #438)', () => {

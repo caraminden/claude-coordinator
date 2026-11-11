@@ -31,14 +31,26 @@ export function mayReceive(store: Store, who: Session, scope: number | 'admin' |
 /**
  * Why a message can't start or steer a turn yet, or null when it can. Until people link their own
  * Claude accounts, turns run on the server's login, which only people an admin allowed may use (Pro
- * and Max plans are per person). A message from no person (GitHub, a wake, another thread) counts
- * as the scheme owner's.
+ * and Max plans are per person). A message from no person is checked against whoever its turn would
+ * run for, as src/runner.ts turnPerson picks them: a relay (`from`, the sending thread) as the asker
+ * of the turn that sent it, or the scheme owner when that asker isn't in this scheme (#211); GitHub
+ * or a wake as the minion's last person, else the scheme owner (#468 S02-2).
  */
-export function turnRefusal(store: Store, ticket: Ticket, author: string, linked: ClaudeLinked = () => null): string | null {
-  const person = store.findUser('name', author);
-  const who = person ?? store.getUser(store.getProject(ticket.project_id)?.owner_id ?? -1);
+export function turnRefusal(store: Store, ticket: Ticket, author: string, linked: ClaudeLinked = () => null, from?: number): string | null {
+  const ownerId = store.getProject(ticket.project_id)?.owner_id ?? null;
+  let id: number | null = null;
+  if (from) {
+    const asker = store.turnAsker(from);
+    const user = asker !== null ? store.getUser(asker) : undefined;
+    id = user && !store.canSee({ uid: user.id, admin: !!user.admin }, ticket.project_id) ? ownerId : asker;
+  } else {
+    const person = store.findUser('name', author);
+    if (person) return claudeRefusal(person, linked);
+  }
+  id ??= ticket.person_id ?? ownerId;
+  const who = store.getUser(id ?? -1);
   if (!who) return "Turns in this scheme start once its owner links their Claude account, so this message waits here and Claude hasn't seen it.";
-  return claudeRefusal(who, linked, !person);
+  return claudeRefusal(who, linked, who.id === ownerId);
 }
 
 /** Whether a person has linked their own Claude (src/claude-link.ts): linked, expired, or not at all. */

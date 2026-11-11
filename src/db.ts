@@ -557,6 +557,14 @@ CREATE TABLE IF NOT EXISTS project_seen_items (
   seen_at INTEGER NOT NULL,
   PRIMARY KEY (name, project_id)
 );
+-- When each person last acted in a scheme (a message or an approval click), for the recap (#538): reading it
+-- from the events took 1.5 s with the disk cache cold. A missing row is filled from the events once (Store.recap).
+CREATE TABLE IF NOT EXISTS last_actions (
+  name TEXT NOT NULL,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (name, project_id)
+);
 CREATE TABLE IF NOT EXISTS shared_pins (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
@@ -765,6 +773,7 @@ export const SCHEMA_HISTORY = [
   [36, 'turns.payer (#468 S05-3)'],
   [37, 'project_seen_counts (#498)'],
   [38, 'project_seen_items (#539)'],
+  [39, 'last_actions (#538)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -776,6 +785,9 @@ export function titleWithoutBuild(title: string, build: number): string {
   const m = title.match(/^(.*\S)\s*(?:[·|:–—-]\s*build\s*#?(\d+)|\(\s*build\s*#?(\d+)\s*\))\s*$/i);
   return m && Number(m[2] ?? m[3]) === build ? m[1] : title;
 }
+
+/** How long without an action before the Taskmaster chat shows the recap: AWAY_MS in public/recap.js. */
+export const RECAP_AWAY_MS = 6 * 60 * 60 * 1000;
 
 export class Store {
   db: DatabaseSync;
@@ -1432,6 +1444,12 @@ export class Store {
     const r = this.db
       .prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)')
       .run(ticketId, kind, json, now);
+    // A message or an approval click is its author's latest action in the scheme, for the recap (Store.recap).
+    const actor = kind === 'user_message' ? (data as any)?.author : kind === 'approval_result' ? (data as any)?.by : null;
+    if (typeof actor === 'string') {
+      this.db.prepare(`INSERT INTO last_actions (name, project_id, at) SELECT ?, project_id, ? FROM tickets WHERE id = ?
+        ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)`).run(actor, now, ticketId);
+    }
     return { id: Number(r.lastInsertRowid), ticket_id: ticketId, kind, data: json, created_at: now };
   }
 
@@ -1677,16 +1695,27 @@ export class Store {
    * has finished since. `since` is null if they never have.
    */
   recap(name: string, projectId: number): { since: number | null; turns: Record<number, number> } {
-    const { since } = this.db.prepare(`
-      SELECT MAX(e.created_at) AS since FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
-      WHERE t.project_id = ? AND e.kind IN ('user_message', 'approval_result') AND (
-        (e.kind = 'user_message' AND json_extract(e.data, '$.author') = ?)
-        OR (e.kind = 'approval_result' AND json_extract(e.data, '$.by') = ?))`).get(projectId, name, name) as { since: number | null };
-    if (since == null) return { since: null, turns: {} };
+    let row = this.db.prepare('SELECT at FROM last_actions WHERE name = ? AND project_id = ?').get(name, projectId) as { at: number } | undefined;
+    if (!row) {
+      // Once per person and scheme: from before last_actions, read from the events (1.5 s cold for Citadel, #538). 0: never acted.
+      const { since } = this.db.prepare(`
+        SELECT MAX(e.created_at) AS since FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
+        WHERE t.project_id = ? AND e.kind IN ('user_message', 'approval_result') AND (
+          (e.kind = 'user_message' AND json_extract(e.data, '$.author') = ?)
+          OR (e.kind = 'approval_result' AND json_extract(e.data, '$.by') = ?))`).get(projectId, name, name) as { since: number | null };
+      row = { at: since ?? 0 };
+      this.db.prepare('INSERT INTO last_actions (name, project_id, at) VALUES (?, ?, ?) ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)').run(name, projectId, row.at);
+    }
+    const since = row.at || null;
+    // The page shows the recap only after RECAP_AWAY_MS without an action, so the count isn't read before then:
+    // it reads every Claude event in the scheme since (0.3 s warm for Citadel, #538).
+    if (since == null || Date.now() - since < RECAP_AWAY_MS) return { since, turns: {} };
+    // Event ids grow with time, so start after the last turn that ended by `since` (turns_ended finds it): the index skips everything older.
+    const before = this.db.prepare('SELECT event_id FROM turns WHERE ended_at <= ? AND event_id IS NOT NULL ORDER BY ended_at DESC LIMIT 1').get(since) as { event_id: number } | undefined;
     const rows = this.db.prepare(`
-      SELECT e.ticket_id, COUNT(*) AS n FROM events e JOIN tickets t ON t.id = e.ticket_id
-      WHERE t.project_id = ? AND e.created_at > ? AND e.kind = 'claude' AND json_extract(e.data, '$.type') = 'result'
-      GROUP BY e.ticket_id`).all(projectId, since) as { ticket_id: number; n: number }[];
+      SELECT e.ticket_id, COUNT(*) AS n FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
+      WHERE t.project_id = ? AND e.kind = 'claude' AND e.id > ? AND e.created_at > ? AND json_extract(e.data, '$.type') = 'result'
+      GROUP BY e.ticket_id`).all(projectId, before?.event_id ?? 0, since) as { ticket_id: number; n: number }[];
     return { since, turns: Object.fromEntries(rows.map((r) => [r.ticket_id, r.n])) };
   }
 

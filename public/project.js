@@ -59,16 +59,28 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && document.getElementById('threads')) {
     if (await switchChat(main, seq)) return;
   }
-  const [{ project, coordinator, tickets, seen, person_notes, pins }, artifacts, shared, projects, machines] = await Promise.all([
-    api(`api/projects/${projectId}`),
+  // The chat's history starts with the scheme when its id is known already: a link's, or the Taskmaster's from the
+  // scheme list (#538), so a switch takes one round trip, not two. A wrong guess is dropped below.
+  const early = main.kind !== 'chat' ? null : main.id ?? (main.number == null ? view?.projects?.find((p) => p.id === projectId)?.coordinator_id : null);
+  const earlyCached = early ? cachedEvents(early) : null;
+  const earlyPage = early && !earlyCached ? loadEvents(early).catch(() => null) : null;
+  // The scheme list is redrawn behind on a switch (refreshSchemes below); only a first load waits for it, for the shelf.
+  const known = view?.projects?.length ? view.projects : null;
+  const [{ project, coordinator, tickets: open, dismissed, seen, person_notes, pins }, artifacts, shared, projects, machines] = await Promise.all([
+    // The dismissed minions come behind the first paint (loadDismissed): most of a big scheme's payload (#538).
+    api(`api/projects/${projectId}?tickets=open`),
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`api/projects/${projectId}/artifacts`).catch(() => []),
     api(`api/projects/${projectId}/shared`).catch(() => []),
     // A failed fetch keeps the list already shown and tries again below, rather than blanking it (#491).
-    api('api/projects').catch(() => null),
+    known ?? api('api/projects').catch(() => null),
     // Each person's own machines; an admin's list has every machine (#306).
     api('api/machines').catch(() => []),
   ]);
+  let tickets = open;
+  // A link to a dismissed minion waits for the dismissed list; any other open draws without it.
+  const findClosed = main.kind === 'chat' && main.number != null && dismissed && !open.some((t) => t.number === main.number);
+  if (findClosed) tickets = open.concat((await api(`api/projects/${projectId}?tickets=closed`)).tickets);
   let chatId = null;
   if (main.kind === 'chat') {
     chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((t) => t.number === main.number)?.id);
@@ -80,8 +92,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   }
   // The minion came with the scheme's list; its history is drawn from the cache when it's there (#527).
   const ticket = !chatId ? null : chatId === coordinator.id ? coordinator : tickets.find((t) => t.id === chatId) ?? (await api(`api/tickets/${chatId}`)).ticket;
-  const cached = chatId ? cachedEvents(chatId) : null;
-  const page = cached?.page ?? (chatId ? await loadEvents(chatId) : null);
+  const guessed = chatId && chatId === early;
+  const cached = guessed ? earlyCached : chatId ? cachedEvents(chatId) : null;
+  const page = cached?.page ?? (guessed ? await earlyPage : null) ?? (chatId ? await loadEvents(chatId) : null);
   if (seq !== routeSeq) return; // overtaken by another click while loading
   forgetOtherSchemes();
   setView({
@@ -166,7 +179,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderSidebar();
   renderGithubStrip();
   renderSchemesShelf();
-  if (!projects) refreshSchemes();
+  if (!projects || known) refreshSchemes();
+  // The recap waits on it: it lists minions dismissed while you were away.
+  if (!findClosed && dismissed) view.dismissedLoad = loadDismissed(projectId);
   renderMachineWarning();
   renderHiddenNote();
   refreshInbox();
@@ -178,6 +193,16 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (!chatId) return window.scrollTo(0, 0);
   revealActiveRow();
   await mountChat(chatId, ticket, page, cached?.fresh);
+}
+
+/** Fetch a scheme's dismissed minions behind its first paint and add them to the list (#538); a newer load of the list wins. */
+async function loadDismissed(projectId) {
+  const list = view.tickets;
+  const closed = await api(`api/projects/${projectId}?tickets=closed`).then((r) => r.tickets, () => []);
+  if (view?.kind !== 'project' || view.tickets !== list) return;
+  // The stream may have brought a fresher copy meanwhile (one reopened, say): that one stays.
+  for (const t of closed) if (!list.has(t.id)) list.set(t.id, t);
+  renderSidebar();
 }
 
 /**
@@ -193,9 +218,9 @@ async function switchChat(main, seq) {
   const cached = cachedEvents(chatId);
   const page = cached?.page ?? await loadEvents(chatId);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, projectId, project, coordinator, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
   setView({
-    kind, main: 'chat', projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
+    kind, main: 'chat', projectId, project, coordinator, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
     artifactId: null, file: null,
     ...chatView(chatId, ticket),
   });

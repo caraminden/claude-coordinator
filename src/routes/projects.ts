@@ -225,6 +225,7 @@ export const projectRoutes: Route[] = [
     // hidden: this person hid it (#226); its badge stays at zero.
     // running: a minion or its Taskmaster has a turn doing work (#248; not one held on an approval card, #373), for the spinner; false when hidden.
     // working: how many minions (not the Taskmaster) have a turn doing work, the number beside the spinner (#278); 0 when hidden.
+    // coordinator_id: the scheme's Taskmaster, null until its first open makes one.
     // fresh: something waits on this person that wasn't waiting when they last had the scheme open (#498, #539), for the
     // violet badge. A scheme they've never had open since #539 takes today's items as seen, so nothing is marked on day one.
     handler: async ({ res, app: { store, runner }, session }) => {
@@ -245,6 +246,8 @@ export const projectRoutes: Route[] = [
           running: !hidden.has(p.id) && tickets.some(busy),
           working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
           icon: await iconVersion(p.repo_dir),
+          // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538).
+          coordinator_id: tickets.find((t) => t.kind === 'coordinator')?.id ?? null,
         };
       })));
     },
@@ -402,11 +405,15 @@ export const projectRoutes: Route[] = [
   },
   {
     method: 'GET', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
-    async handler({ res, app, session, caller, project }) {
+    // ?tickets=open leaves the dismissed minions out (`dismissed` counts them), and ?tickets=closed sends only them: the page
+    // draws the scheme from the open ones and fetches the dismissed behind it, 80% of Citadel's payload (#538).
+    async handler({ res, url, app, session, caller, project }) {
       const coordinator = await ensureCoordinator(app, project);
-      const tickets = app.store
-        .listTickets(project.id)
-        .filter((t) => t.kind === 'ticket')
+      const which = url.searchParams.get('tickets');
+      const all = app.store.listTickets(project.id).filter((t) => t.kind === 'ticket');
+      const dismissed = all.filter((t) => t.status === 'closed').length;
+      const tickets = all
+        .filter((t) => which === 'open' ? t.status !== 'closed' : which === 'closed' ? t.status === 'closed' : true)
         .map((t) => app.runner.view(t));
       // When this person last looked at each thread, so rows they have already seen can be shown quieter.
       const seen = caller ? {} : app.store.seenTimes(session.name, project.id);
@@ -414,7 +421,7 @@ export const projectRoutes: Route[] = [
       const person_notes = caller ? {} : app.store.personNotes(project.id);
       // This person's pinned minions (#179), oldest pin first.
       const pins = caller ? [] : app.store.pinnedTickets(session.name, project.id);
-      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, seen, person_notes, pins });
+      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, dismissed, seen, person_notes, pins });
     },
   },
   {

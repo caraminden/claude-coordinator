@@ -7,12 +7,13 @@ import { threadRow } from './sidebar.js';
 import { rowState } from './threadstate.js';
 import { recapSections } from './threadgroups.js';
 
-const AWAY_MS = 6 * 60 * 60 * 1000; // Cara, 2026-10-28: "only ... if you havent taken an action for 6+ hours"
+const AWAY_MS = 6 * 60 * 60 * 1000; // Cara, 2026-10-28: "only ... if you havent taken an action for 6+ hours". The server skips the count before then: RECAP_AWAY_MS in src/db.ts.
 
 /** Fetch the recap for the open Taskmaster chat and show it, if you have been away long enough. */
 export async function showRecap() {
   const { projectId, id } = view;
-  const recap = await api(`api/projects/${projectId}/recap`).catch(() => null);
+  // Its Dismissed section needs the dismissed minions, which load behind the scheme's first paint (#538).
+  const [recap] = await Promise.all([api(`api/projects/${projectId}/recap`).catch(() => null), view.dismissedLoad]);
   if (!recap?.since || Date.now() - recap.since < AWAY_MS || view?.id !== id) return;
   const tickets = [...view.tickets.values()];
   const sections = recapSections(tickets, recap.since, recap.turns, (t) => rowState(t, usage));

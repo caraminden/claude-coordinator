@@ -13,7 +13,9 @@
   SYSTEM, so the runner's own `config.cmd remove` is never used. The folder's files are data: the marker and .runner
   are read as JSON and nothing else is opened. The runner's name comes from its service's name
   (actions.runner.<owner>-<repo>.<name>), which only an admin can set; .runner's agentName is used only where there is
-  no such name to read (a session runner, or a service name GitHub cut short at 80 characters).
+  no such name to read (a session runner, or a service name GitHub cut short at 80 characters), and Citadel is told the
+  label that kind of runner carries (the scheme's, or the logon task's), so such a name can only reach a runner of
+  the same kind.
   A session runner (add-runner.ps1 -Session, #370) has no service: it is removed when its logon task, "GitHub runner
   <its label>", starts it from that folder, and the task and the runner's processes go with it.
   It never touches another runner, never restarts or reboots the PC. Run it elevated (an admin PowerShell, or the
@@ -67,7 +69,9 @@ function Invoke-Citadel([hashtable]$Ask) {
 # Ends every process running from a runner's folder (run.cmd's cmd.exe, Runner.Listener, Runner.Worker), a job's too.
 function Stop-RunnerProcess([string]$Dir) {
   Get-CimInstance -ClassName Win32_Process | Where-Object {
-    $_.ProcessId -ne $PID -and (($_.ExecutablePath -and $_.ExecutablePath -like "$Dir\*") -or ($_.CommandLine -and $_.CommandLine -like "*$Dir\run.cmd*"))
+    # Literal comparisons: -like would read a [ in the folder's name as a wildcard.
+    $_.ProcessId -ne $PID -and (($_.ExecutablePath -and $_.ExecutablePath.StartsWith("$Dir\", [StringComparison]::OrdinalIgnoreCase)) -or
+      ($_.CommandLine -and $_.CommandLine.IndexOf("$Dir\run.cmd", [StringComparison]::OrdinalIgnoreCase) -ge 0))
   } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
@@ -89,6 +93,8 @@ function Wait-RunnerService([string]$Name, [int]$Seconds, [switch]$Gone) {
 
 # Deletes a folder without following a link in it: a job can leave a junction to anywhere, and Windows PowerShell 5.1's
 # Remove-Item -Recurse would empty what it points at. A link is removed as a link; a read-only file (git's objects) goes too.
+# shortcut: a process a job detached outside the folder (so not ended above) could swap a subfolder for a junction between
+# listing and recursing; fine on a trusted-friends PC, revisit if runners ever take outside PRs.
 function Remove-Tree([IO.FileSystemInfo]$Item) {
   $link = [bool]($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)
   if ($Item -is [IO.DirectoryInfo] -and -not $link) {
@@ -103,11 +109,11 @@ $root = 'C:\'
 $never = '', '-2', '-3', '-4', '-perf' | ForEach-Object { Join-Path $root "actions-runner$_" }
 
 try { $names = Invoke-Citadel @{ mint = $false } } catch { Stop-With "Citadel refused: $($_.Exception.Message)" }
-$mine = @(Get-ChildItem -Path $root -Directory -Filter 'actions-runner-*' | Where-Object {
+$mine = @(Get-ChildItem -LiteralPath $root -Directory -Filter 'actions-runner-*' | Where-Object {
     if ($never -contains $_.FullName.TrimEnd('\')) { return $false }
     $marker = Join-Path $_.FullName '.citadel-runner'
-    if (-not (Test-Path $marker)) { return $false }
-    try { return (Get-Content -Raw $marker | ConvertFrom-Json).repo -eq $names.repo } catch { return $false }
+    if (-not (Test-Path -LiteralPath $marker)) { return $false }
+    try { return (Get-Content -Raw -LiteralPath $marker | ConvertFrom-Json).repo -eq $names.repo } catch { return $false }
   })
 if (-not $mine) {
   Write-Host "No Citadel runner of $($names.repo) on this PC, so nothing changed."
@@ -127,7 +133,7 @@ Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%'" 
   ForEach-Object { $services[(Split-Path (Split-Path ($_.PathName -replace '^"([^"]+)".*$', '$1') -Parent) -Parent)] = $_.Name }
 $tasks = @{}
 foreach ($d in $mine) {
-  $m = Get-Content -Raw (Join-Path $d.FullName '.citadel-runner') | ConvertFrom-Json
+  $m = Get-Content -Raw -LiteralPath (Join-Path $d.FullName '.citadel-runner') | ConvertFrom-Json
   if (-not ($m.PSObject.Properties['mode'] -and $m.mode -eq 'session')) { continue }
   $t = Get-ScheduledTask -TaskName "GitHub runner $($m.label)" -ErrorAction SilentlyContinue
   if ($t -and @($t.Actions | Where-Object { $_.WorkingDirectory -eq $d.FullName }).Count) { $tasks[$d.FullName] = $t.TaskName }
@@ -161,8 +167,13 @@ foreach ($d in $mine) {
   }
 
   # 2. Off GitHub first: if that fails, nothing here has changed and running this again finds the runner.
+  # With the label this kind of runner carries, from what an admin made, never from the folder: the scheme's label for
+  # a service runner, the logon task's ("GitHub runner <label>") for a session runner. Citadel removes only a runner
+  # carrying it, so a name a job wrote into .runner can't reach the scheme's Linux runners or, from a service runner,
+  # its session runner.
+  $label = if ($task) { $task.Substring('GitHub runner '.Length) } else { $names.label }
   try {
-    $gone = Invoke-Citadel @{ kind = 'delete'; name = $name }
+    $gone = Invoke-Citadel @{ kind = 'delete'; name = $name; label = $label }
   } catch {
     $failed++
     Write-Host "Citadel couldn't take the runner $name off GitHub: $($_.Exception.Message) $($d.FullName) stays." -ForegroundColor Red

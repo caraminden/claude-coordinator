@@ -167,29 +167,29 @@ test('a machine takes a runner of its scheme off GitHub by name, with the owner\
   const w = world();
   w.gh.runners.push(runner(7, 'DESK', 'peek-auras-ci'), runner(8, 'DESK-2', 'peek-auras-ci'), runner(9, 'DESK-desktop', 'peek-auras-desktop'), runner(10, 'wsl', 'peek-auras-ci-linux'));
   const pc = w.machine('josh-pc', w.josh.id);
-  assert.deepEqual(await w.tokens.unregister(pc, 'Peek Auras', 'DESK-2'), { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', name: 'DESK-2', removed: true });
+  assert.deepEqual(await w.tokens.unregister(pc, 'Peek Auras', 'DESK-2', 'peek-auras-ci'), { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', name: 'DESK-2', removed: true });
   assert.deepEqual(w.gh.calls, [`GET ${RUNNERS}?per_page=100&page=1`, `DELETE ${RUNNERS}/8`]);
   assert.deepEqual(w.gh.runners.map((r) => r.name), ['DESK', 'DESK-desktop', 'wsl'], 'only the named one went');
   assert.equal(w.notes.length, 1);
   assert.match(w.notes[0], /^Peek Auras: Machine josh-pc took the CI runner DESK-2 of caraminden\/peek-auras off GitHub, with Cara's GitHub login/);
   assert.doesNotMatch(w.notes[0], /gho_/);
   // The session runner's and the Linux runner's labels are the scheme's too.
-  assert.equal((await w.tokens.unregister(pc, w.scheme.id, 'DESK-desktop')).removed, true);
-  assert.equal((await w.tokens.unregister(pc, w.scheme.id, 'wsl')).removed, true);
+  assert.equal((await w.tokens.unregister(pc, w.scheme.id, 'DESK-desktop', 'peek-auras-desktop')).removed, true);
+  assert.equal((await w.tokens.unregister(pc, w.scheme.id, 'wsl', 'peek-auras-ci-linux')).removed, true);
   assert.deepEqual(w.gh.runners.map((r) => r.name), ['DESK']);
   // Someone else's GitHub login is never the one asked with: a revoked owner link fails, whoever's machine asks.
   w.creds.put(w.josh.id, 'github', 'gho_josh', { login: 'josh', id: 2, name: null });
   w.creds.put(w.cara.id, 'github', 'gho_revoked', { login: 'caraminden', id: 1, name: null });
-  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK'), { status: 502, message: /link stopped working/ });
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK', 'peek-auras-ci'), { status: 502, message: /link stopped working/ });
   assert.deepEqual(w.gh.runners.map((r) => r.name), ['DESK']);
 });
 
 test('a runner GitHub no longer lists is already gone: success, nothing deleted, nothing noted', async () => {
   const w = world();
   w.gh.runners.push(runner(7, 'DESK', 'peek-auras-ci'));
-  assert.deepEqual(await w.tokens.unregister(w.machine('cara-pc', w.cara.id), 'Peek Auras', 'DESK-2'), { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', name: 'DESK-2', removed: false });
+  assert.deepEqual(await w.tokens.unregister(w.machine('cara-pc', w.cara.id), 'Peek Auras', 'DESK-2', 'peek-auras-ci'), { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', name: 'DESK-2', removed: false });
   // An exact name: not a prefix, not another case.
-  assert.equal((await w.tokens.unregister(w.machine('cara-pc2', w.cara.id), 'Peek Auras', 'desk')).removed, false);
+  assert.equal((await w.tokens.unregister(w.machine('cara-pc2', w.cara.id), 'Peek Auras', 'desk', 'peek-auras-ci')).removed, false);
   assert.deepEqual(w.gh.calls, [`GET ${RUNNERS}?per_page=100&page=1`, `GET ${RUNNERS}?per_page=100&page=1`]);
   assert.equal(w.gh.runners.length, 1);
   assert.equal(w.notes.length, 0);
@@ -201,7 +201,7 @@ test('a runner without one of the scheme\'s own labels is refused and stays', as
   w.gh.runners.push(runner(1, 'DESK-perf', 'delve-perf'), runner(2, 'OTHER', 'delve-ci'), runner(3, 'NEAR', 'peek-auras-ci-2'), runner(4, 'BARE'));
   const pc = w.machine('cara-pc', w.cara.id);
   for (const name of ['DESK-perf', 'OTHER', 'NEAR', 'BARE']) {
-    await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', name), { status: 403, message: new RegExp(`${name}.*none of the labels Peek Auras gives its runners \\(peek-auras-ci, peek-auras-ci-linux, peek-auras-desktop\\)`) });
+    await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', name, 'peek-auras-ci'), { status: 403, message: new RegExp(`${name} of caraminden/peek-auras doesn't carry the label peek-auras-ci`) });
   }
   assert.equal(w.gh.runners.length, 4);
   assert.ok(w.gh.calls.every((c) => c.startsWith('GET ')), 'nothing was deleted');
@@ -211,7 +211,7 @@ test('a runner without one of the scheme\'s own labels is refused and stays', as
 test('the runner is found on a later page of GitHub\'s list', async () => {
   const w = world();
   for (let i = 1; i <= 230; i++) w.gh.runners.push(runner(i, `R${i}`, 'peek-auras-ci'));
-  assert.equal((await w.tokens.unregister(w.machine('cara-pc', w.cara.id), 'Peek Auras', 'R215')).removed, true);
+  assert.equal((await w.tokens.unregister(w.machine('cara-pc', w.cara.id), 'Peek Auras', 'R215', 'peek-auras-ci')).removed, true);
   assert.deepEqual(w.gh.calls, [1, 2, 3].map((n) => `GET ${RUNNERS}?per_page=100&page=${n}`).concat(`DELETE ${RUNNERS}/215`));
   assert.equal(w.gh.runners.length, 229);
 });
@@ -221,15 +221,30 @@ test('taking a runner off GitHub meets the same checks as a token, and says why 
   w.gh.runners.push({ ...runner(7, 'DESK', 'peek-auras-ci'), busy: true });
   const pc = w.machine('cara-pc', w.cara.id);
   // Not this machine's scheme, no repo, no name, a name that isn't one.
-  await assert.rejects(w.tokens.unregister(w.machine('olive-pc', w.olive.id), 'Peek Auras', 'DESK'), { status: 404 });
-  await assert.rejects(w.tokens.unregister(pc, 'No Repo', 'DESK'), { status: 409 });
-  for (const bad of [undefined, '', 7, 'a\nb', 'x'.repeat(65)]) await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', bad), { status: 400, message: /name/ });
+  await assert.rejects(w.tokens.unregister(w.machine('olive-pc', w.olive.id), 'Peek Auras', 'DESK', 'peek-auras-ci'), { status: 404 });
+  await assert.rejects(w.tokens.unregister(pc, 'No Repo', 'DESK', 'no-repo-ci'), { status: 409 });
+  for (const bad of [undefined, '', 7, 'a\nb', 'x'.repeat(65)]) await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', bad, 'peek-auras-ci'), { status: 400, message: /name/ });
+  // The label says which kind of runner is being removed, and is one of the scheme's own.
+  for (const bad of [undefined, '', 'delve-ci', 'self-hosted', 'peek-auras-ci-2']) await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK', bad), { status: 400, message: /label must be one of peek-auras-ci, peek-auras-ci-linux, peek-auras-desktop/ });
   assert.equal(w.gh.calls.length, 0);
   // GitHub won't delete a runner in the middle of a job.
-  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK'), { status: 502, message: /GitHub said "Runner is currently running a job and cannot be deleted\." \(422\)/ });
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK', 'peek-auras-ci'), { status: 502, message: /GitHub said "Runner is currently running a job and cannot be deleted\." \(422\)/ });
   w.gh.opts.down = true;
-  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK'), { status: 502, message: /Couldn't reach GitHub/ });
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK', 'peek-auras-ci'), { status: 502, message: /Couldn't reach GitHub/ });
   assert.equal(w.gh.runners.length, 1);
   assert.equal(w.notes.length, 0);
-  await assert.rejects(world(false).tokens.unregister(pc, 'Peek Auras', 'DESK'), { status: 403 });
+  await assert.rejects(world(false).tokens.unregister(pc, 'Peek Auras', 'DESK', 'peek-auras-ci'), { status: 403 });
+});
+
+// The name can come from a file a job wrote (a session runner's .runner): it must not reach a runner of another kind.
+test('a named runner carrying another of the scheme\'s labels than the one expected is refused', async () => {
+  const w = world();
+  w.gh.runners.push(runner(7, 'DESK', 'peek-auras-ci'), runner(9, 'DESK-desktop', 'peek-auras-desktop'), runner(10, 'wsl', 'peek-auras-ci-linux'));
+  const pc = w.machine('cara-pc', w.cara.id);
+  for (const [name, label] of [['wsl', 'peek-auras-desktop'], ['DESK', 'peek-auras-desktop'], ['DESK-desktop', 'peek-auras-ci'], ['wsl', 'peek-auras-ci'], ['DESK', 'peek-auras-ci-linux']]) {
+    await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', name, label), { status: 403, message: new RegExp(`${name} of caraminden/peek-auras doesn't carry the label ${label}`) });
+  }
+  assert.equal(w.gh.runners.length, 3);
+  assert.ok(w.gh.calls.every((c) => c.startsWith('GET ')), 'nothing was deleted');
+  assert.equal(w.notes.length, 0);
 });

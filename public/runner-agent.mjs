@@ -250,7 +250,8 @@ export class Sampler {
       return { procs: this.procs(), pressure: Number.isFinite(pressure) ? pressure : null };
     }
     const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(this.dir, 'sample-load.ps1')];
-    if (this.count % RESTARTS_EVERY === 0) args.push('-Restarts');
+    // From the second look on: the first gives no sample to carry them (take), and a PC just back from a crash should say so at once.
+    if (this.count % RESTARTS_EVERY === 1) args.push('-Restarts');
     const { code, output } = await this.run({ command: join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args }, process.env, SAMPLE_LIMIT_MS);
     if (code !== 0) throw new Error(`sample-load.ps1 ended with exit ${code}: ${output.split('\n').at(-1)}`);
     const raw = JSON.parse(output.split('\n').at(-1));

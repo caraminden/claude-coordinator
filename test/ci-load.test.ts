@@ -55,6 +55,11 @@ test('a pool is a repo\'s runners with the same labels: its runners, who is busy
   assert.equal(p.cpu, 24, 'four runners at 6% of the PC each');
   // Before the agents' update there are no samples: the runners are still found by the PC's name.
   assert.deepEqual(pools(PC, jobs, [], projects, NOW)[0].runners, names);
+  // Two repos' runners can share a name (each scheme's first is the PC's): each stays in its own pool, with its own CPU.
+  const VAULT = 'caraminden/vault';
+  const shared = window({ runners: [{ name: PC, repo: PEEK, dir: 'C:\\a', cpu: 20, mem: 1 }, { name: PC, repo: VAULT, dir: 'C:\\b', cpu: 3, mem: 1 }] });
+  const two = pools(PC, [running(PC), job({ repo: VAULT, labels: 'vault-ci' }), job({ repo: VAULT, labels: 'vault-ci', status: 'queued', runner: '', created: NOW - 5 * MIN, started: NaN, ended: NaN })], shared, projects, NOW);
+  assert.deepEqual(two.map((x) => [x.repo, x.runners, x.busy, x.waiting, x.cpu]), [[VAULT, [PC], 0, 1, 3], [PEEK, [PC], 1, 0, 20]]);
   // A runner the agent saw that has run nothing yet stands under its repo.
   const idle = sample(0, { runners: [{ name: `${PC}-linux`, repo: 'caraminden/claude-coordinator', dir: '/opt/actions-runner', cpu: 0, mem: 1 }] });
   assert.deepEqual(pools(PC, [], [idle], projects, NOW).map((x) => [x.title, x.runners]), [['caraminden/claude-coordinator', [`${PC}-linux`]]]);
@@ -161,10 +166,11 @@ test('a verdict that holds for 30 minutes is one quiet Mandate item per admin, c
   const machine = store.createMachine('desk-runners', '', 'Cara');
   let ghJobs: Job[] = [];
   const sent: [string, string | null][] = [];
+  let down = false;
   const load = new CiLoad(store, {
     jobs: () => [{ project: store.getProject(project.id)!, jobs: ghJobs }],
     hosts: () => [PC],
-    mandate: async (p, u, key, title) => { sent.push([`${p.name}/${u.name}/${key}`, title]); return true; },
+    mandate: async (p, u, key, title) => { if (!down) sent.push([`${p.name}/${u.name}/${key}`, title]); return !down; },
   });
   const iso = (t: number) => new Date(t).toISOString();
   const gh = (j: LoadJob, i: number): Job => ({ id: i, run_id: 1, name: j.name, status: j.status, conclusion: null, created_at: iso(j.created), started_at: iso(Number.isNaN(j.started) ? j.created : j.started), completed_at: null, runner_name: j.runner || null, labels: ['self-hosted', j.labels] });
@@ -189,7 +195,15 @@ test('a verdict that holds for 30 minutes is one quiet Mandate item per admin, c
   await load.tick(now);
   assert.equal(sent.length, 1, 'said once while it holds');
   now += 5 * MIN;
+  // Mandate is away as the verdict ends: the item is taken back on a later look, not left there.
   feed(); ghJobs = [];
+  down = true;
   await load.tick(now);
+  assert.equal(sent.length, 1);
+  down = false;
+  now += MIN;
+  feed();
+  await load.tick(now);
+  assert.equal(sent.length, 2);
   assert.deepEqual(sent[1], ['Peek Auras/Cara/ciload.desktop-g248ij8', null]);
 });

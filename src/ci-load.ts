@@ -135,10 +135,12 @@ export interface Verdict { kind: Kind; text: string; pool: string | null }
 
 /** The pools of runners on a PC, from the jobs GitHub knows and the runners the agents saw. */
 export function pools(host: string, jobs: LoadJob[], recent: Sample[], projects: Pick<Project, 'id' | 'name' | 'repo_url'>[], now: number): Pool[] {
-  const sampled = new Map<string, string>();
-  for (const s of recent) for (const r of s.runners) if (r.name) sampled.set(r.name, r.repo);
+  // A runner's name is its own only within its repo: two schemes' runners on one PC can both be called <PC>.
+  const sampled = new Map<string, { name: string; repo: string }>();
+  const names = new Set<string>();
+  for (const s of recent) for (const r of s.runners) if (r.name) { sampled.set(`${r.repo}/${r.name}`, r); names.add(r.name); }
   // GitHub names a runner after its PC unless told otherwise, and Citadel's scripts keep that: <PC>, <PC>-2, <PC>-linux.
-  const here = (name: string) => !!name && (sampled.has(name) || name.toLowerCase().startsWith(host.toLowerCase()));
+  const here = (name: string) => !!name && (names.has(name) || name.toLowerCase().startsWith(host.toLowerCase()));
   const out = new Map<string, Pool>();
   const poolOf = new Map<string, Pool>();
   const pool = (repo: string, labels: string) => {
@@ -153,8 +155,8 @@ export function pools(host: string, jobs: LoadJob[], recent: Sample[], projects:
   for (const j of jobs) {
     if (!here(j.runner)) continue;
     const p = pool(j.repo, j.labels);
-    if (!poolOf.has(j.runner)) p.runners.push(j.runner);
-    poolOf.set(j.runner, p);
+    if (!poolOf.has(`${j.repo}/${j.runner}`)) p.runners.push(j.runner);
+    poolOf.set(`${j.repo}/${j.runner}`, p);
     if (j.status === 'in_progress') p.busy++;
     if (now - j.created > DAY_MS || !Number.isFinite(j.started)) continue;
     p.jobs++;
@@ -163,8 +165,8 @@ export function pools(host: string, jobs: LoadJob[], recent: Sample[], projects:
   }
   // A runner the agents saw that ran nothing in the jobs read: it is idle, in its repo's pool where the repo has
   // just one here; with several (or none yet) its labels aren't known, so it stands alone under its repo.
-  for (const [name, repo] of sampled) {
-    if (poolOf.has(name) || !repo) continue;
+  for (const [key, { name, repo }] of sampled) {
+    if (poolOf.has(key) || !repo) continue;
     const same = [...out.values()].filter((p) => p.repo === repo && p.labels);
     (same.length === 1 ? same[0] : pool(repo, '')).runners.push(name);
   }
@@ -184,7 +186,7 @@ export function pools(host: string, jobs: LoadJob[], recent: Sample[], projects:
     // Each agent's samples on their own clock: a PC's Windows and WSL agents see different runners.
     const shares = new Map<string, number[]>();
     for (const s of window) {
-      const mine = s.runners.filter((r) => p.runners.includes(r.name));
+      const mine = s.runners.filter((r) => (!r.repo || r.repo === p.repo) && p.runners.includes(r.name));
       // A WSL agent's percentages are of the cores WSL sees, the same count as the PC's unless .wslconfig caps it.
       if (mine.length) (shares.get(s.os) ?? shares.set(s.os, []).get(s.os)!).push(mine.reduce((a, r) => a + r.cpu, 0));
     }
@@ -208,9 +210,9 @@ export function verdict(samples: Sample[], all: Pool[], jobs: LoadJob[], now: nu
   if (restart !== undefined) {
     // The event is written as the PC comes back: it went down at its last sample before that, where there is one.
     const down = samples.filter((s) => s.at < restart && restart - s.at < 30 * MIN).at(-1)?.at ?? restart;
-    const running = jobs.filter((j) => j.started <= down && !(j.ended < down - MIN) && all.some((p) => p.runners.includes(j.runner)));
+    const running = jobs.filter((j) => j.started <= down && !(j.ended < down - MIN) && all.some((p) => p.repo === j.repo && p.runners.includes(j.runner)));
     if (running.length) {
-      const names = [...new Set(running.map((j) => all.find((p) => p.runners.includes(j.runner))!.title))].join(', ');
+      const names = [...new Set(running.map((j) => all.find((p) => p.repo === j.repo && p.runners.includes(j.runner))!.title))].join(', ');
       return { kind: 'crash', pool: null, text: `Crashed under load: the PC restarted without a clean shutdown at about ${clock(down)}, with ${plural(running.length, 'CI job')} running (${names}). Add no runners until that's explained.` };
     }
   }
@@ -219,9 +221,11 @@ export function verdict(samples: Sample[], all: Pool[], jobs: LoadJob[], now: nu
   const hot = window.filter((s) => there(s) && trueCpu(s) >= OVER_CPU).length;
   const queued = window.filter((s) => there(s) && s.queue !== null && s.queue > s.cores).length;
   const lowMem = latest.mem_free < latest.mem_total * LOW_MEM;
-  if (hot >= window.length * OVER_SHARE || queued >= window.length * OVER_SHARE || lowMem) {
+  // One hot sample just after an agent starts is not a busy quarter of an hour.
+  const share = Math.max(4, window.length * OVER_SHARE);
+  if (hot >= share || queued >= share || lowMem) {
     const why = lowMem ? `only ${Math.round((latest.mem_free / latest.mem_total) * 100)}% of its memory is free`
-      : hot >= window.length * OVER_SHARE ? `CPU was at ${OVER_CPU}% or more for ${mins((hot / window.length) * WINDOW_MS)} of the last ${mins(WINDOW_MS)} with someone at the PC`
+      : hot >= share ? `CPU was at ${OVER_CPU}% or more for ${mins((hot / window.length) * WINDOW_MS)} of the last ${mins(WINDOW_MS)} with someone at the PC`
         : `more threads waited for a core than it has (${latest.queue} now) with someone at the PC`;
     return { kind: 'over', pool: top?.key ?? null, text: `Overloading: ${why}.${top ? ` ${top.title} uses the most (${Math.round(top.cpu!)}% of the PC): take a runner from it.` : ' CI isn\'t the cause: no runner is busy.'}` };
   }
@@ -256,7 +260,7 @@ export function pcView(host: string, samples: Sample[], jobs: LoadJob[], project
   const own = samples.some((s) => s.os === 'windows') ? samples.filter((s) => s.os === 'windows') : samples;
   const wsl = own === samples ? [] : samples.filter((s) => s.os === 'linux');
   const all = pools(host, jobs, samples, projects, now);
-  const mine = jobs.filter((j) => all.some((p) => p.runners.includes(j.runner) || (!j.runner && p.key === `${j.repo}|${j.labels}`)));
+  const mine = jobs.filter((j) => all.some((p) => (p.repo === j.repo && p.runners.includes(j.runner)) || (!j.runner && p.key === `${j.repo}|${j.labels}`)));
   const latest = own.at(-1);
   const lastWsl = wsl.at(-1);
   const fresh = latest && now - latest.at <= STALE_MS ? latest : null;
@@ -300,7 +304,7 @@ export interface CiLoadDeps {
   mandate: (project: Project, person: User, key: string, title: string | null) => Promise<boolean>;
 }
 /** What is kept per PC between looks: the verdict that holds, since when, and who has its item (and from which scheme). */
-type Held = { kind: Kind; since: number; sent: Record<string, number> };
+type Held = { kind: Kind; since: number; sent: Record<string, number>; stale?: boolean };
 
 export class CiLoad {
   private store: Store;
@@ -360,16 +364,20 @@ export class CiLoad {
         const held: Held = { kind: 'none', since: now, sent: {}, ...this.store.getSetting<Held>(key) };
         const item = `ciload.${v.host.toLowerCase().replace(/[^a-z0-9._-]+/g, '_')}`.slice(0, 128);
         if (held.kind !== v.verdict.kind) {
-          // A new verdict is a new item: the old one's words no longer hold.
+          held.kind = v.verdict.kind;
+          held.since = now;
+          held.stale = true;
+        }
+        const tell = held.kind === 'crash' || ((held.kind === 'over' || held.kind === 'more') && now - held.since >= TELL_AFTER_MS);
+        // A new verdict is a new item: the old one's words no longer hold. A take-back that fails is tried again next time.
+        if (held.stale || !tell) {
           for (const [uid, pid] of Object.entries(held.sent)) {
             const u = this.store.getUser(Number(uid));
             const p = this.store.getProject(pid);
             if (!u || !p || (await this.deps.mandate(p, u, item, null))) delete held.sent[uid];
           }
-          held.kind = v.verdict.kind;
-          held.since = now;
+          if (!Object.keys(held.sent).length) held.stale = false;
         }
-        const tell = held.kind === 'crash' || ((held.kind === 'over' || held.kind === 'more') && now - held.since >= TELL_AFTER_MS);
         // From the scheme the verdict names, or any with runners there.
         const project = this.store.getProject(v.pools.find((p) => p.key === v.verdict.pool)?.project ?? v.projects[0] ?? -1);
         if (tell && project) {

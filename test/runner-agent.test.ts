@@ -199,3 +199,19 @@ test('a sample: nothing on the first look, then percentages of the whole PC, nam
   // 48 CPU seconds in 30 seconds is 1.6 cores' worth: that over the PC's cores.
   assert.deepEqual(s.runners, [{ name: 'PC-25', repo: 'caraminden/vault', dir: '/opt/actions-runner-vault', cpu: Math.round((48 / (30 * s.cores)) * 1000) / 10, mem: 100 }]);
 });
+
+test('a Windows agent asks for the hard restarts on its second look, the first that makes a sample', async () => {
+  let t = 1_000_000;
+  const asked: boolean[] = [];
+  const run = async ({ args }: { args: string[] }) => {
+    asked.push(args.includes('-Restarts'));
+    return { code: 0, output: JSON.stringify({ procs: [], queue: 1, quser: null, hv: null, temp: null, ...(args.includes('-Restarts') ? { restarts: ['2026-11-11T13:29:00.0000000Z'] } : {}) }) };
+  };
+  const sampler = new Sampler({ os: 'windows', dir: '/', run, now: () => t, times: () => ({ idle: t / 2, total: t }) });
+  assert.equal(await sampler.take(), null);
+  t += 30_000;
+  assert.deepEqual((await sampler.take()).restarts, ['2026-11-11T13:29:00.0000000Z']);
+  t += 30_000;
+  assert.equal((await sampler.take()).restarts, undefined);
+  assert.deepEqual(asked, [false, true, false]);
+});

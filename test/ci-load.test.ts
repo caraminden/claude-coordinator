@@ -11,6 +11,8 @@ import { CiLoad, KEEP_MS, TELL_AFTER_MS, cleanSample, loadJob, pcView, pools, ve
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 
+// The verdicts' times are in the server's zone: pinned here, so the words are the same on every host.
+process.env.TZ = 'UTC';
 const root = mkdtempSync(join(tmpdir(), 'ci-load-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 

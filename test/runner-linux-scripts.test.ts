@@ -126,7 +126,8 @@ test('add, add again, list, remove: the whole life of a scheme\'s Linux runners'
   assert.equal(list.code, 0, list.out);
   assert.match(list.out, new RegExp(`citadel-runner-caraminden-theory-of-crafting\\.service {2}active {2}\\S+actions-runner-theory-of-crafting {2}\\(Citadel's, for caraminden/theory-of-crafting, as ${USER}\\)`));
   assert.match(list.out, /\(no Citadel unit\) {2}- {2}\S+actions-runner-other {2}\(not Citadel's\)/);
-  assert.doesNotMatch(list.out, /no Citadel unit.*-3/, 'a folder with a unit is listed once');
+  // The whole folder name, not just -3: the temp folder's random name can hold that.
+  assert.doesNotMatch(list.out, /no Citadel unit.*actions-runner-theory-of-crafting-3 /, 'a folder with a unit is listed once');
 
   asked.length = 0;
   writeFileSync(log, '');

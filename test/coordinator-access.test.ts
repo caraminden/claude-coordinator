@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
-import { coordinatorAccess } from '../src/turn-launch.ts';
+import { coordinatorAccess, credentialDenies } from '../src/turn-launch.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'coordinator-access-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -107,6 +107,9 @@ const bashAllowed = (command: string) => !!parts(command)?.every((p) => allowRes
 test('the rule matcher reads rules the way Claude Code did in real runs', () => {
   assert.ok(bashAllowed('ps -eo pid,pcpu --sort=-pcpu | head -5'));
   assert.ok(bashAllowed('curl -s http://127.0.0.1:1/api/some-doc'));
+  assert.ok(bashAllowed("curl -s -m 5 http://127.0.0.1:8573/api/health -w '%{http_code}' | head -c 50"));
+  assert.ok(bashAllowed('sort /tmp/a | uniq -c | sort -rn'));
+  assert.ok(!bashAllowed('curl -s http://127.0.0.1'), 'a rule ending :* is a prefix, so the URL rule ends /*');
   assert.ok(bashAllowed(`git -C ${live} merge-base --is-ancestor HEAD HEAD && echo LIVE || echo NOT-LIVE`));
   for (const c of ['curl -X POST http://127.0.0.1:1/', 'curl -s -X POST http://127.0.0.1:1/', 'gh api -f x=1 rate_limit', 'sort -o /tmp/s /tmp/a', 'find -delete', 'journalctl --user --rotate', 'echo hi > /tmp/x', 'ss -ltn | awk \'{print $4}\'']) assert.ok(!bashAllowed(c), c);
 });
@@ -131,12 +134,13 @@ const STILL_DENIED: [RegExp, string][] = [
   [/sqlite3 -readonly (?!-safe)/, 'sqlite3 without -safe, which could run .shell or write with .output'],
   [/git -C \S+\/projects\/[^2]\/repo /, "another scheme's repo: git is allowed per folder of this scheme"],
   [/ branch --contains /, 'branch takes -D after a filter, so only listing forms are allowed'],
+  [/^Bash: curl -s (localhost|-o )/, 'curl only as `curl -s http://127.0.0.1:<port>/…` (or localhost), so no flag can come before the URL'],
 ];
 
 test("most of the Taskmaster's denied calls now run; the rest write, cd, or are shell Claude Code can't match by rule", () => {
   const passed = fixture.filter(nowAllowed);
   for (const c of fixture.filter((c) => !nowAllowed(c))) assert.ok(STILL_DENIED.some(([re]) => re.test(c)), `still denied, unexpectedly: ${c.slice(0, 200)}`);
-  assert.equal(`${passed.length} of ${fixture.length}`, '57 of 82');
+  assert.equal(`${passed.length} of ${fixture.length}`, '55 of 82');
   for (const c of [
     'Bash: systemctl --user status claude-coordinator --no-pager -n 20',
     'Bash: ps -eo pid,user,pcpu,pmem,rss,etime,comm --sort=-pcpu | head -25',
@@ -156,7 +160,14 @@ test('writes stay denied: cp, sed -i, python, curl -X POST, gh api -X, sqlite3 w
     'gh api -X DELETE repos/a/b', 'gh api repos/a/b/issues -f title=x', `sqlite3 ${data}/coordinator.db "delete from tickets"`,
     `sqlite3 -readonly ${data}/coordinator.db ".shell rm -rf /tmp/x"`, `git -C ${data}/projects/2/repo push`, `git -C ${data}/projects/2/repo -c core.pager=x log`,
     `rm ${data}/x`, `find ${data} -name x -delete`, `find ${data} -exec rm {} ;`, `find ${data} -fprint /tmp/x`, `grep -c a ${data}/x > /tmp/y`,
-    `cd ${data}/projects/2/repo && git log -1`, 'journalctl --user --vacuum-time=1s', 'sort -o /tmp/a /tmp/b',
+    `cd ${data}/projects/2/repo && git log -1`, 'journalctl --user --vacuum-time=1s', 'journalctl --user --vac=1s', 'journalctl --user --cursor-file=/tmp/c',
+    'sort -o /tmp/a /tmp/b', 'sort --o=/tmp/a /tmp/b', 'sort --compress-program=sh -S 1K /tmp/a', 'sort --co=sh -S 1K /tmp/a', 'uniq /tmp/a /tmp/b',
+    // Review findings: -nonce turns -safe off; curl writes, reads files and reaches other hosts; ss -D writes.
+    `sqlite3 -readonly -safe -nonce x ${data}/c.db '.nonce x' '.shell rm -rf /tmp/x'`, `sqlite3 -readonly -safe -unsafe-testing ${data}/c.db '.shell x'`,
+    'curl -s http://127.0.0.1:8573/ -o /tmp/x', 'curl -s -o /dev/null http://127.0.0.1:8573/', 'curl -sSo /tmp/x http://127.0.0.1:8573/', 'curl -s -D /tmp/h http://127.0.0.1:8573/',
+    'curl -s file:///home/u/.ssh/id_ed25519', 'curl -s http://127.0.0.1:8573/ FILE:///etc/passwd', 'curl -s http://127.0.0.1:8573/ file:/etc/passwd', 'curl -s http://127.0.0.1:8573/ -w @/home/u/.ssh/id_ed25519',
+    'curl -s http://127.0.0.1:8573@example.com/', 'curl -s https://example.com/', 'curl -s --unix-socket /run/user/1/podman/podman.sock http://127.0.0.1:1/x',
+    'curl -s http://127.0.0.1:8573/ --connect-to 127.0.0.1:8573:example.com:80', `ss -ltn -D ${data}/coordinator.db`, `ss -ltn --diag=${data}/x`,
   ]) assert.ok(!bashAllowed(c), c);
 });
 
@@ -181,5 +192,7 @@ test("the tripwire still refuses secrets, environments, the credentials table an
   }
   assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: `sqlite3 ${box}/state.db "select 1"` }, cwd }, cfg));
   assert.ok(tripwire({ tool_name: 'Grep', tool_input: { pattern: 'x', path: '/home/u/.config' }, cwd }, cfg));
+  // The push key isn't the tripwire's: Claude Code's Read deny keeps it from the Read tool and from cat (tried in real runs).
+  assert.ok(credentialDenies('/home/u', '/home/u/.claude', box).includes(`Read(/${box}/vapid.json)`));
   assert.equal(tripwire({ tool_name: 'Bash', tool_input: { command: `sqlite3 -readonly -safe ${box}/coordinator.db "select id from tickets"` }, cwd }, cfg), null);
 });

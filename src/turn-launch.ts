@@ -212,14 +212,14 @@ export const TASKMASTER_COMPACT_WINDOW = 180_000;
 /**
  * Read rules every turn gets, so the Read, Grep and Glob tools can't open a login or a transcript
  * (#185): the Claude login, SSH keys, the service's env file, the GitHub login, a runner's sign-in,
- * and state.db with its backups (every minion's session). Claude Code enforces these, unlike the
+ * state.db with its backups (every minion's session) and the push key (vapid.json, #483). Claude Code enforces these, unlike the
  * tripwire's pattern match; Bash is the tripwire's.
  */
 export function credentialDenies(home: string, claudeConfig: string, dataDir: string, runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`): string[] {
   // podman's storage and socket (#213): every person's Claude container and its sign-in. If Claude
   // Code's sandbox is ever turned on for turns, these same paths go in its filesystem denyRead list.
   const files = [join(home, '.claude/.credentials.json'), join(claudeConfig, '.credentials.json'), join(home, '.ssh/**'), join(home, '.config/claude-coordinator/**'),
-    join(home, '.config/gh/hosts.yml'), join(home, '.config/citadel-claude/**'), join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*'),
+    join(home, '.config/gh/hosts.yml'), join(home, '.config/citadel-claude/**'), join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*'), join(dataDir, 'vapid.json'),
     join(home, '.local/share/containers/storage/**'), join(runtimeDir, 'podman/**'), join(runtimeDir, 'containers/**')];
   // `//` makes the path absolute.
   return [...new Set(files)].map((f) => `Read(/${f})`);
@@ -241,24 +241,38 @@ const READ_ONLY_GIT = [
  * Shell commands a Taskmaster may run on any path (#483): they read and print. The tripwire still
  * refuses a secret path, a process's environment, state.db opened writable and the credentials table.
  * sqlite3 only with -readonly and -safe: -safe refuses .shell, .output, .backup, ATTACH, VACUUM INTO
- * and writefile(). curl is for GETs: the Taskmaster's API token is already its MCP tools'.
+ * and writefile(). curl only GETs this box's own services, its flags fixed before the URL so no
+ * bundled -o can come first; the Taskmaster's API token is already its MCP tools'. The URL rule ends
+ * `/*`, not `:*`, which Claude Code reads as a prefix needing a space after (tried in real runs).
  */
 const READ_ONLY_COMMANDS = [
-  'grep', 'ls', 'find', 'cat', 'head', 'tail', 'wc', 'stat', 'sort', 'uniq', 'cut', 'echo',
-  'uptime', 'free', 'df', 'du', 'ps', 'ss', 'curl', 'journalctl --user',
-  'systemctl --user status', 'systemctl --user is-active', 'systemctl --user show', 'systemctl --user list-units', 'systemctl --user list-timers',
-  'sqlite3 -readonly -safe', 'sqlite3 -safe -readonly',
-  'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
-].map((c) => `Bash(${c}:*)`);
-/** The ways those commands write, run something else or send data, denied (deny wins over allow). */
-// Each flag with a space before it, so a URL like /api/some-doc isn't caught by -d; `curl * -X*`
-// needs a word before the flag, so the flag straight after the command is its own rule (tried in real
-// runs). shortcut: bundled flags (`curl -sX POST`) still match the allow rule; fine for accidents, not a wall.
+  ...['grep', 'ls', 'find', 'cat', 'head', 'tail', 'wc', 'stat', 'sort', 'uniq', 'cut', 'echo', 'uptime', 'free', 'df', 'du', 'ps', 'journalctl --user',
+    'ss -ltn', 'ss -tln', 'ss -lnt', 'ss -ltnp', 'ss -tlnp', 'ss -lntp',
+    'systemctl --user status', 'systemctl --user is-active', 'systemctl --user show', 'systemctl --user list-units', 'systemctl --user list-timers',
+    'sqlite3 -readonly -safe', 'sqlite3 -safe -readonly',
+    'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
+  ].map((c) => `Bash(${c}:*)`),
+  ...['-s', '-sS', '-sI', '-s -m 5', '-sS -m 5'].flatMap((f) => ['127.0.0.1', 'localhost'].map((host) => `Bash(curl ${f} http://${host}:*/*)`)),
+];
+/**
+ * The ways those commands write, run something else or reach further, denied (deny wins over allow).
+ * Each flag has a space before it, so a URL like /api/some-doc isn't caught by -d, and comes in two
+ * rules, since `curl * -X*` needs a word between (tried in real runs). Long flags are cut to their
+ * shortest unique start, since sort and journalctl take `--co` for --compress-program.
+ * shortcut: a short flag bundled after the first (`sort -uo x`, a bundle after curl's URL) still
+ * matches; the tripwire's write check covers this server's paths, and that's fine for accidents.
+ */
 const READ_ONLY_EXCEPTIONS = [
-  ['find', '-delete', '-exec', '-ok', '-fprint', '-fls'], ['sort', '-o', '--output'], ['ss', '-K', '--kill'], ['journalctl', '--vacuum', '--rotate', '--flush'],
-  ['curl', '-X', '--request', '-d', '--data', '-F', '--form', '-T', '--upload', '-K', '--config', '--json'],
+  ['find', '-delete', '-exec', '-ok', '-fprint', '-fls'], ['sort', '-o', '--o', '--co'], ['ss', '-D', '--d', '-K', '--k'],
+  ['journalctl', '--vac', '--rot', '--fl', '--syn', '--rel', '--sm', '--se', '--up', '--cursor-f'],
+  ['sqlite3', '-nonce', '--nonce', '-unsafe', '--unsafe'],
+  ['curl', '-X', '--request', '-d', '--data', '-F', '--form', '-T', '--upload', '-K', '--config', '--json', '-o', '--output', '-O', '--remote-name',
+    '-D', '--dump-header', '-c', '--cookie-jar', '--trace', '--stderr', '--libcurl', '--etag-save', '--hsts', '--alt-svc',
+    '--unix-socket', '--abstract-unix-socket', '-x', '--proxy', '--preproxy', '--socks', '--connect-to', '--resolve'],
   ['gh api', '-X', '--method', '-f', '-F', '--field', '--raw-field', '--input'],
-].flatMap(([cmd, ...flags]) => flags.flatMap((f) => [`Bash(${cmd} ${f}*)`, `Bash(${cmd} * ${f}*)`]));
+].flatMap(([cmd, ...flags]) => flags.flatMap((f) => [`Bash(${cmd} ${f}*)`, `Bash(${cmd} * ${f}*)`]))
+  // uniq's second operand is a file it writes; curl's @ reads a file (-w @x) or names another host (http://a:1@b/), and file:/ reads any path.
+  .concat(['uniq * *', 'curl *@*', 'curl *file:/*', 'curl *FILE:/*', 'curl *File:/*'].map((c) => `Bash(${c})`));
 /** Box-health files a Taskmaster may Read beside its read folders. */
 const HEALTH_FILES = ['/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/pressure/**'];
 

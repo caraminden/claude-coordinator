@@ -133,6 +133,23 @@ test('memory indexing drains each indexed scheme, skips the rest, and logs an ou
   assert.equal(errors.length, 1, 'one line per outage, not one per minute');
 });
 
+test('one scheme that fails sits out the pass without stopping the others (#488)', async () => {
+  const calls: number[] = [];
+  let left = 2;
+  const store = {
+    listProjects: () => [{ id: 1 }, { id: 2 }],
+    memory: { index: async (id: number) => { calls.push(id); if (id === 1) throw new Error('refused'); return left-- > 0 ? 1 : 0; } },
+  };
+  const was = console.error;
+  console.error = () => {};
+  try {
+    await new MemoryIndexer(store as any, async () => [], 'model', () => true).run();
+  } finally {
+    console.error = was;
+  }
+  assert.deepEqual(calls, [1, 2, 2, 2], 'scheme 1 is tried once; scheme 2 drains');
+});
+
 // ---------- artifact scans ----------
 
 function reply(store: Store, ticketId: number, text: string) {

@@ -98,9 +98,11 @@ export async function mountChat(chatId, ticket, page) {
       document.querySelector('.composer textarea')?.focus();
     }
   } catch {}
-  // Events broadcast while the snapshot was loading arrived before `view` existed.
-  await catchUpEvents();
-  if (isCoordinator(ticket)) await showRecap();
+  // Events broadcast while the snapshot was loading arrived before `view` existed. Not awaited: the chat is
+  // drawn, so the route's dim (body.navigating) clears now rather than after these round trips (#494).
+  catchUpEvents()
+    .then(() => isCoordinator(ticket) && view?.id === chatId && showRecap())
+    .catch(() => {}); // a missed catch-up is made good by the stream's next resync
 }
 
 /**

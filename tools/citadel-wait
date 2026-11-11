@@ -25,7 +25,8 @@ case $kind in
     what="port $arg to listen" ;;
   file) done_yet() { [ -e "$arg" ]; }
     what="$arg to exist" ;;
-  cmd) done_yet() { bash -c "$arg" >/dev/null 2>&1; }
+  # Bounded by what's left, so a test that hangs can't outlast the limit.
+  cmd) done_yet() { [ "$SECONDS" -lt "$limit" ] && timeout "$((limit - SECONDS))" bash -c "$arg" >/dev/null 2>&1; }
     what="\`$arg\` to succeed" ;;
   *) usage ;;
 esac

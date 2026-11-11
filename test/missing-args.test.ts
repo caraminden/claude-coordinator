@@ -147,6 +147,8 @@ test('state enum error: the string "null" is read as null', async () => {
   assert.equal(t.state, null);
   assert.equal(t.note, null);
   refused(await tool(Minion, 'thread', 'set_thread_status', { state: 'done' }), /State must be one of/);
+  // Only where null is allowed: a message that says "null" is still that text.
+  assert.ok(!(await tool(Minion, 'thread', 'message_coordinator', { text: 'null' })).isError);
 });
 
 test('"is too long": the limit is in the schema and the description, and the error names it', async () => {

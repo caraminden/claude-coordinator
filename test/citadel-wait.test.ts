@@ -66,6 +66,9 @@ test('gives up with 124 and says so; bad usage is 2', async () => {
   const r = await wait(['cmd', 'false'], 1);
   assert.equal(r.code, 124);
   assert.match(r.err, /still waiting for `false` to succeed after \d+s; run it again/);
+  const hung = await wait(['cmd', 'sleep 30'], 2);
+  assert.equal(hung.code, 124, 'a test that hangs is cut off at the limit');
+  assert.ok(hung.ms < 10_000, `took ${hung.ms} ms`);
   assert.equal((await wait(['pid', 'abc'])).code, 2);
   assert.equal((await wait(['soon'])).code, 2);
 });

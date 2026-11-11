@@ -1067,9 +1067,10 @@ function needOne(args: any, fields: string[], tool: string): void {
 
 async function runTool(name: string, args: any): Promise<string> {
   // Each role may only call its own tools.
-  if (!toolList().some((t) => t.name === name)) throw new Error(`Unknown tool ${name}`);
-  // Models often send the string "null" for null (#481); no argument means the text "null".
-  for (const [k, v] of Object.entries(args)) if (v === 'null') args[k] = null;
+  const tool: any = toolList().find((t) => t.name === name);
+  if (!tool) throw new Error(`Unknown tool ${name}`);
+  // Models often send the string "null" for null (#481): read it as null where the schema takes null.
+  for (const [k, v] of Object.entries(args)) if (v === 'null' && [tool.inputSchema?.properties?.[k]?.type].flat().includes('null')) args[k] = null;
   switch (name) {
     case 'list_tickets': {
       const { tickets } = await call('GET', `/api/projects/${PROJECT}/tickets${args.include_closed ? '?include_closed=1' : ''}`);

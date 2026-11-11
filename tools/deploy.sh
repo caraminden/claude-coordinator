@@ -122,12 +122,14 @@ running_minions() {
 
 # Running turns a restart would cut off: those not in a unit of their own. A server from before turn
 # units doesn't say, and every one of its turns would be cut off; a server that is down has none left.
+# One that doesn't answer while its unit is still up (slow or stuck) is not down: ? keeps the wait going.
 interruptible() {
   local n
   n=$(health interruptible)
   if [ -n "$n" ]; then echo "$n"
-  elif [ -z "$(health ok)" ]; then echo 0
-  else running_minions; fi
+  elif [ -n "$(health ok)" ]; then running_minions
+  elif systemctl --user is-active -q "$SERVICE" 2>/dev/null; then echo '?'
+  else echo 0; fi
 }
 
 # The units of the turns this server runs (src/runner.ts names them after its data dir).

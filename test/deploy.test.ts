@@ -194,10 +194,26 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
 
 test('deploy.sh waits only for turns a restart would cut off; a server from before units counts every running turn', async () => {
   // Async, so the stand-in server below (in this process) can answer.
-  const count = async (url: string) =>
-    (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db') } })).stdout.trim();
+  // DEPLOY_SERVICE names no unit, so the service reads as down; extra PATH entries stand in for systemctl.
+  const count = async (url: string, path = '') =>
+    (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...hostEnv, PATH: `${path}${process.env.PATH}`, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db'), DEPLOY_SERVICE: 'no-such-citadel-unit' } })).stdout.trim();
   assert.equal(await count(base), '0');
   assert.equal(await count('http://127.0.0.1:9'), '0', 'a server that is down has no turns to cut off');
+  // One that doesn't answer while its unit is up is slow or stuck, not down: keep waiting (#468 S10-6).
+  const active = join(root, 'active-bin');
+  mkdirSync(active, { recursive: true });
+  writeFileSync(join(active, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  assert.equal(await count('http://127.0.0.1:9', `${active}:`), '?', 'refused while its unit is active');
+  const silent = createHttpServer(() => {}); // takes the request, never answers
+  await new Promise<void>((r) => silent.listen(0, '127.0.0.1', r));
+  try {
+    const url = `http://127.0.0.1:${(silent.address() as any).port}`;
+    assert.equal(await count(url, `${active}:`), '?', 'a server too slow to answer is not counted as having no turns');
+    assert.equal(await count(url), '0', 'nor is one whose unit is down kept waiting on');
+  } finally {
+    silent.closeAllConnections();
+    silent.close();
+  }
   const old = createHttpServer((_req, res) => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true,"reload":"sighup"}'));
   await new Promise<void>((r) => old.listen(0, '127.0.0.1', r));
   const running = store.createTicket({ project_id: project.id, title: 'Busy', permission_mode: 'default', created_by: 'Cara' });

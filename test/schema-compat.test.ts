@@ -107,5 +107,5 @@ test('a Store never lowers schema_version, so an older release left behind by a 
 test('SCHEMA_HISTORY numbers rise by one with no gaps or repeats, and SCHEMA_VERSION is the last', () => {
   SCHEMA_HISTORY.forEach(([n], i) => assert.equal(n, SCHEMA_HISTORY[0][0] + i));
   assert.equal(SCHEMA_VERSION, SCHEMA_HISTORY.at(-1)![0]);
-  assert.equal(SCHEMA_VERSION, 37);
+  assert.equal(SCHEMA_VERSION, 38);
 });

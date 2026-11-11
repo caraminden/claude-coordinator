@@ -539,11 +539,21 @@ CREATE TABLE IF NOT EXISTS project_hides (
   hidden_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, project_id)
 );
--- The Needs-you count each person last saw on a scheme's badge (#498), so the scheme list can mark one that changed since.
+-- The Needs-you count each person last saw on a scheme's badge (#498). Unused since #539 (project_seen_items
+-- replaced it); kept so a rollback to #498's release still finds it.
 CREATE TABLE IF NOT EXISTS project_seen_counts (
   name TEXT NOT NULL,
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   count INTEGER NOT NULL,
+  seen_at INTEGER NOT NULL,
+  PRIMARY KEY (name, project_id)
+);
+-- The Needs-you items (InboxItem.key, src/inbox.ts) each person last saw waiting in a scheme, as a JSON array (#539),
+-- so the scheme list can mark a badge when something new waits.
+CREATE TABLE IF NOT EXISTS project_seen_items (
+  name TEXT NOT NULL,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  keys TEXT NOT NULL,
   seen_at INTEGER NOT NULL,
   PRIMARY KEY (name, project_id)
 );
@@ -754,6 +764,7 @@ export const SCHEMA_HISTORY = [
   [35, 'machines.lend (#439)'],
   [36, 'turns.payer (#468 S05-3)'],
   [37, 'project_seen_counts (#498)'],
+  [38, 'project_seen_items (#539)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1312,16 +1323,16 @@ export class Store {
     else this.db.prepare('DELETE FROM project_hides WHERE user_id = ? AND project_id = ?').run(uid, projectId);
   }
 
-  /** The Needs-you count `name` last saw on each scheme's badge (#498): project id -> count. */
-  seenCounts(name: string): Map<number, number> {
-    const rows = this.db.prepare('SELECT project_id, count FROM project_seen_counts WHERE name = ?').all(name) as { project_id: number; count: number }[];
-    return new Map(rows.map((r) => [r.project_id, r.count]));
+  /** The Needs-you items `name` last saw waiting in each scheme (#539): project id -> their keys. */
+  seenItems(name: string): Map<number, Set<string>> {
+    const rows = this.db.prepare('SELECT project_id, keys FROM project_seen_items WHERE name = ?').all(name) as { project_id: number; keys: string }[];
+    return new Map(rows.map((r) => [r.project_id, new Set(JSON.parse(r.keys) as string[])]));
   }
 
-  /** Record the count `name` saw on a scheme's badge; with `keep`, only when none is recorded yet. */
-  setSeenCount(name: string, projectId: number, count: number, keep = false) {
-    this.db.prepare(`INSERT INTO project_seen_counts (name, project_id, count, seen_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(name, project_id) DO ${keep ? 'NOTHING' : 'UPDATE SET count = excluded.count, seen_at = excluded.seen_at'}`).run(name, projectId, count, Date.now());
+  /** Record the items `name` saw waiting in a scheme; with `keep`, only when none are recorded yet. */
+  setSeenItems(name: string, projectId: number, keys: string[], keep = false) {
+    this.db.prepare(`INSERT INTO project_seen_items (name, project_id, keys, seen_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(name, project_id) DO ${keep ? 'NOTHING' : 'UPDATE SET keys = excluded.keys, seen_at = excluded.seen_at'}`).run(name, projectId, JSON.stringify(keys), Date.now());
   }
 
   deleteProject(id: number) {

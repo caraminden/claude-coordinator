@@ -83,27 +83,32 @@ export function inboxStrip() {
 /** A scheme's pill for the scheme lists: the spinner while a turn runs, then the Needs-you count (schemePill says what shows); hidden when neither. */
 export function schemeCount(p) {
   // The scheme you're in is never marked: you're looking at its count (#498).
-  const { need, busy, working, changed, label } = schemePill(p.id === view?.projectId ? { ...p, seenInbox: null } : p);
-  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !changed, role: label ? 'img' : null, title: label || null, 'aria-label': label || null },
+  const { need, busy, working, fresh, label } = schemePill(p.id === view?.projectId ? { ...p, fresh: false } : p);
+  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, title: label || null, 'aria-label': label || null },
     busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
-    need || changed ? h('span', { class: `need${changed ? ' changed' : ''}`, 'aria-hidden': 'true' }, need) : null);
+    need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
 }
 
-/** You're in the scheme, so its count is the one you've seen (#498): record it on the server when it moves, behind the page. */
-function markCountSeen(projectId, count) {
+// The items each scheme last told the server you saw (sorted keys, joined), so a redraw with nothing new writes nothing.
+const seenSent = new Map();
+
+/** You're in the scheme, so what waits in it is what you've seen (#539): record its items on the server when they change, behind the page. */
+function markItemsSeen(projectId, keys) {
   const p = view.projects?.find((q) => q.id === projectId);
-  if (!p || p.seenInbox === count) return;
-  const before = p.seenInbox;
-  p.seenInbox = count;
+  const sig = [...keys].sort().join('\n');
+  if (!p || seenSent.get(projectId) === sig) return;
+  seenSent.set(projectId, sig);
+  p.fresh = false;
   // A failed write tries again at the next redraw.
-  api(`api/projects/${projectId}/seen-count`, { method: 'PUT', body: { count } }).catch(() => { if (p.seenInbox === count) p.seenInbox = before; });
+  api(`api/projects/${projectId}/seen-items`, { method: 'PUT', body: { keys } }).catch(() => { if (seenSent.get(projectId) === sig) seenSent.delete(projectId); });
 }
 
-/** Another tab or device of yours saw a scheme's count (#498): redraw its pills, with no fetch or write, so two tabs can't set each other off. */
-export function onSeenCount(projectId, count) {
+/** Another tab or device of yours saw what waits in a scheme (#539): redraw its pills, with no fetch or write, so two tabs can't set each other off. */
+export function onSeenItems(projectId) {
   const p = view?.projects?.find((q) => q.id === projectId);
   if (!p || projectId === view.projectId) return;
-  p.seenInbox = count;
+  p.fresh = false;
+  seenSent.delete(projectId); // what the server holds is theirs now: write ours again when you're back in it
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${projectId}"]`)) el.replaceWith(schemeCount(p));
 }
 
@@ -113,12 +118,13 @@ export function renderInbox() {
   const items = inbox.items.filter((i) => ticketOf(i.ticketId));
   const strip = inboxStrip();
   // Minions, not items: one waiting on two things is one to see to (Cara, 2026-11-01).
-  const count = new Set(items.filter((i) => !faded(i)).map((i) => i.ticketId)).size;
+  const waiting = items.filter((i) => !faded(i));
+  const count = new Set(waiting.map((i) => i.ticketId)).size;
   // A scheme you hid (#226) keeps its strip but no pill.
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
   const running = !hidden && [view.coordinator, ...view.tickets.values()].some(isWorking);
   const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && isWorking(t)).length;
-  if (!hidden) markCountSeen(view.projectId, count);
+  if (!hidden) markItemsSeen(view.projectId, waiting.map((i) => i.key));
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working }));
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();

@@ -26,18 +26,21 @@ export const turnMoved = (before, after) => isWorking(before) !== isWorking(afte
  * turn runs (#248) and how many minions are working when that's more than one (#278; Cara,
  * 2026-11-02: "Only show if number > 1"). The spinner shows beside the count, not only at zero (#314;
  * Josh, 2026-11-05: "I think actually the blue spinner and number of minions should show regardless
- * of badge"). `changed`: the count differs from `seenInbox`, the one last seen in the scheme (#498), and
- * shows even at zero. `label` covers it all, for the tooltip and screen readers; empty when the pill is hidden.
+ * of badge"). `fresh`: something waits on you that wasn't waiting when you last had the scheme open, as
+ * the server's `fresh` says (#498, #539), for the violet count. `label` covers it all, for the tooltip and screen
+ * readers; empty when the pill is hidden.
  */
 export function schemePill(p) {
   const need = p.inbox || 0;
   const busy = !!p.running;
-  // The count moved, up or down, since this person last had the scheme open (#498; Cara, 2026-11-11: "a different color or something if the number has changed").
-  const changed = p.seenInbox != null && need !== p.seenInbox;
+  // New items, not a moved count (#539; Cara, 2026-11-11: "a different color or something if the number has changed";
+  // Josh, 2026-11-11: "Only when it went up", then "if one went up and one went down, or even 2 went down it should
+  // still be purple"). Items only going away leave it plain, and at zero there's nothing to show.
+  const fresh = need > 0 && !!p.fresh;
   const parts = [];
-  if (need || changed) parts.push(`${need || 'None'} waiting on you${changed ? ` (${p.seenInbox} when you last opened it)` : ''}`);
+  if (need) parts.push(`${need} waiting on you${fresh ? ' (something new since you last opened it)' : ''}`);
   if (busy) parts.push(p.working ? `${p.working} minion${p.working === 1 ? '' : 's'} working` : 'Taskmaster working');
-  return { need, busy, working: busy && p.working > 1 ? p.working : 0, changed, label: parts.join(' · ') };
+  return { need, busy, working: busy && p.working > 1 ? p.working : 0, fresh, label: parts.join(' · ') };
 }
 
 /**

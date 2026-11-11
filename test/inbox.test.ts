@@ -103,6 +103,8 @@ test('each item carries the chat event it jumps to: its card\'s for approvals, q
 
   const byKind = Object.fromEntries(inboxItems(store, approvals, p, 'Cara').map((i) => [i.kind, i.eventId]));
   assert.deepEqual(byKind, { approval: approvalEvent.id, question: question.id, plan: plan.id, state: undefined });
+  // Each item's key names it while it waits, for the scheme pill's "something new" (#539).
+  assert.deepEqual(inboxItems(store, approvals, p, 'Cara').map((i) => i.key).sort(), [`approval:${approvalId}`, `plan:${plan.id}`, `question:${question.id}`, `state:${ready}`].sort());
 });
 
 test('inboxCount: the Needs-you badge\'s number for one person; a ready or replies minion they opened since it changed stops counting, cards never do', () => {

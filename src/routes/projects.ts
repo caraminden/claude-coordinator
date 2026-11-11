@@ -8,7 +8,7 @@ import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { askerKey, EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
-import { inboxCount, inboxItems } from '../inbox.ts';
+import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
@@ -225,21 +225,23 @@ export const projectRoutes: Route[] = [
     // hidden: this person hid it (#226); its badge stays at zero.
     // running: a minion or its Taskmaster has a turn doing work (#248; not one held on an approval card, #373), for the spinner; false when hidden.
     // working: how many minions (not the Taskmaster) have a turn doing work, the number beside the spinner (#278); 0 when hidden.
-    // seenInbox: the count this person last saw while in the scheme (#498); the badge is marked when inbox differs.
-    // A scheme they've never had open since #498 takes today's count, so nothing is marked on day one.
+    // fresh: something waits on this person that wasn't waiting when they last had the scheme open (#498, #539), for the
+    // violet badge. A scheme they've never had open since #539 takes today's items as seen, so nothing is marked on day one.
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id) });
-      const seenCounts = store.seenCounts(session.name);
+      const seenItems = store.seenItems(session.name);
       json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => {
         const tickets = store.listTickets(p.id);
-        const inbox = hidden.has(p.id) ? 0 : inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id));
-        if (!hidden.has(p.id) && !seenCounts.has(p.id)) store.setSeenCount(session.name, p.id, inbox, true);
+        const waiting = hidden.has(p.id) ? [] : inboxWaiting(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id));
+        const seen = seenItems.get(p.id);
+        if (!hidden.has(p.id) && !seen) store.setSeenItems(session.name, p.id, waiting.map((i) => i.key), true);
+        const inbox = minionCount(waiting);
         return {
           ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: tickets.filter((t) => t.kind === 'ticket').length,
           hidden: hidden.has(p.id),
           inbox,
-          seenInbox: hidden.has(p.id) ? inbox : (seenCounts.get(p.id) ?? inbox),
+          fresh: !!seen && waiting.some((i) => !seen.has(i.key)),
           running: !hidden.has(p.id) && tickets.some(busy),
           working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
           icon: await iconVersion(p.repo_dir),
@@ -261,15 +263,15 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    // The Needs-you count this person saw while in the scheme (#498): the scheme list marks the badge when the count moves off it.
-    method: 'PUT', path: '/api/projects/:project/seen-count', who: ['person'],
+    // The Needs-you items this person saw waiting while in the scheme (#539: InboxItem.key): the scheme list marks the badge when one not among them waits.
+    method: 'PUT', path: '/api/projects/:project/seen-items', who: ['person'],
     async handler({ req, res, app, session, project }) {
-      const { count } = await readJson(req);
-      if (!Number.isSafeInteger(count) || count < 0) throw new HttpError(400, 'count must be a whole number, 0 or more');
-      app.store.setSeenCount(session.name, project.id, count);
+      const { keys } = await readJson(req);
+      if (!Array.isArray(keys) || keys.length > 1000 || !keys.every((k) => typeof k === 'string' && k.length <= 200)) throw new HttpError(400, 'keys must be a list of item keys');
+      app.store.setSeenItems(session.name, project.id, keys);
       // Their other tabs and devices unmark the badge too; each tab takes only its own person's.
-      app.broadcast({ type: 'seen-count', name: session.name, projectId: project.id, count });
-      return json(res, 200, { count });
+      app.broadcast({ type: 'seen-items', name: session.name, projectId: project.id });
+      return json(res, 200, { keys });
     },
   },
   {

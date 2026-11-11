@@ -10,6 +10,8 @@ export interface InboxItem {
   at: number;
   /** The card as its chat shows it, so the inbox can act on it in place; none for 'state'. */
   card?: unknown;
+  /** Names this item while it waits, so a scheme's pill can tell a new one from one you saw (#539). */
+  key: string;
 }
 
 /**
@@ -25,20 +27,27 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
   const awake = new Set(tickets.filter((t) => t.state !== 'parked').map((t) => t.id));
   const items: InboxItem[] = [
     ...approvals.pending().filter((a) => ids.has(a.ticketId))
-      .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined })),
+      .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined, key: `approval:${(card as { id: string }).id}` })),
     // A new stored card kind only needs adding to Store.openCards.
-    ...store.openCards(projectId).filter((e) => awake.has(e.ticket_id)).map((e) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card: JSON.parse(e.data), eventId: e.id })),
-    ...tickets.filter((t) => t.state === 'ready' || t.state === 'try').map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at })),
+    ...store.openCards(projectId).filter((e) => awake.has(e.ticket_id)).map((e) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card: JSON.parse(e.data), eventId: e.id, key: `${e.kind}:${e.id}` })),
+    ...tickets.filter((t) => t.state === 'ready' || t.state === 'try').map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at, key: `state:${t.id}` })),
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.
-    ...tickets.filter((t) => t.replies && !['ready', 'try', 'parked'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at })),
+    ...tickets.filter((t) => t.replies && !['ready', 'try', 'parked'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at, key: `replies:${t.id}` })),
   ];
   return items.sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval') || b.at - a.at);
 }
 
-/** How many minions the scheme's Needs-you badge counts for `person`, who last saw each minion at `seen` (ticket id -> time): one with any item left, where a ready/try or replies item they opened since it changed stops counting, as in public/inbox.js. */
-export function inboxCount(store: Store, approvals: Approvals, projectId: number, person: string, seen: Record<number, number>): number {
+/** The items the scheme's Needs-you badge counts for `person`, who last saw each minion at `seen` (ticket id -> time): a ready/try or replies item they opened since it changed stops counting, as in public/inbox.js. */
+export function inboxWaiting(store: Store, approvals: Approvals, projectId: number, person: string, seen: Record<number, number>): InboxItem[] {
   const updated = new Map(store.listTickets(projectId).map((t) => [t.id, t.updated_at]));
-  const waiting = inboxItems(store, approvals, projectId, person)
+  return inboxItems(store, approvals, projectId, person)
     .filter((i) => !((i.kind === 'state' || i.kind === 'replies') && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0)));
-  return new Set(waiting.map((i) => i.ticketId)).size;
+}
+
+/** How many minions the badge counts: one with any item left in `inboxWaiting` (minions, not items: Cara, 2026-11-01). */
+export const minionCount = (items: InboxItem[]) => new Set(items.map((i) => i.ticketId)).size;
+
+/** How many minions the scheme's Needs-you badge counts for `person` (inboxWaiting says which items count). */
+export function inboxCount(store: Store, approvals: Approvals, projectId: number, person: string, seen: Record<number, number>): number {
+  return minionCount(inboxWaiting(store, approvals, projectId, person, seen));
 }

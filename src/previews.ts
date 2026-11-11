@@ -93,6 +93,12 @@ export class Previews {
     if (ticket.status === 'closed') throw new PreviewError(409, 'This minion is dismissed');
     if (!existsSync(join(ticket.cwd, 'server.ts'))) throw new PreviewError(400, 'This worktree has no server.ts to preview');
     await this.boot(ticket);
+    // Dismissed while it booted: runner.onClose's stop came before there was anything to stop.
+    const now = this.store.getTicket(ticket.id);
+    if (!now || now.status === 'closed') {
+      await this.stop(ticket.id, true);
+      throw new PreviewError(409, 'This minion is dismissed');
+    }
     if (!this.offered(ticket.id)) {
       this.store.setSetting(previewKey(ticket.id), { at: Date.now() });
       this.onChange(ticket.id);

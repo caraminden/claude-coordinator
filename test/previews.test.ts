@@ -149,6 +149,15 @@ test("an HTML page's file token gets through without a login, to the preview's o
   assert.equal(forged.status, 403);
   assert.match((await forged.json()).error, /expired/);
   assert.equal((await fetch(`${base}/preview/${ticket.id}/api/files/x`, { method: 'POST' })).status, 401);
+  // The preview's front end sits at /preview/N/c/, so its relative links ask under /c/ (#468 S08-3).
+  const cPath = `/preview/${ticket.id}/c/api/projects/${project.id}/shared/file?path=gallery.html`;
+  const cRes = await fetch(base + cPath, { headers: { Cookie: cookie }, redirect: 'manual' });
+  assert.equal(cRes.status, 302);
+  const cPage = new URL(cRes.headers.get('location')!, base + cPath);
+  assert.match(cPage.pathname, new RegExp(`^/preview/${ticket.id}/c/api/files/p${project.id}\\.`));
+  assert.equal((await fetch(cPage)).status, 200);
+  assert.equal((await fetch(new URL('pic.png', cPage))).status, 200);
+  assert.equal((await fetch(`${base}/preview/${ticket.id}/c/api/files/x`, { method: 'POST' })).status, 401);
 });
 
 test('a branch without preview mode is refused, and nothing is left running', async () => {
@@ -194,6 +203,31 @@ test('idle previews stop (a page load starts them again) and at most `max` run a
   } finally {
     await previews.stop(a.id, true);
     await previews.stop(b.id, true);
+  }
+});
+
+test('a minion dismissed while its preview boots keeps no preview and no offer (#468 S08-5)', async () => {
+  const d4 = join(root, 'data4');
+  mkdirSync(d4);
+  const s4 = new Store(join(d4, 'coordinator.db'));
+  const t = s4.createTicket({ project_id: s4.createProject('Four', null).id, title: 'Slow boot', permission_mode: 'default', created_by: 'Cara' });
+  const wt = join(root, 'slow-boot');
+  mkdirSync(wt);
+  // A preview that takes a moment to answer, long enough to dismiss the minion meanwhile.
+  writeFileSync(join(wt, 'server.ts'), `import { createServer } from 'node:http';
+setTimeout(() => createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true }))).listen(Number(process.env.PORT), '127.0.0.1'), 600);
+`);
+  s4.setTicketDir(t.id, wt, 'ticket/4-slow-boot');
+  const previews = new Previews(s4, d4);
+  try {
+    const starting = previews.start(s4.getTicket(t.id)!);
+    s4.updateTicket(t.id, { status: 'closed' });
+    await assert.rejects(starting, (err: any) => err.status === 409);
+    assert.equal(previews.isRunning(t.id), false);
+    assert.equal(previews.offered(t.id), false);
+    assert.equal(existsSync(join(previews.root, String(t.id))), false);
+  } finally {
+    await previews.stop(t.id, true);
   }
 });
 

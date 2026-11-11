@@ -176,7 +176,7 @@ else
   # A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.
   [ -z "$(git status --porcelain --ignored)" ] && tested=$tip || tested=
   log="$state/land-test.log"
-  if ! "$tools/run-tests.sh" "$log"; then
+  if ! "$tools/run-tests.sh" "$log" 9>&-; then # without the lock's fd: a run that outlives a killed land.sh must not hold it
     tail -n 40 "$log" >&2
     refuse "tests failed on the rebased branch (full log: $log), so main is untouched"
   fi

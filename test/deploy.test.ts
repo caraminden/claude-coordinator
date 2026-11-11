@@ -243,6 +243,9 @@ test('deploy.sh pushes the live commit to main, never forced, and a failed push 
   execFileSync('git', ['init', '-q', '-b', 'main', live]);
   git(live, 'config', 'user.email', 't@t');
   git(live, 'config', 'user.name', 't');
+  // A Claude session started in the live clone turns the pre-push hook on (tools/guard.sh --install); this push is the one meant to reach main.
+  cpSync(join(repo, '.githooks'), join(live, '.githooks'), { recursive: true });
+  git(live, 'config', 'core.hooksPath', '.githooks');
   const commit = () => {
     git(live, 'commit', '-q', '--allow-empty', '-m', String(Math.random()));
     return git(live, 'rev-parse', 'HEAD');
@@ -330,7 +333,7 @@ test('the restart refuses to restart when it cannot copy the database first', ()
   execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x']);
   new Store(join(dir, 'coordinator.db')).db.close();
   writeFileSync(join(dir, 'backups'), 'not a folder');
-  const copy = join(root, 'refuse-deploy.sh'); // the restart deletes its own script, as the unit's is a private copy
+  const copy = join(root, 'refuse-deploy.sh');
   cpSync(join(repo, 'tools', 'deploy.sh'), copy);
   const r = spawnSync('bash', [copy, 'restart'], {
     encoding: 'utf8',
@@ -339,6 +342,15 @@ test('the restart refuses to restart when it cannot copy the database first', ()
   assert.equal(r.status, 1);
   assert.match(r.stderr, /FAILED: Could not copy the database to backups\/ .*so nothing restarted/);
   assert.doesNotMatch(r.stderr, /restarting no-such-citadel-unit/);
+  // Run by hand as tools/deploy.sh restart, it must not delete the tracked script: only the unit's private copy goes.
+  assert.ok(existsSync(copy), 'a script that is not the private copy stays');
+  const own = join(live, '.git', 'cc-deploy', 'restart-abc-1.sh');
+  cpSync(copy, own);
+  assert.equal(spawnSync('bash', [own, 'restart'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: join(dir, 'coordinator.db'), DEPLOY_NOW: '1', DEPLOY_URL: 'http://127.0.0.1:1', DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_REMOTE: '' } }).status, 1);
+  assert.ok(!existsSync(own), 'the private copy is deleted');
+  const usage = spawnSync('bash', [copy, 'no-such-command'], { encoding: 'utf8', env: hostEnv });
+  assert.equal(usage.status, 2);
+  assert.doesNotMatch(usage.stderr, /restart/, 'the usage line does not offer the restart');
 });
 
 test('deploy.sh copies the database while the live server keeps writing it (#497)', { timeout: 60_000 }, async () => {
@@ -387,12 +399,21 @@ async function standIn(answer: (req: import('node:http').IncomingMessage, body: 
 }
 
 test('deploy.sh retries a report the server never got, but not one it may already have (#520)', { timeout: 60_000 }, async () => {
-  const post = (url: string, env: object = {}) => promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'post-report', url, 'tok', '7', 'ok', 'Deployed abc1234'], { encoding: 'utf8', env: { ...hostEnv, ...env } });
+  // A curl that notes a turn token on its command line, where any process on the box could read it, then runs the real one.
+  const bin = join(root, 'curl-bin');
+  const leaked = join(root, 'curl-leaked');
+  mkdirSync(bin);
+  const curl = execFileSync('sh', ['-c', 'command -v curl'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(bin, 'curl'), `#!/bin/sh\ncase "$*" in *tok-secret*) echo "$*" >>'${leaked}' ;; esac\nexec '${curl}' "$@"\n`, { mode: 0o755 });
+  const post = (url: string, env: object = {}) => promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'post-report', url, 'tok-secret', '7', 'ok', 'Deployed abc1234'], { encoding: 'utf8', env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, ...env } });
   // Dropped unanswered, then a 503: neither got the report in, so it goes again, with the same body.
-  const flaky = await standIn((req) => (flaky.seen.length === 1 ? 'reset' : flaky.seen.length === 2 ? 503 : 201));
+  const auth: (string | undefined)[] = [];
+  const flaky = await standIn((req) => (auth.push(req.headers.authorization), flaky.seen.length === 1 ? 'reset' : flaky.seen.length === 2 ? 503 : 201));
   try {
     const r = await post(flaky.url);
     assert.equal(flaky.seen.length, 3);
+    assert.deepEqual(auth, Array(3).fill('Bearer tok-secret'), 'the token still reaches the server');
+    assert.ok(!existsSync(leaked), 'and is not on curl\'s command line');
     assert.ok(flaky.seen.every((s) => s.url === '/api/tickets/7/deploy' && JSON.parse(s.body).text === 'Deployed abc1234'));
     assert.doesNotMatch(r.stderr, /could not post/);
   } finally {

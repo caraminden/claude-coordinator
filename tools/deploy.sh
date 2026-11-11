@@ -75,7 +75,7 @@ post_report() {
   while :; do
     rc=0
     out=$(curl -sS -o /dev/null -w '%{http_code} %{time_connect}' --max-time "$REPORT_WAIT" -X POST "$api/api/tickets/$ticket/deploy" \
-      -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$body" 2>/dev/null) || rc=$?
+      -K - -H 'Content-Type: application/json' -d "$body" 2>/dev/null <<<"header = \"Authorization: Bearer $token\"") || rc=$? # the token on stdin: a command line is readable by every process
     read -r code connected <<<"$out"
     [ "$rc" = 0 ] && [ "${code:0:1}" = 2 ] && return 0
     # curl's 28 is any timeout: only one after the connection was made means the server has the report.
@@ -118,7 +118,8 @@ push_github() {
   [ -n "$REMOTE" ] || return 0
   local out why fix=""
   # Main goes out as the box's own gh login, not the GitHub account of the turn that ran the deploy (#182).
-  if out=$(env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$LIVE" push -q "$REMOTE" "$1:refs/heads/main" 2>&1); then
+  # --no-verify: .githooks/pre-push refuses every push to main on purpose; this is the one meant to make it.
+  if out=$(env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$LIVE" push -q --no-verify "$REMOTE" "$1:refs/heads/main" 2>&1); then
     say "pushed $(git_live rev-parse --short "$1") to $REMOTE main"
     echo " Pushed to GitHub."
     return 0
@@ -213,7 +214,7 @@ restart_healthy() {
 # Queued as the restart unit: restart once no turn would be cut off (at once with --now), roll back if
 # the new code doesn't come up or stay up.
 restart() {
-  rm -f "$0" # a private copy (see deploy); bash keeps reading it from the open file
+  case "$0" in */cc-deploy/restart-*.sh) rm -f "$0" ;; esac # the unit's private copy (see deploy), never the tracked script; bash keeps reading it from the open file
   init_state
   local i=0
   # $STATE/now: a --now deploy that found this restart already queued and waiting.
@@ -331,7 +332,7 @@ deploy() {
   else
     say "running the tests"
     queue_phase "deploying: running the tests since $(date +%H:%M)"
-    if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log"); then
+    if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log" 9>&-); then # without the lock's fd: a run that outlives a killed deploy must not hold it
       tail -n 40 "$STATE/test.log" >&2
       say "tests failed (full log: $STATE/test.log); nothing deployed"
       false
@@ -339,7 +340,7 @@ deploy() {
   fi
   queue_phase "deploying: boot check since $(date +%H:%M)"
   say "boot check: the new code on a spare port with a copy of the database"
-  if ! version=$(node "$LIVE/tools/boot-check.ts" "$LIVE" "$DB"); then
+  if ! version=$("$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" 9>&-); then # not as `node`: ananicy would idle it (deploy/priority.md); no lock fd, as the tests
     say "boot check failed; nothing deployed"
     false
   fi
@@ -415,5 +416,5 @@ case "${1:-}" in
   post-report) post_report "$2" "$3" "$4" "$5" "$6" ;;
   backup-db) backup_db "$2" ;;
   rotate-backups) rotate_backups ;;
-  *) echo "usage: $0 [--now | restart | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--now | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
 esac

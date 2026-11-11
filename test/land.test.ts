@@ -93,6 +93,20 @@ test("a rebase that changes land.sh hands over to the rebased copy, which keeps 
   assert.match(readFileSync(join(state, 'queue', '.took'), 'utf8'), /^\d+\n$/);
 });
 
+// A killed land.sh must not leave its test run holding the deploy lock (ultra review A4).
+test("the test run doesn't get the deploy lock's fd 9", () => {
+  const r = setup();
+  const tools = join(r.dir, 'tools');
+  mkdirSync(tools);
+  for (const f of ['land.sh', 'deploy-queue.sh']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(tools, f));
+  writeFileSync(join(tools, 'run-tests.sh'), '#!/usr/bin/env bash\n[ -e /proc/self/fd/9 ] && echo open >"$FD9_NOTE" || echo closed >"$FD9_NOTE"\n', { mode: 0o755 });
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = spawnSync('bash', [join(tools, 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), FD9_NOTE: join(r.dir, 'fd9') } });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(readFileSync(join(r.dir, 'fd9'), 'utf8'), 'closed\n');
+  assert.equal(r.note(), 'locked=1 held=yes', 'land.sh itself still holds the lock for the deploy');
+});
+
 test('red tests stop it before main moves', () => {
   const r = setup();
   r.commit(r.wt, 'b.txt', 'mine\n');
@@ -457,6 +471,20 @@ test('the real deploy.sh takes the lock land.sh holds, lets go of it once the re
     assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'));
     assert.match(res.stderr, /skipping the tests: land\.sh just ran them on/);
     assert.deepEqual(runs(), [r.wt], 'the suite ran once, in the worktree');
+  }));
+
+// A killed deploy must not leave its test run or boot check holding the lock (ultra review A4), and the boot check
+// runs under a name ananicy's node rule doesn't match (A5b).
+test("deploy.sh's test run and boot check don't get the deploy lock's fd 9, and the boot check isn't named node", () =>
+  withRealDeploy(async (r, run) => {
+    const fd9 = join(r.dir, 'fd9');
+    writeFileSync(join(r.source, 'tools', 'run-tests.sh'), '#!/usr/bin/env bash\n[ -e /proc/self/fd/9 ] && echo tests open >>"$FD9_NOTE" || echo tests closed >>"$FD9_NOTE"\n');
+    // node opens descriptors of its own, so the boot check looks at what its fd 9 is.
+    writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "import { appendFileSync, readlinkSync } from 'node:fs';\nimport { basename } from 'node:path';\nlet fd9 = '';\ntry { fd9 = readlinkSync('/proc/self/fd/9'); } catch {}\nappendFileSync(process.env.FD9_NOTE, `boot ${fd9.endsWith('/cc-deploy/lock') ? 'open' : 'closed'} ${basename(process.argv0)}\\n`);\nconsole.log('v1');\n");
+    git(r.source, 'commit', '-qam', 'stand-ins that look for fd 9');
+    const res = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, { FD9_NOTE: fd9 });
+    assert.match(res.stderr, /live now: the server restarted on/);
+    assert.equal(readFileSync(fd9, 'utf8'), 'tests closed\nboot closed citadel-node\n');
   }));
 
 test('deploy.sh tests again when a file outside the commit was in the worktree (untracked or ignored) or is in the live checkout', async () => {

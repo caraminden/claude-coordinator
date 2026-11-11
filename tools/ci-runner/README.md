@@ -70,7 +70,7 @@ who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` show
    ```
 
    It checks that Node 18+ and Git for Windows are there, creates and locks the folder,
-   downloads the agent and its three scripts (printing their SHA-256), registers the task
+   downloads the agent and its four scripts (printing their SHA-256), registers the task
    **Citadel runner agent** (SYSTEM, at startup, retried every 5 minutes), starts it and waits
    until it connects. There's no reboot and no runner is touched. The Machines page then shows
    `cara-desktop-runners` online.
@@ -258,6 +258,33 @@ tarball and stubbed `systemctl`, `runuser`, `useradd` and `userdel` (`test/runne
 `keep-wsl-up.ps1` passes the `.ps1` lint. Nothing has run in WSL yet: the real `config.sh` and runner service,
 systemd in the distro, the tailnet from WSL's network, and whether the logon task really holds the distro up are
 first tried by Cara's setup.
+
+## Load samples (#534)
+
+Each runner agent also samples its PC every 30 seconds and posts the sample to Citadel, which keeps 14 days of
+them (`src/ci-load.ts`). It is read-only: it changes no runner, count, VM setting or workflow. The Machines page
+shows the result under **CI desktop load**, to every member of a scheme with runners on that PC: a verdict, CPU
+and memory now, the last 24 hours with hard restarts marked, and each pool of runners (a repo and its labels)
+with how many are busy and what waits.
+
+- **What a sample holds.** The whole PC's CPU, memory and disk; each runner's share of the CPU (its
+  `Runner.Listener` and everything it started); on Windows also the threads waiting for a core, how long since
+  the person at the PC last touched it (`quser`), with Hyper-V on the PC's true CPU and each guest's share (the
+  host's own counters leave guests out), the hottest ACPI thermal zone where the firmware reports one, and the
+  restarts with no clean shutdown (Kernel-Power 41) of the last 14 days. `sample-load.ps1` reads what Node can't;
+  the agent in WSL reads `/proc`. What a PC can't report is left empty, never guessed.
+- **The verdict**, over the last 15 minutes: **overloading** (with someone at the PC, the CPU at 90% or more for two
+  thirds of that time, or memory under 10% free; it says whether the runners are the cause), **crashed under load** (a hard restart with CI
+  jobs running; it holds for 24 hours and never says to add a runner), **could do more** (jobs have waited over
+  2 minutes with every runner of their pool busy and the CPU under 60%), **full** (jobs wait and the PC is busy
+  too), else **fine**. A verdict that holds for 30 minutes (a crash at once) becomes one quiet Mandate item for
+  the schemes with runners there, taken away when it ends. It never rings.
+- **Turning it on** (Cara, after the change is live): the agents never update themselves, so run each host's
+  install line again. Windows: step 2 of "Install the runner agent" above, for the Windows runner host. WSL:
+  `wsl -d citadel-ci -u root`, then step 3 of "Set it up" under "Linux runners in WSL", for the WSL runner host.
+  Until then the panel shows the queues from GitHub and "No samples yet".
+- **Not yet seen on the real PC** (2026-11-11): `quser` under SYSTEM, the Hyper-V counters and the thermal zone.
+  The first hour of samples says which of them the desktop reports.
 
 ## Point the workflows at it
 

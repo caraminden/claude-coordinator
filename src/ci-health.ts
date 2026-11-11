@@ -28,6 +28,8 @@ export const VERDICT_MS = 4 * 3600_000;
 const ACTIVE_MS = 7 * 24 * 3600_000;
 const VERDICTS = new Set(['success', 'failure']);
 const RAN = new Set(['success', 'failure']);
+// A run whose jobs were all skipped (a job-level `if:`), or neutral, was never meant to give a verdict.
+const NO_VERDICT = new Set(['skipped', 'neutral']);
 
 export interface Run {
   id: number;
@@ -126,7 +128,8 @@ export function queuedProblems(jobs: Job[], now: number): Problem[] {
  * runs after it by VERDICT_MS: measured from the first run that hasn't got one, so a stream of runs each cancelling
  * the last still counts. `runs` is the workflow's runs on that branch, newest first.
  */
-export function verdictProblem(workflow: { id: number; name: string }, branch: string, runs: Run[], now: number): Problem | null {
+export function verdictProblem(workflow: { id: number; name: string }, branch: string, all: Run[], now: number): Problem | null {
+  const runs = all.filter((r) => !(r.status === 'completed' && NO_VERDICT.has(r.conclusion ?? '')));
   if (!runs.length || now - at(runs[0].created_at) > ACTIVE_MS) return null;
   const v = runs.findIndex((r) => r.status === 'completed' && VERDICTS.has(r.conclusion ?? ''));
   if (v === 0) return null;

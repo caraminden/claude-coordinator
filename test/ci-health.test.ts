@@ -100,6 +100,14 @@ test('no verdict counts from the first run after the last verdict, so a stream o
   assert.equal(verdictProblem(wf, 'main', [], NOW), null);
 });
 
+test('runs skipped by a job-level if: (or neutral) wait for no verdict (#468 S08-4)', () => {
+  const wf = { id: 8, name: 'claude' };
+  const skipped = (h: number) => runOf({ conclusion: 'skipped', created_at: iso(h * HOUR) });
+  assert.equal(verdictProblem(wf, 'main', [skipped(1), skipped(5), runOf({ created_at: iso(30 * HOUR) })], NOW), null);
+  assert.equal(verdictProblem(wf, 'main', [runOf({ conclusion: 'neutral', created_at: iso(2 * HOUR) }), skipped(6)], NOW), null);
+  assert.ok(verdictProblem(wf, 'main', [skipped(1), runOf({ conclusion: 'cancelled', created_at: iso(5 * HOUR) }), runOf({ created_at: iso(30 * HOUR) })], NOW), 'a cancelled run still waits for one');
+});
+
 test('a green run that skipped jobs which ran the time before alerts; jobs skipped both times do not', () => {
   const wf = { id: 7, name: 'desktop' };
   const before = [job({ name: 'screen' }), job({ name: 'capture', conclusion: 'failure' }), job({ name: 'nightly', conclusion: 'skipped' })];

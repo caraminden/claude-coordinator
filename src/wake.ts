@@ -144,8 +144,14 @@ export class LiveWaiters {
   /** The live checkout: the server's own code. */
   private repo: string;
   private send: (ticketId: number, text: string) => void;
-  /** Start a chained minion: give it its held brief. */
+  /**
+   * Start a chained minion: give it its held brief. Its chain stays stored until then, so a start that
+   * never sends (the server dies while it catches up the branch) runs again after a restart: the start
+   * calls release() as it sends, and end() when it is over either way.
+   */
   start: (c: Chain, why: string) => void = () => {};
+  /** Chained minions whose start is running in this process: check() leaves them be. */
+  private starting = new Set<number>();
   /** A chained minion's leader was dismissed without shipping: tell people, once. */
   hold: (c: Chain, why: string) => void = () => {};
   /** The commit the server runs now: what it booted from, then what its front end last reloaded to. */
@@ -265,7 +271,20 @@ export class LiveWaiters {
     return c.held ? `${who}'s work is ${c.when}, and ${who} was dismissed without it, so only Start now starts you` : `${who}'s work is ${c.when}`;
   }
 
-  /** Take `ticket`'s held brief out of the chain (someone started it early), or null. */
+  /** `ticket`'s held brief, kept in the chain, for a start about to run (Start now); null when none, or one already runs. */
+  claim(ticket: number): Chain | null {
+    const c = this.chains().find((o) => o.ticket === ticket) ?? null;
+    if (!c || this.starting.has(ticket)) return null;
+    this.starting.add(ticket);
+    return c;
+  }
+
+  /** A start of `ticket` is over, sent or not: the next check() may start it again if its chain is still stored. */
+  end(ticket: number): void {
+    this.starting.delete(ticket);
+  }
+
+  /** Take `ticket`'s held brief out of the chain (its start sends it now), or null. */
   release(ticket: number): Chain | null {
     const all = this.chains();
     const c = all.find((o) => o.ticket === ticket) ?? null;
@@ -282,11 +301,15 @@ export class LiveWaiters {
       const t = this.store.getTicket(c.ticket);
       if (!t || t.status === 'closed') continue;
       const state = this.chainState(c);
-      if (state === 'go') go.push(c);
-      else keep.push(state === 'unshipped' && !c.held ? (hold.push(c), { ...c, held: true }) : c);
+      // Kept until its start sends the brief (release), so a start the server dies in runs again.
+      if (state === 'go') {
+        keep.push(c);
+        if (!this.starting.has(c.ticket)) go.push(c);
+      } else keep.push(state === 'unshipped' && !c.held ? (hold.push(c), { ...c, held: true }) : c);
     }
     this.store.setSetting(CHAINS, keep);
     const n = (id: number) => `#${this.store.getTicket(id)?.number ?? id}`;
+    for (const c of go) this.starting.add(c.ticket);
     for (const c of go) this.start(c, `${n(c.after)}'s work is ${c.when === 'merged' ? 'merged' : 'live'}`);
     for (const c of hold) this.hold(c, `${n(c.after)} was dismissed without its work being merged`);
     return go.length;
@@ -354,8 +377,12 @@ export class LiveWaiters {
     this.store.setSetting(KEY, waiting);
     const short = (c: string) => c.slice(0, 7);
     for (const w of woken) {
-      if (w.commit && this.elsewhere(w.ticket)) this.send(w.ticket, `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`);
-      else this.send(w.ticket, `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`);
+      try {
+        if (w.commit && this.elsewhere(w.ticket)) this.send(w.ticket, `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`);
+        else this.send(w.ticket, `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`);
+      } catch (err) {
+        console.error(`Waking #${w.ticket} failed:`, err); // the others still get theirs
+      }
     }
     return woken.length + this.checkChains();
   }

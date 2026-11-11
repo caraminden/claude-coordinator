@@ -610,7 +610,7 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { res, app, session, ticket } = ctx;
       if (ticket.kind === 'coordinator') throw new HttpError(400, 'The Taskmaster never waits on another minion\'s work');
-      const chained = app.waiters.release(ticket.id);
+      const chained = app.waiters.claim(ticket.id); // released by startChained as it sends the brief
       if (!chained) throw new HttpError(409, `#${ticket.number} isn't parked waiting on another minion's work`);
       await app.startChained(chained, `${session.name} started it before its leader's work was in`);
       return json(res, 200, ticketView(app, ticket.id));

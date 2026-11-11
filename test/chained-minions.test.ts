@@ -81,7 +81,11 @@ function waiters(head: string) {
     branch: (_repo, branch) => prs.findLast((p) => p.branch === branch) ?? null,
     commit: () => null,
   };
-  w.start = (c, why) => started.push({ c, why });
+  // As the server's start does once the follower's branch is caught up: the brief leaves the chain as it is sent.
+  w.start = (c, why) => {
+    started.push({ c, why });
+    w.release(c.ticket);
+  };
   w.hold = (c, why) => held.push({ c, why });
   return w;
 }
@@ -338,6 +342,41 @@ test('a leader with no commits of its own counts as done once dismissed', () => 
   store.updateTicket(leader.id, { status: 'closed' });
   assert.equal(w.check(), 1);
   assert.equal(held.length, 0);
+});
+
+test("a chained minion's brief stays held until its start sends it: a start that never gets there isn't repeated, and runs again after a restart (#468 S04-5)", () => {
+  reset();
+  const w = waiters(live.git('rev-parse', 'HEAD'));
+  w.start = (c, why) => started.push({ c, why }); // still catching up its branch when the server dies
+  const leader = minion();
+  const follower = chain(w, leader.id, 'live');
+  store.updateTicket(leader.id, { status: 'closed' });
+  assert.equal(w.check(), 1);
+  assert.deepEqual(w.chains().map((c) => c.message), ['build part two'], 'the brief is still stored');
+  assert.equal(w.check(), 0, 'not started twice while its start runs');
+
+  const restarted = waiters(live.git('rev-parse', 'HEAD'));
+  assert.equal(restarted.check(), 1, 'a restart starts it again');
+  assert.equal(started.at(-1)!.c.ticket, follower);
+  assert.equal(restarted.chains().length, 0, 'gone once sent');
+  assert.equal(restarted.check(), 0);
+});
+
+test('a deploy wakes every waiter whose commit is live even when one send throws, and wakes none twice (#468 S04-5)', () => {
+  const head = live.git('rev-parse', 'HEAD');
+  const got: number[] = [];
+  const w = new LiveWaiters(store, live.dir, head, (id) => {
+    if (id === a) throw new Error('send failed');
+    got.push(id);
+  });
+  const a = minion().id;
+  const b = minion().id;
+  w.add(a, null, 'first');
+  w.add(b, null, 'second');
+  live.commit();
+  assert.doesNotThrow(() => w.check(live.git('rev-parse', 'HEAD')));
+  assert.deepEqual(got, [b]);
+  assert.deepEqual(w.list().filter((x) => x.ticket === a || x.ticket === b), [], 'dropped before sending: none woken twice');
 });
 
 test('a leader already live when the chain is set starts it at once', () => {

@@ -308,13 +308,24 @@ runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'erro
 
 // Chained minions (create_ticket's start_after): one starts with its held brief, on a branch caught
 // up to main so it builds on the work it waited for, once its leader's work is in.
+// The brief stays in the chain until it is sent, so a server that dies during the catch-up starts it after the restart.
 async function startChained(c: Chain, why: string) {
-  const t = store.getTicket(c.ticket);
-  if (!t) return;
-  const repo = store.getProject(t.project_id)?.repo_dir ?? null;
-  await catchUpTicketDir(t.cwd, repo).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
-  runner.emit(c.ticket, 'note', { text: `${why}, so this minion started.` });
-  runner.send(c.ticket, c.from, c.message, [], { brief: true });
+  try {
+    const t = store.getTicket(c.ticket);
+    if (!t) return;
+    const repo = store.getProject(t.project_id)?.repo_dir ?? null;
+    await catchUpTicketDir(t.cwd, repo).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
+    if (!waiters.release(c.ticket)) return; // dismissed meanwhile
+    try {
+      runner.emit(c.ticket, 'note', { text: `${why}, so this minion started.` });
+      runner.send(c.ticket, c.from, c.message, [], { brief: true });
+    } catch (err) {
+      waiters.chain(c); // held again: the next check, or Start now, tries again
+      throw err;
+    }
+  } finally {
+    waiters.end(c.ticket);
+  }
 }
 waiters.start = (c, why) => void startChained(c, why);
 runner.heldFor = (id) => waiters.heldFor(id);

@@ -92,6 +92,7 @@ REMOTE=${DEPLOY_REMOTE-origin}
 CI_WORKFLOW=.github/workflows/tests.yml
 CI_LABEL=citadel-ci-linux
 CI_REF=land/$branch
+CI_STEP='the full suite' # the workflow's step that runs the tests; a run that fails in any other never ran them
 CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI_POLL:-5}
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
 hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&-; }
@@ -110,7 +111,7 @@ ci_done() {
 }
 # 0: green on this commit. 1: red. 2: no answer, with the reason in $why.
 ci_gate() {
-  local url online stale='' started=$SECONDS waited
+  local url online step stale='' started=$SECONDS waited
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
   ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
@@ -122,6 +123,7 @@ ci_gate() {
     online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>/dev/null) || { why="GitHub didn't say which runners are online"; return 2; }
     [ "$online" -gt 0 ] 2>/dev/null || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
     ci_pushed=1
+    # Forced on purpose: land/<branch> is a scratch branch only this script writes and deletes, so there is no one's work to overwrite.
     hub git push -q "$REMOTE" "+$tip:refs/heads/$CI_REF" 2>/dev/null || { why="pushing $short to GitHub failed"; return 2; }
   fi
   say "waiting for CI on $short: the full suite on Cara's desktop (at most $((CI_LIMIT / 60)) min, then it runs here)"
@@ -137,7 +139,12 @@ ci_gate() {
   done
   case $ci_result in
     success) say "CI passed on $short in $((SECONDS - started))s ($ci_url)" ;;
-    failure | timed_out) return 1 ;;
+    failure)
+      # Red only when the tests ran: a run that failed setting up (no user manager, a download) says nothing about this commit.
+      step=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq '[.jobs[].steps[] | select(.conclusion == "failure") | .name][0] // empty' 2>/dev/null) || step=''
+      [ "${step:-$CI_STEP}" = "$CI_STEP" ] || { why="the CI run failed in its setup step \"$step\", before any test ran ($ci_url): the runner needs fixing"; return 2; }
+      return 1 ;;
+    timed_out) return 1 ;;
     *) why="the CI run ended as $ci_result, not as a verdict on the tests"; return 2 ;;
   esac
 }
@@ -150,7 +157,12 @@ if [ "$rc" = 0 ]; then
   ci_done
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then
-  hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null | tail -n 40 >&2 || true
+  failed=$(hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null) || true
+  tail -n 40 <<<"$failed" >&2
+  # run-tests.sh's flake lines can't reach the retro log from the desktop, so they are written from its output here.
+  while read -r f load; do
+    retro_log "flake · $f · load $load · $branch · in CI"
+  done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
   refuse "tests failed on the rebased branch in CI ($ci_url), so main is untouched"
 else
   ci_done

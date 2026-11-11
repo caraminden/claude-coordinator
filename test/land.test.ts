@@ -132,7 +132,8 @@ test('a test that hangs is stopped at the time limit, says so, and lets go of th
 });
 
 // The CI gate (#523): GitHub is a bare repo as origin and a stand-in gh. The stand-in knows one run, id 7, of whatever
-// commit land/<branch> points at there, in the state FAKE_CI names; FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>".
+// commit land/<branch> points at there, in the state FAKE_CI names; FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>",
+// which GitHub still answers with for FAKE_LAG polls after the push; FAKE_STEP is the step a red run failed in.
 function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
   git(r.dir, 'init', '-q', '--bare', hub);
@@ -146,7 +147,9 @@ case "$*" in
   *"/actions/runs?head_sha="*)
     sha=\${2#*head_sha=} sha=\${sha%%&*}
     [ "\${FAKE_CI:-}" != down ] || exit 1
-    if [ "$(git -C "${hub}" rev-parse -q --verify "refs/heads/land/ticket/1-x" 2>/dev/null)" = "$sha" ]; then
+    lag=0
+    if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
+    if [ "$lag" = 0 ] && [ "$(git -C "${hub}" rev-parse -q --verify "refs/heads/land/ticket/1-x" 2>/dev/null)" = "$sha" ]; then
       case \${FAKE_CI:-green} in
         green) printf '7\\tcompleted\\tsuccess\\thttps://ci/7\\n' ;;
         red) printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n' ;;
@@ -158,7 +161,8 @@ case "$*" in
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
   *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; echo "\${FAKE_RUNNERS:-1}" ;;
-  "run view "*) echo "not ok 1 - the red test's output" ;;
+  *"/actions/runs/7/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
+  "run view "*) printf 'test\\tthe full suite\\t2026 run-tests: test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n'; echo "not ok 1 - the red test's output" ;;
 esac
 `);
   chmodSync(join(bin, 'gh'), 0o755);
@@ -203,10 +207,12 @@ test('a run of this very commit that is already green lands at once; one that wa
   const r2 = setup();
   const c2 = ci(r2);
   r2.commit(r2.wt, 'b.txt', 'mine\n');
-  res = c2.run({ FAKE_OLD_RUN: `${git(r2.wt, 'rev-parse', 'HEAD')} completed failure` });
+  // GitHub takes a moment to list the new run: until then it still answers with the old red one, which is no verdict.
+  res = c2.run({ FAKE_OLD_RUN: `${git(r2.wt, 'rev-parse', 'HEAD')} completed failure`, FAKE_LAG: '2' });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /CI passed on .*ci\/7/);
   assert.equal(c2.localRuns(), 0);
+  assert.ok(c2.calls().split('\n').filter((l) => l.includes('head_sha')).length >= 4, 'it polled past the old run');
 });
 
 test('red CI refuses with main untouched, shows the failed log, and never falls back to a run here', () => {
@@ -214,8 +220,10 @@ test('red CI refuses with main untouched, shows the failed log, and never falls 
   const c = ci(r);
   r.commit(r.wt, 'b.txt', 'mine\n');
   const main = git(r.source, 'rev-parse', 'main');
-  const res = c.run({ FAKE_CI: 'red' });
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ FAKE_CI: 'red', COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 1);
+  assert.match(landLog(shared), /· flake · test\/slow\.test\.ts · load 31\.5 · ticket\/1-x · in CI$/m, 'a flake CI labelled reaches the retro log');
   assert.match(res.stderr, /the red test's output\n.*tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK/);
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
@@ -232,6 +240,7 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
     ['no runner starts the job', { FAKE_CI: 'queued', LAND_CI_START: '1' }, /no runner started the job within 1s/],
     ['the run never finishes', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }, /CI didn't finish within 1s/],
     ['the run was cancelled', { FAKE_CI: 'cancelled' }, /ended as cancelled/],
+    ['the run failed before the tests', { FAKE_CI: 'red', FAKE_STEP: "the runner user's systemd" }, /failed in its setup step "the runner user's systemd", before any test ran/],
     ['LAND_CI=0', { LAND_CI: '0' }, /LAND_CI=0 was set/],
   ];
   for (const [name, extra, why] of cases) {

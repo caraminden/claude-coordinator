@@ -410,8 +410,12 @@ leaves every link needing linking again. Deploys still push `main` with the box'
 ### Deploying
 
 A minion lands its branch with `tools/land.sh`, run from its worktree. Under
-the deploy lock it rebases the branch onto the local `main`, runs `node --test`,
-fast-forwards `main` in the scheme repo, then runs `tools/deploy.sh`. A conflict
+the deploy lock it rebases the branch onto the local `main`, waits for the full
+suite to pass on that exact commit, fast-forwards `main` in the scheme repo, then
+runs `tools/deploy.sh`. The suite runs on Cara's desktop
+(`.github/workflows/tests.yml`, on a scratch branch `land/<branch>`); when no
+runner is online or CI doesn't answer in time, `land.sh` prints `CI FALLBACK` and
+runs it on perigee instead (`LAND_CI=0` forces that). A conflict
 or a red test stops it before `main` moves; a deploy whose checks fail puts
 `main` back too.
 
@@ -429,7 +433,7 @@ long timeout. The queued restart takes the lock outside the line.
 interrupt turns:
 
 1. It fast-forwards `~/claude-coordinator` to `main`, runs `node --test` (unless
-   `land.sh` just ran it on that same commit, with no files outside the commit
+   `land.sh` just had it pass on that same commit, in CI or here, with no files outside the commit
    in its worktree or here), and boots the new code on a spare port against a copy of the database
    (`tools/boot-check.ts`: `node --check` on `public/*.js`, `/api/health`, the
    app signed in and rendered in Playwright's headless Chromium with no console

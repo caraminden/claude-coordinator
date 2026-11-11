@@ -75,8 +75,12 @@ export function redact(text) {
 export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
   return new Promise((resolve) => {
     const lines = [];
+    // A chunk ends wherever the pipe cut it, not at a line's end: its first piece carries on the last line (#534: a
+    // long line of JSON came back in pieces).
     const keep = (chunk) => {
-      lines.push(...String(chunk).split(/\r?\n/));
+      const parts = String(chunk).split(/\r?\n/);
+      if (lines.length) lines[lines.length - 1] += parts.shift();
+      lines.push(...parts);
       if (lines.length > TAIL_LINES * 2) lines.splice(0, lines.length - TAIL_LINES);
     };
     let child;
@@ -86,6 +90,9 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
     } catch (err) {
       return resolve({ code: -1, output: `could not start ${command}: ${err.message}` });
     }
+    // As text, so a character cut by a chunk's end isn't broken.
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', keep);
     child.stderr.on('data', keep);
     const timer = setTimeout(() => {
@@ -93,7 +100,7 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
       if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
       else try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill(); }
     }, limitMs);
-    child.on('error', (err) => keep(`could not start ${command}: ${err.message}`));
+    child.on('error', (err) => keep(`\ncould not start ${command}: ${err.message}`));
     child.on('close', (code) => {
       clearTimeout(timer);
       resolve({ code: code ?? -1, output: lines.join('\n').trim().split('\n').slice(-TAIL_LINES).join('\n') });

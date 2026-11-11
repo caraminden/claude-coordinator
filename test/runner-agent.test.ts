@@ -219,3 +219,9 @@ test('a Windows agent asks for the hard restarts on its second look, the first t
   assert.equal((await sampler.take()).restarts, undefined);
   assert.deepEqual(asked, [false, true, false]);
 });
+
+test('a line that arrives in pieces comes back whole: the sampler reads one long line of JSON', async () => {
+  const { code, output } = await runCommand({ command: '/bin/sh', args: ['-c', 'echo first; printf "%s" \'{"procs":[[1,0,"sy\'; sleep 0.2; printf "%s" \'stem32",2,3]]\'; sleep 0.2; echo "}"'] }, process.env);
+  assert.equal(code, 0);
+  assert.deepEqual(output.split('\n'), ['first', '{"procs":[[1,0,"system32",2,3]]}']);
+});

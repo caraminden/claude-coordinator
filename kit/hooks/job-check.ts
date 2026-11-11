@@ -28,7 +28,7 @@ export function jobCheck(input: any, role: string | undefined, blocks: number): 
   if (role !== 'thread' || blocks >= MAX_STOP_BLOCKS) return null;
   const jobs = runningJobs(input);
   if (!jobs.length) return null;
-  return `[citadel job check] Your own background job is still running: ${jobs.join(', ')}. Don't end the turn to wait for it: keep its task in progress and wait inside the turn with one blocking command, like \`citadel-wait pid <pid>\` or \`citadel-wait cmd '<test>'\` with a Bash timeout of 600000 (\`sleep N; check\` is refused), repeated until it finishes, or stop it with TaskStop if it is no longer needed.`;
+  return `[citadel job check] Your own background job is still running: ${jobs.join(', ')}. Don't end the turn to wait for it: keep its task in progress and wait inside the turn with one blocking command, like \`citadel-wait pid <pid>\` or \`citadel-wait cmd '<test>'\` with a Bash timeout of 600000 (\`sleep N; check\` is refused), repeated until it finishes, or stop it with TaskStop if it is no longer needed. A Grunt whose result this turn needs starts with \`run_in_background: false\` on its Agent call, so the next one can't hold up the stop.`;
 }
 
 /** Runs the check for one Stop, counting refusals per prompt in a temp file; prints the block, if any. */

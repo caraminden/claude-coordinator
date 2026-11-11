@@ -915,7 +915,7 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
 }
 
 // CLAUDE.md's "commit before you move", ported from Delve's git guard (tools/mods/delve/hooks, judgeGit).
-const NEVER_PATH = 'Never check out, restore or stash a path to look at it: that throws away uncommitted work. Use `git show HEAD:path` or `git diff` to see the old version, and commit (a WIP commit is fine) before undoing anything.';
+const NEVER_PATH = 'Never check out, restore or stash a path to look at it: that throws away uncommitted work. To see the old version, use `git show HEAD:path` or `git diff`. To put one file back as it was at HEAD on purpose, dropping its uncommitted edits, write it over from the worktree\'s root: `git show HEAD:path > path` (commit first, a WIP commit is fine, if you might want those edits back).';
 const STASH_WHY = 'The stash stack is shared by every worktree of the repo, so another session can pop your entry, or you theirs. Commit work in progress instead (a WIP commit is fine), and use `git show HEAD:path` or `git diff` to see the old version.';
 const PROTECTED = /^(main|master)$/;
 const MAIN_WHY = "main changes only through the scheme's own route (tools/land.sh and tools/deploy.sh, or a merged pull request), never a push from a minion's worktree. Push your minion branch.";
@@ -1197,7 +1197,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   // Every turn, Citadel, its contraptions and other people's dev servers run as the one account, so a
   // pattern kill reaches them all: on 2026-11-03 a turn's `pkill -f app/dev/dev.ts` killed two minions'
   // shells (#299; what took Citadel down was a kill fed by grep, see listingKill).
-  if (name === 'pkill' || name === 'killall') return hard(`\`${name}\` kills by name across the whole account: other minions' shells and dev servers, Citadel and its contraptions. Stop your own process by pid: \`$!\` when you start it, or the pid from \`ss -ltnp 'sport = :<your port>'\`, checked with \`readlink /proc/<pid>/cwd\`. A dev copy of Citadel started with \`citadel-dev-copy start\` stops with \`citadel-dev-copy stop\`.`);
+  if (name === 'pkill' || name === 'killall') return hard(`\`${name}\` kills by name across the whole account: other minions' shells and dev servers, Citadel and its contraptions. ${STOP_BY_PID} Check that a pid you didn't start is yours with \`readlink /proc/<pid>/cwd\`.`);
   if (name === 'printenv') return hard(`\`printenv\` prints the environment. ${ENV_WHY}`);
   // Anywhere among the plain words: an option's value (`--model haiku`) comes before the subcommand.
   const print = args.some((w) => w.text === '-p' || w.text === '--print');
@@ -1341,8 +1341,10 @@ function wholeListing({ name, args }: { name: string; args: Word[] }): number {
   return 0;
 }
 
-const LISTING_KILL_WHY = "That `kill` takes its pids from the whole socket table narrowed by grep or awk, so a pattern that comes out empty or loose kills every server on the account: on 2026-11-03 `kill $(ss -ltnp | grep \":$P \" …)` with an empty $P took Citadel and every contraption down for 7½ hours (#299). Let ss pick the port, `ss -ltnp 'sport = :<port>'`, or use `$!` from when you started it.";
-const PROCESS_KILL_WHY = "That `kill` takes its pids from a process listing (ps or pgrep) picked by a pattern, which is `pkill -f` spelled out: every turn, Citadel, its contraptions and other people's dev servers run as the one account, so it reaches them all (on 2026-11-03 `pkill -f app/dev/dev.ts` killed two minions' shells, #299). Stop your own process by pid: `$!` when you start it, or the pid from `ss -ltnp 'sport = :<your port>'`; to go through matches, check each one first: `[ \"$(readlink /proc/$p/cwd)\" = \"$PWD\" ] && kill $p`.";
+/** The allowed way to stop your own server, named in every kill-by-name refusal (Mandate #86's logs: 4 sessions retried). */
+const STOP_BY_PID = "Stop your own server by its pid: `kill <pid>` with the pid it printed when it started (`citadel-dev-copy start` prints one, and `citadel-dev-copy stop` stops it), `$!` right after you start it in the background, or the pid ss reports for your own port: `kill $(ss -ltnp 'sport = :<your port>' | grep -o 'pid=[0-9]*' | cut -d= -f2)`.";
+const LISTING_KILL_WHY = "That `kill` takes its pids from the whole socket table narrowed by grep or awk, so a pattern that comes out empty or loose kills every server on the account: on 2026-11-03 `kill $(ss -ltnp | grep \":$P \" …)` with an empty $P took Citadel and every contraption down for 7½ hours (#299). " + STOP_BY_PID;
+const PROCESS_KILL_WHY = "That `kill` takes its pids from a process listing (ps or pgrep) picked by a pattern, which is `pkill -f` spelled out: every turn, Citadel, its contraptions and other people's dev servers run as the one account, so it reaches them all (on 2026-11-03 `pkill -f app/dev/dev.ts` killed two minions' shells, #299). " + STOP_BY_PID + " To go through matches, check each one first: `[ \"$(readlink /proc/$p/cwd)\" = \"$PWD\" ] && kill $p`.";
 
 /**
  * The functions a command defines (`f() { … }`, `function f() { … }`) whose every call it can see: run

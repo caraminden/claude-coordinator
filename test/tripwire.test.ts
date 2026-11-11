@@ -672,6 +672,16 @@ for (const command of ALLOWED) {
   test(`allows: ${command}`, () => assert.equal(bash(command), null));
 }
 
+test('every kill-by-name refusal names a way to stop your own server that the tripwire allows (Mandate #86)', () => {
+  for (const no of ['pkill -f dev.ts', 'killall node', 'kill $(pgrep -f dev.ts)', 'kill $(ss -ltnp | grep ":$P " | grep -o "pid=[0-9]*" | cut -d= -f2)']) {
+    const why = bash(no) ?? '';
+    assert.match(why, /the pid it printed when it started/, no);
+    const named = [...why.matchAll(/`(kill \$\(ss [^`]+<your port>[^`]+)`/g)].at(-1)?.[1];
+    assert.ok(named, no);
+    assert.equal(bash(named.replace('<your port>', '18431')), null, named);
+  }
+});
+
 test('git habits: path checkouts and moves over uncommitted changes, read from the real repo', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-git-'));
   // The real home: a turn's TMPDIR is under it (#218), where cfg's /home/u would make the scratch another person's.
@@ -698,6 +708,13 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
     for (const move of ['git checkout other', 'git switch other', 'git merge other', 'git reset --hard HEAD', 'git rebase other', 'git pull', 'git cherry-pick other', 'cd sub && git merge other']) {
       assert.match(at(move) ?? '', /^Commit first: .* 1 uncommitted tracked file\(s\) \(a\.txt\)/, move);
     }
+    // A path checkout's refusal names the way to put one file back, and that way is allowed (Mandate #86's logs).
+    assert.match(at('git checkout -- a.txt')!, /`git show HEAD:path > path`/);
+    assert.match(at('git restore a.txt')!, /`git show HEAD:path > path`/);
+    for (const ok of ['git show HEAD:a.txt > a.txt', `git show HEAD:a.txt > ${wt}/a.txt`, `git -C ${wt} show HEAD:a.txt > ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
+    sh('git show HEAD:a.txt > a.txt');
+    assert.equal(sh('git status --porcelain --untracked-files=no').toString(), '', 'the file is back as it was at HEAD');
+    writeFileSync(join(wt, 'a.txt'), 'changed');
     assert.match(at(`git -C ${wt} merge other`, '/tmp')!, /Commit first/);
     assert.match(at('git checkout -')!, /Commit first/);
     // A forced checkout with no branch throws the changes away too (#468 S01-3).

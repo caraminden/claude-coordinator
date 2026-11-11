@@ -1,7 +1,8 @@
 // Scheduled minions: a saved brief that starts on a cron schedule. The schedule lives in the app
 // (this table plus a timer in the server), since minions can't install systemd timers.
 import type { DatabaseSync } from 'node:sqlite';
-import type { Store, User } from './db.ts';
+import type { Project, Store, User } from './db.ts';
+import type { Runner } from './runner.ts';
 import { HttpError } from './http.ts';
 
 export interface Schedule {
@@ -255,4 +256,68 @@ export function runBrief(s: Schedule, when: string): string {
     '',
     s.brief,
   ].join('\n');
+}
+
+export interface ScheduledRunDeps {
+  store: Store;
+  /** server.ts's newMinion: a minion with its worktree, not started yet. */
+  newMinion: (project: Project, m: ReturnType<typeof runMinion>, by: string) => Promise<{ id: number; number: number }>;
+  runner: Pick<Runner, 'emit' | 'send'>;
+  broadcast: (msg: object) => void;
+  /** Who a run's minion says started it. */
+  by: string;
+}
+
+/**
+ * Each due schedule starts a fresh minion with its brief. server.ts calls runDue every half minute; a
+ * schedule that came due while the server was down runs once when it is back. Moved out of server.ts
+ * (docs/adr/0002-background-jobs-out-of-server.md).
+ */
+export class ScheduledRuns {
+  private scheduling = false;
+
+  private d: ScheduledRunDeps;
+
+  constructor(d: ScheduledRunDeps) {
+    this.d = d;
+  }
+
+  async run(s: Schedule, now = Date.now()) {
+    await this.start(s, now);
+    this.d.broadcast({ type: 'schedules', projectId: s.project_id });
+  }
+
+  private async start(s: Schedule, now: number) {
+    const { store, runner, by } = this.d;
+    const project = store.getProject(s.project_id);
+    const last = s.last_ticket_id ? store.getTicket(s.last_ticket_id) : null;
+    if (!project) return store.schedules.remove(s.id);
+    // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works.
+    if (last?.status === 'running') return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
+    try {
+      // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone; it's theirs.
+      const maker = store.findUser('name', s.created_by);
+      const { id, number } = await this.d.newMinion(project, runMinion(s, maker), by);
+      store.updateTicket(id, { person_id: maker?.id ?? null });
+      const pinnedFor = pinForOwner(store, id);
+      if (pinnedFor) this.d.broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });
+      store.schedules.ran(s.id, { ticketId: id }, now);
+      runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
+      runner.send(id, by, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })), [], { brief: true });
+      console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
+    } catch (err: any) {
+      console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
+      store.schedules.ran(s.id, { error: err.message }, now);
+    }
+  }
+
+  async runDue() {
+    if (this.scheduling) return;
+    this.scheduling = true;
+    try {
+      for (const s of this.d.store.schedules.due()) await this.run(s);
+    } finally {
+      this.scheduling = false;
+    }
+  }
 }

@@ -1,12 +1,12 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readdir, realpath, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { basename, extname, isAbsolute, join } from 'node:path';
+import { extname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { fileType, findArtifacts, findByName, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
+import { isArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
 import { claudeRefusal, lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnRefusal } from './src/access.ts';
@@ -15,10 +15,9 @@ import { CodexLink } from './src/codex-link.ts';
 import { Landings } from './src/land.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
-import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
-import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
+import { Store, type Artifact, type Project } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
@@ -29,9 +28,9 @@ import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, githubPrs, LiveWaiters, startChained } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
-import { describeCron, pinForOwner, runBrief, runMinion, type Schedule } from './src/schedules.ts';
+import { ScheduledRuns } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App, type SharedFile } from './src/http.ts';
+import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
@@ -47,8 +46,10 @@ import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
 import { CiHealth } from './src/ci-health.ts';
 import { callMandate } from './src/mandate-items.ts';
 import { projectRoutes } from './src/routes/projects.ts';
-import { llamaEmbed } from './src/memory.ts';
-import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
+import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
+import { ticketRoutes } from './src/routes/tickets.ts';
+import { ArtifactScanner } from './src/artifact-scan.ts';
+import { ShipStatus } from './src/ship-status.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
 
@@ -351,43 +352,8 @@ async function newMinion(project: Project, m: { title: string; props: Record<str
 
 // Scheduled minions (src/schedules.ts): each due schedule starts a fresh minion with its brief. Checked
 // every half minute; a schedule that came due while the server was down runs once when it is back.
-async function runSchedule(s: Schedule, now = Date.now()) {
-  await startScheduled(s, now);
-  broadcast({ type: 'schedules', projectId: s.project_id });
-}
-async function startScheduled(s: Schedule, now: number) {
-  const project = store.getProject(s.project_id);
-  const last = s.last_ticket_id ? store.getTicket(s.last_ticket_id) : null;
-  if (!project) return store.schedules.remove(s.id);
-  // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works.
-  if (last?.status === 'running') return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
-  try {
-    // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone; it's theirs.
-    const maker = store.findUser('name', s.created_by);
-    const { id, number } = await newMinion(project, runMinion(s, maker), APP_NAME);
-    store.updateTicket(id, { person_id: maker?.id ?? null });
-    const pinnedFor = pinForOwner(store, id);
-    if (pinnedFor) broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });
-    store.schedules.ran(s.id, { ticketId: id }, now);
-    runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
-    runner.send(id, APP_NAME, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })), [], { brief: true });
-    console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
-  } catch (err: any) {
-    console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
-    store.schedules.ran(s.id, { error: err.message }, now);
-  }
-}
-let scheduling = false;
-async function runDueSchedules() {
-  if (scheduling) return;
-  scheduling = true;
-  try {
-    for (const s of store.schedules.due()) await runSchedule(s);
-  } finally {
-    scheduling = false;
-  }
-}
-if (!BOOT_CHECK) setInterval(() => void safely('schedules', runDueSchedules), 30_000).unref();
+const scheduledRuns = new ScheduledRuns({ store, newMinion, runner, broadcast, by: APP_NAME });
+if (!BOOT_CHECK) setInterval(() => void safely('schedules', () => scheduledRuns.runDue()), 30_000).unref();
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fresh sessions', () => runner.freshSweep()), 60_000).unref();
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('cold mail', () => runner.coldSweep()), 60_000).unref();
@@ -399,136 +365,21 @@ if (!BOOT_CHECK && !PREVIEW) {
   setInterval(sweepBuild, 24 * 60 * 60_000).unref();
 }
 
-// Embed what was said since the last pass, a little at a time, never in a request.
-let indexing = false;
-let embedDown = false; // say so once per outage, not every minute
-async function indexMemory() {
-  if (indexing) return;
-  indexing = true;
-  try {
-    // A batch per scheme in turn, so one scheme's backfill never holds up another's new turns, and
-    // one scheme that fails (a chunk the model refuses) sits out this pass without stopping the rest.
-    let failed: any = null;
-    const out = new Set<number>();
-    for (let more = true; more; ) {
-      more = false;
-      for (const p of store.listProjects()) {
-        if (!memoryScheme(p.id) || out.has(p.id)) continue;
-        try {
-          if ((await store.memory.index(p.id, embed, EMBED_MODEL, 8)) > 0) more = true;
-        } catch (err) {
-          failed = err;
-          out.add(p.id);
-        }
-      }
-    }
-    if (failed) throw failed;
-    if (embedDown) console.log('Semantic memory: the embedding service is back');
-    embedDown = false;
-  } catch (err: any) {
-    if (!embedDown) console.error('Semantic memory indexing stopped:', err?.cause?.code ?? err?.message ?? err);
-    embedDown = true;
-  } finally {
-    indexing = false;
-  }
-}
-if (!BOOT_CHECK) setInterval(() => void safely('memory', indexMemory), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
+// Embed what was said since the last pass, a little at a time, never in a request (src/memory.ts).
+const memoryIndexer = new MemoryIndexer(store, embed, EMBED_MODEL, memoryScheme);
+if (!BOOT_CHECK) setInterval(() => void safely('memory', () => memoryIndexer.run()), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
 
-// ---------- artifacts ----------
+// ---------- artifacts, branch and ship status (src/artifact-scan.ts, src/ship-status.ts) ----------
 
-// Rescan a ticket's folder shortly after it may have written files, at most once per delay.
-const SCAN_DELAY_MS = 2000;
-const scanTimers = new Map<number, NodeJS.Timeout>();
-const scanning = new Map<number, Promise<void>>();
-
-function scheduleScan(ticketId: number) {
-  if (scanTimers.has(ticketId)) return;
-  scanTimers.set(ticketId, setTimeout(() => {
-    scanTimers.delete(ticketId);
-    scanArtifacts(ticketId).catch((err) => console.error(`Artifact scan of ticket ${ticketId} failed:`, err));
-  }, SCAN_DELAY_MS));
-}
-
-/**
- * The documents and pages in a project's shared folder, newest first, paths relative to it, with
- * their pins. A pinned file that is gone stays listed as missing, like a pinned artifact.
- */
-async function sharedFiles(projectId: number): Promise<SharedFile[]> {
-  const dir = projectSharedDir(DATA_DIR, projectId);
-  const files: (FoundArtifact & { missing?: number })[] = await findArtifacts(dir, false);
-  const pins = new Map(store.sharedPins(projectId).map((p) => [p.path, p]));
-  const seen = new Set(files.map((f) => f.path));
-  const real = await realpath(dir).catch(() => dir);
-  for (const p of pins.values()) {
-    if (seen.has(p.path)) continue;
-    // Past the scan's file cap, or gone. A symlink on the way out of the folder counts as gone, as the scan skips it.
-    const inside = (await realpath(join(dir, p.path)).catch(() => null)) === join(real, p.path);
-    const st = inside ? await lstat(join(dir, p.path)).catch(() => null) : null;
-    files.push(st?.isFile() ? { path: p.path, size: st.size, mtime: Math.round(st.mtimeMs) } : { path: p.path, size: 0, mtime: p.pinned_at, missing: 1 });
-  }
-  return files.sort((a, b) => b.mtime - a.mtime).map((f) => ({
-    ...f, name: basename(f.path), kind: fileType(f.path)?.kind ?? 'text', display_path: `scheme shared/${f.path}`,
-    pinned_at: pins.get(f.path)?.pinned_at ?? null, pinned_by: pins.get(f.path)?.pinned_by ?? null, missing: f.missing ?? 0,
-  }));
-}
-
-// What each project's shared folder held at the last scan, so a change can tell open pages to refresh.
-const sharedSeen = new Map<number, string>();
-
-async function scanShared(projectId: number) {
-  const sig = JSON.stringify((await sharedFiles(projectId)).map((f) => [f.path, f.size, f.mtime]));
-  if (sharedSeen.get(projectId) === sig) return;
-  // The first look after a start only records what is there.
-  if (sharedSeen.has(projectId)) broadcast({ type: 'artifacts', projectId });
-  sharedSeen.set(projectId, sig);
-}
-
-// The file a broken link's name finds (findByName), kept a while: a scan runs every few seconds, and
-// broken links stay in the replies for good.
-const NAME_FIX_MS = 10 * 60_000;
-const nameFixes = new Map<string, { match: string | null; at: number }>();
-
-async function scanArtifacts(ticketId: number) {
-  // One scan per ticket at a time; a request during a scan waits for it, then rescans.
-  while (scanning.has(ticketId)) await scanning.get(ticketId);
-  const job = (async () => {
-    const ticket = store.getTicket(ticketId);
-    if (!ticket?.cwd) return;
-    const shared = sharedDir(ticket);
-    const found = [
-      ...(await findArtifacts(ticket.cwd, !!ticket.branch)),
-      // Files in the shared folder are stored by absolute path, since they sit outside the working directory.
-      ...(await findArtifacts(shared, false)).map((f) => ({ ...f, path: join(shared, f.path) })),
-    ];
-    // Only files a reply linked are meant for people; the rest are the ticket's own working files.
-    // A pinned file stays listed either way.
-    const linked = linkedPaths(store.replyTexts(ticketId), ticket.cwd);
-    // A link with the wrong folders counts for the one file of its name, as the chat opens it (#281).
-    for (const abs of [...linked]) {
-      if (!isArtifact(abs) || (await realpath(abs).catch(() => null))) continue;
-      const key = `${ticketId}\0${abs}`;
-      let fix = nameFixes.get(key);
-      if (!fix || Date.now() - fix.at > NAME_FIX_MS) {
-        nameFixes.set(key, fix = { match: await findByName(abs, [ticket.cwd, shared, projectSharedDir(DATA_DIR, ticket.project_id)]), at: Date.now() });
-      }
-      if (fix.match) linked.add(fix.match);
-    }
-    const pinned = new Set(store.pinnedArtifactPaths(ticketId));
-    const shown = found.filter((f) => linked.has(isAbsolute(f.path) ? f.path : join(ticket.cwd, f.path)) || pinned.has(f.path));
-    if (store.syncArtifacts(ticket, shown)) broadcast({ type: 'artifacts', projectId: ticket.project_id });
-    await scanShared(ticket.project_id);
-  })();
-  scanning.set(ticketId, job);
-  try {
-    await job;
-  } finally {
-    scanning.delete(ticketId);
-  }
-}
+const artifacts = new ArtifactScanner(store, DATA_DIR, broadcast);
+const sharedDir = artifacts.sharedDir;
+const ships = new ShipStatus({ store, runner, broadcast, liveHead: () => waiters.head, checkoutDir: import.meta.dirname });
+const ticketBranch = ships.branch;
+runner.ship = ships.ship;
 
 runner.onFilesMayChange = (ticketId) => {
-  scheduleScan(ticketId);
-  scheduleBranchCheck(ticketId);
+  artifacts.schedule(ticketId);
+  ships.scheduleCheck(ticketId);
 };
 runner.filesDir = sharedDir;
 runner.sharedDir = (project) => projectSharedDir(DATA_DIR, project.id);
@@ -557,7 +408,7 @@ if (!PREVIEW) writeVocabularies().catch((err) => console.error('Could not write 
 if (!PREVIEW) void safely('startup sweep', async () => {
   for (const p of store.listProjects()) {
     for (const t of store.listTickets(p.id)) {
-      await scanArtifacts(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
+      await artifacts.scan(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
     }
   }
   // Copy every thread's Claude session into the database (only what changed since last time), so
@@ -579,77 +430,13 @@ if (!PREVIEW) void safely('startup sweep', async () => {
   }
 });
 
-// ---------- branch and pull request ----------
-
-// gh calls go over the network, so a ticket's PR is looked up at most this often; git is checked every time.
-const PR_TTL_MS = 60_000;
-const branchCache = new Map<number, { status: BranchStatus | null; prAt: number; json: string }>();
-const branchTimers = new Map<number, NodeJS.Timeout>();
-
-/** Where a ticket's branch stands (null for tickets without one); broadcast when it changes. */
-async function ticketBranch(ticketId: number, maxPrAge = PR_TTL_MS): Promise<BranchStatus | null> {
-  const ticket = store.getTicket(ticketId);
-  const project = ticket && store.getProject(ticket.project_id);
-  if (!ticket?.branch || !project?.repo_dir) return null;
-  const cached = branchCache.get(ticketId);
-  const prFresh = cached && Date.now() - cached.prAt < maxPrAge;
-  const status = await branchStatus(project.repo_dir, ticket.branch, ticket.created_at, !prFresh, { head: waiters.head, checkoutDir: import.meta.dirname });
-  if (status && prFresh) status.pr = cached.status?.pr ?? null;
-  const json = JSON.stringify(status);
-  branchCache.set(ticketId, { status, prAt: prFresh ? cached.prAt : Date.now(), json });
-  if (cached && cached.json !== json) broadcast({ type: 'branch', ticketId, status });
-  shipChanged(ticketId);
-  return status;
-}
-
-// ---------- ship status: where a minion's change is, from branch to live ----------
-
-/** The last deploy report that failed, while the server still runs what it ran then. */
-function deployFailure(): string | null {
-  const f = store.getSetting<{ text: string; head: string | null }>(DEPLOY_FAILURE);
-  return f && f.head === waiters.head ? f.text : null;
-}
-runner.ship = (ticketId) => {
-  const status = branchCache.get(ticketId)?.status;
-  return status ? shipLine(status, runner.interruptible(), deployFailure()) : null;
-};
-
-/** The ship line each minion's row last showed; a change re-sends the minion. */
-const shipShown = new Map<number, string>();
-function shipChanged(ticketId: number) {
-  const now = JSON.stringify(runner.ship(ticketId));
-  if (shipShown.get(ticketId) === now) return;
-  const first = !shipShown.has(ticketId);
-  shipShown.set(ticketId, now);
-  if (!first || now !== 'null') runner.broadcastTicket(ticketId);
-}
-
 // Deploys happen in other minions' turns, so merged work that isn't live yet is looked at again every
 // SHIP_POLL_MS, and at startup every open minion's branch is, so the list has its badges.
 const SHIP_POLL_MS = 15_000;
 // Only git reads, so a preview shows the badges too.
 if (!BOOT_CHECK || PREVIEW) {
-  void safely('branch sweep', async () => {
-    for (const p of store.listProjects()) {
-      for (const t of store.listTickets(p.id)) {
-        if (t.kind === 'ticket' && t.branch && t.status !== 'closed') await ticketBranch(t.id).catch(() => {});
-      }
-    }
-  });
-  let polling = false; // a slow git can't stack up rounds
-  setInterval(() => void safely('ship poll', async () => {
-    if (polling) return;
-    polling = true;
-    try {
-      for (const [id, { status }] of branchCache) {
-        if (store.getTicket(id)?.status === 'closed') continue;
-        if (status?.deploy && !status.deploy.live) await ticketBranch(id).catch(() => {});
-        else shipChanged(id);
-      }
-    } finally {
-      polling = false;
-    }
-  }), SHIP_POLL_MS).unref();
+  void safely('branch sweep', () => ships.sweep());
+  setInterval(() => void safely('ship poll', () => ships.poll()), SHIP_POLL_MS).unref();
 }
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
@@ -703,21 +490,6 @@ mainSync.stuck = (repoDir, why) => {
   const coordinator = project && store.getCoordinator(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text: `This scheme's main checkout (${repoDir}) isn't level with GitHub's main, and ${APP_NAME} didn't fast-forward it: ${why}. A person needs to look.` });
 };
-
-/** After a turn's tool calls (commits, merges, `gh pr create`), look again shortly. */
-function scheduleBranchCheck(ticketId: number) {
-  if (branchTimers.has(ticketId)) return;
-  branchTimers.set(ticketId, setTimeout(() => {
-    branchTimers.delete(ticketId);
-    ticketBranch(ticketId, runner.isRunning(ticketId) ? PR_TTL_MS : 0)
-      .catch((err) => console.error(`Branch check of ticket ${ticketId} failed:`, err));
-  }, SCAN_DELAY_MS));
-}
-
-/** Where a ticket keeps files it fetched or made to show people, outside its repo. */
-function sharedDir(ticket: Ticket): string {
-  return join(projectDir(DATA_DIR, ticket.project_id), 'shared', String(ticket.id));
-}
 
 /** Rewrite each scheme's property-vocabulary.md from the registry; a hand-written one is kept aside once. */
 async function writeVocabularies(projectIds = store.listProjects().map((p) => p.id)) {
@@ -797,7 +569,7 @@ const app: App = {
   get assetVersion() {
     return ASSET_VERSION;
   },
-  broadcast, notify, newMinion, startChained: startChain, ticketBranch, sharedFiles, sharedDir, registryChanged,
+  broadcast, notify, newMinion, startChained: startChain, ticketBranch, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
 };
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes, ...contraptionRoutes]);
 

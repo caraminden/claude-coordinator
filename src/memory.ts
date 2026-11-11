@@ -241,3 +241,55 @@ export class Memory {
     this.db.prepare('DELETE FROM memory_chunks WHERE ticket_id = ?').run(ticketId);
   }
 }
+
+/**
+ * Embed what was said since the last pass, a little at a time, never in a request. server.ts calls run
+ * every minute. Moved out of server.ts (docs/adr/0002-background-jobs-out-of-server.md).
+ */
+export class MemoryIndexer {
+  private indexing = false;
+  private down = false; // say so once per outage, not every minute
+
+  private store: Store;
+  private embed: Embed;
+  private model: string;
+  private indexed: (projectId: number) => boolean;
+
+  constructor(store: Store, embed: Embed, model: string, indexed: (projectId: number) => boolean) {
+    this.store = store;
+    this.embed = embed;
+    this.model = model;
+    this.indexed = indexed;
+  }
+
+  async run() {
+    if (this.indexing) return;
+    this.indexing = true;
+    try {
+      // A batch per scheme in turn, so one scheme's backfill never holds up another's new turns, and
+      // one scheme that fails (a chunk the model refuses) sits out this pass without stopping the rest.
+      let failed: any = null;
+      const out = new Set<number>();
+      for (let more = true; more; ) {
+        more = false;
+        for (const p of this.store.listProjects()) {
+          if (!this.indexed(p.id) || out.has(p.id)) continue;
+          try {
+            if ((await this.store.memory.index(p.id, this.embed, this.model, 8)) > 0) more = true;
+          } catch (err) {
+            failed = err;
+            out.add(p.id);
+          }
+        }
+      }
+      if (failed) throw failed;
+      if (this.down) console.log('Semantic memory: the embedding service is back');
+      this.down = false;
+    } catch (err: any) {
+      if (!this.down) console.error('Semantic memory indexing stopped:', err?.cause?.code ?? err?.message ?? err);
+      this.down = true;
+    } finally {
+      this.indexing = false;
+    }
+  }
+}

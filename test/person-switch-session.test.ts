@@ -215,3 +215,25 @@ test("a link planted in the volume isn't followed out of it, so a restore can't 
   await saveSession(store, c.ticket, project, joshPlace.configDir, null);
   assert.deepEqual(store.listClaudeState(project.id, c.ticket.id).map((row) => row.path), [join('projects', projectSlug(c.cwd), 'sess-1.jsonl')]);
 });
+
+test("a memory folder that became a link out of the volume isn't read, and its stored notes aren't dropped as deleted (C1 review)", async () => {
+  const d = planted('wt-c1-prune', 'sess-1');
+  mkdirSync(join(d.slugDir, 'memory'), { recursive: true });
+  writeFileSync(join(d.slugDir, 'sess-1.jsonl'), '{}\n');
+  writeFileSync(join(d.slugDir, 'memory', 'note.md'), 'a note');
+  await saveSession(store, d.ticket, project, joshPlace.configDir, null);
+  const note = join('projects', projectSlug(d.cwd), 'memory', 'note.md');
+  const paths = () => store.listClaudeState(project.id, d.ticket.id).map((row) => row.path);
+  assert.ok(paths().includes(note));
+  // The folder moves out (say into a dotfiles repo) and a link takes its place.
+  rmSync(join(d.slugDir, 'memory'), { recursive: true });
+  symlinkSync(hostSecret, join(d.slugDir, 'memory'));
+  await saveSession(store, d.ticket, project, joshPlace.configDir, new Set(paths()));
+  assert.ok(paths().includes(note), 'the stored note stays');
+  assert.ok(!paths().some((p) => p.endsWith('id_key')), 'nothing behind the link was read');
+  // A note that is really deleted is still dropped.
+  rmSync(join(d.slugDir, 'memory'));
+  mkdirSync(join(d.slugDir, 'memory'));
+  await saveSession(store, d.ticket, project, joshPlace.configDir, new Set(paths()));
+  assert.ok(!paths().includes(note));
+});

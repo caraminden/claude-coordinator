@@ -88,13 +88,14 @@ function scope(ticket: Ticket, project: Project): Scope {
   return { ticketRoots, projectRoots };
 }
 
-async function listFiles(configDir: string, root: string): Promise<string[]> {
+/** The files under a root; null when a link leads it out of the config dir, which says nothing about what was deleted. */
+async function listFiles(configDir: string, root: string): Promise<string[] | null> {
   const abs = join(configDir, root);
   let st;
   try {
     // A person's container owns its volume and can plant links there: none is followed, as the last name or on
     // the way to it, or the server would read a host file into the database and a restore would hand it over.
-    if (!(await realpath(abs)).startsWith((await realpath(configDir)) + sep)) return [];
+    if (!(await realpath(abs)).startsWith((await realpath(configDir)) + sep)) return null;
     st = await lstat(abs);
   } catch {
     return [];
@@ -120,8 +121,11 @@ export async function saveSession(store: Store, ticket: Ticket, project: Project
   const { ticketRoots, projectRoots } = scope(ticket, project);
   for (const [roots, ticketId] of [[ticketRoots, ticket.id], [projectRoots, null]] as const) {
     const seen = new Set<string>();
+    const unread: string[] = [];
     for (const root of roots) {
-      for (const path of await listFiles(configDir, root)) {
+      const files = await listFiles(configDir, root);
+      if (!files) unread.push(root);
+      for (const path of files ?? []) {
         seen.add(path);
         let st;
         try {
@@ -144,6 +148,7 @@ export async function saveSession(store: Store, ticket: Ticket, project: Project
     for (const row of rows) {
       const inRoots = roots.some((r) => row.path === r || row.path.startsWith(r + sep));
       // A row this turn's config dir held at its start that is outside the current roots (an earlier session id) or whose file was deleted since: drop it.
+      if (unread.some((r) => row.path === r || row.path.startsWith(r + sep))) continue;
       if (prunable.has(row.path) && (!inRoots || !seen.has(row.path))) store.deleteClaudeState(row.path);
     }
   }

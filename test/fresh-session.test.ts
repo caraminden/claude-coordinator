@@ -19,7 +19,7 @@ after(async () => {
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const calls = join(root, 'calls.jsonl');
 // A stand-in for `claude -p`: logs its argv and prompt, says which session it runs (the one it resumes,
-// else a new one), reports a context size (20k, or the size file's), then, once it has its prompt, ends the turn when the release file says ok or error.
+// else a new one), reports a context size (20k, or the size file's), then, once it has its prompt, ends the turn when its folder's release file says ok or error.
 const fake = join(root, 'claude-fake');
 writeFileSync(
   fake,
@@ -40,10 +40,11 @@ process.stdin.on('data', (d) => {
   console.log(JSON.stringify({ type: 'assistant', session_id: session, message: { content: [], usage: { input_tokens: 10, cache_read_input_tokens: size } } }));
   waitForRelease();
 });
+// The release file is in the turn's folder, so a turn a failed test left running can't take the next test's.
 // Only once the prompt is logged: tests write release right after the turn starts, often before this
 // process has read its stdin, and a turn ended first would log no call and report no size (#470).
 const waitForRelease = () => { const wait = setInterval(() => {
-  const release = ${JSON.stringify(join(root, 'release'))};
+  const release = 'release';
   if (!existsSync(release)) return;
   clearInterval(wait);
   const outcome = readFileSync(release, 'utf8');
@@ -73,7 +74,8 @@ function taskmaster(session = 'old') {
   return t.id;
 }
 
-// The waits give up (helpers' until, 30 s) so a test that timed out stops polling and lets the file exit (#470).
+// The waits give up (helpers' until, 30 s): they, not a limit per test, fail a turn that never comes. Each turn costs
+// two node starts, so on a starved box a six-turn test takes 20 s and more without anything being wrong (#470).
 async function started(id: number) {
   await until('the turn to start', () => runner.isRunning(id));
 }
@@ -82,7 +84,7 @@ async function started(id: number) {
 async function endTurn(id: number, outcome: 'ok' | 'error') {
   const turn = () => store.getSetting<{ startedAt: number }>(`turn:${id}`)?.startedAt;
   const was = turn();
-  writeFileSync(join(root, 'release'), outcome);
+  writeFileSync(join(store.getTicket(id)!.cwd, 'release'), outcome);
   await until('the turn to end', () => turn() !== was);
 }
 
@@ -261,7 +263,6 @@ test('a fresh start that cannot run a turn gives up once, not every minute', asy
 
 /** Every turn's reported context size from now on (the fake reads it as the turn starts). */
 const contextSize = (tokens: number | null) => (tokens === null ? rmSync(join(root, 'size'), { force: true }) : writeFileSync(join(root, 'size'), String(tokens)));
-// A timeout each, so one that never hands off fails rather than waits.
 const freshNotes = (id: number) => notes(id).filter((t) => t.startsWith('Starting a fresh session'));
 /** The prompts of the turns started since count, once there are want of them. */
 async function prompts(count: number, want: number) {
@@ -269,7 +270,7 @@ async function prompts(count: number, want: number) {
   return jsonLines(calls).slice(count).map((l) => promptText(l.prompt));
 }
 
-test('a Taskmaster turn that ends past 150k hands off at once; one at 150k does not (#423)', { timeout: 20_000 }, async () => {
+test('a Taskmaster turn that ends past 150k hands off at once; one at 150k does not (#423)', async () => {
   try {
     const small = taskmaster();
     contextSize(FRESH_CONTEXT_TOKENS);
@@ -299,7 +300,7 @@ test('a Taskmaster turn that ends past 150k hands off at once; one at 150k does 
   }
 });
 
-test("a minion's turn past 150k never hands off", { timeout: 20_000 }, async () => {
+test("a minion's turn past 150k never hands off", async () => {
   const project = store.createProject(`Minion ${++n}`, null);
   const t = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   const cwd = join(root, `m${n}`);
@@ -319,7 +320,7 @@ test("a minion's turn past 150k never hands off", { timeout: 20_000 }, async () 
   }
 });
 
-test('messages queued during a big turn run first, and the last of their turns hands off', { timeout: 20_000 }, async () => {
+test('messages queued during a big turn run first, and the last of their turns hands off', async () => {
   const id = taskmaster();
   try {
     contextSize(FRESH_CONTEXT_TOKENS + 1);
@@ -345,7 +346,7 @@ test('messages queued during a big turn run first, and the last of their turns h
   }
 });
 
-test('a message that arrives once a fresh start Citadel asked for is pending still goes first', { timeout: 20_000 }, async () => {
+test('a message that arrives once a fresh start Citadel asked for is pending still goes first', async () => {
   const id = taskmaster();
   const count = callCount();
   runner.send(id, 'Cara', 'first');
@@ -365,7 +366,7 @@ test('a message that arrives once a fresh start Citadel asked for is pending sti
   assert.equal(store.getTicket(id)!.session_id, null);
 });
 
-test('a message sent during an automatic handoff turn that writes none goes before the compaction', { timeout: 20_000 }, async () => {
+test('a message sent during an automatic handoff turn that writes none goes before the compaction', async () => {
   const id = taskmaster();
   const count = callCount();
   assert.equal(runner.requestFresh(id, 'test', true), null);
@@ -382,7 +383,7 @@ test('a message sent during an automatic handoff turn that writes none goes befo
   assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
 });
 
-test('a handoff and compaction that leave it big do not loop; the next real turn hands off again', { timeout: 20_000 }, async () => {
+test('a handoff and compaction that leave it big do not loop; the next real turn hands off again', async () => {
   const id = taskmaster();
   try {
     contextSize(FRESH_CONTEXT_TOKENS + 1);

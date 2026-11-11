@@ -15,7 +15,7 @@ runner serves one repo only, so each scheme's repo gets its own runner instance 
 
 **Hard rules on that PC.** Never restart or reboot it (Windows Update is paused there). Never touch
 another scheme's runner, Delve's (`C:\actions-runner`, `-2`, `-3`, `-4`, `-perf`) above all.
-Registration and removal tokens last about an hour and are never written down.
+Registration tokens (and the Linux scripts' removal tokens) last about an hour and are never written down.
 
 ## How runners get there
 
@@ -27,7 +27,7 @@ out to Citadel like a machine agent. It does three things, and only when a membe
 |---|---|
 | `add`, with a count of 1 to 4 | `add-runner.ps1 -Scheme <id> -Count <n>`: installs the missing instances, then Citadel waits until GitHub shows them Idle |
 | `list` | `list-runners.ps1`: every `actions.runner.*` service, its state and folder, and whether Citadel made it |
-| `remove` | `remove-runner.ps1 -Scheme <id>`: only folders whose `.citadel-runner` marker names the scheme's repo |
+| `remove` | `remove-runner.ps1 -Scheme <id>`: only folders whose `.citadel-runner` marker names the scheme's repo. Citadel takes each runner off GitHub; the script then deletes its service and folder |
 
 With `os: linux` (`{"op": "add", "count": 1, "os": "linux"}`) the same three go to the **Linux** runner agent in WSL
 on the same PC instead, which runs `add-runner.sh`, `list-runners.sh` or `remove-runner.sh`: see
@@ -44,12 +44,25 @@ What keeps the agent narrow:
   count, and refuses any other job or field. It never downloads code: installing again is how
   its scripts change.
 - **One job at a time.** It's killed after 15 minutes, and it never restarts the PC.
-- **It never sees a token.** The scripts fetch their own registration and removal tokens from
-  Citadel with the agent's machine token, and its output is scrubbed of anything token-shaped
+- **It never sees a token.** The scripts fetch their own registration tokens (the Linux
+  `remove-runner.sh` a removal token) from Citadel with the agent's machine token, and its output is scrubbed of anything token-shaped
   before it goes back.
 - **Remove only removes what add made.** It acts only on folders with the scheme's marker and
   never on Delve's paths. A runner made by hand, Peek Auras' included, has no marker, so the
   agent can't remove it.
+- **Remove runs nothing from a runner's folder** (#476). CI jobs run as the runner's account
+  (NETWORK SERVICE, or the person for a session runner) and can write that folder, while
+  `remove-runner.ps1` runs as SYSTEM, so it never runs the runner's own `config.cmd remove`.
+  Instead it asks Citadel (`/api/machines/runner-token`, kind `delete`, with the runner's name)
+  to delete the runner on GitHub, which Citadel does with the scheme owner's GitHub login and
+  only for a runner carrying one of the scheme's labels (`-ci`, `-ci-linux`, `-desktop`); a
+  name GitHub no longer lists counts as removed. Then the script stops and deletes the Windows
+  service (`sc.exe`), ends what still runs from the folder and deletes the folder, without
+  following a link in it. The name comes from the service's name, which only an admin sets;
+  the folder's `.runner` is read (as JSON) only for a session runner, which has no service, or
+  a service name GitHub cut at 80 characters. If Citadel or GitHub refuses (GitHub won't
+  delete a runner in the middle of a job), that runner's service and folder stay, the script
+  says why, and running it again finds it.
 - **Locked-down folder.** Its folder, `C:\ProgramData\citadel-runner-agent`, is writable only by
   Administrators and SYSTEM.
 
@@ -113,8 +126,10 @@ runner's service.
 members on Windows PowerShell 5.1 and 7, PSScriptAnalyzer with their compatibility rules), which
 `npm test` runs (`test/ps1-lint.test.ts`, with pwsh and PSScriptAnalyzer installed for cara on
 perigee; it skips where they're missing). Apart from that, the Windows side hasn't run here: the
-SYSTEM task, the folder lock, the real `config.cmd` add and remove, and session mode's logon task
-(Peek Auras' own setup script, which it copies, has run on Cara's PC). The agent's job handling
+SYSTEM task, the folder lock, the real `config.cmd` add, the removal's `sc.exe` stop and delete, and
+session mode's logon task (Peek Auras' own setup script, which it copies, has run on Cara's PC).
+`remove-runner.ps1` does run in that test under pwsh on Linux, against a fake Citadel with the
+Windows cmdlets and `sc.exe` stood in for: a `config.cmd` planted in the folder never runs. The agent's job handling
 and the Citadel side have tests, with a fake PowerShell.
 
 ## Session runners (jobs that open windows)

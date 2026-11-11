@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -83,4 +84,166 @@ function Get-ScheduledTask { [pscustomobject]@{ TaskName = 'GitHub runner by han
 test('the Windows scripts start Windows PowerShell by its System32 path, not from $PSHOME', () => {
   for (const f of ps1s('tools/ci-runner')) assert.doesNotMatch(readFileSync(f, 'utf8'), /\$PSHOME/, f);
   for (const f of ['install-runner-agent.ps1', 'keep-runners.ps1']) assert.ok(readFileSync(join(root, 'tools/ci-runner', f), 'utf8').includes('"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"'), f);
+});
+
+// remove-runner.ps1 runs as SYSTEM, and a CI job can write its runner's folder (#476 B1): nothing in that folder is ever
+// run. Here the real script runs under pwsh on Linux against a fake Citadel, with the Windows-only cmdlets and sc.exe
+// stood in for and two of its lines changed: the admin check (a Windows API) and the drive it looks in.
+// Every runner folder holds a config.cmd and a config.sh that write a canary.
+const REPO = 'caraminden/peek-auras';
+
+/** Runs remove-runner.ps1 over `root`'s folders; `refuse` is the runner name the fake Citadel won't delete. */
+async function removeRunners(dir: string, root: string, services: { Name: string; PathName: string }[], task: { name: string; dir: string } | null, refuse = '') {
+  const src = readFileSync(join(root0, 'tools/ci-runner/remove-runner.ps1'), 'utf8');
+  const swapped = src.replace(/^\$admin = .*$/m, '$admin = $true').replace(/^\$root = 'C:\\'$/m, `$root = '${root}/'`);
+  assert.equal(swapped.split('\n').filter((l, i) => l !== src.split('\n')[i]).length, 2, 'the admin check and the root, and nothing else, were swapped');
+  const script = join(dir, 'remove-runner.ps1');
+  writeFileSync(script, swapped);
+  const log = join(dir, 'calls.log');
+  writeFileSync(log, '');
+  const stub = join(dir, 'stub.ps1');
+  writeFileSync(stub, `$global:services = @(${services.map((s) => `[pscustomobject]@{ Name = '${s.Name}'; PathName = '${s.PathName}'; State = 'Running' }`).join(', ')})
+function Note([string]$Line) { Add-Content -LiteralPath '${log}' -Value $Line }
+function Get-CimInstance {
+  param([string]$ClassName, [string]$Filter)
+  if ($ClassName -eq 'Win32_Service') { $global:services | Where-Object { $_.Name -like ($Filter -replace "^Name\\s*(LIKE|=)\\s*'(.*)'$", '$2' -replace '%', '*') } }
+}
+function sc.exe {
+  Note "sc.exe $args"
+  $verb, $name = $args
+  if ($verb -eq 'stop') { $global:services | Where-Object { $_.Name -eq $name } | ForEach-Object { $_.State = 'Stopped' } }
+  if ($verb -eq 'delete') { $global:services = @($global:services | Where-Object { $_.Name -ne $name }) }
+  $global:LASTEXITCODE = 0
+}
+function Get-ScheduledTask { param([string]$TaskName, $ErrorAction) ${task ? `if ($TaskName -eq '${task.name}') { [pscustomobject]@{ TaskName = $TaskName; Actions = @([pscustomobject]@{ WorkingDirectory = '${task.dir}' }) } }` : ''} }
+function Stop-ScheduledTask { param([string]$TaskName) Note "Stop-ScheduledTask $TaskName" }
+function Unregister-ScheduledTask { param([string]$TaskName, [switch]$Confirm) Note "Unregister-ScheduledTask $TaskName" }
+$script, $rest = $args
+& $script @rest
+exit $LASTEXITCODE
+`);
+  const asked: any[] = [];
+  const citadel = createServer((req, res) => {
+    let text = '';
+    req.on('data', (c) => { text += c; });
+    req.on('end', () => {
+      const body = JSON.parse(text);
+      asked.push({ auth: req.headers.authorization, url: req.url, ...body });
+      const answer = (code: number, said: object) => res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(said));
+      if (body.kind !== 'delete') return answer(200, { scheme: 'Peek Auras', repo: REPO, label: 'peek-auras-ci', token: body.mint ? 'AREMOVALTOKEN' : null, expires_at: null });
+      if (body.name === refuse) return answer(502, { error: `GitHub said "Runner is currently running a job and cannot be deleted." (422)` });
+      answer(200, { scheme: 'Peek Auras', repo: REPO, name: body.name, removed: true });
+    });
+  });
+  await new Promise<void>((r) => citadel.listen(0, '127.0.0.1', r));
+  try {
+    const url = `http://127.0.0.1:${(citadel.address() as any).port}`;
+    const child = spawn('pwsh', ['-NoProfile', '-NonInteractive', '-File', stub, script, '-Scheme', 'Peek Auras', '-CitadelUrl', url, '-MachineToken', 'ccm_test'], { cwd: dir });
+    let out = '';
+    child.stdout.on('data', (c) => { out += c; });
+    child.stderr.on('data', (c) => { out += c; });
+    const status = await new Promise<number | null>((r) => child.on('close', r));
+    return { status, out, asked, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+  } finally {
+    await new Promise((r) => citadel.close(r));
+  }
+}
+const root0 = root;
+
+/** A runner folder with a marker, a `.runner` naming `agent`, and a config.cmd and config.sh that write `canary`. */
+function runnerFolder(dir: string, canary: string, agent: string, marker: object) {
+  mkdirSync(join(dir, 'bin'), { recursive: true });
+  writeFileSync(join(dir, '.citadel-runner'), JSON.stringify({ repo: REPO, ...marker }));
+  writeFileSync(join(dir, '.runner'), JSON.stringify({ agentId: 7, agentName: agent, gitHubUrl: `https://github.com/${REPO}` }));
+  writeFileSync(join(dir, 'bin', 'RunnerService.exe'), '');
+  for (const f of ['config.cmd', 'config.sh', 'run.cmd']) writeFileSync(join(dir, f), `#!/bin/sh\necho ran >> '${canary}'\n`, { mode: 0o755 });
+}
+
+const noPwsh = found.error ? 'no pwsh on PATH' : false;
+const svc = (name: string, dir: string) => ({ Name: `actions.runner.caraminden-peek-auras.${name}`, PathName: `"${dir}/bin/RunnerService.exe"` });
+
+test('remove-runner.ps1 runs nothing from a runner\'s folder: Citadel takes it off GitHub, then the service and folder go', { skip: noPwsh, timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ps1-remove-'));
+  try {
+    const root = join(dir, 'c');
+    const canary = join(dir, 'canary');
+    const one = join(root, 'actions-runner-peek-auras');
+    const session = join(root, 'actions-runner-peek-auras-desktop');
+    const delve = join(root, 'actions-runner');
+    const plantedDir = join(root, 'actions-runner-planted');
+    // A job wrote its own .runner to name another runner: the service's name, which an admin made, is the one used.
+    runnerFolder(one, canary, 'SOMEONE-ELSES', { label: 'peek-auras-ci' });
+    runnerFolder(session, canary, 'DESK-desktop', { label: 'peek-auras-desktop', mode: 'session' });
+    runnerFolder(delve, canary, 'DELVE', { label: 'peek-auras-ci' });
+    runnerFolder(plantedDir, canary, 'PLANTED', { label: 'peek-auras-ci' });
+    // A job left a link out of its folder: what it points at stays.
+    const outside = join(dir, 'outside');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'keep.txt'), 'keep');
+    mkdirSync(join(one, '_work'));
+    symlinkSync(outside, join(one, '_work', 'link'));
+    writeFileSync(join(one, '_work', 'readonly.txt'), 'x', { mode: 0o444 });
+
+    const r = await removeRunners(dir, root, [svc('DESK', one), svc('DELVE', delve), { Name: 'actions.runner.caraminden-other.DESK', PathName: `"${plantedDir}/bin/RunnerService.exe"` }], { name: 'GitHub runner peek-auras-desktop', dir: session });
+    assert.equal(existsSync(canary), false, `something in a runner folder was run:\n${r.out}`);
+    // The planted folder (a marker, no service of this repo) is left alone and makes the run fail, as before.
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /actions-runner-planted has a marker .* left alone/);
+    assert.match(r.out, /remove-runner: 1 runner folder\(s\) weren't removed; the lines above say why\./);
+    assert.deepEqual(r.asked.filter((a) => a.kind === 'delete').map((a) => [a.url, a.auth, a.scheme, a.name]).sort(), [
+      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK'],
+      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK-desktop'],
+    ]);
+    assert.ok(r.asked.every((a) => a.mint !== true), 'no removal token is asked for any more');
+    assert.deepEqual(r.calls, [
+      'sc.exe stop actions.runner.caraminden-peek-auras.DESK',
+      'sc.exe delete actions.runner.caraminden-peek-auras.DESK',
+      'Stop-ScheduledTask GitHub runner peek-auras-desktop',
+      'Unregister-ScheduledTask GitHub runner peek-auras-desktop',
+    ]);
+    assert.equal(existsSync(one), false, r.out);
+    assert.equal(existsSync(session), false, r.out);
+    assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'keep', 'a link in the folder was followed');
+    assert.equal(existsSync(join(delve, 'config.cmd')), true, 'Delve\'s folder was touched');
+    assert.equal(existsSync(join(plantedDir, 'config.cmd')), true, 'the planted folder was touched');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('remove-runner.ps1 leaves a runner Citadel couldn\'t take off GitHub as it was, and says why', { skip: noPwsh, timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ps1-remove-'));
+  try {
+    const root = join(dir, 'c');
+    const canary = join(dir, 'canary');
+    const one = join(root, 'actions-runner-peek-auras');
+    const two = join(root, 'actions-runner-peek-auras-2');
+    runnerFolder(one, canary, 'DESK', { label: 'peek-auras-ci' });
+    runnerFolder(two, canary, 'DESK-2', { label: 'peek-auras-ci' });
+    const r = await removeRunners(dir, root, [svc('DESK', one), svc('DESK-2', two)], null, 'DESK');
+    assert.equal(existsSync(canary), false, r.out);
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /Citadel couldn't take the runner DESK off GitHub: GitHub said "Runner is currently running a job and cannot be deleted\." \(422\)/);
+    assert.match(r.out, /remove-runner: 1 runner folder\(s\) weren't removed; the lines above say why\./);
+    // The refused one keeps its service and folder, so a re-run finds it; the other still goes.
+    assert.deepEqual(r.calls, ['sc.exe stop actions.runner.caraminden-peek-auras.DESK-2', 'sc.exe delete actions.runner.caraminden-peek-auras.DESK-2']);
+    assert.equal(existsSync(join(one, '.citadel-runner')), true);
+    assert.equal(existsSync(two), false, r.out);
+    // Run again once GitHub lets it go: the one that stayed is found and removed, and the run is clean.
+    const again = await removeRunners(dir, root, [svc('DESK', one)], null);
+    assert.equal(again.status, 0, again.out);
+    assert.deepEqual(again.asked.filter((a) => a.kind === 'delete').map((a) => a.name), ['DESK']);
+    assert.equal(existsSync(one), false, again.out);
+    assert.equal(existsSync(canary), false, again.out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// What Linux can't show: no line of the script starts anything from the folder it is removing.
+test('remove-runner.ps1 has no line that runs a file of the runner folder', () => {
+  const code = readFileSync(join(root, 'tools/ci-runner/remove-runner.ps1'), 'utf8').replace(/<#[\s\S]*?#>/, '').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(code, /config\.(cmd|sh)|Invoke-Expression|\biex\b|Start-Process|Invoke-Command|Import-Module|Push-Location|Set-Location|^\s*\.\s+\S/m);
+  // The call operator starts sc.exe and nothing else.
+  assert.deepEqual([...new Set(code.match(/(?<!&)&\s*[^\s&]+/g))], ['& sc.exe']);
 });

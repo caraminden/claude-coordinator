@@ -261,7 +261,7 @@ function claudeCard() {
     if (st.state === 'starting') {
       poll = setTimeout(() => api('api/me/claude').then(render).catch(() => {}), 2000);
       return card.replaceChildren(title('Starting', 'off'), errLine,
-        h('p', {}, 'Starting your container and Anthropic\'s sign-in. The first time builds Citadel\'s image, which can take a few minutes.'), override);
+        h('p', {}, 'Starting your container and Anthropic\'s sign-in. The first time builds Citadel\'s image, which can take a few minutes.'));
     }
     if (st.state === 'waiting for code') {
       const code = h('input', { placeholder: 'Paste the code here', autocomplete: 'off', spellcheck: 'false', required: true, maxlength: 2000 });

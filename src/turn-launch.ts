@@ -241,9 +241,8 @@ const READ_ONLY_GIT = [
  * Shell commands a Taskmaster may run on any path (#483): they read and print. The tripwire still
  * refuses a secret path, a process's environment, state.db opened writable and the credentials table.
  * sqlite3 only with -readonly and -safe: -safe refuses .shell, .output, .backup, ATTACH, VACUUM INTO
- * and writefile(). curl only GETs this box's own services, its flags fixed before the URL so no
- * bundled -o can come first; the Taskmaster's API token is already its MCP tools'. The URL rule ends
- * `/*`, not `:*`, which Claude Code reads as a prefix needing a space after (tried in real runs).
+ * and writefile(). curl only as the exact health check: a deny list never caught up with its ways to
+ * write or reach elsewhere (--expand-output, -w %output{}, a second URL; #483 review).
  */
 const READ_ONLY_COMMANDS = [
   ...['grep', 'ls', 'find', 'cat', 'head', 'tail', 'wc', 'stat', 'sort', 'uniq', 'cut', 'echo', 'uptime', 'free', 'df', 'du', 'ps', 'journalctl --user',
@@ -252,27 +251,24 @@ const READ_ONLY_COMMANDS = [
     'sqlite3 -readonly -safe', 'sqlite3 -safe -readonly',
     'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
   ].map((c) => `Bash(${c}:*)`),
-  ...['-s', '-sS', '-sI', '-s -m 5', '-sS -m 5'].flatMap((f) => ['127.0.0.1', 'localhost'].map((host) => `Bash(curl ${f} http://${host}:*/*)`)),
+  ...['-s', '-sS', '-s -m 5'].flatMap((f) => ['127.0.0.1', 'localhost'].map((host) => `Bash(curl ${f} http://${host}:8573/api/health)`)),
 ];
 /**
  * The ways those commands write, run something else or reach further, denied (deny wins over allow).
- * Each flag has a space before it, so a URL like /api/some-doc isn't caught by -d, and comes in two
- * rules, since `curl * -X*` needs a word between (tried in real runs). Long flags are cut to their
+ * Each flag has a space before it, so a path like /some-dir isn't caught by -d, and comes in two
+ * rules, since `cmd * -X*` needs a word between (tried in real runs). Long flags are cut to their
  * shortest unique start, since sort and journalctl take `--co` for --compress-program.
- * shortcut: a short flag bundled after the first (`sort -uo x`, a bundle after curl's URL) still
- * matches; the tripwire's write check covers this server's paths, and that's fine for accidents.
+ * shortcut: a short flag bundled after another (`sort -uo x`) still matches; the tripwire's sort
+ * check refuses this server's paths, and that's fine for accidents.
  */
 const READ_ONLY_EXCEPTIONS = [
   ['find', '-delete', '-exec', '-ok', '-fprint', '-fls'], ['sort', '-o', '--o', '--co'], ['ss', '-D', '--d', '-K', '--k'],
   ['journalctl', '--vac', '--rot', '--fl', '--syn', '--rel', '--sm', '--se', '--up', '--cursor-f'],
   ['sqlite3', '-nonce', '--nonce', '-unsafe', '--unsafe'],
-  ['curl', '-X', '--request', '-d', '--data', '-F', '--form', '-T', '--upload', '-K', '--config', '--json', '-o', '--output', '-O', '--remote-name',
-    '-D', '--dump-header', '-c', '--cookie-jar', '--trace', '--stderr', '--libcurl', '--etag-save', '--hsts', '--alt-svc',
-    '--unix-socket', '--abstract-unix-socket', '-x', '--proxy', '--preproxy', '--socks', '--connect-to', '--resolve'],
   ['gh api', '-X', '--method', '-f', '-F', '--field', '--raw-field', '--input'],
 ].flatMap(([cmd, ...flags]) => flags.flatMap((f) => [`Bash(${cmd} ${f}*)`, `Bash(${cmd} * ${f}*)`]))
-  // uniq's second operand is a file it writes; curl's @ reads a file (-w @x) or names another host (http://a:1@b/), and file:/ reads any path.
-  .concat(['uniq * *', 'curl *@*', 'curl *file:/*', 'curl *FILE:/*', 'curl *File:/*'].map((c) => `Bash(${c})`));
+  // uniq's second operand is a file it writes.
+  .concat('Bash(uniq * *)');
 /** Box-health files a Taskmaster may Read beside its read folders. */
 const HEALTH_FILES = ['/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/pressure/**'];
 

@@ -1019,7 +1019,8 @@ function addGruntText(log, id, text, data, event) {
     line = h('details', { class: 'msg coord grunt', 'data-grunt': id, 'data-at': event.created_at },
       h('summary', {}, stepMark('done'), h('span', { class: 'who' }, h('span', { class: 'name' }, `Grunt · ${name}`)), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
       h('div', { class: 'msg grunt-body' }, body));
-    Object.assign(line, { start, name });
+    // Not `name`: on a <details> that makes same-named lines one group, opening one closing the rest.
+    Object.assign(line, { start, gruntLabel: name });
   }
   line.end = event.created_at;
   line.querySelector('.preview').textContent = gist(text);
@@ -1036,7 +1037,7 @@ function addGruntText(log, id, text, data, event) {
   const all = [...group.lastChild.children];
   group.firstChild.replaceChildren(
     h('span', { class: 'who' }, groupTitle(all.length, Math.max(...all.map((l) => l.end)) - Math.min(...all.map((l) => l.start)), shortDuration)),
-    h('span', { class: 'preview' }, all.map((l) => l.name).join(', ')));
+    h('span', { class: 'preview' }, all.map((l) => l.gruntLabel).join(', ')));
 }
 
 /** The time a message or card was posted, after its who-line; the full date shows on hover. */

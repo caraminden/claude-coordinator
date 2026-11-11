@@ -45,6 +45,20 @@ test('in the hour repeated when clocks go back, nextRun never returns a time at 
   });
 });
 
+test('a schedule inside the hour skipped when clocks go forward runs at the first minute after the gap (#468 S04-4)', () => {
+  inZone('America/Los_Angeles', () => {
+    // 2027-03-14: 02:00 PST is 03:00 PDT (10:00 UTC); there is no 02:30.
+    const gapEnd = Date.UTC(2027, 2, 14, 10, 0);
+    const local = (d: number, h: number, m = 0) => new Date(2027, 2, d, h, m).getTime();
+    assert.equal(nextRun('30 2 * * *', local(13, 12)), gapEnd);
+    assert.equal(nextRun('0 2 * * 0', local(10, 12)), gapEnd);
+    assert.equal(nextRun('0,30 1,2 * * *', local(14, 1, 30)), gapEnd, 'stepping by minutes out of a wanted hour');
+    // Not run twice: the next is the day after, at 02:30 again.
+    assert.equal(nextRun('30 2 * * *', gapEnd), local(15, 2, 30));
+    assert.equal(nextRun('0 4 * * *', local(14, 1)), local(14, 4), 'a schedule not in the gap is untouched');
+  });
+});
+
 test('parseCron refuses what it cannot read', () => {
   for (const bad of ['', '* * * *', '60 * * * *', '* 24 * * *', '5-1 * * * *', '*/0 * * * *', 'a * * * *', '* * * * 8']) {
     assert.throws(() => parseCron(bad), Error, bad);

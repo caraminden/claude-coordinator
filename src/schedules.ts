@@ -102,11 +102,22 @@ export function nextRun(expr: string, after: number): number | null {
   // rebuilding from local fields lands in its first pass, before `after` (#468 S04-3).
   const d = new Date(Math.floor(after / 60_000) * 60_000 + 60_000);
   const limit = after + 5 * 366 * 86_400_000;
+  // Clocks going forward skip an hour: a schedule wanting it runs at the first minute after the gap (#468 S04-4).
+  const skipped = (h: number) => d.getHours() !== h && d.getHours() !== (h + 1) % 24 && c.hour.has((h + 1) % 24);
   while (d.getTime() <= limit) {
     if (!c.month.has(d.getMonth() + 1)) { d.setMonth(d.getMonth() + 1, 1); d.setHours(0, 0); continue; }
     if (!dayMatches(c, d)) { d.setDate(d.getDate() + 1); d.setHours(0, 0); continue; }
-    if (!c.hour.has(d.getHours())) { d.setHours(d.getHours() + 1, 0); continue; }
-    if (!c.minute.has(d.getMinutes())) { d.setTime(d.getTime() + 60_000); continue; }
+    const h = d.getHours();
+    if (!c.hour.has(h)) {
+      d.setHours(h + 1, 0);
+      if (skipped(h)) return d.getTime();
+      continue;
+    }
+    if (!c.minute.has(d.getMinutes())) {
+      d.setTime(d.getTime() + 60_000);
+      if (skipped(h)) return d.getTime();
+      continue;
+    }
     if (d.getTime() <= after) { d.setTime(d.getTime() + 60_000); continue; }
     return d.getTime();
   }

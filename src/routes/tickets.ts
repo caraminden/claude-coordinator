@@ -748,9 +748,11 @@ export const ticketRoutes: Route[] = [
       // wake_when_runners_back (#541): a landing parked because CI gave no verdict waits for the scheme's runners.
       const project = app.store.getProject(ticket.project_id);
       if (!repoSlug(project?.repo_url ?? null)) throw new HttpError(400, "This scheme's repo isn't on GitHub, so it has no runners to watch");
+      const label = runnerLabel(project!.name);
+      if (!label) throw new HttpError(409, `${project!.name}'s name has no letters a-z or digits to make a runner label from, so no runner can match`);
       const body = await readJson(req);
       addRunnerWaiter(app.store, ticket.id, str(body.reason, 'Reason', 1000));
-      return json(res, 201, { label: runnerLabel(project!.name) });
+      return json(res, 201, { label });
     },
   },
   {

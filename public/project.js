@@ -195,11 +195,18 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   await mountChat(chatId, ticket, page, cached?.fresh);
 }
 
-/** Fetch a scheme's dismissed minions behind its first paint and add them to the list (#538); a newer load of the list wins. */
+/**
+ * Fetch a scheme's dismissed minions behind its first paint and add them to the list (#538); a newer load of
+ * the list wins. A failed fetch (a restart's gap) tries again, backing off to 30 s, as refreshSchemes does.
+ */
 async function loadDismissed(projectId) {
   const list = view.tickets;
-  const closed = await api(`api/projects/${projectId}?tickets=closed`).then((r) => r.tickets, () => []);
-  if (view?.kind !== 'project' || view.tickets !== list) return;
+  let closed = null;
+  for (let wait = 1000; !closed; wait = Math.min(30_000, wait * 2)) {
+    closed = await api(`api/projects/${projectId}?tickets=closed`).then((r) => r.tickets, () => null);
+    if (view?.kind !== 'project' || view.tickets !== list) return;
+    if (!closed) await new Promise((r) => setTimeout(r, wait));
+  }
   // The stream may have brought a fresher copy meanwhile (one reopened, say): that one stays.
   for (const t of closed) if (!list.has(t.id)) list.set(t.id, t);
   renderSidebar();
@@ -215,6 +222,7 @@ async function switchChat(main, seq) {
   // The list already has the minion, kept current by the stream: draw the chat from it at once, with the
   // cached history when there is one, and fetch behind it (#527). Only a history not yet downloaded waits.
   const ticket = chatId === view.coordinator.id ? view.coordinator : view.tickets.get(chatId);
+  if (!ticket) return false; // a dismissed one before the dismissed list has come (#538): the full load finds it
   const cached = cachedEvents(chatId);
   const page = cached?.page ?? await loadEvents(chatId);
   if (seq !== routeSeq) return true; // overtaken by another click while loading

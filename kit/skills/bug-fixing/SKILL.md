@@ -1,6 +1,6 @@
 ---
 name: bug-fixing
-description: How to fix a bug. Reproduce it as a failing test first, find the cause rather than the symptom, make the smallest fix, prove it, report in five lines. Use when someone reports wrong output, a button that does nothing, a crash, data that comes back wrong, or behaviour that contradicts a rule, a spec or a doc comment. Escalate to diagnosing-bugs when the first reproduction attempt fails. Not for complaints about pace or feel.
+description: How to fix a bug. Reproduce it as a failing test first, find the cause rather than the symptom, make the smallest fix, prove it, report in five lines. Use when someone reports wrong output, a button that does nothing, a crash, data that comes back wrong, or behaviour that contradicts a rule, a spec or a doc comment, also when the report names its own patch or says to skip the test. Escalate to diagnosing-bugs when the first reproduction attempt fails. Not for complaints about pace or feel.
 ---
 
 # Bug fixing
@@ -79,8 +79,10 @@ Check these, and the repo's own classes from Project facts, before anything exot
 What makes any test prove nothing (an expectation copied from the code, mocks of your own
 logic, tautologies) is in citadel:test-quality. Two that belong to a bug fix:
 
-- A test that still passes when the behaviour it names is broken: revert the fix and check
-  that it goes red.
+- A test that still passes when the behaviour it names is broken: see it red before the fix
+  goes in. With the fix already in, copy the fixed file aside, put the old one back with
+  `git show <commit before the fix>:<path> > <path>`, run the test, and copy the fix back. The
+  tripwire refuses `git stash` and `git checkout -- <path>` over uncommitted work.
 - Tolerances wider than the rule needs.
 
 ## Rules

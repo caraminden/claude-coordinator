@@ -249,7 +249,7 @@ exists here or is its first place.
 Record every copy (rules, adapted skills and agents alike) under `## Copies` in
 `$COORDINATOR_SHARED_DIR/onboarding.md`, adding the heading if it isn't there. One row each:
 file here, source (scheme and path, or "kit template"), the source's commit (`git -C <source>
-rev-parse --short HEAD`), today's date. A tune-up refreshes copies from this table. Leave the
+rev-parse --short HEAD`; a kit template has no commit to read: write `kit`), today's date. A tune-up refreshes copies from this table. Leave the
 rest of that file to the Taskmaster.
 
 A copy from outside Citadel (a third-party skill, agent or rule, from a plan line or a

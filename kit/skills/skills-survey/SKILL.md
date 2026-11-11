@@ -59,7 +59,7 @@ say so, name it, and stop: no Grunts.
    For a 2-group scope it took 68 s and 98k Sonnet tokens, and about 1k tokens reached the session
    (#358).
 4. **Without it**, start every Grunt in one message, each with `model: "sonnet"`, `effort:
-   "medium"`. A Grunt writes only its own clone folder and verdict file, and changes nothing else.
+   "medium"` and `run_in_background: false`, so the turn waits for all of them. A Grunt writes only its own clone folder and verdict file, and changes nothing else.
    Each prompt is the role line your own prompt gives for Grunt briefs, "First read `<BRIEF.md>`
    and follow it exactly", then the group's name, its repos or search, and what to compare against
    (as `compare` above). Each Grunt writes one verdict file and returns at most 3 lines. Read the

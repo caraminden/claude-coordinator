@@ -29,8 +29,10 @@ check the Check claims lens runs on the real data when the check only reads.
 2. Apply part 1 of `<kit>/skills/self-review/references/lenses.md`: every "Always" lens, and
    the "Pick by the diff" lenses the brief names (or whose trigger is in the diff). Where it
    and ponytail-review differ, the lenses win.
-3. Label the risk by the rubric in `<kit>/skills/self-review/SKILL.md` §4 and the "Project
-   facts" section of the repo's `CLAUDE.md`, and set Door and Blast radius as §4 describes.
+3. Read `<kit>/skills/self-review/SKILL.md` §4 and the "Project facts" section of the repo's
+   `CLAUDE.md`. The risk is the highest table row the change itself matches (what it touches
+   and does); what you found in it doesn't move the label, since findings get fixed before it
+   ships. Set Door and Blast radius as §4 describes.
 
 ## What you hand back (at most 25 lines)
 
@@ -41,5 +43,5 @@ This replaces ponytail-review's §4 format.
    <the problem and its failing case>`, one or two lines each. Or `No findings.` If they don't
    all fit, end with `+N more: <file:line, ...>` rather than going over.
 3. At most one `pre-existing:` line, unnumbered (lenses.md, "Already there").
-4. `Risk: low|medium|high: <reason>`
+4. `Risk: low|medium|high: <the §4 row the change matches, in the table's words>`
 5. `Door: one-way|two-way · Blast radius: <word>`

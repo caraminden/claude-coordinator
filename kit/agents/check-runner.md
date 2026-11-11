@@ -19,6 +19,14 @@ The working tree, and the checks to run, by command. When the caller names none,
 commands the repo's `CLAUDE.md` names under "Project facts" (else its `package.json` scripts or
 `Makefile`).
 
+## How you run each check
+
+Send each run's whole output to its own file under `$TMPDIR` (not the working tree, not
+`/dev/null`, not a shell variable) and note the exit code. Read the file's last 40 lines before
+you search it: the summary looks however this runner prints it, so don't grep for a format you
+expect. If you run a check again, keep the first run's file and report every run; a failure
+that passed on a re-run is still reported, with its test name, from the run that failed.
+
 ## What you hand back (at most 15 lines)
 
 - Each check: the command, passed or failed, and its counts (tests passed, failed, skipped).

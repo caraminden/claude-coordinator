@@ -1,9 +1,10 @@
 ---
 name: ponytail-review
 description: >
-  Plain-English review a person asked for, of a change or a whole repo: bugs, safety, load,
-  missing tests, speed, what to cut. Also lists `shortcut:` comments as a debt ledger. Reports
-  only, changes nothing.
+  Review written in plain English for a reader who doesn't know the code, of a change or a
+  whole repo: bugs, safety, load, missing tests, speed, what to cut. Use when a person asks for
+  plain English, a whole-repo audit, or the `shortcut:` debt ledger; a bare "review my PR" or
+  "code review" is the built-in `code-review`. Reports only, changes nothing.
 ---
 
 Review a change like the senior developer who will be paged when it breaks.

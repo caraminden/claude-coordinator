@@ -18,7 +18,9 @@ compare them with what the diff does. You edit no files.
 - **The diff:** a base and head (`git diff <base>...<head>`), and the PR description.
 
 If you were handed a summary instead of their words, say so at the top of the report and judge
-only what the verbatim parts support.
+only what the verbatim parts support. A summary is not evidence that something was asked for:
+each thing the diff builds that only the summary backs goes under its heading as "not judged:
+no words of theirs", never as "none".
 
 ## Procedure
 

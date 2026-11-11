@@ -1,6 +1,6 @@
 ---
 name: diagnosing-bugs
-description: Diagnosis loop for hard bugs and performance regressions. Use when the bug-fixing skill's first reproduction attempt fails, the bug is intermittent, a fix did not hold, something got slow, or the user says "diagnose" or "debug this".
+description: Diagnosis loop for hard bugs and performance regressions. Use when the bug-fixing skill's first reproduction attempt fails, the bug is intermittent or a test is flaky (also when the ask is to bump a wait or add a retry), a fix did not hold, something got slow, or the user says "diagnose" or "debug this".
 ---
 
 # Diagnosing Bugs

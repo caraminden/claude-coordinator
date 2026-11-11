@@ -315,7 +315,11 @@ export class LiveWaiters {
     const other = this.elsewhere(w.ticket);
     if (other) return !!w.commit && (!!this.merged(other, w.commit) || !!this.prs.commit(other, w.commit)?.commit);
     if (!w.commit) return this.head !== w.since;
-    const runs = (c: string) => within(this.repo, this.head!, c) !== null;
+    // The live checkout pulls only main, so a branch commit that landed rebased is known only to the
+    // scheme's repo, which also has the live commit here (else it would be elsewhere()): look there too.
+    const t = this.store.getTicket(w.ticket);
+    const scheme = t && this.store.getProject(t.project_id)?.repo_dir;
+    const runs = (c: string) => within(this.repo, this.head!, c) !== null || (!!scheme && scheme !== this.repo && runsRepo(scheme, this.head) && within(scheme, this.head!, c) !== null);
     if (runs(w.commit)) return true;
     const pr = this.prs.commit(this.repo, w.commit);
     return !!pr?.commit && runs(pr.commit);

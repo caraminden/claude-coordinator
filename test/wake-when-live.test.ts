@@ -251,3 +251,36 @@ test('pending-deploy minions whose branch the live commit contains are found, wh
   git('cherry-pick', pick);
   assert.deepEqual(waiters(git('rev-parse', 'HEAD')).pendingLive().sort(), [shipped, unmerged, picked].sort());
 });
+
+test('a waiter on a scheme-repo commit that lands rebased wakes once the live checkout runs the landed copy (#468 S04-1)', () => {
+  // The live checkout pulls only main, so the branch's own hash never reaches it: check it in the scheme's repo.
+  const scheme = join(root, 'scheme-rebased');
+  execFileSync('git', ['clone', '-q', repo, scheme]);
+  const sg = (...args: string[]) => execFileSync('git', args, { cwd: scheme, encoding: 'utf8' }).trim();
+  sg('config', 'user.email', 't@example.com');
+  sg('config', 'user.name', 'T');
+  sg('checkout', '-q', '-b', 'ticket/r');
+  writeFileSync(join(scheme, 'rebased.txt'), 'work');
+  sg('add', '-A');
+  sg('commit', '-q', '-m', 'the work');
+  const work = sg('rev-parse', 'HEAD');
+  sg('checkout', '-q', 'main');
+  writeFileSync(join(scheme, 'other.txt'), 'meanwhile');
+  sg('add', '-A');
+  sg('commit', '-q', '-m', 'main moved on');
+  const p = store.createProject('Rebased', null);
+  store.setProjectRepoDir(p.id, scheme);
+  const t = store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t.id, { status: 'idle' });
+  const w = waiters(git('rev-parse', 'HEAD'));
+  w.prs = { branch: () => null, commit: () => null };
+  sent.length = 0;
+  assert.equal(w.add(t.id, work, 'try the rebased work'), true);
+  assert.equal(w.check(), 0, 'not landed yet');
+  sg('cherry-pick', work); // landed rebased: a new hash, the same change
+  git('pull', '-q', '--ff-only', scheme, 'main'); // the deploy pulls main only
+  assert.equal(w.check(git('rev-parse', 'HEAD')), 1);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /is live now/);
+  assert.equal(w.list().length, 0);
+});

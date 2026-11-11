@@ -40,3 +40,29 @@ test("a notification click opens the thread in Citadel's window, not a focused c
   assert.deepEqual(mandate.sent, []);
   assert.equal(opened, '');
 });
+
+test("a notification click goes to a window on Citadel's own page, never a preview or the backup page, else opens one", async () => {
+  const win = (url: string, focused: boolean) => ({ url, focused, sent: [] as unknown[], postMessage(m: unknown) { this.sent.push(m); }, focus: async () => {} });
+  const click = async (windows: ReturnType<typeof win>[]) => {
+    const listeners: Record<string, (e: any) => void> = {};
+    let opened = '';
+    const self = {
+      addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
+      location: { origin: 'https://citadel.example' },
+      clients: { matchAll: async () => windows, openWindow: async (url: string) => { opened = url; } },
+    };
+    new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
+    let done: Promise<unknown> = Promise.resolve();
+    listeners.notificationclick({ notification: { close() {}, data: { url: '/c/#/p/2/t/9' } }, waitUntil: (p: Promise<unknown>) => (done = p) });
+    await done;
+    return opened;
+  };
+  const preview = win('https://citadel.example/preview/3/c/#/p/2', true);
+  const backup = win('https://citadel.example/backup', false);
+  assert.equal(await click([preview, backup]), 'https://citadel.example/c/#/p/2/t/9');
+  assert.deepEqual([preview.sent, backup.sent], [[], []]);
+  const citadel = win('https://citadel.example/c/#/p/2', false);
+  assert.equal(await click([preview, backup, citadel]), '');
+  assert.deepEqual(citadel.sent, [{ type: 'open', url: 'https://citadel.example/c/#/p/2/t/9' }]);
+  assert.deepEqual(preview.sent, []);
+});

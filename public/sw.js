@@ -40,9 +40,11 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = new URL(event.notification.data?.url || '/c/', self.location.origin).href;
   event.waitUntil((async () => {
-    // Citadel's own windows only: a contraption's (its own installed app since #274) can't show a thread.
+    // Citadel's own page only (the url's, /c/): a contraption's window (its own installed app since #274)
+    // can't show a thread, a preview's runs on a database copy, and the backup page has no listener.
+    const page = new URL(url).pathname;
     const windows = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
-      .filter((w) => !new URL(w.url).pathname.startsWith('/apps/'));
+      .filter((w) => new URL(w.url).pathname === page);
     const win = windows.find((w) => w.focused) ?? windows[0];
     if (!win) return self.clients.openWindow(url);
     win.postMessage({ type: 'open', url });

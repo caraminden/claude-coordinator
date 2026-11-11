@@ -70,9 +70,9 @@ who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` show
    ```
 
    It checks that Node 18+ and Git for Windows are there, creates and locks the folder,
-   downloads the agent and its four scripts (printing their SHA-256), registers the task
+   downloads the agent and its scripts (printing their SHA-256), registers the task
    **Citadel runner agent** (SYSTEM, at startup, retried every 5 minutes), starts it and waits
-   until it connects. There's no reboot and no runner is touched. The Machines page then shows
+   until it connects, then proves the CPU cap (#552, "Cap and yield" below). There's no reboot and no runner is registered or removed. The Machines page then shows
    `cara-desktop-runners` online.
 3. Run the same line again whenever these scripts change, to update the agent. The lines it
    prints at the end say how to stop or remove it; removing the agent leaves its runners in place.
@@ -285,6 +285,58 @@ with how many are busy and what waits.
   Until then the panel shows the queues from GitHub and "No samples yet".
 - **Not yet seen on the real PC** (2026-11-11): `quser` under SYSTEM, the Hyper-V counters and the thermal zone.
   The first hour of samples says which of them the desktop reports.
+
+## Cap and yield (#552)
+
+Josh, 2026-11-11: "ok, CI is using my whole desktop, can we limit it a bit?", and he picked **Cap and yield**: CI runs
+at below-normal priority so the PC stays responsive, and all CI together is held to about 75% of the CPU. Runner
+counts stay; jobs just run slower when it's busy. The PC has 16 cores, 32 threads.
+
+| Part | What holds it | Its share |
+|---|---|---|
+| Windows runners, every one on the PC (Delve's, Peek's, Mandate's, ToC's, the session runners) | `keep-runners.ps1`, which the Windows agent keeps running: one job object, `Global\CitadelCiRunners` | below-normal priority, all together at most 75% (`CI_CPU_PERCENT` in `public/runner-agent.mjs`) |
+| The WSL VM (Citadel's and ToC's Linux runners, and the Android emulator, #533) | `processors=16` in Cara's `%UserProfile%\.wslconfig`; inside it, the runners niced (`citadel-runner-.service.d/yield.conf`, written by `install-runner-agent.sh`) | at most 16 of the 32 threads; the emulator's 4 cores come first |
+| The test box VM (Peek's desktop tests) | `Set-VMProcessor -Count 6 -Maximum 75 -RelativeWeight 50`, set by `tools/win-test-box/new-test-box.ps1` | about 4.5 of 32 threads, already; left as it is |
+
+**Windows.** Every 15 seconds `keep-runners.ps1` finds each `RunnerService.exe` and `Runner.Listener.exe` and
+everything started under them, and puts what isn't held yet into the job. The job runs everything in it at below-normal
+priority and caps all of it together at 75% of every core (a hard cap: past it, the job's threads wait for the next
+scheduling interval). A process started by one in the job is in the job from its start, so a step's cargo, MSBuild,
+node or dotnet is held too; the sweep only catches runners that started before it did, and processes that asked to
+break away. A runner already in another job (a session runner's logon task puts it in one) gets a job of its own,
+nested in that one, with the same limits. It also starts any `actions.runner.*` service that is set to start
+automatically but is stopped, at most every 5 minutes each (the BIOS reboot of 2026-11-11 left them all stopped): **to keep
+one stopped, set it to Manual** (`Set-Service <name> -StartupType Manual`). It never stops, removes or re-registers a
+runner.
+
+It comes back by itself: the agent starts it at every boot and every install, and again a minute after it ever ends;
+it ends with the agent. A job's limits stay on its processes while they run, so an agent install leaves the running
+runners capped.
+
+**Proof.** `keep-runners.ps1 -Prove` runs a throwaway job capped at 25%, whose process starts one CPU-burning
+grandchild per core, and reports whether the grandchildren are in the job, at below-normal priority, and what share of
+the PC the job used. `install-runner-agent.ps1` runs it at its end; it touches no runner. By hand, in an administrator
+PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\citadel-runner-agent\keep-runners.ps1 -Prove`.
+
+**WSL** (by hand, once, as Cara). WSL's VM has no job object Windows can cap; `.wslconfig` is what limits it
+([`.wslconfig` settings](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#wslconfig)). In a normal PowerShell:
+
+```powershell
+$f = "$env:UserProfile\.wslconfig"; $t = if (Test-Path $f) { Get-Content -Raw $f } else { '' }
+if ($t -match '(?m)^[^\S\r\n]*processors\s*=') { $t = $t -replace '(?m)^[^\S\r\n]*processors[^\S\r\n]*=[^\r\n]*', 'processors=16' } elseif ($t -match '(?m)^\[wsl2\]') { $t = $t -replace '(?m)^\[wsl2\][^\S\r\n]*(?=\r?$)', "[wsl2]`r`nprocessors=16" } else { $t = "[wsl2]`r`nprocessors=16`r`n`r`n" + $t }
+Set-Content -Path $f -Value $t -Encoding ASCII; Get-Content $f
+```
+
+It takes at the next `wsl --shutdown`, which stops every distro: Citadel's and ToC's Linux runners (a run in flight
+fails, and `land.sh` falls back to perigee), and the Android emulator. Do it when neither is busy; the logon tasks
+**Citadel WSL runners** and **Citadel WSL citadel-android** start both again within 5 minutes. The runners' nice
+needs the WSL agent installed again (step 3 of "Set it up"), or as root in the distro:
+`mkdir -p /etc/systemd/system/citadel-runner-.service.d && printf '[Service]\nNice=10\nCPUWeight=20\n' > /etc/systemd/system/citadel-runner-.service.d/yield.conf && systemctl daemon-reload`.
+Runners take it at their next start, which the `wsl --shutdown` gives them.
+
+**What has been tested** (#552): the job type compiles with struct sizes matching Windows x64 (pwsh on perigee),
+every script passes the `.ps1` lint, and the agent's start of `keep-runners.ps1` runs in `test/runner-agent.test.ts`
+with a fake PowerShell. The job itself has only run where `-Prove` runs: on the desktop, at the agent's next install.
 
 ## Point the workflows at it
 

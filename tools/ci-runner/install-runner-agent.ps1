@@ -8,15 +8,20 @@
     1. checks it's elevated and that Node 18+ and Git for Windows are here;
     2. makes C:\ProgramData\citadel-runner-agent, readable and writable only by Administrators and SYSTEM, so no
        unelevated program can change what the agent runs;
-    3. downloads runner-agent.mjs, add-runner.ps1, list-runners.ps1, remove-runner.ps1 and start-runner.ps1 (the
+    3. downloads runner-agent.mjs, add-runner.ps1, list-runners.ps1, remove-runner.ps1, sample-load.ps1,
+       keep-runners.ps1 and start-runner.ps1 (the
        session runner's launcher, for add-runner.ps1 -Session by hand) from Citadel into it
        (the agent never downloads code itself: these copies are what it runs until you install again) and
        prints their SHA-256;
     4. keeps the machine token in a file there;
     5. registers the scheduled task "Citadel runner agent", run as SYSTEM with highest privileges, at startup and
        retried every 5 minutes, and starts it now: no reboot, no logon needed;
-    6. waits until its log says it connected.
-  It touches no runner and never restarts or reboots the PC.
+    6. waits until its log says it connected;
+    7. proves the CPU cap on this PC with keep-runners.ps1 -Prove (#552): a throwaway job of CPU-burning processes,
+       about 20 seconds, touching no runner.
+  It registers, removes and restarts no runner; once it runs, the agent keeps every runner at below-normal priority
+  and all of CI under a CPU cap (keep-runners.ps1), and starts runner services that should be running. It never
+  restarts or reboots the PC.
 
 .PARAMETER CitadelUrl
   The machines address: what the Machines page shows in a machine's setup lines.
@@ -78,6 +83,8 @@ $files = [ordered]@{
   'remove-runner.ps1' = "$url/ci-runner/remove-runner.ps1"
   # The agent's load samples (#534): read-only.
   'sample-load.ps1'   = "$url/ci-runner/sample-load.ps1"
+  # Cap and yield (#552): the agent keeps it running, holding every runner at below-normal priority under a CPU cap.
+  'keep-runners.ps1'  = "$url/ci-runner/keep-runners.ps1"
   # Not the agent's: add-runner.ps1 -Session, run by hand from this folder, copies it into a session runner (#370).
   'start-runner.ps1'  = "$url/ci-runner/start-runner.ps1"
 }
@@ -121,6 +128,12 @@ if ($said -match 'Connected to ') {
 } else {
   Write-Host 'It has not connected yet: the lines above say why (nothing above means it did not start).' -ForegroundColor Yellow
 }
+# 7. The cap and yield (#552), proved on this PC: the agent's own copy is already holding the runners.
+Write-Host ''
+Write-Host 'Proving the CI cap on this PC (about 20 seconds, no runner touched)...'
+& (Join-Path $PSHOME 'powershell.exe') -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'keep-runners.ps1') -Prove
+if ($LASTEXITCODE -ne 0) { Write-Host 'The CI cap did not hold here: paste the lines above to the minion.' -ForegroundColor Yellow }
+Write-Host ''
 Write-Host "Its log:   Get-Content -Wait `"$log`""
 Write-Host "Stop it:   Disable-ScheduledTask -TaskName '$task'; Stop-ScheduledTask -TaskName '$task'"
 Write-Host "Remove it: Unregister-ScheduledTask -TaskName '$task' -Confirm:`$false; Remove-Item -Recurse -Force `"$dir`""

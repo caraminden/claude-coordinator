@@ -76,6 +76,14 @@ if ! command -v node >/dev/null || ! command -v git >/dev/null || ! command -v c
 fi
 node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' || die "Node $(node -v) is too old: the agent needs 18 or newer."
 
+# Yield (#552; Josh, 2026-11-11: "ok, CI is using my whole desktop, can we limit it a bit?"): every runner service
+# (citadel-runner-*.service, through systemd's prefix drop-in, so runners added later too; the agent matches it as
+# well, harmlessly) runs niced and lightly weighted, so the Android emulator sharing this VM (#533) gets its cores
+# first. What keeps the VM off the rest of the PC is .wslconfig's processors= on Windows (README, "Cap and yield").
+# Runners take it at their next start.
+mkdir -p /etc/systemd/system/citadel-runner-.service.d
+printf '%s\n' '# Citadel #552: CI yields to the emulator and anything else in this VM.' '[Service]' 'Nice=10' 'CPUWeight=20' > /etc/systemd/system/citadel-runner-.service.d/yield.conf
+
 # 3. The agent and its scripts, as Citadel serves them now, in a folder only root can read or change.
 systemctl stop citadel-runner-agent 2>/dev/null || true
 install -d -m 700 -o root -g root "$dir"

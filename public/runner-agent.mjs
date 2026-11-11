@@ -6,7 +6,8 @@
 // those, with arguments it checks itself, one job at a time, and never downloads code. It also reports the PC's load
 // every 30 seconds (#534, the samples below): read-only, through sample-load.ps1 on Windows and /proc on Linux. The scripts fetch their own
 // GitHub tokens from Citadel and never keep them; this file never sees one. It serves no MCP server, no workspace,
-// no shell, and never restarts the PC.
+// no shell, and never restarts the PC. On Windows it also keeps keep-runners.ps1 running (#552, below), which holds every
+// runner on the PC at below-normal priority and all CI under a CPU cap.
 //
 //   node runner-agent.mjs <machines url> --token-file <file> [--log <file>]
 //
@@ -16,9 +17,10 @@
 // It dials out to Citadel like the machine agent (public/machine-agent.mjs) and holds an event stream open, so the
 // PC needs no open port. tools/ci-runner/install-runner-agent.ps1 installs it; tools/ci-runner/README.md says how.
 import { spawn } from 'node:child_process';
-import { appendFileSync, readFileSync, readdirSync, readlinkSync, realpathSync, statfsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, readdirSync, readlinkSync, realpathSync, statfsSync } from 'node:fs';
 import { cpus, freemem, hostname, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 export const MAX_RUNNERS = 4;
@@ -299,6 +301,39 @@ export class Sampler {
   }
 }
 
+// ---- Cap and yield (#552; Josh, 2026-11-11: "ok, CI is using my whole desktop, can we limit it a bit?") ----
+// On Windows, keep-runners.ps1 holds every runner on the PC (Citadel's or not) and all it starts at below-normal
+// priority, all of them together under CI_CPU_PERCENT of the PC, in one job object it keeps open; and it starts runner
+// services a reboot left stopped. It runs as long as the agent does, so the cap comes back with every boot and install.
+export const CI_CPU_PERCENT = 75;
+const KEEPER_AGAIN_MS = 60_000;
+
+/** keep-runners.ps1 from the agent's folder, in Windows PowerShell, with the cap and this agent's pid (it ends with the agent). */
+export function keeperCommand(dir, pid = process.pid, systemRoot = process.env.SystemRoot ?? 'C:\\Windows') {
+  return {
+    command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', String(CI_CPU_PERCENT), '-AgentPid', String(pid)],
+  };
+}
+
+/** Starts keep-runners.ps1, logs what it says, and starts it again a minute after it ever ends. */
+export function keepRunners(dir, log, again = KEEPER_AGAIN_MS) {
+  if (!existsSync(join(dir, 'keep-runners.ps1'))) {
+    log('keep-runners.ps1 is not in the agent\'s folder, so CI is not capped (#552): install the agent again.');
+    return;
+  }
+  const { command, args } = keeperCommand(dir);
+  const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  for (const stream of [child.stdout, child.stderr]) {
+    createInterface({ input: stream }).on('line', (line) => line.trim() && log(`keep-runners: ${line.trim()}`));
+  }
+  child.on('error', (err) => log(`Couldn't start keep-runners.ps1: ${err.message}`));
+  child.on('close', (code) => {
+    log(`keep-runners.ps1 ended (exit ${code}); starting it again in ${Math.round(again / 1000)}s.`);
+    setTimeout(() => keepRunners(dir, log, again), again).unref();
+  });
+}
+
 /** Server-sent events from a fetch body, one parsed JSON message per event. */
 async function* events(body) {
   const decoder = new TextDecoder();
@@ -375,6 +410,7 @@ async function main() {
     setTimeout(sample, sampleMs).unref();
   };
   sample();
+  if (os === 'windows') keepRunners(jobs.dir, log);
 
   let retry = 0;
   for (;;) {

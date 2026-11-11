@@ -3,7 +3,7 @@
 // Here the scripts are faked (a node one-liner stands in for PowerShell); the Windows side is untested until installed.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { checkJob, JobRunner, jobCommand, personIdle, redact, runCommand, runnerUse, Sampler } from '../public/runner-agent.mjs';
@@ -103,15 +103,24 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     // For sample-load.ps1 it prints a line like the real one's: a runner with a child, two threads waiting, Cara at the PC.
     const line = JSON.stringify({ procs: [[10, 1, 'C:\\actions-runner-vault\\bin\\Runner.Listener.exe', 1, 1000], [11, 10, 'C:\\cargo\\rustc.exe', 5, 2000]], queue: 2, quser: [' USERNAME SESSIONNAME ID STATE IDLE TIME LOGON TIME', '>cara console 1 Active 3 11/10/2026 8:01 AM'], hv: null, temp: null, restarts: ['2026-10-30T13:34:00.0000000Z'] });
     writeFileSync(join(srv.root, 'sample.json'), line);
-    writeFileSync(join(ps, 'powershell.exe'), `#!/bin/sh\ncase "$*" in *sample-load.ps1*) cat '${join(srv.root, 'sample.json')}'; exit 0;; esac\necho "fake ps: $*"\necho "token was $CC_MACHINE_TOKEN"\n`);
+    writeFileSync(join(ps, 'powershell.exe'), `#!/bin/sh\ncase "$*" in *sample-load.ps1*) cat '${join(srv.root, 'sample.json')}'; exit 0;; *keep-runners.ps1*) echo "holding: $*"; exit 0;; esac\necho "fake ps: $*"\necho "token was $CC_MACHINE_TOKEN"\n`);
     chmodSync(join(ps, 'powershell.exe'), 0o755);
     const made = await srv.call('/api/machines', { name: 'desk-runners' });
     assert.equal(made.status, 201, JSON.stringify(made.data));
     const tokenFile = join(srv.root, 'machine-token');
     writeFileSync(tokenFile, `${made.data.token}\n`);
-    agent = spawn(process.execPath, [agentFile, srv.base, '--token-file', tokenFile, '--os', 'windows', '--sample-ms', '200'], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
+    // Installed as on the PC, with its scripts beside it: a Windows agent keeps keep-runners.ps1 running (#552).
+    const installed = join(srv.root, 'agent');
+    mkdirSync(installed);
+    copyFileSync(agentFile, join(installed, 'runner-agent.mjs'));
+    writeFileSync(join(installed, 'keep-runners.ps1'), '');
+    const logFile = join(srv.root, 'agent.log');
+    agent = spawn(process.execPath, [join(installed, 'runner-agent.mjs'), srv.base, '--token-file', tokenFile, '--os', 'windows', '--sample-ms', '200', '--log', logFile], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
     const online = await until('the runner agent to connect', async () => (await srv.call('/api/machines')).data.find((m: any) => m.name === 'desk-runners' && m.online));
     assert.equal(online.runners, true);
+    // The cap and yield (#552): started from its folder with the cap and the agent's pid, its lines in the agent's log.
+    const held = await until('keep-runners.ps1 to start', async () => existsSync(logFile) && /keep-runners: holding: .*/.exec(readFileSync(logFile, 'utf8'))?.[0]);
+    assert.ok(held.includes(`-File ${join(installed, 'keep-runners.ps1')} -CpuPercent 75 -AgentPid ${agent.pid}`), held);
     assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
 
     const project = (await srv.call('/api/projects', { name: 'Vault' })).data;
@@ -140,7 +149,7 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     const laptop = await srv.call('/api/machines', { name: 'a-laptop' });
     assert.equal((await post(laptop.data.token, { os: 'windows', host: 'x', cores: 1, cpu: 5, mem_total: 1, mem_free: 1, runners: [] })).status, 403);
 
-    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1', 'keep-wsl-up.ps1',
+    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1', 'keep-wsl-up.ps1', 'keep-runners.ps1',
       'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh']) {
       assert.equal((await fetch(`${srv.base}/ci-runner/${name}`)).status, 200, name);
     }

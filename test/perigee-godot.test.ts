@@ -14,13 +14,17 @@ const root = mkdtempSync(join(tmpdir(), 'perigee-godot-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const H = 3600_000;
 const NOW = Date.parse('2026-11-10T12:00:00Z');
+const until = async (ok: () => boolean) => {
+  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(ok());
+};
 
 /** A stub systemctl that logs its arguments and answers `show` with the given unit state. */
 function stub(name: string, unit: { ActiveState: string; FreezerState?: string; since?: number }) {
   const dir = mkdtempSync(join(root, `${name}-`));
   const calls = join(dir, 'calls');
   writeFileSync(join(dir, 'show'), `ActiveState=${unit.ActiveState}\nFreezerState=${unit.FreezerState ?? 'running'}\nInactiveExitTimestamp=${unit.since ? `@${Math.floor(unit.since / 1000)}` : ''}\n`);
-  writeFileSync(join(dir, 'systemctl'), `#!/bin/sh\necho "$*" >>'${calls}'\ncase "$*" in *' show '*) cat '${dir}/show' ;; esac\n`);
+  writeFileSync(join(dir, 'systemctl'), `#!/bin/sh\necho "$*" >>'${calls}'\ncase "$*" in *' show '*) cat '${dir}/show' ;; *' stop '*) touch '${dir}/stopping'; sleep 0.3 ;; esac\n`);
   chmodSync(join(dir, 'systemctl'), 0o755);
   const cfg = settings({ GODOT_SYSTEMCTL: join(dir, 'systemctl'), GODOT_ACTIVITY: join(dir, 'last-call') });
   const used = (at: number) => (writeFileSync(cfg.activity, ''), utimesSync(cfg.activity, new Date(at), new Date(at)));
@@ -66,6 +70,19 @@ test('idle-check stops the unit after 2 hours unused, and leaves a used or froze
   assert.equal(idleCheck(fresh.cfg, NOW).stop, false);
   assert.equal(statSync(fresh.cfg.activity).mtimeMs, NOW);
   assert.equal(idleCheck(fresh.cfg, NOW + 2 * H + 60_000).stop, true, 'and stops it 2 hours on');
+});
+
+test('idle-check run as the timer runs it holds the stop lock while it stops the editor', async () => {
+  const s = stub('locked', { ActiveState: 'active', since: Date.now() - 3 * H });
+  s.used(Date.now() - 3 * H);
+  const script = join(import.meta.dirname, '..', 'deploy', 'perigee-godot', 'godot-on-demand.mjs');
+  const run = spawn(process.execPath, [script, 'idle-check'], { stdio: 'ignore', env: { ...process.env, GODOT_SYSTEMCTL: s.cfg.systemctl, GODOT_ACTIVITY: s.cfg.activity, GODOT_STOP_LOCKED: '' } });
+  after(() => run.exitCode === null && run.kill());
+  await until(() => existsSync(join(s.dir, 'stopping')));
+  const probe = spawn('flock', ['-n', '-s', join(s.dir, 'stop.lock'), 'true']);
+  assert.equal(await new Promise((r) => probe.on('exit', r)), 1, 'a call would wait for this stop');
+  assert.equal(await new Promise((r) => run.on('exit', r)), 0);
+  assert.deepEqual(s.log().filter((l) => !l.startsWith('show')), ['stop perigee-godot.service']);
 });
 
 test('needsEditor: tool calls wait for the editor, the handshake and listings do not', () => {
@@ -198,10 +215,6 @@ function fakeBridge(s: ReturnType<typeof stub>) {
   };
   return { send, seen, replies, ready, fresh, close };
 }
-const until = async (ok: () => boolean) => {
-  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
-  assert.ok(ok());
-};
 
 test('bridge: the handshake goes straight through, a tool call waits for the editor, and order holds', async () => {
   const s = stub('bridge', { ActiveState: 'inactive' });

@@ -162,7 +162,7 @@ export async function ensureEditor(cfg, log, { now = Date.now, connected = () =>
     await sleep(poll);
     if (connected()) {
       log(`the editor connected ${Math.round((now() - since) / 1000)} s after ${cfg.unit} started`);
-      // shortcut: the TCP connection comes a moment before the plugin's handshake registers it, and a call in that gap fails; a fixed wait covers it. Ask the backend's status instead if it ever doesn't.
+      // shortcut: the TCP connection comes a moment before the plugin's handshake registers it, and a call in that gap fails; a fixed wait covers the call that started it (not another session's call landing inside those seconds). Ask the backend's status instead if that ever bites.
       await sleep(settle);
       return 'ready';
     }

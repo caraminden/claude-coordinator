@@ -31,7 +31,8 @@ The kit's skills and agents read this repo's paths and commands from here. "None
 skill step is skipped or uses its default.
 
 - **Check commands:** `npm test` (`node --test test/`, failing if it leaves processes running: `test/leak-guard.ts`; it also lints the `.ps1` files with pwsh, `test/ps1-lint.test.ts`). No build step. A UI change is
-  also checked in a dev copy or preview (scheme instructions, "UI checks").
+  also checked in a dev copy (`citadel-dev-copy start`, then `stop`) or preview (scheme instructions,
+  "UI checks").
 - **Front end:** `public/`, plain JS with no build step.
 - **High risk by file (self-review):** auth (`src/auth.ts`); deploy and restart code
   (`tools/deploy.sh`, `tools/land.sh`, `tools/boot-check.ts`, `deploy/`); the tripwire

@@ -57,6 +57,31 @@ async function end(proc: ChildProcess): Promise<void> {
   clearTimeout(timer);
 }
 
+/**
+ * Copy the database for a server that runs on it beside the live one (a preview, tools/dev-copy.ts):
+ * consistent even while the live server writes (WAL), minus the push subscriptions, the running turns'
+ * records (their systemd units) and the running ultra reviews' (their folders), which only the live
+ * server may act on.
+ */
+export async function copyData(from: DatabaseSync, to: string): Promise<void> {
+  await backup(from, to);
+  const copy = new DatabaseSync(to);
+  copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%' OR key = 'ultrareview_running'");
+  copy.close();
+}
+
+/**
+ * A preview-mode server.ts's environment, on `port` with its data in `dir`: no turns, no pushes, no
+ * new minions. Only what it needs: not this server's secrets, MACHINES_URL or Claude's login.
+ */
+export function previewEnv(port: number, dir: string, password: string, secret: string): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG,
+    HOST: '127.0.0.1', PORT: String(port), DATA_DIR: dir, PREVIEW: '1', BOOT_CHECK: '1', CLAUDE_BIN: '/bin/false',
+    CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: password, SESSION_SECRET: secret,
+  };
+}
+
 export class Previews {
   private store: Store;
   readonly root: string;
@@ -150,26 +175,14 @@ export class Previews {
     const dir = join(this.root, String(ticket.id));
     rmSync(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
-    // A consistent copy even while this server writes (WAL), minus the push subscriptions, the
-    // running turns' records (their systemd units) and the running ultra reviews' (their folders),
-    // which only the live server may act on.
-    const db = join(dir, 'coordinator.db');
-    await backup(this.store.db, db);
-    const copy = new DatabaseSync(db);
-    copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%' OR key = 'ultrareview_running'");
-    copy.close();
+    await copyData(this.store.db, join(dir, 'coordinator.db'));
 
     const port = await freePort();
     const password = randomBytes(16).toString('hex');
     const secret = randomBytes(32).toString('hex');
     const proc = spawn(process.execPath, [join(ticket.cwd, 'server.ts')], {
       cwd: ticket.cwd,
-      // Only what it needs: not this server's secrets, MACHINES_URL or Claude's login.
-      env: {
-        PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG,
-        HOST: '127.0.0.1', PORT: String(port), DATA_DIR: dir, PREVIEW: '1', BOOT_CHECK: '1', CLAUDE_BIN: '/bin/false',
-        CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: password, SESSION_SECRET: secret,
-      },
+      env: previewEnv(port, dir, password, secret),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let log = '';

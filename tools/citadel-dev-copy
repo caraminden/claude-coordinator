@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# A dev copy of Citadel from the worktree you're in (#482), on every turn's PATH like citadel-heavy:
+#   citadel-dev-copy start [--data copy|empty] | status | stop
+# It runs that worktree's tools/dev-copy.ts, which says what each does.
+set -uo pipefail
+root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "citadel-dev-copy: run it inside a worktree of Citadel's repo" >&2; exit 2; }
+[ -f "$root/tools/dev-copy.ts" ] || { echo "citadel-dev-copy: $root has no tools/dev-copy.ts: it isn't Citadel's repo, or its branch is older than the command (rebase onto main)" >&2; exit 2; }
+exec node "$root/tools/dev-copy.ts" "$@"

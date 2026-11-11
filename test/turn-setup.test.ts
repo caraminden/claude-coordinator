@@ -70,7 +70,8 @@ const mcp = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf
 // What a Bash call would run for \`citadel-heavy\`, read while the turn's folder still exists.
 const heavy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-heavy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
 const wait = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-wait) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, mcp, heavy, wait }));
+const devCopy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-dev-copy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, mcp, heavy, wait, devCopy }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
@@ -268,6 +269,7 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   const t = await turn('ticket', 'connected');
   assert.equal(t.heavy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-heavy'), 'utf8'), 'on PATH and executable');
   assert.equal(t.wait, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-wait'), 'utf8'), 'citadel-wait beside it (#481)');
+  assert.equal(t.devCopy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-dev-copy'), 'utf8'), 'citadel-dev-copy (#482) too');
   assert.ok(!t.env.PATH.startsWith(MCP_DIR) && t.env.PATH.split(':')[0].endsWith('/pin/bin'), "the turn's own pinned copy, which outlives a restart");
   assert.equal(t.env.CITADEL_HEAVY_DIR, join(root, 'projects', '.heavy'), "in the projects folder every container mounts");
   assert.match(t.env.CITADEL_HEAVY_WHO, /^P[\d.]+ #\d+$/);
@@ -365,9 +367,11 @@ test("only the scheme whose code this server runs hears about deploys, pending-d
     const served = await turn('ticket', 'connected', {}, repo);
     assert.equal(served.env.COORDINATOR_DEPLOYS, '1');
     assert.match(served.system, /After you deploy with tools\/deploy\.sh/);
+    assert.match(served.system, /run `citadel-dev-copy start`.*Stop your other processes by pid/);
     for (const other of [await turn('ticket', 'connected'), await turn('ticket', 'connected', {}, join(root, 'big-scheme', 'repo'))]) {
       assert.equal(other.env.COORDINATOR_DEPLOYS, undefined);
-      assert.doesNotMatch(other.system, /deploy\.sh|pending-deploy/);
+      assert.doesNotMatch(other.system, /deploy\.sh|pending-deploy|citadel-dev-copy/);
+      assert.match(other.system, /Stop your processes by pid/);
     }
     // A Taskmaster's MCP server never offers set_thread_status or start_preview, so it needs no flag.
     assert.equal((await turn('coordinator', 'connected', {}, repo)).env.COORDINATOR_DEPLOYS, undefined);

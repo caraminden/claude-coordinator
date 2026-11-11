@@ -505,6 +505,13 @@ async function resync() {
   if (view?.kind !== 'project') return route();
   // Refresh in place so a half-typed message in the composer survives.
   const v = view;
+  // The stream has no replay: live events for the open chat wait until the catch-up has fetched what
+  // came before them, or the catch-up (after the newest shown) would skip what was missed offline.
+  const hold = v.id ? (held?.view === v ? held : { view: v, events: [], owed: 0 }) : null;
+  if (hold) {
+    hold.owed++;
+    held = hold;
+  }
   try {
     const [{ coordinator, tickets, seen, person_notes, pins }, artifacts, chat] = await Promise.all([
       api(`api/projects/${view.projectId}`),
@@ -529,7 +536,16 @@ async function resync() {
     renderTicketHead();
     if (view.ticket.branch) refreshBranch(view.id);
     await catchUpEvents();
-  } catch {}
+  } catch {} finally {
+    if (hold && !--hold.owed) releaseHeld(hold);
+  }
+}
+
+/** Live events for the open chat held while resync catches up (see resync). */
+let held = null;
+function releaseHeld(hold) {
+  if (held === hold) held = null;
+  if (view === hold.view) for (const ev of hold.events) if (ev.id > view.lastEventId) appendEvent(ev);
 }
 
 // Threads' histories downloaded this session, each its newest page or more ({ events, more, tasks },
@@ -666,6 +682,7 @@ export function markSeen(ticketId) {
 function onEvent(event) {
   if (view?.kind !== 'project' || view.id !== event.ticket_id) return;
   if (event.id <= view.lastEventId) return;
+  if (held?.view === view) return void held.events.push(event);
   appendEvent(event);
 }
 

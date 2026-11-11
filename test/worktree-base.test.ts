@@ -152,3 +152,22 @@ test("main catches up through a fetch that runs as the scheme owner's GitHub log
     mainSync.as = was;
   }
 });
+
+test('a fetch from a remote that stalls gives up after its own limit, and main is caught up from what is there (#468 S07-4)', async () => {
+  const r = join(root, 'stalled');
+  git(['clone', '--quiet', remote, r], root);
+  // A remote that answers and then says nothing: the "ssh" sleeps (exec'd, so nothing names this folder).
+  const ssh = join(root, 'ssh-stall');
+  writeFileSync(ssh, '#!/bin/sh\nexec sleep 4\n', { mode: 0o755 });
+  git(['config', 'core.sshCommand', ssh], r);
+  git(['remote', 'set-url', 'origin', 'ssh://stall.invalid/x.git'], r);
+  const was = mainSync.fetchMs;
+  mainSync.fetchMs = 300;
+  try {
+    const t0 = Date.now();
+    await syncMain(r);
+    assert.ok(Date.now() - t0 < 2500, `took ${Date.now() - t0} ms`);
+  } finally {
+    mainSync.fetchMs = was;
+  }
+});

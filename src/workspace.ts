@@ -9,8 +9,8 @@ import { asEnv, identity, type GithubEnv } from './scheme-repo.ts';
 const run = promisify(execFile);
 const GIT_TIMEOUT_MS = 10 * 60 * 1000;
 
-async function git(args: string[], cwd?: string, as?: GithubEnv): Promise<string> {
-  const { stdout } = await run('git', args, { cwd, env: asEnv(as), maxBuffer: 16 * 1024 * 1024, timeout: GIT_TIMEOUT_MS });
+async function git(args: string[], cwd?: string, as?: GithubEnv, timeout = GIT_TIMEOUT_MS): Promise<string> {
+  const { stdout } = await run('git', args, { cwd, env: asEnv(as), maxBuffer: 16 * 1024 * 1024, timeout });
   return stdout.trim();
 }
 
@@ -88,6 +88,8 @@ export const mainSync = {
   stuck: (repoDir: string, why: string | null) => { if (why) console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`); },
   /** The GitHub login the fetch runs as (#321: the scheme owner's; server.ts sets it); undefined is the box's. */
   as: (_repoDir: string): GithubEnv => undefined,
+  /** How long the fetch may take: a remote that stalls would hold up every new minion of the repo behind it. */
+  fetchMs: 45_000,
 };
 
 // One catch-up per repo at a time: two at once would trip over git's index lock.
@@ -101,9 +103,9 @@ const stuckWhy = new Map<string, string | null>();
 export function syncMain(repoDir: string): Promise<void> {
   const next = (syncing.get(repoDir) ?? Promise.resolve()).then(async () => {
     try {
-      await git(['fetch', '--quiet', 'origin'], repoDir, mainSync.as(repoDir));
+      await git(['fetch', '--quiet', 'origin'], repoDir, mainSync.as(repoDir), mainSync.fetchMs);
     } catch {
-      // Unreachable remote: work from what we already have.
+      // Unreachable or stalled remote: work from what we already have.
     }
     const why = await catchUpMain(repoDir).catch((err) => `the catch-up failed: ${err.message}`);
     if ((stuckWhy.get(repoDir) ?? null) === why) return;

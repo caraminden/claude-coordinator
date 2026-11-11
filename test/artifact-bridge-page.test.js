@@ -34,7 +34,7 @@ function page(entries = []) {
   vm.runInContext(`${FN}(${JSON.stringify({ page: 't1-0.x.y/p.html', entries: entries.map(([key, value]) => ({ key, value })) })})`, ctx);
   const deliver = (data) => { for (const fn of listeners) fn({ source: host, data: { bridge: TAG, ...data } }); };
   return {
-    ctx, posted, bars,
+    ctx, posted, bars, deliver,
     /** Answer the oldest unanswered request of kind `op`. */
     answer(op, result, ok = true) {
       const m = posted.find((p) => p.op === op && !p.answered);
@@ -75,4 +75,19 @@ test('one write request is out at a time, so a later flush cannot overtake an ea
   assert.equal(JSON.stringify(p.waiting('write').map((m) => m.entries)), JSON.stringify([[{ key: 'k', value: 2 }]]));
   p.answer('write', { entries: [] });
   await second;
+});
+
+test('a store refresh keeps writes that are on their way on top (#468 S13-7)', async () => {
+  const p = page([['k', 'a']]);
+  const set = p.ctx.citadel.storage.set('k', 'b');
+  await wait(10); // flushed: waiting on the viewer's hello
+  p.answer('hello', { person: 'Cara', entries: [{ key: 'k', value: 'a' }] });
+  await p.ctx.citadel.ready;
+  assert.equal(await p.ctx.citadel.storage.get('k'), 'b');
+  await wait(10);
+  p.answer('write', { entries: [{ key: 'k', value: 'b' }] });
+  await set;
+  // Once it has landed, a refresh is what the server holds.
+  p.deliver({ op: 'changed', entries: [{ key: 'k', value: 'c' }] });
+  assert.equal(await p.ctx.citadel.storage.get('k'), 'c');
 });

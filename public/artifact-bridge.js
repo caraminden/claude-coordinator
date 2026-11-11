@@ -72,6 +72,8 @@
   let flushing = null;
   // The last flush's requests: the next waits for them, so a later value never reaches the server first.
   let sending = Promise.resolve();
+  // Flushed but not yet answered: a refresh meanwhile keeps them on top, as it does the queue.
+  const inFlight = new Map();
   function write(key, value) {
     const v = value === undefined ? undefined : clone(value);
     if (v === undefined) data.delete(key);
@@ -82,9 +84,12 @@
       const entries = [...queue].map(([k, val]) => ({ key: k, value: val }));
       queue = new Map();
       flushing = null;
+      for (const e of entries) inFlight.set(e.key, e.value);
       sending = sending.catch(() => {}).then(async () => {
         if (!(await ready)) throw new Error(NO_VIEWER);
         for (let i = 0; i < entries.length; i += 100) await request('write', { entries: entries.slice(i, i + 100) });
+      }).finally(() => {
+        for (const e of entries) if (inFlight.get(e.key) === e.value) inFlight.delete(e.key);
       });
       return sending;
     });
@@ -96,10 +101,10 @@
     warned = true;
   };
 
-  // The store as the server has it now (another person's or an agent's write); writes not yet sent stay on top.
+  // The store as the server has it now (another person's or an agent's write); writes not yet sent or answered stay on top.
   function replace(entries) {
     const next = new Map(entries.map((e) => [e.key, e.value]));
-    for (const [k, v] of queue) {
+    for (const [k, v] of [...inFlight, ...queue]) {
       if (v === null) next.delete(k);
       else next.set(k, v);
     }

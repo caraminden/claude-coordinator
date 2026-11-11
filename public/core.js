@@ -605,8 +605,10 @@ export function prefetchTopRows() {
 }
 
 export async function catchUpEvents() {
-  if (!view.id) return;
-  const events = await api(`api/tickets/${view.id}/events?after=${view.lastEventId}`);
+  const v = view;
+  if (!v?.id) return;
+  const events = await api(`api/tickets/${v.id}/events?after=${v.lastEventId}`);
+  if (view !== v) return; // another view (or chat) opened meanwhile: these aren't its events
   for (const ev of events) if (ev.id > view.lastEventId) appendEvent(ev);
 }
 

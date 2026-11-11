@@ -410,11 +410,12 @@ export function withoutCount(line) {
 export const THINKING_AFTER = 5000;
 
 /**
- * The live card's running line: the call underway, or the last one for a few seconds after it
- * finished, then "Thinking…". `actions` are the turn's { block, result, doneAt } in order.
+ * The live card's running line: the newest call still underway (calls can run side by side), or the
+ * last one for a few seconds after it finished, then "Thinking…". `actions` are the turn's
+ * { block, result, doneAt } in order.
  */
 export function nowDoing(actions, now) {
-  const last = actions.at(-1);
+  const last = actions.findLast((a) => !a.result) ?? actions.at(-1);
   return last && (!last.result || !(now - last.doneAt >= THINKING_AFTER)) ? actionLabel(last.block) : 'Thinking…';
 }
 

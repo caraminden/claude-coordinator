@@ -324,7 +324,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 /* The live card under the chat while a turn runs (#543): step and time, the latest remark, what's running, the last steps done.
    Only the running line's dot moves. */
 .typing { display: grid; gap: 0.3rem; margin: 0.25rem 0 0.75rem; padding: 0.55rem 0.8rem; border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); border-radius: 10px; background: var(--panel); font-size: 0.9em; min-width: 0; }
-.typing .top { display: flex; align-items: center; gap: 0.5rem; min-width: 0; font-weight: 600; cursor: pointer; }
+.typing .top { display: flex; align-items: center; gap: 0.5rem; min-width: 0; width: 100%; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; font-weight: 600; text-align: left; }
 .typing .top:hover .t, .typing .top:focus-visible .t { text-decoration: underline; }
 .typing .mark { flex: none; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--running); }
 .typing .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -338,6 +338,8 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .typing .prev > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .typing [hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .typing .act .pulse { animation: none; } }
+/* A phone's 40px tap target on the top line, without the card's top padding growing past its bottom. */
+@media (max-width: 800px) { .typing .top { margin-block: calc((1lh - var(--control-h)) / 2); } }
 /* No turn running: the card keeps its top line's room, empty, so a turn starting or ending moves the chat less (rule 13). */
 .typing[hidden] { visibility: hidden; }
 .typing[hidden] > :not(.top) { display: none; }

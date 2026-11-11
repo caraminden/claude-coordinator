@@ -152,6 +152,9 @@ test('the live card keeps a finished call\'s label for a few seconds, then says 
   const done = { ...read, result: { content: 'ok' }, doneAt: 10_000 };
   assert.equal(nowDoing([done], 10_000 + THINKING_AFTER - 1), label, 'the gap before the next call keeps the label');
   assert.equal(nowDoing([done], 10_000 + THINKING_AFTER), 'Thinking…');
+  // Calls run side by side: one finishing first doesn't hide the one still running.
+  const bash = { block: { type: 'tool_use', name: 'Bash', input: { command: 'npm test', description: 'Run the tests' } }, result: null };
+  assert.equal(nowDoing([bash, done], 10_000 + THINKING_AFTER), describeAction(bash.block).text);
 });
 
 test('the live card counts steps done like every readout, and shows the last two steps done (#518, #543)', () => {

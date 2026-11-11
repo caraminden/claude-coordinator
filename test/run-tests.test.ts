@@ -12,8 +12,8 @@ const tools = join(import.meta.dirname, '..', 'tools');
 const root = mkdtempSync(join(tmpdir(), 'run-tests-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // NODE_TEST_CONTEXT would make the inner `node --test` report to this runner; COORDINATOR_SHARED_DIR would write
-// into the real scheme's retro log.
-const env = { ...process.env, NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined };
+// into the real scheme's retro log; an empty DEPLOY_TEST_CPU_WEIGHT makes no real systemd scope (run-tests-scope.test.ts).
+const env = { ...process.env, NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined };
 
 const FIXTURES: Record<string, string> = {
   'ok.test.mjs': "import test from 'node:test';\ntest('fine', () => {});\n",

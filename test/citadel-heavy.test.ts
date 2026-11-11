@@ -10,9 +10,14 @@ const heavy = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
 const root = mkdtempSync(join(tmpdir(), 'heavy-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 let n = 0;
-function folder(slots?: number) {
+// A fake /proc/pressure/cpu, so no test reads (or depends on) the real box's load.
+const psi = (some60: number) => `some avg10=${some60}.12 avg60=${some60}.34 avg300=1.00 total=123\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n`;
+function folder(slots?: number, pressure = 5) {
   const dir = join(root, `locks-${n++}`);
-  return { dir, env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots) } };
+  const pressureFile = `${dir}-pressure`;
+  writeFileSync(pressureFile, psi(pressure));
+  const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots), CITADEL_HEAVY_PRESSURE: pressureFile, CITADEL_HEAVY_POLL: '0.1', CITADEL_HEAVY_MAX_PRESSURE: undefined, CITADEL_HEAVY_LOAD_WAIT: undefined };
+  return { dir, env, pressureFile };
 }
 type Job = { child: ChildProcess; err: () => string; done: Promise<number | null> };
 function job(env: NodeJS.ProcessEnv, who: string, script: string): Job {
@@ -86,6 +91,7 @@ test('the slots file tunes how many run at once, and a nested call runs in the o
   const b = job(env, 'second', 'true');
   try {
     await until('the second to wait on the one slot', () => /all heavy slots \(1\) are busy/.test(b.err()));
+    assert.doesNotMatch(b.err(), /CPU pressure/, 'with no slot free, the load is beside the point');
   } finally {
     writeFileSync(go, '');
   }
@@ -102,4 +108,68 @@ test('without a usable lock folder it warns and runs anyway', () => {
   const r = spawnSync(heavy, ['echo', 'ran'], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(blocker, 'locks') }, encoding: 'utf8' });
   assert.equal(r.stdout, 'ran\n');
   assert.match(r.stderr, /without waiting for a slot/);
+});
+
+// Box load (#503): a free slot is not enough while the CPUs are already full.
+test('with a slot free but the box busy, the job waits, says the pressure, and starts once it eases', async () => {
+  const { dir, env, pressureFile } = folder(3, 72);
+  const a = job(env, 'Peek #4', touch(join(root, 'load-up')));
+  try {
+    await until('the job to say it waits on load', () => /box is busy/.test(a.err()));
+    assert.ok(!existsSync(join(root, 'load-up')), 'it waits though all 3 slots are free');
+    assert.match(a.err(), /a heavy slot is free, but the box is busy: CPU pressure 72% over the last minute \(it waits at 50%; load \d+ on \d+ cores\)/);
+    assert.match(a.err(), /at most 5 min, then it starts anyway \(Peek #4: sh -c/);
+    assert.match(a.err(), /Raising the slot count would make every suite slower, not faster/);
+    // The next job in line waits behind it rather than slipping past to the free slots.
+    const b = job(env, 'Peek #5', touch(join(root, 'load-up-2')));
+    await until('the next to queue', () => /others are in line/.test(b.err()));
+    assert.ok(!existsSync(join(root, 'load-up-2')));
+    writeFileSync(pressureFile, psi(49));
+    assert.equal(await b.done, 0);
+  } finally {
+    writeFileSync(pressureFile, psi(0));
+  }
+  assert.equal(await a.done, 0);
+  assert.ok(existsSync(join(root, 'load-up')));
+  assert.doesNotMatch(a.err(), /starts anyway in slot/);
+  assert.ok(!existsSync(join(dir, 'slot-0.who')));
+});
+
+test('a job never waits on load past the limit: then it takes the free slot anyway, and says so', async () => {
+  const { env } = folder(2, 90);
+  const r = spawnSync(heavy, ['echo', 'ran'], { env: { ...env, CITADEL_HEAVY_LOAD_WAIT: '1' }, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, 'ran\n');
+  assert.match(r.stderr, /at most 1 s, then it starts anyway/);
+  assert.match(r.stderr, /the box is still busy \(CPU pressure 90% .*\) after 1 s waiting on it, so this starts anyway in slot 1/);
+});
+
+test('it goes by slots alone below the limit and without a pressure file, and the limit can be set', () => {
+  const { env } = folder(1, 49);
+  let r = spawnSync(heavy, ['true'], { env, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, '', 'below the limit it starts straight away, quietly');
+  r = spawnSync(heavy, ['true'], { env: { ...env, CITADEL_HEAVY_PRESSURE: join(root, 'no-such-pressure') }, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, '', 'no PSI on the host: slots alone');
+  r = spawnSync(heavy, ['true'], { env: { ...env, CITADEL_HEAVY_MAX_PRESSURE: '40', CITADEL_HEAVY_LOAD_WAIT: '0' }, encoding: 'utf8', timeout: 10_000 });
+  assert.match(r.stderr, /CPU pressure 49% .*it waits at 40%/);
+});
+
+test('the slots file can carry comments, digits and all', async () => {
+  const { dir, env } = folder(undefined, 5);
+  spawnSync(heavy, ['true'], { env });
+  writeFileSync(join(dir, 'slots'), '# Raised to 6 on 2026-11-10: it made suites slower, not faster.\n3 # three\n9\n');
+  const go = join(root, 'go-3');
+  const jobs = [1, 2, 3, 4].map((i) => job(env, `c${i}`, `${touch(join(root, `c${i}-up`))}; ${waitFor(go)}`));
+  const up = () => [1, 2, 3, 4].filter((i) => existsSync(join(root, `c${i}-up`))).length;
+  try {
+    // Whichever job gets in line last waits: 3 slots, from the first number that isn't in a comment.
+    await until('three running and one waiting', () => up() === 3 && jobs.some((j) => /all heavy slots \(3\) are busy/.test(j.err())));
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(up(), 3);
+  } finally {
+    writeFileSync(go, '');
+  }
+  for (const j of jobs) assert.equal(await j.done, 0);
 });

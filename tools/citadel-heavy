@@ -5,8 +5,21 @@
 # burst of minions builds a few at a time instead of all at once. The rest wait in line and say for whom.
 # A slot is a flock(1) lock on a file in $CITADEL_HEAVY_DIR (turns get Citadel's projects folder, which
 # every container mounts at the same path). The kernel drops a lock when its holder exits or dies, so
-# no slot is ever left stale. How many slots: the number in $CITADEL_HEAVY_DIR/slots (edit it to tune;
-# the next job in line reads it), else $CITADEL_HEAVY_SLOTS, else 2.
+# no slot is ever left stale. How many slots: the first number in $CITADEL_HEAVY_DIR/slots (edit it to
+# tune; the next job in line reads it; # starts a comment), else $CITADEL_HEAVY_SLOTS, else 2.
+#
+# Box load (#503): a free slot isn't enough on its own. The job next in line also reads the host's CPU
+# pressure, /proc/pressure/cpu's "some avg60": the share of the last minute in which some task was
+# waiting for a CPU (containers see the host's). At 50% or more the CPUs are already full, so it waits
+# even with a slot free. After waiting 5 min on load it takes the free slot anyway, so nothing waits
+# forever: under sustained load, one more heavy job starts every 5 min at most. Without the pressure file
+# (no PSI) it goes by slots alone. CITADEL_HEAVY_MAX_PRESSURE, CITADEL_HEAVY_LOAD_WAIT (seconds) and
+# CITADEL_HEAVY_PRESSURE (the file) override these, and CITADEL_HEAVY_POLL the seconds between looks, for tests.
+#
+# RAISING THE SLOT COUNT UNDER LOAD MAKES SUITES SLOWER, NOT FASTER. On 2026-11-10 the slots went from 3
+# to 6 to push a stuck landing through: six suites ran at once, the load reached ~100 on 16 cores,
+# every suite slowed down and timing-sensitive tests went red. When jobs queue on a busy box, wait.
+#
 # Exits with the command's status. Nested calls (a wrapped script that wraps its own step) run straight
 # away in the outer call's slot. When the lock folder or flock is missing, it warns and runs unlocked.
 set -uo pipefail
@@ -24,13 +37,34 @@ fi
 who=${CITADEL_HEAVY_WHO:-$(id -un 2>/dev/null || echo someone)}
 what="$*"
 [ ${#what} -le 100 ] || what="${what:0:97}..."
+psi=${CITADEL_HEAVY_PRESSURE:-/proc/pressure/cpu}
+max_pressure=${CITADEL_HEAVY_MAX_PRESSURE:-50}
+load_wait=${CITADEL_HEAVY_LOAD_WAIT:-300}
 
 slots() {
   local n
-  n=$(tr -dc 0-9 2>/dev/null <"$dir/slots")
+  n=$(sed 's/#.*//' "$dir/slots" 2>/dev/null | grep -o '[0-9][0-9]*' | head -n 1)
   n=${n:-${CITADEL_HEAVY_SLOTS:-2}}
-  [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] || n=1
+  [[ $n =~ ^[0-9]{1,6}$ ]] && [ "$n" -ge 1 ] || n=1
+  [ "$n" -le 64 ] || n=64 # a typo can't make it list a million slots
   echo "$n"
+}
+
+# Sets $pressure to the whole percent from the pressure file's "some avg60"; fails when there's none to read.
+pressure=
+read_pressure() {
+  local line
+  pressure=
+  line=$(grep -m 1 '^some ' "$psi" 2>/dev/null) || return 1
+  [[ $line =~ avg60=([0-9]+) ]] || return 1
+  pressure=$((10#${BASH_REMATCH[1]}))
+}
+# "CPU pressure 63% over the last minute (it waits at 50%; load 41 on 16 cores)", for people reading the wait.
+load_text() {
+  local load cores
+  load=$(cut -d ' ' -f 1 /proc/loadavg 2>/dev/null) && load=${load%%.*}
+  cores=$(nproc 2>/dev/null)
+  echo "CPU pressure $pressure% over the last minute (it waits at $max_pressure%${load:+; load $load on ${cores:-?} cores})"
 }
 
 # Try each slot once; on success fd 8 holds it and $slot says which.
@@ -46,6 +80,21 @@ take() {
   return 1
 }
 
+# The admission decision: succeeds holding a slot it may run in; else $waiting says on what ("slots" or "load").
+# The load clock starts the first time a free slot meets a busy box and keeps running from there.
+waiting=
+load_since=
+forced=
+admit() {
+  take || { waiting=slots; return 1; }
+  read_pressure && [ "$pressure" -ge "$max_pressure" ] || return 0
+  load_since=${load_since:-$SECONDS}
+  if [ $((SECONDS - load_since)) -ge "$load_wait" ]; then forced=1; return 0; fi
+  exec 8>&-
+  waiting=load
+  return 1
+}
+
 holders() {
   local i n f line
   n=$(slots)
@@ -56,29 +105,44 @@ holders() {
   done
 }
 
+# "5 min", or seconds when under a minute (tests).
+dur() { if [ "$1" -ge 60 ]; then echo "$(($1 / 60)) min"; else echo "$1 s"; fi; }
+
+# Why it waits, said when that changes and again every minute.
+tell() {
+  local after=$1
+  if [ "$waiting" = load ]; then
+    say "${after}a heavy slot is free, but the box is busy: $(load_text). Waiting for it to ease, at most $(dur "$load_wait"), then it starts anyway ($who: $what). Raising the slot count would make every suite slower, not faster."
+  else
+    say "${after}all heavy slots ($(slots)) are busy; waiting for one ($who: $what)"
+    holders
+  fi
+}
+
 # The line: whoever holds the queue lock is next and polls for a free slot; the rest wait behind it.
 exec 7<>"$dir/queue"
 since=$SECONDS
 if ! flock -n 7; then
-  say "all heavy slots ($(slots)) are busy and others are in line first; waiting ($who: $what)"
+  say "others are in line for a heavy slot first; waiting ($who: $what)"
   holders
   flock 7
 fi
-if ! take; then
-  say "all heavy slots ($(slots)) are busy; waiting for one ($who: $what)"
-  holders
+if ! admit; then
+  tell ""
   told=$SECONDS
-  until take; do
-    sleep 2
-    if [ $((SECONDS - told)) -ge 60 ]; then
-      say "still waiting after $(((SECONDS - since) / 60)) min:"
-      holders
+  said=$waiting
+  until admit; do
+    sleep "${CITADEL_HEAVY_POLL:-2}"
+    if [ "$waiting" != "$said" ] || [ $((SECONDS - told)) -ge 60 ]; then
+      tell "still waiting after $(((SECONDS - since) / 60)) min: "
       told=$SECONDS
+      said=$waiting
     fi
   done
 fi
 exec 7>&-
-[ $((SECONDS - since)) -lt 2 ] || say "got slot $((slot + 1)) after $((SECONDS - since))s"
+[ -z "$forced" ] || say "the box is still busy ($(load_text)) after $(dur "$load_wait") waiting on it, so this starts anyway in slot $((slot + 1))"
+[ $((SECONDS - since)) -lt 2 ] || [ -n "$forced" ] || say "got slot $((slot + 1)) after $((SECONDS - since))s"
 
 printf '%s: %s (since %s, pid %s)\n' "$who" "$what" "$(date +%H:%M)" "$$" >"$dir/slot-$slot.who" 2>/dev/null
 trap 'rm -f "$dir/slot-$slot.who"' EXIT

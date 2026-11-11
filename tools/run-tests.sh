@@ -10,6 +10,13 @@
 # average in the scheme's retro log (retro-log/<date>/land.md) so flaky files get counted. A hang is never rerun.
 # The reruns hold the deploy lock too, and a waiting land gives up after 15 minutes: DEPLOY_RERUN_TIMEOUT limits
 # each in seconds (default 120), DEPLOY_RERUN_BUDGET all of them together (default 300); a file left over is not rerun.
+#
+# Landing tests win over routine checks (#503): the run and its reruns get their own systemd scope in citadel.slice
+# with CPUWeight=500, beside the host turns' slice and each person's container (100 each) and under the server's
+# 1000, so the one test run holding the deploy lock isn't starved by minions' builds and the server stays first.
+# When it runs in a unit of the user manager (the landing turn, or the server for a container's land tool), the
+# scope is bound to it, so stopping that unit still stops the tests, as before. DEPLOY_TEST_CPU_WEIGHT sets the
+# weight (empty: no scope). Without a user systemd to ask (no bus, no such slice) it runs as before, unweighted.
 set -uo pipefail
 log=$1
 limit=${DEPLOY_TEST_TIMEOUT:-600}
@@ -17,9 +24,16 @@ rerun_limit=${DEPLOY_RERUN_TIMEOUT:-120}
 budget=${DEPLOY_RERUN_BUDGET:-300}
 max_reruns=5 # more failed files than this is a broken change, not load
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+weight=${DEPLOY_TEST_CPU_WEIGHT-500}
+cgroup=$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null)
+scope=(systemd-run --user --scope --quiet --collect --slice=citadel.slice -p "CPUWeight=$weight")
+# Only a unit below the user manager: a login's session-N.scope belongs to the system manager, which --user can't bind to.
+[[ $cgroup =~ /user@[0-9]+\.service/.+/([^/]+\.(service|scope))$ ]] && scope+=(-p "BindsTo=${BASH_REMATCH[1]}")
+scope+=(--)
+[ -n "$weight" ] && timeout 20 "${scope[@]}" true >/dev/null 2>&1 || scope=()
 failed=$(mktemp)
 trap 'rm -f "$failed"' EXIT
-timeout -k 30 "$limit" node --test --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
+timeout -k 30 "$limit" "${scope[@]}" node --test --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" test/ >"$log" 2>&1
 rc=$?
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'
@@ -59,7 +73,7 @@ for f in "${files[@]}"; do
   fi
   this=$((left < rerun_limit ? left : rerun_limit))
   echo "== $f" >>"$rerun_log"
-  timeout -k 10 "$this" node --test --test-force-exit "$f" >>"$rerun_log" 2>&1
+  timeout -k 10 "$this" "${scope[@]}" node --test --test-force-exit "$f" >>"$rerun_log" 2>&1
   case $? in
     0) say "$f: failed in the full run, passed alone: likely load, not your change (1-minute load $load)"; log_flake "$f" ;;
     124 | 137) say "$f: hung when rerun alone (stopped after ${this}s): a real failure" ;;

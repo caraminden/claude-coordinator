@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -121,4 +121,49 @@ test('the nightly backup drops hand-made before-* copies once they are 7 days ol
 test('the nightly prune timer deletes stale copies too', () => {
   const unit = readFileSync(join(import.meta.dirname, '..', 'deploy', 'claude-coordinator-prune.service'), 'utf8');
   assert.match(unit, /^ExecStart=.*prune\.sh --apply --stale-backups$/m);
+});
+
+// A data dir of its own, for cases that would upset the shared one above.
+let scratches = 0;
+function scratch(...names: string[]) {
+  const dir = join(root, `scratch-${++scratches}`);
+  mkdirSync(dir);
+  const db = new Store(join(dir, 'coordinator.db'));
+  const projects = names.map((name) => {
+    const p = db.createProject(name, null);
+    const repo = join(dir, 'projects', String(p.id), 'repo');
+    mkdirSync(repo, { recursive: true });
+    git(['init', '--quiet', '-b', 'main'], repo);
+    git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', 'init'], repo);
+    db.setProjectRepoDir(p.id, repo);
+    return { id: p.id, repo };
+  });
+  const closed = (which: number, title: string, daysAgo = 40) => {
+    const { id: project_id, repo } = projects[which];
+    const t = db.createTicket({ project_id, title, permission_mode: 'default', created_by: 't' });
+    const cwd = join(dir, 'projects', String(project_id), 'tickets', String(t.id));
+    git(['worktree', 'add', '--quiet', '-b', `ticket/${t.number}-x`, cwd], repo);
+    db.setTicketDir(t.id, cwd, `ticket/${t.number}-x`);
+    db.putClaudeState({ path: `projects/x/${t.id}.jsonl`, project_id, ticket_id: t.id, size: 3, mtime: 1, data: new Uint8Array(1000) });
+    db.updateTicket(t.id, { status: 'closed' });
+    db.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(Date.now() - daysAgo * DAY, t.id);
+    return { id: t.id, number: t.number, cwd, repo, project_id };
+  };
+  const exec = (...args: string[]) => spawnSync(prune, args, { env: { ...process.env, DATA_DIR: dir }, encoding: 'utf8' });
+  return { dir, db, projects, closed, exec };
+}
+
+test('a scheme name with a space is listed, counted and deleted like any other (#468 S10-3)', () => {
+  const s = scratch('Peek Auras', 'Zeta');
+  const spaced = s.closed(0, 'spaced');
+  const plain = s.closed(1, 'plain');
+  const dry = s.exec();
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.doesNotMatch(dry.stderr, /syntax error/);
+  assert.match(dry.stdout, new RegExp(`Would delete: Peek Auras #${spaced.number}, 1 files, 0\\.0 MB`));
+  assert.match(dry.stdout, new RegExp(`Would delete: Zeta #${plain.number}, 1 files`));
+  const res = s.exec('--apply');
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(s.db.listClaudeState(spaced.project_id, spaced.id).length, 0);
+  assert.equal(s.db.listClaudeState(plain.project_id, plain.id).length, 0);
 });

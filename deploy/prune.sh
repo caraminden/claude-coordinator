@@ -43,10 +43,10 @@ verb=$([[ $apply == 1 ]] && echo Deleting || echo "Would delete")
 # Session state of long-closed minions.
 cutoff=$((now - STATE_DAYS * 86400000))
 closed_state="SELECT t.id FROM tickets t WHERE t.status = 'closed' AND t.updated_at < $cutoff"
-rows=$(sql -separator ' ' "SELECT p.name, t.number, count(*), sum(length(s.data)) FROM claude_state s JOIN tickets t ON t.id = s.ticket_id JOIN projects p ON p.id = t.project_id WHERE s.ticket_id IN ($closed_state) GROUP BY t.id ORDER BY p.name, t.number")
+rows=$(sql -separator $'\t' "SELECT p.name, t.number, count(*), sum(length(s.data)) FROM claude_state s JOIN tickets t ON t.id = s.ticket_id JOIN projects p ON p.id = t.project_id WHERE s.ticket_id IN ($closed_state) GROUP BY t.id ORDER BY p.name, t.number")
 echo "== Session state of minions closed over $STATE_DAYS days ago"
 total=0
-while read -r name num files bytes; do
+while IFS=$'\t' read -r name num files bytes; do # tab-separated: a scheme name may have spaces
   [[ -n ${num:-} ]] || continue
   echo "$verb: $name #$num, $files files, $(mb "$bytes")"
   total=$((total + bytes))

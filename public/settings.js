@@ -511,10 +511,10 @@ export function appInstructionsEditor() {
       undo: () => appInstructions === mine && show(was, 'Not saved.'), // unless a later save changed it again
       label: 'save the Citadel-wide instructions',
     }).then((a) => {
+      loadHistory(); // even when the broadcast of this save beat the answer and replaced `mine`
       if (appInstructions !== mine) return;
       if (textarea.value === mine.text) textarea.value = a.text; // as the server keeps it
       show(a, status.textContent);
-      loadHistory();
     }, () => {});
   };
   discard.onclick = () => {

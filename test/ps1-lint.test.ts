@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { test } from 'node:test';
 
 // The .ps1 lint (#370): Citadel's runner scripts and the Windows CI kit's own scripts must parse and lint clean, since
@@ -89,13 +89,17 @@ test('the Windows scripts start Windows PowerShell by its System32 path, not fro
 // remove-runner.ps1 runs as SYSTEM, and a CI job can write its runner's folder (#476 B1): nothing in that folder is ever
 // run. Here the real script runs under pwsh on Linux against a fake Citadel, with the Windows-only cmdlets and sc.exe
 // stood in for and two of its lines changed: the admin check (a Windows API) and the drive it looks in.
+// On Windows the same tests run it under Windows PowerShell 5.1, which is what a runner agent starts it with, on NTFS
+// (a junction for the link, a real read-only file): `node --test test/ps1-lint.test.ts` on the test box.
+const win = process.platform === 'win32';
+const psRun = win ? ['powershell', '-ExecutionPolicy', 'Bypass'] : ['pwsh'];
 // Every runner folder holds a config.cmd and a config.sh that write a canary.
 const REPO = 'caraminden/peek-auras';
 
 /** Runs remove-runner.ps1 over `root`'s folders; `refuse` is the runner name the fake Citadel won't delete. */
 async function removeRunners(dir: string, root: string, services: { Name: string; PathName: string }[], task: { name: string; dir: string } | null, refuse = '', procs: { id: number; exe?: string; cmd?: string }[] = []) {
   const src = readFileSync(join(root0, 'tools/ci-runner/remove-runner.ps1'), 'utf8');
-  const swapped = src.replace(/^\$admin = .*$/m, '$admin = $true').replace(/^\$root = 'C:\\'$/m, `$root = '${root}/'`);
+  const swapped = src.replace(/^\$admin = .*$/m, '$admin = $true').replace(/^\$root = 'C:\\'$/m, `$root = '${root}${sep}'`);
   assert.equal(swapped.split('\n').filter((l, i) => l !== src.split('\n')[i]).length, 2, 'the admin check and the root, and nothing else, were swapped');
   const script = join(dir, 'remove-runner.ps1');
   writeFileSync(script, swapped);
@@ -140,7 +144,7 @@ exit $LASTEXITCODE
   await new Promise<void>((r) => citadel.listen(0, '127.0.0.1', r));
   try {
     const url = `http://127.0.0.1:${(citadel.address() as any).port}`;
-    const child = spawn('pwsh', ['-NoProfile', '-NonInteractive', '-File', stub, script, '-Scheme', 'Peek Auras', '-CitadelUrl', url, '-MachineToken', 'ccm_test'], { cwd: dir });
+    const child = spawn(psRun[0], [...psRun.slice(1), '-NoProfile', '-NonInteractive', '-File', stub, script, '-Scheme', 'Peek Auras', '-CitadelUrl', url, '-MachineToken', 'ccm_test'], { cwd: dir });
     let out = '';
     child.stdout.on('data', (c) => { out += c; });
     child.stderr.on('data', (c) => { out += c; });
@@ -161,8 +165,8 @@ function runnerFolder(dir: string, canary: string, agent: string, marker: object
   for (const f of ['config.cmd', 'config.sh', 'run.cmd']) writeFileSync(join(dir, f), `#!/bin/sh\necho ran >> '${canary}'\n`, { mode: 0o755 });
 }
 
-const noPwsh = found.error ? 'no pwsh on PATH' : false;
-const svc = (name: string, dir: string) => ({ Name: `actions.runner.caraminden-peek-auras.${name}`, PathName: `"${dir}/bin/RunnerService.exe"` });
+const noPwsh = !win && found.error ? 'no pwsh on PATH' : false;
+const svc = (name: string, dir: string) => ({ Name: `actions.runner.caraminden-peek-auras.${name}`, PathName: `"${join(dir, 'bin', 'RunnerService.exe')}"` });
 
 test('remove-runner.ps1 runs nothing from a runner\'s folder: Citadel takes it off GitHub, then the service and folder go', { skip: noPwsh, timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ps1-remove-'));
@@ -187,10 +191,10 @@ test('remove-runner.ps1 runs nothing from a runner\'s folder: Citadel takes it o
     mkdirSync(outside);
     writeFileSync(join(outside, 'keep.txt'), 'keep');
     mkdirSync(join(one, '_work'));
-    symlinkSync(outside, join(one, '_work', 'link'));
+    symlinkSync(outside, join(one, '_work', 'link'), 'junction');
     writeFileSync(join(one, '_work', 'readonly.txt'), 'x', { mode: 0o444 });
 
-    const r = await removeRunners(dir, root, [svc('DESK', one), svc('L'.repeat(43), long), svc('DELVE', delve), { Name: 'actions.runner.caraminden-other.DESK', PathName: `"${plantedDir}/bin/RunnerService.exe"` }], { name: 'GitHub runner peek-auras-desktop', dir: session }, '', [
+    const r = await removeRunners(dir, root, [svc('DESK', one), svc('L'.repeat(43), long), svc('DELVE', delve), { Name: 'actions.runner.caraminden-other.DESK', PathName: `"${join(plantedDir, 'bin', 'RunnerService.exe')}"` }], { name: 'GitHub runner peek-auras-desktop', dir: session }, '', [
       { id: 101, exe: `${one}\\bin\\Runner.Listener.exe` },
       { id: 102, cmd: `cmd.exe /c ${session}\\run.cmd` },
       // Not in a runner folder being removed: the folder "cx" that "c[x]" matches as a wildcard, Delve's, and a name that only starts the same.

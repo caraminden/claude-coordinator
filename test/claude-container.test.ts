@@ -10,7 +10,7 @@ import { CodexLink } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TURN_SLICE } from '../src/turn-launch.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
@@ -118,11 +118,11 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(r.inContainer('citadel-claude-test-2'), 1);
   assert.equal(r.interruptible(), 0);
   await until(() => status(id) === 'idle');
-  const execs = readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const execs = jsonLines(calls);
   const start = execs.find((a) => a[0] === 'exec' && a[1] === '-d');
   assert.equal(start[2], 'citadel-claude-test-2');
   assert.match(start[4], /turn-wrapper\.ts$/);
-  const env = JSON.parse(readFileSync(seen, 'utf8').trim().split('\n').at(-1)!).env;
+  const env = jsonLines(seen).at(-1).env;
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CLAUDE_CONFIG_DIR, join(volume, '.claude'));
   assert.equal(env.COORDINATOR_CONTAINER, '1');
@@ -134,7 +134,7 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.match(env.CITADEL_HEAVY_DIR, /\/projects\/\.heavy$/);
   assert.match(env.CITADEL_HEAVY_WHO, / #\d+ \(josh\)$/);
   // Codex reviews (#330): the managed hook reads the turn's tripwire from a file, which never asks (no card in Codex); the reviewer is pinned beside citadel-heavy.
-  const { codex, codexPinned } = JSON.parse(readFileSync(seen, 'utf8').trim().split('\n').at(-1)!);
+  const { codex, codexPinned } = jsonLines(seen).at(-1);
   assert.match(codex.script, /\/pin\/tripwire\.ts$/);
   assert.equal(codex.config.ask, false);
   assert.equal(codex.config.project, store.getTicket(id)!.project_id);
@@ -163,7 +163,7 @@ test("a container turn answering the person's own typed message carries their id
   const r = runner(inContainer);
   r.send(id, 'Josh', 'what is on my list?', [], { typed: true });
   await until(() => status(id) === 'idle');
-  const env = JSON.parse(readFileSync(seen, 'utf8').trim().split('\n').at(-1)!).env;
+  const env = jsonLines(seen).at(-1).env;
   assert.deepEqual([env.CITADEL_PERSON_ID, env.CITADEL_PERSON_LOGIN, env.COORDINATOR_CONTAINER], [String(josh.id), 'josh', '1']);
 });
 
@@ -173,7 +173,7 @@ test("a container turn's exec runs in a scope of its own under the turns slice, 
   r.units = true;
   r.send(id, 'Josh', 'build it');
   await until(() => status(id) === 'idle');
-  const execs = readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const execs = jsonLines(calls);
   const scope = execs.findLast((c) => c[0] === 'systemd-run');
   assert.ok(scope, 'the exec starts through systemd-run');
   assert.ok(scope.includes('--user') && scope.includes('--scope') && scope.includes('--collect') && scope.includes(`--slice=${TURN_SLICE}`), scope.join(' '));
@@ -189,10 +189,10 @@ test("a container turn still runs when systemd-run fails, with a plain podman ex
   r.units = true;
   process.env.FAKE_SYSTEMD_RUN_FAILS = '1';
   try {
-    const before = readFileSync(calls, 'utf8').trim().split('\n').length;
+    const before = lines(calls).length;
     r.send(id, 'Josh', 'build it');
     await until(() => status(id) === 'idle');
-    const execs = readFileSync(calls, 'utf8').trim().split('\n').slice(before).map((l) => JSON.parse(l));
+    const execs = jsonLines(calls).slice(before);
     const failed = execs.findIndex((c) => c[0] === 'systemd-run');
     assert.ok(failed >= 0, 'it tried the scope first');
     assert.ok(execs.slice(failed + 1).some((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === 'citadel-claude-test-2'), 'then ran podman exec itself');
@@ -381,7 +381,7 @@ test("a person's container mounts their own turns' files, never another person's
   r.send(b, 'Ben', 'go');
   await until(() => status(a) === 'idle' && status(b) === 'idle');
   // The wrapper's folder, from each container's `podman exec -d <container> node <wrapper> <dir>`.
-  const execs = readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const execs = jsonLines(calls);
   const dirOf = (container: string) => execs.findLast((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === container).at(-1) as string;
   const annDir = dirOf(link.name(ann.id));
   const benDir = dirOf(link.name(ben.id));

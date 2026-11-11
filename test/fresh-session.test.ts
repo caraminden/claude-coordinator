@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { FRESH_CONTEXT_TOKENS, FRESH_IDLE_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'fresh-session-'));
@@ -85,12 +85,12 @@ async function endTurn(id: number, outcome: 'ok' | 'error') {
 /** The last turn's argv and prompt, once the fake has logged it. */
 async function lastCall(count: number) {
   for (;;) {
-    const all = existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+    const all = jsonLines(calls);
     if (all.length > count) return all[all.length - 1] as { args: string[]; prompt: any };
     await new Promise((r) => setTimeout(r, 20));
   }
 }
-const callCount = () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter(Boolean).length : 0);
+const callCount = () => lines(calls).length;
 const promptText = (p: any) => (typeof p === 'string' ? p : p.map((b: any) => b.text).join('\n'));
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 const waitIdle = async (id: number) => {
@@ -239,7 +239,7 @@ const freshNotes = (id: number) => notes(id).filter((t) => t.startsWith('Startin
 /** The prompts of the turns started since count, once there are want of them. */
 async function prompts(count: number, want: number) {
   while (callCount() < count + want) await new Promise((r) => setTimeout(r, 20));
-  return readFileSync(calls, 'utf8').split('\n').filter(Boolean).slice(count).map((l) => promptText(JSON.parse(l).prompt));
+  return jsonLines(calls).slice(count).map((l) => promptText(l.prompt));
 }
 
 test('a Taskmaster turn that ends past 150k hands off at once; one at 150k does not (#423)', { timeout: 20_000 }, async () => {

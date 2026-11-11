@@ -8,6 +8,7 @@ import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
 import { Containers } from '../src/containers.ts';
 import { images, notReady, overPace, REQUIREMENTS, review, usageLine } from '../src/codex-review.ts';
+import { jsonLines } from './helpers.ts';
 // @ts-expect-error: a plain .mjs, shipped into the image as is.
 import { patchPaths } from '../deploy/claude-container/codex/citadel-hook.mjs';
 
@@ -229,7 +230,7 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
 `,
 );
 chmodSync(fakeCodex, 0o755);
-const logged = () => readFileSync(fakeLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+const logged = () => jsonLines(fakeLog);
 
 test('a review starts a read-only, ephemeral thread with no approvals, declines what Codex asks, and returns its last message', async () => {
   rmSync(fakeLog, { force: true });
@@ -349,7 +350,7 @@ const wait = setInterval(() => {
     started_();
     const started = await linking;
     assert.deepEqual(started, { state: 'waiting', url: 'https://auth.openai.com/codex/device', code: 'AB12-CD34Z' });
-    const argv = JSON.parse(readFileSync(calls, 'utf8').trim().split('\n')[0]);
+    const argv = jsonLines(calls)[0];
     assert.deepEqual(argv, ['exec', '-i', 'citadel-claude-2', 'codex', 'login', '--device-auth', '-c', 'cli_auth_credentials_store="file"']);
     // OpenAI turns the code down: the sign-in says why, without the link or the code.
     writeFileSync(go, 'expired');
@@ -458,13 +459,7 @@ const personTurns = join(root, 'run', 'turns', 'person-1');
 const container = { name: 'citadel-claude-test-1', turnsDir: personTurns, env: { HOME: '/home/u', PATH: '/usr/local/bin:/usr/bin' } };
 const hostTurn = join(turnDir, 'codex-tripwire.json');
 writeFileSync(hostTurn, JSON.stringify({ script: tripwire, config, container }), { mode: 0o444 });
-const podCalls = () => {
-  try {
-    return readFileSync(podLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  } catch {
-    return [];
-  }
-};
+const podCalls = () => jsonLines(podLog);
 function cli(args: string[], fake: string | null, cfg: string, input = '', extra: Record<string, string> = {}) {
   rmSync(podLog, { force: true });
   // HOME too: never the real one, whose ~/.codex may hold a person's Codex login.

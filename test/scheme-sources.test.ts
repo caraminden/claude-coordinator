@@ -9,7 +9,7 @@ import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { repoSlug } from '../src/prlinks.ts';
 import { repoName } from '../src/scheme-repo.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, lines, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 // A new scheme's code sources (#173). The server runs with HOME set to the scratch folder (so its
 // data dir is under HOME) and a stub `gh` first on PATH: no test makes a real GitHub repo.
@@ -17,7 +17,7 @@ const root = mkdtempSync(join(tmpdir(), 'scheme-sources-'));
 const stub = join(root, 'gh-stub');
 const git = (args: string[], cwd = root) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, HOME: root } }).trim();
 const commit = (cwd: string, m: string) => git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', m], cwd);
-const ghCalls = () => (existsSync(join(stub, 'calls')) ? readFileSync(join(stub, 'calls'), 'utf8').trim().split('\n') : []);
+const ghCalls = () => lines(join(stub, 'calls'));
 
 // `gh repo view` finds a repo when stub/taken/<owner>_<name> exists; `gh repo create` fails with
 // stub/fail's text when that exists, and otherwise makes a bare repo standing in for GitHub's (and
@@ -51,8 +51,8 @@ writeFileSync(join(stub, 'bin', 'git'), `#!/bin/sh
 exec ${JSON.stringify(realGit)} "$@"
 `);
 chmodSync(join(stub, 'bin', 'git'), 0o755);
-const asCalls = () => (existsSync(join(stub, 'as')) ? readFileSync(join(stub, 'as'), 'utf8').trim().split('\n') : []);
-const clones = () => (existsSync(join(stub, 'clones')) ? readFileSync(join(stub, 'clones'), 'utf8').trim().split('\n') : []);
+const asCalls = () => lines(join(stub, 'as'));
+const clones = () => lines(join(stub, 'clones'));
 
 // A "remote" that https://example.test/remote.git clones from, through git's insteadOf.
 const seed = join(root, 'seed');

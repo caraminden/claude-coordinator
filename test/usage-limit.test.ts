@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_LIMIT_RESUMES, parseResetTime, Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { lines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
 // A failed turn says why. A usage limit is a wait: the minion is `limited`, resumes by itself after the
@@ -67,14 +67,19 @@ function minion(state: any = null) {
 
 /** Run one turn of `id` that ends with `result`. */
 async function turn(id: number, result: string, text = 'go') {
-  writeFileSync(release, result);
+  setRelease(result);
   runner.send(id, 'Cara', text);
   await until(() => !runner.isRunning(id), 'the turn to end');
   return store.getTicket(id)!;
 }
 
 const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => JSON.parse(e.data).text as string);
-const turnsRun = () => (existsSync(prompts) ? readFileSync(prompts, 'utf8').split('\n').filter(Boolean).length : 0);
+/** Sets the release file whole: a fake polling for it would otherwise read it between create and write, empty. */
+const setRelease = (words: string) => {
+  writeFileSync(`${release}.tmp`, words);
+  renameSync(`${release}.tmp`, release);
+};
+const turnsRun = () => lines(prompts).length;
 
 const LIMIT = "You've hit your 5-hour limit · resets 3:30pm (America/Los_Angeles)";
 const IDENTITY = 'API Error: 400 Identity verification is required to continue.';
@@ -156,13 +161,13 @@ test('after the reset it resumes, with the messages held while it waited', async
   const before = turnsRun();
   await turn(id, "You've hit your session limit");
   assert.equal(store.getTicket(id)!.state, 'limited');
-  writeFileSync(release, 'ok');
+  setRelease('ok');
   runner.send(id, 'Cara', 'also do this');
   assert.equal(runner.isRunning(id), false, 'held, not run into the limit');
   assert.match(events(id, 'note').at(-1)!, /^Held for the resume at/);
   assert.equal(runner.view(store.getTicket(id)!).queued, 1);
   await until(() => turnsRun() === before + 2 && !runner.isRunning(id), 'the resume to run');
-  const prompt = readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!;
+  const prompt = lines(prompts).at(-1)!;
   assert.match(prompt, /usage limit, which has now reset/);
   assert.match(prompt, /also do this/);
   const t = store.getTicket(id)!;
@@ -184,7 +189,7 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.equal(t.state, 'limited');
     assert.deepEqual(runner.view(t).payer, { id: null, name: 'Cara' });
     assert.equal(runner.view(t).context_tokens, 122005);
-    writeFileSync(release, 'ok');
+    setRelease('ok');
     // A relay (no person of its own) waits for the payer's reset; a person's own message would try now (#477).
     runner.send(id, 'Relay', 'more from a relay');
     assert.equal(runner.isRunning(id), false, 'the relay waits for the reset');
@@ -196,7 +201,7 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.equal(t.state, null);
     assert.equal(runner.view(t).limit_resume_at, null);
     assert.deepEqual(runner.view(t).payer, { id: josh.id, name: 'Josh' });
-    const prompt = readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!;
+    const prompt = lines(prompts).at(-1)!;
     assert.ok(prompt.indexOf('carry on, josh') < prompt.indexOf('more from a relay'), "Josh's message leads, so the turn is his");
   } finally {
     runner.personOf = undefined;
@@ -210,7 +215,7 @@ test("a person's own message tries now, whatever reset time Claude gave: a reset
     await turn(id, LIMIT);
     assert.equal(store.getTicket(id)!.state, 'limited');
     const before = turnsRun();
-    writeFileSync(release, 'ok');
+    setRelease('ok');
     runner.send(id, 'Cara', 'I reset it');
     await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the turn to run now');
     const t = store.getTicket(id)!;
@@ -264,7 +269,7 @@ test("a rate-limit event saying the plan works again ends the waits mid-turn, wi
   await turn(id, LIMIT);
   assert.ok(runner.limitWait(id)!.at > Date.now() + 60_000);
   const before = turnsRun();
-  writeFileSync(release, 'ok');
+  setRelease('ok');
   // Still limited: nothing moves.
   (runner as any).updateUsage({ unifiedWindows: { five_hour: { utilization: 1, status: 'rejected' } } });
   assert.ok(runner.limitWait(id)!.at > Date.now() + 60_000);
@@ -296,7 +301,7 @@ test(`it gives up after ${MAX_LIMIT_RESUMES} resumes in a row`, async () => {
 test('the wait and its held messages outlive a restart', async () => {
   const id = minion();
   await turn(id, "You've hit your session limit");
-  writeFileSync(release, 'ok');
+  setRelease('ok');
   runner.send(id, 'Cara', 'held across the restart');
   const before = turnsRun();
   // A new server on the same database, once the reset time has come.
@@ -305,7 +310,7 @@ test('the wait and its held messages outlive a restart', async () => {
   runner = makeRunner();
   runner.recover();
   await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume after the restart');
-  assert.match(readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!, /held across the restart/);
+  assert.match(lines(prompts).at(-1)!, /held across the restart/);
   assert.equal(store.getSetting('limit-resumes'), null);
 });
 

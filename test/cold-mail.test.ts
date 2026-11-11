@@ -2,14 +2,14 @@
 // COLD_MS waits as held mail for its next turn, unless urgent, and wakes it after COLD_HOLD_MAX_MS.
 // A stand-in `claude -p` writes each turn's prompt to prompts.jsonl and ends.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { COLD_HOLD_MAX_MS, COLD_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { stopTurns, until, testPins } from './helpers.ts';
+import { jsonLines, lines, stopTurns, until, testPins } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'cold-mail-'));
@@ -54,8 +54,8 @@ function ticket(kind: 'coordinator' | 'ticket', idleMs: number | null, projectId
 }
 
 const lastMessage = (id: number) => JSON.parse(store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!.data);
-const promptCount = () => (existsSync(prompts) ? readFileSync(prompts, 'utf8').trim().split('\n').length : 0);
-const lastPrompt = () => JSON.parse(readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!).message.content.map((c: any) => c.text);
+const promptCount = () => lines(prompts).length;
+const lastPrompt = () => jsonLines(prompts).at(-1).message.content.map((c: any) => c.text);
 async function idle(id: number) {
   await until('the turn to end', async () => !runner.isRunning(id));
 }

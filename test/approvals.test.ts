@@ -241,14 +241,15 @@ test('a card whose turn ended keeps its outcome for an asker that was between tw
 
 // ---------- turns ----------
 
-// A stand-in for `claude -p` that records its arguments and some of its environment, then waits
-// for a release file before ending the turn.
+// A stand-in for `claude -p` that records its arguments and some of its environment (written under another
+// name and renamed, so the test never reads it half-written), then waits for a release file before ending the turn.
 const fake = join(root, 'claude-fake');
 writeFileSync(
   fake,
   `#!${process.execPath}
-const { existsSync, writeFileSync } = require('node:fs');
-writeFileSync(${JSON.stringify(join(root, 'argv'))}, JSON.stringify({ args: process.argv.slice(2), timeout: process.env.MCP_TOOL_TIMEOUT ?? null, approvals: process.env.COORDINATOR_APPROVALS ?? null }));
+const { existsSync, renameSync, writeFileSync } = require('node:fs');
+writeFileSync(${JSON.stringify(join(root, 'argv.tmp'))}, JSON.stringify({ args: process.argv.slice(2), timeout: process.env.MCP_TOOL_TIMEOUT ?? null, approvals: process.env.COORDINATOR_APPROVALS ?? null }));
+renameSync(${JSON.stringify(join(root, 'argv.tmp'))}, ${JSON.stringify(join(root, 'argv'))});
 process.stdin.resume();
 const wait = setInterval(() => {
   if (!existsSync(${JSON.stringify(join(root, 'release'))})) return;
@@ -273,7 +274,6 @@ async function turn(projectId: number, mkdirs: string[] = [], picks = '') {
   rmSync(join(root, 'argv'), { force: true });
   runner.send(t.id, 'Cara', 'go');
   while (!existsSync(join(root, 'argv'))) await wait(20);
-  await wait(50);
   return { id: t.id, cwd, ...JSON.parse(readFileSync(join(root, 'argv'), 'utf8')) };
 }
 async function finish(id: number) {

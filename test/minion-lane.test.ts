@@ -8,7 +8,7 @@ import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
 import { Runner } from '../src/runner.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { lines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
 // #259: every step of a minion's turn lifecycle runs on one serial lane per minion, and cleanups
@@ -68,7 +68,7 @@ async function until(cond: () => boolean, what: string) {
   for (let i = 0; i < 400 && !cond(); i++) await sleep(20);
   assert.ok(cond(), `timed out waiting for ${what}`);
 }
-const turnsRun = () => (existsSync(prompts) ? readFileSync(prompts, 'utf8').split('\n').filter(Boolean).length : 0);
+const turnsRun = () => lines(prompts).length;
 
 /** A gate a test opens by hand: `wait` resolves once `open()` is called. */
 function gate() {
@@ -159,7 +159,7 @@ test("a usage-limit resume that comes due while the last turn's session is still
   assert.equal(r.isRunning(id), false);
   save.open();
   await until(() => turnsRun() === 2 && !r.isRunning(id), 'the resume to run once the save is in');
-  assert.match(readFileSync(prompts, 'utf8'), /usage limit, which has now reset/);
+  assert.match(lines(prompts).join('\n'), /usage limit, which has now reset/);
 });
 
 test("the boot sweep's session save holds the minion's next turn until it is done", async () => {
@@ -237,7 +237,7 @@ for (const when of ['during the turn', 'during the save']) {
     const r2 = makeRunner();
     r2.recover();
     await until(() => turnsRun() === 2 && !r2.isRunning(id), 'the queued message to run after the restart');
-    assert.match(readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!, new RegExp(`two, ${when}`));
+    assert.match(lines(prompts).at(-1)!, new RegExp(`two, ${when}`));
     assert.ok(store.getClaudeState(join('projects', projectSlug(cwd), `${session}.jsonl`)), 'the save was redone');
   });
 }

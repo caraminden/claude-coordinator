@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -7,7 +7,7 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { gzipSync } from 'node:zlib';
 import { projectSlug } from '../src/sessions.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { jsonLines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
 // #250: a minion whose turns move from one Claude login to another between turns (Josh's container,
@@ -88,7 +88,7 @@ async function until(check: () => boolean) {
   for (let i = 0; i < 500 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
   assert.ok(check(), 'timed out');
 }
-const turns = () => (existsSync(seen) ? readFileSync(seen, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+const turns = () => jsonLines(seen);
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 
 test("a message that arrives during Josh's turn, from Cara, resumes the same conversation on the host's login", async () => {

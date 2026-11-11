@@ -33,7 +33,7 @@ const { Runner } = await import('../src/runner.ts');
 const { codexSwitchKey, codexThreadKey } = await import('../src/codex.ts');
 const { transcriptPath } = await import('../src/sessions.ts');
 const { GLOBAL_OWNER } = await import('../src/properties.ts');
-const { testPins } = await import('./helpers.ts');
+const { jsonLines, lines, testPins } = await import('./helpers.ts');
 testPins(root);
 
 const store = new Store(join(root, 'coordinator.db'));
@@ -83,7 +83,7 @@ async function launch(c: Case) {
   rmSync(units, { force: true });
   runner.units = !!c.units;
   runner.send(t.id, c.author ?? 'Cara', 'go');
-  for (let i = 0; i < 500 && !spawned.length && !existsSync(units) && runner.isRunning(t.id); i++) await wait(10);
+  for (let i = 0; i < 500 && !spawned.length && !lines(units).length && runner.isRunning(t.id); i++) await wait(10);
   const notes = store.listEvents(t.id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
   const turn = store.getSetting<{ dir: string }>(`turn:${t.id}`);
   if (!turn) return scrub({ launched: false, notes });
@@ -91,7 +91,7 @@ async function launch(c: Case) {
   const read = (f: string) => (existsSync(join(dir, f)) ? JSON.parse(readFileSync(join(dir, f), 'utf8')) : null);
   const files = readdirSync(dir).filter((f) => f !== 'pin').sort().map((f) => `${f} ${(statSync(join(dir, f)).mode & 0o777).toString(8)}`);
   const got = { launched: true, notes, spec: read('spec.json'), settings: read('settings.json'), mcp: read('mcp.json'), codexTripwire: read('codex-tripwire.json'), files, pinned: readdirSync(join(dir, 'pin')).length > 0,
-    spawned: spawned.map(({ how, wrapper }) => ({ how, wrapper })), unit: existsSync(units) ? readFileSync(units, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : null };
+    spawned: spawned.map(({ how, wrapper }) => ({ how, wrapper })), unit: existsSync(units) ? jsonLines(units) : null };
   // End it: the wrapper that would have run it never started.
   writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
   for (let i = 0; i < 1000 && runner.isRunning(t.id); i++) await wait(10);

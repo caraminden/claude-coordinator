@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
 // Turns run in a process of their own (src/turn-wrapper.ts) and write to a turn folder, so a server
@@ -201,7 +201,7 @@ test('a re-attached turn can be stopped, and messages queued behind it survive t
 
   writeFileSync(release, '');
   // The queued message runs as the next turn once the re-attached one ends.
-  await until(() => readFileSync(seen, 'utf8').includes('and then this'));
+  await until(() => lines(seen).some((l) => l.includes('and then this')));
   await until(() => !next.isRunning(queued));
 });
 
@@ -209,7 +209,7 @@ test('the turn keeps its own tripwire and MCP copies, the env allowlist, and no 
   const id = newTicket();
   const r = await started(id);
   const dir = turnDir(r, id);
-  const run = JSON.parse(readFileSync(seen, 'utf8').trim().split('\n').at(-1)!);
+  const run = jsonLines(seen).at(-1);
   const settings = JSON.parse(readFileSync(run.argv[run.argv.indexOf('--settings') + 1], 'utf8'));
   const hook = settings.hooks.PreToolUse[0].hooks[0].command.split(' ')[1].slice(1, -1);
   assert.equal(hook, join(dir, 'pin', 'tripwire.ts'));

@@ -210,7 +210,7 @@ test("a Codex turn reads as a Claude turn: init, words, Bash, patches, MCP, trip
   assert.match(argv, /project_doc_fallback_filenames=\["CLAUDE.md"\]/);
   assert.match(argv, /features\.goals=false/);
   // The way back: every part in full, for Claude's next turn.
-  const parts = readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const parts = jsonLines(logFile);
   assert.deepEqual(parts.slice(0, 4), [{ text: '[Message] [Josh]: go' }, { text: '[Codex] Looking.' }, { text: '[Bash] npm test' }, { text: 'FULL OUTPUT', output: true }]);
 });
 

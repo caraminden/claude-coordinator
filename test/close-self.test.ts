@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -47,7 +47,9 @@ function newTicket() {
 
 async function endTurn(id: number, outcome: 'ok' | 'error') {
   rmSync(join(root, 'release'), { force: true });
-  writeFileSync(join(root, 'release'), outcome);
+  // Made under another name and renamed: the fake polling for the file would otherwise read it between create and write, empty.
+  writeFileSync(join(root, 'release.tmp'), outcome);
+  renameSync(join(root, 'release.tmp'), join(root, 'release'));
   while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
   rmSync(join(root, 'release'), { force: true });
 }

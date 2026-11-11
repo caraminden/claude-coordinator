@@ -11,7 +11,7 @@ import type { TurnPlace } from '../src/claude-link.ts';
 import { codexSwitchKey } from '../src/codex.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, until, stopTurns, testPins } from './helpers.ts';
+import { bootServer, jsonLines, until, stopTurns, testPins } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'contraption-turns-'));
 after(async () => {
@@ -118,7 +118,7 @@ take().then((m) => {
 `,
 );
 chmodSync(fake, 0o755);
-const runs = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const runs = () => jsonLines(log);
 const lastRun = () => runs().at(-1);
 const argAfter = (argv: string[], name: string) => argv[argv.indexOf(name) + 1];
 
@@ -483,7 +483,7 @@ test('the turn_cap and the plan\'s own limit both answer limit; a crash says fai
 test('a container turn runs in the person\'s own container, on their own sign-in, at its own scratch folder', async () => {
   rmSync(podmanLog, { force: true });
   await turn(mandate, { person: josh.id, session: 'in-container', mcp: [{ name: 'mandate', path: '/mcp' }] });
-  const call = JSON.parse(readFileSync(podmanLog, 'utf8').split('\n')[0]);
+  const call = jsonLines(podmanLog)[0];
   assert.deepEqual(call.slice(0, 4), ['exec', '-i', '-w', join(homedir(), '.citadel', 'contraption-scratch', 'mandate')]);
   const envs = call.filter((_: string, i: number) => call[i - 1] === '-e');
   assert.ok(envs.includes(`CLAUDE_CONFIG_DIR=${join(vol, '.claude')}`));
@@ -656,7 +656,7 @@ test("on Codex (#337) a contraption turn runs the shim in its own mode with only
     assert.deepEqual([evs[0].data.provider, evs[0].data.model], ['codex', 'gpt-6-luna']);
     assert.deepEqual([evs.at(-1)!.data.provider, evs.at(-1)!.data.model], ['codex', 'gpt-6-luna']);
     assert.ok(evs.some((e) => e.event === 'text' && e.data.delta.includes('CODEX MOVED IT')));
-    const calls = readFileSync(codexLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const calls = jsonLines(codexLog);
     assert.equal(calls[0].tripwire.mode, 'contraption');
     assert.deepEqual(calls[0].tripwire.mcp, ['mandate']);
     assert.ok(calls[0].argv.includes('features.shell_tool=false'), 'no shell for an app turn');
@@ -701,10 +701,10 @@ test("the server login's Codex app turns run in its own Codex-only container, ha
     store.setSetting(codexSwitchKey(cara.id), true);
     const evs = await turn(mandate, { ...ask, prompt: 'CODEX ASK cara' });
     assert.equal(evs.at(-1)!.event, 'end', JSON.stringify(evs));
-    const exec = readFileSync(podmanLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
+    const exec = jsonLines(podmanLog).at(-1);
     assert.ok(exec.includes('citadel-claude-t-cara'), 'in her own container');
     assert.ok(!exec.some((a: string) => a.startsWith('ANTHROPIC_API_KEY=')), "never the server's Claude key");
-    const calls = readFileSync(codexLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const calls = jsonLines(codexLog);
     assert.equal(calls[0].tripwire.mode, 'contraption');
     const said = calls.find((c) => c.method === 'turn/start').params.input.map((i: any) => i.text).join('\n');
     assert.match(said, /HOST CLAUDE ASK/, 'the hand-over is her Claude conversation on the host');

@@ -596,7 +596,9 @@ while :; do
   fi
 
   if [ -z "$want" ]; then
-    if [ -n "$base" ]; then # what it was built on is gone: wait for the one ahead to build again
+    # What it was built on is gone: wait for the one ahead to build again. Unless that was main's tip: the one
+    # it sat on has landed and only skipped ones are ahead for a moment, so the build and its CI run still stand.
+    if [ -n "$base" ] && [ "$base" != "$(git rev-parse "refs/heads/$BRANCH")" ]; then
       [ -z "$pushed" ] || ci_cancel
       base='' tip='' blocked='' green=''
       queue_set 4 -

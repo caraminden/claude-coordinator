@@ -257,7 +257,12 @@ function queueSetup(branches: number, check = gated, config: Record<string, stri
     const child = spawn('bash', [join(wts[i - 1], 'tools', 'land.sh')], { cwd: wts[i - 1], stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, GATE: gate, LAND_QUEUE_POLL: '0.05', ...extra } });
     let stderr = '';
     child.stderr!.on('data', (d) => (stderr += d));
-    const exit = new Promise<number | null>((ok) => child.on('close', ok));
+    // A landing that never ends fails its test by name instead of hanging the whole run (#560).
+    const exit = new Promise<number | null>((ok, no) => {
+      const late = setTimeout(() => no(new Error(`land.sh was still running after 60 s:\n${stderr}`)), 60_000);
+      child.on('close', (code) => { clearTimeout(late); ok(code); });
+    });
+    exit.catch(() => {}); // for a test that had already failed on something else
     return { child, exit, stderr: () => stderr };
   };
   const open = () => writeFileSync(gate, '');
@@ -565,6 +570,7 @@ test('the stack: a red run in the middle is refused, and the one behind it build
     assert.deepEqual(c.landed(), ['f1.txt: 1']);
     c.verdict(again, GREEN);
     assert.equal(await d.exit, 0, d.stderr());
+    assert.doesNotMatch(d.stderr(), /rebasing ticket\/3-x onto main/, 'the 3rd kept the run it had on the 1st\'s commit: it is not built a third time once the red 2nd is all that is ahead (#560)');
     assert.deepEqual(c.landed(), ['f1.txt: 1', 'f3.txt: 3'], "none of the 2nd's commits reached main");
     assert.equal(c.mainAt(), again);
     assert.equal(c.on(2), 'ticket/2-x');

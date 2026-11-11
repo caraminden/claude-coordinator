@@ -94,7 +94,7 @@ async function git(args: string[], cwd: string): Promise<string[]> {
 async function gitAdded(cwd: string): Promise<string[]> {
   const files = new Set(await git(['ls-files', '-z', '--others', '--exclude-standard'], cwd));
   try {
-    const [base] = await git(['merge-base', '-z', 'HEAD', 'refs/remotes/origin/HEAD'], cwd);
+    const [base] = await git(['merge-base', 'HEAD', 'refs/remotes/origin/HEAD'], cwd);
     const added = await git(['diff', '-z', '--name-only', '--no-renames', '--diff-filter=A', base.trim()], cwd);
     for (const f of added) files.add(f);
   } catch {

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { commentMessage, findByName, linkedPaths, optionImageProblem, resolveLink } from '../src/artifacts.ts';
+import { commentMessage, findArtifacts, findByName, linkedPaths, optionImageProblem, resolveLink } from '../src/artifacts.ts';
 import { promptMessage } from '../src/prompts.ts';
 
 const cwd = '/work/t1';
@@ -90,4 +91,29 @@ test('a comment reaches Claude as "[Name on file]: text", other messages as "[Na
     { type: 'text', text: '[Cara on report.md]: Looks good' },
     { type: 'text', text: '[Josh]: Agreed' },
   ]);
+});
+
+test('a git worktree lists its committed and staged files as well as untracked ones (#468 S06-1)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifacts-git-'));
+  try {
+    const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' });
+    const origin = join(root, 'origin');
+    mkdirSync(origin);
+    g(origin, 'init', '-q', '-b', 'main');
+    writeFileSync(join(origin, 'old.md'), 'old');
+    g(origin, 'add', '.');
+    g(origin, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'base');
+    const work = join(root, 'work');
+    g(root, 'clone', '-q', origin, work);
+    writeFileSync(join(work, 'committed.md'), 'c');
+    g(work, 'add', 'committed.md');
+    g(work, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'mine');
+    writeFileSync(join(work, 'staged.md'), 's');
+    g(work, 'add', 'staged.md');
+    writeFileSync(join(work, 'loose.md'), 'u');
+    const found = (await findArtifacts(work, true)).map((f) => f.path).sort();
+    assert.deepEqual(found, ['committed.md', 'loose.md', 'staged.md']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

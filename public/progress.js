@@ -390,7 +390,7 @@ export function planEstimate(p, running, now = Date.now()) {
   const usual = current.estimate * 60;
   const pending = p.tasks.filter((t) => t.status === 'pending').reduce((s, t) => s + (t.estimate ?? 0), 0);
   const left = Math.max(0, usual - (now - current.startedAt) / 1000) / 60 + pending;
-  return { since: current.startedAt, usual, left: Math.round(left) };
+  return { since: current.startedAt, usual, left: Math.ceil(left) };
 }
 
 /**

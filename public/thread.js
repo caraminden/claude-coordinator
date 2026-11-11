@@ -770,8 +770,7 @@ function renderProgress() {
   // The minion's own guesses for its steps (#551, Josh's pick): the bar fills against the step's, and the line
   // says what's left of the plan's. Only while no wait has a real estimate of its own.
   const est = !w && live ? planEstimate(p, running) : null;
-  const left = est && h('span', { class: 'time left', title: "The minion's own guess for the steps left" },
-    est.left ? `~${est.left >= 60 ? `${Math.floor(est.left / 60)}h ${est.left % 60}m` : `${est.left} min`} left` : 'past its guess');
+  const left = est && h('span', { class: 'time left', title: "The minion's own guess for the steps left" }, leftText(est));
 
   const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {
     view.ui.open = !view.ui.open;
@@ -1420,4 +1419,13 @@ setInterval(() => {
 setInterval(() => {
   const el = view?.progressEl?.querySelector('.progress-line .doing');
   if (el && el.dataset.doing && el.dataset.doing !== nowDoing(view.turnActions, Date.now())) scheduleProgress();
+  // What's left of the plan's guesses runs down while a long call runs, with no event to redraw it.
+  const left = view?.progressEl?.querySelector('.progress-line .left');
+  const est = left && planEstimate(view.progress, view.ticket?.status === 'running');
+  if (left && (!est || left.textContent !== leftText(est))) scheduleProgress();
 }, 1000);
+
+/** "~26 min left" of the plan's guesses, "~1h 5m left", or past them. */
+function leftText(est) {
+  return est.left ? `~${est.left >= 60 ? `${Math.floor(est.left / 60)}h ${est.left % 60}m` : `${est.left} min`} left` : 'past its guess';
+}

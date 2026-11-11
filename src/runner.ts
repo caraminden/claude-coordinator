@@ -298,6 +298,8 @@ interface LimitResume {
   tz?: string;
   /** Its person switched to Codex: it resumes on Codex now (#337). */
   codex?: true;
+  /** The limit was Codex's own, so a Claude turn getting through says nothing about it (#477). */
+  codexLimit?: true;
 }
 const RESUME_LIMIT_PROMPT =
   `Your last turn stopped at the account's usage limit, which has now reset. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
@@ -1045,12 +1047,12 @@ export class Runner {
   }
 
   /** Wait for the limit to reset, a while after `resetAt` and spaced from the minions already waiting; returns when it resumes. */
-  private waitForLimit(ticketId: number, resetAt: number, tries: number, tz?: string): number {
+  private waitForLimit(ticketId: number, resetAt: number, tries: number, tz?: string, codexLimit = false): number {
     const list = this.limitResumes().filter((w) => w.ticket !== ticketId);
     let at = resetAt + this.limitDelayMs;
     for (const w of [...list].sort((a, b) => a.at - b.at)) if (Math.abs(w.at - at) < this.limitGapMs) at = w.at + this.limitGapMs;
     const queued = this.queues.get(ticketId);
-    list.push({ ticket: ticketId, at, tries, ...(queued?.length ? { queued } : {}), ...(tz ? { tz } : {}) });
+    list.push({ ticket: ticketId, at, tries, ...(queued?.length ? { queued } : {}), ...(tz ? { tz } : {}), ...(codexLimit ? { codexLimit: true as const } : {}) });
     this.saveLimitResumes(list);
     return at;
   }
@@ -1071,6 +1073,26 @@ export class Runner {
     w.queued = [...(this.queues.get(ticketId) ?? [])];
     this.store.setSetting(LIMIT_RESUMES, list);
     return true;
+  }
+
+  /**
+   * A Claude turn on `payer`'s plan got through, so its limit has gone, whatever reset time Claude gave
+   * (a reset, an upgrade, extra usage): every minion waiting on it resumes now, limitGapMs apart, and so
+   * do those that gave up waiting (#477). Not one a person stopped: that waits for a message.
+   */
+  private limitCleared(payer: number | null) {
+    const list = this.limitResumes();
+    const gaveUp = this.store.limitedTickets().filter((t) => t.status === 'error' && t.note?.startsWith('Usage limit: gave up') && !list.some((w) => w.ticket === t.id) && !this.isRunning(t.id));
+    if (!list.length && !gaveUp.length) return;
+    const onPlan = (id: number) => {
+      const t = this.store.getTicket(id);
+      return !!t && this.payerOf(t.person_id ?? this.store.getProject(t.project_id)?.owner_id) === payer;
+    };
+    const now = Date.now();
+    const early = list.filter((w) => w.at > now && !w.codexLimit && onPlan(w.ticket));
+    for (const w of early) w.at = now;
+    const back = gaveUp.filter((t) => onPlan(t.id)).map((t) => ({ ticket: t.id, at: now, tries: 1 }));
+    if (early.length || back.length) this.saveLimitResumes([...list, ...back]);
   }
 
   /** Time the next usage-limit resume: the earliest due, and never sooner than limitGapMs after the last. */
@@ -1153,12 +1175,13 @@ export class Runner {
       return;
     }
     const q = this.queues.get(ticketId) ?? [];
+    const limited = !!(ticket && this.limitWait(ticketId));
     // Waiting on its payer's usage limit, a message on another plan carries on now (sender pays): first, so the turn is its sender's.
-    const otherPlan = !!(person && ticket && this.limitWait(ticketId) && this.payerOf(person) !== this.payerOf(ticket.person_id ?? this.store.getProject(ticket.project_id)?.owner_id));
-    if (otherPlan) {
-      q.unshift(msg);
-      this.cancelLimitWait(ticketId);
-    } else q.push(msg);
+    const otherPlan = !!(person && limited && this.payerOf(person) !== this.payerOf(ticket!.person_id ?? this.store.getProject(ticket!.project_id)?.owner_id));
+    if (otherPlan) q.unshift(msg);
+    else q.push(msg);
+    // A person's own message tries now too: the reset time is only Claude's word, and a reset can come sooner. Still limited, it waits again (#477).
+    if (otherPlan || (limited && person && !extra.from)) this.cancelLimitWait(ticketId);
     this.queues.set(ticketId, q);
     if (!this.isRunning(ticketId)) {
       this.next(ticketId);
@@ -1990,6 +2013,7 @@ export class Runner {
     this.parkedAs.delete(ticketId);
     if (parkedAs && status !== 'error' && this.heldFor(ticketId)) this.store.updateTicket(ticketId, parkedAs);
     if (status === 'idle' && !stopped && !signal) this.clearFailNote(ticketId);
+    if (status === 'idle' && !stopped && !signal && !turn?.codex) this.limitCleared(this.payerOf(turn?.person));
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
     this.closing.delete(ticketId);
@@ -2077,8 +2101,8 @@ export class Runner {
       // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
       const hit = codexReset !== undefined ? (codexReset ? [codexReset] : []) : [usage?.session, usage?.weekly].filter((w) => w?.status === 'rejected' && w.resetsAt && w.resetsAt > Date.now()).map((w) => w!.resetsAt!);
       const resetAt = hit.length ? Math.max(...hit) : parseResetTime(reason) ?? Date.now() + this.limitFallbackMs;
-      const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz);
-      this.emit(ticketId, 'note', { text: `${reason}\nIt resumes by itself at ${clockTime(at, tz)}; messages sent before then go into that turn.` });
+      const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz, codexReset !== undefined);
+      this.emit(ticketId, 'note', { text: `${reason}\nIt resumes by itself at ${clockTime(at, tz)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.` });
       if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit, resumes ${clockTime(at, tz)}` });
       return;
     }
@@ -2366,7 +2390,12 @@ export class Runner {
     if (!usage.weekly && !usage.session) return;
     const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
     const payer = turn?.container && turn.person ? turn.person : null;
-    this.store.setSetting(payer === null ? 'usage' : usageKey(payer), usage);
+    const key = payer === null ? 'usage' : usageKey(payer);
+    const rejected = (u: Usage | null) => [u?.session, u?.weekly].some((w) => w?.status === 'rejected');
+    const was = this.store.getSetting<Usage>(key);
+    this.store.setSetting(key, usage);
+    // The plan's limit lifted (#477): what waits on it needn't wait for the reset time any more.
+    if (rejected(was) && !rejected(usage) && [usage.session, usage.weekly].some((w) => w?.status)) this.limitCleared(payer);
     // Only the payer's own meter shows it (server.ts, broadcast).
     this.broadcast({ type: 'usage', usage, payer });
   }

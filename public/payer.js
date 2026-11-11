@@ -36,7 +36,7 @@ export function payerLine(t, sendText) {
     // Sender pays: any message from another plan carries on now, so the cost is said for Send too.
     return h('div', { class: 'payer-line warn' },
       `${mine(t) ? 'Your' : `${t.payer.name}'s`} plan hit its usage limit; `,
-      t.limit_resume_at ? `this minion carries on at ${time(t.limit_resume_at)}.` : 'this minion stopped retrying and waits for a message.',
+      t.limit_resume_at ? `this minion carries on at ${time(t.limit_resume_at)}${mine(t) ? ', or sooner if you reset it: a message tries now' : ''}.` : 'this minion stopped retrying and waits for a message.',
       go ? h('span', { class: 'row' }, go, h('span', { class: 'muted' }, `${cost ? `${cost} of your usage to load it. ` : ''}Any message you send carries on too.`)) : '');
   }
   if (!account.turns) {

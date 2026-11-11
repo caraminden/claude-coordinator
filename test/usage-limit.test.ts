@@ -185,8 +185,9 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.deepEqual(runner.view(t).payer, { id: null, name: 'Cara' });
     assert.equal(runner.view(t).context_tokens, 122005);
     writeFileSync(release, 'ok');
-    runner.send(id, 'Cara', 'more from cara');
-    assert.equal(runner.isRunning(id), false, "Cara's own message waits for her reset");
+    // A relay (no person of its own) waits for the payer's reset; a person's own message would try now (#477).
+    runner.send(id, 'Relay', 'more from a relay');
+    assert.equal(runner.isRunning(id), false, 'the relay waits for the reset');
     const before = turnsRun();
     runner.send(id, 'Josh', 'carry on, josh');
     await until(() => turnsRun() === before + 1 && !runner.isRunning(id), "Josh's turn");
@@ -196,10 +197,69 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.equal(runner.view(t).limit_resume_at, null);
     assert.deepEqual(runner.view(t).payer, { id: josh.id, name: 'Josh' });
     const prompt = readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!;
-    assert.ok(prompt.indexOf('carry on, josh') < prompt.indexOf('more from cara'), "Josh's message leads, so the turn is his");
+    assert.ok(prompt.indexOf('carry on, josh') < prompt.indexOf('more from a relay'), "Josh's message leads, so the turn is his");
   } finally {
     runner.personOf = undefined;
   }
+});
+
+test("a person's own message tries now, whatever reset time Claude gave: a reset may have come early (#477)", async () => {
+  runner.personOf = (author) => (author === 'Cara' ? 1 : null);
+  try {
+    const id = minion();
+    await turn(id, LIMIT);
+    assert.equal(store.getTicket(id)!.state, 'limited');
+    const before = turnsRun();
+    writeFileSync(release, 'ok');
+    runner.send(id, 'Cara', 'I reset it');
+    await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the turn to run now');
+    const t = store.getTicket(id)!;
+    assert.equal(t.status, 'idle');
+    assert.equal(t.state, null);
+    assert.equal(runner.limitWait(id), null);
+  } finally {
+    runner.personOf = undefined;
+  }
+});
+
+test('a turn on the same plan getting through resumes every minion waiting on its limit, those that gave up too (#477)', async () => {
+  runner.limitFallbackMs = 50;
+  const gaveUp = minion();
+  await turn(gaveUp, "You've hit your session limit");
+  await until(() => store.getTicket(gaveUp)!.note?.startsWith('Usage limit: gave up') ?? false, 'it to give up');
+  runner.limitFallbackMs = 60 * 60 * 1000;
+  const [a, b] = [minion(), minion()];
+  await turn(a, LIMIT);
+  await turn(b, LIMIT);
+  assert.ok(runner.limitWait(a)!.at > Date.now() + 60_000, 'waiting for the stated reset');
+  const before = turnsRun();
+  // The account works again: one turn gets through, and the waits end now rather than at the stated time.
+  await turn(minion(), 'ok');
+  await until(() => turnsRun() === before + 4 && [a, b, gaveUp].every((id) => !runner.isRunning(id)), 'the waiting minions to resume');
+  for (const id of [a, b, gaveUp]) {
+    const t = store.getTicket(id)!;
+    assert.equal(t.status, 'idle');
+    assert.equal(t.state, null);
+    assert.equal(runner.limitWait(id), null);
+    assert.ok(events(id, 'note').includes('Resumed after the usage limit reset'));
+  }
+  pushes.length = 0;
+});
+
+test("a rate-limit event saying the plan works again ends the waits mid-turn, without waiting for the turn's end (#477)", async () => {
+  store.setSetting('usage', { session: { utilization: 1, resetsAt: Date.now() + 2 * 60 * 60 * 1000, status: 'rejected' }, weekly: null, updatedAt: Date.now() });
+  const id = minion();
+  await turn(id, LIMIT);
+  assert.ok(runner.limitWait(id)!.at > Date.now() + 60_000);
+  const before = turnsRun();
+  writeFileSync(release, 'ok');
+  // Still limited: nothing moves.
+  (runner as any).updateUsage({ unifiedWindows: { five_hour: { utilization: 1, status: 'rejected' } } });
+  assert.ok(runner.limitWait(id)!.at > Date.now() + 60_000);
+  (runner as any).updateUsage({ unifiedWindows: { five_hour: { utilization: 0.02, status: 'allowed' } } });
+  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume');
+  assert.equal(store.getTicket(id)!.state, null);
+  store.deleteSetting('usage');
 });
 
 test(`it gives up after ${MAX_LIMIT_RESUMES} resumes in a row`, async () => {
@@ -217,6 +277,8 @@ test(`it gives up after ${MAX_LIMIT_RESUMES} resumes in a row`, async () => {
   assert.deepEqual(pushes, [{ ticket: id, text: `Usage limit: gave up after ${MAX_LIMIT_RESUMES} resumes in a row` }], 'giving up is the one push');
   pushes.length = 0;
   runner.limitFallbackMs = 60 * 60 * 1000;
+  // Gone, so the next test's turn getting through doesn't resume it (#477).
+  runner.close(id, 'Cara dismissed this minion.');
 });
 
 test('the wait and its held messages outlive a restart', async () => {

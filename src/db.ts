@@ -1296,6 +1296,11 @@ export class Store {
       .all(projectId) as unknown as Ticket[];
   }
 
+  /** Open tickets whose last turn hit the usage limit, in every project. */
+  limitedTickets(): Ticket[] {
+    return this.db.prepare("SELECT * FROM tickets WHERE state = 'limited' AND status != 'closed'").all() as unknown as Ticket[];
+  }
+
   getCoordinator(projectId: number): Ticket | undefined {
     return this.db
       .prepare("SELECT * FROM tickets WHERE project_id = ? AND kind = 'coordinator'")

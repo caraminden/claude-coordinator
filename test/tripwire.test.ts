@@ -286,6 +286,14 @@ const BLOCKED: [string, string?][] = [
   [`cat <<\\EOF > /tmp/x\nhi\nEOF\nrm -rf ${data}/state.db`],
   ['cat <<\\EOF\nhi\nEOF\npkill -f node'],
   ['git commit -m "$(cat <<\\EOF\nmsg\nEOF\n)" && git stash'],
+  // #468 S01-2: the live tools/deploy.sh may run, but naming it doesn't let a write to the live checkout through
+  ['cp tools/deploy.sh ~/claude-coordinator/tools/deploy.sh'],
+  ['rm -f ~/claude-coordinator/tools/deploy.sh', 'deploy'],
+  ['cd ~/claude-coordinator && git checkout -- tools/deploy.sh', 'deploy'],
+  ["cd ~/claude-coordinator && sed -i 's/a/b/' tools/deploy.sh"],
+  ['cd ~/claude-coordinator && git commit -am x tools/deploy.sh', 'deploy'],
+  ['cp ~/claude-coordinator/tools/deploy.sh ~/claude-coordinator/tools/land.sh', 'deploy'],
+  ['echo ~/claude-coordinator/tools/deploy.sh; systemctl --user restart claude-coordinator', 'deploy'],
 ];
 
 const ALLOWED = [
@@ -551,6 +559,10 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
 
 test('once tools/deploy.sh exists, it is still allowed', () => {
   assert.equal(bash('~/claude-coordinator/tools/deploy.sh', worktree, { ...cfg, deployScript: true }), null);
+  // Run through a shell or systemd-run too (#468 S01-2).
+  for (const command of ['bash ~/claude-coordinator/tools/deploy.sh', 'cd ~/claude-coordinator && sh -x tools/deploy.sh', 'systemd-run --user --collect --unit=cc-deploy bash /home/u/claude-coordinator/tools/deploy.sh', 'cd ~/claude-coordinator && ./tools/deploy.sh 2>&1 | tail -5']) {
+    assert.equal(bash(command, worktree, { ...cfg, deployScript: true }), null, command);
+  }
 });
 
 test('a Taskmaster in its own scheme folder can work; one in another scheme cannot write', () => {

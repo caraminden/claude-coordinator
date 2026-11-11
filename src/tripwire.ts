@@ -1056,9 +1056,14 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   if (deployCall >= 0 && words.slice(deployCall + 1).some((w) => w.text === '--now')) {
     return { reason: '`tools/deploy.sh --now` restarts the server even if that cuts off running turns. Run plain tools/deploy.sh unless a person has said to force it.', ask: true };
   }
-  // The deploy script is the sanctioned way to touch the live checkout and restart the service.
+  // The deploy script is the sanctioned way to touch the live checkout and restart the service: running
+  // it (itself, through systemd-run, or as a shell's script) is fine, naming it to rm, cp or git is not (#468 S01-2).
   const deploy = join(cfg.checkout, 'tools/deploy.sh');
-  if (words.slice(i).some((w) => pathsOf(w, st, cfg).includes(deploy))) return null;
+  const fromOperand = (ws: Word[]) => ws.slice(Math.max(0, ws.findIndex((w) => !w.text.startsWith('-'))));
+  let run = [cmd, ...args];
+  if (name === 'systemd-run') run = fromOperand(args);
+  if (run[0] && SHELLS.has(basename(run[0].text))) run = fromOperand(run.slice(1));
+  if (run[0] && !run[0].text.startsWith('-') && pathsOf(run[0], st, cfg).includes(deploy)) return null;
 
   const sysctl = words.findIndex((w, k) => k >= i && basename(w.text) === 'systemctl');
   if (sysctl >= 0) {

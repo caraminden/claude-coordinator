@@ -16,7 +16,9 @@ import { contraptionsPage } from './contraptions.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
+  const seq = routeSeq;
   const { ticket } = await api(`api/tickets/${ticketId}`);
+  if (seq !== routeSeq) return; // overtaken by another click while loading
   if (isCoordinator(ticket) || ticket.number != null) return replaceHash(threadHref(ticket));
   await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
 }

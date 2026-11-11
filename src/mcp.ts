@@ -981,6 +981,11 @@ const THREAD_TOOLS = [
     description: `${WAKE_DESCRIPTION.replace('the minion', 'this minion')} Use it instead of asking the Taskmaster to remember, then set state parked and end your turn.`,
     inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
   },
+  {
+    name: 'wake_when_runners_back',
+    description: `Park until this scheme's CI runners are back: after land.sh exits 75 (CI gave no verdict, nearly always because the machine the runners run on is off), call this, set state parked and end your turn. ${APP_NAME} checks the scheme's GitHub runners every 5 minutes and messages you once one labelled <scheme-slug>-ci or <scheme-slug>-ci-linux is online, so you can run land again. Woken once, then forgotten; a second call replaces the first.`,
+    inputSchema: { type: 'object', properties: { reason: { type: 'string', maxLength: 1000, description: 'What to do once they are back (at most 1,000 characters); it comes back in the wake message, e.g. "run tools/land.sh again"' } }, required: ['reason'] },
+  },
   ...(DEPLOYS && IN_CONTAINER
     ? [{
       name: 'land',
@@ -1370,6 +1375,10 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!r.waiting && r.merged) return `${what} is on the scheme's main already, so there is nothing to wait for.`;
       if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
       return `Waiting for ${what}: ${APP_NAME} sends ${ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
+    }
+    case 'wake_when_runners_back': {
+      const r = await call('POST', `/api/tickets/${TICKET}/wake-runners`, { reason: args.reason });
+      return `Waiting for a runner labelled ${r.label} or ${r.label}-linux to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state parked and end your turn.`;
     }
     case 'list_artifacts': {
       const [artifacts, shared] = await Promise.all([call('GET', `/api/projects/${PROJECT}/artifacts?titles`), call('GET', `/api/projects/${PROJECT}/shared?titles`)]);

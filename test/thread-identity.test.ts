@@ -120,6 +120,17 @@ test('wake_when_live posts to its own internal id, which its token may do', asyn
   assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake`));
 });
 
+test('wake_when_runners_back posts to its own internal id, which its token may do (#541)', async () => {
+  calls.length = 0;
+  respond = () => [201, { label: 'citadel-ci' }];
+  const r = await tool('wake_when_runners_back', { reason: 'run land again' });
+  assert.ok(!r.isError, r.content[0].text);
+  assert.match(r.content[0].text, /citadel-ci or citadel-ci-linux/);
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/wake-runners`]);
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/wake-runners`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake-runners`));
+});
+
 test('close_self says when it cleared state ready (#480)', async () => {
   respond = () => [202, { cleared: true }];
   const r = await tool('close_self', {});

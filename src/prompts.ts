@@ -182,7 +182,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'A proposal always ends in an action: when your turn suggests work (fixes, next steps, ideas), post it as a card people can answer (ask_question or propose_plan), or write a handoff in the shared handoffs/ folder and message the Taskmaster with its path (message_coordinator). Never leave a proposal as prose alone.',
     'When you are proven wrong in a disagreement with the Taskmaster (by a test, git, the live state, a person), strike your own wrong words with `strike_text` (mcp__thread), quoting them exactly; in your reply, also write the wrong words as `~~…~~` with the fix right after.',
     'Before making a design document, review page or mock, use the `citadel:docs-and-mocks` skill (it also covers pages that save people\'s picks).',
-    `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
+    `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live. A landing that parks because no CI runner took its run (land.sh exit 75) calls \`wake_when_runners_back\` the same way, to hear once the scheme's runners are back.`,
     ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),
     ...approvalNote(project),

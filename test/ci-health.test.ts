@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import {
-  CiHealth, OFFLINE_MS, QUEUED_MS, VERDICT_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, neverStarted, queuedProblems,
+  CiHealth, OFFLINE_MS, addRunnerWaiter, onlineRunners, runnerWaiters, QUEUED_MS, VERDICT_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, neverStarted, queuedProblems,
   runnerProblems, sharedHost, skippedProblem, verdictPair, verdictProblem, type GhAnswer, type Job, type Run,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
@@ -428,4 +428,46 @@ test("an older build's runner alarm moves into the one alert even when the first
   w.gh.runnersDenied = true;
   await w.health.tick(NOW);
   assert.deepEqual(w.puts, [['Cara', 'ci.runner:DESKTOP-G248IJ8', null], ['Cara', 'ci.open', `CI, Peek Auras: ${title.slice(4)}`]]);
+});
+
+test('wake_when_runners_back (#541): a minion parked on CI hears once, when a runner with its scheme\'s label is online', async () => {
+  const w = world({ delve: true });
+  const sent: [number, string][] = [];
+  const health = new CiHealth(w.store, { ...w.deps, wake: (id, text) => sent.push([id, text]) });
+  const mk = (project_id: number, title: string) => w.store.createTicket({ project_id, title, permission_mode: 'default', created_by: 1 } as any).id;
+  const delve = w.store.listProjects().find((p) => p.name === 'Delve')!;
+  const parked = mk(w.peek.id, 'parked');
+  const other = mk(delve.id, 'delve');
+  const gone = mk(w.peek.id, 'dismissed');
+  for (const t of [parked, other, gone]) addRunnerWaiter(w.store, t, 'run tools/land.sh again.');
+  w.store.updateTicket(gone, { status: 'closed' });
+
+  // Online, but not with Peek's label: no wake. The dismissed minion's waiter is dropped.
+  w.gh.runners = [{ name: 'DESKTOP-G248IJ8', status: 'offline', labels: [{ name: 'peek-auras-ci' }] }, { name: 'X', status: 'online', labels: [{ name: 'other-ci' }] }] as any;
+  await health.tick(NOW);
+  assert.deepEqual(sent, []);
+  assert.deepEqual(runnerWaiters(w.store).map((x) => x.ticket), [parked, other]);
+
+  // The Linux runner comes back: Peek's minion is woken once, Delve's (no runner of its own online) keeps waiting.
+  w.gh.runners = [{ name: 'DESKTOP-G248IJ8-linux', status: 'online', labels: [{ name: 'self-hosted' }, { name: 'peek-auras-ci-linux' }] }] as any;
+  await health.tick(NOW + 5 * MIN);
+  await health.tick(NOW + 10 * MIN);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][0], parked);
+  assert.match(sent[0][1], /^Peek Auras's CI runners are back \(DESKTOP-G248IJ8-linux online\): run tools\/land\.sh again\. If land parks/);
+  assert.deepEqual(runnerWaiters(w.store).map((x) => x.ticket), [other]);
+
+  // Without a way to send, nobody is dropped.
+  w.gh.delveRunners = [{ name: 'D', status: 'online', labels: [{ name: 'delve-ci' }] }] as any;
+  await w.health.tick(NOW + 15 * MIN);
+  assert.deepEqual(runnerWaiters(w.store).map((x) => x.ticket), [other]);
+  await health.tick(NOW + 20 * MIN);
+  assert.deepEqual(sent.map(([id]) => id), [parked, other]);
+  assert.deepEqual(runnerWaiters(w.store), []);
+});
+
+test('onlineRunners matches the scheme label and its -linux twin, online only', () => {
+  const r = (name: string, status: string, ...labels: string[]) => ({ name, status, labels: labels.map((name) => ({ name })) });
+  const got = onlineRunners([r('a', 'online', 'peek-auras-ci'), r('b', 'online', 'peek-auras-ci-linux'), r('c', 'offline', 'peek-auras-ci'), r('d', 'online', 'peek-auras-ci-mac'), { name: 'e', status: 'online' }], 'Peek Auras');
+  assert.deepEqual(got.map((x) => x.name), ['a', 'b']);
 });

@@ -6,11 +6,14 @@ import { cleanPluginPicks, lines, mcpMerge, mergeTarget, plainMerge } from '../a
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
 import { cardHref } from '../card-links.ts';
+import { addRunnerWaiter } from '../ci-health.ts';
+import { runnerLabel } from '../ci-runner.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
+import { repoSlug } from '../prlinks.ts';
 import { NOTIFY_STATES } from '../push.ts';
 import { tripwireConfig } from '../turn-launch.ts';
 import { tmpDirFor } from '../turn-tmp.ts';
@@ -736,6 +739,18 @@ export const ticketRoutes: Route[] = [
       }
       const waiting = await waiters.add(id, commit, reason);
       return json(res, 201, { waiting, commit, head: waiters.head, merged: !!elsewhere });
+    },
+  },
+  {
+    method: 'POST', path: '/api/tickets/:ticket/wake-runners', who: ['minion'],
+    async handler(ctx) {
+      const { req, res, ticket, app } = ctx;
+      // wake_when_runners_back (#541): a landing parked because CI gave no verdict waits for the scheme's runners.
+      const project = app.store.getProject(ticket.project_id);
+      if (!repoSlug(project?.repo_url ?? null)) throw new HttpError(400, "This scheme's repo isn't on GitHub, so it has no runners to watch");
+      const body = await readJson(req);
+      addRunnerWaiter(app.store, ticket.id, str(body.reason, 'Reason', 1000));
+      return json(res, 201, { label: runnerLabel(project!.name) });
     },
   },
   {

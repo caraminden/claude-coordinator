@@ -15,6 +15,7 @@
 // with ETags so an unchanged answer (a 304) costs no rate limit.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { runnerLabel } from './ci-runner.ts';
 import type { Project, Store, User } from './db.ts';
 import { repoSlug } from './prlinks.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
@@ -63,6 +64,7 @@ export interface Job {
 export interface Runner {
   name: string;
   status: string;
+  labels?: { name: string }[];
 }
 /** Something wrong now: what the alert says, keyed so the same trouble keeps one item. */
 export interface Problem {
@@ -203,6 +205,33 @@ const BUNDLE_ITEM = 'ci.open';
 /** A Mandate item key for a problem (Mandate allows A-Z a-z 0-9 . _ : - and 128 characters). */
 export const itemKey = (key: string) => `ci.${key.replace(/[^A-Za-z0-9._:-]+/g, '_')}`.slice(0, 128);
 
+// ---------- wake_when_runners_back (#541) ----------
+// A landing whose CI gate got no verdict (the kit's land.sh exits 75: no runner took the run, nearly always the
+// desktop off) parks its minion. Its CI ran on a scratch branch the PR watcher never sees, so this poll wakes it:
+// once one of its scheme's runners (labelled <scheme>-ci or <scheme>-ci-linux, as ci_runners adds them) is online.
+
+/** A minion parked until its scheme's runners are back; in the settings table, so it outlives a restart. */
+export interface RunnerWaiter {
+  ticket: number;
+  reason: string;
+}
+export const RUNNER_WAITERS = 'wake-runners-back';
+
+export function runnerWaiters(store: Store): RunnerWaiter[] {
+  return store.getSetting<RunnerWaiter[]>(RUNNER_WAITERS) ?? [];
+}
+
+/** Wait for `ticket`'s scheme's runners; a second call replaces the first. */
+export function addRunnerWaiter(store: Store, ticket: number, reason: string): void {
+  store.setSetting(RUNNER_WAITERS, [...runnerWaiters(store).filter((w) => w.ticket !== ticket), { ticket, reason }]);
+}
+
+/** The online runners carrying a scheme's label, Windows or Linux. */
+export function onlineRunners(runners: Runner[], schemeName: string): Runner[] {
+  const label = runnerLabel(schemeName);
+  return label ? runners.filter((r) => r.status === 'online' && r.labels?.some((l) => l.name === label || l.name === `${label}-linux`)) : [];
+}
+
 // ---------- GitHub ----------
 
 export interface GhAnswer {
@@ -252,6 +281,8 @@ export interface CiHealthDeps {
   /** Put (with `title`) or clear (null) a person's Mandate item from a scheme or CI_SENDER, an alert unless `quiet`; true once Mandate has it settled. */
   mandate: (from: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, quiet?: boolean, link?: string) => Promise<boolean>;
   get?: GhGet;
+  /** Message a minion (wake_when_runners_back); no message, no wakes. */
+  wake?: (ticketId: number, text: string) => void;
 }
 
 export class CiHealth {
@@ -355,8 +386,10 @@ export class CiHealth {
     const out: Problem[] = [];
 
     const runners = await this.read(`repos/${slug}/actions/runners?per_page=100`, as, true);
-    if (Array.isArray(runners?.runners)) out.push(...runnerProblems(runners.runners, saved.offline, now));
-    else {
+    if (Array.isArray(runners?.runners)) {
+      out.push(...runnerProblems(runners.runners, saved.offline, now));
+      this.wakeParked(p, runners.runners);
+    } else {
       // Unreadable isn't fine: the runners already alerting stay as they were, and new ones go unseen.
       // Before #540 only the items' titles were kept, so the first round after it reads them back from those.
       const was = saved.problems ?? Object.entries(saved.sent).map(([key, by]) => ({ key, title: Object.values(by)[0] ?? '' }));
@@ -390,6 +423,26 @@ export class CiHealth {
       }
     }
     return out;
+  }
+
+  /** Message (once) and drop the scheme's minions parked on its runners, once one of them is online; dismissed ones are dropped. */
+  wakeParked(p: Project, runners: Runner[]) {
+    const all = runnerWaiters(this.store);
+    const mine = (w: RunnerWaiter) => this.store.getTicket(w.ticket)?.project_id === p.id;
+    const gone = (w: RunnerWaiter) => { const t = this.store.getTicket(w.ticket); return !t || t.status === 'closed'; };
+    const up = onlineRunners(runners, p.name);
+    const woken = up.length && this.deps.wake ? all.filter((w) => mine(w) && !gone(w)) : [];
+    if (!woken.length && !all.some(gone)) return;
+    // Dropped before sending, so a send that throws can't wake anyone twice.
+    this.store.setSetting(RUNNER_WAITERS, all.filter((w) => !gone(w) && !woken.includes(w)));
+    const names = up.map((r) => r.name).join(', ');
+    for (const w of woken) {
+      try {
+        this.deps.wake!(w.ticket, `${p.name}'s CI runners are back (${names} online): ${w.reason.replace(/[.\s]+$/, '')}. If land parks again on no runner while they're online, the workflow's runs-on may not match them: ask a person instead of parking again.`);
+      } catch (err) {
+        console.error(`Waking #${w.ticket} for its runners failed:`, err); // the others still get theirs
+      }
+    }
   }
 
   /**

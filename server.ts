@@ -476,6 +476,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   mandate: (from, person, key, title, quiet, link) => mandateAlert('CI health', from, person, key, title, link, quiet),
+  wake: (ticketId, text) => runner.send(ticketId, APP_NAME, text),
 });
 if (!BOOT_CHECK) ciHealth.start();
 // The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that

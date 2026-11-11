@@ -177,7 +177,7 @@ one ahead, so a landing doesn't wait a whole CI round per place in line. When "e
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
 `CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion
-parks and runs it again once a person says the runners are back. Say all of this in the "How a
+calls `wake_when_runners_back`, parks, and runs it again once Citadel says the runners are back. Say all of this in the "How a
 change ships" line, and that the worktree sits on a detached commit while a landing waits.
 
 `--install` sets `core.hooksPath` in the repo's shared config, so the main checkout gets the

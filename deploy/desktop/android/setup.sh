@@ -67,6 +67,14 @@ fi
 [[ -d /run/systemd/system ]] || die 'systemd is not running although /etc/wsl.conf turns it on: in PowerShell, wsl --terminate citadel-android, then run this again.'
 [[ -e /dev/kvm ]] || die 'There is no /dev/kvm here, so the emulator would crawl. Stop and tell the minion.'
 
+# One clock keeper for the whole WSL VM (#542): every distro shares one kernel clock, WSL's own chrony already
+# keeps it by the Windows clock, and this distro's systemd-timesyncd stepping it too skewed every distro's clock by
+# 2% (tools/ci-runner/README.md, "Citadel's own tests").
+if grep -qa 'refclock PHC' /init 2>/dev/null && [[ $(systemctl is-enabled systemd-timesyncd 2>/dev/null) != masked ]]; then
+  systemctl mask --now systemd-timesyncd
+  echo 'Turned systemd-timesyncd off: WSL keeps the clock by the Windows clock, and the two fought over it (#542).'
+fi
+
 # 2. What it needs. libX11: the headless emulator still links against it.
 java=/usr/lib/jvm/java-21-openjdk-amd64
 if ! command -v ssh >/dev/null || ! command -v curl >/dev/null || ! command -v unzip >/dev/null || [[ ! -x $java/bin/java ]] || ! ldconfig -p | grep -q 'libX11\.so\.6'; then

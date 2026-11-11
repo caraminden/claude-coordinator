@@ -40,6 +40,7 @@ as_android() { runuser -u "$user" -- env HOME="$home" "$@"; }
 
 [[ -n $url ]] || die 'usage: setup.sh <the address the Machines page shows> [<ssh login on perigee>]'
 [[ $(id -u) == 0 ]] || die 'Run this as root: in PowerShell, wsl -d citadel-android -u root'
+cd / # root's home isn't readable by the user the steps below run as
 
 # 1. systemd on (the emulator and the tunnel are its services); no Windows drives or programs.
 want='# Citadel'"'"'s Android emulator (#533, deploy/desktop/android/setup.sh): systemd for its services, and nothing of
@@ -92,7 +93,8 @@ done
 # 5. The SDK, the emulator and the AVD.
 as_android CITADEL_ANDROID_JAVA_HOME="$java" bash "$dir/install-sdk.sh"
 sdk=$home/.local/share/android-sdk
-missing=$(ldd "$sdk"/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless | grep 'not found' || true)
+# Its own libraries are in emulator/lib64, which the emulator's launcher puts on the path; only the system's can be missing.
+missing=$(LD_LIBRARY_PATH="$sdk/emulator/lib64" ldd "$sdk"/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless | grep 'not found' || true)
 [[ -z $missing ]] || die "The emulator is missing system libraries; tell the minion: $missing"
 
 # 6. The key, and what perigee shares.

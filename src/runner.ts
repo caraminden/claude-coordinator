@@ -982,11 +982,31 @@ export class Runner {
       if (!ticket || !project || ticket.status === 'closed') return;
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
       if (netTries && !this.netWait(ticketId)) return;
+      const person = ticket.person_id ?? this.turnPerson(ticket, project, this.peekQueue(ticketId));
+      if (this.refused(ticketId, person)) {
+        // Nothing it would have carried is dropped: the queue, held mail and a network wait wait for the next turn (#468 S03-6).
+        const q = this.queues.get(ticketId);
+        if (q?.length) this.store.setSetting(waitingKey(ticketId), q);
+        return;
+      }
       this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
-      const batch = this.takeQueue(ticketId);
       // It carries on the interrupted turn, so it runs for that turn's person.
-      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...batch], ticket.person_id ?? this.turnPerson(ticket, project, batch), resumes, limitTries, netTries);
+      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries);
     });
+  }
+
+  /** What takeQueue would take, left where it is. */
+  private peekQueue(ticketId: number): QueuedMessage[] {
+    return [...(this.netWait(ticketId)?.queued ?? []), ...(this.queues.get(ticketId) ?? []), ...(this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [])];
+  }
+
+  /** Whether `person`'s Claude can't run a turn now (Runner.placeFor); the chat says why. Asked before the queue is taken. */
+  private refused(ticketId: number, person: number | null): boolean {
+    const place = this.noTurns ? null : this.placeFor?.(person);
+    if (!place || !('refused' in place)) return false;
+    this.emit(ticketId, 'note', { text: place.refused });
+    this.broadcastTicket(ticketId);
+    return true;
   }
 
   /** Everything queued for the minion's next turn, which starts now: a network wait's held messages first, as that wait ends. */
@@ -1364,6 +1384,8 @@ export class Runner {
         this.store.deleteSetting(coldKey(t.id));
         // A dismissed minion isn't reopened by the cap: its mail waits for a person's message.
         if (!mail.length || t.status === 'closed') continue;
+        // Nor while its Claude can't run a turn: the mail waits for the next one that can (#468 S03-6).
+        if (this.refused(t.id, this.turnPerson(t, p, mail))) continue;
         this.store.deleteSetting(mailKey(t.id));
         this.emit(t.id, 'note', { text: t.session_id ? `Held mail has waited ${COLD_HOLD_MAX_MS / 3_600_000} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.' });
         this.queues.set(t.id, [...(this.queues.get(t.id) ?? []), ...mail]);
@@ -1629,8 +1651,16 @@ export class Runner {
         this.emit(ticketId, 'note', { text: 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
       }
       // Everything queued while the last turn ran goes into one turn.
-      const batch = this.takeQueue(ticketId);
-      if (batch.length) return this.startTurn(project, ticket, batch, this.turnPerson(ticket, project, batch));
+      const waiting = this.peekQueue(ticketId);
+      if (!waiting.length) return;
+      const person = this.turnPerson(ticket, project, waiting);
+      if (this.refused(ticketId, person)) {
+        // What woke it is refused, as in send(); held mail and a network wait's messages stay for the next turn (#468 S03-6).
+        this.queues.delete(ticketId);
+        this.store.deleteSetting(waitingKey(ticketId));
+        return;
+      }
+      return this.startTurn(project, ticket, this.takeQueue(ticketId), person);
     });
   }
 

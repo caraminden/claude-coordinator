@@ -191,3 +191,26 @@ test("cold mail keeps its sender's person, so a turn the cap starts runs as the 
     store.deleteSetting(`cold:${tm.id}`);
   }
 });
+
+test("held mail outlives a turn whose Claude can't start, and rides along with the next one that can (#468 S03-6)", async () => {
+  const tm = ticket('coordinator', 2 * 3_600_000);
+  const minion = ticket('ticket', 0, tm.project_id);
+  runner.relay(minion.id, tm.id, `#${minion.number} M`, 'please start #9');
+  const before = promptCount();
+  runner.placeFor = () => ({ refused: "Cara's Claude sign-in expired, so this message waits here." });
+  try {
+    runner.send(tm.id, 'Cara', 'first try');
+    assert.equal(runner.isRunning(tm.id), false);
+    assert.ok(store.getSetting(`mail:${tm.id}`), 'the held mail stays held');
+    // The sweep's cap meets the same refusal: the mail still waits.
+    runner.coldSweep(NOW + COLD_HOLD_MAX_MS);
+    assert.equal(runner.isRunning(tm.id), false);
+    assert.ok(store.getSetting(`mail:${tm.id}`), 'the sweep keeps it held too');
+  } finally {
+    runner.placeFor = undefined;
+  }
+  runner.send(tm.id, 'Cara', 'second try');
+  await until('the turn', async () => promptCount() > before);
+  assert.deepEqual(lastPrompt(), ['[Cara]: second try', `[Held mail from #${minion.number} M, sent 2026-11-08 14:05 UTC]: please start #9`]);
+  await idle(tm.id);
+});

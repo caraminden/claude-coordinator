@@ -372,3 +372,28 @@ test('a message held by the network wait shows as queued and can be taken back (
   await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume');
   assert.doesNotMatch(lastPrompt(), /never mind this/);
 });
+
+test("a resume whose Claude can't start keeps the held messages for the next turn (#468 S03-6)", async () => {
+  up = false;
+  const id = minion();
+  rmSync(release, { force: true });
+  runner.send(id, 'Cara', 'go');
+  await until(() => runner.isRunning(id), 'the turn to start');
+  runner.send(id, 'Cara', 'held through it all');
+  setRelease(OUTAGE);
+  await until(() => !runner.isRunning(id), 'the turn to die');
+  assert.ok(runner.netWait(id));
+  runner.placeFor = () => ({ refused: 'No Claude login for this turn.' });
+  const before = turnsRun();
+  try {
+    setRelease('ok');
+    up = true;
+    await until(() => events(id, 'note').includes('No Claude login for this turn.'), 'the refused resume');
+    assert.equal(turnsRun(), before);
+  } finally {
+    runner.placeFor = undefined;
+  }
+  runner.send(id, 'Cara', 'now?');
+  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), "the person's turn");
+  assert.match(lastPrompt(), /held through it all[\s\S]*now\?/);
+});

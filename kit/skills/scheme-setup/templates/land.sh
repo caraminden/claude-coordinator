@@ -5,54 +5,112 @@
 # time, under a lock in the scheme repo's .git, in the order they asked: it says its place in line
 # and waits as long as the line moves, so run it in the background with a long timeout (a run that
 # is stopped loses its place).
-# 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here.
+# 1. Rebases the branch onto the local main. A conflict stops here.
 # 2. Refuses when the branch takes a number main already has (a migration, a version, a ledger id),
 #    as the "Numbered things" line in Project facts names them. No line, or "none": no check.
-#    A refusal puts the branch back where it was, with main untouched.
-# 3. Runs the check command on the rebased branch, within LAND_CHECK_TIMEOUT whole seconds (default
-#    1800). A failure or overrun stops here, with main untouched.
-# 4. Fast-forwards main in the scheme's main checkout to the branch.
-# 5. Pushes main to origin from the main checkout, never forced. A failed push is reported and main
+# 3. Runs the check command on the rebased commit, within LAND_CHECK_TIMEOUT whole seconds (default
+#    1800). A failure or overrun stops here.
+# 4. With the CI gate on (below): pushes the commit to the scratch branch land/<branch> on origin and
+#    waits for CI to pass exactly that commit. Red stops here.
+# 5. Fast-forwards main in the scheme's main checkout to the commit.
+# 6. Pushes main to origin from the main checkout, never forced. A failed push is reported and main
 #    stays moved; the next landing pushes it again.
+# Until step 5 main is untouched. The branch itself only moves when it lands, or to the rebased
+# commit when the check or CI was red on top of main (so the fix starts from there); anything else
+# leaves it where it was. While this runs, the worktree sits on a detached commit: don't work in it.
+# Exit: 0 landed; 1 refused (a conflict, a clash, a red check, red CI) or main moved but its push
+# failed; 75 CI gave no verdict (no runner took the run, it ran too long, or it was lost twice):
+# nothing is wrong with the branch and nothing landed, so park and run this again once a person says
+# the runners are back.
 set -euo pipefail
 
 # The check command, exactly as Project facts names it under "Check commands" ('true' while it has none).
+# With the CI gate on it is what runs here before anything is pushed: keep it light.
 CHECK='npm test'
 # The scheme's main branch.
 BRANCH=main
 # The file whose Project facts may have a "Numbered things" line.
 FACTS=CLAUDE.md
 
+# The CI gate: off while both of these are empty.
+# CI_WORKFLOWS: the workflow files that must all be green on the exact commit that lands, split by
+#   spaces: 'windows.yml' or 'ci.yml android.yml'. Each needs "land/**" among its push branches:
+#     on:
+#       push:
+#         branches: [main, 'land/**']
+#   and a concurrency group per ref (group: <name>-${{ github.ref }}), or the stacked runs below
+#   wait for each other.
+# CI_STATUS: only when "every workflow green" is not the scheme's rule (a workflow that blocks only
+#   when red, one that runs only for some paths): the scheme's own command. It gets the commit as
+#   its one argument and answers by exit code: 0 green, 1 red, 2 running, 3 not started (no run yet,
+#   or still queued), 4 ended without a verdict (cancelled, the runner lost, its jobs skipped);
+#   anything else: no answer this time. What it prints is shown when CI is red. It must judge the
+#   newest run on that commit.
+CI_WORKFLOWS=''
+CI_STATUS=''
+# How many landings at the front of the line run CI at once, each on top of the ones ahead of it
+# (below, "The stack"). 1: only the head of the line.
+CI_STACK=3
+
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
+park() { say "$*"; exit 75; }
 
 # The line for the land lock. The lock itself is the flock on <.git>/land.lock, on fd 9: that alone
 # keeps landings one at a time. The kernel grants a flock in no order, though, so several landings
 # waiting on it meant some lost every round and timed out (2026-11-10). So waiters line up first:
 # each takes a numbered ticket file in <.git>/land-queue, and only the oldest ticket tries the lock.
-#   queue_lock <.git dir> <label>   wait in line, then hold the lock on fd 9. Returns 1 only when
-#                                   nothing has moved for QUEUE_STALL seconds.
-#   queue_phase <text>              say what the holder is doing now: the waiters' sign of progress
+#   queue_join <.git dir> <label>   take a ticket at the end of the line
+#   queue_look                      one look at the line: Q_AHEAD is how many are ahead; with none,
+#                                   it takes the lock (Q_HELD). Returns 1 only when nothing has moved
+#                                   for QUEUE_STALL seconds.
+#   queue_phase <text>              say what this one is doing now: the waiters' sign of progress
 #   queue_done [ok]                 leave the line; ok: it went all the way, so its time counts
 #                                   toward the waiters' estimate
-# A ticket is four lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits),
-# its label, and its phase. A ticket whose process is gone is deleted by whoever waits behind it.
+# A ticket is five lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits),
+# its label, its phase, and the commit it built ("-" while it has none; see "The stack"). A ticket
+# whose process is gone is deleted by whoever waits behind it.
 # A land.sh from a branch older than the line takes the flock directly; the head of the line waits
 # for it like for anyone else.
 # The same line as Citadel's own tools/deploy-queue.sh, kept inline so a scheme copies one file: a
-# fix to either belongs in both.
+# fix to either belongs in both (the stack is only here).
+#
+# The stack (CI gate on, CI_STACK over 1). A landing can't know its commit until the one ahead has
+# landed, so with CI in the way every landing would wait a whole CI round alone. Instead the first
+# CI_STACK in line each build now: the head on main, each one behind on the commit in the ticket
+# directly ahead of it, and CI runs them side by side. Only the head lands, holding the land lock
+# from the moment it is head, and only a commit CI passed that sits exactly on main. When it lands,
+# the next one's commit already sits on the new main, so it lands as soon as its own run is green.
+# When one leaves without landing (red, a conflict, killed), the commit ahead of everyone behind it
+# changes: each of them builds again on the new one and CI runs again. The ones ahead never notice.
+# A ticket with no fifth line is from a land.sh older than the stack: nobody builds on it, they
+# wait for it to leave.
+# The commit is built on a detached HEAD from the branch as it was, so the branch never holds
+# another minion's unlanded commits, whatever stops this script.
 QUEUE_POLL=${LAND_QUEUE_POLL:-1}
 CHECK_LIMIT=${LAND_CHECK_TIMEOUT:-1800}
 [[ $CHECK_LIMIT =~ ^[0-9]+$ ]] || refuse "LAND_CHECK_TIMEOUT is in whole seconds, not \"$CHECK_LIMIT\""
 [[ ${LAND_QUEUE_SLACK:-300} =~ ^[0-9]+$ ]] || refuse "LAND_QUEUE_SLACK is in whole seconds, not \"$LAND_QUEUE_SLACK\""
-# Give up after this long with no change at the head of the line. The holder's longest single phase
-# is the check, so the limit is the check's own plus slack (the 30 s it gets to die, the 60 s push):
-# it stays longer than the check's whatever a scheme sets that to.
-# shortcut: a waiter counts with its own LAND_CHECK_TIMEOUT, not the holder's; write the holder's
-# into its ticket if landings in one scheme ever run with different limits.
-QUEUE_STALL=$((CHECK_LIMIT + ${LAND_QUEUE_SLACK:-300}))
+# CI's limits, in whole seconds, counted for the head of the line only (a run behind it may just be
+# waiting for a runner the ones ahead are using): a runner takes the run within CI_START, and the run
+# ends within CI_LIMIT. CI is asked every CI_POLL. For CI_GRACE after a push, an older run of the
+# same commit may still be the one that answers, so red or lost is not believed yet.
+CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60}
+for v in CI_START CI_LIMIT CI_POLL CI_GRACE; do
+  [[ ${!v} =~ ^[0-9]+$ ]] || refuse "LAND_$v is in whole seconds, not \"${!v}\" (CI_LIMIT is LAND_CI_TIMEOUT)"
+done
+[[ $CI_STACK =~ ^[1-9][0-9]*$ ]] || refuse "CI_STACK is a number from 1 up, not \"$CI_STACK\""
+CI_ON=1
+[ -n "$CI_WORKFLOWS$CI_STATUS" ] || CI_ON='' CI_STACK=1 CI_LIMIT=0
+# Give up after this long with no change at the head of the line. The head's longest single phases
+# are the check (which may wait for the checks of the ones stacked behind it) and the CI run, so the
+# limit is those plus slack (the 30 s a check gets to die, the 60 s push): it stays longer than them
+# whatever a scheme sets them to.
+# shortcut: a waiter counts with its own limits, not the holder's; write the holder's into its
+# ticket if landings in one scheme ever run with different limits.
+QUEUE_STALL=$((CHECK_LIMIT * CI_STACK + CI_LIMIT + ${LAND_QUEUE_SLACK:-300}))
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
-QUEUE_TICKET=
+QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID=''
 
 # "<pid> <start time>" of a live process, or nothing. The start time tells a reused pid apart.
 queue_proc() {
@@ -66,16 +124,19 @@ queue_proc() {
   echo "$1 ${21}"
 }
 
-queue_write() { # <file> <pid and start> <got> <label> <phase>: by a rename, so nobody reads half a ticket
-  printf '%s\n' "$2" "$3" "$4" "$5" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
+queue_write() { # <file> <pid and start> <got> <label> <phase> <commit>: by a rename, so nobody reads half a ticket
+  printf '%s\n' "$2" "$3" "$4" "$5" "$6" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
 }
 
-queue_phase() {
+queue_set() { # <line, from 0> <text>: change one line of this landing's ticket
   local t=$QUEUE_TICKET l
   [ -n "$t" ] && [ -e "$t" ] || return 0
   mapfile -t l 2>/dev/null <"$t" || return 0
-  queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "$1" 2>/dev/null || true
+  l[$1]=$2
+  queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "${l[3]:-}" "${l[4]:--}" 2>/dev/null || true
 }
+
+queue_phase() { queue_set 3 "$1"; }
 
 queue_done() {
   local t=$QUEUE_TICKET l took
@@ -94,71 +155,74 @@ queue_ordinal() {
   case $1 in 1) echo next ;; 2) echo 2nd ;; 3) echo 3rd ;; *) echo "${1}th" ;; esac
 }
 
-queue_lock() {
-  local q=$1/land-queue label=$2 n me t l ahead head headname sig last="" since=$SECONDS said="" typical sum count line
-  mkdir -p -m 700 "$q"
+queue_join() {
+  Q_DIR=$1/land-queue Q_LABEL=$2
+  mkdir -p -m 700 "$Q_DIR"
   exec 9>"$1/land.lock"
-  me=$(queue_proc $$)
+  Q_ME=$(queue_proc $$)
   # The ticket and its number, under a lock of its own that is only ever held for these few lines: the
   # ticket is in the folder before the next number goes out, so nobody behind it can miss it.
-  n=$(
-    exec 8>"$q/.seq.lock"
+  Q_N=$(
+    exec 8>"$Q_DIR/.seq.lock"
     flock 8
-    n=$(printf '%010d' $(($(cat "$q/.seq" 2>/dev/null || echo 0) + 1)))
-    queue_write "$q/$n" "$me" 0 "$label" waiting
-    echo "$((10#$n))" >"$q/.seq"
+    n=$(printf '%010d' $(($(cat "$Q_DIR/.seq" 2>/dev/null || echo 0) + 1)))
+    queue_write "$Q_DIR/$n" "$Q_ME" 0 "$Q_LABEL" waiting -
+    echo "$((10#$n))" >"$Q_DIR/.seq"
     echo "$n"
   )
-  QUEUE_TICKET="$q/$n"
-  trap queue_done EXIT
+  QUEUE_TICKET="$Q_DIR/$Q_N" Q_SINCE=$SECONDS
+}
 
-  while :; do
-    ahead=0 head=""
-    for t in "$q"/[0-9]*; do
-      [[ ${t##*/} =~ ^[0-9]+$ ]] || continue # not a ticket half-written, or the glob itself
-      [[ ${t##*/} < $n ]] || break
-      mapfile -t l 2>/dev/null <"$t" || continue
-      # Its process is gone (killed, or its turn was stopped): it leaves the line.
-      if [ -z "${l[0]:-}" ] || [ "$(queue_proc "${l[0]%% *}")" != "${l[0]}" ]; then
-        rm -f "$t"
-        continue
-      fi
-      ahead=$((ahead + 1))
-      [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"; }
-    done
-
-    if [ "$ahead" = 0 ]; then
-      # A short blocking wait, not a poll: the lockers outside the line block in the kernel, and a poller would lose to every one of them.
-      if flock -w "$QUEUE_POLL" 9; then
-        [ -z "$said" ] || echo "queue: got the land lock" >&2
-        queue_write "$QUEUE_TICKET" "$me" "$(date +%s)" "$label" starting
-        return 0
-      fi
-      head="outside $n" headname="a landing started from a branch whose land.sh is older than the line"
+queue_look() {
+  local q=$Q_DIR t l ahead=0 head="" headname="" sig typical sum count line
+  Q_PRED='' Q_PREDNAME=''
+  for t in "$q"/[0-9]*; do
+    [[ ${t##*/} =~ ^[0-9]+$ ]] || continue # not a ticket half-written, or the glob itself
+    [[ ${t##*/} < $Q_N ]] || break
+    mapfile -t l 2>/dev/null <"$t" || continue
+    # Its process is gone (killed, or its turn was stopped): it leaves the line.
+    if [ -z "${l[0]:-}" ] || [ "$(queue_proc "${l[0]%% *}")" != "${l[0]}" ]; then
+      rm -f "$t"
+      continue
     fi
-
-    # Progress is any change at the head of the line: a new head, or the head's next phase.
-    sig="$ahead $head"
-    if [ "$sig" != "$last" ]; then
-      last=$sig since=$SECONDS
-      line="$(queue_ordinal $((ahead + 1))) in line for the land lock"
-      if [ "$ahead" -gt 0 ]; then
-        sum=0 count=0
-        [ ! -f "$q/.took" ] || while read -r typical; do [[ $typical =~ ^[0-9]+$ ]] && sum=$((sum + typical)) count=$((count + 1)); done <"$q/.took" || true
-        typical=$((count ? sum / count : QUEUE_TYPICAL))
-        [ "$typical" -gt 0 ] || typical=1
-        line="$line, about $(((ahead * typical + 59) / 60)) min"
-      fi
-      echo "queue: $line (ahead: $headname)" >&2
-      [ -n "$said" ] || echo "queue: the wait has no time limit while the line moves, so run this in the background with a long timeout rather than under a 10 min limit: a run that is stopped loses its place" >&2
-      said=1
-    elif [ $((SECONDS - since)) -ge "$QUEUE_STALL" ]; then
-      echo "queue: nothing has moved for $(((QUEUE_STALL + 59) / 60)) min (ahead: $headname), so this gave up and nothing landed. A person needs to look at what holds the land lock ($1/land.lock) before anyone tries again" >&2
-      queue_done
-      return 1
-    fi
-    [ "$ahead" = 0 ] || sleep "$QUEUE_POLL"
+    ahead=$((ahead + 1))
+    [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"; }
+    Q_PRED=${l[4]:-} Q_PREDNAME=${l[2]:-?} # the last one seen is the one directly ahead
   done
+  Q_AHEAD=$ahead
+  [[ $Q_PRED =~ ^[0-9a-f]{40,}$ ]] || Q_PRED='' # "-": it has built nothing yet; no line: older than the stack
+
+  if [ "$ahead" = 0 ]; then
+    [ -z "$Q_HELD" ] || return 0
+    # A short blocking wait, not a poll: the lockers outside the line block in the kernel, and a poller would lose to every one of them.
+    if flock -w "$QUEUE_POLL" 9; then
+      [ -z "$Q_SAID" ] || echo "queue: got the land lock" >&2
+      Q_HELD=1
+      queue_set 1 "$(date +%s)"
+      return 0
+    fi
+    head="outside $Q_N" headname="a landing started from a branch whose land.sh is older than the line"
+  fi
+
+  # Progress is any change at the head of the line: a new head, or the head's next phase.
+  sig="$ahead $head"
+  if [ "$sig" != "$Q_LAST" ]; then
+    Q_LAST=$sig Q_SINCE=$SECONDS
+    line="$(queue_ordinal $((ahead + 1))) in line for the land lock"
+    if [ "$ahead" -gt 0 ]; then
+      sum=0 count=0
+      [ ! -f "$q/.took" ] || while read -r typical; do [[ $typical =~ ^[0-9]+$ ]] && sum=$((sum + typical)) count=$((count + 1)); done <"$q/.took" || true
+      typical=$((count ? sum / count : QUEUE_TYPICAL))
+      [ "$typical" -gt 0 ] || typical=1
+      line="$line, about $(((ahead * typical + 59) / 60)) min"
+    fi
+    echo "queue: $line (ahead: $headname)" >&2
+    [ -n "$Q_SAID" ] || echo "queue: the wait has no time limit while the line moves, so run this in the background with a long timeout rather than under a 10 min limit: a run that is stopped loses its place" >&2
+    Q_SAID=1
+  elif [ $((SECONDS - Q_SINCE)) -ge "$QUEUE_STALL" ]; then
+    echo "queue: nothing has moved for $(((QUEUE_STALL + 59) / 60)) min (ahead: $headname), so this gave up and nothing landed. A person needs to look at what holds the land lock (${q%/land-queue}/land.lock) before anyone tries again" >&2
+    return 1
+  fi
 }
 
 # Numbered things: what minions number in parallel, so two can take the same "next" one and both
@@ -258,58 +322,281 @@ numbered_clashes() {
 [ $# -eq 0 ] || refuse "takes no arguments"
 here=$(git rev-parse --show-toplevel)
 cd "$here"
+gitdir=$(git rev-parse --absolute-git-dir)
 branch=$(git branch --show-current)
+# A landing that was killed outright left this worktree on its detached commit, and the branch where it was.
+if [ -z "$branch" ] && [ -s "$gitdir/land-branch" ]; then
+  git rebase --abort 2>/dev/null || true
+  branch=$(cat "$gitdir/land-branch")
+  git checkout -q "$branch" || refuse "an earlier landing was stopped mid-way and $here could not go back onto $branch (above); a person needs to look"
+  say "an earlier landing here was stopped mid-way: $here is back on $branch as it was"
+fi
+rm -f "$gitdir/land-branch"
 { [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || refuse "run it from a minion's branch, not $BRANCH or a detached HEAD"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
 # The main checkout is the first entry of the worktree list.
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-
 state=$(git -C "$MAIN" rev-parse --absolute-git-dir)
-queue_lock "$state" "$branch" || exit 1
-# Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
-[ "$(git -C "$MAIN" branch --show-current)" = "$BRANCH" ] || refuse "$MAIN is not on $BRANCH; a person needs to look"
-[ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ] || refuse "$MAIN has uncommitted changes; a person needs to look"
 
-pre=$(git rev-parse HEAD)
-fork=$(git merge-base "$BRANCH" HEAD)
-queue_phase "rebasing onto $BRANCH"
-say "rebasing $branch onto $BRANCH ($(git log -1 --format='%h "%s"' "$BRANCH"))"
-if ! git rebase -q "$BRANCH"; then
-  git rebase --abort 2>/dev/null || true # nothing to abort if it never started
-  refuse "the rebase onto $BRANCH failed (see git's output above), so nothing landed. On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again"
+CI_REF=land/$branch
+slug=''
+if [ -n "$CI_ON" ]; then
+  slug=$(git -C "$MAIN" remote get-url origin 2>/dev/null) || refuse "the CI gate is on, but there is no origin remote to run CI from"
+  slug=${slug#*github.com[:/]} slug=${slug%.git}
 fi
+cilog="$state/land-ci-${branch//\//-}.log"
+# Never holding the lock: a gh or git left hanging after its timeout mustn't keep it.
+hub() { GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&-; }
 
-queue_phase "checking numbered things"
-rc=0
-clashes=$(numbered_clashes "$BRANCH" "$fork" "$pre") || rc=$?
-if [ "$rc" != 0 ]; then
-  git reset -q --keep "$pre"
-  printf '%s\n' "$clashes" | sed 's/^/land:   /' >&2
-  [ "$rc" != 2 ] || refuse "fix that line in $FACTS (commit it on this branch), then run this again. Nothing landed and $branch is back where it was"
-  [ "$rc" = 1 ] || refuse "the numbered-things check itself failed (exit $rc), so nothing landed and $branch is back where it was; a person needs to look"
-  refuse "this branch takes a number main already has (above), so nothing landed and $branch is back where it was. Renumber yours past main's highest (bump the version past main's), commit, then run this again"
-fi
+pre=$(git rev-parse HEAD) # the branch as it was: every build starts from here
+base=''    # the commit the build sits on: main, or the commit of the one directly ahead
+tip=''     # the build: $pre rebased onto $base, once it passed the check
+blocked='' # why it can't land on $base (a conflict, a clash, a red check, red CI). Final only once it is the head
+           # and $base is main: until then the fault may lie in an unlanded commit it sits on, so it waits.
+           # shortcut: it waits for the ones ahead to land, not just to turn green; read their verdicts
+           # from their tickets if a red landing holding up the ones behind it ever costs real time.
+keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
+green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_last=-1 landed=''
 
-say "running $CHECK"
-queue_phase "running the check since $(date +%H:%M)"
-log="$state/land-check.log"
-# It runs under the lock, so it has a time limit (LAND_CHECK_TIMEOUT, in seconds), and 9>&- keeps a
-# process it leaves running from holding the lock after this script ends.
-limit=$CHECK_LIMIT
-rc=0
-timeout -k 30 "$limit" bash -c "$CHECK" >"$log" 2>&1 9>&- || rc=$?
-if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-  echo "land: the check ran past ${limit}s and was stopped: something in it hung" >>"$log" # the tail below shows it
-fi
-if [ "$rc" != 0 ]; then
-  tail -n 40 "$log" >&2
-  refuse "the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
-fi
+# CI's verdict on $tip, by the exit codes in the header at CI_STATUS; what it found goes to $cilog.
+ci_verdict() {
+  local runs w path id status result one failed rank worst=0 worst_rank=0
+  : >"$cilog"
+  if [ -n "$CI_STATUS" ]; then
+    timeout 120 bash -c "$CI_STATUS \"\$1\"" _ "$tip" >"$cilog" 2>&1 9>&-
+    return
+  fi
+  runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$tip&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5
+  for w in $CI_WORKFLOWS; do
+    one=3
+    while IFS=$'\t' read -r path id status result url; do
+      [[ ${path%%@*} == */"$w" ]] || continue
+      case $status:$result in
+        completed:success) one=0 ;;
+        completed:failure)
+          # Red only when a step failed. A runner that went away mid-run fails its job with the step it was in never finished.
+          failed=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[].steps[]? | select(.conclusion == "failure")] | length' 2>>"$cilog") || return 5
+          if [ "$failed" -gt 0 ] 2>/dev/null; then one=1; else one=4; fi ;;
+        completed:timed_out) one=1 ;;
+        completed:*) one=4 ;;
+        in_progress:*) one=2 ;;
+      esac
+      echo "$w: $status $result $url" >>"$cilog"
+      break # the newest run of this workflow on the commit
+    done <<<"$runs"
+    [ "$one" != 3 ] || echo "$w: not started on ${tip:0:12}" >>"$cilog"
+    # The worst of the workflows: red, then no verdict, not started, running, green.
+    case $one in 1) rank=4 ;; 4) rank=3 ;; 3) rank=2 ;; 2) rank=1 ;; *) rank=0 ;; esac
+    [ "$rank" -le "$worst_rank" ] || worst=$one worst_rank=$rank
+  done
+  return "$worst"
+}
 
-tip=$(git rev-parse HEAD)
-git -C "$MAIN" merge -q --ff-only "$tip" || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
+# The commit goes to the scratch branch, which starts CI on it. Deleted first: a push of the commit
+# the branch already has (a run to repeat) would start nothing. Forced on purpose: only this script
+# writes land/<branch>, so there is no one's work to overwrite. --no-verify: the check ran above.
+ci_push() {
+  hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
+  hub git push -q --no-verify origin "+$tip:refs/heads/$CI_REF" || refuse "couldn't push ${tip:0:12} to origin's $CI_REF, so CI can't run on it and nothing landed"
+  pushed=1 pushed_at=$SECONDS ci_clock=$SECONDS
+}
+
+# Stops the scratch branch's runs nobody waits for now, so they don't hold a runner. Best effort.
+ci_cancel() {
+  local id
+  for id in $(hub gh api "repos/$slug/actions/runs?branch=$CI_REF&per_page=20" --jq '.workflow_runs[] | select(.status != "completed") | .id' 2>/dev/null); do
+    hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
+  done
+}
+
+# Asks CI about $tip, at most every CI_POLL seconds: sets green, refuses on red, repeats a lost run once, parks at the limits.
+ci_ask() {
+  local rc=0 waited
+  [ $((SECONDS - ci_last)) -ge "$CI_POLL" ] || return 0
+  ci_last=$SECONDS
+  ci_verdict || rc=$?
+  if [ -n "$pushed_at" ] && [ $((SECONDS - pushed_at)) -lt "$CI_GRACE" ]; then
+    case $rc in 1 | 4) rc=3 ;; esac
+  fi
+  case $rc in
+    0)
+      green=1
+      say "CI is green on ${tip:0:12}"
+      queue_phase "CI passed ${tip:0:12}"
+      return 0 ;;
+    1)
+      cat "$cilog" >&2
+      say "CI is red on ${tip:0:12}"
+      [ "$Q_AHEAD" = 0 ] || say "that commit sits on $Q_PREDNAME's, which hasn't landed: waiting to see whether it does before giving up"
+      blocked="CI is red on ${tip:0:12} (above), so $BRANCH is untouched. Fix it, commit, then run this again"
+      keep=$tip tip=''
+      queue_set 4 - # nobody builds on a red commit
+      queue_phase "CI is red"
+      return 0 ;;
+    4)
+      cat "$cilog" >&2
+      [ -z "$retried" ] || park "CI's run on ${tip:0:12} ended without a verdict a second time (a runner lost mid-run, or the run cancelled), so nothing landed. The runners need a person's look; park, and run this again after"
+      retried=1
+      say "CI's run on ${tip:0:12} ended without a verdict (a runner lost mid-run, or the run cancelled): running it again, once. The commit is the same, so the ones stacked on it keep their runs"
+      ci_push
+      queue_phase "waiting for CI on ${tip:0:12} again since $(date +%H:%M)"
+      return 0 ;;
+  esac
+  [ "$Q_AHEAD" = 0 ] || return 0
+  waited=$((SECONDS - ci_clock))
+  if [ "$rc" != 2 ] && [ "$waited" -ge "$CI_START" ]; then
+    cat "$cilog" >&2
+    park "no runner has started CI on ${tip:0:12} within $(((CI_START + 59) / 60)) min (the machine they run on is probably off or asleep), so nothing landed. Park, and run this again once a person says the runners are back"
+  fi
+  if [ "$waited" -ge "$CI_LIMIT" ]; then
+    cat "$cilog" >&2
+    park "CI on ${tip:0:12} hasn't finished within $(((CI_LIMIT + 59) / 60)) min, so nothing landed. Park, and run this again later"
+  fi
+}
+
+# The branch as it was, rebased onto <commit> and checked: sets base, and tip when it passed (with the
+# CI gate on, CI then runs on it), or blocked when it can't sit on that commit.
+build() {
+  local want=$1 on phase rc=0 clashes fork log
+  [ -z "$pushed" ] || ci_cancel # its run is on a commit that will never land now
+  base=$want tip='' blocked='' keep='' green='' retried='' pushed_at=''
+  queue_set 4 -
+  if [ "$Q_AHEAD" = 0 ]; then
+    on="$BRANCH ($(git log -1 --format='%h "%s"' "$want"))" phase="rebasing onto $BRANCH"
+  else
+    phase="rebasing onto $Q_PREDNAME's commit"
+    on="$Q_PREDNAME's commit ${want:0:12}, $(queue_ordinal $((Q_AHEAD + 1))) in line: CI runs on both at once, and this lands once $Q_PREDNAME has"
+  fi
+  queue_phase "$phase"
+  say "rebasing $branch onto $on"
+  echo "$branch" >"$gitdir/land-branch"
+  # 9>&- on git: a git gc --auto it starts detaches, and mustn't keep the lock.
+  git checkout -q --detach "$pre" 9>&-
+  if ! git rebase -q "$want" 9>&-; then
+    git rebase --abort 2>/dev/null || true # nothing to abort if it never started
+    blocked="the rebase onto $BRANCH failed (see git's output above), so nothing landed. On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again"
+    return 0
+  fi
+
+  queue_phase "checking numbered things"
+  fork=$(git merge-base "$want" "$pre")
+  clashes=$(numbered_clashes "$want" "$fork" "$pre") || rc=$?
+  if [ "$rc" != 0 ]; then
+    printf '%s\n' "$clashes" | sed 's/^/land:   /' >&2
+    [ "$rc" != 2 ] || refuse "fix that line in $FACTS (commit it on this branch), then run this again. Nothing landed and $branch is back where it was"
+    [ "$rc" = 1 ] || refuse "the numbered-things check itself failed (exit $rc), so nothing landed and $branch is back where it was; a person needs to look"
+    blocked="this branch takes a number main already has (above), so nothing landed and $branch is back where it was. Renumber yours past main's highest (bump the version past main's), commit, then run this again"
+    return 0
+  fi
+
+  say "running $CHECK"
+  queue_phase "waiting to run the check"
+  log="$state/land-check-${branch//\//-}.log"
+  # It runs under the lock when this is the head, so it has a time limit (LAND_CHECK_TIMEOUT, in seconds), and
+  # 9>&- keeps a process it leaves running from holding the lock after this script ends. One check at a time,
+  # under a lock of its own (fd 7): the ones stacked behind the head check too, and the box is shared.
+  (
+    flock 7
+    queue_phase "running the check since $(date +%H:%M)"
+    timeout -k 30 "$CHECK_LIMIT" bash -c "$CHECK" >"$log" 2>&1 9>&- 7>&-
+  ) 7>"$state/land-check.lock" 9>&- || rc=$? # 9>&-: this subshell outlives a killed landing, and mustn't keep its lock
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
+  fi
+  if [ "$rc" != 0 ]; then
+    tail -n 40 "$log" >&2
+    keep=$(git rev-parse HEAD)
+    blocked="the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
+    return 0
+  fi
+
+  tip=$(git rev-parse HEAD)
+  if [ -n "$CI_ON" ]; then
+    ci_clock=$SECONDS ci_last=$SECONDS
+    # A run of this very commit that is green or going (its pull request's, say) will do; otherwise a new one.
+    ci_verdict || rc=$?
+    case $rc in
+      0) green=1 && say "CI already passed ${tip:0:12}" ;;
+      2) say "CI is already running on ${tip:0:12}" ;;
+      *) ci_push && say "waiting for CI on ${tip:0:12} (origin's $CI_REF)" ;;
+    esac
+    queue_phase "waiting for CI on ${tip:0:12} since $(date +%H:%M)"
+  fi
+  queue_set 4 "$tip"
+}
+
+# On the way out, however it ends: the worktree goes back on the branch, the place in line and the lock
+# go, then the scratch branch and its runs.
+leave() {
+  local rc=$? main
+  trap - EXIT
+  set +e
+  if [ -z "$(git branch --show-current)" ]; then
+    git rebase --abort 2>/dev/null
+    # The branch takes the rebased commit only when that landed or was built on main itself: never one stacked on
+    # someone's unlanded work.
+    main=$(git rev-parse "refs/heads/$BRANCH")
+    if [ -n "$keep" ] && { [ "$keep" = "$main" ] || [ "$base" = "$main" ]; }; then
+      git checkout -q -B "$branch" "$keep" 9>&-
+    else
+      git checkout -q "$branch" 9>&-
+    fi
+  fi
+  rm -f "$gitdir/land-branch"
+  queue_done $landed
+  exec 9>&-
+  if [ -n "$pushed" ]; then
+    ci_cancel
+    hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null
+  fi
+  exit "$rc"
+}
+
+queue_join "$state" "$branch"
+trap leave EXIT
+seen_main=''
+while :; do
+  queue_look || exit 1
+  if [ "$Q_AHEAD" = 0 ]; then
+    [ -n "$Q_HELD" ] || continue # queue_look waited on the lock, so this is no busy loop
+    if [ -z "$seen_main" ]; then
+      # Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
+      [ "$(git -C "$MAIN" branch --show-current)" = "$BRANCH" ] || refuse "$MAIN is not on $BRANCH; a person needs to look"
+      [ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ] || refuse "$MAIN has uncommitted changes; a person needs to look"
+      seen_main=1 ci_clock=$SECONDS # the limits on CI count from here: until now its run could be waiting on the ones ahead
+    fi
+    want=$(git rev-parse "refs/heads/$BRANCH")
+  elif [ "$Q_AHEAD" -lt "$CI_STACK" ] && [ -n "$Q_PRED" ]; then
+    want=$Q_PRED
+  else
+    want='' # too far back to build yet, or the one ahead has nothing built
+  fi
+
+  if [ -z "$want" ]; then
+    if [ -n "$base" ]; then # what it was built on is gone: wait for the one ahead to build again
+      [ -z "$pushed" ] || ci_cancel
+      base='' tip='' blocked='' green=''
+      queue_set 4 -
+      queue_phase waiting
+    fi
+  elif [ "$want" != "$base" ]; then
+    build "$want"
+    [ -z "$blocked" ] || [ "$Q_AHEAD" = 0 ] || say "that was on top of $Q_PREDNAME's commit, which hasn't landed: waiting to see whether it does before giving up"
+  fi
+
+  if [ -n "$blocked" ]; then
+    [ "$Q_AHEAD" != 0 ] || refuse "$blocked"
+  elif [ -n "$tip" ]; then
+    [ -z "$CI_ON" ] || [ -n "$green" ] || ci_ask
+    if [ "$Q_AHEAD" = 0 ] && { [ -z "$CI_ON" ] || [ -n "$green" ]; }; then break; fi
+  fi
+  sleep "$QUEUE_POLL"
+done
+
+# The head of the line, holding the lock, with $tip checked (and green in CI) on exactly today's main.
+git -C "$MAIN" merge -q --ff-only "$tip" 9>&- || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
+keep=$tip landed=ok # it landed, so its time counts toward the estimate, whatever the push does
 say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$tip")"
-trap 'queue_done ok' EXIT # it landed, so its time counts toward the estimate, whatever the push does
 
 if ! git -C "$MAIN" remote get-url origin >/dev/null 2>&1; then
   say "no origin remote, so $BRANCH stays local"

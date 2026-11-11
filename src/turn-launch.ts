@@ -233,30 +233,57 @@ export const USAGE_LIMIT = /hit your [\w -]*limit/i;
 // Read-only git subcommands the coordinator may run with `git -C <dir>` in the repo and ticket worktrees.
 // Branch listing is matched exactly, since `branch -v -D x` would delete.
 const READ_ONLY_GIT = [
-  ...['log', 'show', 'status', 'diff', 'blame', 'ls-files', 'rev-parse', 'shortlog', 'worktree list'].map((c) => `${c}:*`),
-  ...['branch', 'branch -a', 'branch -r', 'branch -v', 'branch -vv', 'branch -av', 'branch --list'],
+  ...['log', 'show', 'status', 'diff', 'blame', 'ls-files', 'ls-tree', 'rev-parse', 'rev-list', 'merge-base', 'cat-file', 'describe', 'for-each-ref', 'shortlog', 'worktree list'].map((c) => `${c}:*`),
+  ...['branch', 'branch -a', 'branch -r', 'branch -v', 'branch -vv', 'branch -av', 'branch --list', 'branch -a -vv', 'branch --show-current', 'remote', 'remote -v'],
 ];
 
 /**
+ * Shell commands a Taskmaster may run on any path (#483): they read and print. The tripwire still
+ * refuses a secret path, a process's environment, state.db opened writable and the credentials table.
+ * sqlite3 only with -readonly and -safe: -safe refuses .shell, .output, .backup, ATTACH, VACUUM INTO
+ * and writefile(). curl is for GETs: the Taskmaster's API token is already its MCP tools'.
+ */
+const READ_ONLY_COMMANDS = [
+  'grep', 'ls', 'find', 'cat', 'head', 'tail', 'wc', 'stat', 'sort', 'uniq', 'cut', 'echo',
+  'uptime', 'free', 'df', 'du', 'ps', 'ss', 'curl', 'journalctl --user',
+  'systemctl --user status', 'systemctl --user is-active', 'systemctl --user show', 'systemctl --user list-units', 'systemctl --user list-timers',
+  'sqlite3 -readonly -safe', 'sqlite3 -safe -readonly',
+  'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
+].map((c) => `Bash(${c}:*)`);
+/** The ways those commands write, run something else or send data, denied (deny wins over allow). */
+// Each flag with a space before it, so a URL like /api/some-doc isn't caught by -d; `curl * -X*`
+// needs a word before the flag, so the flag straight after the command is its own rule (tried in real
+// runs). shortcut: bundled flags (`curl -sX POST`) still match the allow rule; fine for accidents, not a wall.
+const READ_ONLY_EXCEPTIONS = [
+  ['find', '-delete', '-exec', '-ok', '-fprint', '-fls'], ['sort', '-o', '--output'], ['ss', '-K', '--kill'], ['journalctl', '--vacuum', '--rotate', '--flush'],
+  ['curl', '-X', '--request', '-d', '--data', '-F', '--form', '-T', '--upload', '-K', '--config', '--json'],
+  ['gh api', '-X', '--method', '-f', '-F', '--field', '--raw-field', '--input'],
+].flatMap(([cmd, ...flags]) => flags.flatMap((f) => [`Bash(${cmd} ${f}*)`, `Bash(${cmd} * ${f}*)`]));
+/** Box-health files a Taskmaster may Read beside its read folders. */
+const HEALTH_FILES = ['/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/pressure/**'];
+
+/**
  * How the coordinator may look at the project's code: its main checkout and every ticket folder,
- * readable but not writable. Bash runs only read-only commands there: Claude Code already allows
- * plain reads (grep, cat, ls, find) in added directories, and `git -C <dir> <read-only command>` is
- * allowed per folder. Each rule pins the exact folder as a prefix, since `*` in a rule would also
- * match `git -C x commit -m "fix log"`. Anything else that would ask for approval is denied.
+ * readable but not writable. Bash runs only read-only commands (READ_ONLY_COMMANDS), on those folders,
+ * readDirs and the box-health files: Claude Code still refuses a read command's path outside them.
+ * `git -C <dir> <read-only command>` is allowed per folder; each rule pins the exact folder as a prefix,
+ * since `*` in a rule would also match `git -C x commit -m "fix log"`. Anything else that would ask
+ * for approval is denied (test/coordinator-access.test.ts replays the calls that used to be).
  * Two more folders are added with no deny rule: the project's shared folder, which acceptEdits then
  * lets the coordinator write, and the repo's Claude Code memory. Claude Code treats files under its
  * config dir as sensitive, so neither allow rules nor a hook's allow let it write there (tried with
  * real runs); making that folder its auto-memory does, so its memory is the one minions load too.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null, liveDir: string | null = null): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
-  let ticketDirs: string[] = [];
-  try {
-    ticketDirs = readdirSync(ticketsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(ticketsDir, d.name));
-  } catch {
-    // No tickets yet.
-  }
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null, liveDir: string | null = null, readDirs: string[] = []): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
+  const subdirs = (dir: string) => {
+    try {
+      return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(dir, d.name));
+    } catch {
+      return []; // No tickets yet.
+    }
+  };
   const roots = [repoDir, ticketsDir, liveDir].filter((d): d is string => !!d);
-  const gitDirs = [repoDir, ...(repoDir ? ticketDirs : []), liveDir].filter((d): d is string => !!d);
+  const gitDirs = [repoDir, ...(repoDir ? subdirs(ticketsDir) : []), liveDir].filter((d): d is string => !!d);
   const writable = [sharedDir, memoryDir].filter((d): d is string => !!d);
   return {
     // Adding the parent tickets/ folder also covers worktrees made after the turn starts.
@@ -264,9 +291,11 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
     settings: {
       permissions: {
         // `//` makes the path absolute. Edit rules also cover Write, NotebookEdit and Bash commands that write there.
-        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)'],
+        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)', ...READ_ONLY_EXCEPTIONS],
         // The web tools ask by default, and nobody can answer a Taskmaster's prompts, so they were denied (#210).
-        allow: ['WebSearch', 'WebFetch', ...gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`))],
+        // readDirs (the live data folder, mise's installs) are readable but not added, so acceptEdits can't write there.
+        allow: ['WebSearch', 'WebFetch', ...[...readDirs.map((d) => `${d}/**`), ...HEALTH_FILES].map((p) => `Read(/${p})`), ...READ_ONLY_COMMANDS,
+          ...gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`))],
       },
       ...(memoryDir ? { autoMemoryDirectory: memoryDir } : {}),
     },
@@ -387,7 +416,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {
-    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null);
+    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')]);
     addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
     const { permissions, ...rest } = access.settings;
     Object.assign(settings, rest);

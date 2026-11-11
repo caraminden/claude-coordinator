@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
 import { coordinatorAccess } from '../src/turn-launch.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'coordinator-access-'));
@@ -24,16 +25,17 @@ test('allows read-only git -C with the exact folder as prefix', () => {
   assert.ok(allow.includes(`Bash(git -C ${repo} log:*)`));
   assert.ok(allow.includes(`Bash(git -C ${join(tickets, '7')} status:*)`));
   assert.ok(allow.includes(`Bash(git -C ${repo} branch -a)`));
-  for (const rule of allow) {
+  for (const rule of allow.filter((r: string) => r.startsWith('Bash(git '))) {
     assert.ok(!rule.includes('*)') || rule.endsWith(':*)'), `no mid-rule wildcard: ${rule}`);
-    assert.doesNotMatch(rule, / (commit|checkout|switch|reset|push|merge|rebase)\b/);
+    assert.doesNotMatch(rule, / (commit|checkout|switch|reset|push|merge|rebase)(?![\w-])/);
   }
 });
 
-test('without a repo, only the tickets folder is added and no git is allowed, only the web tools', () => {
+test('without a repo, only the tickets folder is added and no git is allowed', () => {
   const { addDirs, settings } = coordinatorAccess(null, tickets) as any;
   assert.deepEqual(addDirs, [tickets]);
-  assert.deepEqual(settings.permissions.allow, ['WebSearch', 'WebFetch']);
+  assert.ok(settings.permissions.allow.includes('WebSearch') && settings.permissions.allow.includes('Bash(grep:*)'));
+  assert.ok(!settings.permissions.allow.some((r: string) => r.startsWith('Bash(git')));
 });
 
 test('a live checkout is added read-only, with read-only git, and only when given', () => {
@@ -49,4 +51,135 @@ test('a live checkout is added read-only, with read-only git, and only when give
 test('a project with no tickets folder yet still works', () => {
   const { addDirs } = coordinatorAccess(repo, join(root, 'missing'));
   assert.equal(addDirs.length, 2);
+});
+
+// ---------- #483: the Taskmaster's read-only shell, replayed against the calls it was denied ----------
+
+const data = join(root, 'data');
+mkdirSync(join(data, 'projects/2/tickets/141'), { recursive: true });
+const mise = join(root, 'mise');
+const live = join(root, 'live');
+const tm = coordinatorAccess(`${data}/projects/2/repo`, `${data}/projects/2/tickets`, `${data}/projects/2/shared/project`, null, live, [data, mise]);
+const { allow: tmAllow, deny: tmDeny } = tm.settings.permissions;
+
+/** A Bash rule as a regex, the way Claude Code reads it (checked in real runs, #483): `x:*` is x alone or x and more; `*` elsewhere is any text. */
+function ruleRe(rule: string): RegExp {
+  const body = rule.slice('Bash('.length, -1);
+  const esc = (s: string) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  return body.endsWith(':*') ? new RegExp(`^${esc(body.slice(0, -2))}( .*)?$`, 's') : new RegExp(`^${body.split('*').map(esc).join('.*')}$`, 's');
+}
+const allowRes = tmAllow.filter((r) => r.startsWith('Bash(')).map(ruleRe);
+const denyRes = tmDeny.filter((r) => r.startsWith('Bash(')).map(ruleRe);
+
+/** A command's parts split at |, ||, &&, ; and newlines outside quotes, or null for what Claude Code won't match by rule: a redirect that writes, $(…), backticks, unclosed quotes. */
+function parts(command: string): string[] | null {
+  const cmd = command.replace(/ 2>&1| 2>\/dev\/null| >\s?\/dev\/null/g, '');
+  const out: string[] = [];
+  let cur = '';
+  let q = '';
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (q) {
+      if (c === '\\' && q === '"') { cur += c + (cmd[++i] ?? ''); continue; }
+      if (c === q) q = '';
+      cur += c;
+      continue;
+    }
+    if (c === '\\') { cur += c + (cmd[++i] ?? ''); continue; }
+    if (c === "'" || c === '"') q = c;
+    if (c === '`' || (c === '$' && cmd[i + 1] === '(') || c === '>' || c === '<') return null;
+    if (c === ';' || c === '|' || c === '&' || c === '\n') {
+      if (c === '&' && cmd[i + 1] !== '&') return null;
+      if ((c === '|' || c === '&') && cmd[i + 1] === c) i++;
+      out.push(cur.trim());
+      cur = '';
+      continue;
+    }
+    cur += c;
+  }
+  if (q) return null;
+  out.push(cur.trim());
+  return out.filter(Boolean);
+}
+/** Whether Claude Code would run this Bash call with no prompt: every part allowed, none denied. Paths are Claude Code's own check, tried in real runs. */
+const bashAllowed = (command: string) => !!parts(command)?.every((p) => allowRes.some((r) => r.test(p)) && !denyRes.some((r) => r.test(p)));
+
+test('the rule matcher reads rules the way Claude Code did in real runs', () => {
+  assert.ok(bashAllowed('ps -eo pid,pcpu --sort=-pcpu | head -5'));
+  assert.ok(bashAllowed('curl -s http://127.0.0.1:1/api/some-doc'));
+  assert.ok(bashAllowed(`git -C ${live} merge-base --is-ancestor HEAD HEAD && echo LIVE || echo NOT-LIVE`));
+  for (const c of ['curl -X POST http://127.0.0.1:1/', 'curl -s -X POST http://127.0.0.1:1/', 'gh api -f x=1 rate_limit', 'sort -o /tmp/s /tmp/a', 'find -delete', 'journalctl --user --rotate', 'echo hi > /tmp/x', 'ss -ltn | awk \'{print $4}\'']) assert.ok(!bashAllowed(c), c);
+});
+
+// The calls, with the box's paths moved under this test's folders; calls cut at 500 characters are left out.
+const fixture = readFileSync(new URL('taskmaster-denied-calls.txt', import.meta.url), 'utf8').split('\n').filter((l) => l.includes('\t') && !/…\[\+\d+ chars\]$/.test(l))
+  .map((l) => l.split('\t')[1].replaceAll('/home/cara/.local/share/claude-coordinator', data).replaceAll('/home/cara/claude-coordinator', live).replaceAll('/home/cara/.local/share/mise/installs', mise));
+/** Whether a Taskmaster turn now makes this fixture call without a prompt. */
+function nowAllowed(call: string): boolean {
+  const [tool, arg] = [call.slice(0, call.indexOf(':')), call.slice(call.indexOf(':') + 2)];
+  if (tool === 'Bash') return bashAllowed(arg);
+  if (tool === 'Read') return tmAllow.some((r) => r.startsWith('Read(') && arg.startsWith(r.slice('Read(/'.length, -'**)'.length)));
+  return tmAllow.includes(tool);
+}
+
+// Why each call that stays denied does: the first of these it contains.
+const STILL_DENIED: [RegExp, string][] = [
+  [/^Bash: cd /, 'a cd first: run one command with absolute paths'],
+  [/^Bash: (cp|python3) /, 'writes'],
+  [/^Bash: (for|[A-Za-z]+=)/, 'a loop or a path in a variable, which Claude Code cannot match by rule'],
+  [/\b(sed|awk|xargs|tr|last|tailscale) /, 'not on the list: sed, awk and xargs can write or run anything'],
+  [/sqlite3 -readonly (?!-safe)/, 'sqlite3 without -safe, which could run .shell or write with .output'],
+  [/git -C \S+\/projects\/[^2]\/repo /, "another scheme's repo: git is allowed per folder of this scheme"],
+  [/ branch --contains /, 'branch takes -D after a filter, so only listing forms are allowed'],
+];
+
+test("most of the Taskmaster's denied calls now run; the rest write, cd, or are shell Claude Code can't match by rule", () => {
+  const passed = fixture.filter(nowAllowed);
+  for (const c of fixture.filter((c) => !nowAllowed(c))) assert.ok(STILL_DENIED.some(([re]) => re.test(c)), `still denied, unexpectedly: ${c.slice(0, 200)}`);
+  assert.equal(`${passed.length} of ${fixture.length}`, '57 of 82');
+  for (const c of [
+    'Bash: systemctl --user status claude-coordinator --no-pager -n 20',
+    'Bash: ps -eo pid,user,pcpu,pmem,rss,etime,comm --sort=-pcpu | head -25',
+    'Bash: cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io',
+    'Bash: gh run list -R caraminden/peek-auras --limit 8',
+    `Bash: git -C ${data}/projects/2/repo rev-list --count origin/main..main`,
+    `Bash: git -C ${data}/projects/2/tickets/141 branch --show-current`,
+    `Bash: ls ${mise}`,
+    `Read: ${data}/projects/2/shared/191/scheme-instructions.diff`,
+  ]) assert.ok(passed.includes(c), c);
+});
+
+test('writes stay denied: cp, sed -i, python, curl -X POST, gh api -X, sqlite3 without -readonly -safe, git push, rm, find -exec', () => {
+  for (const c of [
+    `cp /etc/hostname ${data}/x`, `sed -i s/a/b/ ${data}/x`, `python3 -c "open('/tmp/x','w').write('x')"`,
+    'curl -s -X POST http://127.0.0.1:8573/api/x', 'curl -d x=1 http://127.0.0.1:8573/api/x', 'curl --json {} http://127.0.0.1:8573/api/x',
+    'gh api -X DELETE repos/a/b', 'gh api repos/a/b/issues -f title=x', `sqlite3 ${data}/coordinator.db "delete from tickets"`,
+    `sqlite3 -readonly ${data}/coordinator.db ".shell rm -rf /tmp/x"`, `git -C ${data}/projects/2/repo push`, `git -C ${data}/projects/2/repo -c core.pager=x log`,
+    `rm ${data}/x`, `find ${data} -name x -delete`, `find ${data} -exec rm {} ;`, `find ${data} -fprint /tmp/x`, `grep -c a ${data}/x > /tmp/y`,
+    `cd ${data}/projects/2/repo && git log -1`, 'journalctl --user --vacuum-time=1s', 'sort -o /tmp/a /tmp/b',
+  ]) assert.ok(!bashAllowed(c), c);
+});
+
+test("the data folder and mise's installs are readable, not added: acceptEdits can't write there", () => {
+  assert.ok(!tm.addDirs.includes(data) && !tm.addDirs.includes(mise));
+  assert.ok(tmAllow.includes(`Read(/${data}/**)`) && tmAllow.includes(`Read(/${mise}/**)`) && tmAllow.includes('Read(//proc/loadavg)'));
+  assert.ok(!tmAllow.some((r) => /^(Edit|Write)\(/.test(r)));
+});
+
+test("the tripwire still refuses secrets, environments, the credentials table and writable state.db on calls the rules now allow", () => {
+  const box = '/home/u/.local/share/claude-coordinator';
+  const cfg: TripwireConfig = { home: '/home/u', data: box, checkout: '/home/u/claude-coordinator', project: 2, claudeConfig: '/home/u/.claude', ask: false, deployScript: false, env: { PATH: '/usr/bin:/bin' } };
+  const cwd = `${box}/projects/2/coordinator`;
+  for (const command of [
+    'grep -r token /home/u/.config/gh', 'cat /home/u/.ssh/id_ed25519', 'grep -rl x /home/u', 'cat /home/u/.config/claude-coordinator/env',
+    'cat /proc/1/environ', 'ps eww -p 1', `sqlite3 -readonly -safe ${box}/coordinator.db "select * from credentials"`,
+    `sqlite3 -readonly -safe ${box}/coordinator.db ".dump"`, 'cat /home/u/.claude/.credentials.json',
+  ]) {
+    assert.ok(bashAllowed(command), `the rules let it through, so the tripwire is what stops it: ${command}`);
+    const v = tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, cfg);
+    assert.ok(v && !v.ask, `tripwire refuses: ${command}`);
+  }
+  assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: `sqlite3 ${box}/state.db "select 1"` }, cwd }, cfg));
+  assert.ok(tripwire({ tool_name: 'Grep', tool_input: { pattern: 'x', path: '/home/u/.config' }, cwd }, cfg));
+  assert.equal(tripwire({ tool_name: 'Bash', tool_input: { command: `sqlite3 -readonly -safe ${box}/coordinator.db "select id from tickets"` }, cwd }, cfg), null);
 });

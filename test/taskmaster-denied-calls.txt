@@ -1,0 +1,100 @@
+# Taskmaster tool calls denied for lack of an allow rule, 2026-10-27 to 2026-11-10. One per line: when<TAB>call (cut at 500 chars, newlines as \n). Fixture for test/coordinator-access.test.ts (#483).
+2026-10-27 11:34	Bash: cd /home/cara/.local/share/claude-coordinator/projects/2/repo && grep -rniE "queue|interrupt|busy" --include=*.ts --include=*.js --include=*.py -l . | grep -v node_modules | head -20
+2026-10-27 11:34	Bash: grep -rniE "queue|interrupt|busy" --include=*.ts --include=*.js --include=*.py --exclude-dir=node_modules -l /home/cara/.local/share/claude-coordinator/projects/2/repo | head -20
+2026-10-27 19:32	Bash: ls /home/cara/claude-coordinator /home/cara/claude-coordinator/scripts /home/cara/.config/systemd/user
+2026-10-27 22:58	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/2/repo branch --contains abe29f5
+2026-10-27 23:42	Bash: grep -rln -i "frontmatter\|^---$" /home/cara/.local/share/claude-coordinator/projects/2/repo/src /home/cara/.local/share/claude-coordinator/projects/2/repo/server.ts /home/cara/.local/share/claude-coordinator/projects/2/repo/public
+2026-10-28 01:59	Bash: grep -rl -i "emberknight" /home/cara/.local/share/claude-coordinator/projects/2/shared /home/cara/.local/share/claude-coordinator/projects/2/tickets 2>/dev/null
+2026-10-28 01:59	Bash: grep -n -i -o -E ".{0,120}(advanced class|24 classes|sixteen|subclass|class list).{0,200}" /home/cara/.local/share/claude-coordinator/projects/2/tickets/9/delve-design/pages/glossary.html /home/cara/.local/share/claude-coordinator/projects/2/tickets/9/delve-de …[+25 chars]
+2026-10-28 02:34	Bash: systemctl --user status claude-coordinator --no-pager -n 20
+2026-10-28 06:12	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/2/repo remote -v; git -C /home/cara/.local/share/claude-coordinator/projects/2/repo branch -vv | grep -E '^\*|main'; git -C /home/cara/.local/share/claude-coordinator/projects/2/repo log -1 --format='% …[+233 chars]
+2026-10-28 06:12	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/2/repo rev-list --count origin/main..main
+2026-10-28 09:55	Bash: grep -n "/\${\|done\b\|completed" /home/cara/.local/share/claude-coordinator/projects/2/repo/public/progress.js | head -40
+2026-10-28 09:55	Bash: grep -n "/' +\|}/\${" /home/cara/.local/share/claude-coordinator/projects/2/repo/public/progress.js /home/cara/.local/share/claude-coordinator/projects/2/repo/public/sidebar.js
+2026-10-28 10:23	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/2/tickets/141 branch --show-current
+2026-10-28 10:38	Bash: curl -s localhost:8573/api/health
+2026-10-28 11:17	Bash: sqlite3 -readonly /home/cara/.local/share/claude-coordinator/coordinator.db "select m.id, m.name, mp.project_id from machines m left join machine_projects mp on mp.machine_id = m.id;"
+2026-10-28 19:54	Bash: ls -t /home/cara/.local/share/claude-coordinator/projects/1/shared/project/ /home/cara/.local/share/claude-coordinator/projects/1/shared/project/handoffs | head -30
+2026-10-29 09:45	Bash: ls /home/cara/.local/share/claude-coordinator/projects/2/repo/public/*.css; grep -c -e "var(--" /home/cara/.local/share/claude-coordinator/projects/2/repo/public/style.css; grep -c -E "#[0-9a-fA-F]{3,8}\b|rgba?\(" /home/cara/.local/share/claude-coordinator/pro …[+158 chars]
+2026-10-29 10:55	Read: /home/cara/.local/share/claude-coordinator/projects/2/shared/191/scheme-instructions.diff
+2026-10-29 10:55	Read: /home/cara/.local/share/claude-coordinator/projects/2/shared/191/scheme-instructions-proposed.md
+2026-10-29 11:00	Bash: cp /tmp/claude-1002/-home-cara--local-share-claude-coordinator-projects-2-coordinator/fdb5aa6b-2a89-4e65-acfc-674fd980c648/images/7.png /home/cara/.local/share/claude-coordinator/projects/2/shared/project/strike-note-2026-10-29.png
+2026-10-29 12:15	Bash: R=/home/cara/.local/share/claude-coordinator/projects/2/repo; grep -n "name: '" $R/src/mcp.ts | head -80; echo ---; grep -n "minionOnly\|taskmasterOnly\|COORDINATOR_ONLY\|isCoordinator\|forCoordinator" $R/src/mcp.ts | head -20
+2026-10-29 12:15	Bash: R=/home/cara/.local/share/claude-coordinator/projects/2/repo; ls $R/src $R/src/routes $R/public; grep -n -i -E "shared" $R/src/*.ts $R/src/routes/*.ts $R/server.ts | grep -i -E "artifact|pin|readdir|scan|list" | head -40
+2026-10-29 12:16	Bash: grep -n -E "export (const|function) (fileUrl|sharedUrl|artifactUrl)|api/artifacts/\\$\{[^}]*\}/raw" /home/cara/.local/share/claude-coordinator/projects/2/repo/public/core.js /home/cara/.local/share/claude-coordinator/projects/2/repo/public/artifacts.js
+2026-10-29 20:10	Bash: f=/home/cara/.local/share/claude-coordinator/projects/2/shared/project/cross-scheme-audit-2026-10.md; grep -n "Ready-to-start" $f; wc -l $f
+2026-10-29 20:21	Bash: git -C /home/cara/claude-coordinator merge-base --is-ancestor f068587 HEAD && echo LIVE || echo NOT-LIVE
+2026-10-29 20:21	Bash: git -C /home/cara/claude-coordinator log --oneline -1
+2026-10-29 20:26	Bash: find /home/cara/.local/share/claude-coordinator/projects/2/tickets/148 /home/cara/.local/share/claude-coordinator/projects/2/shared -name 'citadel-wide*' 2>/dev/null
+2026-10-29 20:26	Bash: sqlite3 -readonly /home/cara/.local/share/claude-coordinator/coordinator.db "select id, ticket_id, path, missing, pinned_at from artifacts where path like '%citadel-wide%'"
+2026-10-29 23:30	Bash: find /home/cara/.local/share/claude-coordinator/projects/1/repo /home/cara/.local/share/claude-coordinator/projects/1/shared -iname '*canvas*' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -20
+2026-10-29 23:56	Bash: sed -n '/Added 2026-10-29/,/^## /p' /home/cara/.local/share/claude-coordinator/projects/2/shared/project/delve-hide-old-claude-scripts-handoff.md
+2026-10-30 03:01	Bash: cp /tmp/claude-1002/-home-cara--local-share-claude-coordinator-projects-2-coordinator/fdb5aa6b-2a89-4e65-acfc-674fd980c648/images/13.png /home/cara/.local/share/claude-coordinator/projects/2/shared/project/mockups/mobile-working-indicator-2026-10-29.png
+2026-10-30 05:11	Bash: journalctl --user --since "3 hours ago" --no-pager 2>/dev/null | grep -i -E "peek|create|tickets\b.*(4[0-9][0-9]|5[0-9][0-9])" | tail -20
+2026-10-30 05:11	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/3/repo log --oneline -3
+2026-10-30 06:00	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/2/repo log --oneline -3 main; git -C /home/cara/.local/share/claude-coordinator/projects/2/repo log --oneline -3 origin/main; git -C /home/cara/.local/share/claude-coordinator/projects/2/repo symbolic- …[+165 chars]
+2026-10-30 06:00	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/2/repo branch -a -vv
+2026-10-30 11:48	Bash: git -C /home/cara/claude-coordinator log -1 --format='%h %cd %s' --date=iso; git -C /home/cara/claude-coordinator merge-base --is-ancestor 6a93430 HEAD && echo has-205; git -C /home/cara/claude-coordinator merge-base --is-ancestor 38bdf8d HEAD && echo has-201b
+2026-10-30 19:07	Bash: ls /home/cara/.local/share/claude-coordinator/
+2026-10-30 19:09	WebSearch: {"query":"Obsidian markdown note app","mode":"standard"}
+2026-10-31 19:46	Bash: ls -la /home/cara/.local/share/claude-coordinator/projects/1/repo/assets/icon/
+2026-11-01 07:27	Bash: ls ~/.local/share/claude-coordinator/*.db 2>/dev/null; sqlite3 -readonly ~/.local/share/claude-coordinator/state.db "select name from sqlite_master where type='table' and name like '%machine%';" 2>&1 | head
+2026-11-01 08:01	Bash: grep -n -i -E "dial|websocket|machine" /home/cara/.local/share/claude-coordinator/projects/3/shared/project/specs/companion-app/citadel-apps-peek-auras.md | head -40
+2026-11-01 08:01	Read: /home/cara/.local/share/claude-coordinator/projects/3/shared/project/specs/companion-app/citadel-apps-peek-auras.md
+2026-11-01 08:21	Bash: cp /home/cara/.local/share/claude-coordinator/projects/2/tmp/5/claude-1002/-home-cara--local-share-claude-coordinator-projects-2-coordinator/fdb5aa6b-2a89-4e65-acfc-674fd980c648/images/1.png /home/cara/.local/share/claude-coordinator/projects/2/shared/project/ …[+34 chars]
+2026-11-01 08:37	Bash: sqlite3 -readonly /home/cara/.local/share/claude-coordinator/state.db "select name from sqlite_master where type='table' and name like '%machine%'"
+2026-11-01 10:38	Bash: ls -la /home/cara/.local/share/claude-coordinator/
+2026-11-01 10:57	Bash: curl -s -m 5 http://127.0.0.1:8573/api/health; echo; systemctl --user show claude-coordinator -p ActiveEnterTimestamp -p MainPID -p ActiveState
+2026-11-01 19:44	Bash: ls -lt /home/cara/.claude/projects | head -20
+2026-11-01 21:47	Bash: grep -n -i "workdir\|health\|\\\${\|expand" /home/cara/claude-coordinator/src/app-services.ts | head -60
+2026-11-02 08:01	Bash: cd /home/cara/claude-coordinator && ls docs 2>/dev/null; grep -rln "citadel-app.json\|X-Citadel-Identity\|rail.js" --include=*.md . 2>/dev/null | grep -v node_modules | head -20
+2026-11-02 09:35	Bash: ss -ltn | grep -c ':22255 ' ; ls /home/cara/.local/share/claude-coordinator/projects/; ls -d /home/cara/apps/* 2>/dev/null
+2026-11-02 09:35	Read: /home/cara/.local/share/claude-coordinator/projects/6/repo/citadel-app.json
+2026-11-02 09:35	Read: /home/cara/.local/share/claude-coordinator/projects/6/repo/.mise.toml
+2026-11-04 08:39	Bash: curl -s -m 5 http://127.0.0.1:22255/ | grep -io '<link[^>]*manifest[^>]*>'
+2026-11-04 08:44	Bash: last -x reboot shutdown -F --since 2026-11-02
+2026-11-04 10:08	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/2/repo remote -v
+2026-11-04 10:59	Bash: grep -n "fsSLO\|Node 18 or newer\|PowerShell" /home/cara/claude-coordinator/public/settings.js | head -30
+2026-11-04 10:59	Bash: grep -rn "fsSLO" /home/cara/claude-coordinator/public
+2026-11-05 01:24	Bash: grep -rl "josh-laptop2" /home/cara/.local/share/claude-coordinator/projects/2/shared /home/cara/.local/share/claude-coordinator/projects/2/tickets 2>/dev/null | head
+2026-11-05 08:04	Bash: sqlite3 -readonly ~/.local/share/claude-coordinator/state.db "select id,name,repo_url,owner_id from projects where id=4" 2>&1; grep -n "repo_url\|repoSlug" /home/cara/.local/share/claude-coordinator/projects/2/repo/src/prlinks.ts | head
+2026-11-05 08:05	Bash: ls /home/cara/.local/share/claude-coordinator/projects/*/repo/.github/workflows/ 2>&1 | head -30
+2026-11-05 08:13	Bash: ls /home/cara/.local/share/claude-coordinator/projects/1/repo/.github/workflows /home/cara/.local/share/claude-coordinator/projects/3/repo/.github/workflows /home/cara/.local/share/claude-coordinator/projects/4/repo/.github/workflows /home/cara/.local/share/cl …[+127 chars]
+2026-11-05 08:24	Bash: grep -n "^| \`" /home/cara/.local/share/claude-coordinator/projects/2/shared/project/property-vocabulary.md | head -40
+2026-11-05 08:40	Bash: ps -eo pid,user,pcpu,pmem,rss,etime,comm --sort=-pcpu | head -25
+2026-11-05 08:40	Bash: cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
+2026-11-05 08:56	Bash: gh run list -R caraminden/peek-auras --limit 8
+2026-11-05 11:55	Bash: git -C /home/cara/claude-coordinator log --oneline -1; git -C /home/cara/claude-coordinator merge-base --is-ancestor 9e1553b HEAD && echo contains-9e1553b
+2026-11-05 20:22	Bash: curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 http://100.117.200.65:8574/ci-runner/install-runner-agent.ps1
+2026-11-06 03:03	Bash: cd /home/cara/.local/share/claude-coordinator/projects/2/shared/project/handoffs && for f in handoff-skills-self-review-lenses.md handoff-skills-lsp-trial.md handoff-skills-delve-godot-csharp.md handoff-skills-peek-auras-rust.md; do echo "=== $f"; sed -n '/Add …[+82 chars]
+2026-11-06 04:18	Bash: for r in peek-auras gamedevtest; do echo "== $r"; gh api repos/caraminden/$r/actions/runners --jq '.runners[] | "\(.name)  \(.status)  busy=\(.busy)  \([.labels[].name]|join(","))"'; done
+2026-11-06 04:18	Bash: gh api repos/caraminden/peek-auras/actions/runners --jq '.runners[] | "\(.name)  \(.status)  busy=\(.busy)"'; gh api repos/caraminden/gamedevtest/actions/runners --jq '.runners[] | "\(.name)  \(.status)  busy=\(.busy)"'
+2026-11-06 04:22	Bash: cp /home/cara/.local/share/claude-coordinator/projects/2/shared/727/361/menu-phone.png /home/cara/.local/share/claude-coordinator/projects/2/shared/5/361-pickers-phone.png && ls -la /home/cara/.local/share/claude-coordinator/projects/2/shared/5/361-pickers-pho …[+6 chars]
+2026-11-06 17:56	Bash: ls /home/cara/.local/share/mise/installs/ | grep -i -E "typescript|pyright|chrome" ; ls /home/cara/.local/share/mise/installs/npm-typescript /home/cara/.local/share/mise/installs/npm-pyright /home/cara/.local/share/mise/installs/npm-chrome-devtools-mcp 2>&1
+2026-11-06 17:57	Bash: ls -d /home/cara/.local/share/mise/installs/npm-typescript/* /home/cara/.local/share/mise/installs/npm-pyright/* /home/cara/.local/share/mise/installs/npm-chrome-devtools-mcp/* 2>&1 | head
+2026-11-06 17:57	Bash: sqlite3 -readonly /home/cara/.local/share/claude-coordinator/coordinator.db "select id, name, replace(plugin_dirs, char(10), ' | '), replace(optional_plugin_dirs, char(10), ' | ') from projects where id in (3,5,6)"
+2026-11-06 18:00	Bash: ls /home/cara/.local/share/mise/installs
+2026-11-06 18:12	Bash: python3 - /home/cara/.claude/projects/-home-cara--local-share-claude-coordinator-projects-2-repo/memory/for-cara-next-time.md <<'EOF' ⏎ import sys ⏎ p=sys.argv[1] ⏎ lines=open(p).read().split('\n') ⏎ # lines index 28..37 are items 29..38 (1-based) ⏎ new=["1c. **DONE 202 …[+868 chars]
+2026-11-08 20:31	Bash: ls /home/cara/.local/share/claude-coordinator/projects/*/repo/THIRD_PARTY.md 2>&1; sed -n 1,30p /home/cara/.local/share/claude-coordinator/projects/2/repo/kit/skills/upstream-check/SKILL.md 2>/dev/null || find /home/cara/.local/share/claude-coordinator/project …[+60 chars]
+2026-11-08 20:31	Bash: ls /home/cara/.local/share/claude-coordinator/projects/1/repo/THIRD_PARTY.md /home/cara/.local/share/claude-coordinator/projects/5/repo/THIRD_PARTY.md /home/cara/.local/share/claude-coordinator/projects/3/repo/THIRD_PARTY.md /home/cara/.local/share/claude-coor …[+112 chars]
+2026-11-08 22:52	Bash: awk '/^## Briefs/{f=1} f' /home/cara/.local/share/claude-coordinator/projects/2/shared/project/reports/regular-checkups-2026-11.md
+2026-11-09 02:47	Bash: grep -rli "art critic\|art-critic\|art professor\|art-professor" /home/cara/.local/share/claude-coordinator/projects/1/repo --include='*.md' 2>/dev/null | head; grep -rli "art critic\|art-critic\|art professor\|art-professor" /home/cara/claude-coordinator/kit  …[+18 chars]
+2026-11-09 03:39	Bash: grep -rli "card" /home/cara/.claude/projects/-home-cara--local-share-claude-coordinator-projects-2-repo/memory/ | head; grep -rn -i "link.\{0,40\}card\|card.\{0,40\}link" /home/cara/.claude/projects/-home-cara--local-share-claude-coordinator-projects-2-repo/me …[+16 chars]
+2026-11-09 03:40	Bash: grep -rnoE "focus=|[?&]event=|[?&]card=|/e/\\$\{" /home/cara/.local/share/claude-coordinator/projects/2/repo/public/core.js /home/cara/.local/share/claude-coordinator/projects/2/repo/public/inbox.js /home/cara/.local/share/claude-coordinator/projects/2/repo/pu …[+14 chars]
+2026-11-09 06:45	Bash: M=/home/cara/.claude/projects/-home-cara--local-share-claude-coordinator-projects-2-repo/memory; rm "$M/model-choice-on-create.md" && grep -v "model-choice-on-create.md" "$M/MEMORY.md" > "$M/MEMORY.md.new" && mv "$M/MEMORY.md.new" "$M/MEMORY.md" && grep -c . " …[+13 chars]
+2026-11-09 07:16	Bash: cd /home/cara/claude-coordinator; grep -rln -i "send answer\|clipboard" kit/skills/docs-and-mocks public/*.js public/**/*.js 2>/dev/null | head; grep -rn -i "postMessage" kit/skills/docs-and-mocks | head -5; grep -rn "citadel-answer\|mock-answer\|composer" pub …[+28 chars]
+2026-11-09 08:00	Bash: ss -ltn | awk '{print $4}' | grep -oE '[0-9]+$' | sort -n | uniq | tr '\n' ' '
+2026-11-09 08:00	Bash: git -C /home/cara/.local/share/claude-coordinator/projects/7/repo ls-tree -r --name-only origin/main -- assets/icon citadel-app.json .gitignore
+2026-11-09 08:00	Bash: ls /home/cara/apps/transdata/assets/icon /home/cara/apps/transdata/app/server; cat /home/cara/apps/transdata/.gitignore
+2026-11-09 14:30	Bash: grep -nE "contextKey ?=|function contextKey|DATA_DIR" /home/cara/claude-coordinator/src/runner.ts /home/cara/claude-coordinator/src/store.ts 2>/dev/null | head -5; ls /home/cara/.local/share/claude-coordinator/*.db 2>/dev/null
+2026-11-09 14:48	Bash: sqlite3 -readonly /home/cara/.local/share/claude-coordinator/state.db "select brief from schedules where id=8"
+2026-11-09 19:27	Bash: git -C /home/cara/claude-coordinator ls-files | wc -l; git -C /home/cara/claude-coordinator ls-files -z -- src public tools test | xargs -0 cat 2>/dev/null | wc -lc
+2026-11-09 19:33	Bash: grep -rn "runs-on" /home/cara/.local/share/claude-coordinator/projects --include=*.yml --include=*.yaml -s --exclude-dir=tickets --exclude-dir=node_modules
+2026-11-09 20:21	Bash: grep -o '"name":"mcp__coordinator__update_schedule","input":{"schedule_id":8[^}]*}' /home/cara/.claude/projects/-home-cara--local-share-claude-coordinator-projects-2-coordinator/489122ca-b16a-439b-ab9a-37ee609dafd4.jsonl
+2026-11-10 01:27	Bash: find /home/cara/.local/share/claude-coordinator/projects/*/shared -iname '*firebase*' 2>/dev/null | head
+2026-11-10 01:32	Bash: tailscale ip -4
+2026-11-10 02:01	Bash: grep -rln -i "sandbox\|bwrap\|bubblewrap" /home/cara/claude-coordinator/src | head -20; git -C /home/cara/claude-coordinator log -1 --format='%h %s'
+2026-11-10 15:22	Bash: grep -n -i "workspaces\|git_sync\|gitSync\|tasks" /home/cara/claude-coordinator/public/machine-agent.mjs
+2026-11-10 18:16	Bash: grep -n "454\|CSS\|css" /home/cara/.claude/projects/-home-cara--local-share-claude-coordinator-projects-2-repo/memory/parked-minions.md | head -20; for d in /home/cara/.local/share/claude-coordinator/projects/2/tickets/*/; do b=$(git -C "$d" rev-parse --abbrev …[+167 chars]
+2026-11-10 18:22	Bash: cd /home/cara/claude-coordinator && grep -rniI "CITADEL-BOX" --include=*.ts --include=*.js --include=*.mjs --include=*.md --include=*.ps1 . 2>/dev/null | grep -v node_modules | head -15; grep -rnI "been offline" src public tools 2>/dev/null | head -10
+2026-11-10 18:41	Bash: ls /home/cara/.local/share/claude-coordinator/ 2>&1 | head; ls /home/cara/claude-coordinator 2>&1 | head -3

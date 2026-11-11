@@ -34,10 +34,10 @@ test('the coordinator adds the shared and memory folders without denying edits t
   const { deny, allow } = settings.permissions;
   assert.deepEqual(deny.filter((r: string) => r.startsWith('Edit(')), [`Edit(/${repo}/**)`, `Edit(/${tickets}/**)`]);
   assert.ok(!deny.some((r: string) => r.includes(shared) || r.includes(memory)));
-  // Still no shell: besides the web tools (#210), the only rules are read-only Bash ones.
+  // Still no writing shell: besides the web tools (#210), the only rules are read-only Bash and Read ones (#483).
   const bash = allow.filter((r: string) => r !== 'WebSearch' && r !== 'WebFetch');
   assert.equal(bash.length, allow.length - 2);
-  assert.ok(bash.every((r: string) => r.startsWith('Bash(') && !/\b(commit|push|checkout)\b/.test(r)));
+  assert.ok(bash.every((r: string) => (r.startsWith('Bash(') || r.startsWith('Read(')) && !/\b(commit|push|checkout)\b/.test(r)));
   // Claude Code refuses allow rules for files under ~/.claude; only its auto-memory folder is writable (#98).
   assert.equal(settings.autoMemoryDirectory, memory);
 });

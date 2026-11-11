@@ -79,6 +79,7 @@ function notSent(chatId, entry) {
       entry.state = 'taken back';
       setSending(sending - 1);
       el.remove();
+      for (const url of entry.urls ?? []) URL.revokeObjectURL(url);
       const box = outbox(chatId);
       if (box.includes(entry)) box.splice(box.indexOf(entry), 1);
       const form = chatOpen(chatId) && document.querySelector('.composer');
@@ -189,9 +190,11 @@ export function composer(chatId, ticket) {
     const uploads = sent.filter((i) => i.upload).map((i) => i.upload);
     const files = uploads.map(({ name, type }) => ({ name, type }));
     // The server's copy of the message replaces this one when it arrives (thread.js, by sendId).
-    const el = userBubble(me, text, images.map(({ mediaType, data }) => base64Url(mediaType, data)), null, null,
+    // Its images' object URLs are let go when the bubble goes (taken back here, swapped for the server's copy in thread.js).
+    const urls = images.map(({ mediaType, data }) => base64Url(mediaType, data));
+    const el = userBubble(me, text, urls, null, null,
       uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })));
-    const entry = { el, text, sendId: crypto.randomUUID(), saved: [...images, ...uploads.map((upload) => ({ upload }))], state: 'new' };
+    const entry = { el, urls, text, sendId: crypto.randomUUID(), saved: [...images, ...uploads.map((upload) => ({ upload }))], state: 'new' };
     const body = { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}), sendId: entry.sendId };
     setSending(sending + 1); // until it's in or taken back: a reload now would lose it
     entry.retry = () => optimistic({

@@ -805,6 +805,7 @@ export function appendEvent(event, scroll = true) {
       // null, not false, when it isn't ours to swap (a reload replays every message): ?. passes false through.
       const m = i >= 0 ? view.pendingMessages.splice(i, 1)[0] : null;
       m?.el.remove();
+      for (const url of m?.urls ?? []) URL.revokeObjectURL(url);
       // Marked not sent when its reply was lost, yet it went: nothing left to send, and a Retry now does nothing.
       if (m?.state === 'failed') {
         m.state = 'sent';

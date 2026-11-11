@@ -53,6 +53,8 @@ const KEEP_LOGS = 100;
 const FOUND_EVERY_MS = 30_000;
 const BEAT_MS = 20_000;
 const SILENT_MS = 60_000;
+// How long an agent another agent took over from waits before it connects again.
+const REPLACED_WAIT_S = 600;
 
 /** %NAME% from the environment, as Windows writes it; an unset one is an error, not an empty string. */
 export function expand(text, env = process.env) {
@@ -1256,6 +1258,8 @@ async function main() {
         log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Minions can use ${describe}${!managed && host?.workspaces.size ? ` and workspaces ${[...host.workspaces.keys()].join(', ')}` : ''} while this runs.`);
         retry = 0;
         sendInfo();
+      } else if (msg.replaced) {
+        throw Object.assign(new Error(`another agent connected with this machine's token, from ${msg.by || 'another computer'}; run only one`), { replaced: true });
       } else if (msg.lend) {
         setLend(msg.lend);
       } else if (msg.close) {
@@ -1278,7 +1282,7 @@ async function main() {
     } catch (err) {
       // The app ends every session when this connection drops; stop their servers too.
       for (const id of [...sessions.keys()]) stopServer(id);
-      const wait = Math.min(30, 2 ** retry++);
+      const wait = err.replaced ? REPLACED_WAIT_S : Math.min(30, 2 ** retry++);
       log(`Disconnected: ${err.message}. Retrying in ${wait}s.`);
       await new Promise((r) => setTimeout(r, wait * 1000));
     }

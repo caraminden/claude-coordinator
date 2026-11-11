@@ -84,3 +84,13 @@ test('an agent that beats and then goes quiet (a laptop asleep) is dropped withi
     mock.timers.reset();
   }
 });
+
+test('a second agent with the same token takes over, and the first is told so before its stream ends', () => {
+  const { relay, box } = world();
+  const first = stream();
+  relay.connectAgent(box, first, { host: 'laptop', command: 'fake-mcp' });
+  relay.connectAgent(box, stream(), { host: 'desktop', command: 'fake-mcp' });
+  assert.equal(first.ended, true);
+  assert.deepEqual(first.sent.at(-1), { replaced: true, by: 'desktop' });
+  assert.equal(relay.isOnline(box.id), true);
+});

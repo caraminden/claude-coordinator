@@ -181,13 +181,16 @@ async function main() {
         if (msg.hello) {
           log(`Connected to ${new URL(appUrl).host} as "${msg.hello}": adds, lists and removes CI runners when Citadel asks.`);
           retry = 0;
+        } else if (msg.replaced) {
+          // Another agent took over with this token: trying again at once would drop it, and it this one, forever.
+          throw Object.assign(new Error(`another agent connected with this machine's token, from ${msg.by || 'another computer'}; run only one`), { replaced: true });
         } else if (msg.runners) {
           answer(msg.runners);
         }
       }
       throw new Error('the connection closed');
     } catch (err) {
-      const wait = Math.min(60, 2 ** retry++);
+      const wait = err.replaced ? 600 : Math.min(60, 2 ** retry++);
       log(`Disconnected: ${err.message}. Retrying in ${wait}s.`);
       await new Promise((r) => setTimeout(r, wait * 1000));
     }

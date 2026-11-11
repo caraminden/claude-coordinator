@@ -364,8 +364,12 @@ export class MachineRelay {
   /** A machine's agent connected: hold the stream open and send it its sessions' messages. */
   connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string; runners?: boolean; managed?: boolean }) {
     // A newer connection wins: the old one is a laptop that dropped off without the server noticing.
+    // Told so, the old one waits a while before it tries again: two agents with one token would otherwise drop each other at once, forever.
     const old = this.agents.get(machine.id);
-    if (old) this.dropAgent(machine.id, old);
+    if (old) {
+      old.res.write(`data: ${JSON.stringify({ replaced: true, by: info.host })}\n\n`);
+      this.dropAgent(machine.id, old);
+    }
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
     const mcp = !info.runners && machine.mcp_kind === null && mcpFromAgent(info.command);

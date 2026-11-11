@@ -275,6 +275,29 @@ without it, a Windows runner runs `run:` steps in PowerShell.
 
 For Linux jobs, `runs-on: [self-hosted, <scheme-slug>-ci-linux]`; they need no `shell: bash`.
 
+## Citadel's own tests (#523)
+
+Citadel's full suite runs on its Linux runners (`citadel-ci-linux`; two of them, but the workflow lets one suite
+run at a time: two at once on that PC failed in a different file every run, 2026-11-11).
+`.github/workflows/tests.yml` runs on every push to a `land/**` branch, and `tools/land.sh` is the only
+thing that pushes there: it sends the rebased commit to `land/<branch>`, waits for the run on that exact commit
+while it holds the deploy lock, and deletes the branch again. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
+skipped: perigee skips none, so a skip means the runner lacks something. What the suite needs goes in the runner's
+own home, with no root: Node, `pwsh` with PSScriptAnalyzer for the `.ps1` lint, Chrome's headless shell for the
+browser tests, and `libatomic1` and `sqlite3` unpacked from their `.deb`s. Those last two are tidier installed once
+in the distro (`wsl -d citadel-ci -u root`, then `apt-get install -y libatomic1 sqlite3`); the workflow uses the
+distro's as soon as they are there.
+
+One thing does need root, once: the runner's user needs its own systemd manager, because turns in tests start
+their units with `systemd-run --user` as they do on perigee. As root in the distro,
+`loginctl enable-linger ci-claude-coordinator-4590fb` (the user `ci_runners` made; the workflow's step names it
+when it's missing).
+
+When the runner can't answer (Cara is logged off, GitHub is down, no runner takes the job within 90 s, the run
+takes more than 6 minutes), `land.sh` prints `CI FALLBACK` with the reason, runs the suite on perigee as it used
+to, and adds a `ci fallback` line to the day's retro log (`retro-log/<date>/land.md`), so they can be counted. A red
+run refuses the landing; it never falls back. `LAND_CI=0 tools/land.sh` skips CI, for when the runner itself is broken.
+
 ## Check it
 
 - `ci_runners list`, or on the desktop `Get-Service actions.runner.*`, lists each runner and whether it is Running.

@@ -1,0 +1,87 @@
+# The full suite, on Cara's desktop (the Linux runner in WSL: tools/ci-runner/README.md) instead of perigee (#523).
+# tools/land.sh pushes the rebased commit to land/<branch> and waits for this run on that exact commit; when no
+# runner is online or it doesn't answer in time, land.sh runs the suite on perigee itself.
+name: tests
+on:
+  push:
+    branches: ['land/**']
+  workflow_dispatch:
+
+# One suite at a time on the desktop, however many runners there are: two at once (2026-11-11, load 30-35 on its 32
+# threads) failed in a different file every run. Landings come one at a time anyway.
+concurrency:
+  group: citadel-tests
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux"]') }}
+    # land.sh gives up on the run after 6 minutes (LAND_CI_TIMEOUT); this only stops one nobody waits for. The
+    # suite's own limit is run-tests.sh's 10 minutes.
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tests read the history (the last release's schema, branches)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26 # perigee's
+      # Node 26 needs libatomic1, and deploy.sh, backup.sh and prune.sh the sqlite3 CLI. A fresh distro has neither,
+      # and a job has no root, so until someone runs `apt-get install -y libatomic1 sqlite3` there as root they are
+      # unpacked from their .debs into the runner's home.
+      - name: libatomic1 and sqlite3, when the distro lacks them
+        run: |
+          set -euo pipefail
+          if ! command -v sqlite3 >/dev/null || ! /sbin/ldconfig -p | grep -q 'libatomic\.so\.1'; then
+            dir=$HOME/.local/debs
+            if [ ! -x "$dir/usr/bin/sqlite3" ]; then
+              mkdir -p "$dir" && cd "$dir"
+              apt-get download libatomic1 sqlite3
+              for d in *.deb; do dpkg -x "$d" .; done
+            fi
+            echo "LD_LIBRARY_PATH=$dir/usr/lib/x86_64-linux-gnu" >>"$GITHUB_ENV"
+            echo "$dir/usr/bin" >>"$GITHUB_PATH"
+          fi
+      # Turns in tests start their units with systemd-run --user, as on perigee. Without the user's manager they
+      # fall back to running inside the server, so the real path would go untested (and since #519 that fallback
+      # raises an alert a test counts).
+      - name: the runner user's systemd
+        run: |
+          dir=/run/user/$(id -u)
+          [ -S "$dir/bus" ] || { echo "No systemd user manager for $(id -un). As root in the distro: loginctl enable-linger $(id -un)"; exit 1; }
+          echo "XDG_RUNTIME_DIR=$dir" >>"$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$dir/bus" >>"$GITHUB_ENV"
+      # test/ps1-lint.test.ts skips without pwsh and PSScriptAnalyzer, so a failed install fails the job
+      # rather than quietly dropping the lint. Both go in the runner's own home (no root), once.
+      - name: pwsh and PSScriptAnalyzer for the .ps1 lint
+        run: |
+          set -euo pipefail
+          v=7.6.9 dir=$HOME/.local/pwsh
+          if [ ! -x "$dir/$v/pwsh" ]; then
+            mkdir -p "$dir/$v"
+            curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v$v/powershell-$v-linux-x64.tar.gz" | tar -xz -C "$dir/$v"
+            chmod +x "$dir/$v/pwsh"
+          fi
+          echo "$dir/$v" >>"$GITHUB_PATH"
+          "$dir/$v/pwsh" -NoProfile -Command 'if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq 1.25.0)) { Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force }'
+      # Chrome for Testing's headless shell, where test/browser.ts looks for Playwright's (the build perigee has).
+      - name: headless Chromium for the browser tests
+        run: |
+          set -euo pipefail
+          v=156.0.8078.4 dir=$HOME/.cache/ms-playwright/chromium_headless_shell-1248
+          if [ ! -x "$dir/chrome-headless-shell-linux64/chrome-headless-shell" ]; then
+            mkdir -p "$dir"
+            curl -fsSL -o "$RUNNER_TEMP/chs.zip" "https://storage.googleapis.com/chrome-for-testing-public/$v/linux64/chrome-headless-shell-linux64.zip"
+            python3 -m zipfile -e "$RUNNER_TEMP/chs.zip" "$dir"
+            chmod +x "$dir/chrome-headless-shell-linux64/chrome-headless-shell"
+          fi
+      # The run land.sh makes on perigee when this can't answer: it always ends (a leaked handle hangs a bare
+      # `npm test` here), and labels a file that fails under load. Perigee skips no test, so a skip here means this
+      # runner lacks something a test needs, and the gate would be weaker than the one it replaces: that is red too.
+      - name: the full suite
+        run: |
+          rc=0
+          DEPLOY_TEST_CPU_WEIGHT= tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
+          cat "$RUNNER_TEMP/tests.log"
+          [ "$rc" != 0 ] || grep -q '^ℹ skipped 0$' "$RUNNER_TEMP/tests.log" || { echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"; exit 1; }
+          exit "$rc"

@@ -131,6 +131,142 @@ test('a test that hangs is stopped at the time limit, says so, and lets go of th
   assert.equal(spawnSync('flock', ['-n', lock, 'true']).status, 0, 'the deploy lock is free');
 });
 
+// The CI gate (#523): GitHub is a bare repo as origin and a stand-in gh. The stand-in knows one run, id 7, of whatever
+// commit land/<branch> points at there, in the state FAKE_CI names; FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>".
+function ci(r: ReturnType<typeof setup>) {
+  const hub = join(r.dir, 'hub.git');
+  git(r.dir, 'init', '-q', '--bare', hub);
+  git(r.source, 'remote', 'add', 'origin', hub);
+  const bin = join(r.dir, 'bin');
+  mkdirSync(bin);
+  const calls = join(r.dir, 'gh-calls');
+  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash
+echo "$*" >>"${calls}"
+case "$*" in
+  *"/actions/runs?head_sha="*)
+    sha=\${2#*head_sha=} sha=\${sha%%&*}
+    [ "\${FAKE_CI:-}" != down ] || exit 1
+    if [ "$(git -C "${hub}" rev-parse -q --verify "refs/heads/land/ticket/1-x" 2>/dev/null)" = "$sha" ]; then
+      case \${FAKE_CI:-green} in
+        green) printf '7\\tcompleted\\tsuccess\\thttps://ci/7\\n' ;;
+        red) printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n' ;;
+        cancelled) printf '7\\tcompleted\\tcancelled\\thttps://ci/7\\n' ;;
+        queued) printf '7\\tqueued\\t-\\thttps://ci/7\\n' ;;
+        running) printf '7\\tin_progress\\t-\\thttps://ci/7\\n' ;;
+      esac
+    elif [ "\${FAKE_OLD_RUN%% *}" = "$sha" ]; then
+      set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
+    fi ;;
+  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; echo "\${FAKE_RUNNERS:-1}" ;;
+  "run view "*) echo "not ok 1 - the red test's output" ;;
+esac
+`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const testRuns = join(r.dir, 'test-runs');
+  return {
+    run: (extra: Record<string, string> = {}) => r.run({ PATH: `${bin}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', TEST_RUNS: testRuns, ...extra }),
+    calls: () => (existsSync(calls) ? readFileSync(calls, 'utf8') : ''),
+    localRuns: () => (existsSync(testRuns) ? readFileSync(testRuns, 'utf8').trim().split('\n').length : 0),
+    refs: () => git(hub, 'for-each-ref', '--format=%(refname)'),
+  };
+}
+
+test('green CI on the exact rebased commit lands it without a test run here, and the scratch branch goes', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  r.commit(r.source, 'c.txt', 'someone else\n');
+  // A green run of the commit as it was before the rebase is not a run of what lands.
+  const res = c.run({ FAKE_OLD_RUN: `${git(r.wt, 'rev-parse', 'HEAD')} completed success` });
+  assert.equal(res.status, 0, res.stderr);
+  const tip = git(r.wt, 'rev-parse', 'HEAD');
+  assert.equal(git(r.source, 'rev-parse', 'main'), tip);
+  assert.match(res.stderr, /waiting for CI on .*CI passed on/s);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|running the tests/);
+  assert.equal(c.localRuns(), 0);
+  assert.match(c.calls(), new RegExp(`head_sha=${tip}&`), 'it asked about the rebased commit');
+  assert.equal(c.refs(), '', 'land/<branch> is deleted again');
+  assert.equal(r.note(), 'locked=1 held=yes');
+});
+
+test('a run of this very commit that is already green lands at once; one that was red is run again', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const tip = git(r.wt, 'rev-parse', 'HEAD');
+  let res = c.run({ FAKE_OLD_RUN: `${tip} completed success`, FAKE_RUNNERS: '0' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.doesNotMatch(c.calls(), /runners/, 'no new run was asked for');
+  assert.equal(c.localRuns(), 0);
+
+  const r2 = setup();
+  const c2 = ci(r2);
+  r2.commit(r2.wt, 'b.txt', 'mine\n');
+  res = c2.run({ FAKE_OLD_RUN: `${git(r2.wt, 'rev-parse', 'HEAD')} completed failure` });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI passed on .*ci\/7/);
+  assert.equal(c2.localRuns(), 0);
+});
+
+test('red CI refuses with main untouched, shows the failed log, and never falls back to a run here', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = c.run({ FAKE_CI: 'red' });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /the red test's output\n.*tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched/s);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.equal(c.localRuns(), 0);
+  assert.equal(c.refs(), '');
+  assert.equal(r.note(), null);
+});
+
+test('when CI cannot answer, it says so loudly, logs it, runs the suite here and lands', async (t) => {
+  const cases: [string, Record<string, string>, RegExp][] = [
+    ['no runner online', { FAKE_RUNNERS: '0' }, /no citadel-ci-linux runner is online/],
+    ['GitHub down', { FAKE_CI: 'down' }, /GitHub didn't answer/],
+    ['the runner list fails', { FAKE_RUNNERS: 'down' }, /didn't say which runners are online/],
+    ['no runner starts the job', { FAKE_CI: 'queued', LAND_CI_START: '1' }, /no runner started the job within 1s/],
+    ['the run never finishes', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }, /CI didn't finish within 1s/],
+    ['the run was cancelled', { FAKE_CI: 'cancelled' }, /ended as cancelled/],
+    ['LAND_CI=0', { LAND_CI: '0' }, /LAND_CI=0 was set/],
+  ];
+  for (const [name, extra, why] of cases) {
+    await t.test(name, () => {
+      const r = setup();
+      const c = ci(r);
+      r.commit(r.wt, 'b.txt', 'mine\n');
+      const shared = join(r.dir, 'shared');
+      const res = c.run({ COORDINATOR_SHARED_DIR: shared, ...extra });
+      assert.equal(res.status, 0, res.stderr);
+      assert.match(res.stderr, /={20,}\nland: CI FALLBACK: .*Running the full suite on perigee instead\.\nland: ={20,}\nland: running the tests/);
+      assert.match(res.stderr, why);
+      assert.match(res.stderr.trimEnd().split('\n').at(-1)!, /landed on perigee's own test run, not CI: /, 'the last line says it again');
+      assert.match(landLog(shared), /^- \d\d:\d\d:\d\dZ · ci fallback · ticket\/1-x · /m);
+      assert.equal(c.localRuns(), 1);
+      assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+      assert.equal(c.refs(), '', 'nothing is left on GitHub');
+      // A run nobody waits for any more is cancelled, so it doesn't keep the one runner from the next landing.
+      if (extra.FAKE_CI === 'queued' || extra.FAKE_CI === 'running') assert.match(c.calls(), /-X POST repos\/.*\/actions\/runs\/7\/cancel/);
+      if (extra.LAND_CI === '0') assert.equal(c.calls(), '', 'GitHub is never asked');
+    });
+  }
+});
+
+test('a red run here after a fallback still refuses', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = c.run({ FAKE_RUNNERS: '0', FAIL_TESTS: '1' });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /CI FALLBACK.*tests failed on the rebased branch \(full log/s);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+});
+
 // The tests run from the worktree's top, wherever in it land.sh was started (#468 S10-7).
 test('run from a subfolder of the worktree, it tests and lands the same', () => {
   const r = setup();

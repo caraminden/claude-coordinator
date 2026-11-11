@@ -5,12 +5,14 @@
 # order they asked (tools/deploy-queue.sh): it says its place in line, and waits as long as the line moves.
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
-# 2. Runs the tests on the rebased branch. A failure stops here, with main untouched. Not in a citadel-heavy
-#    slot: the deploy lock already lets only one landing test at a time, and waiting on a slot other schemes'
-#    builds can hold for an hour, while holding the lock, starved every other landing (#499).
+# 2. Needs the full suite green on the rebased commit, with main untouched otherwise. Cara's desktop runs it
+#    (.github/workflows/tests.yml) and this waits for that run; when CI can't answer it says CI FALLBACK and runs
+#    the suite here (tools/run-tests.sh). See "The gate" below. The run here is not in a citadel-heavy slot: the
+#    deploy lock already lets only one landing test at a time, and waiting on a slot other schemes' builds can
+#    hold for an hour, while holding the lock, starved every other landing (#499).
 # 3. Fast-forwards main in the scheme repo to the branch.
 # 4. Runs tools/deploy.sh (it inherits the lock, and skips its own test run when the live checkout
-#    lands on the commit just tested here). If that deploys nothing because a check failed and
+#    lands on the commit that just passed). If that deploys nothing because a check failed and
 #    the live checkout went back, main goes back too, so main only ever holds what passed.
 # For a restart that cuts off running turns (only with a person's OK), land first, then run
 # tools/deploy.sh --now: it joins the restart this one queued.
@@ -22,6 +24,17 @@ SOURCE=${DEPLOY_SOURCE:-$HOME/.local/share/claude-coordinator/projects/2/repo}
 
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
+
+# A line in the scheme's retro log. Best effort: land.sh has no session id, so it goes in the day's land.md, and any
+# failure here is swallowed so the landing goes on as before.
+retro_log() (
+  set +e
+  [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
+  dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
+  mkdir -p "$dir" || exit 0
+  [ -e "$dir/land.md" ] || printf '# Retro log: land.sh\n\nWritten by tools/land.sh and tools/run-tests.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, and per test file that failed in a land or deploy run and passed alone (flake).\n\n' >>"$dir/land.md"
+  printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
+) >/dev/null 2>&1 || true
 
 # A turn in its person's Claude container (#213) has no deploy lock, user bus or GitHub login here.
 [ "${COORDINATOR_CONTAINER:-}" != 1 ] || refuse "this turn runs in a container: call the land tool (mcp__thread) instead, which runs land.sh on the host"
@@ -55,18 +68,10 @@ old=$(git -C "$SOURCE" rev-parse main)
 [ -n "$resumed" ] || queue_phase "rebasing onto main"
 [ -n "$resumed" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
 if ! git rebase -q main; then
-  # Which files collide is worth a retro-log line (the architecture check counts them). Best effort: land.sh has no
-  # session id, so the line goes in the day's land.md; any failure here is swallowed and the abort and refusal go on as before.
+  # Which files collide is worth a retro-log line (the architecture check counts them).
   conflicted=$(git diff --name-only --diff-filter=U 2>/dev/null | sed ':a;N;$!ba;s/\n/, /g' || true)
-  (
-    set +e
-    [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
-    dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
-    mkdir -p "$dir" || exit 0
-    [ -e "$dir/land.md" ] || printf '# Retro log: land.sh\n\nWritten by tools/land.sh and tools/run-tests.sh (no session id, so one file per day). One line per rebase conflict, and per test file that failed in a land or deploy run and passed alone (flake).\n\n' >>"$dir/land.md"
-    if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h main): $conflicted"; else what=": no conflicted files found (the rebase may not have started)"; fi
-    printf -- '- %sZ · land conflict · %s%s\n' "$(date -u +%T)" "$branch" "$what" >>"$dir/land.md"
-  ) >/dev/null 2>&1 || true
+  if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h main): $conflicted"; else what=": no conflicted files found (the rebase may not have started)"; fi
+  retro_log "land conflict · $branch$what"
   git rebase --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
   refuse "the rebase onto main failed (see git's output above), so nothing landed${conflicted:+; conflicted files: $conflicted}. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
 fi
@@ -74,17 +79,97 @@ fi
 # go on in the rebased one instead. It keeps the lock on fd 9, and its own rebase finds nothing to do.
 [ -n "$resumed" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 exec bash "$tools/land.sh"
 
-say "running the tests"
-queue_phase "running the tests since $(date +%H:%M)"
-# A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.
-[ -z "$(git status --porcelain --ignored)" ] && tested=$(git rev-parse HEAD) || tested=
-log="$state/land-test.log"
-if ! "$tools/run-tests.sh" "$log"; then
-  tail -n 40 "$log" >&2
-  refuse "tests failed on the rebased branch (full log: $log), so main is untouched"
+# The gate (#523): the full suite, green on this exact commit. Cara's desktop runs it (.github/workflows/tests.yml, on
+# the Linux runner in WSL) so perigee doesn't: the commit goes to a scratch branch land/<branch> on GitHub, and this
+# waits for that run, still holding the lock. Landings are one at a time whatever the lock does (the one behind
+# can't know its commit until this one moves main), so letting go of it would speed nobody up. The wait is bounded
+# instead: no runner online, GitHub not answering, a job no runner starts within LAND_CI_START seconds or a run not
+# done within LAND_CI_TIMEOUT all fall back, loudly, to the run on perigee (also LAND_CI=0, for when CI itself is
+# broken). A red run is red: it refuses, and never falls back.
+tip=$(git rev-parse HEAD)
+short=$(git rev-parse --short HEAD)
+REMOTE=${DEPLOY_REMOTE-origin}
+CI_WORKFLOW=.github/workflows/tests.yml
+CI_LABEL=citadel-ci-linux
+CI_REF=land/$branch
+CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI_POLL:-5}
+# As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
+hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&-; }
+ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why=''
+# The newest run of the workflow on this commit, into ci_*; nothing when there is none. Fails when GitHub doesn't answer.
+ci_run() {
+  local run
+  run=$(hub gh api "repos/$ci_slug/actions/runs?head_sha=$tip&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>/dev/null) || return 1
+  read -r ci_id ci_status ci_result ci_url <<<"$run" || true
+}
+# Leaves nothing behind on GitHub: a run nobody waits for is cancelled, and the scratch branch goes.
+ci_done() {
+  [ -z "$ci_id" ] || [ "$ci_status" = completed ] || hub gh api -X POST "repos/$ci_slug/actions/runs/$ci_id/cancel" >/dev/null 2>&1 || true
+  [ -z "$ci_pushed" ] || hub git push -q "$REMOTE" ":refs/heads/$CI_REF" >/dev/null 2>&1 || true
+  ci_id='' ci_pushed=''
+}
+# 0: green on this commit. 1: red. 2: no answer, with the reason in $why.
+ci_gate() {
+  local url online stale='' started=$SECONDS waited
+  [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
+  { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
+  ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
+  ci_run || { why="GitHub didn't answer"; return 2; }
+  # A run of this commit that is green or still going (a landing stopped and started again) will do; otherwise a new one.
+  if [ -z "$ci_id" ] || { [ "$ci_status" = completed ] && [ "$ci_result" != success ]; }; then
+    stale=$ci_id ci_id=''
+    # shortcut: with the repo variable CI_RUNNER=github (hosted runners) this finds no runner and falls back; look at the variable too if that is ever used for long.
+    online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>/dev/null) || { why="GitHub didn't say which runners are online"; return 2; }
+    [ "$online" -gt 0 ] 2>/dev/null || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
+    ci_pushed=1
+    hub git push -q "$REMOTE" "+$tip:refs/heads/$CI_REF" 2>/dev/null || { why="pushing $short to GitHub failed"; return 2; }
+  fi
+  say "waiting for CI on $short: the full suite on Cara's desktop (at most $((CI_LIMIT / 60)) min, then it runs here)"
+  queue_phase "waiting for CI since $(date +%H:%M)"
+  while :; do
+    ci_run || true # one missed answer is not a verdict: the limits below end the wait
+    [ "$ci_id" != "$stale" ] || ci_id='' ci_status=''
+    [ "$ci_status" != completed ] || break
+    waited=$((SECONDS - started))
+    if [ "$ci_status" != in_progress ] && [ "$waited" -ge "$CI_START" ]; then why="no runner started the job within ${CI_START}s"; return 2; fi
+    if [ "$waited" -ge "$CI_LIMIT" ]; then why="CI didn't finish within ${CI_LIMIT}s"; return 2; fi
+    sleep "$CI_POLL"
+  done
+  case $ci_result in
+    success) say "CI passed on $short in $((SECONDS - started))s ($ci_url)" ;;
+    failure | timed_out) return 1 ;;
+    *) why="the CI run ended as $ci_result, not as a verdict on the tests"; return 2 ;;
+  esac
+}
+
+trap 'ci_done; queue_done' EXIT
+fellback=
+rc=0
+ci_gate || rc=$?
+if [ "$rc" = 0 ]; then
+  ci_done
+  tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
+elif [ "$rc" = 1 ]; then
+  hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null | tail -n 40 >&2 || true
+  refuse "tests failed on the rebased branch in CI ($ci_url), so main is untouched"
+else
+  ci_done
+  fellback=$why
+  say "=========================================================================="
+  say "CI FALLBACK: $why. Running the full suite on perigee instead."
+  say "=========================================================================="
+  retro_log "ci fallback · $branch · $why"
+  say "running the tests"
+  queue_phase "running the tests since $(date +%H:%M)"
+  # A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.
+  [ -z "$(git status --porcelain --ignored)" ] && tested=$tip || tested=
+  log="$state/land-test.log"
+  if ! "$tools/run-tests.sh" "$log"; then
+    tail -n 40 "$log" >&2
+    refuse "tests failed on the rebased branch (full log: $log), so main is untouched"
+  fi
 fi
 
-tip=$(git rev-parse HEAD)
 # Only when the live checkout doesn't have it (a failed check put it back, or it never pulled): main follows, unless it moved on since.
 main_back() {
   if ! git -C "$LIVE" merge-base --is-ancestor "$tip" HEAD 2>/dev/null && [ "$(git -C "$SOURCE" rev-parse main)" = "$tip" ]; then
@@ -106,3 +191,4 @@ if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" "$here/tools/deploy.sh"; then
 fi
 trap - INT TERM HUP
 queue_done ok
+[ -z "$fellback" ] || say "landed on perigee's own test run, not CI: $fellback"

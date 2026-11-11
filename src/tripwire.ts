@@ -554,7 +554,9 @@ const SQL_WRITE = /\b(insert|update|delete|drop|alter|create|replace|vacuum|rein
 // Commands that look at a path without showing what's in it; fine even for keys.
 const METADATA = new Set(['ls', 'stat', 'test', '[', '[[', 'du', 'find', 'namei', 'realpath', 'readlink', 'getfacl', 'lsattr', 'chmod', 'chown']);
 // Prefixes that run the next word as the command.
-const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock']);
+const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock', 'systemd-run']);
+// systemd-run's options that take the next word as their value (`--unit x`, `-p K=V`, `-qu x`; #513).
+const SYSTEMD_RUN_VALUE = /^(-[^-HMCupE]*[HMCupE]|--(host|machine|capsule|unit|property|description|slice|expand-environment|service-type|uid|gid|nice|working-directory|root-directory|setenv|output|json|job-mode|background|path-property|socket-property|timer-property|on-active|on-boot|on-startup|on-unit-active|on-unit-inactive|on-calendar))$/;
 const KEYWORDS = new Set(['!', '{', '}', 'then', 'do', 'else', 'if', 'while', 'until', 'elif', 'fi', 'done', 'esac']);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
 // node, tsx, bun and deno options known to take no value; any other may take the next word as its value (#468 S01-11 review).
@@ -1084,6 +1086,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   // Step over keywords and wrappers (env VAR=x, timeout 5m, nice -n 5, …) to the real command.
   let viaXargs = false;
   let flockShell = false;
+  // systemd-run's --setenv=NAME=value (or -E) sets NAME for the command it runs (#485).
+  const runEnv = new Set<string>();
   for (;;) {
     const name = basename(words[i]?.text ?? '');
     if (KEYWORDS.has(name)) i++;
@@ -1094,6 +1098,14 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       i++;
       while (i < words.length && words[i].text.startsWith('-')) {
         const opt = words[i++].text;
+        if (name === 'systemd-run') {
+          if (opt === '--') break;
+          const env = /^(--setenv|-E)$/.test(opt) ? words[i]?.text ?? '' : /^(--setenv=|-E)/.test(opt) ? opt.replace(/^(--setenv=|-E)/, '') : '';
+          const m = /^([A-Za-z_]\w*)=/.exec(env);
+          if (m) runEnv.add(m[1]);
+          if (SYSTEMD_RUN_VALUE.test(opt)) i++;
+          continue;
+        }
         if (name === 'env' && (/^(-u|--unset)$/.test(opt) ? GH_VARS.test(words[i]?.text ?? '') : GH_VARS.test(opt.replace(/^(-u|--unset=)/, '')))) return hard(`Unsetting ${opt.replace(/^(-u|--unset=?)/, '') || words[i].text} is blocked. ${GH_ENV_WHY}`);
         if (/^-(u|C|n|I|P|d|L|s|E|k|a)$|^--(unset|chdir|adjustment|signal|kill-after|arg-file)$/.test(opt)) i++;
         else if (name === 'flock' && /^(-w|--wait|--timeout|--conflict-exit-code)$/.test(opt)) i++;
@@ -1115,16 +1127,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   // flock's -c string runs in sh, checked as `sh -c` is.
   const name = flockShell ? 'sh' : basename(cmd.text);
   const args = words.slice(flockShell ? i : i + 1);
-  const vars = new Set([...st.vars, ...assigned.keys()]);
-  // systemd-run's --setenv=NAME=value (or -E) sets NAME for the command it runs (#485).
-  if (name === 'systemd-run') {
-    for (let k = 0; k < args.length && args[k].text.startsWith('-') && args[k].text !== '--'; k++) {
-      const opt = args[k].text;
-      const t = /^(--setenv|-E)$/.test(opt) ? args[++k]?.text ?? '' : /^(--setenv=|-E)/.test(opt) ? opt.replace(/^(--setenv=|-E)/, '') : '';
-      const m = /^([A-Za-z_]\w*)=/.exec(t);
-      if (m) vars.add(m[1]);
-    }
-  }
+  const vars = new Set([...st.vars, ...assigned.keys(), ...runEnv]);
 
   if (name === 'claude') {
     // Through known variables too (`a=ultrareview; claude "$a"`); a word it can't know might be the subcommand.
@@ -1244,7 +1247,6 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const deploy = join(cfg.checkout, 'tools/deploy.sh');
   const fromOperand = (ws: Word[]) => ws.slice(Math.max(0, ws.findIndex((w) => !w.text.startsWith('-'))));
   let run = [cmd, ...args];
-  if (name === 'systemd-run') run = fromOperand(args);
   if (run[0] && SHELLS.has(basename(run[0].text))) run = fromOperand(run.slice(1));
   if (run[0] && !run[0].text.startsWith('-') && pathsOf(run[0], st, cfg).includes(deploy)) return null;
 
@@ -1307,12 +1309,13 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
 function commandOf(seg: Segment): { name: string; args: Word[] } {
   const w = seg.words;
   let i = 0;
-  for (let wrapped = false, lock = false; i < w.length; i++) {
+  for (let wrapped = false, lock = false, run = false; i < w.length; i++) {
     const t = w[i].text;
     if (basename(t) === 'command' && /^-[pvV]*[vV]/.test(w[i + 1]?.text ?? '')) return { name: '', args: [] };
     // flock's lock file (#468 S01-15).
     if (lock && !t.startsWith('-') && !/^[\d.]+$/.test(t)) lock = false;
-    else if (WRAPPERS.has(basename(t))) (wrapped = true), (lock = basename(t) === 'flock');
+    else if (WRAPPERS.has(basename(t))) (wrapped = true), (lock = basename(t) === 'flock'), (run ||= basename(t) === 'systemd-run');
+    else if (run && SYSTEMD_RUN_VALUE.test(w[i - 1].text)) continue;
     else if (!/^[A-Za-z_]\w*=/.test(t) && !KEYWORDS.has(t) && !(wrapped && (t.startsWith('-') || /^[\d.]+[smhd]?$/.test(t)))) break;
   }
   return { name: basename(w[i]?.text ?? ''), args: w.slice(i + 1) };

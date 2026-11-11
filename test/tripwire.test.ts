@@ -1009,6 +1009,23 @@ test('git: --ours and --theirs mid-merge, and any checkout in a clone under the 
   }
 });
 
+test('systemd-run is a wrapper: the command it runs is checked past its options (#513)', () => {
+  const db = '~/.local/share/claude-coordinator/state.db';
+  for (const command of [
+    `systemd-run --user rm -f ${db}`,
+    `systemd-run --user --unit=x rm -f ${db}`,
+    `systemd-run --user -p X=1 -- rm -f ${db}`,
+    `systemd-run --user --unit x --description 'clean up' -G rm -f ${db}`,
+    `systemd-run --user -E A=1 --on-active 5 -qu x rm -f ${db}`,
+    `systemd-run --user -P timeout 5 rm -f ${db}`,
+    'systemd-run --user --unit=x pkill node',
+    'systemd-run --user --unit x -- systemctl --user stop claude-coordinator',
+  ])
+    assert.ok(verdict(command), command);
+  for (const command of ['systemd-run --user --unit=x sleep 5', 'systemd-run --user --unit x -p MemoryMax=1G --collect sleep 5', 'systemd-run --user -P --wait -- ls /tmp'])
+    assert.equal(bash(command), null, command);
+});
+
 test('systemd-run --setenv counts for server.ts, a grep pattern is not a path, and the refusals name citadel-dev-copy (#485)', () => {
   for (const command of ['systemd-run --user --setenv=DATA_DIR=/tmp/d --setenv=PORT=19999 node server.ts', 'systemd-run --user -E DATA_DIR=/tmp/d -E PORT=19999 --unit=dev node server.ts', 'systemd-run --user --setenv DATA_DIR=/tmp/d --setenv PORT=19999 node server.ts'])
     assert.equal(bash(command), null, command);

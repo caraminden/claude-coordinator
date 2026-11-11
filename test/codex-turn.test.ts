@@ -108,7 +108,8 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   if (m.method === 'turn/steer' && mode === 'late-steer') {
     // The turn ends just before the steer reaches it: Codex refuses a steer for a finished turn.
     note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
-    return send({ id: m.id, error: { message: 'no active turn to steer' } });
+    // Its refusal comes after the completion, so the shim has printed the result and seen its input end by then (#564).
+    return setTimeout(() => send({ id: m.id, error: { message: 'no active turn to steer' } }), 300);
   }
   if (m.method === 'turn/steer') {
     send({ id: m.id, result: { turnId: 'tu1' } });

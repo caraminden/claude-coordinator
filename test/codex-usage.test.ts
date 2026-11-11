@@ -69,7 +69,8 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   }
   assert.equal(await appServerLimits([join(root, 'missing')]), null, "one that can't start says nothing");
   const silent = join(root, 'silent');
-  writeFileSync(silent, `#!${process.execPath}\nsetTimeout(() => {}, 60000);\n`);
+  // Ends with its stdin, as app-server does: under --test-force-exit this file exits before appServerLimits' 3 s kill (#564).
+  writeFileSync(silent, `#!${process.execPath}\nprocess.stdin.resume().on('end', () => process.exit());\n`);
   chmodSync(silent, 0o755);
   assert.equal(await appServerLimits([silent], 200), null, "one that doesn't answer times out");
 });

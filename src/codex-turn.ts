@@ -185,6 +185,8 @@ export async function main(argv: string[], env: Record<string, string | undefine
   let stopping = false;
   let timedOut = false;
   let inputEnded = false;
+  /** Steers sent and not yet answered: one Codex refuses still starts a turn, so the run can't end before it's answered. */
+  let steering = 0;
   let lastText = '';
   let rateLimits: any = null;
   let usage: any = null;
@@ -228,6 +230,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
     const q = { content: line.message?.content, uuid: line.uuid, line };
     if (!threadId || (busy && !turnId)) return void queue.push(q);
     if (!busy) return void startTurn(q).catch(fail);
+    steering++;
     try {
       await call('turn/steer', { threadId, input: codexInput(q.content), expectedTurnId: turnId });
       log(`[Message] ${typeof q.content === 'string' ? q.content : codexInput(q.content).map((i) => i.text ?? '[image]').join('\n')}`);
@@ -236,6 +239,9 @@ export async function main(argv: string[], env: Record<string, string | undefine
       // The turn ended while the steer was on its way: nothing else would start the next turn.
       if (!busy) return void startTurn(q).catch(fail);
       queue.push(q); // not steerable now: it starts the next turn
+    } finally {
+      steering--;
+      if (inputEnded && !busy && !queue.length && !steering) finish(0);
     }
   };
   const fail = (err: Error) => {
@@ -366,7 +372,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
         errors.length = 0;
         const next = queue.shift();
         if (next) return void startTurn(next).catch(fail);
-        if (inputEnded) finish(0);
+        if (inputEnded && !steering) finish(0);
         return;
       }
     }
@@ -428,7 +434,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   });
   process.stdin.on('end', () => {
     inputEnded = true;
-    if (threadId && !busy && !queue.length) finish(0);
+    if (threadId && !busy && !queue.length && !steering) finish(0);
   });
 
   try {

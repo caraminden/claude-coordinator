@@ -95,10 +95,10 @@ CHECK_LIMIT=${LAND_CHECK_TIMEOUT:-1800}
 # waiting for a runner the ones ahead are using): a runner takes the run within CI_START, and the run
 # ends within CI_LIMIT. CI is asked every CI_POLL. For CI_GRACE after a push, an older run of the
 # same commit may still be the one that answers, so red or lost is not believed yet.
-CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60}
-for v in CI_START CI_LIMIT CI_POLL CI_GRACE; do
-  [[ ${!v} =~ ^[0-9]+$ ]] || refuse "LAND_$v is in whole seconds, not \"${!v}\" (CI_LIMIT is LAND_CI_TIMEOUT)"
+for v in LAND_CI_START LAND_CI_TIMEOUT LAND_CI_POLL LAND_CI_GRACE; do
+  [[ ${!v:-0} =~ ^[0-9]+$ ]] || refuse "$v is in whole seconds, not \"${!v}\""
 done
+CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60}
 [[ $CI_STACK =~ ^[1-9][0-9]*$ ]] || refuse "CI_STACK is a number from 1 up, not \"$CI_STACK\""
 CI_ON=1
 [ -n "$CI_WORKFLOWS$CI_STATUS" ] || CI_ON='' CI_STACK=1 CI_LIMIT=0
@@ -399,6 +399,7 @@ ci_push() {
   hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
   hub git push -q --no-verify origin "+$tip:refs/heads/$CI_REF" || refuse "couldn't push ${tip:0:12} to origin's $CI_REF, so CI can't run on it and nothing landed"
   pushed=1 pushed_at=$SECONDS ci_clock=$SECONDS
+  say "waiting for CI on ${tip:0:12} (origin's $CI_REF)"
 }
 
 # Stops the scratch branch's runs nobody waits for now, so they don't hold a runner. Best effort.
@@ -518,7 +519,7 @@ build() {
     case $rc in
       0) green=1 && say "CI already passed ${tip:0:12}" ;;
       2) say "CI is already running on ${tip:0:12}" ;;
-      *) ci_push && say "waiting for CI on ${tip:0:12} (origin's $CI_REF)" ;;
+      *) ci_push ;;
     esac
     queue_phase "waiting for CI on ${tip:0:12} since $(date +%H:%M)"
   fi
@@ -581,7 +582,7 @@ while :; do
     fi
   elif [ "$want" != "$base" ]; then
     build "$want"
-    [ -z "$blocked" ] || [ "$Q_AHEAD" = 0 ] || say "that was on top of $Q_PREDNAME's commit, which hasn't landed: waiting to see whether it does before giving up"
+    [ -z "$blocked" ] || [ "$Q_AHEAD" = 0 ] || say "that was on top of $Q_PREDNAME's commit, which hasn't landed: ${blocked%%, so *}. Not final: waiting to see whether that one lands"
   fi
 
   if [ -n "$blocked" ]; then

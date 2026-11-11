@@ -51,9 +51,12 @@ let ready = new Promise<void>((r) => (markReady = r));
 const handshake: any[] = [];
 const REPLAY_ID = 'citadel-replayed-initialize';
 
+// Claude's requests posted to the machine and not answered yet, by id: answered with an error if the stream ends first.
+const pending = new Map<unknown, any>();
+
 /** Reply to a request that can't reach the machine, so claude gets an error instead of waiting. */
 function unreachable(message: any, why: string) {
-  if (message?.id === undefined || !message.method) return;
+  if (message?.id === undefined || !message.method || !pending.delete(message.id)) return;
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: `${NAME}: ${why}` } })}\n`);
 }
 
@@ -78,6 +81,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (message?.method === 'initialize' || message?.method === 'notifications/initialized') handshake.push(message);
   chain = chain.then(async () => {
     await ready;
+    if (message?.id !== undefined && message.method) pending.set(message.id, message);
     try {
       const r = await post(message);
       if (!r.ok) unreachable(message, r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
@@ -108,6 +112,7 @@ for (let first = true; ; first = false) {
           if (!first) for (const m of handshake) await post(m.id === undefined ? m : { ...m, id: REPLAY_ID }).catch(() => {});
           markReady!();
         } else if (msg.message !== undefined && msg.message?.id !== REPLAY_ID) {
+          if (msg.message?.id !== undefined && !msg.message.method) pending.delete(msg.message.id);
           process.stdout.write(`${JSON.stringify(msg.message)}\n`);
         }
       }
@@ -115,5 +120,7 @@ for (let first = true; ; first = false) {
   } catch {
     // Cut off mid-stream: the app went away.
   }
+  // The machine's agent stops its servers when the app goes, so no reply to these will come.
+  for (const m of [...pending.values()]) unreachable(m, 'the connection to the machine dropped (the app restarted?), so this call was lost');
   ready = new Promise<void>((r) => (markReady = r));
 }

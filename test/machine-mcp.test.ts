@@ -94,3 +94,21 @@ test('a first connect that the app answers 503 still fails at once', async () =>
   assert.equal(await p.exited, 1);
   assert.match(p.err(), /box is not available \(503\)/);
 });
+
+test('a call in flight when the app restarts is answered with an error, and one answered before is not answered twice', async () => {
+  const app = await fakeApp(['open', 'open']);
+  const p = startProxy(app.base);
+  p.send(init);
+  await until('initialize posted', () => app.posts.length === 1);
+  app.reply({ jsonrpc: '2.0', id: 1, result: {} });
+  p.send({ jsonrpc: '2.0', id: 'call-7', method: 'tools/call', params: { name: 'whoami', arguments: {} } });
+  p.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: {} });
+  await until('the call posted', () => app.posts.length === 3);
+  // The agent stops its servers when the app goes, so this call's reply never comes.
+  app.state.stream!.end();
+  const answered = await until('the call answered', () => p.out.find((m) => m.id === 'call-7'));
+  assert.match(answered.error.message, /^box: /);
+  await until('a new session', () => app.state.gets === 2 && app.posts.length === 4);
+  assert.deepEqual(p.out.map((m) => m.id), [1, 'call-7'], 'one reply each, none for the notification');
+  assert.equal(p.code(), undefined);
+});

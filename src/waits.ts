@@ -317,8 +317,11 @@ export class Waits {
     }
     const ids = new Set([...this.current.keys(), ...next.keys()]);
     this.current = next;
-    const gates = new Map<number, { branch: string; since: number }>();
-    for (const [id, w] of next) if (w.key === 'land:ci') gates.set(id, { branch: this.d.store.getTicket(id)?.branch ?? '', since: w.since });
+    const gates = new Map<number, { branch: string; cwd: string | null; since: number }>();
+    for (const [id, w] of next) {
+      const t = w.key === 'land:ci' ? this.d.store.getTicket(id) : undefined;
+      if (t?.branch) gates.set(id, { branch: t.branch, cwd: t.cwd, since: w.since });
+    }
     this.d.ci?.landings(this.d.ciSlug?.() ?? null, gates);
     for (const id of ids) this.check(id);
   }

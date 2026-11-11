@@ -3,6 +3,8 @@
 // (tools/land.sh pushes land/<branch> and waits for tests.yml there). Stops once the run ends. "Usual" is the median
 // of the workflow's last five green runs. Cost: one jobs call per run per poll, conditional on its ETag, read as the
 // login the PR watcher uses (the box's own for a landing, as land.sh's), never from a turn.
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { ghGet, type GhGet, type Job } from './ci-health.ts';
 import { median } from './waits.ts';
 import type { PrSnapshot } from './github.ts';
@@ -45,12 +47,15 @@ function stepOf(j: Job): { n: number; of: number; name: string } {
   return { n: i + 1, of: steps.length, name: steps[i]?.name ?? '' };
 }
 
-/** A run's (or a PR's runs') jobs as where CI stands; null with no jobs yet. */
-export function ciNow(jobs: Job[]): CiNow | null {
-  if (!jobs.length) return null;
+/**
+ * A run's (or a PR's runs') jobs as where CI stands; null with no jobs yet. `over` once the runs themselves have
+ * ended: until then, jobs that wait on others may not be listed yet, so all listed ones done isn't a verdict.
+ */
+export function ciNow(jobs: Job[], over = true): CiNow | null {
   const since = Math.min(...jobs.map((j) => at(j.created_at)).filter((t) => !Number.isNaN(t)));
+  if (!Number.isFinite(since)) return null;
   const done = jobs.filter((j) => j.status === 'completed');
-  if (done.length === jobs.length) {
+  if (over && done.length === jobs.length) {
     const ended = Math.max(...jobs.map((j) => at(j.completed_at)).filter((t) => !Number.isNaN(t)));
     const failed = jobs.filter((j) => !PASSED.has(j.conclusion ?? ''));
     const stage = !failed.length ? 'passed' : failed.every((j) => j.conclusion === 'cancelled') ? 'cancelled' : 'failed';
@@ -70,7 +75,7 @@ export function ciNow(jobs: Job[]): CiNow | null {
     return `${j.name} step ${s.n} of ${s.of}${s.name ? `: ${s.name}` : ''}${j.runner_name ? ` (${j.runner_name})` : ''}`;
   });
   const red = done.filter((j) => !PASSED.has(j.conclusion ?? '') && j.conclusion !== 'cancelled').map((j) => `${j.name} failed`);
-  const text = [...red, ...where].join(', ') || `${done.length} of ${jobs.length} jobs done, the next waiting for a runner`;
+  const text = [...red, ...where].join(', ') || `${done.length} of ${jobs.length} jobs done, the next not started yet`;
   // One job says more by its steps; several, by how many are done.
   if (jobs.length === 1) {
     const s = stepOf(jobs[0]);
@@ -91,8 +96,10 @@ interface Watch {
   /** "PR #88", or "" for a landing. */
   what: string;
   runs: number[];
-  /** A landing's: its branch, and when its CI phase began (its run is found by these). */
+  /** A landing's: its branch, worktree and head commit, and when its CI phase began (its run is found by these). */
   branch?: string;
+  cwd?: string;
+  sha?: string;
   since?: number;
   /** Run id → its workflow's usual, s (null while unknown). */
   usual: Map<number, number | null>;
@@ -107,6 +114,17 @@ export interface CiRunsDeps {
   changed: (ticketId: number) => void;
   get?: GhGet;
   now?: () => number;
+  /** A worktree's head commit, or null. */
+  head?: (cwd: string) => Promise<string | null>;
+}
+
+const run = promisify(execFile);
+async function gitHead(cwd: string): Promise<string | null> {
+  try {
+    return (await run('git', ['rev-parse', 'HEAD'], { cwd, timeout: 15_000 })).stdout.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 /** The CI run each minion waits on, polled from GitHub while in flight. */
@@ -147,13 +165,13 @@ export class CiRuns {
   }
 
   /** The minions whose landing waits for CI now, by id: their branch and when that wait began (Waits.poll). */
-  landings(slug: string | null, now: Map<number, { branch: string; since: number }>) {
+  landings(slug: string | null, now: Map<number, { branch: string; cwd: string | null; since: number }>) {
     for (const [id, w] of this.watches) if (w.branch && !now.has(id)) this.drop(id);
     if (!slug) return;
-    for (const [id, { branch, since }] of now) {
+    for (const [id, { branch, cwd, since }] of now) {
       const w = this.watches.get(id);
-      if (w?.branch === branch && w.since === since) continue;
-      this.watches.set(id, { slug, as: undefined, what: '', runs: [], branch, since, usual: new Map(), jobs: new Map(), lastAt: 0 });
+      if (!branch || (w?.branch === branch && w.since === since)) continue;
+      this.watches.set(id, { slug, as: undefined, what: '', runs: [], branch, cwd: cwd ?? undefined, since, usual: new Map(), jobs: new Map(), lastAt: 0 });
     }
   }
 
@@ -166,7 +184,7 @@ export class CiRuns {
   view(ticketId: number): (CiNow & { what: string; usual: number | null }) | null {
     const w = this.watches.get(ticketId);
     if (!w) return null;
-    const c = ciNow([...w.jobs.values()].flat());
+    const c = ciNow([...w.jobs.values()].flat(), !!w.ended);
     if (!c) return null;
     const usuals = [...w.usual.values()].filter((u): u is number => u != null);
     return { ...c, what: w.what, usual: usuals.length ? Math.max(...usuals) : null };
@@ -212,9 +230,12 @@ export class CiRuns {
 
   private async poll(w: Watch) {
     if (w.branch && !w.runs.length) {
-      // land.sh pushes land/<branch>; a run of the same commit from an earlier try counts while it still runs.
-      const body = await this.read(`repos/${w.slug}/actions/workflows/${LAND_WORKFLOW}/runs?branch=${encodeURIComponent(`land/${w.branch}`)}&per_page=5`, w.as);
-      const run = (body?.workflow_runs ?? []).find((r: any) => r.status !== 'completed' || at(r.created_at) >= w.since! - 60_000);
+      // As land.sh finds it: the newest run of the commit it lands (its worktree's head once past the rebase), which may
+      // be an earlier try's. Without the commit, the newest run of the land/<branch> it pushes, since this wait began.
+      if (w.sha === undefined) w.sha = (w.cwd && (await (this.d.head ?? gitHead)(w.cwd))) || '';
+      const runs = `repos/${w.slug}/actions/workflows/${LAND_WORKFLOW}/runs?per_page=5&`;
+      const body = await this.read(runs + (w.sha ? `head_sha=${w.sha}` : `branch=${encodeURIComponent(`land/${w.branch}`)}`), w.as);
+      const run = (body?.workflow_runs ?? []).find((r: any) => w.sha || at(r.created_at) >= w.since! - 60_000);
       if (!run) return;
       w.runs = [run.id]; // its usual is the landing's own CI stage's (Waits)
       w.usual.set(run.id, null);

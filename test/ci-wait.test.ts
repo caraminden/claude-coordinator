@@ -83,14 +83,15 @@ function setup() {
   const state = mkdtempSync(join(root, 'state-'));
   mkdirSync(join(state, 'queue'));
   let ci!: CiRuns;
+  const heads: { sha: string | null } = { sha: null };
   const waits = new Waits({
     store, deployState: state, heavyDir: join(root, 'none'), ship: () => null, interruptible: () => 0,
-    changed: (id) => changed.push(id), now: () => now, alive: () => true, held: () => false, ci: (ci = new CiRuns({ changed: (id) => waits.check(id), get: gh.get, now: () => now })), ciSlug: () => 'o/r',
+    changed: (id) => changed.push(id), now: () => now, alive: () => true, held: () => false, ci: (ci = new CiRuns({ changed: (id) => waits.check(id), get: gh.get, now: () => now, head: async () => heads.sha })), ciSlug: () => 'o/r',
   });
   const pr = (number: number, runs: number[], state: PrSnapshot['state'] = 'OPEN') => ({
     number, state, checks: runs.map((r) => ({ name: `c${r}`, status: 'pending', url: `https://github.com/o/r/actions/runs/${r}/job/1` })),
   } as PrSnapshot);
-  return { gh, ci, waits, changed, state, pr, at: (s: number) => (now = T0 + s * 1000), now: () => now };
+  return { gh, ci, waits, changed, state, pr, heads, at: (s: number) => (now = T0 + s * 1000), now: () => now };
 }
 
 test('a PR\'s run: queued, its jobs, then green for a while; shown only once the turn has ended', async () => {
@@ -124,7 +125,7 @@ test('a PR\'s run: queued, its jobs, then green for a while; shown only once the
   gh.answers.set('repos/o/r/actions/runs/7/jobs', done);
   at(260);
   await ci.tick();
-  assert.equal(waits.wait(m.id)!.stage, 'passed');
+  assert.deepEqual([waits.wait(m.id)!.stage, waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['jobs', 'CI · 2/2 jobs', 'PR #88 · 2 of 2 jobs done, the next not started yet'], 'no verdict before the run says so');
   gh.answers.set('repos/o/r/actions/runs/7', { id: 7, workflow_id: 3, status: 'completed' });
   await ci.tick();
   gh.calls.length = 0;
@@ -173,6 +174,20 @@ test('more than BUSY runs in flight: each is asked about once a minute', async (
   assert.equal(jobs(), 2 * (BUSY + 1));
 });
 
+test('a landing waiting for CI finds its run by its commit, as land.sh does', async () => {
+  const { gh, ci, waits, state, heads } = setup();
+  const m = minion('running');
+  heads.sha = 'abc123';
+  writeFileSync(join(state, 'queue', '0000000001'), `100 77\n1\n${m.branch}\nwaiting for CI since 12:01\n`);
+  waits.poll();
+  // An earlier try's green run of the same commit counts, however old.
+  gh.answers.set('repos/o/r/actions/workflows/tests.yml/runs', { workflow_runs: [{ id: 5, status: 'completed', created_at: iso(-3600) }] });
+  gh.answers.set('repos/o/r/actions/runs/5/jobs', { jobs: [job('test', { status: 'in_progress', steps: steps(1, 3) })] });
+  await ci.tick();
+  assert.ok(gh.calls.includes('repos/o/r/actions/workflows/tests.yml/runs?per_page=5&head_sha=abc123'));
+  assert.equal(waits.wait(m.id)!.chip, 'land · CI 2/3');
+});
+
 test('a landing waiting for CI shows its run on land/<branch>; a fallback says so', async () => {
   const { gh, ci, waits, state, at, now } = setup();
   const m = minion('running');
@@ -193,7 +208,7 @@ test('a landing waiting for CI shows its run on land/<branch>; a fallback says s
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test')] });
   at(65);
   await ci.tick();
-  assert.ok(gh.calls.some((c) => c.startsWith(`${runs}?branch=land%2F${encodeURIComponent(m.branch)}`)));
+  assert.ok(gh.calls.includes(`${runs}?per_page=5&branch=land%2F${encodeURIComponent(m.branch)}`));
   const w = waits.wait(m.id)!;
   assert.deepEqual([w.kind, w.stage, w.chip, w.text], ['land', 'test', 'land · CI queued', 'waiting for CI: queued for a runner (citadel-ci-linux); if none starts it soon, the suite runs on perigee']);
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'in_progress', runner_name: 'cara-desktop', steps: steps(4, 8) })] });

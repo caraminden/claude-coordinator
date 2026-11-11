@@ -29,7 +29,7 @@ case $kind in
   # Bounded by what's left, so a test that hangs can't outlast the limit.
   cmd) done_yet() { [ "$SECONDS" -lt "$limit" ] && timeout "$((limit - SECONDS))" bash -c "$arg" >/dev/null 2>&1; }
     what="\`$arg\` to succeed"
-    if [[ $arg =~ (^|[^[:alnum:]_.-])gh[[:space:]]|github|ci-status ]]; then
+    if [[ $arg =~ (^|[^[:alnum:]_.-])gh[[:space:]]|api\.github\.com|ci-status ]]; then
       every=20
       say "it asks GitHub, so it checks every ${every}s"
     fi ;;

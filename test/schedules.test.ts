@@ -21,6 +21,30 @@ test('nextRun finds the next matching minute, strictly after the given time', ()
   assert.equal(nextRun('0 0 30 2 *', at(2026, 1, 1)), null);
 });
 
+/** Run `fn` with the process in another time zone (Node reads TZ again when it is set). */
+function inZone(tz: string, fn: () => void) {
+  const was = process.env.TZ;
+  process.env.TZ = tz;
+  try {
+    fn();
+  } finally {
+    if (was === undefined) delete process.env.TZ;
+    else process.env.TZ = was;
+  }
+}
+
+test('in the hour repeated when clocks go back, nextRun never returns a time at or before the one asked about (#468 S04-3)', () => {
+  inZone('America/Los_Angeles', () => {
+    // 2026-11-01: 01:00-02:00 comes twice, PDT (08:00 UTC) then PST (09:00 UTC).
+    const pst = (h: number, m: number, s = 0) => Date.UTC(2026, 10, 1, h + 8, m, s);
+    assert.equal(nextRun('*/10 * * * *', pst(1, 0, 5)), pst(1, 10));
+    assert.equal(nextRun('30 1 * * *', pst(1, 10)), pst(1, 30));
+    for (const after of [pst(1, 0, 5), pst(1, 10), pst(1, 59)]) {
+      for (const cron of ['*/10 * * * *', '30 1 * * *', '@hourly', '0 3 * * *']) assert.ok(nextRun(cron, after)! > after, `${cron} after ${new Date(after).toISOString()}`);
+    }
+  });
+});
+
 test('parseCron refuses what it cannot read', () => {
   for (const bad of ['', '* * * *', '60 * * * *', '* 24 * * *', '5-1 * * * *', '*/0 * * * *', 'a * * * *', '* * * * 8']) {
     assert.throws(() => parseCron(bad), Error, bad);

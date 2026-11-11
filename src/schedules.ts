@@ -98,15 +98,16 @@ function dayMatches(c: Cron, d: Date): boolean {
 /** The first minute strictly after `after` (ms) that the schedule runs, in the server's local time; null if none within ~5 years. */
 export function nextRun(expr: string, after: number): number | null {
   const c = parseCron(expr);
-  const d = new Date(after);
-  d.setSeconds(0, 0);
-  d.setMinutes(d.getMinutes() + 1);
+  // The next whole minute by the clock, not by local fields: in the hour repeated when clocks go back,
+  // rebuilding from local fields lands in its first pass, before `after` (#468 S04-3).
+  const d = new Date(Math.floor(after / 60_000) * 60_000 + 60_000);
   const limit = after + 5 * 366 * 86_400_000;
   while (d.getTime() <= limit) {
     if (!c.month.has(d.getMonth() + 1)) { d.setMonth(d.getMonth() + 1, 1); d.setHours(0, 0); continue; }
     if (!dayMatches(c, d)) { d.setDate(d.getDate() + 1); d.setHours(0, 0); continue; }
     if (!c.hour.has(d.getHours())) { d.setHours(d.getHours() + 1, 0); continue; }
-    if (!c.minute.has(d.getMinutes())) { d.setMinutes(d.getMinutes() + 1); continue; }
+    if (!c.minute.has(d.getMinutes())) { d.setTime(d.getTime() + 60_000); continue; }
+    if (d.getTime() <= after) { d.setTime(d.getTime() + 60_000); continue; }
     return d.getTime();
   }
   return null;

@@ -155,7 +155,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     ...(held ? [`You are parked: your brief is held until ${held}. Answer the message you got without starting the work; Start now on your page (or the Taskmaster's message_ticket with start_now) starts you with your brief. End the turn with the state and note you have now.`] : []),
     'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with TaskCreate before starting it:',
     '- Make 3 to 7 tasks that are conceptual chunks someone skimming would follow ("Find where the sidebar text comes from", "Make the readout show phases", "Test it on a copy"), not individual commands.',
-    '- Give each a one-sentence description of what it involves and why, and a short activeForm ("Finding where the sidebar text comes from").',
+    '- Give each a one-sentence description of what it involves and why, a short activeForm ("Finding where the sidebar text comes from"), and metadata.estimate: your guess of its minutes, which fills the readout\'s bar.',
     '- Mark each task in_progress with TaskUpdate when you start it. When you finish it, mark it completed and set metadata.outcome to one plain sentence on what it found, decided or changed.',
     '- If the plan changes, add, reword or delete tasks so the list stays true.',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',

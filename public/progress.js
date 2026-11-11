@@ -314,7 +314,7 @@ export function applyEvent(p, kind, data) {
       if (block.type === 'text' && block.text?.trim()) {
         // What Claude said while a step was underway is the best plain summary of that step; a
         // Grunt's report (a subagent's words) is not.
-        const task = !data.parent_tool_use_id && p.tasks.find((t) => t.status === 'in_progress');
+        const task = !data.parent_tool_use_id && stepInfo(p, true).current;
         if (task) task.note = block.text.trim();
         continue;
       }
@@ -344,7 +344,7 @@ export function applyEvent(p, kind, data) {
           return { id, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0 };
         });
       } else if (isWorkTool(block.name)) {
-        const task = p.tasks.find((t) => t.status === 'in_progress');
+        const task = stepInfo(p, true).current;
         if (task) task.actions++;
         p.turnActions++;
         p.lastAction = activityLabel(block);
@@ -366,11 +366,14 @@ export function applyEvent(p, kind, data) {
   return actions;
 }
 
-/** Counts for the readout: which step is underway out of how many. */
-export function stepInfo(p) {
+/**
+ * Counts for the readout: which step is underway out of how many. While a turn runs, a step an earlier
+ * turn left underway (a card it waited on) isn't this turn's until the plan moves (#518).
+ */
+export function stepInfo(p, running = false) {
   const total = p.tasks.length;
   const done = p.tasks.filter((t) => t.status === 'completed').length;
-  const currentIdx = p.tasks.findIndex((t) => t.status === 'in_progress');
+  const currentIdx = running && !p.planMoved ? -1 : p.tasks.findIndex((t) => t.status === 'in_progress');
   const current = currentIdx >= 0 ? p.tasks[currentIdx] : null;
   return { total, done, current, step: current ? currentIdx + 1 : done };
 }
@@ -380,9 +383,7 @@ export function stepInfo(p) {
  * the list's badge and the readout's meter show, so no two views read differently (#72, #518).
  */
 export function progressLine(p, running) {
-  const { total, done, current: underway } = stepInfo(p);
-  // A step an earlier turn left underway (a card it waited on) isn't what this turn is doing until the plan moves (#518).
-  const current = running && !p.planMoved ? null : underway;
+  const { total, done, current } = stepInfo(p, running);
   // A finished plan from an earlier turn says nothing about a turn that is running now.
   if (!running && p.turnFailed) return 'Last turn failed: see the error below';
   if (total && !(running && !current && done === total)) {

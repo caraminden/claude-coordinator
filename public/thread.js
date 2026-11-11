@@ -721,7 +721,7 @@ function renderProgress() {
     progressEl.hidden = true;
     return;
   }
-  const { total, done, current } = stepInfo(p);
+  const { total, done, current } = stepInfo(p, running);
   // The line carries its own worded step count; the turn's action count shows only when no plan is underway.
   const planned = total && (current || done < total);
   const count = !planned && running && initSeen() && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
@@ -744,7 +744,8 @@ function renderProgress() {
     const all = [...view.actions.values()];
     const groups = { completed: [], in_progress: [], pending: [] };
     for (const t of p.tasks) (groups[t.status] ?? groups.pending).push(t);
-    const stepEl = (t) => planStep(t, all.filter((a) => a.taskId === t.id), running);
+    // A step an earlier turn left underway reads as paused until this turn moves the plan.
+    const stepEl = (t) => planStep(t, all.filter((a) => a.taskId === t.id), running && !!current);
     const section = (title, tasks) => (tasks.length ? h('section', { class: 'plan-group' }, h('h4', {}, title), tasks.map(stepEl)) : '');
     const loose = view.turnActions.filter((a) => a.taskId == null || !p.tasks.some((t) => t.id === a.taskId));
     const req = view.turnRequest;
@@ -752,7 +753,7 @@ function renderProgress() {
       req?.length ? h('p', { class: 'request' }, h('span', { class: 'muted' }, running ? 'Working on ' : 'Last worked on '),
         req.flatMap((m, n) => [n ? ' and ' : '', `${m.author}'s request: `, h('q', {}, firstSentence(m.text, 160))])) : '',
       section('Done', groups.completed),
-      section(running ? 'Now' : 'Stopped at', groups.in_progress),
+      section(running && current ? 'Now' : 'Stopped at', groups.in_progress),
       section('Up next', groups.pending),
       loose.length ? looseWork(loose, running, !p.tasks.length) : '',
       !p.tasks.length && !loose.length ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '');

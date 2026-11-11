@@ -2399,7 +2399,7 @@ export class Runner {
    */
   progressOf(ticket: Ticket) {
     const p = this.progressFor(ticket.id);
-    const { total, done, current, step } = stepInfo(p);
+    const { total, done, current, step } = stepInfo(p, ticket.status === 'running');
     return {
       line: progressLine(p, ticket.status === 'running') || null,
       step: total ? { n: step, of: total, done, label: current ? current.activeForm || current.subject : null } : null,

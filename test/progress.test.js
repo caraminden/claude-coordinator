@@ -60,6 +60,14 @@ test("a step an earlier turn left underway isn't shown as underway in the next t
   assert.equal(progressLine(p, true), 'Landing through the old land.sh… · 1 of 2 done');
 });
 
+test("a new turn's work before its plan moves isn't filed under the step an earlier turn left underway (#518)", () => {
+  const p = { ...plan('cipppp'), planMoved: false };
+  const run = (id) => applyEvent(p, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'ls' } }] } });
+  assert.equal(run('b1')[0].taskId, null);
+  applyEvent(p, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'u1', name: 'TaskUpdate', input: { taskId: '2', status: 'in_progress' } }] } });
+  assert.equal(run('b2')[0].taskId, '2');
+});
+
 test('withoutCount drops the count from every form, old and new', () => {
   const cases = {
     'Moving turns into units… · 2 of 6 done': 'Moving turns into units…',

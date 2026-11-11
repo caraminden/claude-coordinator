@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { historyPage } from '../src/history.ts';
-import { applyEvent, createProgress } from '../public/progress.js';
+import { applyEvent, createProgress, progressLine } from '../public/progress.js';
 import { bootServer, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'history-'));
@@ -139,6 +139,30 @@ test("each page carries the plan as it stood before it, so the readout matches a
   const seeded = { ...createProgress(), tasks: page.tasks };
   for (const e of page.events) applyEvent(seeded, e.kind, JSON.parse(e.data));
   assert.deepEqual(seeded.tasks, full.tasks);
+});
+
+test("a page of a running turn reads the same as a full replay, so a step left underway isn't shown as current (#518)", () => {
+  const { store, t } = setup('plan-moved');
+  const create = (id: string, subject: string) => [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TaskCreate', input: { subject, activeForm: `${subject}ing` } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${id.slice(1)} created successfully: ${subject}` }] } },
+  ];
+  const update = (taskId: string, status: string) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `u${++tool}`, name: 'TaskUpdate', input: { taskId, status } }] } });
+  turn(store, t.id, 2, [...create('c1', 'Land'), ...create('c2', 'Wait on the Allow'), update('1', 'completed'), update('2', 'in_progress')]);
+  // The card's answer starts a long turn that never touches the plan, still running.
+  store.addEvent(t.id, 'user_message', { author: 'Cara', text: 'Merge and ship' });
+  store.addEvent(t.id, 'claude', { type: 'system', subtype: 'init', session_id: 's' });
+  for (let i = 0; i < 20; i++) store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: `w${++tool}`, name: 'Bash', input: { command: 'ls' } }] } });
+  const full = createProgress();
+  for (const e of store.listEvents(t.id)) applyEvent(full, e.kind, JSON.parse(e.data));
+
+  const page = historyPage(store, t.id, { limit: 10 });
+  assert.equal(page.more, true);
+  // Pages are whole turns, so the running turn's start comes with it and the seed needn't carry planMoved.
+  const seeded = { ...createProgress(), tasks: page.tasks };
+  for (const e of page.events) applyEvent(seeded, e.kind, JSON.parse(e.data));
+  assert.equal(progressLine(seeded, true), progressLine(full, true));
+  assert.doesNotMatch(progressLine(seeded, true), /Wait/);
 });
 
 test("planEvents leaves out ordinary tool results yet replays to the same plan as every event (#497)", () => {

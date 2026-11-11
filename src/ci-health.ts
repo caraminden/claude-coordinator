@@ -4,8 +4,11 @@
 //   - jobs that never started (0 steps, no runner: a billing block) or sat queued with no runner to take them;
 //   - a green run on main that skipped jobs which ran the time before (a quiet item, not an alert: below);
 //   - no verdict on main for hours while runs keep coming.
-// Each open problem is one Mandate alert item for every admin (Cara, 2026-11-07: "Send a mandate alert to
-// admins"), put from the scheme so its chip names it, and cleared when the problem is. A green run never
+// Every admin gets one Mandate alert item for all the open problems of every scheme (Cara, 2026-11-07: "Send a
+// mandate alert to admins"; 2026-11-11: "bundle the CI failure alerts from mandate into one instead of me getting
+// like 10 when CI is down"), from a CI health sender of its own. It rings once when it opens (Mandate pushes only a
+// new item, #540), takes new words quietly while problems come and go, and is cleared when the last one is, so the
+// next outage rings again. A green run never
 // alarms (Cara, 2026-11-11: "I also definitely don't need alerts when CI goes green"): alert items ring like
 // an alarm on her phone (Mandate #75), so only real trouble is one, and anything informational is quiet. It polls with the scheme
 // owner's linked GitHub (as the PR watcher and runner list do; the box's login without one), every 5 minutes,
@@ -163,6 +166,40 @@ export function skippedProblem(workflow: { id: number; name: string }, branch: s
   return { key: `green-skipped:${workflow.id}`, quiet: true, title: `CI: ${workflow.name} on ${branch} (${latest.head_sha.slice(0, 7)}) went green with ${plural(skipped.length, 'job')} skipped that ran the time before: ${skipped.join(', ')}` };
 }
 
+/** The schemes named, up to three, or counted. */
+const schemesText = (names: string[]) => (names.length > 3 ? `${names.length} schemes` : names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]);
+
+/**
+ * The PC a set of runners share, if they do: runner names are its computer name, with -2, -perf or -linux and the
+ * like after it (tools/ci-runner/add-runner.*).
+ */
+export function sharedHost(names: string[]): string | null {
+  if (names.length < 2) return null;
+  const host = names.map((n) => n.replace(/(-linux)?(-\d+)?$/i, '')).sort((a, b) => a.length - b.length)[0];
+  const h = host.toLowerCase();
+  return names.every((n) => n.toLowerCase() === h || n.toLowerCase().startsWith(`${h}-`)) ? host : null;
+}
+
+/** The one alert's words for every scheme's open problems: led by offline runners and the PC they share, then the rest in full. */
+export function bundleTitle(open: { scheme: string; problem: Problem }[]): string {
+  const text = (x: { problem: Problem }) => x.problem.title.replace(/^CI: /, '');
+  const cut = (s: string) => (s.length > 500 ? `${s.slice(0, 499)}…` : s);
+  if (open.length === 1) return cut(`CI, ${open[0].scheme}: ${text(open[0])}`);
+  const runners = open.filter((x) => x.problem.key.startsWith('runner:'));
+  const others = open.filter((x) => !x.problem.key.startsWith('runner:'));
+  const host = sharedHost(runners.map((x) => x.problem.key.slice('runner:'.length)));
+  const head = [
+    runners.length ? `${plural(runners.length, 'runner')} offline${host ? ` on ${host}` : ''}` : '',
+    others.length ? plural(others.length, runners.length ? 'other problem' : 'problem') : '',
+  ].filter(Boolean).join(' and ');
+  const detail = others.map((x) => `${x.scheme}: ${text(x)}`).join('; ');
+  return cut(`CI: ${head} in ${schemesText([...new Set(open.map((x) => x.scheme))])}${detail ? `. ${detail}` : ''}`);
+}
+
+/** Who the one alert comes from in Mandate: no scheme of its own, so a switch for CI health alone. */
+export const CI_SENDER = { id: 0, name: 'CI health' };
+const BUNDLE_ITEM = 'ci.open';
+
 /** A Mandate item key for a problem (Mandate allows A-Z a-z 0-9 . _ : - and 128 characters). */
 export const itemKey = (key: string) => `ci.${key.replace(/[^A-Za-z0-9._:-]+/g, '_')}`.slice(0, 128);
 
@@ -200,18 +237,20 @@ class RateLimited extends Error {}
 
 // ---------- the poller ----------
 
-/** What is kept across restarts, per scheme: runners first seen offline, and which item titles each admin has. */
+/** What is kept across restarts, per scheme: runners first seen offline, its open problems, and its own items' titles. */
 interface Saved {
   offline: Record<string, number>;
-  /** Problem key → user id → the title their Mandate item has. */
+  /** What was wrong at the last round GitHub fully answered: the one alert is made from these. */
+  problems?: Problem[];
+  /** Quiet problem key → user id → the title their Mandate item has (alarm keys only until an older build's are cleared). */
   sent: Record<string, Record<string, string>>;
 }
 
 export interface CiHealthDeps {
   /** The GitHub login to read a scheme's repo as: its owner's linked one, or undefined for the box's. */
   as: (project: Project) => GithubEnv;
-  /** Put (with `title`) or clear (null) a person's Mandate item for a scheme, an alert unless `quiet`; true once Mandate has it settled. */
-  mandate: (project: Project, person: User, key: string, title: string | null, quiet?: boolean) => Promise<boolean>;
+  /** Put (with `title`) or clear (null) a person's Mandate item from a scheme or CI_SENDER, an alert unless `quiet`; true once Mandate has it settled. */
+  mandate: (from: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, quiet?: boolean, link?: string) => Promise<boolean>;
   get?: GhGet;
 }
 
@@ -260,22 +299,49 @@ export class CiHealth {
           if (err instanceof RateLimited) {
             this.pausedUntil = now + RATE_LIMITED_MS;
             console.error('GitHub rate limit reached; pausing CI health checks.');
-            return;
+            break;
           }
           this.sayOnce(`fail:${p.id}:${err?.message}`, `CI health check of ${p.name} failed (said once until a restart): ${err?.message ?? err}`);
         }
       }
+      await this.alert();
     } finally {
       this.busy = false;
     }
   }
 
-  /** One scheme: what's wrong now, then its admins' Mandates brought in line. */
+  /** One scheme: what's wrong now, kept for the one alert, and its quiet items brought in line. A round that throws keeps the last. */
   async check(p: Project, slug: string, now: number) {
     const saved: Saved = { offline: {}, sent: {}, ...this.store.getSetting<Saved>(`ci-health:${p.id}`) };
-    const problems = await this.problems(p, slug, saved, now);
-    await this.deliver(p, problems, saved);
+    saved.problems = await this.problems(p, slug, saved, now);
+    await this.deliver(p, saved.problems.filter((x) => x.quiet), saved);
     this.store.setSetting(`ci-health:${p.id}`, saved);
+  }
+
+  private admins() {
+    return this.store.listUsers().filter((u) => u.admin && !u.disabled_at && this.store.contraptionEnabled('mandate', u.id));
+  }
+
+  /** Every admin's one alert, from every scheme's open problems: put when its words change, cleared when none are left. */
+  async alert() {
+    const open: { scheme: string; problem: Problem; id: number }[] = [];
+    for (const p of this.store.listProjects()) {
+      if (!repoSlug(p.repo_url)) continue;
+      for (const x of this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []) if (!x.quiet) open.push({ scheme: p.name, problem: x, id: p.id });
+    }
+    // User id → the title their item has.
+    const sent = this.store.getSetting<Record<string, string>>('ci-health:alert') ?? {};
+    const title = open.length ? bundleTitle(open) : null;
+    const admins = title ? this.admins() : [];
+    for (const u of admins) {
+      if (sent[u.id] !== title && (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, title, false, `/c/#/p/${open[0].id}`))) sent[u.id] = title!;
+    }
+    for (const uid of Object.keys(sent)) {
+      if (admins.some((u) => String(u.id) === uid)) continue;
+      const u = this.store.getUser(Number(uid));
+      if (!u || (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, null))) delete sent[uid];
+    }
+    this.store.setSetting('ci-health:alert', sent);
   }
 
   async problems(p: Project, slug: string, saved: Saved, now: number): Promise<Problem[]> {
@@ -290,7 +356,11 @@ export class CiHealth {
 
     const runners = await this.read(`repos/${slug}/actions/runners?per_page=100`, as, true);
     if (Array.isArray(runners?.runners)) out.push(...runnerProblems(runners.runners, saved.offline, now));
-    else this.sayOnce(`runners:${p.id}`, `CI health: can't list ${slug}'s runners (needs a repo admin's linked GitHub), so offline runners there go unseen.`);
+    else {
+      // Unreadable isn't fine: the runners already alerting stay as they were, and new ones go unseen.
+      out.push(...(saved.problems ?? []).filter((x) => x.key.startsWith('runner:')));
+      this.sayOnce(`runners:${p.id}`, `CI health: can't list ${slug}'s runners (needs a repo admin's linked GitHub), so offline runners there go unseen.`);
+    }
 
     const runs: Run[] = ((await this.read(`repos/${slug}/actions/runs?per_page=${RUNS}`, as))?.workflow_runs ?? [])
       .filter((r: Run) => now - at(r.created_at) <= WINDOW_MS);
@@ -320,9 +390,12 @@ export class CiHealth {
     return out;
   }
 
-  /** Every admin with Mandate on gets each problem's item, updated when its words change, and cleared once it's gone. */
+  /**
+   * A scheme's own items, quiet ones only: every admin with Mandate on gets each, updated when its words change, and
+   * cleared once it's gone; an alarm item an older build put here is cleared, as the one alert stands for it now.
+   */
   async deliver(p: Project, problems: Problem[], saved: Saved) {
-    const admins = this.store.listUsers().filter((u) => u.admin && !u.disabled_at && this.store.contraptionEnabled('mandate', u.id));
+    const admins = this.admins();
     const open = new Map(problems.map((x) => [x.key, x]));
     for (const [key, { title, quiet }] of open) {
       const sent = (saved.sent[key] ??= {});

@@ -456,7 +456,7 @@ const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId
 github.as = githubOf;
 if (!BOOT_CHECK) github.start();
 /** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log. */
-async function mandateAlert(what: string, project: Project, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false): Promise<boolean> {
+async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false): Promise<boolean> {
   const c = store.getContraption('mandate');
   const identity = c && contraptions.signIdentity(c.name, person, { name: `scheme-${project.id}`, title: project.name });
   if (!c || !identity) return false;
@@ -470,11 +470,12 @@ async function mandateAlert(what: string, project: Project, person: User, key: s
   }
   return false;
 }
-// CI health (#368): a runner offline, jobs that never started, or no verdict on main for hours becomes a Mandate
-// alert for every admin, from the scheme (green that skipped jobs, a quiet item), and is cleared when it's over; no turn runs.
+// CI health (#368): runners offline, jobs that never started, or no verdict on main for hours, in every scheme, make
+// one Mandate alert for every admin (#540), cleared when it's all over (green that skipped jobs, a quiet item from
+// its scheme); no turn runs.
 const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
-  mandate: (project, person, key, title, quiet) => mandateAlert('CI health', project, person, key, title, undefined, quiet),
+  mandate: (from, person, key, title, quiet, link) => mandateAlert('CI health', from, person, key, title, link, quiet),
 });
 if (!BOOT_CHECK) ciHealth.start();
 // The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that

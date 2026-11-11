@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import {
-  CiHealth, OFFLINE_MS, QUEUED_MS, VERDICT_MS, deadGroups, deadProblem, ghGet, itemKey, neverStarted, queuedProblems,
-  runnerProblems, skippedProblem, verdictPair, verdictProblem, type GhAnswer, type Job, type Run,
+  CiHealth, OFFLINE_MS, QUEUED_MS, VERDICT_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, neverStarted, queuedProblems,
+  runnerProblems, sharedHost, skippedProblem, verdictPair, verdictProblem, type GhAnswer, type Job, type Run,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
@@ -145,7 +145,7 @@ esac
 
 // ---------- the poller ----------
 
-function world() {
+function world({ delve = false } = {}) {
   const dir = mkdtempSync(join(root, 'w-'));
   const store = new Store(join(dir, 'coordinator.db'));
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
@@ -154,6 +154,8 @@ function world() {
   const peek = store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras', cara.id);
   store.createProject('Notes', 'https://github.com/caraminden/notes', cara.id);
   store.createProject('Local', null, cara.id);
+  // A second scheme with CI, sharing the desktop, when a test asks for it.
+  if (delve) store.createProject('Delve', 'https://github.com/caraminden/delve', cara.id);
   const c = new Contraptions(store, 's'.repeat(40), join(dir, 'keys'));
   const mandate = c.register({ name: 'mandate', title: 'Mandate', port: 9101, icon: '/icon.svg', home_scheme: null, open_paths: '[]', default_model: 'haiku', turn_cap: 200 });
   // Cara and Josh have Mandate; Rachel, an admin, doesn't.
@@ -162,6 +164,8 @@ function world() {
 
   const gh = {
     runners: [{ name: 'DESKTOP-G248IJ8-desktop', status: 'online' }] as { name: string; status: string }[],
+    delveRunners: [] as { name: string; status: string }[],
+    runnersDenied: false,
     runs: [] as Run[],
     jobs: new Map<number, Job[]>(),
     mainRuns: [] as Run[],
@@ -177,10 +181,12 @@ function world() {
     let body: any;
     if (path.startsWith('repos/caraminden/notes/')) body = { total_count: 0, workflows: [] };
     else if (path.endsWith('/actions/workflows?per_page=100')) body = { workflows: [{ id: 7, name: 'desktop', state: 'active' }, { id: 8, name: 'old', state: 'disabled_manually' }] };
+    else if (path.endsWith('/actions/runners?per_page=100') && gh.runnersDenied) return { status: 403, etag: null, body: { message: 'Resource not accessible by integration' } };
+    else if (path === 'repos/caraminden/delve/actions/runners?per_page=100') body = { runners: gh.delveRunners };
     else if (path.endsWith('/actions/runners?per_page=100')) body = { runners: gh.runners };
     else if (path.includes('/actions/workflows/7/runs?branch=main')) body = { workflow_runs: gh.mainRuns };
     else if (path.endsWith('/actions/runs?per_page=50')) body = { workflow_runs: gh.runs };
-    else if (path === 'repos/caraminden/peek-auras') body = { default_branch: 'main' };
+    else if (/^repos\/caraminden\/[^/]+$/.test(path)) body = { default_branch: 'main' };
     else if (/\/runs\/\d+\/jobs/.test(path)) body = { jobs: gh.jobs.get(Number(/runs\/(\d+)\//.exec(path)![1])) ?? [] };
     else if (/check-runs\/\d+\/annotations/.test(path)) body = [{ message: BILLING, annotation_level: 'failure' }];
     else return { status: 404, etag: null, body: { message: 'Not Found' } };
@@ -188,6 +194,7 @@ function world() {
     return etag === tag ? { status: 304, etag: tag, body: null } : { status: 200, etag: tag, body };
   };
   const puts: [string, string, string | null][] = [];
+  const from: string[] = [];
   const quiet: string[] = [];
   const mandateUp = { ok: true };
   const deps = {
@@ -195,14 +202,15 @@ function world() {
     get,
     mandate: async (p: { name: string }, u: { name: string }, key: string, title: string | null, q?: boolean) => {
       puts.push([u.name, key, title]);
+      from.push(p.name);
       if (q) quiet.push(key);
       return mandateUp.ok;
     },
   };
-  return { store, peek, gh, puts, quiet, mandateUp, deps, health: new CiHealth(store, deps) };
+  return { store, peek, gh, puts, from, quiet, mandateUp, deps, health: new CiHealth(store, deps) };
 }
 
-test('each problem is one Mandate alert per admin with Mandate, updated on change, cleared when fixed, and kept across a restart', async () => {
+test('a problem is one Mandate alert per admin with Mandate, cleared when fixed, and kept across a restart', async () => {
   const w = world();
   const t0 = NOW;
   await w.health.tick(t0);
@@ -215,8 +223,9 @@ test('each problem is one Mandate alert per admin with Mandate, updated on chang
   assert.deepEqual(w.puts, []);
   await w.health.tick(t0 + 5 * MIN + OFFLINE_MS);
   assert.equal(w.puts.length, 1);
-  assert.deepEqual(w.puts[0].slice(0, 2), ['Cara', 'ci.runner:DESKTOP-G248IJ8-desktop']);
-  assert.match(w.puts[0][2]!, /^CI: runner DESKTOP-G248IJ8-desktop has been offline since/);
+  assert.deepEqual(w.puts[0].slice(0, 2), ['Cara', 'ci.open']);
+  assert.match(w.puts[0][2]!, /^CI, Peek Auras: runner DESKTOP-G248IJ8-desktop has been offline since/);
+  assert.equal(w.from[0], 'CI health', 'from CI health, not the scheme');
   await w.health.tick(t0 + 10 * MIN + OFFLINE_MS);
   assert.equal(w.puts.length, 1, 'unchanged: not put again');
 
@@ -228,7 +237,7 @@ test('each problem is one Mandate alert per admin with Mandate, updated on chang
   // Back online: her item is cleared.
   w.gh.runners = [{ name: 'DESKTOP-G248IJ8-desktop', status: 'online' }];
   await again.tick(t0 + 20 * MIN + OFFLINE_MS);
-  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.runner:DESKTOP-G248IJ8-desktop', null]);
+  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', null]);
   await again.tick(t0 + 25 * MIN + OFFLINE_MS);
   assert.equal(w.puts.length, 2, 'cleared once');
 });
@@ -256,7 +265,7 @@ test('billing-blocked jobs make one alert that counts up, quoting GitHub, and Ma
   w.mandateUp.ok = false;
   await w.health.tick(t);
   assert.equal(w.puts.length, 1);
-  assert.match(w.puts[0][2]!, /^CI: 2 jobs on windows-latest didn't start since .*GitHub says: "The job was not started because recent account payments/);
+  assert.match(w.puts[0][2]!, /^CI, Peek Auras: 2 jobs on windows-latest didn't start since .*GitHub says: "The job was not started because recent account payments/);
   await w.health.tick(t + MIN);
   assert.equal(w.puts.length, 2, 'Mandate was down: tried again');
   w.mandateUp.ok = true;
@@ -269,8 +278,8 @@ test('billing-blocked jobs make one alert that counts up, quoting GitHub, and Ma
   w.gh.runs = [third, ...runs];
   w.gh.jobs.set(600, [dead(0, { run_id: 600, created_at: third.created_at })]);
   await w.health.tick(t + 4 * MIN);
-  assert.equal(w.puts.at(-1)![1], 'ci.nostart:windows-latest');
-  assert.match(w.puts.at(-1)![2]!, /^CI: 3 jobs/);
+  assert.equal(w.puts.at(-1)![1], 'ci.open');
+  assert.match(w.puts.at(-1)![2]!, /^CI, Peek Auras: 3 jobs/);
   assert.equal(w.gh.calls.filter((c) => c.includes('/runs/501/jobs')).length, 1, "a finished run's jobs are read once");
   assert.equal(w.gh.calls.filter((c) => c.includes('/annotations')).length, 2, 'one annotation read per newest dead job');
 
@@ -279,7 +288,7 @@ test('billing-blocked jobs make one alert that counts up, quoting GitHub, and Ma
   w.gh.runs = [ok, third, ...runs];
   w.gh.jobs.set(700, [job({ run_id: 700, labels: ['windows-latest'], created_at: ok.created_at })]);
   await w.health.tick(t + 5 * MIN);
-  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.nostart:windows-latest', null]);
+  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', null]);
 });
 
 test('a rate limit pauses the checks', async () => {
@@ -308,7 +317,7 @@ test('a GitHub error skips the round: open alerts stay, and a failed jobs read i
   w.gh.down = null;
   await w.health.tick(t + MIN);
   assert.equal(w.puts.length, 1, 'the jobs are read again once GitHub answers');
-  assert.equal(w.puts[0][1], 'ci.nostart:windows-latest');
+  assert.equal(w.puts[0][1], 'ci.open');
   for (const down of [/\/actions\/workflows\?/, /\/actions\/runs\?per_page/, /\/workflows\/7\/runs/]) {
     w.gh.down = down;
     await w.health.tick(t + 2 * MIN);
@@ -331,4 +340,83 @@ test('green with skipped jobs goes out quiet, and the alarm item an older build 
   const put = w.puts.find(([, k]) => k === 'ci.green-skipped:7');
   assert.match(put?.[2] ?? '', /went green with 1 job skipped that ran the time before: screen$/);
   assert.deepEqual(w.quiet, ['ci.green-skipped:7'], 'and comes back as a quiet item, not an alert');
+});
+
+test('the one alert names the PC a set of offline runners share, and lists the other problems in full', () => {
+  assert.equal(sharedHost(['DESKTOP-G248IJ8', 'DESKTOP-G248IJ8-2', 'DESKTOP-G248IJ8-perf', 'DESKTOP-G248IJ8-linux-2']), 'DESKTOP-G248IJ8');
+  assert.equal(sharedHost(['DESKTOP-G248IJ8-3', 'DESKTOP-G248IJ8-4']), 'DESKTOP-G248IJ8', 'no runner named for the PC alone');
+  assert.equal(sharedHost(['DESKTOP-G248IJ8', 'DESKTOP-AB12CD3']), null, "two PCs' default names aren't one PC");
+  assert.equal(sharedHost(['DESKTOP-G248IJ8', 'CITADEL-BOX-desktop']), null);
+  assert.equal(sharedHost(['DESKTOP-G248IJ8']), null);
+
+  const runner = (scheme: string, name: string) => ({ scheme, problem: { key: `runner:${name}`, title: `CI: runner ${name} has been offline since Nov 11 13:32` } });
+  const schemes = ['Delve', 'Peek Auras', 'Theory of Crafting', 'Mandate', 'Citadel'];
+  const outage = schemes.flatMap((s, i) => [runner(s, i ? `DESKTOP-G248IJ8-${i + 1}` : 'DESKTOP-G248IJ8'), runner(s, `DESKTOP-G248IJ8-linux${i ? `-${i}` : ''}`)]);
+  assert.equal(bundleTitle(outage), 'CI: 10 runners offline on DESKTOP-G248IJ8 in 5 schemes');
+  assert.equal(bundleTitle(outage.slice(0, 4)), 'CI: 4 runners offline on DESKTOP-G248IJ8 in Delve and Peek Auras');
+  const queued = { scheme: 'Delve', problem: { key: 'queued:delve-ci', title: 'CI: 2 jobs on delve-ci have waited for a runner since Nov 11 13:40' } };
+  assert.equal(bundleTitle([...outage.slice(0, 2), queued]), 'CI: 2 runners offline on DESKTOP-G248IJ8 and 1 other problem in Delve. Delve: 2 jobs on delve-ci have waited for a runner since Nov 11 13:40');
+  assert.equal(bundleTitle([queued]), 'CI, Delve: 2 jobs on delve-ci have waited for a runner since Nov 11 13:40');
+  assert.equal(bundleTitle([runner('Delve', 'DESKTOP-G248IJ8'), runner('Peek Auras', 'CITADEL-BOX-desktop')]), 'CI: 2 runners offline in Delve and Peek Auras');
+  assert.equal(bundleTitle(Array.from({ length: 30 }, (_, i) => ({ ...queued, problem: { ...queued.problem, key: `q${i}` } }))).length, 500, 'kept to Mandate\'s 500');
+});
+
+test('an outage across schemes is one alert that rings once, takes new words quietly, clears when all is well, and rings again on the next (#540)', async () => {
+  const w = world({ delve: true });
+  const t0 = NOW;
+  const off = (name: string) => ({ name, status: 'offline' });
+  w.gh.runners = [off('DESKTOP-G248IJ8'), off('DESKTOP-G248IJ8-2')];
+  w.gh.delveRunners = [off('DESKTOP-G248IJ8-linux')];
+  await w.health.tick(t0);
+  await w.health.tick(t0 + OFFLINE_MS);
+  assert.deepEqual(w.puts, [['Cara', 'ci.open', 'CI: 3 runners offline on DESKTOP-G248IJ8 in Delve and Peek Auras']], 'one item, not three');
+  assert.deepEqual(w.quiet, [], 'an alert');
+
+  // One more drops: the same item takes the new words (Mandate pushes only a new item, so this one doesn't ring).
+  w.gh.delveRunners = [off('DESKTOP-G248IJ8-linux'), off('DESKTOP-G248IJ8-linux-2')];
+  await w.health.tick(t0 + 2 * OFFLINE_MS);
+  await w.health.tick(t0 + 3 * OFFLINE_MS);
+  assert.deepEqual(w.puts.slice(1), [['Cara', 'ci.open', 'CI: 4 runners offline on DESKTOP-G248IJ8 in Delve and Peek Auras']]);
+
+  // Peek's come back first: still open, fewer words; then Delve's, and it clears once.
+  w.gh.runners = [];
+  await w.health.tick(t0 + 4 * OFFLINE_MS);
+  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', 'CI: 2 runners offline on DESKTOP-G248IJ8 in Delve']);
+  w.gh.delveRunners = [];
+  await w.health.tick(t0 + 5 * OFFLINE_MS);
+  await w.health.tick(t0 + 6 * OFFLINE_MS);
+  assert.deepEqual(w.puts.slice(3), [['Cara', 'ci.open', null]]);
+
+  // The next outage is a new item, so it rings.
+  w.gh.runners = [off('DESKTOP-G248IJ8')];
+  await w.health.tick(t0 + 7 * OFFLINE_MS);
+  await w.health.tick(t0 + 8 * OFFLINE_MS);
+  assert.equal(w.puts.length, 5);
+  assert.deepEqual(w.puts.at(-1)!.slice(0, 2), ['Cara', 'ci.open']);
+});
+
+test("an older build's per-scheme alarm items are cleared from their scheme once the one alert takes over (#540)", async () => {
+  const w = world();
+  w.store.setSetting(`ci-health:${w.peek.id}`, { offline: { 'DESKTOP-G248IJ8': NOW - OFFLINE_MS }, sent: { 'runner:DESKTOP-G248IJ8': { 1: 'CI: runner DESKTOP-G248IJ8 has been offline since Nov 5 03:45' } } });
+  w.gh.runners = [{ name: 'DESKTOP-G248IJ8', status: 'offline' }];
+  await w.health.tick(NOW);
+  assert.deepEqual(w.puts[0], ['Cara', 'ci.runner:DESKTOP-G248IJ8', null]);
+  assert.deepEqual(w.puts.slice(1).map(([u, k]) => [u, k]), [['Cara', 'ci.open']]);
+  assert.deepEqual(w.from, ['Peek Auras', 'CI health']);
+});
+
+test("a runner list CI health can't read keeps the runner alerts as they were (#540)", async () => {
+  const w = world();
+  w.gh.runners = [{ name: 'DESKTOP-G248IJ8', status: 'offline' }];
+  await w.health.tick(NOW);
+  await w.health.tick(NOW + OFFLINE_MS);
+  assert.equal(w.puts.length, 1);
+  w.gh.runnersDenied = true;
+  await w.health.tick(NOW + 2 * OFFLINE_MS);
+  await w.health.tick(NOW + 3 * OFFLINE_MS);
+  assert.equal(w.puts.length, 1, 'not cleared, not re-sent');
+  w.gh.runnersDenied = false;
+  w.gh.runners = [{ name: 'DESKTOP-G248IJ8', status: 'online' }];
+  await w.health.tick(NOW + 4 * OFFLINE_MS);
+  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', null], 'cleared once the list says so');
 });

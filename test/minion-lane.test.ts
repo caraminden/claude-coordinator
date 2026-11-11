@@ -285,3 +285,23 @@ test("a restart's sweep keeps a turn folder whose wrapper hasn't started yet, an
   assert.ok(existsSync(starting), 'no pid.json yet is no proof it is gone');
   assert.ok(!existsSync(dead));
 });
+
+test("a restart's sweep removes only turn folders, never a running Codex review's or anything else it didn't make (C5)", () => {
+  const r = makeRunner();
+  const person = join(r.turnsDir, 'person-3');
+  // codex-review.ts makes review-* beside a person's turn folders; it has no pid.json and its mtime stops moving.
+  const review = join(person, 'review-Ab12Cd');
+  const ultra = join(person, 'ultrareview-9');
+  const other = join(r.turnsDir, 'not-a-turn');
+  const dead = join(person, '999-3');
+  const old = new Date(Date.now() - 5 * 60_000);
+  for (const d of [review, ultra, other, dead]) {
+    mkdirSync(d, { recursive: true });
+    utimesSync(d, old, old);
+  }
+  r.recover();
+  assert.ok(existsSync(review), 'a Codex review may still be running');
+  assert.ok(existsSync(ultra));
+  assert.ok(existsSync(other));
+  assert.ok(!existsSync(dead), "a container turn's dead folder still goes");
+});

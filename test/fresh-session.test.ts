@@ -261,6 +261,40 @@ test('a fresh start that cannot run a turn gives up once, not every minute', asy
   assert.ok(notes(id).includes('The fresh start could not run a turn, so the Taskmaster keeps its session.'));
 });
 
+test('a fresh start whose turn throws as it starts gives up, and does not spin the server (C2)', async () => {
+  const id = taskmaster();
+  let calls = 0;
+  let timerFired = false;
+  let spun = false;
+  // Stands in for any synchronous throw in startTurn (a full disk, say): placeFor is its first call. The lane
+  // frees in a microtask and asks again, so unfixed this never lets a timer run; the cap ends the test's loop.
+  runner.placeFor = () => {
+    if (++calls > 1 && !timerFired) spun = true;
+    if (calls > 500) return { refused: 'cap' };
+    throw new Error('ENOSPC (simulated)');
+  };
+  setTimeout(() => (timerFired = true), 0);
+  const was = console.error;
+  console.error = () => {};
+  try {
+    try {
+      runner.requestFresh(id, 'test');
+    } catch {
+      // Whether the caller hears of it is not the point.
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  } finally {
+    runner.placeFor = undefined;
+    console.error = was;
+  }
+  assert.equal(spun, false, `asked ${calls} times before a timer could fire`);
+  assert.equal(timerFired, true);
+  assert.equal(calls, 1);
+  assert.equal(store.getSetting(`fresh:${id}`), null);
+  assert.equal(runner.isRunning(id), false);
+  assert.ok(notes(id).includes('The fresh start could not run a turn, so the Taskmaster keeps its session.'));
+});
+
 /** Every turn's reported context size from now on (the fake reads it as the turn starts). */
 const contextSize = (tokens: number | null) => (tokens === null ? rmSync(join(root, 'size'), { force: true }) : writeFileSync(join(root, 'size'), String(tokens)));
 const freshNotes = (id: number) => notes(id).filter((t) => t.startsWith('Starting a fresh session'));

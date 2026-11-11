@@ -507,6 +507,8 @@ export class Runner {
   saveSession = saveSession;
   /** How often a running turn's stream file is read. */
   pollMs = 250;
+  /** How long a container turn's `podman exec -d` (or its systemd-run) may take to return before the start counts as failed. */
+  containerStartMs = 60_000;
   /** Run turns in transient systemd user units, which outlive this server, rather than as its children. */
   units = false;
   /** Where turn folders go: beside the database, so a test's or dev copy's never mix with the live ones. */
@@ -947,11 +949,12 @@ export class Runner {
     // Folders of turns nobody follows any more and whose process is gone.
     try {
       const followed = new Set([...this.turns.values()].map((t) => t.dir));
-      // Container turns' folders sit one deeper, in their person's folder (ClaudeLink.turnsDir). Ultra reviews'
-      // clones sit there too, and are src/ultrareview.ts's to clear: a review outlives a restart (#508).
+      // Container turns' folders sit one deeper, in their person's folder (ClaudeLink.turnsDir). Only what startTurn
+      // names (<minion>-<ms>) is this sweep's: ultra reviews' clones (#508) and Codex reviews' folders sit there too,
+      // are their own code's to clear, and may be in use across a restart.
       const dirs = readdirSync(this.turnsDir).flatMap((name) => {
         const dir = join(this.turnsDir, name);
-        return /^person-\d+$/.test(name) ? readdirSync(dir).filter((n) => !n.startsWith('ultrareview-')).map((n) => join(dir, n)) : [dir];
+        return (/^person-\d+$/.test(name) ? readdirSync(dir).map((n) => join(dir, n)) : [dir]).filter((d) => /^\d+-\d+$/.test(basename(d)));
       });
       // Gone for sure: its wrapper's pid is dead, or it never wrote one in the time a start takes. Not knowing isn't enough (#259).
       const gone = (dir: string) => wrapperAlive(dir) === false || (wrapperAlive(dir) === null && Date.now() - statSync(dir).mtimeMs > START_GRACE_MS);
@@ -1166,8 +1169,10 @@ export class Runner {
    * (a reset, an upgrade, extra usage): every minion waiting on it resumes now, limitGapMs apart, and so
    * do those that gave up waiting (#477). Not one a person stopped: that waits for a message. Nor one whose
    * next turn runs on Codex (a Codex pick or its person's override): Claude working says nothing about Codex's limit.
+   * Nor, when one turn's success is the proof (`model`, its model), one on another model: a cap on that model alone
+   * would fail it again, and one that gave up would be revived, fail and push again on every success.
    */
-  private limitCleared(payer: number | null) {
+  private limitCleared(payer: number | null, model?: string | null) {
     const list = this.limitResumes();
     const gaveUp = this.store.limitedTickets().filter((t) => t.status === 'error' && t.note?.startsWith('Usage limit: gave up') && !list.some((w) => w.ticket === t.id) && !this.isRunning(t.id));
     if (!list.length && !gaveUp.length) return;
@@ -1176,8 +1181,9 @@ export class Runner {
       const project = t && this.store.getProject(t.project_id);
       if (!t || !project) return false;
       const person = t.person_id ?? project.owner_id;
-      const codex = isCodexModel(turnSettings(t, project).model) || (person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person)));
-      return !codex && this.payerOf(person) === payer;
+      const its = turnSettings(t, project).model;
+      const codex = isCodexModel(its) || (person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person)));
+      return !codex && this.payerOf(person) === payer && (model === undefined || its === model);
     };
     const now = Date.now();
     const early = list.filter((w) => w.at > now && !w.codex && onPlan(w.ticket));
@@ -1520,6 +1526,9 @@ export class Runner {
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
     live.stopPending = !existsSync(join(live.dir, 'pid.json'));
     this.signal(live, 'SIGTERM');
+    // A container turn with no claude yet has no pid or unit to signal, and a start that hangs never gets one:
+    // this ends it at the next poll. `stopped` tells poll it is not the wrapper's, should claude start after all.
+    if (live.stopPending && live.container) writeFileSync(join(live.dir, 'exit.json'), JSON.stringify({ code: null, signal: null, stopped: true }));
     // A turn that ignores the stop (or hadn't started claude yet) gets killed.
     clearTimeout(live.stopTimer);
     live.stopTimer = setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGKILL'), 15_000);
@@ -1672,7 +1681,15 @@ export class Runner {
       // (but goes before a handoff Citadel asked for by itself: freshStep).
       const fresh = this.freshStep(ticketId);
       if (fresh) {
-        const ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
+        let ended: Promise<void> | void;
+        try {
+          ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
+        } catch (err) {
+          // Thrown out of the step with the fresh start still pending, the freed lane would ask again in a
+          // microtask, for ever, and nothing else on the server would run: give up as below.
+          console.error(`Ticket ${ticketId}: its fresh start's turn could not start:`, err);
+          ended = this.turns.get(ticketId)?.ended;
+        }
         if (this.isRunning(ticketId)) {
           // The queue waits behind this turn as behind any: in its record, so a restart keeps it.
           const q = this.queues.get(ticketId);
@@ -1967,16 +1984,19 @@ export class Runner {
     beat();
     // Starting the container (building its image, the first time) can take minutes; it counts as running meanwhile.
     const starting = setInterval(beat, 5_000);
+    // Both return as soon as the wrapper is started. One that hangs (a stuck podman lock) would keep the turn "running" for good.
     const run = ([cmd, ...args]: string[]) => new Promise<void>((resolve, reject) => {
-      execFile(cmd, args, (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim() || err.message)) : resolve()));
+      execFile(cmd, args, { timeout: this.containerStartMs }, (err, _out, stderr) => (err ? reject(new Error(err.killed ? `${cmd} did not return within ${this.containerStartMs / 1000} s` : String(stderr).trim() || err.message)) : resolve()));
     });
+    // Stopped while it started (stop() wrote exit.json), and maybe finished since: nothing more to start or to say.
+    const over = () => !existsSync(dir) || existsSync(join(dir, 'exit.json'));
     const exec = ['podman', 'exec', '-d', place.container, ...wrapper];
     const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec];
     place.ensure()
       // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.
       // Only an exec that then starts counts as a fallback: one that fails both ways was podman's trouble.
-      .then(() => (this.units ? run(scoped).then(() => fallbacks.started('scope'), (err) => run(exec).then(() => fallbacks.record(ticketId, `A turn in ${place.container}`, err.message, Date.now(), 'scope'))) : run(exec)))
-      .catch((err) => writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
+      .then(() => (over() ? undefined : this.units ? run(scoped).then(() => fallbacks.started('scope'), (err) => run(exec).then(() => fallbacks.record(ticketId, `A turn in ${place.container}`, err.message, Date.now(), 'scope'))) : run(exec)))
+      .catch((err) => !over() && writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
       .finally(() => clearInterval(starting));
   }
 
@@ -2009,7 +2029,10 @@ export class Runner {
       // Checked before reading: once exit.json is there, everything claude wrote is in the stream.
       const exited = existsSync(join(live.dir, 'exit.json'));
       this.readStream(ticketId, live, exited);
-      if (exited) return this.finish(ticketId, live, JSON.parse(readFileSync(join(live.dir, 'exit.json'), 'utf8')));
+      const exit = exited ? JSON.parse(readFileSync(join(live.dir, 'exit.json'), 'utf8')) : null;
+      // stop()'s own exit.json, but claude has started since: the turn ends with its wrapper's, once the signal below lands.
+      if (exit?.stopped && live.stopPending && existsSync(join(live.dir, 'pid.json'))) rmSync(join(live.dir, 'exit.json'), { force: true });
+      else if (exit) return this.finish(ticketId, live, exit);
       // Stopped while still starting: its claude has a pid now (#468 S03-2). The SIGKILL retry still follows.
       if (live.stopPending && existsSync(join(live.dir, 'pid.json'))) {
         live.stopPending = false;
@@ -2146,7 +2169,9 @@ export class Runner {
     this.parkedAs.delete(ticketId);
     if (parkedAs && status !== 'error' && this.heldFor(ticketId)) this.store.updateTicket(ticketId, parkedAs);
     if (status === 'idle' && !stopped && !signal) this.clearFailNote(ticketId);
-    if (status === 'idle' && !stopped && !signal && !turn?.codex) this.limitCleared(this.payerOf(turn?.person));
+    const ran = this.store.getTicket(ticketId);
+    const ranIn = ran && this.store.getProject(ran.project_id);
+    if (status === 'idle' && !stopped && !signal && !turn?.codex && ran && ranIn) this.limitCleared(this.payerOf(turn?.person), turnSettings(ran, ranIn).model);
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
     this.closing.delete(ticketId);

@@ -263,6 +263,36 @@ test('a turn on the same plan getting through resumes every minion waiting on it
   pushes.length = 0;
 });
 
+test("a turn getting through says nothing of another model's limit: a minion on that model stays given up, or waits out its time (C7)", async () => {
+  runner.limitFallbackMs = 50;
+  const gaveUp = minion();
+  store.updateTicket(gaveUp, { model: 'opus' });
+  await turn(gaveUp, "You've hit your Opus limit");
+  await until(() => store.getTicket(gaveUp)!.note?.startsWith('Usage limit: gave up') ?? false, 'it to give up');
+  runner.limitFallbackMs = 60 * 60 * 1000;
+  const waiting = minion();
+  store.updateTicket(waiting, { model: 'opus' });
+  await turn(waiting, LIMIT);
+  const at = runner.limitWait(waiting)!.at;
+  const before = turnsRun();
+  pushes.length = 0;
+  // A turn on the plan's default model gets through: Opus's cap is its own, and reviving these would only fail them again, with a push each round.
+  await turn(minion(), 'ok');
+  await sleep(200);
+  assert.equal(turnsRun(), before + 1, 'no Opus minion ran');
+  assert.equal(runner.limitWait(gaveUp), null);
+  assert.match(store.getTicket(gaveUp)!.note ?? '', /^Usage limit: gave up/);
+  assert.equal(runner.limitWait(waiting)?.at, at, 'still waiting for its own reset');
+  assert.deepEqual(pushes, []);
+  // An Opus turn getting through is the proof they wait for.
+  const opus = minion();
+  store.updateTicket(opus, { model: 'opus' });
+  await turn(opus, 'ok');
+  await until(() => turnsRun() === before + 4 && [waiting, gaveUp].every((id) => !runner.isRunning(id) && !runner.limitWait(id)), 'the Opus minions to resume');
+  for (const id of [waiting, gaveUp]) assert.equal(store.getTicket(id)!.state, null);
+  pushes.length = 0;
+});
+
 test("a Claude turn getting through leaves a minion whose next turn runs on Codex waiting: Codex's limit is its own (#477)", async () => {
   const id = minion();
   await turn(id, LIMIT);

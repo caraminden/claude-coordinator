@@ -39,7 +39,10 @@ if (args[0] !== 'exec') process.exit(0);
 const detached = args[1] === '-d';
 const [cmd, ...rest] = args.slice(detached ? 3 : 2);
 const run = cmd === 'node' ? process.execPath : cmd;
-if (detached) spawn(run, rest, { detached: true, stdio: 'ignore' }).unref();
+// FAKE_PODMAN_HANGS: a detached exec never returns, as podman does on a stuck lock. FAKE_PODMAN_SLOW: it starts late.
+const start = () => spawn(run, rest, { detached: true, stdio: 'ignore' }).unref();
+if (detached && process.env.FAKE_PODMAN_HANGS) setInterval(() => {}, 1000);
+else if (detached) setTimeout(start, Number(process.env.FAKE_PODMAN_SLOW ?? 0));
 else process.exit(spawnSync(run, rest, { stdio: 'inherit' }).status ?? 1);
 `,
 );
@@ -520,6 +523,98 @@ test("a restart sweeps container turns' dead folders in each person's folder, an
   assert.ok(!existsSync(join(person, '8-1')), 'a dead turn goes');
   assert.ok(existsSync(join(person, '8-2')), 'a running one stays');
   assert.ok(existsSync(person), "the person's folder stays mounted");
+});
+
+const errors = (id: number) => store.listEvents(id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text as string);
+
+test('a podman exec that never returns fails the turn after its time limit, not never (C6)', async () => {
+  const id = newTicket();
+  const r = runner(inContainer);
+  r.containerStartMs = 300;
+  process.env.FAKE_PODMAN_HANGS = '1';
+  try {
+    r.send(id, 'Josh', 'build it');
+    await until(() => status(id) === 'error');
+  } finally {
+    delete process.env.FAKE_PODMAN_HANGS;
+  }
+  assert.match(errors(id)[0], /^Could not start claude: citadel-claude-test-2: podman did not return within 0\.3 s/);
+  assert.equal(r.isRunning(id), false);
+});
+
+test('Stop ends a container turn whose claude has not started, and never will (C6)', async () => {
+  const id = newTicket();
+  const r = runner(inContainer);
+  r.containerStartMs = 1500;
+  process.env.FAKE_PODMAN_HANGS = '1';
+  const dir = () => (r as any).turns.get(id)?.dir as string | undefined;
+  try {
+    r.send(id, 'Josh', 'build it');
+    await until(() => status(id) === 'running');
+    const turnDir = dir()!;
+    assert.ok(!existsSync(join(turnDir, 'pid.json')));
+    const stopped = Date.now();
+    assert.equal(r.stop(id), true);
+    await until(() => !r.isRunning(id));
+    assert.ok(Date.now() - stopped < 1000, `ended ${Date.now() - stopped} ms after the stop, not when the exec gave up`);
+    assert.equal(status(id), 'idle');
+    // The exec gives up later, its turn's folder long gone: nothing is written, said or thrown.
+    await new Promise((res) => setTimeout(res, 1800));
+    assert.ok(!existsSync(turnDir));
+    assert.deepEqual(errors(id), []);
+  } finally {
+    delete process.env.FAKE_PODMAN_HANGS;
+  }
+});
+
+test('a turn stopped while its container starts never reaches podman exec (C6)', async () => {
+  const id = newTicket();
+  let ready!: () => void;
+  const r = runner(() => ({ ...inContainer(), ensure: () => new Promise<void>((res) => (ready = res)) }));
+  r.send(id, 'Josh', 'build it');
+  await until(() => status(id) === 'running');
+  const before = jsonLines(calls).length;
+  r.stop(id);
+  await until(() => !r.isRunning(id));
+  ready();
+  await new Promise((res) => setTimeout(res, 200));
+  assert.deepEqual(jsonLines(calls).slice(before), []);
+  assert.equal(status(id), 'idle');
+});
+
+test("a container turn's claude that starts just after the stop is still signalled and followed to its end (C6, #468 S03-2)", async () => {
+  const id = newTicket();
+  // A claude that runs until it is told to stop.
+  const patient = join(root, 'claude-patient');
+  writeFileSync(patient, `#!${process.execPath}\nprocess.on('SIGTERM', () => process.exit(143));\nsetInterval(() => {}, 1000);\n`);
+  chmodSync(patient, 0o755);
+  const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), patient);
+  r.personOf = () => josh.id;
+  r.placeFor = inContainer;
+  r.pollMs = 3_600_000; // polled by hand below, to put the stop between the exec and claude's start
+  process.env.FAKE_PODMAN_SLOW = '300';
+  try {
+    r.send(id, 'Josh', 'build it');
+    const turnDir = (r as any).turns.get(id).dir as string;
+    await until(() => jsonLines(calls).some((c) => c.includes(turnDir))); // podman exec is under way
+    r.stop(id);
+    assert.ok(!existsSync(join(turnDir, 'pid.json')));
+    assert.ok(existsSync(join(turnDir, 'exit.json')), 'the stop ends the turn at its next poll');
+    await until(() => existsSync(join(turnDir, 'pid.json')));
+    const before = jsonLines(calls).length;
+    (r as any).poll(id);
+    assert.equal(r.isRunning(id), true, 'its claude runs, so the turn is not cut loose');
+    await until(() => jsonLines(calls).length > before);
+    assert.match(jsonLines(calls)[before].join(' '), /^exec citadel-claude-test-2 sh -c kill -TERM/);
+    await until(() => {
+      (r as any).poll(id);
+      return !r.isRunning(id);
+    });
+    assert.equal(status(id), 'idle');
+    assert.deepEqual(errors(id), []);
+  } finally {
+    delete process.env.FAKE_PODMAN_SLOW;
+  }
 });
 
 test("the sign-in link is read from the terminal's output", () => {

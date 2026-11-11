@@ -1,6 +1,7 @@
 /* The scheme view: schemes and their dialogs, the board, the panels' layout and drawers, the overview shelf, artifacts,
    properties, the file viewer. */
-main:has(> .split) { max-width: 1560px; }
+/* The scheme view spans the window (#495); wide-screen columns below. */
+main:has(> .split) { max-width: none; }
 /* New scheme: a modal box on desktop, a sheet along the bottom on phones; the scheme switcher's menu. */
 .card.new-scheme { max-width: 480px; margin: 10vh auto; }
 .card.new-scheme h2 { margin-bottom: 1rem; }
@@ -121,15 +122,14 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .shelf:not([open]) > summary .label { max-height: 14rem; }
 /* Wide screens (#495, Cara 2026-11-10: "make the scheme list be able to scale to the point where all
    scheme names fit, then let the minion list and chat boxes scale proportionally to fit the rest"):
-   the page spans the window, the overview is as wide as its longest scheme row (only the scheme list
-   sets it, capped at 22rem, about 30 characters of name), and the minions list and main panel share
-   what's left 3:7, the list never under 15rem. Prose in the chat still wraps at a readable 100ch;
+   the overview is as wide as its longest scheme row (only the scheme list sets it; capped at 22rem
+   or 18vw, whichever is wider, so one absurd name can't take the screen), and the minions list and
+   main panel share what's left 3:7, the list never under 15rem. Prose in the chat still wraps at a readable 100ch;
    its boxes, tables, code and pictures take the full width. */
 @media (min-width: 1151px) {
-  body:has(.split) main { max-width: none; }
   .split { grid-template-columns: auto minmax(15rem, 3fr) minmax(0, 7fr); }
   .split:has(> .panels > .shelf[open] + .sidebar:not([open])) { grid-template-columns: auto auto minmax(0, 1fr); }
-  .shelf[open] { width: max-content; min-width: 220px; max-width: 22rem; }
+  .shelf[open] { width: max-content; min-width: 220px; max-width: max(22rem, 18vw); }
   .shelf[open] > :not(#schemes-shelf) { contain: inline-size; }
   .sidebar[open] { width: auto; }
   #log .msg :is(p, li, blockquote, h1, h2, h3, h4, h5, h6) { max-width: 100ch; }

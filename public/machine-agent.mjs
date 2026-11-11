@@ -262,6 +262,19 @@ export function cmdLine(command, args) {
 const OWN_GROUP = process.platform !== 'win32';
 /** Task process groups still running: ended with the agent, which a Ctrl-C would no longer reach. */
 const liveGroups = new Set();
+let pruning = null;
+
+/** Track a task's group until none of it is left, which may be long after its first process ended (`sleep 600 &`). */
+function trackGroup(pid) {
+  liveGroups.add(pid);
+  // Dropped within seconds of emptying, before its id can name some other group the agent's exit would signal.
+  pruning ??= setInterval(() => {
+    for (const g of liveGroups) if (!signalGroup(g, 0)) liveGroups.delete(g);
+    if (liveGroups.size) return;
+    clearInterval(pruning);
+    pruning = null;
+  }, 5000).unref();
+}
 
 /** Signals a process group; false once none of it is left. */
 function signalGroup(pid, signal) {
@@ -673,7 +686,6 @@ export class WorkspaceHost {
         job.error = error;
         if (job.partial) job.tail.push(job.partial);
         file.end(error ? `\n${error}\n` : `\nexit ${code}\n`);
-        if (child && OWN_GROUP) liveGroups.delete(child.pid);
         this.release(w, lock);
         if (screen) releaseScreenLock(this.screenLock, screen);
         resolveDone();
@@ -690,7 +702,7 @@ export class WorkspaceHost {
       }, TASK_LIMIT_MS);
       try {
         child = spawn(argv[0], argv.slice(1), { cwd: w.path, env: this.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: OWN_GROUP });
-        if (OWN_GROUP && child.pid) liveGroups.add(child.pid);
+        if (OWN_GROUP && child.pid) trackGroup(child.pid);
       } catch (err) {
         return finish(null, `Could not start ${argv[0]}: ${err.message}`);
       }

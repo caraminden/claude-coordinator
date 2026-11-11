@@ -529,7 +529,7 @@ function mktempPath(src: string, home: string): string | null {
 
 interface Segment { words: Word[]; redirects: { op: string; target: Word }[] }
 /** What the command has done so far: its folder, and the variables it set, with the values they can take where known (a loop variable takes several). */
-interface State { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; committed?: boolean }
+interface State { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; committed?: boolean; maybe?: boolean }
 
 // Only these commands count as writes. Anything else is taken as a read, so an interpreter or tool
 // that names a protected path (`node -e … coordinator.db`, `curl`) goes through: few false alarms,
@@ -547,6 +547,8 @@ const RUNNER_VALUE = /^(-r|--require|--import|--loader|--experimental-loader|-C|
 // ssh and friends take key paths and remote paths; their arguments are not local reads or writes.
 const REMOTE = new Set(['ssh', 'scp', 'sftp', 'ssh-add', 'ssh-keygen', 'ssh-copy-id', 'mosh']);
 const APP_UNITS = /^(claude-coordinator|perigee-godot[\w-]*|citadel-claude[\w-]*)(\.service)?$/;
+// Names those units go by, for a unit glob (`systemctl restart 'claude-*'`): each prefix, and one with a suffix.
+const APP_UNIT_NAMES = ['claude-coordinator', 'perigee-godot', 'perigee-godot-x', 'citadel-claude', 'citadel-claude-x'];
 const STOP_VERBS = new Set(['restart', 'stop', 'kill', 'try-restart', 'reload-or-restart', 'try-reload-or-restart', 'condrestart', 'force-reload', 'freeze']);
 const UNIT_FILE_VERBS = new Set(['enable', 'disable', 'reenable', 'mask', 'unmask', 'link', 'edit', 'revert', 'preset', 'add-wants', 'add-requires', 'set-property']);
 const GIT_READ = new Set(`status log diff show blame rev-parse rev-list ls-files ls-tree ls-remote cat-file describe shortlog grep fetch help version
@@ -746,6 +748,8 @@ function known(ws: Word[], cfg: TripwireConfig): string[] | undefined {
 
 function setVar(st: State, name: string, values: string[] | undefined) {
   st.vars.add(name);
+  // After && or ||, the assignment may not run: the variable keeps its old values too (#468 S01-15).
+  if (st.maybe && values && st.values.has(name)) values = [...new Set([...st.values.get(name)!, ...values])];
   // A value built up past any real path (A=$A$A …) counts as unknown.
   if (values === undefined || values.join('').length > 10_000) st.values.delete(name);
   else st.values.set(name, values);
@@ -1021,6 +1025,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   }
   // Step over keywords and wrappers (env VAR=x, timeout 5m, nice -n 5, …) to the real command.
   let viaXargs = false;
+  let flockShell = false;
   for (;;) {
     const name = basename(words[i]?.text ?? '');
     if (KEYWORDS.has(name)) i++;
@@ -1033,6 +1038,13 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
         const opt = words[i++].text;
         if (name === 'env' && (/^(-u|--unset)$/.test(opt) ? GH_VARS.test(words[i]?.text ?? '') : GH_VARS.test(opt.replace(/^(-u|--unset=)/, '')))) return hard(`Unsetting ${opt.replace(/^(-u|--unset=?)/, '') || words[i].text} is blocked. ${GH_ENV_WHY}`);
         if (/^-(u|C|n|I|P|d|L|s|E|k|a)$|^--(unset|chdir|adjustment|signal|kill-after|arg-file)$/.test(opt)) i++;
+        else if (name === 'flock' && /^(-w|--wait|--timeout|--conflict-exit-code)$/.test(opt)) i++;
+      }
+      // `flock <lock file> cmd …` and `flock <lock file> -c '…'` (#468 S01-15); `flock 9` locks a descriptor.
+      if (name === 'flock' && i + 1 < words.length) {
+        i++;
+        if (/^(-c|--command)$/.test(words[i].text)) flockShell = true;
+        if (flockShell) break;
       }
       takeAssignments(name === 'env');
       if (ghSet()) return hard(`Setting ${ghSet()} is blocked. ${GH_ENV_WHY}`);
@@ -1042,8 +1054,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     if (i >= words.length) return null;
   }
   const cmd = words[i];
-  const name = basename(cmd.text);
-  const args = words.slice(i + 1);
+  // flock's -c string runs in sh, checked as `sh -c` is.
+  const name = flockShell ? 'sh' : basename(cmd.text);
+  const args = words.slice(flockShell ? i : i + 1);
   const vars = new Set([...st.vars, ...assigned.keys()]);
 
   if (name === 'claude') {
@@ -1150,7 +1163,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   }
 
   // --now restarts even when that cuts off running turns (ones not in a unit of their own): a person's call.
-  const deployCall = words.findIndex((w, k) => k >= i && /(^|\/)tools\/deploy\.sh$/.test(w.text));
+  // `cd tools && ./deploy.sh` too, and a deploy.sh in a folder the tripwire lost track of (#468 S01-15).
+  const isDeploy = (w: Word) => /(^|\/)tools\/deploy\.sh$/.test(w.text) || (basename(w.text) === 'deploy.sh' && ((!st.cwd && !isAbsolute(w.text)) || pathsOf(w, st, cfg).some((p) => p.endsWith('/tools/deploy.sh'))));
+  const deployCall = words.findIndex((w, k) => k >= i && isDeploy(w));
   if (deployCall >= 0 && words.slice(deployCall + 1).some((w) => w.text === '--now')) {
     return { reason: '`tools/deploy.sh --now` restarts the server even if that cuts off running turns. Run plain tools/deploy.sh unless a person has said to force it.', ask: true };
   }
@@ -1166,9 +1181,12 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   // A command that only prints or searches its words (`echo systemctl …`) doesn't run it (#468 S01-12).
   const sysctl = PRINTERS.test(name) || SEARCHERS.has(name) ? -1 : words.findIndex((w, k) => k >= i && basename(w.text) === 'systemctl');
   if (sysctl >= 0) {
-    const plain = words.slice(sysctl + 1).filter((w) => !w.text.startsWith('-')).map((w) => w.text);
+    // An option's value isn't the verb (`-s KILL kill`), and a unit may be a glob (`'claude-coordinator*'`; #468 S01-15).
+    const rest = words.slice(sysctl + 1).map((w) => w.text);
+    const plain = rest.filter((t, k) => !t.startsWith('-') && !/^-[stHMpPon]$|^--(signal|type|host|machine|property|output|lines|state|kill-whom|kill-value|what|job-mode|root|image|when|timestamp|message|drop-in|preset-mode|check-inhibitors)$/.test(rest[k - 1] ?? ''));
     const [verb, ...units] = plain;
-    if (STOP_VERBS.has(verb) && units.some((u) => APP_UNITS.test(u))) {
+    const appUnit = (u: string) => APP_UNITS.test(u) || (/[*?[]/.test(u) && APP_UNIT_NAMES.some((n) => globRe(u).test(n) || globRe(u).test(`${n}.service`)));
+    if (STOP_VERBS.has(verb) && units.some(appUnit)) {
       return hard(`systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor, or a person's Claude container and their turns). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts without stopping running turns' : 'the cc-restart-when-idle unit'}, or ask a person.`);
     }
     // `systemctl edit` opens an editor, which would hang a headless turn.
@@ -1215,10 +1233,12 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
 function commandOf(seg: Segment): { name: string; args: Word[] } {
   const w = seg.words;
   let i = 0;
-  for (let wrapped = false; i < w.length; i++) {
+  for (let wrapped = false, lock = false; i < w.length; i++) {
     const t = w[i].text;
     if (basename(t) === 'command' && /^-[pvV]*[vV]/.test(w[i + 1]?.text ?? '')) return { name: '', args: [] };
-    if (WRAPPERS.has(basename(t))) wrapped = true;
+    // flock's lock file (#468 S01-15).
+    if (lock && !t.startsWith('-') && !/^[\d.]+$/.test(t)) lock = false;
+    else if (WRAPPERS.has(basename(t))) (wrapped = true), (lock = basename(t) === 'flock');
     else if (!/^[A-Za-z_]\w*=/.test(t) && !KEYWORDS.has(t) && !(wrapped && (t.startsWith('-') || /^[\d.]+[smhd]?$/.test(t)))) break;
   }
   return { name: basename(w[i]?.text ?? ''), args: w.slice(i + 1) };
@@ -1264,6 +1284,7 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
   const checked = new Set<string>();
   let listed = 0;
   let anyListed = 0;
+  let prevOp = '';
   const listingKill = (s: Segment): Verdict | null => {
     const c = commandOf(s);
     const from = listed | (fed.get(s) ?? 0);
@@ -1293,10 +1314,14 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       stack.push({ cwd: st.cwd, outer: seg, redir, listed, anyListed });
       seg = { words: [], redirects: [] };
       redir = null;
+      prevOp = '';
       listed = anyListed = 0;
     } else {
       redir = null;
+      st.maybe = prevOp === '&&' || prevOp === '||';
       const why = segmentReason(seg, st, cfg) ?? listingKill(seg);
+      st.maybe = false;
+      prevOp = tok.text;
       seg = { words: [], redirects: [] };
       if (why && !why.ask) return why;
       asked ??= why;

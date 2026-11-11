@@ -354,6 +354,16 @@ const BLOCKED: [string, string?][] = [
   ['command -p pkill -f node'],
   ["perl -Mstrict -pi -e 's/a/b/' ~/claude-coordinator/src/x.ts"],
   ["perl -MList::Util -i -pe 's/a/b/' ~/.local/share/claude-coordinator/state.db"],
+  // #468 S01-15: flock's lock file, a -c string, systemctl option values and unit globs
+  ['flock /tmp/l rm -rf ~/.local/share/claude-coordinator/state.db'],
+  ['flock -w 5 /tmp/l pkill -f node'],
+  ["flock /tmp/l -c 'rm -rf ~/.local/share/claude-coordinator/state.db'"],
+  ['systemctl --user -s KILL kill claude-coordinator'],
+  ['systemctl --user --signal KILL kill claude-coordinator'],
+  ["systemctl --user restart 'claude-coordinator*'"],
+  ["systemctl --user stop 'citadel-*'"],
+  ['D=~/.local/share/claude-coordinator; [ -n "$X" ] && D=/tmp/x; rm -f $D/state.db'],
+  ['D=~/.local/share/claude-coordinator; [ -z "$X" ] || D=/tmp/x; rm -f $D/state.db'],
 ];
 
 const ALLOWED = [
@@ -572,6 +582,15 @@ const ALLOWED = [
   'perl -Mstrict -e \'print 1\' "$f"',
   'perl -MList::Util=sum -e \'print sum(1, 2)\' "$f"',
   'perl -Ilib -wMstrict -e \'print 1\' "$f"',
+  // #468 S01-15: the other side of each
+  'flock /tmp/l npm test',
+  'flock -w 5 /tmp/l -c "npm test"',
+  'flock 9',
+  'cd tools && ./deploy.sh',
+  'systemctl --user -n 50 status claude-coordinator',
+  "systemctl --user restart 'my-app*'",
+  'D=/tmp/a; [ -n "$X" ] && D=/tmp/b; rm -rf $D/build',
+  '[ -n "$D" ] || D=/tmp/x; rm -rf $D/build',
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.
@@ -579,6 +598,9 @@ const ASKS = [
   // a deploy that cuts off running turns
   'tools/deploy.sh --now',
   'git rebase main && ./tools/deploy.sh --now 2>&1 | tail -20',
+  // #468 S01-15: run from its own folder
+  'cd tools && ./deploy.sh --now',
+  'cd ~/claude-coordinator/tools && ./deploy.sh --now',
   // data-dir files other than the live database
   'rm ~/.local/share/claude-coordinator/coordinator.db.bak-machines ~/.local/share/claude-coordinator/coordinator.db.bak-x',
   'cd ~/.local/share/claude-coordinator && rm coordinator.db.bak-*',
@@ -587,6 +609,8 @@ const ASKS = [
   'mv ~/.local/share/claude-coordinator/old ~/.local/share/claude-coordinator/old-2',
   'rm ~/.local/share/claude-coordinator/backups/$F',
   'rm -rf ~u/.local/share/claude-coordinator/backups',
+  // #468 S01-15: the change of D may not run
+  'D=~/.local/share/claude-coordinator; [ -n "$X" ] && D=/tmp/x; rm -rf $D/backups',
   // SQL on the live database, when the card can show all of it
   `sqlite3 ${data}/coordinator.db "delete from tickets where id = 3"`,
   'sqlite3 ~/.local/share/claude-coordinator/coordinator.db "update tickets set state=null"',

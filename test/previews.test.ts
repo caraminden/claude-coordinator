@@ -231,6 +231,33 @@ setTimeout(() => createServer((req, res) => res.end(JSON.stringify({ ok: true, p
   }
 });
 
+test('a preview whose health check hangs is asked again, not waited on for minutes (C8)', async () => {
+  const d5 = join(root, 'data5');
+  mkdirSync(d5);
+  const s5 = new Store(join(d5, 'coordinator.db'));
+  const t = s5.createTicket({ project_id: s5.createProject('Five', null).id, title: 'Hung', permission_mode: 'default', created_by: 'Cara' });
+  const wt = join(root, 'hung');
+  mkdirSync(wt);
+  // Accepts the first request and never answers it; answers the ones after.
+  writeFileSync(join(wt, 'server.ts'), `import { createServer } from 'node:http';
+let n = 0;
+createServer((req, res) => { if (n++) res.end(JSON.stringify({ ok: true, preview: true })); }).listen(Number(process.env.PORT), '127.0.0.1');
+`);
+  s5.setTicketDir(t.id, wt, 'ticket/5-hung');
+  const previews = new Previews(s5, d5);
+  let timer!: NodeJS.Timeout;
+  try {
+    const outcome = await Promise.race([
+      previews.start(s5.getTicket(t.id)!).then(() => 'booted'),
+      new Promise((r) => (timer = setTimeout(() => r('still waiting on the first health check'), 10_000))),
+    ]);
+    assert.equal(outcome, 'booted');
+  } finally {
+    clearTimeout(timer);
+    await previews.stop(t.id, true);
+  }
+});
+
 test('stopping a preview waits for its process to exit before deleting its copy', async () => {
   // A preview that ignores SIGTERM and keeps writing into its folder, as a shutting-down server does
   // (its exit handler removes run/mcp-<pid>, which made a delete racing it leave the folder behind).

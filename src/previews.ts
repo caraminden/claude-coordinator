@@ -210,7 +210,8 @@ export class Previews {
     for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((res) => setTimeout(res, 100))) {
       if (proc.exitCode !== null || proc.signalCode) throw await fail(`The preview exited during boot (code ${proc.exitCode})`);
       if (Date.now() > deadline) throw await fail(`The preview did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
-      const health = await fetch(`http://127.0.0.1:${port}/api/health`).then((res) => (res.ok ? res.json() : null), () => null);
+      // A server that accepts and never answers must not hold the loop past its deadline: fetch alone waits 5 minutes.
+      const health = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(3000) }).then((res) => (res.ok ? res.json() : null), () => null);
       if (!health) continue;
       // A branch from before preview mode would serve with turns and pushes switched on.
       if (health.preview !== true) throw await fail('This branch\'s server has no preview mode; rebase it onto main first');

@@ -103,6 +103,11 @@ test('a schedule pauses, resumes from now, comes due once, and records its runs'
   assert.equal(store.schedules.update(s.id, { name: 'Renamed' }, t1).next_run_at, at(2026, 10, 31, 3, 0));
   assert.equal(store.schedules.update(s.id, { cron: '0 9 * * *' }, t1).next_run_at, at(2026, 10, 31, 9, 0));
   assert.throws(() => store.schedules.update(s.id, { cron: '0 25 * * *' }, t1), /out of range/);
+  // A paused schedule's new cron is checked on save too, not only at resume (C9).
+  store.schedules.update(s.id, { paused: true }, t1);
+  assert.throws(() => store.schedules.update(s.id, { cron: '0 25 * * *' }, t1), /out of range/);
+  assert.equal(store.schedules.update(s.id, { cron: '0 4 * * *' }, t1).next_run_at, null, 'a good one saves and stays paused');
+  assert.equal(store.schedules.update(s.id, { paused: false, cron: '0 9 * * *' }, t1).next_run_at, at(2026, 10, 31, 9, 0));
   // Down for three days: due once, and the next run counts from the run.
   const late = at(2026, 11, 3, 10);
   assert.deepEqual(store.schedules.due(late).map((x) => x.id), [s.id]);

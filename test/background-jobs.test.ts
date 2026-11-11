@@ -33,6 +33,7 @@ function scheduled() {
   const notes: unknown[] = [];
   const sends: { id: number; from: string; text: string }[] = [];
   const made: string[] = [];
+  const waits = { limit: new Set<number>(), net: new Set<number>() };
   const runs = new ScheduledRuns({
     store: s.store,
     newMinion: async (project, m) => {
@@ -41,11 +42,12 @@ function scheduled() {
       const t = minion(s.store, project.id, m.title);
       return { id: t.id, number: t.number! };
     },
-    runner: { emit: (id: number, kind: string, data: unknown) => void notes.push({ id, kind, data }), send: (id: number, from: string, text: string) => void sends.push({ id, from, text }) } as any,
+    runner: { emit: (id: number, kind: string, data: unknown) => void notes.push({ id, kind, data }), send: (id: number, from: string, text: string) => void sends.push({ id, from, text }),
+      limitWait: (id: number) => (waits.limit.has(id) ? { ticket: id, at: 0, tries: 1 } : null), netWait: (id: number) => (waits.net.has(id) ? { ticket: id, tries: 1 } : null) } as any,
     broadcast: s.broadcast,
     by: 'Citadel',
   });
-  return { ...s, runs, notes, sends, made };
+  return { ...s, runs, notes, sends, made, waits };
 }
 
 test('a due schedule starts one minion with its brief, records the run and tells the page', async () => {
@@ -78,6 +80,38 @@ test('a slot is skipped while the last run still works, and a start that throws 
   const broken = store.schedules.create({ project_id: project.id, name: 'broken', cron: '* * * * *', brief: 'b', type: 'chore', created_by: 'Cara' });
   await runs.run(broken);
   assert.equal(store.schedules.get(broken.id)!.last_error, 'no worktree');
+});
+
+test('a slot is skipped while the last run waits on a usage limit or the network, but not once it gave up (C4)', async () => {
+  const { store, project, runs, made, waits } = scheduled();
+  const last = minion(store, project.id, 'last run');
+  // As a limited turn leaves it: status error, state limited, and the runner holding its resume.
+  store.updateTicket(last.id, { status: 'error', state: 'limited' });
+  const sch = store.schedules.create({ project_id: project.id, name: 'Hourly', cron: '* * * * *', brief: 'b', type: 'chore', created_by: 'Cara' });
+  store.schedules.ran(sch.id, { ticketId: last.id });
+  waits.limit.add(last.id);
+  await runs.run(store.schedules.get(sch.id)!);
+  assert.deepEqual(made, [], 'a usage-limit wait is still working');
+  assert.match(store.schedules.get(sch.id)!.last_error ?? '', /was still working, so this slot was skipped/);
+  waits.limit.clear();
+  waits.net.add(last.id);
+  await runs.run(store.schedules.get(sch.id)!);
+  assert.deepEqual(made, [], 'so is a network wait');
+  // Gave up: still state limited, but nothing will resume it, so the schedule carries on.
+  waits.net.clear();
+  await runs.run(store.schedules.get(sch.id)!);
+  assert.deepEqual(made, ['Hourly']);
+});
+
+test("a run's turns are its maker's while they're around, and the owner's (nobody's) once they're disabled or gone (C3)", async () => {
+  const { store, project, runs, sends } = scheduled();
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const sch = store.schedules.create({ project_id: project.id, name: 'Nightly', cron: '* * * * *', brief: 'b', type: 'chore', created_by: 'Josh' });
+  await runs.run(sch);
+  assert.equal(store.getTicket(sends[0].id)!.person_id, josh.id);
+  store.updateUser(josh.id, { disabled_at: Date.now() });
+  await runs.run(store.schedules.get(sch.id)!);
+  assert.equal(store.getTicket(sends[1].id)!.person_id, null, 'a disabled maker would have the brief refused');
 });
 
 test('runDue does not start a second pass while one is running', async () => {

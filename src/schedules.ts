@@ -197,6 +197,8 @@ export class Schedules {
     const old = this.get(id);
     if (!old) throw new ScheduleError('No such schedule');
     const s = { ...old, ...patch, cron: (patch.cron ?? old.cron).trim(), paused: patch.paused === undefined ? old.paused : Number(patch.paused) };
+    // A paused schedule's new cron is checked too, or the typo only shows at resume.
+    if (patch.cron !== undefined) this.next(s.cron, now);
     const next = s.paused ? null : patch.cron !== undefined || (old.paused && !s.paused) ? this.next(s.cron, now) : old.next_run_at;
     this.db
       .prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, model = ?, effort = ?, paused = ?, next_run_at = ? WHERE id = ?')
@@ -262,7 +264,7 @@ export interface ScheduledRunDeps {
   store: Store;
   /** server.ts's newMinion: a minion with its worktree, not started yet. */
   newMinion: (project: Project, m: ReturnType<typeof runMinion>, by: string) => Promise<{ id: number; number: number }>;
-  runner: Pick<Runner, 'emit' | 'send'>;
+  runner: Pick<Runner, 'emit' | 'send' | 'limitWait' | 'netWait'>;
   broadcast: (msg: object) => void;
   /** Who a run's minion says started it. */
   by: string;
@@ -292,13 +294,14 @@ export class ScheduledRuns {
     const project = store.getProject(s.project_id);
     const last = s.last_ticket_id ? store.getTicket(s.last_ticket_id) : null;
     if (!project) return store.schedules.remove(s.id);
-    // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works.
-    if (last?.status === 'running') return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
+    // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works,
+    // or waits to resume after a usage limit or an outage. Not state 'limited': a run that gave up keeps it for good.
+    if (last && (last.status === 'running' || runner.limitWait(last.id) || runner.netWait(last.id))) return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
     try {
       // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone; it's theirs.
       const maker = store.findUser('name', s.created_by);
       const { id, number } = await this.d.newMinion(project, runMinion(s, maker), by);
-      store.updateTicket(id, { person_id: maker?.id ?? null });
+      store.updateTicket(id, { person_id: maker && !maker.disabled_at ? maker.id : null });
       const pinnedFor = pinForOwner(store, id);
       if (pinnedFor) this.d.broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });
       store.schedules.ran(s.id, { ticketId: id }, now);

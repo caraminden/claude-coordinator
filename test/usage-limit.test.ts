@@ -246,6 +246,18 @@ test('a turn on the same plan getting through resumes every minion waiting on it
   pushes.length = 0;
 });
 
+test("a Claude turn getting through leaves a minion whose next turn runs on Codex waiting: Codex's limit is its own (#477)", async () => {
+  const id = minion();
+  await turn(id, LIMIT);
+  // Picked Codex since: its resume would run on Codex, whatever Claude's plan does.
+  store.updateTicket(id, { model: 'gpt-6-astra' });
+  const at = runner.limitWait(id)!.at;
+  await turn(minion(), 'ok');
+  await sleep(100);
+  assert.equal(runner.limitWait(id)?.at, at, 'still waiting for its own reset');
+  runner.stop(id);
+});
+
 test("a rate-limit event saying the plan works again ends the waits mid-turn, without waiting for the turn's end (#477)", async () => {
   store.setSetting('usage', { session: { utilization: 1, resetsAt: Date.now() + 2 * 60 * 60 * 1000, status: 'rejected' }, weekly: null, updatedAt: Date.now() });
   const id = minion();

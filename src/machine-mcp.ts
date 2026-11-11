@@ -20,19 +20,27 @@ function fail(text: string): never {
   process.exit(1);
 }
 
-/** Open the machine's session stream. The first try fails fast; after the app restarts, it keeps trying. */
+/**
+ * Open the machine's session stream. The first try fails fast; after the app restarts, it keeps trying,
+ * through "offline" (503) answers too: the machine's agent reconnects some seconds after the app is back.
+ */
 async function connect(first: boolean): Promise<Response> {
   const started = Date.now();
   for (;;) {
+    let why: string;
     try {
       const res = await fetch(`${API}/api/machines/${MACHINE}/${ROUTE}?server=${SERVER}`, { headers: { ...headers, Accept: 'text/event-stream' } });
-      // The app answered: a machine that is offline stays offline, so don't keep claude waiting.
-      if (!res.ok || !res.body) fail(`${NAME} is not available (${res.status}): ${await res.text().catch(() => '')}`);
-      return res;
+      if (res.ok && res.body) return res;
+      const text = await res.text().catch(() => '');
+      // The app answered: on a first try a machine that is offline stays offline, so don't keep claude waiting.
+      if (first || res.status !== 503) fail(`${NAME} is not available (${res.status}): ${text}`);
+      why = `${NAME} is not available (${res.status}): ${text}`;
     } catch (err: any) {
-      if (first || Date.now() - started > 120_000) fail(`Could not reach the app: ${err.message}`);
-      await new Promise((r) => setTimeout(r, 1000));
+      if (first) fail(`Could not reach the app: ${err.message}`);
+      why = `Could not reach the app: ${err.message}`;
     }
+    if (Date.now() - started > 120_000) fail(why);
+    await new Promise((r) => setTimeout(r, 1000));
   }
 }
 

@@ -110,7 +110,7 @@ button.secondary.act-reopen { --act: var(--done); }
   .ticket-head .head-sub:has(> .prop-chip)::after { content: ''; order: 1; flex-basis: 100%; height: 0; margin-top: -0.35rem; }
   .ticket-head .head-sub:has(> .prop-chip) > :not(.head-state, .ship) { order: 2; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */
-  .ticket-head .note-btn { width: 1.9rem; height: 1.9rem; justify-content: center; padding: 0; }
+  .ticket-head .note-btn { width: var(--head-btn); height: var(--head-btn); justify-content: center; padding: 0; }
   /* To share that line, ↻ ‹ › × are narrower than tall, and Find is just its 🔍 until tapped. */
   .ticket-head .head-sub .head-nav { margin-left: auto; }
   .ticket-head .head-sub .head-nav > :is(.nav-btn, .close-view) { width: 2rem; }
@@ -295,6 +295,8 @@ mark.find.current { background: var(--waiting); color: #fff; }
 /* One line: the branch on the left gives way, the turn's ✓, time and actions stay whole on the right. */
 .turn-end > summary, div.turn-end { display: flex; align-items: baseline; gap: 0.5rem; }
 .turn-end > summary { list-style: none; }
+/* The log's toggles take their tap room (style.css, --tap-pad) from the lines around them, so the log doesn't grow. */
+#log summary { margin-block: calc(-1 * var(--tap-pad)); }
 .turn-end > summary::-webkit-details-marker { display: none; }
 .turn-end > summary::after { content: '▸'; flex: none; }
 details.turn-end[open] > summary::after { content: '▾'; }

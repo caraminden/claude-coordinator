@@ -63,7 +63,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .scheme-row { display: flex; align-items: center; gap: 0.25rem; }
 .scheme-row > a.nav-item { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; }
 .scheme-row > a.nav-item > .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.scheme-hide { flex: none; padding: 0.2rem 0.45rem; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 0.8em; font-weight: normal; line-height: 1.3; cursor: pointer; }
+.scheme-hide { flex: none; min-height: 24px; padding: 0.2rem 0.45rem; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 0.8em; font-weight: normal; line-height: 1.3; cursor: pointer; }
 .scheme-hide:hover, .scheme-hide:focus-visible { background: var(--panel); color: var(--ink); }
 @media (hover: hover) { #schemes-shelf > .scheme-row:not(:hover, :focus-within) > .scheme-hide { opacity: 0; } }
 .hidden-schemes { margin-top: 0.25rem; }
@@ -177,6 +177,9 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   }
   /* No gap for the placeholder a pulled-out panel leaves in the grid. */
   .split { gap: 0; }
+  /* Rows and chips a finger can hit (#471): --control-h tall, the text centred. */
+  .thread-row { min-height: var(--control-h); box-sizing: border-box; align-content: center; }
+  .tag-chip { min-height: var(--control-h); box-sizing: border-box; }
   /* In a drawer the panel's bar closes it. */
   .panels > details.citadel-drawer > summary::after { content: '✕'; }
   /* ...and stays at the top while the list under it scrolls, so ✕ is always in reach. */
@@ -216,7 +219,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 :is(.shelf, .sidebar) > summary .rename:is(:hover, :focus-visible) { color: var(--accent); background: var(--panel); }
 .shelf > summary .rename-input { flex: 1; min-width: 0; font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
 :is(.shelf, .sidebar):not([open]) > summary .rename { display: none; }
-.shelf .column h3 .browse { font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
+.shelf .column h3 .browse { display: inline-block; padding-block: 4px; margin-block: -4px; font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
 .shelf .column h3 .more:hover, .shelf .column h3 .browse:hover, .shelf .column h3 .browse.active { text-decoration: underline; }
 .shelf .sub { margin-top: 0.6rem; }
 .shelf .sub h4 { margin: 0 0 0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; }
@@ -377,3 +380,5 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
   dialog.viewer .ticket-head .progress { display: none; }
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
 }
+/* After the rows' own rules, which set their padding: phones give them --control-h of tap room (#471). */
+@media (max-width: 800px) { .nav-item, .shelf .shared-link { padding-block: max(0.3rem, (var(--control-h) - 1lh) / 2); } }

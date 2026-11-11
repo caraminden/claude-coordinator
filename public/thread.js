@@ -32,7 +32,7 @@ export function chatView(chatId, ticket) {
     ui: progressUi(chatId),
     actions: new Map(), // tool_use_id -> { block, taskId, result }
     turnActions: [], // actions of the current (or last) turn, in order
-    typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite', role: 'button', tabindex: '0', title: 'Show the work so far' }), // below the chat log
+    typingEl: h('button', { type: 'button', class: 'typing', hidden: true, title: 'Show the work so far' }), // below the chat log
     folds: [], // the running turn's settled words, { text, fate } in order, folded when its answer arrives (#551)
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: chatId ? outbox(chatId) : [], // messages on their way or not sent (composer.js), replaced by the server's copy
@@ -239,9 +239,6 @@ export function chatSection(chatId, ticket) {
     view.progressEl.scrollIntoView({ block: 'nearest' });
   };
   view.typingEl.onclick = openReadout;
-  view.typingEl.onkeydown = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReadout(); }
-  };
   // Opening at the first unread message leaves the newest out of sight; this takes you there.
   // It sits in the composer's button row at every width, where it covers no chat words.
   const latest = h('button', { type: 'button', class: 'small secondary to-latest', title: 'Jump to the latest', 'aria-label': 'Jump to the latest', hidden: true },
@@ -854,6 +851,7 @@ export function appendEvent(event, scroll = true) {
   if (event.kind === 'user_message') {
     // Narration after a message goes in a row below it, not back into the one above.
     view.narrationEl = null;
+    if (view.folds.length) view.folds.push({ fate: 'break' }); // and so when the turn's lines fold at its answer
     if (data.author === me && data.sendId) {
       // Our own message, already shown when it was sent: swap in the server's copy, found by its sendId (#392).
       const i = view.pendingMessages.findIndex((m) => m.sendId === data.sendId);

@@ -119,6 +119,19 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .shelf .small { font-size: 0.82em; margin: 0; }
 .shelf > summary .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shelf:not([open]) > summary .label { max-height: 14rem; }
+/* Wide screens (#495, Cara 2026-11-10: "make the scheme list be able to scale to the point where all
+   scheme names fit, then let the minion list and chat boxes scale proportionally to fit the rest"):
+   the page spans the window, the overview is as wide as its longest scheme row (only the scheme list
+   sets it, capped at 22rem, about 30 characters of name), and the minions list and main panel share
+   what's left 3:7, the list never under 15rem. */
+@media (min-width: 1151px) {
+  body:has(.split) main { max-width: none; }
+  .split { grid-template-columns: auto minmax(15rem, 3fr) minmax(0, 7fr); }
+  .split:has(> .panels > .shelf[open] + .sidebar:not([open])) { grid-template-columns: auto auto minmax(0, 1fr); }
+  .shelf[open] { width: max-content; min-width: 220px; max-width: 22rem; }
+  .shelf[open] > :not(#schemes-shelf) { contain: inline-size; }
+  .sidebar[open] { width: auto; }
+}
 /* Medium screens: stack the artifacts and threads in one column so the main panel keeps its width. */
 @media (min-width: 801px) and (max-width: 1150px) {
   /* The main panel spans both rows; let the lower row take its extra height so the shelf stays snug. */

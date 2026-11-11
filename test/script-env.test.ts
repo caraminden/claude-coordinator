@@ -35,7 +35,7 @@ test('the list covers everything the scripts export or pass to a child by assign
 
 // The suites that really run these scripts (the others only name their paths, or stand in for them). A new suite that
 // runs one belongs here.
-const RUNS_SCRIPTS = ['land.test.ts', 'deploy.test.ts', 'run-tests.test.ts', 'run-tests-scope.test.ts', 'scheme-setup-land.test.ts'];
+const RUNS_SCRIPTS = ['land.test.ts', 'land-recover.test.ts', 'deploy.test.ts', 'run-tests.test.ts', 'run-tests-scope.test.ts', 'scheme-setup-land.test.ts'];
 
 test('the suites that start land.sh, deploy.sh or run-tests.sh start them with scriptEnv', () => {
   for (const f of RUNS_SCRIPTS) {

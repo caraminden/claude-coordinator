@@ -193,28 +193,31 @@ test('while main holds a commit whose deploy was rolled back, only a landing tha
   assert.equal(git(p.source, 'rev-parse', 'main'), bad, 'a deploy by hand leaves main alone');
 
   p.commit(p.wts[0], 'b.txt', 'innocent\n');
+  const before = p.restartLog();
+  assert.match(before, /restarting citadel-test/);
   const refused = await p.run(land, p.wts[0]);
   assert.equal(refused.status, 1, refused.stderr);
   assert.match(refused.stderr, new RegExp(`main holds ${bad.slice(0, 7)} "RUN_BAD: never comes up", whose deploy was rolled back`));
   assert.match(refused.stderr, /LAND_FIX=1/);
   assert.equal(git(p.source, 'rev-parse', 'main'), bad);
-  assert.equal(p.restartLog().match(/restarting citadel-test/g)?.length, 2, 'nothing was deployed: the failed one and its rollback only');
+  assert.equal(p.restartLog(), before, 'nothing was deployed: no restart ran');
 
   const forced = await p.run(land, p.wts[0], { LAND_FIX: '1' });
   assert.doesNotMatch(forced.stderr, /whose deploy was rolled back/);
   assert.deepEqual(await p.restarts(2), ['1', '1'], 'it went ahead, and was rolled back like the first');
   assert.equal(git(p.source, 'rev-parse', 'main'), bad, forced.stderr);
+  assert.match((await p.run(land, p.wts[0])).stderr, /whose deploy was rolled back/, 'main still holds the first one, so the next is still refused');
 
   git(p.wts[1], 'rebase', '-q', 'main');
   git(p.wts[1], 'rm', '-q', 'RUN_BAD');
   git(p.wts[1], 'commit', '-qm', 'the fix');
   const fix = await p.run(land, p.wts[1]);
   assert.equal(fix.status, 0, fix.stderr);
-  assert.match(fix.stderr, /live now: the server restarted on/);
-  assert.deepEqual(await p.restarts(3), ['1', '1', '0']);
+  assert.match(fix.stderr, /nothing to deploy: the server already runs/, 'a plain revert leaves the server on the code it runs');
 
   const later = await p.run(land, p.wts[0]);
-  assert.equal(later.status, 0, `once the fix is live, anything lands again:\n${later.stderr}`);
+  assert.equal(later.status, 0, `once the fix is on main, anything lands again:\n${later.stderr}`);
+  assert.match(later.stderr, /live now: the server restarted on/);
   assert.deepEqual(subjects(p.source), ['b.txt: innocent', 'the fix', 'RUN_BAD: never comes up', 'base']);
-  await p.restarts(4);
+  assert.deepEqual(await p.restarts(3), ['1', '1', '0']);
 });

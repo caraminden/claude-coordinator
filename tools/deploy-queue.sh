@@ -128,3 +128,33 @@ queue_lock() {
     [ "$ahead" = 0 ] || sleep "$QUEUE_POLL"
   done
 }
+
+# What a kill leaves behind (#553). Not part of the line (and not in the kit's copy): two notes in <state>, written
+# and read only by whoever holds the lock, so the next one to hold it can finish what a SIGKILL cut off.
+#   unchecked   the commit the live checkout was on before a pull whose checks have not ended (tools/deploy.sh)
+#   moving      "<main before> <tip>" of a landing that moved main and has not seen its deploy end (tools/land.sh)
+
+# <state> <live>: a deploy died between its pull and the end of its checks, so the checkout goes back.
+deploy_unchecked_back() {
+  local prev
+  [ -s "$1/unchecked" ] || return 0
+  prev=$(cat "$1/unchecked")
+  if git -C "$2" cat-file -e "$prev^{commit}" 2>/dev/null && [ "$(git -C "$2" rev-parse HEAD)" != "$prev" ]; then
+    echo "queue: an earlier deploy was killed before its checks ended; putting the live checkout back to $(git -C "$2" log -1 --format='%h "%s"' "$prev")" >&2
+    git -C "$2" reset -q --hard "$prev"
+  fi
+  rm -f "$1/unchecked"
+}
+
+# <state> <live> <source>: a landing died after it moved main, and the live checkout never took its commit
+# (the deploy's checks failed, or never ran). Nothing has landed on top (main is still its tip), so main goes back.
+main_moving_back() {
+  local old tip
+  [ -s "$1/moving" ] || return 0
+  read -r old tip <"$1/moving" || true
+  rm -f "$1/moving"
+  [ -n "$tip" ] && [ "$(git -C "$3" rev-parse main)" = "$tip" ] || return 0
+  ! git -C "$2" merge-base --is-ancestor "$tip" HEAD 2>/dev/null || return 0
+  git -C "$3" reset -q --keep "$old" || return 0
+  echo "queue: an earlier landing was killed after it moved main to $(git -C "$3" log -1 --format='%h "%s"' "$tip") and before its deploy went through; main is back at $(git -C "$3" log -1 --format=%h "$old")" >&2
+}

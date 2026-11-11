@@ -246,6 +246,7 @@ restart() {
   restart_healthy "$target" || rc=$?
   if [ "$rc" = 0 ]; then
     git_live tag -f last-good "$target" >/dev/null
+    rm -f "$STATE/bad"
     rotate_backups
     local pushed kind=ok
     pushed=$(push_github "$target") || kind=warn
@@ -259,6 +260,13 @@ restart() {
     report fail "Deploy of $(short "$target") failed: $why, and there is no older last-good commit to roll back to. Check journalctl --user -u $SERVICE."
     exit 1
   fi
+  # For the deploy that waits on this restart, and for the landings after it while main keeps the commit (land.sh).
+  # The commit stays the first one that failed while it is still part of what failed now: a landing on top of it
+  # that is rolled back too goes off main again, and the first is what main still holds.
+  local held=
+  [ ! -s "$STATE/bad" ] || read -r held _ <"$STATE/bad" || true
+  { [ -n "$held" ] && git_live merge-base --is-ancestor "$held" "$target" 2>/dev/null && ! git_live merge-base --is-ancestor "$held" "$good" 2>/dev/null; } || held=$target
+  echo "$held $good $(date +%s) $target" >"$STATE/bad"
   say "rolling back to last-good $(short "$good")"
   git_live reset -q --hard "$good"
   # Code from before turn units can't re-attach: it would resume turns that still run. Stop them, so
@@ -292,6 +300,7 @@ deploy() {
   if [ -z "$inherited" ]; then
     DEPLOY_TESTED=
     queue_lock "$STATE" "tools/deploy.sh" || exit 1
+    deploy_unchecked_back "$STATE" "$LIVE" # a deploy killed outright (#553); land.sh has done it when the lock is its own
   fi
   [ -f "$STATE/FAILED" ] && say "warning: the last rollback failed too (see journalctl --user -u $UNIT); carrying on" && rm -f "$STATE/FAILED"
   if [ -n "$(git_live status --porcelain --untracked-files=no)" ]; then
@@ -307,16 +316,19 @@ deploy() {
   fi
   # Killed (a person's Stop, a time limit) from the pull until the restart is queued: put the checkout
   # back too, so it never sits on untested code with nothing queued.
-  undo() { say "putting the checkout back to $(short "$prev")"; git_live reset -q --hard "$prev"; }
+  # $STATE/unchecked: for a kill no trap sees (SIGKILL), the next holder of the lock does the same (deploy-queue.sh).
+  undo() { say "putting the checkout back to $(short "$prev")"; git_live reset -q --hard "$prev"; rm -f "$STATE/unchecked"; }
   trap 'undo; exit 130' INT
   trap 'undo; exit 143' TERM
   trap 'undo; exit 129' HUP
+  echo "$prev" >"$STATE/unchecked"
   git_live pull -q --ff-only "$SOURCE" main
   new=$(git_live rev-parse HEAD)
   running=$(health commit)
   kind=$(change_kind "$LIVE" "$running" "$new")
   if [ "$kind" = none ]; then
     trap - INT TERM HUP
+    rm -f "$STATE/unchecked" "$STATE/bad" # a revert of the commit that was rolled back ends here: main is good again
     say "nothing to deploy: the server already runs $(short "$new")"
     report_me "Nothing to deploy: the server already runs $(short "$new")."
     return 0
@@ -345,6 +357,7 @@ deploy() {
     false
   fi
   trap - ERR INT TERM HUP
+  rm -f "$STATE/unchecked"
 
   queue_phase "deploying: going live"
   if [ "$kind" = frontend ] && [ "$(health reload)" = sighup ]; then
@@ -353,6 +366,7 @@ deploy() {
       sleep 1
       if [ "$(health version)" = "$version" ]; then
         git_live tag -f last-good "$new" >/dev/null
+        rm -f "$STATE/bad"
         say "live now: the server reloaded the front end ($version); open tabs reload when idle. No restart."
         local pushed kind=ok
         pushed=$(push_github "$new") || kind=warn
@@ -394,15 +408,23 @@ deploy() {
   # The queued restart takes the lock before it restarts: let go, or it waits out the 60 s below.
   queue_done ok
   flock -u 9
-  # Usually it is live within seconds; say so here, as this turn carries on through the restart.
-  for _ in $(seq 60); do
+  # Usually it is live within seconds and checked again SETTLE s later (last-good moves); say how that went here, as
+  # this turn carries on through the restart. A rollback fails this deploy (#553), so land.sh takes the commit off main.
+  local bad was limit=$((HEALTHY_WAIT * 2 + SETTLE + 15))
+  was=$(cat "$STATE/bad" 2>/dev/null || true)
+  for _ in $(seq "$limit"); do
     sleep 1
-    if [ "$(health commit)" = "$new" ]; then
-      say "live now: the server restarted on $(short "$new")"
+    if git_live merge-base --is-ancestor "$new" last-good 2>/dev/null; then
+      say "live now: the server restarted on $(short "$new") and stayed healthy"
       return 0
     fi
+    bad=$(cat "$STATE/bad" 2>/dev/null || true)
+    if [ -n "$bad" ] && [ "$bad" != "$was" ] && git_live merge-base --is-ancestor "$new" "${bad##* }" 2>/dev/null; then
+      say "the restart on $(short "${bad##* }") failed and was rolled back; its report in this chat says why (see journalctl --user -u $UNIT)"
+      exit 1
+    fi
   done
-  say "not live yet after 60 s; the restart reports here when it is (see journalctl --user -u $UNIT)"
+  say "not live yet after $limit s; the restart reports here when it is (see journalctl --user -u $UNIT)"
 }
 
 case "${1:-}" in

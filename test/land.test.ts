@@ -427,7 +427,7 @@ test("refuses uncommitted work, main itself, arguments, running inside a citadel
 });
 
 // The real deploy.sh and run-tests.sh on main, a boot check that passes, and stand-ins for systemd: the
-// queued "restart" waits for the lock, then counts as live. run() runs a script with them; runs() lists
+// queued "restart" waits for the lock, then counts as live and checked (it tags last-good, as the real one does). run() runs a script with them; runs() lists
 // where the tests ran.
 async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>) {
   const r = setup();
@@ -445,7 +445,7 @@ async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: 
   writeFileSync(join(bin, 'systemctl'), '#!/bin/sh\nexit 1\n');
   writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
 lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
-(flock -w 20 "$lock" true && echo got >${JSON.stringify(restarted)}) >/dev/null 2>&1 &
+(flock -w 20 "$lock" true && echo got >${JSON.stringify(restarted)} && git -C "$DEPLOY_LIVE" tag -f last-good HEAD) >/dev/null 2>&1 &
 `);
   for (const f of ['systemctl', 'systemd-run']) chmodSync(join(bin, f), 0o755);
   const server = createServer((_, res) => res.end(JSON.stringify({ ok: true, commit: existsSync(restarted) ? git(r.source, 'rev-parse', 'main') : base })));

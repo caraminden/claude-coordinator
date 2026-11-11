@@ -63,6 +63,9 @@ if [ -n "$resumed" ]; then trap queue_done EXIT; else queue_lock "$state" "$bran
 # Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
 [ "$(git -C "$SOURCE" branch --show-current)" = main ] || refuse "$SOURCE is not on main; a person needs to look"
 [ -z "$(git -C "$SOURCE" status --porcelain --untracked-files=no)" ] || refuse "$SOURCE has uncommitted changes; a person needs to look"
+# What a landing or deploy killed outright left half-done (#553): the checkout, then main, go back first.
+deploy_unchecked_back "$state" "$LIVE"
+main_moving_back "$state" "$LIVE" "$SOURCE"
 
 old=$(git -C "$SOURCE" rev-parse main)
 [ -n "$resumed" ] || queue_phase "rebasing onto main"
@@ -78,6 +81,20 @@ fi
 # Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):
 # go on in the rebased one instead. It keeps the lock on fd 9, and its own rebase finds nothing to do.
 [ -n "$resumed" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 exec bash "$tools/land.sh"
+
+# <state>/bad: "<commit> <last-good> <when> <what it restarted on>", left by the restart that rolled <commit>'s deploy back (tools/deploy.sh).
+# While main still holds that commit every deploy pulls it in again and is rolled back too (#553), so only its fix
+# may land: a branch that changes a file that deploy changed, or one the lander vouches for with LAND_FIX=1.
+bad_check() {
+  local bad good rest
+  [ -s "$state/bad" ] || return 0
+  read -r bad good rest <"$state/bad" || true
+  git -C "$SOURCE" merge-base --is-ancestor "$bad" main 2>/dev/null || { rm -f "$state/bad"; return 0; }
+  [ -z "${LAND_FIX:-}" ] || return 0
+  ! comm -12 <(git diff --name-only "$good" "$bad" | sort) <(git diff --name-only main HEAD | sort) | grep -q . || return 0
+  refuse "main holds $(git log -1 --format='%h "%s"' "$bad"), whose deploy was rolled back (the restart on it failed: its report is in the chat of the minion that deployed it), and $branch changes none of the files that deploy changed, so its deploy would be rolled back too. Nothing landed. Land the fix for it first (or its revert); if $branch is that fix, run LAND_FIX=1 tools/land.sh"
+}
+bad_check
 
 # The gate (#523): the full suite, green on this exact commit. Cara's desktop runs it (.github/workflows/tests.yml, on
 # the Linux runner in WSL) so perigee doesn't: the commit goes to a scratch branch land/<branch> on GitHub, and this
@@ -184,6 +201,8 @@ fi
 
 # Only when the live checkout doesn't have it (a failed check put it back, or it never pulled): main follows, unless it moved on since.
 main_back() {
+  # A deploy killed outright never put the checkout back; only with the lock, which a deploy that got as far as queuing its restart has let go of.
+  ! flock -n 9 2>/dev/null || deploy_unchecked_back "$state" "$LIVE"
   if ! git -C "$LIVE" merge-base --is-ancestor "$tip" HEAD 2>/dev/null && [ "$(git -C "$SOURCE" rev-parse main)" = "$tip" ]; then
     git -C "$SOURCE" reset -q --keep "$old"
     refuse "the deploy stopped before the live checkout took it, so main is back at $(git log -1 --format=%h "$old"); $branch keeps the rebased work. Fix it and land again"
@@ -193,6 +212,10 @@ main_back() {
 trap 'main_back; exit 130' INT
 trap 'main_back; exit 143' TERM
 trap 'main_back; exit 129' HUP
+bad_check # again: a rollback may have come while this one waited for CI
+# Until this ends by itself, however the deploy goes; a kill that skips the trap leaves it for the next landing.
+echo "$old $tip" >"$state/moving"
+trap '[ "$(cat "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; ci_done; queue_done' EXIT
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
 queue_phase "deploying"

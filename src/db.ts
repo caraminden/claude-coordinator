@@ -389,6 +389,8 @@ CREATE TABLE IF NOT EXISTS events (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_ticket ON events(ticket_id, id);
+-- A minion's events of one kind without reading its whole history: its open cards (openCardsWhere, #527).
+CREATE INDEX IF NOT EXISTS events_ticket_kind ON events(ticket_id, kind, id);
 CREATE TABLE IF NOT EXISTS artifacts (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
@@ -1795,8 +1797,8 @@ export class Store {
   private openCardsWhere(scope: string, id: number): EventRow[] {
     const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
     return this.db.prepare(`
-      SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
-      WHERE ${scope} AND t.status != 'closed' AND (
+      SELECT e.* FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
+      WHERE ${scope} AND t.status != 'closed' AND e.kind IN ('plan', 'question') AND (
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
         OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
       AND NOT EXISTS (

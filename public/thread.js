@@ -72,7 +72,7 @@ function watchYourScrolling() {
 }
 
 /** Fill in a chat section just put on the page: its head, its history, and where you were in it. */
-export async function mountChat(chatId, ticket, page) {
+export async function mountChat(chatId, ticket, page, fresh) {
   renderTicketHead();
   view.page = page;
   view.openedSeenAt = view.seen?.[chatId] ?? 0;
@@ -83,15 +83,25 @@ export async function mountChat(chatId, ticket, page) {
   const jump = takeJump();
   // Open at the first thing you haven't seen, marked New; a minion you've never opened, at the top of
   // what's loaded. Unread from before the loaded page also opens there, under "Load earlier".
-  const jumped = jump && await jumpToEvent(jump);
-  if (view.id !== chatId) return; // you moved on while it loaded back
-  if (!jumped) {
+  const place = async () => {
+    const jumped = jump && await jumpToEvent(jump);
+    if (view?.id !== chatId || jumped) return;
     const divider = document.querySelector('#log > .unread-divider');
     if (!divider) restoreScroll(chatId);
     // A Taskmaster's history runs long; past that much unread, its newest matters more than where you left off.
     else if (isCoordinator(ticket) && divider.parentElement.querySelectorAll(':scope > .unread-divider ~ [data-at]').length > TASKMASTER_UNREAD_LIMIT) scrollToBottom();
     else scrollToUnread(divider);
-  }
+  };
+  await place();
+  if (view?.id !== chatId) return; // you moved on while it loaded back
+  // Drawn from the cache (#527): what came since is drawn in once it arrives, opening at the first unread
+  // as a fresh load would, unless you've scrolled meanwhile.
+  const v = view;
+  const settled = (fresh ?? Promise.resolve(false)).then(async (added) => {
+    if (!added || view !== v || view.page !== page) return;
+    renderHistory();
+    if (!view.scrolledByYou) await place();
+  });
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
@@ -100,7 +110,7 @@ export async function mountChat(chatId, ticket, page) {
   } catch {}
   // Events broadcast while the snapshot was loading arrived before `view` existed. Not awaited: the chat is
   // drawn, so the route's dim (body.navigating) clears now rather than after these round trips (#494).
-  catchUpEvents()
+  settled.then(catchUpEvents)
     .then(() => isCoordinator(ticket) && view?.id === chatId && showRecap())
     .catch(() => {}); // a missed catch-up is made good by the stream's next resync
 }

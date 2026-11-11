@@ -644,7 +644,11 @@ export class Runner {
 
   /** A ticket as the API shows it: plus queued messages and its task-list steps. */
   view(ticket: Ticket) {
-    const { total, done } = stepInfo(this.progressFor(ticket.id));
+    const closed = ticket.status === 'closed';
+    // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
+    // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
+    const { total, done } = closed ? { total: 0, done: 0 } : stepInfo(this.progressFor(ticket.id));
+    const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     return {
       // A network wait's held messages are queued too: they go first into its resume (takeQueue).
       ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
@@ -656,9 +660,9 @@ export class Runner {
       // Parked on start_after: what it waits for, for Start now.
       parked_for: this.heldFor(ticket.id),
       // When its oldest question or plan card still waiting on a person was posted.
-      pending_card_at: ticket.status === 'closed' ? null : this.store.openCardAt(ticket.id),
+      pending_card_at: cards[0]?.created_at ?? null,
       // Its cards waiting on people with the links that open them, for read_ticket and list_tickets (#400).
-      open_cards: this.cardLinks(ticket),
+      open_cards: this.cardLinks(ticket, false, cards),
       properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
@@ -2543,7 +2547,7 @@ export class Runner {
   }
 
   /** A minion's cards waiting on people, oldest first, each with the link that opens it (#400); `placed` adds where each sits (CardLink.below). */
-  cardLinks(ticket: Ticket, placed = false): CardLink[] {
+  cardLinks(ticket: Ticket, placed = false, open?: EventRow[]): CardLink[] {
     if (ticket.status === 'closed') return [];
     const minion = ticket.kind === 'coordinator' ? null : ticket.number;
     const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({
@@ -2555,7 +2559,7 @@ export class Runner {
       const eventId = this.store.cardEventId(ticket.id, 'approval', (a.card as { id: string }).id);
       return eventId == null ? [] : [{ at: a.at, id: eventId, card: link('approval', a.card, eventId) }];
     });
-    const stored = this.store.openCardsOf(ticket.id).map((e) => ({ at: e.created_at, id: e.id, card: link(e.kind as CardLink['kind'], JSON.parse(e.data), e.id) }));
+    const stored = (open ?? this.store.openCardsOf(ticket.id)).map((e) => ({ at: e.created_at, id: e.id, card: link(e.kind as CardLink['kind'], JSON.parse(e.data), e.id) }));
     // Cards posted in the same millisecond keep the order they were posted in (their event ids).
     return [...asks, ...stored].sort((a, b) => a.at - b.at || a.id - b.id).map((c) => c.card);
   }

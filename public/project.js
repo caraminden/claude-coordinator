@@ -1,6 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
-import { app, crumbs, loadEvents, logout, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
+import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
@@ -78,9 +78,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
       return;
     }
   }
-  const [{ ticket }, page] = chatId
-    ? await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)])
-    : [{ ticket: null }, null];
+  // The minion came with the scheme's list; its history is drawn from the cache when it's there (#527).
+  const ticket = !chatId ? null : chatId === coordinator.id ? coordinator : tickets.find((t) => t.id === chatId) ?? (await api(`api/tickets/${chatId}`)).ticket;
+  const cached = chatId ? cachedEvents(chatId) : null;
+  const page = cached?.page ?? (chatId ? await loadEvents(chatId) : null);
   if (seq !== routeSeq) return; // overtaken by another click while loading
   forgetOtherSchemes();
   setView({
@@ -176,7 +177,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (main.kind === 'sharedList') renderSharedList();
   if (!chatId) return window.scrollTo(0, 0);
   revealActiveRow();
-  await mountChat(chatId, ticket, page);
+  await mountChat(chatId, ticket, page, cached?.fresh);
 }
 
 /**
@@ -186,7 +187,11 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
 async function switchChat(main, seq) {
   const chatId = main.id ?? (main.number == null ? view.coordinator.id : [...view.tickets.values()].find((t) => t.number === main.number)?.id);
   if (!chatId) return false;
-  const [{ ticket }, page] = await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)]);
+  // The list already has the minion, kept current by the stream: draw the chat from it at once, with the
+  // cached history when there is one, and fetch behind it (#527). Only a history not yet downloaded waits.
+  const ticket = chatId === view.coordinator.id ? view.coordinator : view.tickets.get(chatId);
+  const cached = cachedEvents(chatId);
+  const page = cached?.page ?? await loadEvents(chatId);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
   const { kind, projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
   setView({
@@ -203,6 +208,8 @@ async function switchChat(main, seq) {
   renderShelf();
   renderSidebar();
   revealActiveRow();
-  await mountChat(chatId, ticket, page);
+  const v = view;
+  api(`api/tickets/${chatId}`).then((r) => { if (view === v) onTicketUpdate(r.ticket); }).catch(() => {});
+  await mountChat(chatId, ticket, page, cached?.fresh);
   return true;
 }

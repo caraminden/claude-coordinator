@@ -610,6 +610,24 @@ export async function loadEvents(ticketId) {
   return page;
 }
 
+/**
+ * A thread's history from the cache, to draw at once, with what came since on its way (#527): `fresh`
+ * resolves true once newer events have joined the page. Null when it isn't cached (or is still prefetching).
+ */
+export function cachedEvents(ticketId) {
+  const page = eventCache.get(ticketId);
+  if (!page || prefetching.has(ticketId)) return null;
+  remember(ticketId, page);
+  const fresh = api(`api/tickets/${ticketId}/events?after=${page.events.at(-1)?.id ?? 0}`).then((events) => {
+    // Live events may have joined the page while this was on its way, so go by id, not by position.
+    const have = new Set(page.events.map((e) => e.id));
+    const added = events.filter((e) => !have.has(e.id));
+    if (added.length) page.events = page.events.concat(added).sort((a, b) => a.id - b.id);
+    return added.length > 0;
+  }).catch(() => false); // the chat's catch-up fetches them again
+  return { page, fresh };
+}
+
 /** Add the page before the oldest loaded event to a thread's history; with `from`, reach back to that event. */
 export function loadEarlier(ticketId, page, from) {
   // One at a time per page (Load earlier and Find can both ask), each going on from where the last got to.
@@ -669,7 +687,7 @@ export async function catchUpEvents() {
   for (const ev of events) if (ev.id > view.lastEventId) appendEvent(ev);
 }
 
-function onTicketUpdate(ticket) {
+export function onTicketUpdate(ticket) {
   if (view?.kind !== 'project') return;
   if (view.projectId !== ticket.project_id) return inboxOtherTicket(ticket);
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);

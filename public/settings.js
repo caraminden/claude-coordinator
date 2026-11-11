@@ -391,7 +391,7 @@ export function approvalsEditor() {
     h('h3', { class: 'settings-label' }, title),
     h('p', { class: 'muted small' }, ...about),
     field,
-    examples.length && !field.readOnly ? h('div', { class: 'settings-examples' }, h('span', { class: 'muted small' }, 'Add an example:'),
+    examples.length > 0 && !field.readOnly ? h('div', { class: 'settings-examples' }, h('span', { class: 'muted small' }, 'Add an example:'),
       examples.map((x) => h('button', { type: 'button', class: 'chip', title: 'Add this line to the list', onclick: () => {
         if (splitLines(field.value).includes(x)) return field.focus();
         field.value = [field.value.trimEnd(), x].filter(Boolean).join('\n');

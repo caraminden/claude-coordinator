@@ -1,13 +1,16 @@
 /* Cards in a chat: questions, approvals, merges, plans, galleries, ultra reviews, and the pointer back to an answer. */
 /* Ultra review (#432): its dialog, and its card in the chat (busy until the findings land). */
 dialog.ultra-review { --cui-dialog-width: 520px; }
-.ultra-review .ur-paths[hidden] { display: none; }
+.ultra-review :is(.ur-paths, .ur-err)[hidden] { display: none; }
+.ultra-review .ur-err { margin: 0 0 0.75rem; }
 .ultra-review .ur-modes { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
 .ultra-review label.ur-mode { display: flex; align-items: center; gap: 0.5rem; color: var(--ink); }
 .ultra-review label.ur-mode input { width: auto; margin: 0; }
 .ultra-review label.ur-mode:has(input:disabled) { color: var(--muted); }
 .ultra-review .ur-paths textarea { font-family: var(--mono); font-size: 0.9em; }
 .ultra-review .ur-size { min-height: 1.4em; overflow-wrap: anywhere; }
+/* Nothing measured (an error says why below): no empty line. */
+.ultra-review .ur-size:empty { display: none; }
 .ultra-review .ur-over, .ur-card .ur-fail { color: var(--error); }
 .ultra-review .ur-cost { font-size: 0.9em; }
 .ur-card .qtitle code, .ultra-review code { overflow-wrap: anywhere; }

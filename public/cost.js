@@ -76,6 +76,7 @@ function drawPop(chip) {
       h('thead', {}, h('tr', {}, h('th', {}), h('th', { class: 'num' }, 'This scheme'), h('th', { class: 'num' }, 'All schemes'))),
       h('tbody', {}, days.map((d, i) => h('tr', {}, h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total)))),
       h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, budget ? '7-day average' : '7 days'), cell(sum(here), budget ? days.length : 1), cell(sum((d) => d.total), budget ? days.length : 1)))),
+    budget ? h('p', { class: 'key' }, h('span', { class: 'warn' }, 'Amber'), ': over that day\'s even share.') : '',
     h('p', { class: 'foot' }, budget
       ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns (last week's, early in a week). Over it, the week runs out early. The server login's turns only, Taskmasters included; not a bill.`
       : "The server login's turns at API prices, not a bill. Taskmasters included. Shown against the weekly limit once its meter reaches 3%."));

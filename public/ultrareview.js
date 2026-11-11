@@ -22,7 +22,7 @@ function openDialog(t) {
   const paths = h('textarea', { name: 'paths', rows: 4, placeholder: 'src/db.ts src/mcp.ts src/routes', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Paths in the area' });
   const pathsBox = h('label', { class: 'ur-paths' }, 'Paths (files or folders, space or line separated)', paths);
   const size = h('p', { class: 'ur-size muted', role: 'status' });
-  const err = h('p', { class: 'error', hidden: true });
+  const err = h('p', { class: 'cui-notice ur-err', 'data-tone': 'danger', role: 'alert', hidden: true });
   const btn = h('button', { type: 'submit', disabled: true }, 'Start ultra review');
   const form = h('form', { class: 'ur-form' },
     h('div', { class: 'ur-modes' }, branchOpt, areaOpt),

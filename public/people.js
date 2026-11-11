@@ -110,8 +110,8 @@ function linkBox(who, token, what) {
 
 /** Main panel, admins only: invite people, make reset links, and decide who may use the server's Claude login. */
 export function peoplePage() {
-  const name = h('input', { name: 'name', placeholder: 'Josh', required: true, maxlength: 40, autocomplete: 'off' });
-  const login = h('input', { name: 'login', placeholder: 'josh', maxlength: 32, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
+  const name = h('input', { name: 'name', placeholder: 'Their name', required: true, maxlength: 40, autocomplete: 'off' });
+  const login = h('input', { name: 'login', placeholder: 'lowercase, no spaces', maxlength: 32, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
   name.oninput = () => { login.placeholder = name.value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '') || 'josh'; };
   const status = h('span', { class: 'muted', role: 'status' });
   const link = h('div');

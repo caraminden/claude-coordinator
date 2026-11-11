@@ -588,6 +588,7 @@ background: var(--citadel-warn-tint);</code></pre></div>
       </div>
       <div class="mk-about">
         <p>A label chip: neutral, or tinted by a status tone (<code>data-tone</code>). A choice chip is a button: accent-tinted, the recommended one filled.</p>
+        <p>A row in a list (a schedule, a person, a machine) carries one status chip beside its name, in one word or two: green when nothing is needed, amber or red when something is, grey when it is off on purpose. The detail stays in the muted line under the name.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>.cui-chip[data-tone]</code>, <code>.cui-choice</code> (<code>.rec</code>)</p>
       </div>
     </div>
@@ -1009,6 +1010,7 @@ row.innerHTML =
       <li><time>2026-11-04</time> · Cara: <q>If I have a screen with a chat open in citadel, it should default focus so I dont have to click on the chat box to type into it</q> (rule 11; the composer's <code>autofocus</code>, desktop only, #294)</li>
       <li><time>2026-11-05</time> · Josh, on mining ui-ux-pro-max's UX guidelines: <q>Mine it, don't install</q> (rules 14 to 21 and rule 5's motion line, #345)</li>
       <li><time>2026-11-08</time> · Cara, in Theory of Crafting, on rejecting speculations: <q>you should be able to click reject and not stop the ability to interact with the app ... assume things will work instantly, but recover later if there was an issue</q> (rule 23; <code>optimistic()</code> and the toast's action, #388)</li>
+      <li><time>2026-11-11</time> · Josh, on the #492 review page (walls of text and weak hierarchy): <q>C · One status chip on every row: Picked</q>, <q>C · Help moves to where it applies: Picked</q>, <q>C · 114 px: two rows, state merged into progress: Picked</q></li>
     </ol>
   </section>
 </main>

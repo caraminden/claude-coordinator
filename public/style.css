@@ -234,10 +234,11 @@ h2 { font-size: 1.15rem; margin: 0; }
 .cost-pop h4 { margin: 0 0 0.3rem; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .cost-pop table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 .cost-pop th, .cost-pop td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); text-align: left; font-weight: normal; white-space: nowrap; }
-.cost-pop thead th { color: var(--muted); font-size: 0.9em; }
+.cost-pop thead th { color: var(--muted); font-size: 0.8rem; }
+.cost-pop .key { margin: 0.4rem 0 0; font-size: 0.8rem; }
 .cost-pop tfoot :is(th, td) { font-weight: 600; border-bottom: none; }
 .cost-pop .num { text-align: right; }
-.cost-pop .foot { margin: 0.4rem 0 0; padding-top: 0.4rem; border-top: 1px solid var(--line); font-size: 0.9em; color: var(--muted); max-width: 22rem; }
+.cost-pop .foot { margin: 0.4rem 0 0; padding-top: 0.4rem; border-top: 1px solid var(--line); font-size: 0.8rem; line-height: 1.45; color: var(--muted); max-width: 22rem; }
 .cost-pop .usd { display: inline-block; min-width: 3.6rem; margin-left: 0.5rem; color: var(--muted); font-size: 0.85em; }
 .cost-pop .warn { color: var(--waiting); font-weight: 600; }
 

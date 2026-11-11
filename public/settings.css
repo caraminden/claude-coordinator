@@ -162,6 +162,8 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .person-row .turns-toggle input { width: auto; margin: 0; }
 .person-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
 .person-row .person-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+/* Phones: who it is takes the line, the buttons the next, never squeezed side by side. */
+@media (max-width: 800px) { .person-row .text { flex-basis: 100%; } }
 .people-add { margin-top: 0.5rem; }
 .contraption-list { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
 .contraption .row { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }

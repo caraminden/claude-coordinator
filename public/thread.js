@@ -409,7 +409,7 @@ export function renderTicketHead() {
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
   actions.unshift(ultraButton(t));
-  const state = (coord ? statusLabel(t) : rowState(t, usage).label) + (t.queued ? ` · ${t.queued} queued` : '');
+  const state = headState(t);
   // Titled too, since a narrow line may cut it short. While Claude works,
   // a cut-short state shows dots that count up instead of "Cla…".
   const working = t.status === 'running';
@@ -417,35 +417,53 @@ export function renderTicketHead() {
     working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
   stateFit?.disconnect();
   if (working) stateFit?.observe(stateLabel);
+  const phone = narrow.matches;
+  // Leaves the thread as it is and goes back to the project's coordinator.
+  const close = coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close'));
   const nav = h('span', { class: 'head-nav' },
     // Through the views opened in this tab, never off the site (public/navstack.js).
     h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
     h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
-    // Leaves the thread as it is and goes back to the project's coordinator.
-    coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close')));
-  // The title's line keeps who it is (and on wider screens the way out); the line under it takes the
-  // state, where the change is, the tools and the buttons, and on phones ‹ › × after Find (#158), so the title has room.
-  const phone = narrow.matches;
+    phone ? '' : close);
+  // Wider screens: the title's line keeps who it is and the way out; the line under it takes the state,
+  // where the change is, the tools and the buttons.
+  // Phones (#492): two rows. Title, ⋯ and ×; then the state or the progress line beside the one button
+  // that matters now. Everything else waits behind ⋯.
+  const main = phone ? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen|start)\b/.test(a.className)) : null;
+  const menuOpen = phone && menuFor === t.id;
+  const more = h('button', { type: 'button', class: 'nav-btn head-more', title: 'More', 'aria-label': 'More', 'aria-expanded': String(menuOpen), onclick: () => {
+    menuFor = menuOpen ? null : t.id;
+    renderTicketHead();
+  } }, '⋯');
+  const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen }, phone ? payerChip(t) : '', phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
+    h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', phone ? nav : '');
   // Find's box is put back in the redrawn bar, which drops the caret from it: keep it there.
   const had = el.contains(document.activeElement) ? document.activeElement : null;
   el.replaceChildren(
-    h('div', { class: 'row' },
+    h('div', { class: phone ? 'row head-top' : 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       h('span', { class: 'spacer' }),
-      phone ? '' : payerChip(t),
-      phone ? '' : nav),
+      phone ? more : payerChip(t),
+      phone ? close : nav),
     coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
-    // Phones give the title its own line (#158), so the payer chip leads the line under it.
-    h('div', { class: 'head-sub' }, phone ? payerChip(t) : '', stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
-      h('span', { class: 'spacer' }), ...actions, view.findEl ?? '', phone ? nav : ''),
-    view.progressEl);
+    phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
+    sub,
+    phone ? '' : view.progressEl);
   if (had?.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
   renderTyping();
   // While a turn runs, Send steers it (composer.js); said on hover rather than in a line of its own.
   const send = document.querySelector('.composer button[type=submit]');
   if (send) send.title = t.status === 'running' ? 'Claude reads it between steps of the running turn; ▾ sends it after this turn' : '';
   scheduleProgress();
+}
+
+/** The chat whose ⋯ menu is open on a phone: the head redraws often, so it is kept here. */
+let menuFor = null;
+
+/** A chat's state in words, as its head shows it. */
+function headState(t) {
+  return (isCoordinator(t) ? statusLabel(t) : rowState(t, usage).label) + (t.queued ? ` · ${t.queued} queued` : '');
 }
 
 /** Take the ticket the server returned after a send or a card's answer, if that chat is still open. */
@@ -751,7 +769,8 @@ function renderProgress() {
     renderProgress();
   } },
     h('span', { class: `dot ${running ? 'running' : view.ticket.status}` }),
-    h('span', { class: 'text' }, text),
+    // Phones show this line in place of the state (#492), so an idle chat's line leads with it.
+    h('span', { class: 'text' }, narrow.matches && !running ? `${headState(view.ticket)} · ${text}` : text),
     count ? h('span', { class: 'count' }, count) : '',
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13).

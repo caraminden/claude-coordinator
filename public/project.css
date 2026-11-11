@@ -232,6 +232,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .view-all { display: flex; justify-content: space-between; text-decoration: none; color: var(--accent); font-size: 0.9em; padding: 0.3rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .view-all:hover, .view-all.active { border-color: var(--accent); }
 .view-all .count, .chip .count { color: var(--muted); }
+.chip .count { margin-left: 0.35em; }
 .shelf .shared-link { display: inline-block; margin-top: 0.25rem; padding: 0.2rem 0.4rem; font-size: 0.85em; color: var(--accent); text-decoration: none; }
 .shelf .shared-link:hover, .shelf .shared-link.active { text-decoration: underline; }
 .shared-list { display: flex; flex-direction: column; gap: 0.15rem; max-width: 48rem; }

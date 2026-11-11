@@ -232,7 +232,9 @@ export function renderArtifactResults() {
   }
   el.replaceChildren(...results.map((a) => {
     const shown = a.display_path ?? a.path;
-    const dir = shown.includes('/') ? shown.slice(0, shown.lastIndexOf('/') + 1) : '';
+    const dirs = shown.split('/').slice(0, -1);
+    // The last two folders tell cards apart; the start of a long path is the same on every one (the full path is the card's title).
+    const dir = dirs.length > 2 ? `…/${dirs.slice(-2).join('/')}/` : dirs.length ? `${dirs.join('/')}/` : '';
     return h('a', { class: `artifact-card${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: shown },
       h('div', { class: 'preview' }, h('span', { class: `badge big k-${a.kind}` }, extOf(a))),
       pinButton(a),

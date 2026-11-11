@@ -62,7 +62,7 @@ button.secondary.act-reopen { --act: var(--done); }
 /* Squeezed while Claude works: "." → ".." → "..." instead of "Cla…" (thread.js, stateFit). The text stays for screen readers. */
 .ticket-head .head-state.squeezed > .state-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .ticket-head .head-state.squeezed > .state-dots { display: inline; }
-/* Phones: the title gets the first line; the buttons and ‹ › × share the second. */
+/* Phones: the title's line, then (in a chat, further down) the state row and the ⋯ menu. */
 @media (max-width: 800px) {
   .ticket-head > .row { gap: 0.4rem 0.45rem; }
   .ticket-head > .row > h2 { flex: 1 0 calc(100% - 1.1rem); min-width: 0; }
@@ -103,20 +103,31 @@ button.secondary.act-reopen { --act: var(--done); }
   .ticket-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 5.3rem); }
   /* Settings' Tune up shares that line too: the short title gives way instead of wrapping the buttons under it. */
   .ticket-head > .row:has(> .tune-up) > h2:has(+ .refresh-btn) { flex: 1 1 auto; }
-  /* A minion's state shares its line with where the change is (wrapping to two lines before it is cut short);
-     the tools, the buttons, Find and ↻ ‹ › × take the next, after a break (::after). */
-  /* Never squeezed to "W.. f…": under 9rem the buttons wrap to the next line instead. */
-  .ticket-head .head-sub > .head-state { flex: 1 1 0; min-width: min(9rem, 100%); white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
-  .ticket-head .head-sub:has(> .prop-chip)::after { content: ''; order: 1; flex-basis: 100%; height: 0; margin-top: -0.35rem; }
-  .ticket-head .head-sub:has(> .prop-chip) > :not(.head-state, .ship) { order: 2; }
+  /* A chat's head is two rows (#492): title, ⋯ and ×, then the state or the progress line beside the one
+     button that matters now. The rest (.head-sub) opens under them from ⋯. */
+  .ticket-head > .row.head-top { flex-wrap: nowrap; }
+  .ticket-head > .row.head-top > h2 { flex: 1 1 0; }
+  .ticket-head .head-more { font-size: 1.3rem; line-height: 1; }
+  .ticket-head .head-more[aria-expanded="true"] { background: var(--line); color: var(--ink); }
+  .ticket-head .head-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.5rem; margin-top: 0.35rem; min-width: 0; }
+  .ticket-head .head-line > .head-state { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
+  .ticket-head .head-line > button { flex: none; white-space: nowrap; }
+  /* The progress line stands in for the state; its meter and its opened detail take full lines under the row. */
+  .ticket-head .head-line:has(> .progress:not([hidden])) > .head-state { display: none; }
+  .ticket-head .head-line > .progress:not([hidden]) { display: contents; }
+  .ticket-head .head-line .progress-line { flex: 1 1 0; width: auto; min-width: 0; min-height: var(--control-h); }
+  .ticket-head .head-line :is(.meter, .progress-detail) { order: 1; flex: none; }
+  .ticket-head .head-line .progress-detail { width: 100%; }
+  .ticket-head .head-sub[hidden] { display: none; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */
   .ticket-head .note-btn { width: var(--head-btn); height: var(--head-btn); justify-content: center; padding: 0; }
-  /* To share that line, ↻ ‹ › × are narrower than tall, and Find is just its 🔍 until tapped. */
+  /* In the ⋯ menu: ↻ ‹ › end the line. */
   .ticket-head .head-sub .head-nav { margin-left: auto; }
-  .ticket-head .head-sub .head-nav > :is(.nav-btn, .close-view) { width: 2rem; }
-  .ticket-head .head-sub .head-nav > .refresh-btn { width: 1.7rem; height: var(--head-btn); }
-  .ticket-head .head-sub .chat-find:placeholder-shown:not(:focus) { width: 2.4rem; padding-right: 0; }
+  .ticket-head .head-sub .head-nav > .refresh-btn { width: var(--head-btn); height: var(--head-btn); }
 }
+
+/* Phones: a table of four or more columns keeps readable columns and scrolls sideways in its own box (.cui-table). */
+@media (max-width: 800px) { .msg .cui-table table:has(tr > :nth-child(4)) { min-width: 34rem; } }
 
 .log { display: flex; flex-direction: column; gap: 0.6rem; }
 .msg { border-radius: 10px; padding: 0.6rem 0.85rem; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }

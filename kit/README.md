@@ -11,8 +11,13 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
   only checks `COORDINATOR_ROLE` (`thread`), since Taskmasters load the kit too. Today's hooks:
   - `job-check.ts` (Stop, minions only): refuses to end the turn while the session's own
     background job runs, at most twice per prompt.
+  - `answer-check.ts` (Stop, minions and Taskmasters): a trial that refuses nothing. It writes a
+    `would refuse` retro-log line when a turn of five or more tool calls ends on a thin last
+    message (under 200 characters, or ending in a colon), or when its final text proposes work
+    and it made no ask_question, propose_plan or message to the Taskmaster or a minion. A turn a
+    steer reached is skipped. The weekly process digest counts the lines to decide on refusal.
   - `retro-log.ts`: one line per tripwire or guard.sh refusal, red test (a test runner the command
-    runs, counted from that runner's own summary), failed push or refused stop in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill. `tools/land.sh` adds `land conflict` lines (the rebase's conflicted files) to `<date>/land.md`.
+    runs, counted from that runner's own summary), failed push, refused stop or would-refuse stop (answer-check.ts) in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill. `tools/land.sh` adds `land conflict` lines (the rebase's conflicted files) to `<date>/land.md`.
   - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, and a
     reminder to re-read the record rather than the summary.
 - A plugin can't carry `.claude/rules`: per-repo rules stay in each repo.

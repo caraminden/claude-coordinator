@@ -52,7 +52,7 @@ function header(session: string, cwd: string | undefined): string {
   } catch {
     // Not a git folder.
   }
-  return `# Retro log: ${session}\n\nWritten by the Citadel kit's hooks (kit/hooks). One line per tripwire or guard.sh refusal, red test, failed push or refused stop.${where ? `\n${where}.` : ''}\n\n`;
+  return `# Retro log: ${session}\n\nWritten by the Citadel kit's hooks (kit/hooks). One line per tripwire or guard.sh refusal, red test, failed push, refused stop or would-refuse stop.${where ? `\n${where}.` : ''}\n\n`;
 }
 
 /** The test runners whose summaries it reads; `any` is a wrapper (npm test, a check script) that could run any of them. */

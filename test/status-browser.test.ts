@@ -268,3 +268,23 @@ test("a toast's Retry can be clicked, and its words heard, over an open modal di
   await page.eval(`document.querySelector('dialog').close(); toast('Saved')`);
   assert.equal(await page.eval('document.querySelector(".cui-toast").parentElement === document.body'), true);
 });
+
+test('a toast shown in a modal dialog stays up, back in the page, when that dialog closes and goes (#468 S14-7 review)', { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  await page.eval(`(() => {
+    const d = document.createElement('dialog');
+    d.className = 'cui-dialog';
+    d.textContent = 'The viewer';
+    document.body.append(d);
+    d.addEventListener('close', () => d.remove()); // as the file viewer and other dialogs do
+    d.showModal();
+    window.hidden = 0;
+    toast('Not sent', { ms: 8000, action: { label: 'Retry', run: () => {} }, onHide: () => window.hidden++ });
+    d.close();
+  })()`);
+  await page.eval('new Promise((r) => setTimeout(r, 50))');
+  assert.equal(await page.eval('document.querySelector(".cui-toast")?.parentElement === document.body'), true, 'back in the page');
+  assert.equal(await page.eval('document.querySelector(".cui-toast").matches(":popover-open")'), true, 'still shown');
+  assert.equal(await page.eval('document.querySelector(".cui-toast-say").isConnected'), true, 'still heard');
+  assert.equal(await page.eval('window.hidden'), 0, 'not gone, so its failure is not final yet');
+});

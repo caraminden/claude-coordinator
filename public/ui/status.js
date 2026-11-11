@@ -109,6 +109,7 @@ let pop = null;
 let say = null;
 let timer = 0;
 let onHide = null;
+let up = false; // shown, and not yet gone (hideToast)
 
 /** The topmost open modal dialog, or null (also where :modal isn't supported). */
 function topModal() {
@@ -116,6 +117,7 @@ function topModal() {
 }
 
 function hideToast() {
+  up = false;
   clearTimeout(timer);
   if (pop?.matches(':popover-open')) pop.hidePopover();
   if (say) say.textContent = '';
@@ -145,6 +147,14 @@ export function toast(text, opts = {}) {
   // Inside the topmost open modal dialog, if any: everything outside one is inert, so its button couldn't be clicked nor its words heard.
   const home = topModal() ?? document.body;
   if (pop.parentNode !== home) home.append(pop, say);
+  // Out again as the dialog closes (before it may be removed), so the toast and its Retry outlive it.
+  if (home !== document.body) {
+    home.addEventListener('close', () => {
+      if (pop.parentNode !== home) return;
+      document.body.append(pop, say); // moving it hides it
+      if (up) pop.showPopover();
+    }, { once: true, capture: true });
+  }
   if (TONES.has(opts.tone)) pop.dataset.tone = opts.tone;
   else delete pop.dataset.tone;
   pop.textContent = text;
@@ -162,6 +172,7 @@ export function toast(text, opts = {}) {
     pop.replaceChildren(line, act);
   }
   pop.showPopover();
+  up = true;
   onHide = opts.onHide ?? null;
   // A frame later, so a live region made just now is in place before it changes and is heard.
   requestAnimationFrame(() => pop.matches(':popover-open') && (say.textContent = text));

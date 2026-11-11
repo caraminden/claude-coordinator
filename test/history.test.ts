@@ -147,6 +147,19 @@ test('after= is unchanged: every event after an id', () => {
   assert.deepEqual(store.listEvents(t.id, ids[2]).map((e) => e.id), ids.slice(3));
 });
 
+test('search finds a quote, a backslash or a line break as typed, and a % or _ only literally (#468 S05-4)', () => {
+  const { store, t } = setup('find');
+  store.addEvent(t.id, 'user_message', { author: 'Cara', text: 'please say "hello" to C:\\temp\nnext line, 100% done' });
+  const p = store.getTicket(t.id)!.project_id;
+  const n = (q: string) => store.findEvents(p, q).length;
+  assert.equal(n('say'), 1);
+  assert.equal(n('say "hello"'), 1);
+  assert.equal(n('C:\\temp'), 1);
+  assert.equal(n('temp\nnext'), 1);
+  assert.equal(n('100% done'), 1);
+  assert.equal(n('100%_done'), 0);
+});
+
 test('the events route pages by default, keeps after= as a plain list, and search finds the oldest hit in one minion', async () => {
   // Seed a long minion and a second one, then boot the real server on that data.
   const routeRoot = join(root, 'route');

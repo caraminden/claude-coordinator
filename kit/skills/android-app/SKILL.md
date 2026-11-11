@@ -74,10 +74,12 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
 
 One headless emulator for every scheme: the `citadel` AVD (Android 36, Google APIs, x86_64, a
 1080×2400 phone), driven by `citadel-android`, which is on every turn's PATH, host and container
-alike:
+alike. It runs on Cara's desktop, behind a tunnel to perigee (Citadel's
+`deploy/desktop/android/README.md`); the commands, the serial `emulator-5554` and the adb server on
+perigee are the same as when it ran here:
 
 ```
-citadel-android up                 # boot it (quick boot ~6s, cold ~25s) and wait until it's ready
+citadel-android up                 # boot it (quick boot ~6s, cold ~40s) and wait until it's ready
 citadel-android install app/build/outputs/apk/debug/app-debug.apk
 citadel-android open https://cara.apps.webplatformisbestplatform.net/c/   # in Chrome
 citadel-android shot "$TMPDIR/shot.png"                                    # then Read the PNG
@@ -112,12 +114,17 @@ citadel-android down               # when you're done
   call, so your install, open and shot run back to back. Anyone else waits, and it says whose turn
   holds it. Don't work around a wait: it ends when the holder's lease runs out or it runs `down`.
 - **Run `down` when you're done**, unless the emulator was already up when you started (someone
-  else's session may use it; it stops itself after the idle time below). It holds about 4 GB of RAM while up. It also stops itself after
-  15 minutes with no `citadel-android` call.
+  else's session may use it). It also stops itself after 15 minutes with no `citadel-android` call.
+  Its RAM is the desktop's, not perigee's.
 - The phone keeps its state between boots (apps, Chrome tabs, logins), from every scheme that used
   it. Don't rely on a clean device; uninstall what you need gone.
 - It's a Citadel page or app without its cookie, so expect a sign-in page.
-- **"nothing listens on 127.0.0.1:18590"** or **"can't start citadel-android.service"**: the host's
-  units aren't installed. Ask your Taskmaster; Cara installs them (Citadel's `deploy/`).
+- **"the emulator's desktop isn't connected"**: Cara's PC is asleep, restarting or logged off, so
+  there is no emulator right now. Nothing on perigee fixes it and nothing falls back; it returns by
+  itself when the PC does. Say so in your reply and go on with what doesn't need a phone; don't
+  wait in a loop.
+- **Reach a dev server on perigee with `adb reverse`**:
+  `adb -s emulator-5554 reverse tcp:<port> tcp:<port>`, then `http://127.0.0.1:<port>` in the phone.
+  `10.0.2.2` inside the phone is the desktop, not perigee.
 - It renders in software (SwiftShader, no GPU) with guest Vulkan off: fine for screenshots and
   flows, not for frame rates or graphics bugs. Test those on a real phone.

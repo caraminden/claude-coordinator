@@ -91,3 +91,30 @@ test('SHIP: every stage has a colour family, and only a branch has no badge', ()
     assert.equal(!s.badge, stage === 'branch', stage);
   }
 });
+
+// What a minion waits on (#544, src/waits.ts): its chip stands in for the steps while it works or waits elsewhere.
+test('rowState: a wait shows its chip while working or outside, never over a needs-you state', () => {
+  const line = { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line, behind #513 (testing)', since: NOW - MIN, usual: 160 };
+  const testing = { ...line, stage: 'test', chip: 'land · tests', text: 'running the tests on the rebased code' };
+  const rows = [
+    [{ status: 'running', steps: { done: 4, total: 5 }, wait: line }, [1, 'wait', 'line · 2nd']],
+    [{ status: 'running', wait: testing }, [1, 'work', 'land · tests', 'pulse']],
+    [{ state: 'outside', wait: testing }, [2, 'work', 'land · tests', 'pulse']],
+    [{ state: 'pending-deploy', wait: { ...line, kind: 'restart', stage: 'restart', chip: 'restart · 2 turns' } }, [2, 'wait', 'restart · 2 turns']],
+    [{ state: 'ready', wait: line }, [0, 'done', 'ready 5m']],
+    [{ status: 'running', approvals: 1, wait: line }, [0, 'you', 'approve 5m']],
+    [{ status: 'closed', wait: line }, [5, 'idle', 'dismissed']],
+  ];
+  for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
+  assert.equal(rowState(t({ status: 'running', wait: line }), null, NOW).label, 'Claude is working · 2nd in line, behind #513 (testing)');
+});
+
+test('a wait reads elapsed against its usual, and runs late past 15% over', async () => {
+  const { waitTime, waitLate } = await import('../public/wait.js');
+  const w = { since: NOW - 59_000, usual: 160 };
+  assert.equal(waitTime(w, NOW), '59s of ~2m 40s');
+  assert.equal(waitTime({ since: NOW - 59_000, usual: null }, NOW), '59s');
+  assert.equal(waitLate(w, NOW), false);
+  assert.equal(waitLate(w, NOW - 59_000 + 160_000 * 1.15 + 1000), true);
+  assert.equal(waitLate({ since: NOW - HOUR, usual: null }, NOW), false);
+});

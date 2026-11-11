@@ -1,6 +1,7 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
 import { STATES } from './base.js';
+import { waitFam } from './wait.js';
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked. */
 export function byUrgency(a, b, usage, now = Date.now()) {
@@ -16,6 +17,14 @@ export function byUrgency(a, b, usage, now = Date.now()) {
  * says it gets the working dot.
  */
 export function rowState(t, usage, now = Date.now()) {
+  const st = baseState(t, usage, now);
+  // While it works or waits elsewhere, what it waits on (#544) says more than a step count: "line · 2nd".
+  if (!t.wait || t.status === 'closed' || (st.rank !== 1 && st.rank !== 2) || st.fam === 'broken') return st;
+  const fam = waitFam(t.wait);
+  return { ...st, fam, cell: t.wait.chip, pulse: fam === 'work', counted: false, label: `${st.label} · ${t.wait.text}` };
+}
+
+function baseState(t, usage, now) {
   const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
   const waited = (word) => `${word} ${shortAgo(t.updated_at, now)}`;
   if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Waiting for your approval' };

@@ -153,3 +153,7 @@
 /* A scheme drawn from its last payload while it refreshes (#538): a small ring after "Minions", after a beat. */
 .sidebar[aria-busy='true'] > summary .label::after { content: ''; display: inline-block; width: 0.75em; height: 0.75em; margin-left: 0.45em; vertical-align: -0.05em; box-sizing: border-box; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: nav-busy-in 0s 0.2s both, scheme-spin 0.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .sidebar[aria-busy='true'] > summary .label::after { animation: nav-busy-in 0s 0.2s both; } }
+/* What a minion waits on (#544, public/wait.js): elapsed against usual under the row, amber once it runs late. */
+.wait-bar { grid-column: 1 / -1; display: block; height: 3px; margin: 0.2rem 0 0.1rem 12px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.wait-bar > i { display: block; height: 100%; background: var(--running); transition: width 1s linear; }
+.wait-bar.late > i { background: var(--waiting-tint); }

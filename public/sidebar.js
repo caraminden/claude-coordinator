@@ -9,6 +9,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { byUrgency, rowState, SHIP } from './threadstate.js';
+import { waitBar } from './wait.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
@@ -365,7 +366,9 @@ export function threadRow(t, href = threadHref(t)) {
     pnote ? `✎ ${pnote.text} (${pnote.by})` : '',
   ].filter(Boolean).join('\n');
   const shipStage = !coord && t.status !== 'closed' && SHIP[t.ship?.stage];
-  const ship = shipStage?.badge ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
+  const wait = !coord && t.status !== 'closed' && t.wait;
+  // A wait says more than the ship badge ("restart · 2 turns" over "deploying"), so the row shows one.
+  const ship = shipStage?.badge && !wait ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks any settled row that changed since you last opened it.
@@ -378,5 +381,6 @@ export function threadRow(t, href = threadHref(t)) {
     st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
     note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
-    pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '');
+    pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
+    wait ? waitBar(wait) : '');
 }

@@ -4,6 +4,7 @@ import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSee
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { rowState, SHIP } from './threadstate.js';
+import { elapsedText, waitBlock } from './wait.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
 import { recapEvent, showRecap } from './recap.js';
@@ -726,8 +727,16 @@ function renderProgress() {
   const progressEl = view.progressEl;
   const running = view.ticket.status === 'running';
   const line = progressLine(p, running);
+  // What it waits on (#544), under the meter; it starts closed and opens to a landing's track. It shows
+  // after the turn has ended too (outside, pending-deploy), with or without a plan.
+  const w = view.ticket.status !== 'closed' && view.ticket.wait;
+  const wait = w ? waitBlock(w, !!view.ui.waitOpen, () => {
+    view.ui.waitOpen = !view.ui.waitOpen;
+    renderProgress();
+  }) : '';
   if (!line) {
-    progressEl.hidden = true;
+    progressEl.replaceChildren(wait);
+    progressEl.hidden = !wait;
     return;
   }
   const { total, done, current } = stepInfo(p, running);
@@ -769,7 +778,7 @@ function renderProgress() {
       loose.length ? looseWork(loose, running, !p.tasks.length) : '',
       !p.tasks.length && !loose.length ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '');
   }
-  progressEl.replaceChildren(bar, meter, detail);
+  progressEl.replaceChildren(bar, meter, wait, detail);
   if (detail) detail.scrollTop = scrollTop;
   progressEl.hidden = false;
 }
@@ -1322,12 +1331,6 @@ export function fileChip({ name, size, href }) {
 /** Whether the running turn's init event has arrived: until then the per-turn state is still the last turn's. */
 function initSeen() {
   return view.turnInitAt >= view.ticket.turnStartedAt;
-}
-
-/** "1m 05s" style, for how long a turn has run. */
-function elapsedText(ms) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
 }
 
 /** Whether the running turn is under way here: its init event has arrived (initSeen). */

@@ -191,3 +191,31 @@ test('counts that cannot be written never fail or change the run', async () => {
   assert.equal(r.code, 0, r.log);
   assert.doesNotMatch(r.log, /run-tests:|Error/);
 });
+
+// The gate has npm test's leak guard (ultra review A3): green tests that leave a process running are a red run.
+test("a full run whose tests leave a process running fails, and names it; the guard's file is the suite's own", async () => {
+  const pidFile = join(root, 'leaked-pid');
+  const gone = join(tmpdir(), 'run-tests-leak-gone', 'x'); // a scratch folder that was deleted, as the guard looks for
+  const leak = `import test from 'node:test';
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+test('leaves a process', () => {
+  const p = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)', ${JSON.stringify(gone)}], { detached: true, stdio: 'ignore' });
+  p.unref();
+  writeFileSync(${JSON.stringify(pidFile)}, String(p.pid));
+});
+`;
+  try {
+    const r = await run(['ok.test.mjs', 'leak.test.mjs'], {}, (dir) => {
+      writeFileSync(join(dir, 'test', 'leak.test.mjs'), leak);
+      writeFileSync(join(dir, 'test', 'leak-guard.ts'), `export * from ${JSON.stringify(join(import.meta.dirname, 'leak-guard.ts'))};\n`);
+    });
+    assert.equal(r.code, 1, r.log);
+    assert.match(r.log, /The tests left 1 process\(es\) running \(now killed\)/);
+    assert.doesNotMatch(r.log, /rerunning each alone/, 'no test file failed, so nothing is rerun');
+  } finally {
+    try {
+      process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
+    } catch {} // the guard killed it
+  }
+});

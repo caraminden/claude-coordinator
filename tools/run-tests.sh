@@ -33,6 +33,9 @@ concurrency=${CITADEL_TEST_CONCURRENCY:-$((($(nproc 2>/dev/null || echo 2) + 1) 
 max_reruns=5 # more failed files than this is a broken change, not load
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 weight=${DEPLOY_TEST_CPU_WEIGHT-500}
+# npm test's leak guard, on the full run only: green tests that leave processes running are a red run (a rerun only labels).
+guard=()
+[ -r test/leak-guard.ts ] && guard=(--test-global-setup=test/leak-guard.ts)
 cgroup=$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null)
 scope=(systemd-run --user --scope --quiet --collect --slice=citadel.slice -p "CPUWeight=$weight")
 # Only a unit below the user manager: a login's session-N.scope belongs to the system manager, which --user can't bind to.
@@ -44,7 +47,7 @@ progress=${log%.log}.progress
 unset CITADEL_TEST_PROGRESS # the reruns below count nothing
 rm -f "$progress" "$progress.tmp"
 trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
-CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
+CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit "${guard[@]}" --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" test/ >"$log" 2>&1
 rc=$?
 rm -f "$progress" "$progress.tmp"

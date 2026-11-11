@@ -16,13 +16,15 @@ export async function globalSetup() {
   before = new Set(scratch().keys());
 }
 
-export async function globalTeardown() {
+// Nothing awaited: under --test-force-exit (tools/run-tests.sh) node exits at this function's first await, before
+// anything is killed or thrown, and takes a throw for green unless the exit code is set too.
+export function globalTeardown() {
   let left: [number, string][] = [];
   // A process a test has just stopped may take a moment to go.
   for (let i = 0; i < 40; i++) {
     left = [...scratch()].filter(([pid, cmd]) => !before.has(pid) && orphaned(cmd));
     if (!left.length) return;
-    await new Promise((r) => setTimeout(r, 50));
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   }
   for (const [pid] of left) {
     try {
@@ -36,5 +38,6 @@ export async function globalTeardown() {
   // node --test fails the run on a throw here but prints nothing, so say what it is first.
   const msg = `The tests left ${left.length} process(es) running (now killed). Stop what a test starts before deleting its folder (test/helpers.ts stopProcs, stopTurns):\n${left.map(([pid, cmd]) => `  ${pid} ${cmd.slice(0, 300)}`).join('\n')}`;
   console.error(`\n${msg}`);
+  process.exitCode = 1;
   throw new Error(msg);
 }

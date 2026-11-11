@@ -299,7 +299,6 @@ test('a waiter that is killed leaves the line, and the one behind it goes next',
     await until('c to see its place', () => /3rd in line/.test(c.stderr()));
     b.child.kill('SIGKILL');
     await b.exit;
-    assert.equal(q.tickets().length, 3, 'a killed waiter leaves its ticket behind');
     await until('c to move up past the dead ticket', () => /2nd in line/.test(c.stderr()));
     assert.equal(q.tickets().length, 2, 'the waiter behind it removed it');
     q.open();

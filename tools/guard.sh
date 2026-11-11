@@ -246,7 +246,7 @@ resolve_dir() { # base dir, -C argument
 # Checks one command's words; blocks if any `git ... push` in it breaks a rule.
 check_segment() {
   local -a w=("$@")
-  local n=${#w[@]} g i a dir branch repo src dst r c
+  local n=${#w[@]} g i a dir branch repo src dst r c o
   for ((g = 0; g < n; g++)); do
     case "${w[g]}" in git|git.exe|*/git|*/git.exe|*\\git|*\\git.exe) ;; *) continue ;; esac
     dir="$cwd"
@@ -266,6 +266,7 @@ check_segment() {
       case "$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')" in
         alias.*) block "git -c alias.* can hide a push from this guard; run the git command itself." ;;
         core.hookspath*) [ "${w[i]:-}" = push ] && block "git -c core.hooksPath=... on a push would skip .githooks/pre-push; push without it." ;;
+        push.*|remote.*|url.*|branch.*) [ "${w[i]:-}" = push ] && block "git -c ${c%%=*} on a push changes what it sends or where, unseen by this guard; push without it and name the remote and branch." ;;
       esac
     done
     [ "${w[i]:-}" = push ] || continue
@@ -285,7 +286,12 @@ check_segment() {
         --repo=*) repo="${a#--repo=}" ;;
         --repo) repo="${w[i+1]:-}"; i=$((i + 1)) ;;
         -o|--push-option|--receive-pack|--exec) i=$((i + 1)) ;;
-        --*) ;;
+        --*)
+          # git takes any unique start of a long option (--al is --all), which the cases above would miss.
+          for o in --force --no-verify --all --mirror --branches --repo; do
+            case "$o" in "${a%%=*}"?*) block "git push ${a%%=*} is a shortened option git may read as $o. Write git push options out in full." ;; esac
+          done
+          ;;
         [0-9\<\>\*]*\>*|[0-9\<\>\*]*\<*|\>*|\<*)
           # A redirection (> log, 2>/dev/null): not a refspec; skip its target too.
           [[ "$a" =~ ^[0-9*]*[\<\>]+$ ]] && i=$((i + 1))
@@ -331,6 +337,7 @@ check_segment() {
       case "$dst" in HEAD|@) dst="$branch" ;; esac
       [ "$dst" = $'\035' ] && block "git -C names its repo with \$VAR or \$(...), so the guard cannot see which branch HEAD is. Write the path or the branch out."
       dst="${dst#refs/heads/}"
+      dst="${dst#heads/}" # git completes heads/main to refs/heads/main
       is_protected "$dst" && block "pushing to $dst is blocked. Push a feature branch and open a pull request."
       case "$dst" in *'*'*) block "wildcard refspec ($r) could push main; push your branch by name." ;; esac
     done
@@ -430,6 +437,31 @@ self_test() {
   t 0 Bash topic 'git push origin "topic#main"'
   t 0 Bash topic 'B=main; git push origin topic'
   t 0 Bash topic '(git push origin topic) && echo {a,b} $((1 + 2))'
+  # git takes any unique start of a long option, so a shortened one is refused: it must be written in full.
+  t 2 Bash topic 'git push --al origin'
+  t 2 Bash topic 'git push --mirr origin'
+  t 2 Bash topic 'git push --branc origin'
+  t 2 Bash topic 'git push --no-verif origin topic'
+  t 2 Bash topic 'git push --forc origin topic'
+  t 2 Bash topic 'git push --al --no-verif origin'
+  t 2 Bash topic 'git push --rep=origin main'
+  t 0 Bash topic 'git push --force-with-lease=topic origin topic'
+  t 0 Bash topic 'git push --force-with-l origin topic'
+  t 0 Bash topic 'git push --force-if-includes --force-with-lease origin topic'
+  t 0 Bash topic 'git push --set-upstream origin topic'
+  t 0 Bash topic 'git push --atomic --dry-run origin topic'
+  t 0 Bash topic 'git commit --al -m x && git push origin topic'
+  # Settings that change what a push sends, and a destination git completes to refs/heads/main.
+  t 2 Bash topic 'git -c remote.origin.push=refs/heads/topic:refs/heads/main push origin'
+  t 2 Bash topic 'git -c push.default=matching push origin'
+  t 2 Bash topic 'git -c url.git@github.com:x/y.insteadOf=origin push origin topic'
+  t 2 Bash topic 'git -c branch.topic.merge=refs/heads/main push'
+  t 2 Bash topic 'git --config-env=push.default=X push origin'
+  t 0 Bash topic 'git -c push.default=current status'
+  t 0 Bash topic 'git -c http.extraHeader=x push origin topic'
+  t 2 Bash topic 'git push origin topic:heads/main'
+  t 2 Bash topic 'git push origin heads/main'
+  t 0 Bash topic 'git push origin topic:heads/topic'
   # Heredocs: the body is a command of its own, so an apostrophe in it hides nothing after it.
   t 2 Bash topic $'git commit -F - <<\'EOF\'\nthe kit\'s line\nEOF\ngit push origin main'
   t 0 Bash topic $'git commit -F - <<\'EOF\'\nthe kit\'s line\nEOF\ngit push origin topic'

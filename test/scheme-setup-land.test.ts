@@ -437,7 +437,7 @@ function ciSetup(branches: number, { stack = '', check = 'true', builtin = false
   const bin = join(q.dir, 'bin');
   mkdirSync(ci);
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null || echo 0 ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
   const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' };
   const started: ReturnType<typeof q.land>[] = [];
@@ -840,11 +840,22 @@ test("CI gate: the built-in reader doesn't take a successful run with a skipped 
     writeFileSync(join(c.ci, 'runs.tsv'), run('ci.yml', 2) + run('slow.yml', 3));
     writeFileSync(join(c.ci, 'skipped-jobs'), '1\n');
     const a = c.land(1);
-    assert.equal(await a.exit, 75, a.stderr());
-    assert.match(a.stderr(), /ci\.yml: 1 of its jobs skipped/);
-    assert.match(a.stderr(), /ended without a verdict/);
+    assert.equal(await a.exit, 1, a.stderr());
+    assert.match(a.stderr(), /1 of the jobs in (ci|slow)\.yml's run on [0-9a-f]{12} were skipped, so the commit's checks did not all run and nothing landed/);
+    assert.match(a.stderr(), /Nothing is wrong with the runners/);
+    assert.match(a.stderr(), /needs the scheme's own CI_STATUS script/);
+    // Running it again would skip the same jobs again, and it is no lost runner.
+    assert.equal(c.sent(a).length, 1, a.stderr());
+    assert.doesNotMatch(a.stderr(), /running it again, once|runner lost|runners need/);
     assert.deepEqual(c.landed(), []);
     assert.match(readFileSync(join(c.ci, 'gh.log'), 'utf8'), /actions\/runs\/2\/jobs/, "it asked for the run's jobs");
+    // No count of the skipped jobs is no verdict, never green: run again once, as for a lost runner, then park.
+    writeFileSync(join(c.ci, 'skipped-jobs'), '');
+    const e = c.land(1);
+    assert.equal(await e.exit, 75, e.stderr());
+    assert.match(e.stderr(), /ended without a verdict \(a runner lost mid-run, or the run cancelled\): running it again, once/);
+    assert.match(e.stderr(), /ended without a verdict a second time/);
+    assert.deepEqual(c.landed(), []);
     // Every job ran: green.
     writeFileSync(join(c.ci, 'skipped-jobs'), '0\n');
     const b = c.land(1);

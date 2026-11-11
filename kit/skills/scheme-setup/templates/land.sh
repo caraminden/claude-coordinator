@@ -41,7 +41,8 @@ FACTS=CLAUDE.md
 #       push:
 #         branches: [main, 'land/**']
 #   and a concurrency group per ref (group: <name>-${{ github.ref }}), or the stacked runs below
-#   wait for each other.
+#   wait for each other. A run that succeeded with a job skipped is not green, and is refused rather than
+#   run again (it would skip again): a workflow whose jobs are skipped on purpose needs CI_STATUS.
 # CI_STATUS: only when "every workflow green" is not the scheme's rule (a workflow that blocks only
 #   when red, one that runs only for some paths): the scheme's own command. It gets the commit as
 #   its one argument and answers by exit code: 0 green, 1 red, 2 running, 3 not started (no run yet,
@@ -363,12 +364,13 @@ blocked='' # why it can't land on $base (a conflict, a clash, a red check, red C
            # shortcut: it waits for the ones ahead to land, not just to turn green; read their verdicts
            # from their tickets if a red landing holding up the ones behind it ever costs real time.
 keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
-green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 landed=''
+green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 landed='' ci_skipped=''
 
 # CI's verdict on $tip, by the exit codes in the header at CI_STATUS; what it found goes to $cilog.
 ci_verdict() {
   local runs w path id status result one failed skipped rank worst=0 worst_rank=0
   : >"$cilog"
+  ci_skipped=''
   if [ -n "$CI_STATUS" ]; then
     timeout 120 bash -c "$CI_STATUS \"\$1\"" _ "$tip" >"$cilog" 2>&1 9>&-
     return
@@ -382,7 +384,8 @@ ci_verdict() {
         completed:success)
           # Green only when every job ran: a run whose jobs were skipped (an `if:` that came out false) concludes success too.
           skipped=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.conclusion == "skipped")] | length' 2>>"$cilog") || return 5
-          if [ "$skipped" -gt 0 ] 2>/dev/null; then one=4; echo "$w: $skipped of its jobs skipped" >>"$cilog"; else one=0; fi ;;
+          # Only a plain 0 is green; a count is told apart from no answer (ci_ask), which is handled as a lost run.
+          if [ "$skipped" = 0 ]; then one=0; else one=4; [ "$skipped" -gt 0 ] 2>/dev/null && ci_skipped="$skipped of the jobs in $w's run"; fi ;;
         completed:failure)
           # Red only when a step failed. A runner that went away mid-run fails its job with the step it was in never finished.
           failed=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[].steps[]? | select(.conclusion == "failure")] | length' 2>>"$cilog") || return 5
@@ -448,6 +451,7 @@ ci_ask() {
       return 0 ;;
     4)
       cat "$cilog" >&2
+      [ -z "$ci_skipped" ] || refuse "$ci_skipped on ${tip:0:12} were skipped, so the commit's checks did not all run and nothing landed. Nothing is wrong with the runners, and running it again would skip them again. A workflow with jobs that are skipped on purpose needs the scheme's own CI_STATUS script (see the top of tools/land.sh)"
       [ -z "$retried" ] || park "CI's run on ${tip:0:12} ended without a verdict a second time (a runner lost mid-run, or the run cancelled), so nothing landed. The runners need a person's look; park, and run this again after"
       retried=1
       say "CI's run on ${tip:0:12} ended without a verdict (a runner lost mid-run, or the run cancelled): running it again, once. The commit is the same, so the ones stacked on it keep their runs"

@@ -2,7 +2,7 @@
 // It goes by the basename of argv[0], so these check that the name, never the scheduler: no ananicy needed.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
@@ -47,6 +47,10 @@ test('tools/citadel-node makes its link folder private, and refuses one that is 
     const own = join(dir, `citadel-node-${process.getuid!()}`);
     const made = run();
     assert.equal(basename(made.stdout), 'citadel-node', made.stderr);
+    assert.equal(statSync(own).mode & 0o777, 0o700);
+    // One left by an older run, open to the group, is closed.
+    chmodSync(own, 0o775);
+    assert.equal(run().status, 0);
     assert.equal(statSync(own).mode & 0o777, 0o700);
     rmSync(own, { recursive: true });
     mkdirSync(join(dir, 'theirs'));

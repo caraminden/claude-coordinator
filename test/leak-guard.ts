@@ -1,4 +1,4 @@
-// npm test's global setup: fail the run if it leaves processes behind, such as a fake claude whose
+// The global setup of npm test and of tools/run-tests.sh's full run: fail the run if it leaves processes behind, such as a fake claude whose
 // turn outlived its test (#271). It names and kills this user's processes that started during the run
 // and name a test's scratch folder that is gone: on a shared /tmp, another run's live work still has its own.
 import { existsSync } from 'node:fs';

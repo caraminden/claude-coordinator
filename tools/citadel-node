@@ -13,6 +13,7 @@ if [ -z "${CITADEL_NODE:-}" ] || [ ! -e "$CITADEL_NODE" ]; then
   mkdir -p -m 700 "$dir"
   # Under /tmp anyone can make the folder first and point the link at a program of theirs.
   { [ -O "$dir" ] && [ ! -L "$dir" ]; } || { echo "citadel-node: $dir is not a folder of this user's own, so node is not run from it. Remove it, or set TMPDIR" >&2; exit 1; }
+  chmod 700 "$dir" # mkdir -m sets it only on a folder it makes
   if [ "$(readlink "$link" 2>/dev/null)" != "$real" ]; then
     # A new link moved into place, so a run already using the old one never sees it missing.
     ln -sfn "$real" "$link.$$" && mv -Tf "$link.$$" "$link"

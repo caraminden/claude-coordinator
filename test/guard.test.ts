@@ -45,7 +45,7 @@ for (const file of ['tools/guard.sh', 'kit/skills/scheme-setup/templates/guard.s
         assert.equal(r.status, 2, cmd);
         assert.match(r.stderr, /Write git push options out in full/, cmd);
       }
-      for (const cmd of ['git -c remote.origin.push=refs/heads/topic:refs/heads/main push origin', 'git -c push.default=matching push', 'git -c url.x.insteadOf=origin push origin topic', 'git -c branch.topic.merge=refs/heads/main push', 'git push origin topic:heads/main', 'git push origin heads/main']) {
+      for (const cmd of ['git -c remote.origin.push=refs/heads/topic:refs/heads/main push origin', 'git -c push.default=matching push', 'git -c url.x.insteadOf=origin push origin topic', 'git -c branch.topic.merge=refs/heads/main push', 'git -c include.path=/tmp/x push origin topic', 'git -c includeIf.gitdir:/.path=/tmp/x push origin topic', 'git push origin topic:heads/main', 'git push origin heads/main']) {
         assert.equal(hook(cmd).status, 2, cmd);
       }
       for (const cmd of ['git push origin topic', 'git push -u origin topic', 'git push --set-upstream origin topic', 'git push --force-with-lease origin topic', 'git push --force-with-lease --force-if-includes origin topic', 'git push --force-with-l origin topic', 'git push --tags origin', 'git push', 'git push origin HEAD', 'git -c push.default=current status']) {

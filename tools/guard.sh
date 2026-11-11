@@ -266,7 +266,7 @@ check_segment() {
       case "$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')" in
         alias.*) block "git -c alias.* can hide a push from this guard; run the git command itself." ;;
         core.hookspath*) [ "${w[i]:-}" = push ] && block "git -c core.hooksPath=... on a push would skip .githooks/pre-push; push without it." ;;
-        push.*|remote.*|url.*|branch.*) [ "${w[i]:-}" = push ] && block "git -c ${c%%=*} on a push changes what it sends or where, unseen by this guard; push without it and name the remote and branch." ;;
+        push.*|remote.*|url.*|branch.*|include.*|includeif.*) [ "${w[i]:-}" = push ] && block "git -c ${c%%=*} on a push changes what it sends or where, unseen by this guard; push without it and name the remote and branch." ;;
       esac
     done
     [ "${w[i]:-}" = push ] || continue
@@ -457,6 +457,9 @@ self_test() {
   t 2 Bash topic 'git -c url.git@github.com:x/y.insteadOf=origin push origin topic'
   t 2 Bash topic 'git -c branch.topic.merge=refs/heads/main push'
   t 2 Bash topic 'git --config-env=push.default=X push origin'
+  t 2 Bash topic 'git -c include.path=/tmp/x push origin topic'
+  t 2 Bash topic 'git -c includeIf.gitdir:/.path=/tmp/x push origin topic'
+  t 0 Bash topic 'git -c include.path=/tmp/x status'
   t 0 Bash topic 'git -c push.default=current status'
   t 0 Bash topic 'git -c http.extraHeader=x push origin topic'
   t 2 Bash topic 'git push origin topic:heads/main'

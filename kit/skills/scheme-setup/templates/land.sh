@@ -367,7 +367,7 @@ green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 lan
 
 # CI's verdict on $tip, by the exit codes in the header at CI_STATUS; what it found goes to $cilog.
 ci_verdict() {
-  local runs w path id status result one failed rank worst=0 worst_rank=0
+  local runs w path id status result one failed skipped rank worst=0 worst_rank=0
   : >"$cilog"
   if [ -n "$CI_STATUS" ]; then
     timeout 120 bash -c "$CI_STATUS \"\$1\"" _ "$tip" >"$cilog" 2>&1 9>&-
@@ -379,7 +379,10 @@ ci_verdict() {
     while IFS=$'\t' read -r path id status result url; do
       [[ ${path%%@*} == */"$w" ]] || continue
       case $status:$result in
-        completed:success) one=0 ;;
+        completed:success)
+          # Green only when every job ran: a run whose jobs were skipped (an `if:` that came out false) concludes success too.
+          skipped=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.conclusion == "skipped")] | length' 2>>"$cilog") || return 5
+          if [ "$skipped" -gt 0 ] 2>/dev/null; then one=4; echo "$w: $skipped of its jobs skipped" >>"$cilog"; else one=0; fi ;;
         completed:failure)
           # Red only when a step failed. A runner that went away mid-run fails its job with the step it was in never finished.
           failed=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[].steps[]? | select(.conclusion == "failure")] | length' 2>>"$cilog") || return 5

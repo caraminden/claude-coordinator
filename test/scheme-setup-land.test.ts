@@ -437,7 +437,7 @@ function ciSetup(branches: number, { stack = '', check = 'true', builtin = false
   const bin = join(q.dir, 'bin');
   mkdirSync(ci);
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
   const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' };
   const started: ReturnType<typeof q.land>[] = [];
@@ -826,6 +826,29 @@ test("CI gate: the built-in reader takes the newest run of each workflow, the wo
     const b = c.land(1);
     assert.equal(await b.exit, 0, b.stderr());
     assert.match(b.stderr(), /CI already passed/);
+    assert.deepEqual(c.landed(), ['f1.txt: 1']);
+  } finally {
+    c.stop();
+  }
+});
+
+// A workflow whose jobs were skipped (an `if:` that came out false) concludes success with nothing run (ultra review B3).
+test("CI gate: the built-in reader doesn't take a successful run with a skipped job for green", async () => {
+  const c = ciSetup(1, { builtin: true });
+  const run = (workflow: string, id: number) => `.github/workflows/${workflow}\t${id}\tcompleted\tsuccess\thttps://ci.test/${id}\n`;
+  try {
+    writeFileSync(join(c.ci, 'runs.tsv'), run('ci.yml', 2) + run('slow.yml', 3));
+    writeFileSync(join(c.ci, 'skipped-jobs'), '1\n');
+    const a = c.land(1);
+    assert.equal(await a.exit, 75, a.stderr());
+    assert.match(a.stderr(), /ci\.yml: 1 of its jobs skipped/);
+    assert.match(a.stderr(), /ended without a verdict/);
+    assert.deepEqual(c.landed(), []);
+    assert.match(readFileSync(join(c.ci, 'gh.log'), 'utf8'), /actions\/runs\/2\/jobs/, "it asked for the run's jobs");
+    // Every job ran: green.
+    writeFileSync(join(c.ci, 'skipped-jobs'), '0\n');
+    const b = c.land(1);
+    assert.equal(await b.exit, 0, b.stderr());
     assert.deepEqual(c.landed(), ['f1.txt: 1']);
   } finally {
     c.stop();

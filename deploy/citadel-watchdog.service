@@ -7,5 +7,6 @@ UMask=0077
 # ~/.local/state/citadel-watchdog: when each one was first seen down, and whether the push went out.
 StateDirectory=citadel-watchdog
 # Not in citadel.slice: it must still run when the server and turns are what's starving the box.
-ExecStart=/usr/bin/node %h/claude-coordinator/tools/watchdog.ts
+# argv[0] is citadel-watchdog, not node: ananicy-cpp's rule for node would run it at idle priority (deploy/priority.md).
+ExecStart=@/usr/bin/node citadel-watchdog %h/claude-coordinator/tools/watchdog.ts
 TimeoutStartSec=2min

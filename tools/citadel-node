@@ -10,8 +10,10 @@ if [ -z "${CITADEL_NODE:-}" ] || [ ! -e "$CITADEL_NODE" ]; then
   real=$(NODE_OPTIONS= node -p process.execPath)
   dir="${TMPDIR:-/tmp}/citadel-node-$(id -u)"
   link="$dir/citadel-node"
+  mkdir -p -m 700 "$dir"
+  # Under /tmp anyone can make the folder first and point the link at a program of theirs.
+  { [ -O "$dir" ] && [ ! -L "$dir" ]; } || { echo "citadel-node: $dir is not a folder of this user's own, so node is not run from it. Remove it, or set TMPDIR" >&2; exit 1; }
   if [ "$(readlink "$link" 2>/dev/null)" != "$real" ]; then
-    mkdir -p "$dir"
     # A new link moved into place, so a run already using the old one never sees it missing.
     ln -sfn "$real" "$link.$$" && mv -Tf "$link.$$" "$link"
   fi

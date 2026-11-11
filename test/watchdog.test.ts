@@ -194,3 +194,10 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   assert.equal(sub(), 'mailto:ops@example.com');
   assert.equal(got.length, 3);
 });
+
+// ananicy-cpp's stock rule runs a process named node at idle priority (deploy/priority.md): under load the
+// down alert would be the last thing to run. The name is argv[0], as in the server's unit.
+test("the watchdog's unit starts node under a name that isn't node", () => {
+  const unit = readFileSync(join(import.meta.dirname, '..', 'deploy', 'citadel-watchdog.service'), 'utf8');
+  assert.match(unit, /^ExecStart=@\/usr\/bin\/node citadel-watchdog %h\/claude-coordinator\/tools\/watchdog\.ts$/m);
+});

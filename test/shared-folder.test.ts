@@ -93,6 +93,8 @@ test('neither prompt mentions the retired minion tag (#254)', () => {
 test('only the coordinator is told about its memory folder', () => {
   assert.ok(systemPrompt(project, coordinator, null, shared, tickets, memory).includes(memory));
   assert.ok(!systemPrompt(project, ticket, null, shared, tickets, null).includes('Claude Code memory'));
+  // It runs read-only Bash and `git -C` (coordinatorAccess), so the memory line must not say it can't run shell commands (#468 S04-9).
+  assert.doesNotMatch(systemPrompt(project, coordinator, null, shared, tickets, memory), /cannot run shell commands/);
 });
 
 test('the Shared group lists documents and pages only', async () => {

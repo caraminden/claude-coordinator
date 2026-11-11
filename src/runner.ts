@@ -11,7 +11,7 @@ import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
 import { KEEP, SENT_BACK } from './link-check.ts';
 import type { SchemeRefs } from './scheme-refs.ts';
-import { cardHref, cardLabel, cardText, type CardLink } from './card-links.ts';
+import { cardHref, cardLabel, cardText, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath } from './sessions.ts';
 import { Lanes } from './lanes.ts';
@@ -2564,13 +2564,27 @@ export class Runner {
     return [...asks, ...stored].sort((a, b) => a.at - b.at || a.id - b.id).map((c) => c.card);
   }
 
+  /** The scheme's cards from the last week that aren't in `open`, newest 200, with what happened to each (#531). */
+  private settledCards(projectId: number, open: Set<string>): SettledCard[] {
+    return this.store.recentCards(projectId, Date.now() - 7 * 86_400_000, 200).flatMap((r) => {
+      const href = cardHref({ project_id: projectId, kind: r.tkind, number: r.number, id: r.ticket_id }, r.id);
+      if (open.has(href)) return [];
+      const kind = r.kind as CardLink['kind'];
+      const data = JSON.parse(r.data);
+      const minion = r.tkind === 'coordinator' ? null : r.number;
+      const how = settledHow(kind, data, r.reply && JSON.parse(r.reply), r.result && JSON.parse(r.result), r.tstatus === 'closed' ? minion : null, (ms) => clockTime(ms));
+      return [{ minion, kind, label: cardLabel(kind, data), href, how }];
+    });
+  }
+
   /** Write a turn's scheme-refs snapshot (scheme-refs.ts) for `ticket`, with its scheme's cards waiting on people. */
   private writeRefs(file: string, ticket: Ticket) {
     const project = this.store.getProject(ticket.project_id)!;
     const tickets = this.store.listTickets(project.id);
     const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => this.cardLinks(t, t.id === ticket.id)) };
+    const refs = { ...schemeRefs(project, this.store.listProjects(), tickets, cards), settled: this.settledCards(project.id, new Set(cards.cards.map((c) => c.href))) };
     // Whole or not at all: the link check may read it mid-turn.
-    writeFileSync(`${file}.new`, JSON.stringify(schemeRefs(project, this.store.listProjects(), tickets, cards)));
+    writeFileSync(`${file}.new`, JSON.stringify(refs));
     renameSync(`${file}.new`, file);
   }
 

@@ -5,7 +5,7 @@
 // same send-back carries the wording check's findings (src/wording.ts): a reserved word used in another sense,
 // the cross-scheme link check's (src/scheme-refs.ts): a bare #N that likely means another scheme's minion,
 // the card link check's (src/card-links.ts): a card waiting on people mentioned without its link, or
-// linked as "above" or "below" when it sits the other way, and the page check: a linked HTML page with an
+// linked as "above" or "below" when it sits the other way, or one already answered linked as still waiting, and the page check: a linked HTML page with an
 // answer button of its own instead of the mock kit's Send dock (#417).
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
@@ -13,7 +13,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
-import { explainCards, explainMisplaced, misplacedCards, unlinkedCards } from './card-links.ts';
+import { explainCards, explainMisplaced, explainStale, misplacedCards, staleCards, unlinkedCards } from './card-links.ts';
 import { explainStrays, readRefs, strayRefs } from './scheme-refs.ts';
 import { CODE, explain, misusedWords } from './wording.ts';
 
@@ -101,8 +101,9 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const strays = refs ? strayRefs(input.last_assistant_message, refs) : [];
   const cards = refs?.cards ? unlinkedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
   const misplaced = refs?.cards ? misplacedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
+  const stale = refs?.settled ? staleCards(input.last_assistant_message, refs.settled) : [];
   const rolled = await handRolledPages(input.last_assistant_message, cfg);
-  if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !rolled.length) return null;
+  if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -129,7 +130,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
     : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
-  const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '');
+  const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '')
+    + (stale.length ? `${explainStale(stale, refs!.self ?? null)}\n` : '');
   return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 

@@ -1794,6 +1794,31 @@ export class Store {
     return row?.id ?? null;
   }
 
+  /**
+   * A project's question, plan and approval cards posted since `since`, newest `limit` of them, oldest first,
+   * each with its minion and how it was settled: the first person's message after it in its chat that isn't
+   * a click on another card (`reply`), and an approval's result (`result`). For the link check (#531).
+   */
+  recentCards(projectId: number, since: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
+    const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
+    return this.db.prepare(`
+      SELECT * FROM (
+        SELECT e.*, t.number, t.kind AS tkind, t.status AS tstatus,
+          (SELECT json_object('author', json_extract(a.data, '$.author'), 'at', a.created_at, 'text', substr(json_extract(a.data, '$.text'), 1, 200),
+              'answer', json(json_extract(a.data, '$.answer')))
+            FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id
+              AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${bots.map(() => '?').join(', ')})
+              AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'
+              AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), json_extract(e.data, '$.id')) = json_extract(e.data, '$.id')
+            ORDER BY a.id LIMIT 1) AS reply,
+          (SELECT json_set(r.data, '$.at', r.created_at) FROM events r WHERE r.ticket_id = e.ticket_id AND r.kind = 'approval_result' AND r.id > e.id
+              AND json_extract(r.data, '$.id') = json_extract(e.data, '$.id') ORDER BY r.id LIMIT 1) AS result
+        FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
+        WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval') AND e.created_at >= ?
+        ORDER BY e.id DESC LIMIT ?)
+      ORDER BY id`).all(...bots, projectId, since, limit) as any;
+  }
+
   private openCardsWhere(scope: string, id: number): EventRow[] {
     const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
     return this.db.prepare(`

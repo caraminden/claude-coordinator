@@ -6,7 +6,7 @@
 //
 // Run as a hook: node scheme-refs.ts '<config json>' < PreToolUse hook input; prints a "deny" decision or nothing.
 import { readFileSync } from 'node:fs';
-import type { CardLink } from './card-links.ts';
+import type { CardLink, SettledCard } from './card-links.ts';
 import { deny, readSent, runHook, saveSent, toolStrings } from './pre-tool-hook.ts';
 import { CODE } from './wording.ts';
 
@@ -22,6 +22,8 @@ export interface SchemeRefs {
   self?: number | null;
   /** This scheme's cards waiting on people (card-links.ts), refreshed when a card is posted mid-turn. */
   cards?: CardLink[];
+  /** This scheme's cards from the last week that no longer wait on people, with what happened to them (#531). */
+  settled?: SettledCard[];
 }
 
 export interface Stray {

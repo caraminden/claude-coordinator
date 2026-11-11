@@ -1,7 +1,8 @@
 // Card links (#400): every mention of a question, plan or approval card in a reply links to that card,
 // at the chat address that opens it centred and ringed (#236's jump, public/base.js jumpHref). The
 // tools hand the link out (ask_question, propose_plan, read_ticket), and the link check (link-check.ts)
-// sends back once a reply that mentions a card still waiting on people without linking it.
+// sends back once a reply that mentions a card still waiting on people without linking it, or that links
+// one already answered, settled or dismissed as if it still waited (#531).
 import { CODE } from './wording.ts';
 
 /** A card still waiting on people, with the link that opens it. */
@@ -20,6 +21,11 @@ export interface CardLink {
   below?: boolean;
 }
 
+/** A card that no longer waits on people, and what happened to it: "answered by Cara at 2:31am: Done, I ran it". */
+export interface SettledCard extends CardLink {
+  how: string;
+}
+
 /** The chat address that opens `ticket`'s card posted as chat event `eventId` (public/base.js jumpHref). */
 export function cardHref(ticket: { project_id: number; kind: string; number: number | null; id: number }, eventId: number): string {
   const chat = ticket.kind === 'coordinator' ? `#/p/${ticket.project_id}` : ticket.number == null ? `#/t/${ticket.id}` : `#/p/${ticket.project_id}/t/${ticket.number}`;
@@ -36,6 +42,23 @@ export function cardLabel(kind: string, data: any): string {
   if (kind === 'plan') return clip(data?.summary);
   if (kind === 'question') return clip((data?.questions ?? []).map((q: any) => q?.header || q?.question).filter(Boolean).join(', '));
   return clip(typeof data?.input?.description === 'string' ? `${data.tool}: ${data.input.description}` : data?.tool);
+}
+
+/**
+ * What happened to a card that no longer waits on people (#531), from its chat event's data, the first
+ * person's message after it (`reply`, Store.recentCards), an approval's result, and whether its minion
+ * was dismissed. `clock` formats a time.
+ */
+export function settledHow(kind: string, data: any, reply: any, result: any, dismissed: number | null, clock: (ms: number) => string): string {
+  const answers = (reply?.answer?.answers ?? []).flatMap((a: any) => [...(a?.selected ?? []), ...(a?.other ? [a.other] : [])]);
+  if (reply?.answer) return `answered by ${reply.author} at ${clock(reply.at)}${answers.length ? `: ${clip(answers.join('; '))}` : ''}`;
+  if (kind === 'plan' && data?.status && data.status !== 'pending') return `${data.status}${data.by ? ` by ${data.by}` : ''}${data.at ? ` at ${clock(data.at)}` : ''}`;
+  if (result?.state === 'expired') return `expired at ${clock(result.at)}${result.reason ? ` (${result.reason})` : ''}`;
+  if (result?.via) return `allowed on ${result.by}'s go "${clip(result.via.text)}" at ${clock(result.at)}`;
+  if (result?.state) return `${result.state}${result.by ? ` by ${result.by}` : ''} at ${clock(result.at)}`;
+  if (reply) return `${reply.author} wrote in its chat at ${clock(reply.at)}: "${clip(reply.text)}"`;
+  if (data?.settled?.at) return `settled by its minion at ${clock(data.settled.at)}`;
+  return dismissed != null ? `#${dismissed} was dismissed` : 'no longer waits on people';
 }
 
 /** How a card reads in a tool's text: `question card "Layout": [open it](#/p/2/t/394?e=123)`. */
@@ -107,5 +130,47 @@ export function explainCards(missing: CardLink[][], self: number | null): string
     for (const c of group) lines.push(`- ${c.minion === self ? "This chat's" : c.minion == null ? "The Taskmaster's" : `#${c.minion}'s`} ${c.kind} card${c.label ? ` "${c.label}"` : ''}: ${c.href}`);
   }
   lines.push("If you didn't mean a card that waits on people, leave it as it is: the next try goes through.");
+  return lines.join('\n');
+}
+
+/** Words that call a card waiting on people: "waiting on you", "needs your go", "still open". */
+const PENDING = /\b(?:wait(?:s|ing)?|awaits|awaiting|needs?|pending|unanswered|still open|open (?:card|question)s?|from you|on you|for you to|go card|to (?:answer|approve|pick|decide))\b/i;
+/** A request at the start of a sentence or list item: "Tap Done on [the card](…)". */
+const ASKS = /^\s*(?:[-*+]|\d+[.)])?\s*(?:please\s+)?(?:tap|click|answer|approve|pick|choose|decide)\b/i;
+/** Words that say the card is dealt with, which let the link through. */
+const DONE = /\b(?:answered|settled|approved|picked|chose|already|closed|dismissed|resolved|replied|denied|allowed|expired|revised)\b/i;
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s/;
+
+/**
+ * The settled cards `text` links as if they still waited on people (#531): the link's sentence, or the
+ * line leading into its list ("Waiting on you:"), reads as pending, and neither says it's dealt with.
+ */
+export function staleCards(text: string, settled: SettledCard[]): SettledCard[] {
+  if (!settled.length) return [];
+  const byEvent = new Map(settled.map((c) => [Number(/\?e=(\d+)$/.exec(c.href)?.[1]), c]));
+  const stale = new Set<SettledCard>();
+  let lead = '';
+  for (const line of text.replace(CODE, ' ').split('\n')) {
+    if (!line.trim()) continue;
+    const item = LIST_ITEM.test(line);
+    if (!item) lead = '';
+    // Sentences end at . ! ? ; followed by a space: a link's "?e=" has none.
+    for (const sentence of line.split(/(?<=[.!?;])\s+/)) {
+      for (const m of sentence.matchAll(/\]\([^)\s]*\?e=(\d+)\)/g)) {
+        const card = byEvent.get(Number(m[1]));
+        const said = `${lead} ${sentence}`;
+        if (card && (PENDING.test(said) || ASKS.test(sentence)) && !DONE.test(said)) stale.add(card);
+      }
+    }
+    if (!item) lead = line;
+  }
+  return [...stale];
+}
+
+/** The send-back's lines for links to settled cards: each card and what happened to it. */
+export function explainStale(stale: SettledCard[], self: number | null): string {
+  const lines = ['Your reply links a card as if it still waits on people, but it no longer does:'];
+  for (const c of stale) lines.push(`- ${c.minion === self ? "This chat's" : c.minion == null ? "The Taskmaster's" : `#${c.minion}'s`} ${c.kind} card${c.label ? ` "${c.label}"` : ''} (${c.href}): ${c.how}`);
+  lines.push('Drop it, or say it was answered. If it still needs people for another reason, leave it: the next try goes through.');
   return lines.join('\n');
 }

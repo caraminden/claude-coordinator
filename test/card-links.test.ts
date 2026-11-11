@@ -6,10 +6,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cardHref, cardLabel, misplacedCards, unlinkedCards, type CardLink } from '../src/card-links.ts';
+import { cardHref, cardLabel, misplacedCards, staleCards, unlinkedCards, type CardLink, type SettledCard } from '../src/card-links.ts';
 import { Store } from '../src/db.ts';
 import { check, SENT_BACK } from '../src/link-check.ts';
-import { Runner } from '../src/runner.ts';
+import { clockTime, Runner } from '../src/runner.ts';
 import type { SchemeRefs } from '../src/scheme-refs.ts';
 import { testPins } from './helpers.ts';
 testPins();
@@ -177,4 +177,86 @@ test('a turn\'s snapshot marks its own cards below until a person writes or the 
   // A message mid-turn lets go of it too (a person's would answer it; the Taskmaster's leaves it waiting).
   runner.emit(minion.id, 'user_message', { author: 'Taskmaster', text: 'Also check PubMed' });
   assert.deepEqual(snap(), [[minion.number, 'question', false], [minion.number, 'plan', false]]);
+});
+
+// Links to answered cards (#531; Cara, 2026-11-11: "This is like the third time you told me something was
+// waiting on me that wasnt, what is up with that?"). The Taskmaster carried card links forward from earlier
+// replies: #520's go card she had picked, #523's root step she had answered.
+const answered = { minion: 523, kind: 'question', label: 'Root step', href: '#/p/2/t/523?e=50', how: 'answered by Cara at 2:31am: Done, I ran it' } satisfies SettledCard;
+const flagged = (text: string) => staleCards(text, [answered]).map((c) => c.href);
+
+test('flags a link to an answered card that the reply still calls waiting', () => {
+  for (const bad of [
+    'Still waiting on you: the root step on [#523\'s card](#/p/2/t/523?e=50).',
+    'Waiting on you:\n\n- #520 is green.\n- The root step on [#523\'s card](#/p/2/t/523?e=50)',
+    '**Needs you**\n1. [#523\'s card](#/p/2/t/523?e=50): the root step',
+    'Tap Done on [#523\'s card](#/p/2/t/523?e=50) when you have run it.',
+  ]) assert.deepEqual(flagged(bad), ['#/p/2/t/523?e=50'], bad);
+});
+
+test('lets through open cards, links that say the card is answered, neutral mentions and code', () => {
+  for (const ok of [
+    'You answered [the card](#/p/2/t/523?e=50) at 2:31, so nothing waits on you.',
+    'Waiting on you: [#394\'s card](#/p/2/t/394?e=11).',
+    'Per [#523\'s card](#/p/2/t/523?e=50), I ran the root step.',
+    'Waiting on you: nothing.\n\nI ran the root step from [#523\'s card](#/p/2/t/523?e=50).',
+    'Already answered:\n- [#523\'s card](#/p/2/t/523?e=50), still waiting on CI meanwhile',
+    '`Waiting on you: [#523\'s card](#/p/2/t/523?e=50)`',
+  ]) assert.deepEqual(flagged(ok), [], ok);
+  assert.deepEqual(staleCards('Waiting on you: [#523\'s card](#/p/2/t/523?e=50)', []), []);
+});
+
+test('the link check sends back a link to an answered card once, saying what happened to it', async () => {
+  const dir = join(root, 'turn-531');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'scheme-refs.json'), JSON.stringify({ scheme: 'Citadel', others: [], minions: {}, self: null, cards, settled: [answered] } satisfies SchemeRefs));
+  const cfg = { cwd: dir, roots: [dir], nudged: join(dir, 'nudged'), refs: join(dir, 'scheme-refs.json') };
+  const text = 'Waiting on you: the root step on [#523\'s card](#/p/2/t/523?e=50).';
+  const verdict = await check({ last_assistant_message: text, prompt_id: 'p1' }, cfg);
+  assert.equal(verdict?.decision, 'block');
+  assert.ok(verdict!.reason.startsWith(SENT_BACK));
+  assert.ok(verdict!.reason.includes('#523\'s question card "Root step" (#/p/2/t/523?e=50): answered by Cara at 2:31am: Done, I ran it'), verdict!.reason);
+  // The second try goes through as it is.
+  assert.equal(await check({ last_assistant_message: text, prompt_id: 'p1' }, cfg), null);
+  // A link to an open card in the same words passes.
+  assert.equal(await check({ last_assistant_message: 'Waiting on you: [#394\'s card](#/p/2/t/394?e=11).', prompt_id: 'p2' }, cfg), null);
+});
+
+test('a turn\'s snapshot lists the scheme\'s recently settled cards with who settled them, when and how', () => {
+  const fake = join(root, 'claude-531');
+  writeFileSync(fake, '#!/bin/sh\nexit 0\n');
+  chmodSync(fake, 0o755);
+  const store = new Store(join(root, 'db-531.sqlite'));
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const p = store.createProject('Citadel', null);
+  const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const a = store.createTicket({ project_id: p.id, title: 'Asker', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const b = store.createTicket({ project_id: p.id, title: 'Gone', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const ask = (t: typeof a, id: string, header: string) => runner.emit(t.id, 'question', { id, questions: [{ header, question: '?' }] });
+  const clicked = ask(a, 'q1', 'Root step');
+  const click = runner.emit(a.id, 'user_message', { author: 'Cara', text: 'My answers…', answer: { questionId: 'q1', answers: [{ selected: ['Done, I ran it'] }] } });
+  const open = ask(a, 'q2', 'Layout');
+  runner.emit(a.id, 'user_message', { author: 'Taskmaster', text: 'Any news?' });
+  const plan = runner.emit(a.id, 'plan', { id: 'p1', summary: 'Build it', plan: 'x', status: 'approved', by: 'Josh', at: 1_000 });
+  const typed = ask(b, 'q3', 'Name');
+  const reply = runner.emit(b.id, 'user_message', { author: 'Josh', text: 'Call it Keep' });
+  const dropped = ask(b, 'q4', 'Colour');
+  store.updateTicket(b.id, { status: 'closed' });
+  runner.approvals.request(a.id, 'Bash', { command: 'ls', description: 'List' });
+  const approval = store.listEvents(a.id).find((e) => e.kind === 'approval')!;
+  runner.approvals.decide(a.id, JSON.parse(approval.data).id, true, 'Cara');
+  const allowed = store.listEvents(a.id).find((e) => e.kind === 'approval_result')!;
+
+  const file = join(root, 'refs-531.json');
+  (runner as any).writeRefs(file, store.getTicket(tm.id)!);
+  const snap = JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs;
+  const at = (t: typeof a, e: { id: number }) => `#/p/${p.id}/t/${t.number}?e=${e.id}`;
+  assert.deepEqual(snap.cards!.map((c) => c.href), [at(a, open)]);
+  assert.deepEqual(snap.settled!.map((c) => [c.href, c.kind, c.label, c.how]), [
+    [at(a, clicked), 'question', 'Root step', `answered by Cara at ${clockTime(click.created_at)}: Done, I ran it`],
+    [at(a, plan), 'plan', 'Build it', `approved by Josh at ${clockTime(1_000)}`],
+    [at(b, typed), 'question', 'Name', `Josh wrote in its chat at ${clockTime(reply.created_at)}: "Call it Keep"`],
+    [at(b, dropped), 'question', 'Colour', `#${b.number} was dismissed`],
+    [at(a, approval), 'approval', 'Bash: List', `allowed by Cara at ${clockTime(allowed.created_at)}`],
+  ]);
 });

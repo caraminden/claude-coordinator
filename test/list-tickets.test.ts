@@ -31,6 +31,12 @@ const OTHER = minion(B.id, 'Other scheme');
 // A question card waiting on people in the sibling's chat (#468 S06-3).
 const CARD = store.addEvent(M2.id, 'question', { id: 'q1', questions: [{ header: 'Layout', question: 'Tabs?' }] });
 
+// A task list in the sibling's history and in the dismissed one's (#527).
+for (const t of [M2, GONE]) {
+  store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'c1', name: 'TaskCreate', input: { subject: 'Map' } }] } });
+  store.addEvent(t.id, 'claude', { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'Task #1 created successfully: Map' }] } });
+}
+
 const tokens = new Auth(PASSWORD, SECRET);
 let srv: Booted;
 before(async () => {
@@ -86,4 +92,15 @@ test("the route gives a minion only the line's fields, and refuses another schem
   const cross = await get(`/api/projects/${B.id}/tickets`, M1.id);
   assert.equal(cross.status, 403);
   assert.equal((await get(`/api/projects/${B.id}/tickets`, OTHER.id)).status, 200);
+});
+
+test("the scheme's list counts an open minion's steps and leaves a dismissed one's history unread (#527)", async () => {
+  const { status, data: scheme } = await srv.call(`/api/projects/${A.id}`);
+  assert.equal(status, 200);
+  const by = (title: string) => scheme.tickets.find((t: any) => t.title === title);
+  assert.deepEqual(by('Sibling').steps, { done: 0, total: 1 });
+  assert.equal(by('Dismissed one').steps, null, 'its row shows no steps, so its events are not replayed for the list');
+  assert.equal(by('Sibling').pending_card_at, CARD.created_at);
+  assert.equal(by('Sibling').open_cards.length, 1);
+  assert.equal(by('Dismissed one').pending_card_at, null);
 });

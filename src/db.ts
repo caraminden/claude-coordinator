@@ -1664,8 +1664,8 @@ export class Store {
    */
   recap(name: string, projectId: number): { since: number | null; turns: Record<number, number> } {
     const { since } = this.db.prepare(`
-      SELECT MAX(e.created_at) AS since FROM events e JOIN tickets t ON t.id = e.ticket_id
-      WHERE t.project_id = ? AND (
+      SELECT MAX(e.created_at) AS since FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
+      WHERE t.project_id = ? AND e.kind IN ('user_message', 'approval_result') AND (
         (e.kind = 'user_message' AND json_extract(e.data, '$.author') = ?)
         OR (e.kind = 'approval_result' AND json_extract(e.data, '$.by') = ?))`).get(projectId, name, name) as { since: number | null };
     if (since == null) return { since: null, turns: {} };

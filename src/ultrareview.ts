@@ -153,9 +153,9 @@ export class UltraReviews {
     this.jobs = new HostJobs(deps.units);
   }
 
-  /** Reviews a restart would cut off (runner.hostJobs): ones whose CLI fell back to the server's child. */
+  /** Reviews a restart would cut off (runner.hostJobs): ones still cloning, and ones whose CLI fell back to the server's child. */
   running(): number {
-    return this.jobs.running();
+    return this.jobs.running() + [...this.live.values()].filter((r) => !r.job).length;
   }
 
   /** Reviews running in a person's container, so a turn starting there doesn't restart it under them. */

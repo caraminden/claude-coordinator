@@ -934,10 +934,11 @@ export class Runner {
     // Folders of turns nobody follows any more and whose process is gone.
     try {
       const followed = new Set([...this.turns.values()].map((t) => t.dir));
-      // Container turns' folders sit one deeper, in their person's folder (ClaudeLink.turnsDir).
+      // Container turns' folders sit one deeper, in their person's folder (ClaudeLink.turnsDir). Ultra reviews'
+      // clones sit there too, and are src/ultrareview.ts's to clear: a review outlives a restart (#508).
       const dirs = readdirSync(this.turnsDir).flatMap((name) => {
         const dir = join(this.turnsDir, name);
-        return /^person-\d+$/.test(name) ? readdirSync(dir).map((n) => join(dir, n)) : [dir];
+        return /^person-\d+$/.test(name) ? readdirSync(dir).filter((n) => !n.startsWith('ultrareview-')).map((n) => join(dir, n)) : [dir];
       });
       // Gone for sure: its wrapper's pid is dead, or it never wrote one in the time a start takes. Not knowing isn't enough (#259).
       const gone = (dir: string) => wrapperAlive(dir) === false || (wrapperAlive(dir) === null && Date.now() - statSync(dir).mtimeMs > START_GRACE_MS);

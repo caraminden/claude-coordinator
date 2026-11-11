@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -122,8 +122,8 @@ test("a review runs the CLI on the clicker's login in a scratch clone, posts the
   const ev = await ur.start(7, 1, 'Cara', spec, { files: 1, lines: 3 }, shared);
   assert.equal(events[0].kind, 'ultrareview');
   assert.deepEqual(events[0].data, ev);
-  // Without units its CLI runs as the server's child, which a restart would cut off.
-  await until('the CLI runs as a child', () => ur.running() === 1);
+  // Still cloning, and then its CLI as the server's child (no units): a restart would cut it off either way.
+  assert.equal(ur.running(), 1);
   await assert.rejects(ur.start(7, 1, 'Cara', spec, { files: 1, lines: 3 }), /already have an ultra review running/, 'one at a time per person: a double click never pays twice');
   const r = await result();
   const [file] = readdirSync(shared);
@@ -254,7 +254,7 @@ test('a review outlives a restart: the next server follows it and posts its find
   const go = join(dir, 'go');
   const started = join(dir, 'started');
   // At most 30 s, so a failed test leaves nothing running.
-  writeFileSync(join(bin, 'claude'), `#!/bin/sh\ntouch '${started}'\nfor i in $(seq 600); do [ -e '${go}' ] && break; sleep 0.05; done\necho "1 bug found: survived the restart"\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'claude'), `#!/bin/sh\ntouch '${started}'\nfor i in $(seq 600); do [ -e '${go}' ] && break; sleep 0.05; done\n[ -e "$PWD/.git" ] || { echo 'the clone is gone'; exit 1; }\necho "1 bug found: survived the restart"\n`, { mode: 0o755 });
   const data = join(dir, 'data');
   mkdirSync(data, { recursive: true });
   const store = new Store(join(data, 'coordinator.db'));
@@ -270,6 +270,11 @@ test('a review outlives a restart: the next server follows it and posts its find
     await until('the CLI runs', () => existsSync(started));
     assert.equal((await srv.call('/api/health')).data.interruptible, 0, "a restart doesn't wait for the review");
     await srv.stop({ keepTurns: true });
+    // Its clone looks as old as a long review's: the next server's sweep of turn folders leaves it be.
+    const people = join(data, 'run', 'turns');
+    const clones = readdirSync(people).flatMap((p) => readdirSync(join(people, p)).filter((n) => n.startsWith('ultrareview-')).map((n) => join(people, p, n)));
+    assert.equal(clones.length, 1);
+    utimesSync(clones[0], new Date(0), new Date(0));
     srv = await bootServer({ root: dir, env });
     writeFileSync(go, '');
     const done = await until('the findings', async () => {

@@ -7,26 +7,41 @@
 import { createHash } from 'node:crypto';
 import type { Project, Store, User } from './db.ts';
 
+/** How a job asked for its own unit: a unit of its own (turns, landings, ultra reviews), or a scope around `podman exec` (container turns). */
+export type Kind = 'unit' | 'scope';
+
 export class Fallbacks {
   /** Jobs that fell back since the server started. */
   count = 0;
   /** Causes already alerted, so nine turns failing the same way raise one alert. */
   private raised = new Set<string>();
   /** Tell people about a new cause; false (or a throw) when it didn't reach everyone, so the next fallback tries again. */
-  alert: (cause: string, job: string, error: string, ticketId: number) => Promise<boolean> = async () => false;
-  /** Take down every fallback alert that is out. */
-  clear: () => Promise<void> = async () => {};
+  alert: (cause: string, job: string, error: string, ticketId: number, kind: Kind) => Promise<boolean> = async () => false;
+  /** Take down the fallback alerts out for jobs of `kind`. */
+  clear: (kind: Kind) => Promise<void> = async () => {};
+  /** Alerts and clears run one at a time, in order, so a clear never misses an alert still on its way. */
+  private chain: Promise<unknown> = Promise.resolve();
+  private clearing = new Set<Kind>();
+
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const p = this.chain.then(fn);
+    this.chain = p.catch(() => {});
+    return p;
+  }
 
   /**
-   * A job got a unit of its own: systemd-run works again, so the alerts go. Causes stay raised for the day, so
-   * trouble that comes and goes alarms once a day at most, not on every flap.
+   * A job of `kind` got a unit of its own: systemd-run works for those again, so their alerts go. Causes stay
+   * raised for the day, so trouble that comes and goes alarms once a day at most, not on every flap.
    */
-  started() {
-    this.clear().catch((err) => console.error(`Clearing fallback alerts failed: ${err?.message ?? err}`));
+  started(kind: Kind = 'unit') {
+    // One clear waiting per kind covers every job that starts meanwhile.
+    if (this.clearing.has(kind)) return;
+    this.clearing.add(kind);
+    this.serial(() => (this.clearing.delete(kind), this.clear(kind))).catch((err) => console.error(`Clearing fallback alerts failed: ${err?.message ?? err}`));
   }
 
   /** `job` (as people read it) of minion `ticketId` runs in the server because systemd-run said `error`. */
-  record(ticketId: number, job: string, error: string, now = Date.now()) {
+  record(ticketId: number, job: string, error: string, now = Date.now(), kind: Kind = 'unit') {
     this.count++;
     console.error(`${job}: systemd-run failed (${error}), so it runs in the server's cgroup.`);
     // Unit names carry the minion's id and a time: the same trouble for another job is the same cause. A new
@@ -35,7 +50,7 @@ export class Fallbacks {
     if (this.raised.has(cause)) return;
     this.raised.add(cause);
     const retry = () => this.raised.delete(cause);
-    this.alert(cause, job, error, ticketId).then((ok) => ok || retry(), (err) => (console.error(`Alerting a fallback failed: ${err?.message ?? err}`), retry()));
+    this.serial(() => this.alert(cause, job, error, ticketId, kind)).then((ok) => ok || retry(), (err) => (console.error(`Alerting a fallback failed: ${err?.message ?? err}`), retry()));
   }
 }
 
@@ -46,13 +61,13 @@ export type PutAlert = (project: Project, person: User, key: string, title: stri
 /** Clears one; true once Mandate has it gone. */
 export type ClearAlert = (project: Project, person: User, key: string) => Promise<boolean>;
 
-/** Settings key for the fallback alerts out: item key → its scheme and the users who have it. */
+/** Settings key for the fallback alerts out: `<scheme id>:<item key>` → the item, its kind of job and who has it. */
 const OUT = 'fallback-alerts';
-type Out = Record<string, { project: number; users: number[] }>;
+type Out = Record<string, { project: number; key: string; kind: Kind; users: number[] }>;
 
 /** The alert that tells every admin with Mandate on, from the job's scheme and linking its minion; true once each has it. */
 export function adminAlert(store: Store, put: PutAlert): Fallbacks['alert'] {
-  return async (cause, job, error, ticketId) => {
+  return async (cause, job, error, ticketId, kind) => {
     const ticket = store.getTicket(ticketId);
     const project = ticket && store.getProject(ticket.project_id);
     if (!ticket || !project) return false;
@@ -64,33 +79,29 @@ export function adminAlert(store: Store, put: PutAlert): Fallbacks['alert'] {
     // Everyone again on a retry: a put of the same key on an item someone already has changes nothing.
     const sent = await Promise.all(admins.map((u) => put(project, u, key, title, link)));
     const out = store.getSetting<Out>(OUT) ?? {};
-    const had = out[key]?.users ?? [];
-    const users = [...new Set([...had, ...admins.filter((_, i) => sent[i]).map((u) => u.id)])];
-    if (users.length) store.setSetting(OUT, { ...out, [key]: { project: project.id, users } });
+    const id = `${project.id}:${key}`;
+    const users = [...new Set([...(out[id]?.users ?? []), ...admins.filter((_, i) => sent[i]).map((u) => u.id)])];
+    if (users.length) store.setSetting(OUT, { ...out, [id]: { project: project.id, key, kind, users } });
     return sent.every(Boolean);
   };
 }
 
-/** Clears every fallback alert out; what Mandate didn't take is tried again on the next clear. */
+/** Clears the fallback alerts out for jobs of a kind; what Mandate didn't take is tried again on the next clear. */
 export function adminClear(store: Store, del: ClearAlert): Fallbacks['clear'] {
-  return async () => {
-    const out = store.getSetting<Out>(OUT);
-    if (!out || !Object.keys(out).length) return;
-    const gone: [string, number][] = [];
-    for (const [key, { project: id, users }] of Object.entries(out)) {
-      const project = store.getProject(id);
-      for (const uid of users) {
+  return async (kind) => {
+    const out = store.getSetting<Out>(OUT) ?? {};
+    const mine = Object.entries(out).filter(([, o]) => o.kind === kind);
+    if (!mine.length) return;
+    for (const [id, o] of mine) {
+      const project = store.getProject(o.project);
+      const left: number[] = [];
+      for (const uid of o.users) {
         const user = store.getUser(uid);
-        if (!project || !user || (await del(project, user, key))) gone.push([key, uid]);
+        if (project && user && !(await del(project, user, o.key))) left.push(uid);
       }
+      if (left.length) out[id] = { ...o, users: left };
+      else delete out[id];
     }
-    // Read again: an alert may have gone out meanwhile.
-    const now = store.getSetting<Out>(OUT) ?? {};
-    for (const [key, uid] of gone) {
-      if (!now[key]) continue;
-      now[key].users = now[key].users.filter((u) => u !== uid);
-      if (!now[key].users.length) delete now[key];
-    }
-    store.setSetting(OUT, now);
+    store.setSetting(OUT, out);
   };
 }

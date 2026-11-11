@@ -103,8 +103,8 @@ test('the alerts out are cleared once a job gets its own unit again, and what Ma
   await settle();
   assert.deepEqual(cleared, [], 'nothing out, nothing cleared');
 
+  // A job starting before the alert's put has landed still clears it: they run in order.
   f.record(ticket.id, 'A turn', 'Unit citadel-turns.slice not found.', DAY);
-  await settle();
   f.started();
   await settle();
   assert.equal(cleared.length, 1, "only Cara had it: Josh's put didn't land");
@@ -114,6 +114,9 @@ test('the alerts out are cleared once a job gets its own unit again, and what Ma
   f.record(ticket.id, 'A turn', 'Unit citadel-turns.slice not found.', DAY);
   await settle();
   assert.equal(cleared.length, 1, 'the cause was retried (Josh missed it), but nothing cleared on a fallback');
+  f.started('scope');
+  await settle();
+  assert.equal(cleared.length, 1, "a container turn's scope starting says nothing about host units");
   joshDown = true;
   f.started();
   await settle();

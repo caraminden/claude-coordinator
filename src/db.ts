@@ -2018,6 +2018,11 @@ export class Store {
     this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
   }
 
+  /** Every settings key starting with `prefix`. */
+  settingKeys(prefix: string): string[] {
+    return (this.db.prepare('SELECT key FROM settings WHERE substr(key, 1, ?) = ? ORDER BY key').all(prefix.length, prefix) as { key: string }[]).map((r) => r.key);
+  }
+
   listMachines(): Machine[] {
     return this.db.prepare('SELECT * FROM machines ORDER BY name').all() as unknown as Machine[];
   }

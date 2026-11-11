@@ -1969,7 +1969,7 @@ export class Runner {
     place.ensure()
       // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.
       // Only an exec that then starts counts as a fallback: one that fails both ways was podman's trouble.
-      .then(() => (this.units ? run(scoped).then(() => fallbacks.started(), (err) => run(exec).then(() => fallbacks.record(ticketId, `A turn in ${place.container}`, err.message))) : run(exec)))
+      .then(() => (this.units ? run(scoped).then(() => fallbacks.started('scope'), (err) => run(exec).then(() => fallbacks.record(ticketId, `A turn in ${place.container}`, err.message, Date.now(), 'scope'))) : run(exec)))
       .catch((err) => writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
       .finally(() => clearInterval(starting));
   }

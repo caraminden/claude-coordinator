@@ -5,7 +5,7 @@
 //   - only for the one person whose own typed message the turn answers (Runner.typedBy): never on a GitHub
 //     or system message, a relay, a wake, a resume or a contraption's ask; that person must be on the
 //     scheme and have Mandate enabled. The tool takes no person, so it can't aim at anyone else. Clearing an
-//     item the chat put works on any turn, for the person it was put for (#532): a fix landing or a PR merging
+//     item the chat put works on any turn, for everyone it was put for (#532): a fix landing or a PR merging
 //     is news from GitHub or a wake, and an item left open after its cause is gone keeps nagging her.
 //   - straight to Mandate's own service (no relay hop), at /apps/mandate/app-api/items/<number>.<key>,
 //     with an identity signed by Mandate's key whose `from` is scheme-<id> and `fromTitle` the scheme's name;
@@ -25,8 +25,12 @@ const FIELDS = ['title', 'day', 'time', 'at', 'alert'] as const;
 /** Settings key for an item's title, which a hook (carrying only the key) quotes back to the minion. */
 // shortcut: a ticked or deleted item's row stays until the minion clears its key; prune if settings ever grows from it.
 export const titleKey = (projectId: number, person: number, key: string) => `mandate-title:${projectId}:${person}:${key}`;
-/** Settings key for whom item `key` (with its minion number) was last put for, so any later turn can clear it. */
-const putForKey = (projectId: number, key: string) => `mandate-for:${projectId}:${key}`;
+
+/** Who has item `key` (with its minion number) open from this scheme: the people whose titles are kept for it. */
+function holders(store: App['store'], projectId: number, key: string): number[] {
+  const prefix = `mandate-title:${projectId}:`; // titleKey's, up to the person
+  return store.settingKeys(prefix).map((k) => /^(\d+):(.*)$/s.exec(k.slice(prefix.length))).filter((m) => m && m[2] === key).map((m) => Number(m![1]));
+}
 
 /**
  * The person whose own typed message the caller's turn answers (Runner.typedBy), checked for a call into
@@ -59,26 +63,24 @@ export async function mandateItem({ req, res, app, params, caller }: Ctx) {
   const key = prefix + params.key;
   if (!KEY.test(key) || !params.key) throw new HttpError(400, `key must be 1 to ${128 - prefix.length} letters, digits, dots, underscores, colons or dashes`);
 
-  const putFor = req.method === 'DELETE' ? store.getSetting<number>(putForKey(ticket.project_id, key)) : null;
-  const { user, project, contraption: mandate, identity } = putFor === null
-    ? typedPersonFor(app, ticket, 'mandate', 'put items in their Mandate')
-    : personFor(app, ticket, putFor, 'mandate', 'clear items in their Mandate');
-
-  let body: Record<string, unknown> | undefined;
-  if (req.method === 'PUT') {
-    const given = await readJson(req, 16 * 1024);
-    body = { hook: true, link: `/c/#/p/${project.id}${ticket.number === null ? '' : `/t/${ticket.number}`}` };
-    for (const f of FIELDS) if (given[f] !== undefined) body[f] = given[f];
+  // A typed turn acts for its typist, as ever; any other may clear the item for everyone this chat put it for.
+  const typed = app.runner.typedBy(ticket.id);
+  const has = req.method === 'DELETE' && typed === null ? holders(store, ticket.project_id, key) : [];
+  const given = req.method === 'PUT' ? await readJson(req, 16 * 1024) : null;
+  let last: { status: number; answer: unknown } | undefined;
+  for (const uid of has.length ? has : [typed]) {
+    const { user, project, contraption: mandate, identity } = personFor(app, ticket, uid, 'mandate', has.length ? 'clear items in their Mandate' : 'put items in their Mandate');
+    let body: Record<string, unknown> | undefined;
+    if (given) {
+      body = { hook: true, link: `/c/#/p/${project.id}${ticket.number === null ? '' : `/t/${ticket.number}`}` };
+      for (const f of FIELDS) if (given[f] !== undefined) body[f] = given[f];
+    }
+    const { status, answer } = (last = await callMandate(mandate, identity, key, body));
+    // A put on a ticked or deleted item changes nothing in Mandate, so neither does it here.
+    if (status === 200 && body && typeof body.title === 'string' && (answer as any)?.state === 'open') store.setSetting(titleKey(project.id, user.id, key), body.title);
+    if (status === 200 && !body) store.deleteSetting(titleKey(project.id, user.id, key));
   }
-  const { status, answer } = await callMandate(mandate, identity, key, body);
-  // A put on a ticked or deleted item changes nothing in Mandate, so neither does it here.
-  if (status === 200 && body && typeof body.title === 'string' && (answer as any)?.state === 'open') store.setSetting(titleKey(project.id, user.id, key), body.title);
-  if (status === 200 && body) store.setSetting(putForKey(project.id, key), user.id);
-  if (status === 200 && !body) {
-    store.deleteSetting(titleKey(project.id, user.id, key));
-    store.deleteSetting(putForKey(project.id, key));
-  }
-  json(res, 200, { status, answer });
+  json(res, 200, last);
 }
 
 /**

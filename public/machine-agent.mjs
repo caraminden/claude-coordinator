@@ -51,6 +51,8 @@ const READ_MAX = 5_000_000;
 const FETCH_MAX = 20_000_000;
 const KEEP_LOGS = 100;
 const FOUND_EVERY_MS = 30_000;
+const BEAT_MS = 20_000;
+const SILENT_MS = 60_000;
 
 /** %NAME% from the environment, as Windows writes it; an unset one is an error, not an empty string. */
 export function expand(text, env = process.env) {
@@ -1198,11 +1200,12 @@ async function main() {
     }).catch((err) => log(`Could not send to the app: ${err.message}`));
   }
 
-  /** Server-sent events from a fetch body, one parsed JSON message per event. */
-  async function* events(body) {
+  /** Server-sent events from a fetch body, one parsed JSON message per event; heard() on every chunk, pings too. */
+  async function* events(body, heard) {
     const decoder = new TextDecoder();
     let buf = '';
     for await (const chunk of body) {
+      heard();
       buf += decoder.decode(chunk, { stream: true });
       let end;
       while ((end = buf.indexOf('\n\n')) >= 0) {
@@ -1221,7 +1224,23 @@ async function main() {
     url.searchParams.set('command', describe);
     // It lends nothing until it has said what it found and heard what is ticked.
     if (managed) url.searchParams.set('v', '2');
-    const res = await fetch(url, { headers: { ...auth, Accept: 'text/event-stream' } });
+    // The app pings every 25 s. Silence for a minute (after a sleep, say) means the connection is dead though
+    // nothing said so: drop it and connect again. A beat every 20 s tells the app this computer is awake.
+    const quiet = new AbortController();
+    let lastHeard = Date.now();
+    const watch = setInterval(() => {
+      if (Date.now() - lastHeard > SILENT_MS) return quiet.abort(new Error(`nothing from the app for ${SILENT_MS / 1000} s`));
+      fetch(new URL('/api/machines/send', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: '{"beat":true}', signal: AbortSignal.timeout(15_000) }).catch(() => {});
+    }, BEAT_MS);
+    try {
+      return await listen(url, quiet.signal, () => (lastHeard = Date.now()));
+    } finally {
+      clearInterval(watch);
+    }
+  }
+
+  async function listen(url, signal, heard) {
+    const res = await fetch(url, { headers: { ...auth, Accept: 'text/event-stream' }, signal });
     if (res.status === 401) {
       console.error('The app rejected this token. Make a new one in the Machines panel.');
       process.exit(1);
@@ -1232,7 +1251,7 @@ async function main() {
       process.exit(1);
     }
     if (!res.ok) throw new Error(`the app answered ${res.status}`);
-    for await (const msg of events(res.body)) {
+    for await (const msg of events(res.body, heard)) {
       if (msg.hello) {
         log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Minions can use ${describe}${!managed && host?.workspaces.size ? ` and workspaces ${[...host.workspaces.keys()].join(', ')}` : ''} while this runs.`);
         retry = 0;

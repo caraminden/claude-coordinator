@@ -70,6 +70,9 @@ export type OnlineMachine = Machine & { servers: MachineServer[] };
 // An agent that stops reading (asleep mid-stream) is dropped rather than buffered for forever.
 const MAX_BACKLOG = 64 * 1024 * 1024;
 const PING_MS = 25_000;
+// An agent that beats (public/machine-agent.mjs posts one every 20 s) and has gone this long without one is
+// asleep or gone: a ping the app writes can't tell, since the kernel, or Caddy in front, takes it anyway.
+const BEAT_LOST_MS = 70_000;
 // How long a check (#307) waits on each server: a machine's MCP server may take a while to start.
 const CHECK_MS = 30_000;
 
@@ -186,6 +189,8 @@ interface Agent {
   timers: NodeJS.Timeout[];
   /** A CI runner agent (public/runner-agent.mjs, #328): it serves no MCP server, only runner jobs. */
   runners: boolean;
+  /** When it last beat; null for an agent from before beats, which is never dropped for missing them. */
+  beat?: number;
 }
 
 /** One job for a CI runner agent (#328): add, list or remove one scheme's runners on its PC. */
@@ -374,7 +379,10 @@ export class MachineRelay {
       agent.timers.push(setTimeout(() => this.checkIfDue(machine.id), CHECK_UNASKED_MS), setInterval(() => this.checkIfDue(machine.id), CHECK_EVERY_MS));
       for (const t of agent.timers) t.unref();
     }
-    const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
+    const ping = setInterval(() => {
+      if (agent.beat && Date.now() - agent.beat > BEAT_LOST_MS && this.agents.get(machine.id) === agent) return this.dropAgent(machine.id, agent);
+      res.write(': ping\n\n');
+    }, PING_MS);
     res.on('close', () => {
       clearInterval(ping);
       for (const t of agent.timers) clearTimeout(t);
@@ -390,6 +398,13 @@ export class MachineRelay {
     agent.res.end();
     if (this.store.getMachine(machineId)) this.store.updateMachine(machineId, { last_seen_at: Date.now() });
     this.onChange();
+  }
+
+  /** The agent says it is awake. False if it isn't connected. */
+  beat(machine: Machine): boolean {
+    const agent = this.agents.get(machine.id);
+    if (agent) agent.beat = Date.now();
+    return !!agent;
   }
 
   /** Disconnect a machine's agent (it was removed, or got a new token). */

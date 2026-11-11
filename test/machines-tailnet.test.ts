@@ -78,6 +78,7 @@ test('every route the agent calls is served at the machines URL, and refused at 
   }
   // Not connected yet: info says so, and an upload has no workspace session to go to.
   assert.equal((await fetch(`${agentBase}/api/machines/info`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: '{}' })).status, 409);
+  assert.equal((await fetch(`${agentBase}/api/machines/send`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: '{"beat":true}' })).status, 409);
   assert.equal((await fetch(`${agentBase}/api/machines/upload?session=nope&name=a.txt`, { method: 'POST', headers: auth, body: 'hi' })).status, 410);
 });
 

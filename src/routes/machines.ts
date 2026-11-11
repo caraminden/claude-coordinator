@@ -69,6 +69,11 @@ export const agentRoutes: Route[] = [
   agent('POST', '/api/machines/send', async ({ req, res, app }, machine) => {
     // Room for screenshots, which MCP servers send as base64 images.
     const body = await readJson(req, 50_000_000);
+    // A beat, { beat: true }, says the agent is awake (src/machines.ts BEAT_LOST_MS); 409 if its stream is gone.
+    if (body.beat === true) {
+      if (!app.machines.beat(machine)) throw new HttpError(409, 'Connect first');
+      return json(res, 202, {});
+    }
     if (typeof body.session !== 'string') throw new HttpError(400, 'session is required');
     // A gone session tells the agent to stop that copy of its MCP server.
     if (!app.machines.fromAgent(machine, body.session, body)) throw new HttpError(410, 'No such session');

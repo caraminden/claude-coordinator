@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
-import { afterEach, test } from 'node:test';
+import { afterEach, mock, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MachineRelay } from '../src/machines.ts';
 
@@ -61,4 +61,26 @@ test('when the agent goes away, its proxies\' streams just end: they reconnect o
   relay.disconnect(box.id);
   assert.equal(proxy.ended, true);
   assert.deepEqual(proxy.sent.map((m) => Object.keys(m)), [['session']]);
+});
+
+test('an agent that beats and then goes quiet (a laptop asleep) is dropped within a couple of minutes; one that never beats is kept', () => {
+  mock.timers.enable({ apis: ['setInterval', 'Date'] });
+  try {
+    const { relay, store, box } = world();
+    const old = store.createMachine('old', 'y', 'Cara');
+    relay.connectAgent(box, stream(), { host: 'h', command: 'fake-mcp' });
+    relay.connectAgent(old, stream(), { host: 'h', command: 'fake-mcp' });
+    assert.equal(relay.beat(box), true);
+    for (let i = 0; i < 4; i++) {
+      mock.timers.tick(20_000);
+      relay.beat(box);
+    }
+    assert.equal(relay.isOnline(box.id), true, 'beating: online');
+    mock.timers.tick(2 * 60_000);
+    assert.equal(relay.isOnline(box.id), false, 'no beat for two minutes: offline');
+    assert.equal(relay.isOnline(old.id), true, 'an agent from before beats is never dropped for missing them');
+    assert.equal(relay.beat(box), false, 'a beat from a dropped agent says so');
+  } finally {
+    mock.timers.reset();
+  }
 });

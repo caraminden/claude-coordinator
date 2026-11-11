@@ -374,7 +374,7 @@ export function renderTicketHead() {
   const actions = [];
   // The minion's branch, running on a copy of the data (start_preview, src/previews.ts).
   if (t.preview && t.status !== 'closed') {
-    actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
+    actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`../preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
   }
   // Parked on start_after (#261): a message only gets an answer; this starts the work, its held brief first.
   if (t.parked_for && t.status !== 'closed' && t.status !== 'running') {

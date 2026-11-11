@@ -302,6 +302,8 @@ export class ClaudeLink {
       // A sign-in starts in a fresh container: the restart's :U chown also mends a volume an older start left root-owned folders in.
       if (!this.busy(this.name(uid))) await this.containers.stop(this.name(uid));
       await this.ensure(uid);
+      // Started again (or unlinked) while the container was starting: that call owns the sign-in now.
+      if (this.logins.get(uid) !== login) return this.status(uid);
       const claude = resolveClaude(this.claudeBin);
       const child = spawn('podman', ['exec', '-i', '-e', `CLAUDE_CONFIG_DIR=${join(this.home, '.claude')}`, this.name(uid), 'script', '-qfec', `stty cols 4000; ${claude} auth login --claudeai`, '/dev/null'], { stdio: ['pipe', 'pipe', 'pipe'] });
       login.child = child;

@@ -118,6 +118,8 @@ test('linking: a state outlives a restart, but not tampering, another kind\'s se
   const asFull = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(lb, 'base64url').toString()), l: 0 })).toString('base64url');
   await refused(`${asFull}.${ls}`, both);
   await refused('garbage');
+  // A signature of the right length in characters but not in bytes is refused, not thrown.
+  await refused(`${fresh().split('.')[0]}.${'é'.repeat(43)}`);
   // A used state with a part tacked on is still used.
   const once = fresh();
   await after.finish(rachel.id, new URLSearchParams({ state: once, code: 'c' }), 'cb');

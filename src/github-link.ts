@@ -187,7 +187,8 @@ export class GithubLink {
     if (!v || typeof v !== 'object' || !Number.isSafeInteger(v.u) || !Number.isSafeInteger(v.p) || !Number.isSafeInteger(v.e) || (v.l !== 0 && v.l !== 1)) return null;
     const want = this.sign(body, v.l === 1);
     if (!want) return 'unset';
-    if (want.length !== sig.length || !timingSafeEqual(Buffer.from(want), Buffer.from(sig))) return null;
+    const [w, g] = [Buffer.from(want), Buffer.from(sig)];
+    if (w.length !== g.length || !timingSafeEqual(w, g)) return null;
     return { uid: v.u as number, projectId: v.p as number, expires: v.e as number, limited: v.l === 1 };
   }
 

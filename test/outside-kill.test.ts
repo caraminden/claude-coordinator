@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -87,6 +87,28 @@ test('a claude killed outright by a signal nobody sent from Citadel fails the tu
   const { ticket, errors } = await turn('signal');
   assert.equal(ticket.status, 'error');
   assert.match(errors[0] ?? '', /^Killed by SIGTERM from outside Citadel\./);
+});
+
+test('a turn killed together with its wrapper (no exit record) fails the turn rather than ending idle like a stop (#468 S03-4)', async () => {
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(t.id, root, null);
+  const failed: string[] = [];
+  runner.onTurnError = (_id: number, why: string) => failed.push(why);
+  try {
+    runner.send(t.id, 'Cara', 'wait');
+    for (let i = 0; i < 500 && !store.listEvents(t.id).some((e) => e.kind === 'claude'); i++) await new Promise((r) => setTimeout(r, 20));
+    const pids = JSON.parse(readFileSync(join((runner as any).turns.get(t.id).dir, 'pid.json'), 'utf8'));
+    process.kill(pids.wrapper, 'SIGKILL');
+    process.kill(-pids.claude, 'SIGKILL');
+    for (let i = 0; i < 500 && runner.isRunning(t.id); i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(!runner.isRunning(t.id), 'the turn ended');
+    assert.equal(store.getTicket(t.id)!.status, 'error');
+    const errors = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
+    assert.match(errors[0] ?? '', /^The turn's process was killed before it finished/);
+    assert.equal(failed.length, 1, 'people hear of it');
+  } finally {
+    runner.onTurnError = () => {};
+  }
 });
 
 test('a turn a person stops is not reported as killed', async () => {

@@ -1984,7 +1984,6 @@ export class Runner {
     const signal = exit ? exit.signal : 'SIGKILL';
     const startError = exit?.error ? `Could not start claude: ${exit.error}` : null;
     if (startError && stopped) this.emit(ticketId, 'error', { text: startError });
-    if (!exit && !stopped) this.emit(ticketId, 'note', { text: 'The turn\'s process was killed before it finished.' });
     const sawResult = !!turn?.result;
     const resultIsError = !!turn?.result?.error;
     const resultError = turn?.result?.error ? turn.result.text : null;
@@ -1999,7 +1998,10 @@ export class Runner {
     // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
     const killed = !stopped && exit && (exit.signal || code === 143)
       ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit, so most likely ${live.unit ? '' : 'the server restarted (this turn ran without a unit of its own) or '}one of the turn's own commands (a kill or pkill) hit claude's process.`
-      : null;
+      // Its wrapper went too, with no record of how: nobody pressed Stop, so it failed (#468 S03-4).
+      : !stopped && !exit
+        ? `The turn's process was killed before it finished, with no record of how.\nNobody pressed Stop, so most likely its ${live.container ? 'container' : live.unit ? 'unit' : 'process group'} was killed from outside Citadel (out of memory, or stopped).`
+        : null;
     if (stopped || (signal && !killed)) {
       // Stopped by the user; leave it waiting for the next message.
     } else if (killed || !sawResult || code !== 0 || resultIsError) {

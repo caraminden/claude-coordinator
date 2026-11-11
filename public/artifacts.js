@@ -33,14 +33,18 @@ export async function showFile(ticketId, path) {
 
 /** A file in the project's shared folder, opened from the Shared group of the artifacts panel. */
 export async function showSharedFile(projectId, path) {
+  const seq = routeSeq;
   const file = await api(`api/projects/${projectId}/shared/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
     missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: `scheme shared/${path}`,
   }));
+  if (seq !== routeSeq) return; // overtaken by another click while loading
   await showProject(projectId, { kind: 'shared', file: { ...file, path } });
 }
 
 export async function showArtifact(artifactId) {
+  const seq = routeSeq;
   const { artifact } = await api(`api/artifacts/${artifactId}`);
+  if (seq !== routeSeq) return; // overtaken by another click while loading
   await showProject(artifact.project_id, { kind: 'artifact', artifact });
 }
 

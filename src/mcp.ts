@@ -1,6 +1,7 @@
 // MCP server (stdio, newline-delimited JSON-RPC) that gives a project's coordinator
 // ticket tools to manage the project's other tickets through the coordinator API.
 // Started by claude from the coordinator's --mcp-config; configured by environment.
+import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
@@ -1042,6 +1043,23 @@ function wholeText(args: any): string {
   return args.instructions;
 }
 
+/**
+ * A brief that sends a minion to a file in the scheme's shared folder that isn't there yet stops it on its
+ * first turn (#481): refuse it. A path in a sentence that asks for it to be written or created passes.
+ */
+function sharedFilesExist(text: unknown, then: string): void {
+  const shared = process.env.COORDINATOR_SHARED_DIR?.replace(/\/+$/, '');
+  if (!shared || typeof text !== 'string') return;
+  const paths = new RegExp(`${shared.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/[^\\s\`'"()<>\\[\\]]+`, 'g');
+  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
+    if (/\b(write|writes|writing|written|create|creates|creating|created)\b/i.test(sentence)) continue;
+    for (const [match] of sentence.matchAll(paths)) {
+      const path = match.replace(/[.,;:!?*_]+$/, '');
+      if (!existsSync(path)) throw new Error(`${path} does not exist yet. ${then} once it is written, or drop the path. Nothing was sent.`);
+    }
+  }
+}
+
 /** A set/update tool that was given nothing to set did nothing; say so rather than "Updated". */
 function needOne(args: any, fields: string[], tool: string): void {
   if (!fields.some((k) => args[k] !== undefined)) throw new Error(`${tool}: pass at least one of ${fields.join(', ')}. Nothing was changed.`);
@@ -1072,6 +1090,8 @@ async function runTool(name: string, args: any): Promise<string> {
       const properties = args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties) ? { ...args.properties } : {};
       const untyped = !args.tag && !Object.keys(properties).some((k) => k.toLowerCase() === 'type');
       if (untyped) properties.type = 'other';
+      // A chained minion's brief waits for its leader, which may be the one writing the file.
+      if (args.start_after == null) sharedFilesExist(args.message, 'Start this minion');
       const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
         title: args.title,
         tag: args.tag ?? undefined,
@@ -1215,6 +1235,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'message_ticket': {
       const ticketId = await id(args);
+      sharedFilesExist(args.text ?? args.message, 'Send this');
       // Already started (its leader just shipped) or never parked: say so, and deliver the message anyway.
       const early = args.start_now === true ? await call('POST', `/api/tickets/${ticketId}/start`, {}).then(() => 'Started early, its brief first. ', (e) => `Not started early: ${e.message}. `) : '';
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}) });

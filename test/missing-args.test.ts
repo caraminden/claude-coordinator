@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -35,12 +35,12 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-async function tool(ticket: { id: number }, role: 'coordinator' | 'thread', name: string, args: object): Promise<{ isError?: boolean; text: string }> {
+async function tool(ticket: { id: number }, role: 'coordinator' | 'thread', name: string, args: object, env: Record<string, string> = {}): Promise<{ isError?: boolean; text: string }> {
   const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
       COORDINATOR_PROJECT: String(Citadel.id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: role,
-      COORDINATOR_APP_INSTRUCTIONS: '1',
+      COORDINATOR_APP_INSTRUCTIONS: '1', ...env,
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -188,4 +188,22 @@ test('"needs a recommended option": a recommendation written into the label or d
   assert.deepEqual(q.questions[0].options[0], { label: 'Exe', description: 'Built here.', recommended: true });
   // An explicit flag wins over the words; with neither, it is still refused.
   refused(await card([{ label: 'A' }, { label: 'B', description: 'Recommended for big ones' }]), /needs a recommended option/);
+});
+
+test('a brief naming a shared file that does not exist yet is refused; one asking for it to be written passes', async () => {
+  const shared = join(root, 'shared', 'project');
+  mkdirSync(join(shared, 'handoffs'), { recursive: true });
+  writeFileSync(join(shared, 'handoffs', 'there.md'), '# Here\n');
+  const env = { COORDINATOR_SHARED_DIR: shared };
+  const missing = join(shared, 'handoffs', 'not-yet.md');
+  const count = () => store.listTickets(Citadel.id).length;
+  const before = count();
+  const r = await tool(TM, 'coordinator', 'create_ticket', { title: 'Brief', properties: { type: 'chore' }, message: `Read ${missing} first; it is your whole brief.` }, env);
+  refused(r, new RegExp(`${missing.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} does not exist yet\\. Start this minion once it is written, or drop the path`));
+  assert.equal(count(), before, 'no minion was made');
+  refused(await tool(TM, 'coordinator', 'message_ticket', { ticket_id: Minion.number, text: `See \`${missing}\`.` }, env), /does not exist yet\. Send this once it is written/);
+  // Present, or asked for: it goes through.
+  const ok = await tool(TM, 'coordinator', 'create_ticket', { title: 'Brief two', properties: { type: 'chore' }, message: `Read ${join(shared, 'handoffs', 'there.md')}. When done, write your report to ${missing}.` }, env);
+  assert.ok(!ok.isError, ok.text);
+  assert.ok(!(await tool(TM, 'coordinator', 'message_ticket', { ticket_id: Minion.number, text: `Create ${missing} with the plan.` }, env)).isError);
 });

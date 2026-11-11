@@ -191,6 +191,28 @@ test('a landing waiting for CI finds its run by its commit, as land.sh does', as
   assert.equal(waits.wait(m.id)!.chip, 'land · CI 2/3');
 });
 
+test("a landing waiting for CI passes over an earlier try's red run of the same commit, which land.sh replaces", async () => {
+  const { gh, ci, waits, state, heads, at, now } = setup();
+  const m = minion('running');
+  heads.sha = 'abc123';
+  const f = join(state, 'queue', '0000000001');
+  writeFileSync(f, `100 77\n${now() / 1000 - 30}\n${m.branch}\nwaiting for CI since 12:01\n`);
+  utimesSync(f, now() / 1000, now() / 1000);
+  waits.poll();
+  const runs = 'repos/o/r/actions/workflows/tests.yml/runs';
+  const old = { id: 5, status: 'completed', conclusion: 'failure', created_at: iso(-3600) };
+  gh.answers.set(runs, { workflow_runs: [old] });
+  gh.answers.set('repos/o/r/actions/runs/5/jobs', { jobs: [job('test', { status: 'completed', conclusion: 'failure' })] });
+  await ci.tick();
+  assert.equal(waits.wait(m.id)!.chip, 'land · CI', "not the old run's result");
+  // The run land.sh starts in its place is the one shown; a red run of this wait's own still counts.
+  gh.answers.set(runs, { workflow_runs: [{ id: 9, status: 'completed', conclusion: 'failure', created_at: iso(40) }, old] });
+  gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'in_progress', steps: steps(1, 3) })] });
+  at(125);
+  await ci.tick();
+  assert.equal(waits.wait(m.id)!.chip, 'land · CI 2/3');
+});
+
 test('a landing waiting for CI shows its run on land/<branch>; a fallback says so', async () => {
   const { gh, ci, waits, state, at, now } = setup();
   const m = minion('running');

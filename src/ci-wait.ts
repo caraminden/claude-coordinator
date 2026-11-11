@@ -251,7 +251,9 @@ export class CiRuns {
       if (w.sha === undefined) w.sha = (w.cwd && (await (this.d.head ?? gitHead)(w.cwd))) || '';
       const runs = `repos/${w.slug}/actions/workflows/${LAND_WORKFLOW}/runs?per_page=5&`;
       const body = await this.read(runs + (w.sha ? `head_sha=${w.sha}` : `branch=${encodeURIComponent(`land/${w.branch}`)}`), w.as);
-      const run = (body?.workflow_runs ?? []).find((r: any) => w.sha || at(r.created_at) >= w.since! - 60_000);
+      // A red or cancelled run from before this wait is one land.sh replaces with a new run, so it isn't this wait's.
+      const fresh = (r: any) => at(r.created_at) >= w.since! - 60_000;
+      const run = (body?.workflow_runs ?? []).find((r: any) => (w.sha ? fresh(r) || r.status !== 'completed' || !r.conclusion || r.conclusion === 'success' : fresh(r)));
       if (!run) return;
       w.runs = [run.id]; // its usual is the landing's own CI stage's (Waits)
       w.usual.set(run.id, null);

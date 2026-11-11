@@ -15,6 +15,7 @@
 // with ETags so an unchanged answer (a 304) costs no rate limit.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { APP_NAME } from './appname.ts';
 import { runnerLabel } from './ci-runner.ts';
 import type { Project, Store, User } from './db.ts';
 import { repoSlug } from './prlinks.ts';
@@ -318,10 +319,10 @@ export function addRunnerWaiter(store: Store, ticket: number, reason: string): v
   store.setSetting(RUNNER_WAITERS, [...runnerWaiters(store).filter((w) => w.ticket !== ticket), { ticket, reason }]);
 }
 
-/** The online runners carrying a scheme's label, Windows or Linux. */
+/** The online runners carrying a scheme's label: Windows or Linux, or its session runner's (add-runner.ps1 -Session). */
 export function onlineRunners(runners: Runner[], schemeName: string): Runner[] {
   const label = runnerLabel(schemeName);
-  return label ? runners.filter((r) => r.status === 'online' && r.labels?.some((l) => l.name === label || l.name === `${label}-linux`)) : [];
+  return label ? runners.filter((r) => r.status === 'online' && r.labels?.some((l) => [label, `${label}-linux`, `${label.replace(/-ci$/, '')}-desktop`].includes(l.name))) : [];
 }
 
 // ---------- GitHub ----------
@@ -524,6 +525,7 @@ export class CiHealth {
       const was = saved.problems ?? Object.entries(saved.sent).map(([key, by]) => ({ key, title: Object.values(by)[0] ?? '' }));
       out.push(...was.filter((x) => x.key.startsWith('runner:') && x.title));
       this.sayOnce(`runners:${p.id}`, `CI health: can't list ${slug}'s runners (needs a repo admin's linked GitHub), so offline runners there go unseen.`);
+      this.wakeParked(p, null);
     }
 
     const runs: Run[] = ((await this.read(`repos/${slug}/actions/runs?per_page=${RUNS}`, as))?.workflow_runs ?? [])
@@ -555,20 +557,25 @@ export class CiHealth {
     return out;
   }
 
-  /** Message (once) and drop the scheme's minions parked on its runners, once one of them is online; dismissed ones are dropped. */
-  wakeParked(p: Project, runners: Runner[]) {
+  /**
+   * Message (once) and drop the scheme's minions parked on its runners, once one of them is online; dismissed ones are dropped.
+   * `runners` null: the list can't be read, so nothing would ever say they're back, and the minions hear that instead.
+   */
+  wakeParked(p: Project, runners: Runner[] | null) {
     const all = runnerWaiters(this.store);
     const mine = (w: RunnerWaiter) => this.store.getTicket(w.ticket)?.project_id === p.id;
     const gone = (w: RunnerWaiter) => { const t = this.store.getTicket(w.ticket); return !t || t.status === 'closed'; };
-    const up = onlineRunners(runners, p.name);
-    const woken = up.length && this.deps.wake ? all.filter((w) => mine(w) && !gone(w)) : [];
+    const up = runners && onlineRunners(runners, p.name);
+    const woken = (!up || up.length) && this.deps.wake ? all.filter((w) => mine(w) && !gone(w)) : [];
     if (!woken.length && !all.some(gone)) return;
     // Dropped before sending, so a send that throws can't wake anyone twice.
     this.store.setSetting(RUNNER_WAITERS, all.filter((w) => !gone(w) && !woken.includes(w)));
-    const names = up.map((r) => r.name).join(', ');
+    const names = up?.map((r) => r.name).join(', ');
     for (const w of woken) {
+      const reason = w.reason.replace(/[.\s]+$/, '');
       try {
-        this.deps.wake!(w.ticket, `${p.name}'s CI runners are back (${names} online): ${w.reason.replace(/[.\s]+$/, '')}. If land parks again on no runner while they're online, the workflow's runs-on may not match them: ask a person instead of parking again.`);
+        if (!up) this.deps.wake!(w.ticket, `${APP_NAME} can't read ${p.name}'s CI runners with the scheme's GitHub login, so it can't tell when they are back: ask a person whether they are, then ${reason}.`);
+        else this.deps.wake!(w.ticket, `${p.name}'s CI runners are back (${names} online): ${reason}. If land parks again on no runner while they're online, the workflow's runs-on may not match them: ask a person instead of parking again.`);
       } catch (err) {
         console.error(`Waking #${w.ticket} for its runners failed:`, err); // the others still get theirs
       }

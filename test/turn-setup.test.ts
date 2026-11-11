@@ -291,6 +291,18 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   assert.ok(!tm.system.includes(HEAVY_LINE));
 });
 
+test("the land tool's land.sh on the host gets the scheme's shared folder its minion's turns get, for its retro-log lines", async () => {
+  runner.sharedDir = (p) => join(root, 'projects', String(p.id), 'shared', 'project');
+  try {
+    const t = await turn('ticket', 'connected');
+    assert.equal(t.env.COORDINATOR_SHARED_DIR, join(root, 'projects', String(store.getTicket(t.id)!.project_id), 'shared', 'project'));
+    assert.equal(runner.hostEnv(store.getTicket(t.id)!, 'token').COORDINATOR_SHARED_DIR, t.env.COORDINATOR_SHARED_DIR);
+  } finally {
+    runner.sharedDir = () => null;
+  }
+  assert.ok(!('COORDINATOR_SHARED_DIR' in runner.hostEnv(store.getTicket((await turn('ticket', 'connected')).id)!, 'token')), 'none without one');
+});
+
 test("the system prompt travels as a file, so a `pkill -f` for a word in it can't match claude itself", async () => {
   // Delve #14 SIGTERMed its own claude: `pgrep -f dotnet` matched the prompt's "dotnet build" in claude's argv.
   const project = store.createProject(`P${Math.random()}`, null);

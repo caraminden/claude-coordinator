@@ -983,7 +983,7 @@ const THREAD_TOOLS = [
   },
   {
     name: 'wake_when_runners_back',
-    description: `Park until this scheme's CI runners are back: after land.sh exits 75 (CI gave no verdict, nearly always because the machine the runners run on is off), call this, set state parked and end your turn. ${APP_NAME} checks the scheme's GitHub runners every 5 minutes and messages you once one labelled <scheme-slug>-ci or <scheme-slug>-ci-linux is online, so you can run land again. Woken once, then forgotten; a second call replaces the first.`,
+    description: `Park until this scheme's CI runners are back: after land.sh exits 75 (CI gave no verdict, nearly always because the machine the runners run on is off), call this, set state parked and end your turn. ${APP_NAME} checks the scheme's GitHub runners every 5 minutes and messages you once one labelled <scheme-slug>-ci, <scheme-slug>-ci-linux or <scheme-slug>-desktop is online, so you can run land again. If it can't read the runners with the scheme's GitHub login, it says so at its next check instead. Woken once, then forgotten; a second call replaces the first.`,
     inputSchema: { type: 'object', properties: { reason: { type: 'string', maxLength: 1000, description: 'What to do once they are back (at most 1,000 characters); it comes back in the wake message, e.g. "run tools/land.sh again"' } }, required: ['reason'] },
   },
   ...(DEPLOYS && IN_CONTAINER

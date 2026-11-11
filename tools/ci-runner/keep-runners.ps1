@@ -139,7 +139,7 @@ if ($Prove) {
   # Each child is cmd spinning in an endless loop, one core's worth, like one compiler of a parallel build.
   $burn = "Start-Sleep -Seconds 3; 1..$cores | ForEach-Object { Start-Process -FilePath `$env:ComSpec -ArgumentList '/c for /l %i in (0,0,1) do @rem' -WindowStyle Hidden }; Start-Sleep -Seconds 60"
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($burn))
-  $parent = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile', '-EncodedCommand', $encoded -WindowStyle Hidden -PassThru
+  $parent = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList '-NoProfile', '-EncodedCommand', $encoded -WindowStyle Hidden -PassThru
   try {
     $err = [CitadelCiJob]::Assign($job, $parent.Id, 0)
     if ($err) { throw "Couldn't put the test's parent process in its job (Win32 error $err)." }

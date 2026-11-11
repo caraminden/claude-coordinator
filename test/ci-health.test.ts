@@ -470,10 +470,28 @@ test('wake_when_runners_back (#541): a minion parked on CI hears once, when a ru
   assert.deepEqual(runnerWaiters(w.store), []);
 });
 
-test('onlineRunners matches the scheme label and its -linux twin, online only', () => {
+test("wake_when_runners_back: a runner list the scheme's GitHub login can't read tells the parked minion once and drops it", async () => {
+  const w = world();
+  const sent: [number, string][] = [];
+  const health = new CiHealth(w.store, { ...w.deps, wake: (id, text) => sent.push([id, text]) });
+  const parked = w.store.createTicket({ project_id: w.peek.id, title: 'parked', permission_mode: 'default', created_by: 1 } as any).id;
+  addRunnerWaiter(w.store, parked, 'run tools/land.sh again.');
+  w.gh.runnersDenied = true;
+  // Without a way to send, nobody is dropped.
+  await w.health.tick(NOW);
+  assert.deepEqual(runnerWaiters(w.store).map((x) => x.ticket), [parked]);
+  await health.tick(NOW + 5 * MIN);
+  await health.tick(NOW + 10 * MIN);
+  assert.equal(sent.length, 1, 'once, not every poll');
+  assert.equal(sent[0][0], parked);
+  assert.match(sent[0][1], /can't read Peek Auras's CI runners with the scheme's GitHub login, so it can't tell when they are back: ask a person whether they are, then run tools\/land\.sh again\.$/);
+  assert.deepEqual(runnerWaiters(w.store), []);
+});
+
+test('onlineRunners matches the scheme label, its -linux twin and the -desktop session runner, online only', () => {
   const r = (name: string, status: string, ...labels: string[]) => ({ name, status, labels: labels.map((name) => ({ name })) });
-  const got = onlineRunners([r('a', 'online', 'peek-auras-ci'), r('b', 'online', 'peek-auras-ci-linux'), r('c', 'offline', 'peek-auras-ci'), r('d', 'online', 'peek-auras-ci-mac'), { name: 'e', status: 'online' }], 'Peek Auras');
-  assert.deepEqual(got.map((x) => x.name), ['a', 'b']);
+  const got = onlineRunners([r('a', 'online', 'peek-auras-ci'), r('b', 'online', 'peek-auras-ci-linux'), r('c', 'offline', 'peek-auras-ci'), r('d', 'online', 'peek-auras-ci-mac'), { name: 'e', status: 'online' }, r('f', 'online', 'peek-auras-desktop'), r('g', 'offline', 'peek-auras-desktop'), r('h', 'online', 'delve-desktop')], 'Peek Auras');
+  assert.deepEqual(got.map((x) => x.name), ['a', 'b', 'f']);
 });
 
 // ---------- the land gate's alarm (#561) ----------

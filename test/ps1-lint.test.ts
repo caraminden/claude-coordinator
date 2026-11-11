@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -61,4 +61,26 @@ test('a path that matches no files is exit 2, not clean', { skip, timeout: 120_0
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Not lint, but the same pwsh: list-runners.ps1 run on Linux with its two Windows cmdlets stood in for.
+test("list-runners.ps1 lists a hand-made logon task with no folder as not Citadel's", { skip: found.error ? 'no pwsh on PATH' : false, timeout: 60_000 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ps1-list-'));
+  try {
+    const stub = join(dir, 'stub.ps1');
+    writeFileSync(stub, `function Get-CimInstance { }
+function Get-ScheduledTask { [pscustomobject]@{ TaskName = 'GitHub runner by hand'; State = 'Ready'; Actions = @([pscustomobject]@{ WorkingDirectory = $null }); Principal = [pscustomobject]@{ UserId = 'cara' } } }
+& $args[0]
+`);
+    const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', stub, 'tools/ci-runner/list-runners.ps1'], { encoding: 'utf8' });
+    assert.match(r.stdout, /^GitHub runner by hand {2}session, Ready, for cara {4}\(not Citadel's\)$/m, r.stdout + r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// $PSHOME is PowerShell 7's own folder when a script is run from it, and that has no powershell.exe.
+test('the Windows scripts start Windows PowerShell by its System32 path, not from $PSHOME', () => {
+  for (const f of ps1s('tools/ci-runner')) assert.doesNotMatch(readFileSync(f, 'utf8'), /\$PSHOME/, f);
+  for (const f of ['install-runner-agent.ps1', 'keep-runners.ps1']) assert.ok(readFileSync(join(root, 'tools/ci-runner', f), 'utf8').includes('"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"'), f);
 });

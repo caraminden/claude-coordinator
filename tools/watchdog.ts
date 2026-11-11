@@ -45,7 +45,10 @@ if (message) {
   else if (!existsSync(keyFile)) console.error(`No ${keyFile}: nothing to sign pushes with.`);
   else {
     const keys = loadVapidKeys(dataDir);
-    const results = await Promise.all(subs.map((s) => postPush(s, s.msg!, keys, 'https://localhost').then(
+    // The subject the server signs with (server.ts): a push service may refuse another.
+    const stored = db.prepare("SELECT value FROM settings WHERE key = 'push_subject'").get() as { value: string } | undefined;
+    const subject = env.PUSH_SUBJECT ?? (stored ? JSON.parse(stored.value) : null) ?? 'https://localhost';
+    const results = await Promise.all(subs.map((s) => postPush(s, s.msg!, keys, subject).then(
       async (res) => (res.ok || console.error(`Push to ${s.name} answered ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`), res.ok),
       (err) => (console.error(`Push to ${s.name} failed: ${err.message}`), false))));
     // One device that got it is enough: the alert is out (a phone that missed it hears the all-clear).

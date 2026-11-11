@@ -31,7 +31,7 @@ foreach ($s in $services) {
   Write-Host "$($s.Name)  $($s.State), $($s.StartMode)  $dir  ($(Get-Whose $dir))"
 }
 foreach ($t in $tasks) {
-  $dir = @($t.Actions | ForEach-Object { $_.WorkingDirectory } | Where-Object { $_ })[0]
+  $dir = $t.Actions | ForEach-Object { $_.WorkingDirectory } | Where-Object { $_ } | Select-Object -First 1
   $whose = if ($dir) { Get-Whose $dir } else { "not Citadel's" }
   Write-Host "$($t.TaskName)  session, $($t.State), for $($t.Principal.UserId)  $dir  ($whose)"
 }

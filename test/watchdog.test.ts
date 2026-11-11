@@ -171,8 +171,8 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   chmodSync(fake, 0o755);
   const stateFile = join(dir, 'state.json');
   writeFileSync(stateFile, JSON.stringify({ citadel: { title: 'Citadel', since: Date.now() - 11 * MIN, why: 'failed', alerted: false } }));
-  const run = () => new Promise<string>((ok, fail) => execFile(process.execPath, ['tools/watchdog.ts'], {
-    env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake },
+  const run = (env: object = {}) => new Promise<string>((ok, fail) => execFile(process.execPath, ['tools/watchdog.ts'], {
+    env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, ...env },
   }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out)))));
   const out = await run();
   assert.match(out, /1 watched, down: Citadel: failed/);
@@ -181,6 +181,16 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   assert.match(got[0].headers.authorization, new RegExp(`^vapid t=.+, k=${keys.publicKey}$`));
   assert.equal(got[0].headers.topic, 'citadel-watchdog');
   assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).citadel.alerted, true);
+  const sub = () => JSON.parse(Buffer.from(/t=[^.]+\.([^.]+)\./.exec(got.at(-1)!.headers.authorization)![1], 'base64url').toString()).sub;
+  assert.equal(sub(), 'https://localhost', 'no subject set anywhere');
   await run();
   assert.equal(got.length, 1, 'no second push while it stays down');
+  // Signed with the server's subject: the stored setting, or PUSH_SUBJECT over it.
+  const again = (env: object = {}) => (writeFileSync(stateFile, JSON.stringify({ citadel: { title: 'Citadel', since: Date.now() - 11 * MIN, why: 'failed', alerted: false } })), run(env));
+  store.setSetting('push_subject', 'https://citadel.example');
+  await again();
+  assert.equal(sub(), 'https://citadel.example');
+  await again({ PUSH_SUBJECT: 'mailto:ops@example.com' });
+  assert.equal(sub(), 'mailto:ops@example.com');
+  assert.equal(got.length, 3);
 });

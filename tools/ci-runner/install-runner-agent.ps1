@@ -131,7 +131,7 @@ if ($said -match 'Connected to ') {
 # 7. The cap and yield (#552), proved on this PC: the agent's own copy is already holding the runners.
 Write-Host ''
 Write-Host 'Proving the CI cap on this PC (about 20 seconds, no runner touched)...'
-& (Join-Path $PSHOME 'powershell.exe') -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'keep-runners.ps1') -Prove
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'keep-runners.ps1') -Prove
 if ($LASTEXITCODE -ne 0) { Write-Host 'The CI cap did not hold here: paste the lines above to the minion.' -ForegroundColor Yellow }
 Write-Host ''
 Write-Host "Its log:   Get-Content -Wait `"$log`""

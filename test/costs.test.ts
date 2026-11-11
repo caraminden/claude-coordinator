@@ -85,3 +85,21 @@ test("an even day's share of the weekly limit, priced from the meter and what tu
   // A meter that has moved but no turns priced in its window yet: the last estimate too.
   close(dayBudget(store, { utilization: 0.5, resetsAt: resetsAt + 30 * 86400_000 })!, 210 / 0.1 / 7);
 });
+
+test("the day budget prices the server login's meter from the server login's turns only, not other payers' (#468 S05-3)", () => {
+  const { store, t } = setup('payer');
+  const resetsAt = Date.now() + 5 * 86400_000;
+  store.recordTurn(t.id, { session_id: 'host', ended_at: Date.now(), session_cost_usd: 140 });
+  const theirs = store.recordTurn(t.id, { session_id: 'josh', ended_at: Date.now(), session_cost_usd: 140, payer: 7 });
+  assert.equal(theirs.payer, 7);
+  close(dayBudget(store, { utilization: 0.1, resetsAt })!, 140 / 0.1 / 7);
+});
+
+test("a meter whose reset time has passed keeps the last estimate rather than summing turns from before its week (#468 S05-3)", () => {
+  const { store, t } = setup('stale');
+  const now = Date.now();
+  store.recordTurn(t.id, { session_id: 'a', ended_at: now - 86400_000, session_cost_usd: 70 });
+  close(dayBudget(store, { utilization: 0.1, resetsAt: now + 5 * 86400_000 }, now)!, 70 / 0.1 / 7);
+  store.recordTurn(t.id, { session_id: 'old', ended_at: now - 8 * 86400_000, session_cost_usd: 700 });
+  close(dayBudget(store, { utilization: 0.2, resetsAt: now - 2 * 86400_000 }, now)!, 70 / 0.1 / 7);
+});

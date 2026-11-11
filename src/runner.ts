@@ -2301,6 +2301,7 @@ export class Runner {
       const turn = this.store.recordTurn(ticketId, {
         event_id: row.id, session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: row.created_at,
         session_cost_usd: ev.total_cost_usd, duration_ms: ev.duration_ms, usage: ev.usage,
+        payer: this.payerOf(this.store.getSetting<TurnState>(turnKey(ticketId))?.person),
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
     }

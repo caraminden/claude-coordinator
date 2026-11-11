@@ -250,6 +250,8 @@ export interface Turn {
   output_tokens: number | null;
   cache_read_tokens: number | null;
   cache_write_tokens: number | null;
+  /** Whose plan paid (Runner.payerOf): null for the server login's, else that person's id. */
+  payer: number | null;
 }
 
 /** What a turn's result event says, for Store.recordTurn. */
@@ -260,6 +262,7 @@ export interface TurnResult {
   session_cost_usd: number;
   duration_ms?: number | null;
   usage?: any;
+  payer?: number | null;
 }
 
 /** A person's own named property filter in a scheme (#194): key → the values ticked for it. */
@@ -453,7 +456,8 @@ CREATE TABLE IF NOT EXISTS turns (
   input_tokens INTEGER,
   output_tokens INTEGER,
   cache_read_tokens INTEGER,
-  cache_write_tokens INTEGER
+  cache_write_tokens INTEGER,
+  payer INTEGER
 );
 CREATE INDEX IF NOT EXISTS turns_ticket ON turns(ticket_id, id);
 CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
@@ -688,6 +692,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'always_on', 'ALTER TABLE machines ADD COLUMN always_on INTEGER NOT NULL DEFAULT 1'],
   ['machines', 'last_check', 'ALTER TABLE machines ADD COLUMN last_check TEXT'],
   ['machines', 'lend', 'ALTER TABLE machines ADD COLUMN lend TEXT'],
+  ['turns', 'payer', 'ALTER TABLE turns ADD COLUMN payer INTEGER'],
   ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
   ['contraptions', 'repo', 'ALTER TABLE contraptions ADD COLUMN repo TEXT'],
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
@@ -735,6 +740,7 @@ export const SCHEMA_HISTORY = [
   [33, 'machines.always_on, last_check (#437)'],
   [34, 'one lending list per machine, projects.machine_tools unread, machines.scoped read only for a CI runner host (#438)'],
   [35, 'machines.lend (#439)'],
+  [36, 'turns.payer (#468 S05-3)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1878,9 +1884,9 @@ export class Store {
     const n = (v: unknown) => (typeof v === 'number' ? v : null);
     const row = this.db
       .prepare(`INSERT INTO turns (ticket_id, event_id, session_id, ended_at, cost_usd, session_cost_usd, duration_ms,
-          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
+          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
       .get(ticketId, r.event_id ?? null, r.session_id ?? null, r.ended_at, r.session_cost_usd - base, r.session_cost_usd,
-        n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens));
+        n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens), r.payer ?? null);
     return row as unknown as Turn;
   }
 
@@ -1934,11 +1940,11 @@ export class Store {
     return (this.db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?').get(ticketId) as { c: number }).c;
   }
 
-  /** Cost per local day ('2026-10-28') and project, for turns ended at or after `since`. */
-  dailyCosts(since: number): { day: string; project_id: number; cost: number; turns: number }[] {
+  /** Cost per local day ('2026-10-28') and project, for turns ended at or after `since`; `hostOnly`: the server login's turns only. */
+  dailyCosts(since: number, hostOnly = false): { day: string; project_id: number; cost: number; turns: number }[] {
     return this.db
       .prepare(`SELECT date(u.ended_at / 1000, 'unixepoch', 'localtime') AS day, t.project_id, SUM(u.cost_usd) AS cost, COUNT(*) AS turns
-          FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? GROUP BY day, t.project_id ORDER BY day`)
+          FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? ${hostOnly ? 'AND u.payer IS NULL ' : ''}GROUP BY day, t.project_id ORDER BY day`)
       .all(since) as unknown as { day: string; project_id: number; cost: number; turns: number }[];
   }
 

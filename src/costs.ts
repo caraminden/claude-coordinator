@@ -51,10 +51,12 @@ const LAST_BUDGET = 'day_budget';
  * weekly window opened, scaled up by how full the meter is. Early in a window, while the meter is too coarse,
  * the last window's estimate stands in, so shares don't drop back to dollars every reset; null before any.
  */
-export function dayBudget(store: Store, weekly: { utilization: number; resetsAt: number | null } | null | undefined): number | null {
+export function dayBudget(store: Store, weekly: { utilization: number; resetsAt: number | null } | null | undefined, now = Date.now()): number | null {
   const last = store.getSetting<number>(LAST_BUDGET);
-  if (!weekly?.resetsAt || weekly.utilization < MIN_UTILIZATION) return last;
-  const spent = store.dailyCosts(weekly.resetsAt - 7 * 86400_000).reduce((sum, r) => sum + r.cost, 0);
+  // A reset time already past: the meter is last week's, and its window's turns are gone from view.
+  if (!weekly?.resetsAt || weekly.resetsAt <= now || weekly.utilization < MIN_UTILIZATION) return last;
+  // The meter is the server login's plan: only its turns priced it (#468 S05-3).
+  const spent = store.dailyCosts(weekly.resetsAt - 7 * 86400_000, true).reduce((sum, r) => sum + r.cost, 0);
   if (!(spent > 0)) return last;
   const budget = spent / weekly.utilization / 7;
   if (budget !== last) store.setSetting(LAST_BUDGET, budget);

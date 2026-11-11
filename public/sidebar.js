@@ -247,7 +247,7 @@ export function renderSidebar() {
   }
   el.replaceChildren(
     pinnedGroup, ...sections, closedGroup,
-    !all.length ? h('p', { class: 'muted' }, 'No minions yet. Ask the Taskmaster to start one, or type in the box above.')
+    !all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one, or type in the box above.')
       : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : '');
 }
 
@@ -333,7 +333,15 @@ function renderThreadResults(el, tickets) {
       h('h3', {}, 'Results', h('span', { class: 'count' }, results.length)),
       results.length
         ? results.map((t) => threadRow(t))
-        : h('p', { class: 'muted small' }, 'No minion has that in its title, number or properties.')),
+        : h('div', { class: 'empty-state' },
+          h('p', {}, 'No minion has “', threadSearch.q.trim(), '” in its title, number or properties.'),
+          h('button', { type: 'button', class: 'secondary small', onclick: () => {
+            const input = document.querySelector('.thread-search');
+            if (!input) return;
+            input.value = '';
+            input.dispatchEvent(new Event('input'));
+            input.focus();
+          } }, 'Clear search'))),
     meaningSection());
 }
 

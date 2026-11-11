@@ -283,6 +283,8 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .act .body pre.err { color: var(--error); }
 .note { color: var(--muted); font-size: 0.85em; text-align: center; }
 .note.error { color: var(--error); white-space: pre-wrap; text-align: left; }
+/* A turn that died is a card in the error's tone, not loose red text in the log (#471). */
+#log .note.error { padding: 0.5rem 0.75rem; border-radius: 6px; border-left: 3px solid var(--error); background: color-mix(in srgb, var(--error) 8%, var(--bg)); color: var(--ink); font-size: 0.85em; overflow-wrap: anywhere; }
 /* A note with output under it (#339): the line stays centred, ▸ opens the output, which reads left to right. */
 .note.detail > summary { cursor: pointer; list-style: none; }
 .note.detail > summary::-webkit-details-marker { display: none; }

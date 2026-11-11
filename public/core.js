@@ -920,7 +920,12 @@ export function renderInvite(token) {
     who.replaceChildren('This sets the password for ', h('strong', {}, r.name), ', who signs in as ', h('strong', {}, r.login), '.');
     form.login.value = r.login;
     form.querySelector('button').disabled = false;
-  }).catch((ex) => { who.textContent = ex.message; who.className = 'error'; });
+  }).catch((ex) => {
+    // A dead link: say so, and the way on is signing in (or asking for a new link), not a form that can't send.
+    for (const el of form.querySelectorAll('label, button')) el.remove();
+    who.replaceWith(h('p', { class: 'cui-notice', 'data-tone': 'danger', role: 'alert' }, ex.message));
+    form.append(h('a', { class: 'button', href: location.pathname }, 'Go to sign in'));
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     err.hidden = true;

@@ -768,10 +768,14 @@ test('the head of the line waits for a lock held outside it (the queued restart)
 test('a waiter that is frozen is passed over: the one behind it takes the lock, and it goes when it wakes', { timeout: 60_000 }, async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
-  const b = waiter(state, 'b', 'true');
+  let b: ReturnType<typeof waiter> | undefined;
   let c: ReturnType<typeof waiter> | undefined;
   try {
-    await until('b to say its place', () => /2nd in line/.test(b.stderr()));
+    // a first: started together, b can take the first ticket under load and never be 2nd (#564).
+    await until('a to hold the lock', () => order(state).length === 1);
+    b = waiter(state, 'b', 'true');
+    const bs = b.stderr;
+    await until('b to say its place', () => /2nd in line/.test(bs()));
     process.kill(b.child.pid!, 'SIGSTOP');
     c = waiter(state, 'c', `until [ -e '${state}/go2' ]; do sleep 0.05; done`, { DEPLOY_QUEUE_STALL: '3' });
     const cs = c.stderr;

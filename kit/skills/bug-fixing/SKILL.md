@@ -1,6 +1,6 @@
 ---
 name: bug-fixing
-description: How to fix a bug. Reproduce it as a failing test first, find the cause rather than the symptom, make the smallest fix, prove it, report in five lines. Use when someone reports wrong output, a button that does nothing, a crash, data that comes back wrong, or behaviour that contradicts a rule, a spec or a doc comment. Escalate to diagnosing-bugs when the first reproduction attempt fails. Not for complaints about pace or feel.
+description: Open this before touching code for any bug report, even when the reporter hands over the fix or a deadline: it holds the order (proof before fix) that stops a quick change from hiding the bug. Use for wrong output, a button that does nothing, a crash, data that comes back wrong, or behaviour that contradicts a rule, a spec or a doc comment. Not for complaints about pace or feel.
 ---
 
 # Bug fixing

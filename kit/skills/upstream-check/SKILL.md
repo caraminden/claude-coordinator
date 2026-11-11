@@ -67,7 +67,8 @@ A check never applies an upstream change to a copy itself, even to an unchanged 
 reaches every scheme, so it goes through a handoff and review like any change. (The Checked
 bumps in step 4 are the check's own change, and it ships them.) Whoever applies one (the
 handoff's minion, or you when a person asks for the re-sync) runs steps 1 to 3 on that row
-first, takes the text from the upstream commit (`git show <sha>:<path>`), not from a folder
+first, cloning even when HEAD matches Checked and diffing from Pinned (what our copy holds) to
+the commit it takes, then takes the text from the upstream commit (`git show <sha>:<path>`), not from a folder
 someone hands over, keeps what the row's Copied cell lists, sets Pinned and Checked to that
 commit's short hash, and ships through `citadel:self-review`. A row without a commit can't be
 checked again.

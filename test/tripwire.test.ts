@@ -337,6 +337,12 @@ const BLOCKED: [string, string?][] = [
   ['deno run -A server.ts'],
   ["PORT=8700 bash -c 'node server.ts'"],
   ["DATA_DIR=/tmp/d bash -c 'node tools/x.ts && node server.ts'"],
+  // #468 S01-11 review: an option the tripwire doesn't know may take the next word as its value, so server.ts after it may be the script
+  ['node --diagnostic-dir ./diag server.ts'],
+  ['cd ~/claude-coordinator && node --heap-prof-dir ./h server.ts'],
+  ['node --diagnostic-dir /tmp server.ts'],
+  ['node --cpu-prof-dir ./p --report-dir ./r server.ts'],
+  ['node --some-future-option ./x.ts server.ts'],
   // #468 S01-12: a search pattern or a message isn't read, but the files a command reads still are
   ['grep -e token ~/.ssh/id_rsa'],
   ['grep -f ~/.ssh/id_rsa src/x.ts'],
@@ -568,6 +574,10 @@ const ALLOWED = [
   'node tools/count.ts src/server.ts',
   'node --test-reporter spec tools/count.ts ~/claude-coordinator/server.ts',
   "DATA_DIR=/tmp/d PORT=8700 bash -c 'node server.ts'",
+  // #468 S01-11 review: an option's value or a known flag before the script, then server.ts as its argument
+  'node --diagnostic-dir ./diag tools/count.ts src/server.ts',
+  'node --experimental-strip-types tools/count.ts src/server.ts',
+  'node --no-warnings --test-reporter=spec tools/count.ts src/server.ts',
   // #468 S01-12: words that only look like paths: a search pattern, a commit message or PR text, an echoed systemctl
   "grep -rn '/home/cody' src",
   "grep -n '~/.ssh' README.md",

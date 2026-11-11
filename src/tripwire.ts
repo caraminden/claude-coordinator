@@ -545,8 +545,8 @@ const METADATA = new Set(['ls', 'stat', 'test', '[', '[[', 'du', 'find', 'namei'
 const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock']);
 const KEYWORDS = new Set(['!', '{', '}', 'then', 'do', 'else', 'if', 'while', 'until', 'elif', 'fi', 'done', 'esac']);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
-// node, tsx, bun and deno options whose value is the next word (#468 S01-11).
-const RUNNER_VALUE = /^(-r|--require|--import|--loader|--experimental-loader|-C|--conditions|--env-file|--env-file-if-exists|--input-type|--test-reporter|--test-reporter-destination|--watch-path|--inspect-port|--title|--disable-warning|--redirect-warnings|--preload|--config|--tsconfig|--cwd)$/;
+// node, tsx, bun and deno options known to take no value; any other may take the next word as its value (#468 S01-11 review).
+const RUNNER_FLAG = /^(-|--|-A|-i|--interactive|--test|--watch|--experimental-strip-types|--enable-source-maps|--expose-gc|--trace-warnings|--trace-uncaught|--trace-deprecation|--inspect|--inspect-brk|--inspect-wait|--test-only|--test-force-exit|--experimental-test-coverage|--no-[\w-]+)$/;
 // ssh and friends take key paths and remote paths; their arguments are not local reads or writes.
 const REMOTE = new Set(['ssh', 'scp', 'sftp', 'ssh-add', 'ssh-keygen', 'ssh-copy-id', 'mosh']);
 const APP_UNITS = /^(claude-coordinator|perigee-godot[\w-]*|citadel-claude[\w-]*)(\.service)?$/;
@@ -1201,9 +1201,13 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const npmStart = /^(npm|pnpm|yarn)$/.test(name) && (args[0]?.text === 'start' || (args[0]?.text === 'run' && args[1]?.text === 'start'));
   // The runner's own words: its options, their values (--import ./x.ts) and its script, not the script's arguments
   // (`node tools/count.ts src/server.ts`, #468 S01-11). With -e or -p there's no script file, so every word counts.
+  // A word right after an option that may take a value may be that value, so the script may be the next one: both count.
   const runnerWords = (ws: Word[]): Word[] => {
     if (ws.some((w) => /^(-e|--eval|-p|--print)$/.test(w.text))) return ws;
-    const script = ws.findIndex((w, k) => !w.text.startsWith('-') && /[./]/.test(w.text) && !RUNNER_VALUE.test(ws[k - 1]?.text ?? ''));
+    const script = ws.findIndex((w, k) => {
+      const prev = ws[k - 1]?.text ?? '';
+      return !w.text.startsWith('-') && /[./]/.test(w.text) && !(prev.startsWith('-') && !prev.includes('=') && !RUNNER_FLAG.test(prev));
+    });
     return script < 0 ? ws : ws.slice(0, script + 1);
   };
   const own = runner >= 0 ? runnerWords(words.slice(runner + 1)) : [];

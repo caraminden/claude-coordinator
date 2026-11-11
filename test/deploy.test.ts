@@ -366,13 +366,15 @@ test('deploy.sh copies the database while the live server keeps writing it (#497
 });
 
 // A stand-in server whose answer to each request the test picks: 'reset' drops the connection unanswered,
-// 'hang' never answers, a number is the status to answer with, a string is a 200 JSON body.
+// 'hang' never answers, a number is the status to answer with, a string is a 200 JSON body. Each request's
+// `at` is performance.now(), not Date.now(): tests time deploy.sh by the gaps between them, and a wall clock
+// can step (CI's WSL runner steps back ~2.2 s every ~32 s, which made a 3 s gap read as 0.8 s, #528).
 async function standIn(answer: (req: import('node:http').IncomingMessage, body: string) => 'reset' | 'hang' | number | string | Promise<string>) {
   const seen: { url: string; body: string; at: number }[] = [];
   const srv = createHttpServer((req, res) => {
     let body = '';
     req.on('data', (d) => (body += d)).on('end', async () => {
-      seen.push({ url: req.url ?? '', body, at: Date.now() });
+      seen.push({ url: req.url ?? '', body, at: performance.now() });
       const a = await answer(req, body);
       if (a === 'reset') return req.socket.destroy();
       if (a === 'hang') return;
@@ -406,11 +408,11 @@ test('deploy.sh retries a report the server never got, but not one it may alread
     slow.close();
   }
   // A connection never made in time is a report the server never got: it goes again.
-  const t0 = Date.now();
+  const t0 = performance.now();
   const r = await post('http://10.255.255.1:9', { DEPLOY_REPORT_WAIT: '1', DEPLOY_REPORT_RETRY: '3' });
   assert.match(r.stderr, /could not post the report to minion 7's chat \(curl exit (28|7)\)/);
   assert.doesNotMatch(r.stderr, /no answer from the server/);
-  assert.ok(Date.now() - t0 >= 2500, 'retried until DEPLOY_REPORT_RETRY ran out');
+  assert.ok(performance.now() - t0 >= 2500, 'retried until DEPLOY_REPORT_RETRY ran out');
   // A refusal won't change on a retry.
   const refused = await standIn(() => 403);
   try {

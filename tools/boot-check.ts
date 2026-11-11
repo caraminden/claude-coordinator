@@ -37,10 +37,11 @@ const fail = (why: string): never => {
 // limit; on a loaded box the steps together can take two minutes. Armed again after the copy, which
 // grows with the database while the boot does not, so the copy has its own 3 minutes (#497).
 let backstop: NodeJS.Timeout | undefined;
+let copied = false;
 const arm = () => {
   clearTimeout(backstop);
   backstop = setTimeout(() => {
-    console.error(`The boot check did not finish within 3 minutes (stuck ${((Date.now() - stepAt) / 1000).toFixed(0)} s on: ${step})${log ? `\n--- server output ---\n${log.slice(-3000)}` : ''}`);
+    console.error(`The boot check did not finish within 3 minutes${copied ? ' after the copy' : ''} (stuck ${((Date.now() - stepAt) / 1000).toFixed(0)} s on: ${step}; ${((Date.now() - start) / 1000).toFixed(0)} s in all)${log ? `\n--- server output ---\n${log.slice(-3000)}` : ''}`);
     for (const p of procs) p.kill('SIGKILL');
     rmSync(root, { recursive: true, force: true });
     process.exit(1);
@@ -59,6 +60,7 @@ try {
   begin('copying the database');
   const copy = join(root, 'coordinator.db');
   await copyDb(db, copy);
+  copied = true;
   arm();
 
   // The turns to start: the Taskmaster of the scheme with the most minions (the largest arguments)

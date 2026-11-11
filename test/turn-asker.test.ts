@@ -152,7 +152,7 @@ test("a contraption's ask is its person's, and a held relay keeps the asker it h
 test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one run as an admin', async () => {
   const tokens = new Auth(PASSWORD, SECRET);
   const srv = await bootServer({ root });
-  after(() => srv.proc.kill());
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const as = async (method: string, path: string, body?: object) => {
     const res = await fetch(srv.base + path, {
       method, headers: { Authorization: `Bearer ${tokens.agentToken(CitadelTM.id)}`, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body),

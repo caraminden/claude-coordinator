@@ -7,12 +7,13 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { promptMessage } from '../src/prompts.ts';
 import { isUploadName, safeFileName, saveUpload, UploadTooLarge } from '../src/uploads.ts';
-import { agentToken, bootServer, stopProcs } from './helpers.ts';
+import { agentToken, bootServer, stopProcs, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'uploads-'));
 const procs: ChildProcess[] = [];
 after(async () => {
   await stopProcs(procs);
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

@@ -15,7 +15,6 @@ import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 const root = mkdtempSync(join(tmpdir(), 'shared-pins-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
 
 const store = new Store(join(data, 'coordinator.db'));
 const A = store.createProject('A', null);
@@ -46,7 +45,10 @@ let srv: Booted;
 before(async () => {
   srv = await bootServer({ root });
 });
-after(() => srv?.proc.kill());
+after(async () => {
+  await srv?.stop(); // ends the server and its turns before the folder goes (#218)
+  rmSync(root, { recursive: true, force: true });
+});
 
 async function tool(ticket: { id: number; project_id: number; kind: string }, name: string, args: object): Promise<{ text: string; error: boolean }> {
   const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {

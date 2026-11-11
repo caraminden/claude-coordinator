@@ -7,14 +7,17 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { ICON_PATHS, MAX_ICON_BYTES } from '../src/scheme-icon.ts';
-import { bootServer } from './helpers.ts';
+import { bootServer, stopTurns } from './helpers.ts';
 
 const ICON_PATH = ICON_PATHS[0];
 
 const root = mkdtempSync(join(tmpdir(), 'scheme-icon-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="red"/></svg>';
 const store = new Store(join(data, 'coordinator.db'));
@@ -47,7 +50,7 @@ writeFileSync(join(fallback.repo, 'public', 'icon.svg'), SVG.replace('red', 'gre
 
 test('a scheme favicon goes to its people only, inert, and is left out when there is none', { timeout: 60_000 }, async () => {
   const srv = await bootServer({ root });
-  after(() => srv.proc.kill());
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const invited = async (name: string) => {
     const made = await fetch(`${srv.base}/api/people`, { method: 'POST', headers: { Cookie: srv.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => r.json());
     const res = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });

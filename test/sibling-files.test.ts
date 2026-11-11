@@ -15,7 +15,6 @@ import { agentToken, bootServer, PASSWORD, SECRET, type Booted } from './helpers
 const root = mkdtempSync(join(tmpdir(), 'sibling-files-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
 
 // A minion whose worktree holds a page, a video, styles, a script and a sub-page, plus ways out:
 // a symlinked file and folder pointing outside, and a dotfile.
@@ -57,7 +56,10 @@ let srv: Booted;
 before(async () => {
   srv = await bootServer({ root });
 });
-after(() => srv?.proc.kill());
+after(async () => {
+  await srv?.stop(); // ends the server and its turns before the folder goes (#218)
+  rmSync(root, { recursive: true, force: true });
+});
 
 const get = (path: string, headers: Record<string, string> = {}) => fetch(srv.base + path, { headers, redirect: 'manual' });
 /** Where a redirect from `path` lands, as an absolute path. */

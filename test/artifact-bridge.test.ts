@@ -18,7 +18,6 @@ import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 const root = mkdtempSync(join(tmpdir(), 'artifact-bridge-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
 
 // Scheme A: a minion with two pages and a note, a Taskmaster, and a shared page. Scheme B: a page of its own.
 const store = new Store(join(data, 'coordinator.db'));
@@ -52,7 +51,10 @@ let srv: Booted;
 before(async () => {
   srv = await bootServer({ root });
 });
-after(() => srv?.stop()); // Send starts turns (CLAUDE_BIN is /bin/false): stop ends them too
+after(async () => {
+  await srv?.stop(); // ends the server and its turns before the folder goes (#218)
+  rmSync(root, { recursive: true, force: true });
+});
 
 /** The token path a person's viewer frames an artifact at, as the frame's page reports it. */
 async function pageOf(id: number) {

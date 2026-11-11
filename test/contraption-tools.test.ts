@@ -15,7 +15,6 @@ import { bootServer, fakeSystemd, PASSWORD, REPO, SECRET, type Booted } from './
 const root = mkdtempSync(join(tmpdir(), 'contraption-tools-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
 
 const store = new Store(join(data, 'coordinator.db'));
 const Delve = store.createProject('Delve', null);
@@ -43,7 +42,10 @@ let srv: Booted;
 before(async () => {
   srv = await bootServer({ root, env: serviceEnv });
 });
-after(() => srv?.proc.kill());
+after(async () => {
+  await srv?.stop(); // ends the server and its turns before the folder goes (#218)
+  rmSync(root, { recursive: true, force: true });
+});
 
 /** One tools/list or tools/call through the real MCP server, as `ticket`; `citadel` is the env the runner sets for Citadel's Taskmaster. */
 async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, citadel = ticket.project_id === GLOBAL_OWNER, home?: string, role = 'coordinator'): Promise<any> {

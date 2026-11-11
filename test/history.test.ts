@@ -6,10 +6,13 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { historyPage } from '../src/history.ts';
 import { applyEvent, createProgress } from '../public/progress.js';
-import { bootServer } from './helpers.ts';
+import { bootServer, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'history-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 
 function setup(name: string) {
   const store = new Store(join(root, `${name}.db`));
@@ -161,7 +164,7 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   said(other.id, 'pelican elsewhere');
 
   const srv = await bootServer({ root: routeRoot });
-  after(() => srv.proc.kill());
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const get = async (path: string) => {
     const { status, data } = await srv.call(path);
     assert.equal(status, 200, path);

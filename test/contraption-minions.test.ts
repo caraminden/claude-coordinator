@@ -8,12 +8,15 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, SECRET } from './helpers.ts';
+import { bootServer, SECRET, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'contraption-minions-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 
 const store = new Store(join(data, 'coordinator.db'));
 const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
@@ -48,7 +51,7 @@ for (let i = 0; i < 3; i++) minion(`Peek ${i}`, Peek.id);
 
 test('GET /api/contraptions/home and /minions (#421): membership, progress, errors and ETags', { timeout: 60_000 }, async () => {
   const srv = await bootServer({ root });
-  after(() => srv.proc.kill());
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const get = async (path: string, headers: Record<string, string> = {}, key = KEY) => {
     const res = await fetch(`${srv.base}/api/contraptions/${path}`, { headers: { Authorization: `Bearer ${key}`, ...headers } });
     return { status: res.status, etag: res.headers.get('etag'), body: res.status === 304 ? null : await res.json() };

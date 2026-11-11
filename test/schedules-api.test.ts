@@ -4,13 +4,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer } from './helpers.ts';
+import { agentToken, bootServer, stopProcs, stopTurns } from './helpers.ts';
 
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'schedules-api-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

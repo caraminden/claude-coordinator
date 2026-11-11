@@ -11,7 +11,6 @@ import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
 const root = mkdtempSync(join(tmpdir(), 'ticket-pins-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
 
 const store = new Store(join(data, 'coordinator.db'));
 const P = store.createProject('A', null);
@@ -32,7 +31,10 @@ before(async () => {
   const login = await fetch(`${srv.base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'josh', password: 'josh-password-1' }) });
   josh = login.headers.get('set-cookie')!.split(';')[0];
 });
-after(() => srv?.proc.kill());
+after(async () => {
+  await srv?.stop(); // ends the server and its turns before the folder goes (#218)
+  rmSync(root, { recursive: true, force: true });
+});
 
 const pins = async (cookie?: string) =>
   (await (await fetch(`${srv.base}/api/projects/${P.id}`, { headers: { Cookie: cookie ?? srv.cookie } })).json()).pins;

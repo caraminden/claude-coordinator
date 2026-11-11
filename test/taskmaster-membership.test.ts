@@ -77,7 +77,7 @@ test('message_taskmaster: labels who asks Citadel, and refuses without naming hi
   const CitadelTM = taskmaster(Citadel.id, Dana.id);
   const tokens = new Auth(PASSWORD, SECRET);
   const srv: Booted = await bootServer({ root });
-  after(() => srv.proc.kill());
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const send = async (from: { id: number }, scheme: string, text = 'the inbox count is wrong') => {
     const res = await fetch(srv.base + '/api/taskmaster', {
       method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(from.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ scheme, text }),

@@ -12,12 +12,15 @@ import { messagePerson } from '../src/access.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, SECRET } from './helpers.ts';
+import { bootServer, SECRET, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'contraption-asks-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 
 // No server_login anywhere, so asks land in the Taskmaster's chat but no turn starts.
 const store = new Store(join(data, 'coordinator.db'));
@@ -71,7 +74,7 @@ test('files never follow an inbox folder linked out of the shared folder', () =>
 
 test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path', { timeout: 60_000 }, async () => {
   const srv = await bootServer({ root });
-  after(() => srv.proc.kill());
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const ask = async (body: object, headers: Record<string, string> = { Authorization: `Bearer ${KEY}` }) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
     return { status: res.status, body: await res.json() };
@@ -213,7 +216,7 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
   store.updateTicket(gone.id, { status: 'closed' });
   for (let i = 0; i < 5; i++) minion(`Peek ${i}`, Peek.id); // #5 exists in Peek Auras only
   const srv = await bootServer({ root });
-  after(() => srv.proc.kill());
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const ask = async (body: object) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tocKey}` }, body: JSON.stringify(body) });
     return { status: res.status, body: await res.json() };

@@ -13,13 +13,16 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import type { Route } from '../src/http.ts';
-import { bootServer, freePort, PASSWORD, SECRET } from './helpers.ts';
+import { bootServer, freePort, PASSWORD, SECRET, stopTurns } from './helpers.ts';
 
 const SNAPSHOT = join(import.meta.dirname, 'access-matrix.snapshot.json');
 const root = mkdtempSync(join(tmpdir(), 'access-matrix-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 
 // The world, made before the server starts: two schemes, each with a Taskmaster, and two minions in A.
 const store = new Store(join(data, 'coordinator.db'));
@@ -138,7 +141,7 @@ OTHER_ROUTES.push(...EXTRA);
 
 test('every route answers each kind of caller as recorded', { timeout: 120_000 }, async () => {
   const srv = await bootServer({ root });
-  after(() => srv.proc.kill());
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   // Besides the admin (person): a member of scheme A who doesn't own it, and someone in no scheme.
   const invited = async (name: string) => {
     const made = await fetch(`${srv.base}/api/people`, { method: 'POST', headers: { Cookie: srv.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => r.json());

@@ -14,7 +14,6 @@ import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 const root = mkdtempSync(join(tmpdir(), 'person-notes-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
 
 const store = new Store(join(data, 'coordinator.db'));
 const P = store.createProject('A', null);
@@ -29,7 +28,10 @@ let srv: Booted;
 before(async () => {
   srv = await bootServer({ root });
 });
-after(() => srv?.proc.kill());
+after(async () => {
+  await srv?.stop(); // ends the server and its turns before the folder goes (#218)
+  rmSync(root, { recursive: true, force: true });
+});
 
 async function asAgent(id: number, path: string, body?: object, method = body ? 'POST' : 'GET') {
   const res = await fetch(srv.base + path, {

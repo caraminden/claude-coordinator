@@ -282,7 +282,8 @@ test('a toast shown in a modal dialog stays up, back in the page, when that dial
     toast('Not sent', { ms: 8000, action: { label: 'Retry', run: () => {} }, onHide: () => window.hidden++ });
     d.close();
   })()`);
-  await page.eval('new Promise((r) => setTimeout(r, 50))');
+  // The dialog's close event is a task of its own: wait for it (the page's listener removes the dialog), not a set time, which a loaded box can beat.
+  await page.eval(`new Promise((r) => { const t0 = Date.now(); const k = () => (!document.querySelector('dialog.cui-dialog') || Date.now() - t0 > 5000 ? r() : setTimeout(k, 10)); k(); })`);
   assert.equal(await page.eval('document.querySelector(".cui-toast")?.parentElement === document.body'), true, 'back in the page');
   assert.equal(await page.eval('document.querySelector(".cui-toast").matches(":popover-open")'), true, 'still shown');
   assert.equal(await page.eval('document.querySelector(".cui-toast-say").isConnected'), true, 'still heard');

@@ -215,14 +215,14 @@ journalctl --user -u claude-coordinator -f
 The service runs with `UMask=0077`, so the database and everything it writes are
 private (mode 600). `citadel.slice` caps the service and every turn it runs, at
 `MemoryMax=8G` and `CPUQuota=800%`, half of perigee, which is shared
-(`resources.conf` puts the service in it). `claude-coordinator.socket` holds port
+(`resources.conf` puts the service in it). `citadel-turns.slice` adds `MemoryHigh=6G` for host turns (throttled, never killed). `claude-coordinator.socket` holds port
 8573 while the server restarts, so requests then wait instead of failing
 (`socket.conf` makes the service use it). `priority.conf` keeps the server out of swap and
 ahead of the turns for CPU; it and the host settings that go with it are in `deploy/priority.md`:
 
 ```sh
 mkdir -p ~/.config/systemd/user/claude-coordinator.service.d
-ln -s ~/claude-coordinator/deploy/citadel.slice ~/.config/systemd/user/
+ln -s ~/claude-coordinator/deploy/citadel.slice ~/claude-coordinator/deploy/citadel-turns.slice ~/.config/systemd/user/
 ln -s ~/claude-coordinator/deploy/claude-coordinator.socket ~/.config/systemd/user/
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/resources.conf ~/.config/systemd/user/claude-coordinator.service.d/
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/socket.conf ~/.config/systemd/user/claude-coordinator.service.d/

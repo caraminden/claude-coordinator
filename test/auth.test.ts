@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHmac } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Auth, looksLikeUrl, type Nonces } from '../src/auth.ts';
+import { Store } from '../src/db.ts';
 
 test('a site address is not a name', () => {
   assert.ok(looksLikeUrl('https//cara.apps.webplatformisbestplatf'));
@@ -96,4 +100,23 @@ test('a session over 7 days old is renewed on use; a newer one, a disabled perso
   assert.equal(auth.renewal({ name: 'Taskmaster', exp: Infinity, agent: 7 }, false), null);
   const preview = new Auth('a-password-long-enough', 'x'.repeat(32));
   assert.equal(preview.renewal(preview.session(aged(preview, 1, 8)), false), null, 'without the people table nobody is renewed');
+});
+
+test("a removed person's id is never handed to the next person, so their old cookie signs no one in (#468 S05-1)", () => {
+  const root = mkdtempSync(join(tmpdir(), 'auth-ids-'));
+  try {
+    const store = new Store(join(root, 'coordinator.db'));
+    const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+    const bob = store.createUser({ name: 'Bob', login: 'bob' });
+    const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, store);
+    const request = { headers: { cookie: auth.issueCookie(bob, false).split(';')[0] } } as any;
+    assert.equal(auth.session(request)?.name, 'Bob');
+    store.deleteUser(bob.id, cara.id);
+    assert.equal(auth.session(request), null);
+    const carol = store.createUser({ name: 'Carol', login: 'carol', admin: true });
+    assert.notEqual(carol.id, bob.id);
+    assert.equal(auth.session(request), null, "Bob's cookie must not sign in as Carol");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

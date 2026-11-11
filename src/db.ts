@@ -1080,11 +1080,15 @@ export class Store {
     return this.db.prepare(`SELECT * FROM users WHERE ${field} = ?`).get(value) as unknown as User | undefined;
   }
 
+  /** A new person gets an id no one has ever had: a removed person's cookie names their id (#468 S05-1). */
   createUser(u: Pick<User, 'name' | 'login'> & { admin?: boolean; server_login?: boolean }): User {
-    const { lastInsertRowid } = this.db
-      .prepare('INSERT INTO users (name, login, admin, server_login, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(u.name, u.login, u.admin ? 1 : 0, u.server_login ? 1 : 0, Date.now());
-    return this.getUser(Number(lastInsertRowid))!;
+    const { max } = this.db.prepare('SELECT COALESCE(MAX(id), 0) AS max FROM users').get() as { max: number };
+    const id = Math.max(this.getSetting<number>('user_id_high') ?? 0, max) + 1;
+    this.db
+      .prepare('INSERT INTO users (id, name, login, admin, server_login, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, u.name, u.login, u.admin ? 1 : 0, u.server_login ? 1 : 0, Date.now());
+    this.setSetting('user_id_high', id);
+    return this.getUser(id)!;
   }
 
   updateUser(id: number, fields: Partial<Omit<User, 'id' | 'login' | 'admin' | 'created_at'>>) {
@@ -1102,6 +1106,8 @@ export class Store {
       this.db.prepare('DELETE FROM machine_projects WHERE machine_id IN (SELECT id FROM machines WHERE owner_id = ?)').run(id);
       this.db.prepare('UPDATE machines SET owner_id = NULL, scoped = 1 WHERE owner_id = ?').run(id);
       this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      // People added before user_id_high existed: remember the removed id so it is never reused.
+      if (id > (this.getSetting<number>('user_id_high') ?? 0)) this.setSetting('user_id_high', id);
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');

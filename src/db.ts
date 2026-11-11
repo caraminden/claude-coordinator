@@ -768,7 +768,9 @@ export class Store {
     this.path = path;
     // Wait out another connection's write (a test's second Store, a backup) instead of failing at once with SQLITE_BUSY.
     this.db = new DatabaseSync(path, { timeout: 5000 });
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    // NORMAL: in WAL mode it fsyncs at checkpoints, not on every commit, which a busy disk made cost 150-300 ms
+    // each. A power cut can lose the last few seconds of writes; an app crash loses nothing (#470, Cara 2026-11-10).
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
     // Setup commits once per block, not once per statement: each commit is an fsync, and a new database's
     // hundred of them took a boot past 15 s when the disk was busy (#426).
     this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} COMMIT;`);
@@ -803,7 +805,7 @@ export class Store {
   private attachState() {
     this.db.prepare('ATTACH DATABASE ? AS state').run(this.path === ':memory:' ? ':memory:' : join(dirname(this.path), 'state.db'));
     // auto_vacuum only takes before the file's first table, so a new state.db gets it; the prune frees space with incremental_vacuum.
-    this.db.exec('PRAGMA state.auto_vacuum = INCREMENTAL; PRAGMA state.journal_mode = WAL;');
+    this.db.exec('PRAGMA state.auto_vacuum = INCREMENTAL; PRAGMA state.journal_mode = WAL; PRAGMA state.synchronous = NORMAL;');
     // A WAL file keeps its biggest size unless capped: the move alone grew state.db's to its whole size.
     this.db.exec('PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
     this.db.exec(`BEGIN IMMEDIATE; ${STATE_SCHEMA} COMMIT;`);

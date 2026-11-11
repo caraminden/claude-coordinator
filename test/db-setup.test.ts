@@ -28,3 +28,14 @@ test('a new database is set up in a few commits, not one per table and column', 
   assert.ok(commits > 0, 'the WAL files hold the setup');
   assert.ok(commits <= 15, `${commits} commits`);
 });
+
+// In WAL mode NORMAL fsyncs at checkpoints, not on every commit: a busy disk made each commit cost
+// 150-300 ms. A power cut can lose the last few seconds of writes; an app crash loses nothing (#470,
+// Cara picked "Live and tests", 2026-11-10).
+test('both database files commit without an fsync each (synchronous NORMAL)', () => {
+  const store = new Store(join(root, 'sync.db'));
+  const level = (schema: string) => (store.db.prepare(`PRAGMA ${schema}.synchronous`).get() as { synchronous: number }).synchronous;
+  const levels = [level('main'), level('state')];
+  store.db.close();
+  assert.deepEqual(levels, [1, 1], 'NORMAL is 1, FULL 2');
+});

@@ -554,6 +554,16 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   assert.equal(w.claim(id), null, 'the chain is gone once sent');
 });
 
+test("Start now hears when the brief couldn't be sent, and the brief stays held for the next try (#468 S07-2)", async () => {
+  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  const { id } = minion();
+  const w = new LiveWaiters(store, live.dir, live.commit(), () => {});
+  w.chain({ ticket: id, after: 0, when: 'merged', message: 'build part two', from: 'Taskmaster', base: null as any, since: 0 });
+  runner.send = () => { throw new Error('disk full'); };
+  await assert.rejects(startChained(w.claim(id)!, 'Cara started it', { store, runner, waiters: w }), /disk full/);
+  assert.ok(w.claim(id), 'held again');
+});
+
 test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or Start now starts it, a message only gets an answer; a brief is marked as one', async () => {
   const { base, cookie, proc } = await bootServer({ root });
   procs.push(proc);

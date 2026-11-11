@@ -421,6 +421,7 @@ export async function startChained(c: Chain, why: string, { store, runner, waite
   const t = store.getTicket(c.ticket);
   if (!t) return waiters.end(c.ticket);
   const repo = store.getProject(t.project_id)?.repo_dir ?? null;
+  let failed: { err: unknown } | null = null;
   const sent = runner.onLane(c.ticket, 'chained start', async () => {
     try {
       await catchUpTicketDir(t.cwd, repo).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
@@ -430,11 +431,14 @@ export async function startChained(c: Chain, why: string, { store, runner, waite
         runner.send(c.ticket, c.from, c.message, [], { brief: true });
       } catch (err) {
         waiters.chain(c); // held again: the next check, or Start now, tries again
+        failed = { err };
         throw err;
       }
     } finally {
       waiters.end(c.ticket);
     }
   });
-  if (!runner.isRunning(c.ticket)) await sent;
+  if (runner.isRunning(c.ticket)) return; // it starts once the turn ends; a failure then is logged
+  await sent;
+  if (failed) throw (failed as { err: unknown }).err; // the lane only logs it: Start now's caller hears it
 }

@@ -8,7 +8,7 @@
 // he is comfortable with"): the OAuth App's full-access link, and a limited one through Citadel's GitHub App
 // (GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_APP_SLUG), whose token reaches only repos where the
 // repo's owner installed the App and the person has access. A person has one link; linking again replaces it.
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Credentials } from './credentials.ts';
@@ -52,7 +52,8 @@ export interface TurnGithub {
 type Fetch = typeof fetch;
 
 export class GithubLink {
-  private states = new Map<string, { uid: number; projectId: number; expires: number; limited: boolean }>();
+  /** States already brought back, until they expire: each works once (per server; GitHub's code is single-use anyway). */
+  private used = new Map<string, number>();
   private checked = new Map<number, number>();
   /** A link that failed, said once on the account page. */
   private errors = new Map<number, string>();
@@ -107,10 +108,10 @@ export class GithubLink {
 
   /** GitHub's authorize page for this person; `projectId` is the scheme whose Settings they come back to. */
   authorizeUrl(uid: number, projectId: number, redirectUri: string, limited = false): string {
-    const now = Date.now();
-    for (const [k, v] of this.states) if (v.expires < now) this.states.delete(k);
-    const state = randomBytes(24).toString('base64url');
-    this.states.set(state, { uid, projectId, expires: now + STATE_MS, limited });
+    // The state carries who asked, for which scheme and kind, signed, rather than living in memory: a deploy restart
+    // while the person is on GitHub's page used to fail their link as expired (#479).
+    const body = Buffer.from(JSON.stringify({ u: uid, p: projectId, l: limited ? 1 : 0, e: Date.now() + STATE_MS, n: randomBytes(12).toString('base64url') })).toString('base64url');
+    const state = `${body}.${this.sign(body, limited) ?? ''}`;
     // A GitHub App takes no scope: what its token can do is the App's own permissions, where it is installed.
     const q = new URLSearchParams({ client_id: this.client(limited)?.id ?? '', redirect_uri: redirectUri, ...(limited ? {} : { scope: SCOPES }), state, allow_signup: 'false' });
     return `https://github.com/login/oauth/authorize?${q}`;
@@ -122,16 +123,22 @@ export class GithubLink {
    */
   async finish(uid: number, params: URLSearchParams, redirectUri: string): Promise<number | null> {
     const state = params.get('state') ?? '';
-    const s = this.states.get(state);
-    if (!s || s.uid !== uid || s.expires < Date.now()) {
+    const now = Date.now();
+    for (const [k, expires] of this.used) if (expires < now) this.used.delete(k);
+    const s = this.used.has(state) ? null : this.opened(state);
+    if (s === 'unset') {
+      this.errors.set(uid, 'That way of linking GitHub isn\'t set up on this server.');
+      return null;
+    }
+    if (!s || s.uid !== uid || s.expires < now) {
       this.errors.set(uid, 'That GitHub sign-in had expired or was for someone else. Try Link GitHub again.');
       return s?.uid === uid ? s.projectId : null;
     }
-    this.states.delete(state);
+    this.used.set(state, s.expires);
     try {
       if (params.get('error')) throw new Error(params.get('error') === 'access_denied' ? 'You cancelled on GitHub.' : `GitHub said: ${params.get('error_description') ?? params.get('error')}`);
-      const client = this.client(s.limited);
-      if (!client) throw new Error('That way of linking GitHub isn\'t set up on this server.');
+      // Signed with this kind's client secret, so the kind is still set up.
+      const client = this.client(s.limited)!;
       const r = await this.fetch('https://github.com/login/oauth/access_token', {
         method: 'POST', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -155,6 +162,33 @@ export class GithubLink {
       this.errors.set(uid, err.message);
     }
     return s.projectId;
+  }
+
+  /** A state's signature: an HMAC keyed from the client secret of its kind, or null when that kind isn't set up. */
+  private sign(body: string, limited: boolean): string | null {
+    const client = this.client(limited);
+    return client ? createHmac('sha256', `citadel github link state\0${client.secret}`).update(body).digest('base64url') : null;
+  }
+
+  /**
+   * What a state GitHub brought back stands for; null when it isn't one this server's secrets signed, and 'unset' when
+   * its kind of link has been taken off the server since (nothing to check it with).
+   */
+  private opened(state: string): { uid: number; projectId: number; expires: number; limited: boolean } | 'unset' | null {
+    // Exactly body.sig: a state with more parts would pass as a new one past `used`.
+    const [body, sig, ...more] = state.split('.');
+    if (sig === undefined || more.length) return null;
+    let v: { u?: unknown; p?: unknown; l?: unknown; e?: unknown };
+    try {
+      v = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    } catch {
+      return null;
+    }
+    if (!v || typeof v !== 'object' || !Number.isSafeInteger(v.u) || !Number.isSafeInteger(v.p) || !Number.isSafeInteger(v.e) || (v.l !== 0 && v.l !== 1)) return null;
+    const want = this.sign(body, v.l === 1);
+    if (!want) return 'unset';
+    if (want.length !== sig.length || !timingSafeEqual(Buffer.from(want), Buffer.from(sig))) return null;
+    return { uid: v.u as number, projectId: v.p as number, expires: v.e as number, limited: v.l === 1 };
   }
 
   /** The token's own account, or null when GitHub refuses it (401: revoked). Throws when GitHub can't be reached. */

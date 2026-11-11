@@ -87,6 +87,55 @@ test('linking: the state must be the person\'s own and fresh; a token without re
   assert.equal(creds.get(rachel.id, 'github'), null);
 });
 
+// #479: a deploy restart between Link and GitHub's way back used to lose the state, which lived in the server's memory,
+// so the link failed as "expired". The state now carries what it stands for, signed, and a new server takes it.
+test('linking: a state outlives a restart, but not tampering, another kind\'s secret, or its 10 minutes', async () => {
+  // Rachel, so Josh keeps the link the tests below use.
+  const gh = fakeGithub({ gho_new: { login: 'joshdev', id: 7, name: 'Josh D' } });
+  const before = new GithubLink(store, creds, 'cid', 'csecret', gh.fetch);
+  const state = new URL(before.authorizeUrl(rachel.id, project.id, 'cb')).searchParams.get('state')!;
+  const after = new GithubLink(store, creds, 'cid', 'csecret', gh.fetch);
+  assert.equal(await after.finish(rachel.id, new URLSearchParams({ state, code: 'c' }), 'cb'), project.id);
+  assert.equal((await after.status(rachel.id)).error, null);
+  assert.equal(creds.get(rachel.id, 'github')!.meta.login, 'joshdev');
+  creds.remove(rachel.id, 'github');
+
+  const fresh = () => new URL(after.authorizeUrl(rachel.id, project.id, 'cb')).searchParams.get('state')!;
+  const refused = async (st: string, by = after) => {
+    await by.finish(rachel.id, new URLSearchParams({ state: st, code: 'c' }), 'cb');
+    assert.match((await by.status(rachel.id)).error!, /expired or was for someone else/);
+    assert.equal(creds.get(rachel.id, 'github'), null);
+  };
+  // Its body rewritten to name someone else's scheme, with the signature kept.
+  const [body, sig] = fresh().split('.');
+  const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body, 'base64url').toString()), p: 999 })).toString('base64url');
+  await refused(`${forged}.${sig}`);
+  // Signed by a server with another client secret.
+  await refused(fresh(), new GithubLink(store, creds, 'cid', 'other secret', gh.fetch));
+  // A limited state can't pass as a full one: the kind is in what's signed.
+  const both = new GithubLink(store, creds, 'cid', 'csecret', gh.fetch, APP);
+  const [lb, ls] = new URL(both.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!.split('.');
+  const asFull = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(lb, 'base64url').toString()), l: 0 })).toString('base64url');
+  await refused(`${asFull}.${ls}`, both);
+  await refused('garbage');
+  // A used state with a part tacked on is still used.
+  const once = fresh();
+  await after.finish(rachel.id, new URLSearchParams({ state: once, code: 'c' }), 'cb');
+  creds.remove(rachel.id, 'github');
+  await refused(`${once}.x`);
+  // Ten minutes on, it has expired: the person goes back to the scheme they came from, with the error.
+  const old = fresh();
+  const now = Date.now;
+  Date.now = () => now() + 10 * 60_000 + 1;
+  try {
+    assert.equal(await after.finish(rachel.id, new URLSearchParams({ state: old, code: 'c' }), 'cb'), project.id);
+  } finally {
+    Date.now = now;
+  }
+  assert.match((await after.status(rachel.id)).error!, /expired/);
+  assert.equal(creds.get(rachel.id, 'github'), null);
+});
+
 // #464: the limited link, through Citadel's GitHub App, beside the OAuth App's full access.
 const APP = { clientId: 'appid', clientSecret: 'appsecret', slug: 'citadel-app' };
 

@@ -320,8 +320,11 @@ export function applyEvent(p, kind, data) {
         // Claude records what a finished step found or decided as metadata.outcome.
         if (typeof input.metadata?.outcome === 'string') task.outcome = input.metadata.outcome;
       } else if (block.name === 'TodoWrite' && Array.isArray(input.todos)) {
+        // Steps keep their ids while the plan keeps its steps; a new plan's get new ones (from this call's
+        // id), so an earlier plan's actions and open steps don't land under it.
+        const same = input.todos.length === p.tasks.length && input.todos.every((t, n) => p.tasks[n].subject === t.content);
         p.tasks = input.todos.map((t, n) => ({
-          id: `todo-${n}`, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0,
+          id: same ? p.tasks[n].id : `todo-${block.id}-${n}`, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0,
         }));
       } else if (isWorkTool(block.name)) {
         const task = p.tasks.find((t) => t.status === 'in_progress');

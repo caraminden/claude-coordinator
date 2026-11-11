@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createProgress, progressLine, withoutCount } from '../public/progress.js';
+import { applyEvent, createProgress, progressLine, withoutCount } from '../public/progress.js';
 
 // A plan of six steps with the given statuses: c(ompleted), i(n progress), p(ending).
 const plan = (statuses) => ({
@@ -40,4 +40,17 @@ test('withoutCount drops the count from every form, old and new', () => {
     'Working… Read app.js': 'Working… Read app.js',
   };
   for (const [line, want] of Object.entries(cases)) assert.equal(withoutCount(line), want, line);
+});
+
+test("a new TodoWrite plan's steps get new ids, so the last plan's actions don't show under them (#468 S11-8)", () => {
+  const p = createProgress();
+  const todo = (id, ...subjects) => applyEvent(p, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TodoWrite', input: { todos: subjects.map((s, n) => ({ content: s, activeForm: s, status: n ? 'pending' : 'in_progress' })) } }] } });
+  const read = (id) => applyEvent(p, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Read', input: { file_path: '/a.js' } }] } });
+  todo('t1', 'Look', 'Fix');
+  const first = read('r1')[0].taskId;
+  todo('t2', 'Look', 'Fix'); // the same plan, its statuses moved on
+  assert.equal(p.tasks[0].id, first, 'a step keeps its id while the plan keeps its steps');
+  todo('t3', 'Test', 'Ship');
+  assert.notEqual(p.tasks[0].id, first);
+  assert.notEqual(read('r2')[0].taskId, first);
 });

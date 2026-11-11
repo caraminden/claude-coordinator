@@ -67,7 +67,9 @@ export function strayRefs(text: string, refs: SchemeRefs): Stray[] {
   for (const m of text.replace(CODE, ' ').matchAll(run)) {
     const g = m.groups!;
     const named = byKey.get(key(g.name));
-    if (!named) continue;
+    // A short form counts only written as one ("ToC", "IS"), with a capital after its first letter, not as the
+    // word its letters may spell ("is", "Is" for "Idea Sandbox").
+    if (!named || (!named.full && !/\p{Lu}/u.test(g.name.slice(1)))) continue;
     const { other } = named;
     // As the chat reads it: the full name, "'s" or nothing, then "#3" or "minion(s) #3".
     const scoped = named.full && !g.aside && (!g.poss || g.poss.endsWith('s'));

@@ -47,6 +47,14 @@ test('flags a bare #N the chat links here though it sits right after another sch
   assert.deepEqual(strays('Delve minion #5 and #6 wait; delve\'s #7 / #8 too.'), ['Delve #6', 'Delve #8']);
 });
 
+test('a short form counts only written as one, not as the common word its letters spell (#468 S06-8)', () => {
+  const sandbox = { ...refs, others: ['Idea Sandbox'] };
+  const strays = (text: string) => strayRefs(text, sandbox).map((f) => `${f.other} #${f.n}`);
+  assert.deepEqual(strays("This is #12's fix."), []);
+  assert.deepEqual(strays('Is #12 done yet?'), []);
+  assert.deepEqual(strays('Then IS #12 can carry on.'), ['Idea Sandbox #12']);
+});
+
 test('lets through own minions near another scheme\'s name, scoped numbers, PRs, issues and code', () => {
   for (const ok of [
     '#320 landed.',

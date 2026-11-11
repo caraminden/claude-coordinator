@@ -328,6 +328,8 @@ document.addEventListener('keydown', () => { lastInputAt = Date.now(); }, true);
 
 function hasUnsentWork() {
   if (sending || Date.now() - lastInputAt < QUIET_MS) return true;
+  // A contraption's typing never reaches this document, and a reload would rebuild its frame at its start.
+  if (framed()) return true;
   if (document.querySelector('.attachments:not([hidden])') || uploadsRunning()) return true;
   return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim());
 }

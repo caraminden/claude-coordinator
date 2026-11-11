@@ -56,21 +56,22 @@ queue_restart() {
 # file open and are neither in line nor started by someone in line (a waiter's sleep inherits fd 9), such as what
 # a killed landing left running. Run with fd 9 closed, or it names itself.
 queue_outside() {
-  local lock p up stat who="" count=0 inline=" "
+  local lock p up stat cmd who="" count=0 inline=" "
   lock=$(realpath "$1/lock" 2>/dev/null) || lock=$1/lock
   for p in "$1"/queue/[0-9]*; do inline="$inline$(head -n 1 "$p" 2>/dev/null | cut -d' ' -f1) "; done
   for p in $(find /proc/[0-9]*/fd -maxdepth 1 -lname "$lock" 2>/dev/null | cut -d/ -f3 | sort -un); do
     up=$p
     while [ "${up:-0}" -gt 1 ]; do
       case $inline in *" $up "*) continue 2 ;; esac
-      stat=$(cat "/proc/$up/stat" 2>/dev/null) || break
+      stat=$(cat "/proc/$up/stat" 2>/dev/null) || continue 2 # gone while we looked (a waiter's poll sleep): it holds nothing now
       stat=${stat##*) }
       stat=${stat#* }
       up=${stat%% *} # its parent
     done
+    cmd=$(tr '\0' ' ' 2>/dev/null <"/proc/$p/cmdline") || continue # gone since, as above
     count=$((count + 1))
     [ "$count" -le 3 ] || continue
-    who="$who${who:+, }pid $p ($(tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | cut -c1-80 | sed 's/ *$//'))"
+    who="$who${who:+, }pid $p ($(cut -c1-80 <<<"$cmd" | sed 's/ *$//'))"
   done
   if [ -n "$who" ]; then
     echo "outside the line, the lock is open in $who$([ "$count" -le 3 ] || echo " and $((count - 3)) more")"

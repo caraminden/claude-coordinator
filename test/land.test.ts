@@ -832,6 +832,23 @@ test('a waiter behind a lock held from outside the line names the process that h
   }
 });
 
+// A waiter's poll sleep has the lock file open and may end while queue_outside looks at it: it held nothing, so it
+// isn't named (#564: CI named one with no command line, and before the fix this script did in most polls).
+test('a child of a waiter that ends while the holder is looked up is not named as the holder', { timeout: 60_000 }, () => {
+  const state = queueState();
+  mkdirSync(join(state, 'queue'));
+  const r = spawnSync('bash', ['-c', `
+    exec 9>"$1/lock"
+    ( for i in $(seq 400); do sleep 0.0$((RANDOM % 9 + 1)) & sleep 0.004; done; wait ) & w=$!
+    exec 9>&-
+    echo "$w 0" >"$1/queue/1"
+    . "$0"
+    while kill -0 $w 2>/dev/null; do queue_outside "$1"; done`, queueLib, state], { encoding: 'utf8', env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('a queued restart'), 'it looked while the waiter ran');
+  assert.doesNotMatch(r.stdout + r.stderr, /outside the line|cmdline/);
+});
+
 // F4: the queued restart takes no ticket, so the waiters saw nothing move through it and gave up. It now says what
 // it is doing in <state>/restart ("<pid>" and its phase), and each new phase is progress.
 test("the queued restart's phases show to the waiters and count as progress", { timeout: 60_000 }, async () => {

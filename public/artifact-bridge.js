@@ -70,18 +70,23 @@
   // so a slider moving fast stays under the viewer's 20 writes a second and its last value always lands.
   let queue = new Map();
   let flushing = null;
+  // The last flush's requests: the next waits for them, so a later value never reaches the server first.
+  let sending = Promise.resolve();
   function write(key, value) {
     const v = value === undefined ? undefined : clone(value);
     if (v === undefined) data.delete(key);
     else data.set(key, v);
     notify([key]);
     queue.set(key, v === undefined ? null : v);
-    flushing ??= new Promise((r) => setTimeout(r, 100)).then(async () => {
+    flushing ??= new Promise((r) => setTimeout(r, 100)).then(() => {
       const entries = [...queue].map(([k, val]) => ({ key: k, value: val }));
       queue = new Map();
       flushing = null;
-      if (!(await ready)) throw new Error(NO_VIEWER);
-      for (let i = 0; i < entries.length; i += 100) await request('write', { entries: entries.slice(i, i + 100) });
+      sending = sending.catch(() => {}).then(async () => {
+        if (!(await ready)) throw new Error(NO_VIEWER);
+        for (let i = 0; i < entries.length; i += 100) await request('write', { entries: entries.slice(i, i + 100) });
+      });
+      return sending;
     });
     return flushing;
   }

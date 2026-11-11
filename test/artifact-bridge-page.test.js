@@ -58,3 +58,21 @@ test('a write nobody answers any more puts a bar on the page saying it is not co
   await assert.rejects(p.ctx.citadel.storage.set('k', 'c'), /did not answer/);
   assert.equal(p.bars.length, 1);
 });
+
+test('one write request is out at a time, so a later flush cannot overtake an earlier one (#468 S13-4)', async () => {
+  const p = page();
+  p.answer('hello', { person: 'Cara', entries: [] });
+  await p.ctx.citadel.ready;
+  const first = p.ctx.citadel.storage.set('k', 1);
+  await wait(10);
+  assert.equal(p.waiting('write').length, 1);
+  const second = p.ctx.citadel.storage.set('k', 2);
+  await wait(10);
+  assert.equal(p.waiting('write').length, 1, 'the second flush waits for the first');
+  p.answer('write', { entries: [] });
+  await first;
+  await wait(10);
+  assert.equal(JSON.stringify(p.waiting('write').map((m) => m.entries)), JSON.stringify([[{ key: 'k', value: 2 }]]));
+  p.answer('write', { entries: [] });
+  await second;
+});

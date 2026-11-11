@@ -60,6 +60,7 @@ Log 'Keeping crash dumps in C:\CrashDumps (WER LocalDumps, #549)'
 # account `citadel` reads the folder; Users get read access explicitly rather than by inheritance.
 New-Item -ItemType Directory -Force C:\CrashDumps | Out-Null
 icacls C:\CrashDumps /grant '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE) { throw "icacls on C:\CrashDumps failed ($LASTEXITCODE)" }
 $ld = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
 Set-Reg $ld DumpFolder 'C:\CrashDumps' ExpandString
 Set-Reg $ld DumpType 1

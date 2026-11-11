@@ -108,8 +108,9 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   if (m.method === 'turn/steer' && mode === 'late-steer') {
     // The turn ends just before the steer reaches it: Codex refuses a steer for a finished turn.
     note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
-    // Its refusal comes after the completion, so the shim has printed the result and seen its input end by then (#564).
-    return setTimeout(() => send({ id: m.id, error: { message: 'no active turn to steer' } }), 300);
+    // Its refusal comes after the shim has printed the result and its input has ended (#564), as turn-wrapper ends it.
+    const refuse = () => require('node:fs').existsSync(process.env.HOME + '/input-ended') ? setTimeout(() => send({ id: m.id, error: { message: 'no active turn to steer' } }), 50) : setTimeout(refuse, 10);
+    return refuse();
   }
   if (m.method === 'turn/steer') {
     send({ id: m.id, result: { turnId: 'tu1' } });
@@ -177,7 +178,7 @@ function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: ob
       if (ev.type === 'codex_waiting' && opts.lockedMs) letGo(opts.lockedMs);
       if (ev.type === 'system' && opts.steer) setTimeout(() => child.stdin.write(JSON.stringify(opts.steer) + '\n'), 200);
       if (ev.type === 'system' && opts.sigterm) setTimeout(() => child.kill('SIGTERM'), 200);
-      if (ev.type === 'result') child.stdin.end();
+      if (ev.type === 'result') child.stdin.end(() => writeFileSync(join(home, 'input-ended'), ''));
     }
   });
   for (const l of opts.lines ?? [{ type: 'user', message: { role: 'user', content: '[Josh]: go' } }]) child.stdin.write(JSON.stringify(l) + '\n');

@@ -97,6 +97,7 @@ export async function mountChat(chatId, ticket, page, fresh) {
   // Drawn from the cache (#527): what came since is drawn in once it arrives, opening at the first unread
   // as a fresh load would, unless you've scrolled meanwhile.
   const v = view;
+  if (fresh) watchYourScrolling(); // a short chat has no Load earlier to have started it
   const settled = (fresh ?? Promise.resolve(false)).then(async (added) => {
     if (!added || view !== v || view.page !== page) return;
     renderHistory();

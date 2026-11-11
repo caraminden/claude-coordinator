@@ -310,6 +310,40 @@ test('a waiter that is killed leaves the line, and the one behind it goes next',
   }
 });
 
+// A zombie: b's parent starts it, then becomes a sleep that never waits on it, so once b is killed its
+// /proc entry stays, start time and all, until the parent goes.
+const isZombie = (pid: number) => { try { return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+
+test('a killed waiter whose parent never reaps it leaves the line too', async () => {
+  const q = queueSetup(3);
+  const a = q.land(1);
+  const pidFile = join(q.dir, 'b.pid');
+  const parent = spawn('bash', ['-c', 'bash "$0" & echo $! >"$1"; exec sleep 600', join(q.wts[1], 'tools', 'land.sh'), pidFile], { cwd: q.wts[1], stdio: 'ignore', env: { ...env, GATE: join(q.dir, 'gate'), LAND_QUEUE_POLL: '0.05' } });
+  let c: ReturnType<typeof q.land> | undefined;
+  try {
+    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+    await until("b's ticket", () => q.issued() === 2);
+    c = q.land(3);
+    const cs = c.stderr;
+    await until('c to see its place', () => /3rd in line/.test(cs()));
+    const [ta, , tc] = q.tickets();
+    const b = Number(readFileSync(pidFile, 'utf8'));
+    process.kill(b, 'SIGKILL');
+    await until('b to be a zombie', () => isZombie(b));
+    await until('c to move up past the zombie', () => /2nd in line/.test(cs()), 5_000);
+    assert.deepEqual(q.tickets(), [ta, tc], "the zombie's ticket was removed");
+    assert.ok(isZombie(b), 'b was still a zombie when c moved up');
+    q.open();
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await c.exit, 0, c.stderr());
+    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f3.txt: 3']);
+  } finally {
+    q.open();
+    c?.child.kill('SIGKILL'); // with nothing ahead it would wait out the stall limit
+    parent.kill('SIGKILL');
+  }
+});
+
 test('a holder that is killed leaves the line too, and its lock goes with it', async () => {
   const q = queueSetup(2);
   const a = q.land(1);

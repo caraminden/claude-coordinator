@@ -500,6 +500,39 @@ test('a waiter that is killed leaves the line, and the one behind it goes next',
   }
 });
 
+// A zombie: b's parent starts it, then becomes a sleep that never waits on it, so once b is killed its
+// /proc entry stays, start time and all, until the parent goes.
+const isZombie = (pid: number) => { try { return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+
+test('a killed waiter whose parent never reaps it leaves the line too', async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
+  const parent = spawn('bash', ['-c', 'bash -c \'. "$0"; queue_lock "$1" b\' "$0" "$1" & echo $! >"$1/b.pid"; exec sleep 600', queueLib, state], { stdio: 'ignore', env: { ...env, DEPLOY_QUEUE_POLL: '0.05' } });
+  let c: ReturnType<typeof waiter> | undefined;
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    await until("b's ticket", () => issued(state) === 2);
+    c = waiter(state, 'c', 'true');
+    const cs = c.stderr;
+    await until('c to see its place', () => /3rd in line/.test(cs()));
+    const [ta, , tc] = tickets(state);
+    const b = Number(readFileSync(join(state, 'b.pid'), 'utf8'));
+    process.kill(b, 'SIGKILL');
+    await until('b to be a zombie', () => isZombie(b));
+    await until('c to move up past the zombie', () => /2nd in line/.test(cs()), 5_000);
+    assert.deepEqual(tickets(state), [ta, tc], "the zombie's ticket was removed");
+    assert.ok(isZombie(b), 'b was still a zombie when c moved up');
+    writeFileSync(join(state, 'go'), '');
+    assert.equal(await a.exit, 0);
+    assert.equal(await c.exit, 0, c.stderr());
+    assert.deepEqual(order(state), ['a', 'c']);
+  } finally {
+    writeFileSync(join(state, 'go'), '');
+    c?.child.kill('SIGKILL');
+    parent.kill('SIGKILL');
+  }
+});
+
 test('a holder that is killed leaves the line too, and its lock goes with it', async () => {
   const state = queueState();
   const a = waiter(state, 'a', 'exec sleep 600');

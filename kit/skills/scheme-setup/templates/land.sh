@@ -61,6 +61,8 @@ queue_proc() {
   stat=${stat##*) } # the command's name may hold spaces
   # shellcheck disable=SC2086
   set -- "$1" $stat
+  # A zombie (Z, or X while it is reaped) is dead, though its /proc entry stays until its parent waits on it.
+  case $2 in Z | X | x) return 0 ;; esac
   echo "$1 ${21}"
 }
 

@@ -29,9 +29,11 @@ test('deploy lines show only when the server runs the scheme', () => {
   assert.match(served, /After you deploy with tools\/deploy\.sh/);
   assert.match(served, /or pending-deploy \(deployed with tools\/deploy\.sh/);
   assert.match(served, /pending-deploy after tools\/deploy\.sh, close_self otherwise/);
+  assert.match(served, /does something by hand .*skip pending-deploy and close_self/);
   const elsewhere = systemPrompt(project, minion, null, null, '/tickets', null);
+  assert.match(elsewhere, /skip close_self: ask that person/);
   assert.doesNotMatch(elsewhere, /deploy\.sh|pending-deploy/);
-  assert.match(elsewhere, /Once your work is finished and nothing is left for a person to answer, try or read, end the minion in that same turn \(close_self\)/);
+  assert.match(elsewhere, /Once your work is finished and nothing is left for a person to answer, try, read or do by hand, end the minion in that same turn \(close_self\)/);
   assert.match(elsewhere, /outside \(work still running elsewhere\), or null when/);
 });
 

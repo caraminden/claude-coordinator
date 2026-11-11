@@ -78,6 +78,15 @@ test("an area's diff is just its paths: the base is main without them, the branc
   assert.equal(git(clone, 'status', '--porcelain'), '');
 });
 
+test('an area with a non-ASCII path is found in main (#468 S06-9)', async () => {
+  const r = repo();
+  git(r, 'config', 'core.quotePath', 'true');
+  write(r, 'docs/café/a.md', 'one\ntwo\n');
+  git(r, 'add', '-A');
+  git(r, 'commit', '-q', '-m', 'docs');
+  assert.deepEqual(await diffSize({ mode: 'area', repo: r, base: 'main', paths: ['docs/café'] }), { files: 1, lines: 2 });
+});
+
 test("a branch review clones the minion's branch, committed work only, against main", async () => {
   const r = repo();
   git(r, 'checkout', '-q', 'ticket/9-thing');

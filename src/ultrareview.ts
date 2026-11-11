@@ -61,8 +61,9 @@ export function parseShortstat(s: string): Size {
 /** How big the review's diff will be, read from the repo without cloning. Throws when a path or branch isn't there. */
 export async function diffSize(spec: ReviewSpec): Promise<Size> {
   if (spec.mode === 'branch') return parseShortstat(await git(spec.repo, 'diff', '--shortstat', `${spec.base}...${spec.branch}`, '--'));
-  const tracked = await git(spec.repo, 'ls-tree', '-r', '--name-only', spec.base, '--', ...spec.paths);
-  const have = tracked.split('\n').filter(Boolean);
+  // -z: names as they are, not C-quoted ("docs/caf\303\251/a.md").
+  const tracked = await git(spec.repo, 'ls-tree', '-r', '-z', '--name-only', spec.base, '--', ...spec.paths);
+  const have = tracked.split('\0').filter(Boolean);
   const missing = spec.paths.filter((p) => !have.some((f) => f === p || f.startsWith(`${p}/`)));
   if (missing.length) throw new Error(`Not in ${spec.base}: ${missing.join(', ')}`);
   const empty = await git(spec.repo, 'hash-object', '-t', 'tree', '/dev/null');

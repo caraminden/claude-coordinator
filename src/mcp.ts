@@ -1290,7 +1290,13 @@ async function runTool(name: string, args: any): Promise<string> {
       let r = await call('POST', `/api/tickets/${TICKET}/land`, {});
       while (r.code === null) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
-        r = await call('GET', `/api/tickets/${TICKET}/land`);
+        try {
+          r = await call('GET', `/api/tickets/${TICKET}/land`);
+        } catch (err: any) {
+          // The server keeps a landing in memory; the restart a landing's deploy queues forgets it.
+          if (!/No landing has started/.test(err.message)) throw err;
+          return "tools/land.sh ended, then Citadel restarted (most likely the deploy it ran) before its result was read, so its exit code and output are lost. Check `git log main` for your commits.";
+        }
       }
       return `tools/land.sh exited ${r.code}${r.code === 0 ? '' : ' (read its output: main only moved if it says so)'}.\n\n${String(r.output).slice(-12_000)}`;
     }

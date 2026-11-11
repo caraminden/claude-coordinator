@@ -39,7 +39,7 @@ test('a runner alerts once it has been offline for 15 minutes, and clears when b
   assert.deepEqual(runnerProblems(runners, offline, NOW + OFFLINE_MS - 1), []);
   const [p] = runnerProblems(runners, offline, NOW + OFFLINE_MS);
   assert.equal(p.key, 'runner:DESKTOP-G248IJ8-desktop');
-  assert.match(p.title, /^CI: runner DESKTOP-G248IJ8-desktop has been offline since \d\d:\d\d$/);
+  assert.match(p.title, /^CI: runner DESKTOP-G248IJ8-desktop has been offline since Nov \d\d? \d\d:\d\d$/);
   assert.deepEqual(runnerProblems([{ name: 'DESKTOP-G248IJ8-desktop', status: 'online' }], offline, NOW + HOUR), []);
   assert.deepEqual(offline, {}, 'back online forgets when it went');
   runnerProblems(runners, offline, NOW);
@@ -62,10 +62,10 @@ test('jobs that never started group by labels, apart from red tests, until a job
   assert.equal(groups.length, 1);
   assert.equal(groups[0].labels, 'windows-latest');
   assert.equal(groups[0].dead.length, 3);
-  const p = deadProblem(groups[0], BILLING, NOW);
+  const p = deadProblem(groups[0], BILLING);
   assert.equal(p.key, 'nostart:windows-latest');
-  assert.match(p.title, /^CI: 3 jobs on windows-latest didn't start since \d\d:\d\d, so they aren't test failures\. GitHub says: "The job was not started because recent account payments have failed/);
-  assert.match(deadProblem({ labels: 'x', dead: [dead(HOUR)] }, null, NOW).title, /1 job on x didn't start since .*, so it isn't a test failure\.$/);
+  assert.match(p.title, /^CI: 3 jobs on windows-latest didn't start since Nov \d\d? \d\d:\d\d, so they aren't test failures\. GitHub says: "The job was not started because recent account payments have failed/);
+  assert.match(deadProblem({ labels: 'x', dead: [dead(HOUR)] }, null).title, /1 job on x didn't start since .*, so it isn't a test failure\.$/);
 
   assert.deepEqual(deadGroups([...jobs, job({ labels: ['windows-latest'], created_at: iso(MIN) })]), [], 'a job that started since clears it');
 });
@@ -201,7 +201,7 @@ function world() {
 
 test('each problem is one Mandate alert per admin with Mandate, updated on change, cleared when fixed, and kept across a restart', async () => {
   const w = world();
-  const t0 = Date.now();
+  const t0 = NOW;
   await w.health.tick(t0);
   assert.deepEqual(w.puts, [], 'all clear: nothing sent');
   assert.ok(!w.gh.calls.some((c) => c.startsWith('repos/caraminden/notes/') && !c.includes('/workflows?')), 'a repo with no workflows costs one call');
@@ -230,9 +230,22 @@ test('each problem is one Mandate alert per admin with Mandate, updated on chang
   assert.equal(w.puts.length, 2, 'cleared once');
 });
 
+test('an alert raised before local midnight is not sent again after it (#509)', async () => {
+  const w = world();
+  const t0 = new Date(2026, 10, 10, 23, 40).getTime(); // local time, in whatever zone the tests run
+  w.gh.runners = [{ name: 'DESKTOP-G248IJ8-desktop', status: 'offline' }];
+  await w.health.tick(t0);
+  await w.health.tick(t0 + OFFLINE_MS);
+  assert.equal(w.puts.length, 1);
+  await w.health.tick(new Date(2026, 10, 11, 0, 5).getTime());
+  await w.health.tick(new Date(2026, 10, 11, 9, 0).getTime());
+  assert.equal(w.puts.length, 1, 'the next day: not put again');
+  assert.match(w.puts[0][2]!, /since Nov 10 23:40$/);
+});
+
 test('billing-blocked jobs make one alert that counts up, quoting GitHub, and Mandate being down is retried', async () => {
   const w = world();
-  const t = Date.now();
+  const t = NOW;
   const at = (ago: number) => new Date(t - ago).toISOString();
   const runs = [1, 2].map((i) => runOf({ id: 500 + i, name: 'windows', created_at: at(i * 10 * MIN) }));
   w.gh.runs = runs;
@@ -269,7 +282,7 @@ test('billing-blocked jobs make one alert that counts up, quoting GitHub, and Ma
 test('a rate limit pauses the checks', async () => {
   const w = world();
   w.gh.rateLimited = true;
-  const t = Date.now();
+  const t = NOW;
   await w.health.tick(t);
   const n = w.gh.calls.length;
   assert.equal(n, 1, 'stops at the first refusal');
@@ -282,7 +295,7 @@ test('a rate limit pauses the checks', async () => {
 
 test('a GitHub error skips the round: open alerts stay, and a failed jobs read is not kept', async () => {
   const w = world();
-  const t = Date.now();
+  const t = NOW;
   const r = runOf({ id: 801, name: 'windows', created_at: new Date(t - 10 * MIN).toISOString() });
   w.gh.runs = [r];
   w.gh.jobs.set(801, [dead(0, { run_id: 801, created_at: r.created_at })]);

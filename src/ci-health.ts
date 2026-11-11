@@ -66,11 +66,10 @@ export interface Problem {
 const at = (s: string) => Date.parse(s);
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** "18:31", or "Nov 5 18:31" when it isn't today, in the server's zone. */
-export function clock(t: number, now: number): string {
+/** "Nov 5 18:31" in the server's zone. Always dated: a title that dropped it for today would change at midnight and re-send the alert (#509). */
+export function clock(t: number): string {
   const d = new Date(t);
-  const hm = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  return d.toDateString() === new Date(now).toDateString() ? hm : `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${hm}`;
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
 }
 
 /** Runners offline for OFFLINE_MS or more. `offline` (runner name → first seen offline) is updated in place. */
@@ -84,7 +83,7 @@ export function runnerProblems(runners: Runner[], offline: Record<string, number
       continue;
     }
     const since = (offline[r.name] ??= now);
-    if (now - since >= OFFLINE_MS) out.push({ key: `runner:${r.name}`, title: `CI: runner ${r.name} has been offline since ${clock(since, now)}` });
+    if (now - since >= OFFLINE_MS) out.push({ key: `runner:${r.name}`, title: `CI: runner ${r.name} has been offline since ${clock(since)}` });
   }
   return out;
 }
@@ -107,10 +106,10 @@ export function deadGroups(jobs: Job[]): { labels: string; dead: Job[] }[] {
   return [...groups].map(([labels, dead]) => ({ labels, dead }));
 }
 
-export function deadProblem(g: { labels: string; dead: Job[] }, reason: string | null, now: number): Problem {
+export function deadProblem(g: { labels: string; dead: Job[] }, reason: string | null): Problem {
   const n = g.dead.length;
   const why = reason ? ` GitHub says: "${reason.length > 300 ? `${reason.slice(0, 299)}…` : reason}"` : '';
-  return { key: `nostart:${g.labels}`, title: `CI: ${plural(n, 'job')} on ${g.labels} didn't start since ${clock(at(g.dead[0].created_at), now)}, so ${n === 1 ? "it isn't a test failure" : "they aren't test failures"}.${why}` };
+  return { key: `nostart:${g.labels}`, title: `CI: ${plural(n, 'job')} on ${g.labels} didn't start since ${clock(at(g.dead[0].created_at))}, so ${n === 1 ? "it isn't a test failure" : "they aren't test failures"}.${why}` };
 }
 
 /** Jobs waiting QUEUED_MS or more for a runner, per set of labels. */
@@ -119,7 +118,7 @@ export function queuedProblems(jobs: Job[], now: number): Problem[] {
   for (const j of jobs) if (j.status === 'queued' && now - at(j.created_at) >= QUEUED_MS) groups.set(labelsOf(j), [...(groups.get(labelsOf(j)) ?? []), j]);
   return [...groups].map(([labels, waiting]) => {
     const since = Math.min(...waiting.map((j) => at(j.created_at)));
-    return { key: `queued:${labels}`, title: `CI: ${plural(waiting.length, 'job')} on ${labels} ${waiting.length === 1 ? 'has' : 'have'} waited for a runner since ${clock(since, now)}` };
+    return { key: `queued:${labels}`, title: `CI: ${plural(waiting.length, 'job')} on ${labels} ${waiting.length === 1 ? 'has' : 'have'} waited for a runner since ${clock(since)}` };
   });
 }
 
@@ -137,7 +136,7 @@ export function verdictProblem(workflow: { id: number; name: string }, branch: s
   const since = at(waiting.at(-1)!.created_at);
   if (now - since < VERDICT_MS) return null;
   const last = v < 0 ? `none in its last ${plural(runs.length, 'run')}` : `the last was ${runs[v].conclusion} on ${runs[v].head_sha.slice(0, 7)}`;
-  return { key: `verdict:${workflow.id}`, title: `CI: no ${workflow.name} verdict on ${branch} since ${clock(since, now)} (${last}; ${plural(waiting.length, 'run')} since)` };
+  return { key: `verdict:${workflow.id}`, title: `CI: no ${workflow.name} verdict on ${branch} since ${clock(since)} (${last}; ${plural(waiting.length, 'run')} since)` };
 }
 
 /** The newest two verdict runs of a workflow's runs on the default branch (newest first): the one to check, and the one before. */
@@ -289,7 +288,7 @@ export class CiHealth {
       if (r.status !== 'completed' && now - at(r.created_at) < QUEUED_MS) continue;
       jobs.push(...(await this.jobs(slug, r, as)));
     }
-    for (const g of deadGroups(jobs)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as), now));
+    for (const g of deadGroups(jobs)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
     out.push(...queuedProblems(jobs, now));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';

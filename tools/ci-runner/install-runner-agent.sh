@@ -64,7 +64,7 @@ fi
 # retunes the kernel tick to make up for it, the clock then really runs off (+7% and -2% on 2026-11-11), and
 # timesyncd steps it again every 32 s for as long as it runs. So where WSL keeps the clock, timesyncd is off, here
 # and in every other distro on the PC (README, "Citadel's own tests").
-if grep -qa 'refclock PHC' /init 2>/dev/null && [[ $(systemctl is-enabled systemd-timesyncd 2>/dev/null) != masked ]]; then
+if grep -qa 'refclock PHC' /init 2>/dev/null && systemctl cat systemd-timesyncd >/dev/null 2>&1; then
   systemctl mask --now systemd-timesyncd
   echo 'Turned systemd-timesyncd off: WSL keeps this clock by the Windows clock, and the two fought over it (#542).'
 fi

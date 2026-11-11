@@ -343,7 +343,7 @@ wsl -d <distro> -u root -- systemctl mask --now systemd-timesyncd
 `wsl -l -v` lists the distros. To look at the clock from a CI job without root: the tick is `adjtimex`'s `tick`
 field (10000 when nothing is wrong), and a timesyncd in another distro shows as a UDP socket in `/proc/net/udp`
 that opens for a tenth of a second every 32 s, with the wall clock stepping as it closes. The clock now follows
-the Windows clock, so it is as right as that is (0.4 s behind NTP when measured).
+the Windows clock, so it is as right as that is (a steady 0.4 s behind NTP once it had settled, 2026-11-11).
 
 When the runner can't answer (Cara is logged off, GitHub is down, no runner takes the job within 90 s, the run
 takes more than 6 minutes), `land.sh` prints `CI FALLBACK` with the reason, runs the suite on perigee as it used

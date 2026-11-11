@@ -70,7 +70,7 @@ fi
 # One clock keeper for the whole WSL VM (#542): every distro shares one kernel clock, WSL's own chrony already
 # keeps it by the Windows clock, and this distro's systemd-timesyncd stepping it too skewed every distro's clock by
 # 2% (tools/ci-runner/README.md, "Citadel's own tests").
-if grep -qa 'refclock PHC' /init 2>/dev/null && [[ $(systemctl is-enabled systemd-timesyncd 2>/dev/null) != masked ]]; then
+if grep -qa 'refclock PHC' /init 2>/dev/null && systemctl cat systemd-timesyncd >/dev/null 2>&1; then
   systemctl mask --now systemd-timesyncd
   echo 'Turned systemd-timesyncd off: WSL keeps the clock by the Windows clock, and the two fought over it (#542).'
 fi

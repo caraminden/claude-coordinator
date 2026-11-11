@@ -142,7 +142,7 @@ chmodSync(fake, 0o755);
 
 type Run = { code: number | null; events: any[]; calls: any[] };
 /** Run the shim with Claude's args; `input` lines go to stdin, the last after the first result unless `keepOpen`. */
-function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: object; sigterm?: boolean; env?: object; lockedMs?: number } = {}): Promise<Run> {
+function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: object; sigterm?: boolean; env?: object; lockedMs?: number; lockPid?: string; killAfterMs?: number } = {}): Promise<Run> {
   rmSync(fakeLog, { force: true });
   const home = join(root, `home-${Math.random().toString(36).slice(2)}`);
   mkdirSync(home);
@@ -156,6 +156,12 @@ function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: ob
     mkdirSync(lock, { recursive: true });
     writeFileSync(join(lock, 'pid'), String(process.pid));
     giveUp = letGo(30_000);
+  }
+  if (opts.lockPid) {
+    // A lock left by a shim that died without its exit handler, its pid file as written.
+    const lock = join(home, '.codex', 'citadel-turn.lock');
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, 'pid'), opts.lockPid);
   }
   const child = spawn(process.execPath, [SHIM, ...args], { cwd: root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: join(home, '.codex'), CITADEL_CODEX_BIN: fake, FAKE: opts.fake ?? '', COORDINATOR_TOKEN: 'tok', ...opts.env }, stdio: ['pipe', 'pipe', 'inherit'] });
   const events: any[] = [];
@@ -174,6 +180,7 @@ function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: ob
     }
   });
   for (const l of opts.lines ?? [{ type: 'user', message: { role: 'user', content: '[Josh]: go' } }]) child.stdin.write(JSON.stringify(l) + '\n');
+  if (opts.killAfterMs) setTimeout(() => child.kill('SIGKILL'), opts.killAfterMs).unref();
   // 'close', not 'exit': the shim's last lines can still be in its stdout pipe when it exits.
   return new Promise((resolve) => child.on('close', (code) => {
     clearTimeout(giveUp);
@@ -259,6 +266,14 @@ test("a person's second Codex turn says it waits for their first, then runs", as
   assert.equal(r.events.filter((e) => e.type === 'codex_waiting').length, 1, 'said once');
   assert.equal(r.events.at(-1).type, 'result');
   assert.equal(r.events.at(-1).is_error, false);
+});
+
+test("a lock whose pid now belongs to another process (a reused pid) is stale, and the turn runs (#468 S04-7)", async () => {
+  // This test process stands in for the unrelated process that got the dead shim's pid: alive, but started at another time.
+  const r = await run([], { lockPid: `${process.pid} 1`, killAfterMs: 8000 });
+  assert.equal(r.events.filter((e) => e.type === 'codex_waiting').length, 0, 'not waiting on it');
+  assert.equal(r.events.at(-1)?.type, 'result');
+  assert.equal(r.code, 0);
 });
 
 test('a stored Codex thread resumes without the hand-over; one that is gone starts fresh with it', async () => {

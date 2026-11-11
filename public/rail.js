@@ -319,10 +319,11 @@ let recheck = 0; // a timer while an app is greyed out, so it comes back once it
 let drawn = ''; // the entries drawn (but which is current, syncRail's), to redraw only when a recheck finds them changed
 const entries = (items) => JSON.stringify(items.map(({ current, ...i }) => i));
 
-/** The rail's entries, or null when Citadel didn't answer. */
+/** The rail's entries, or null when Citadel didn't answer (no answer, or a 5xx from it or its proxy while it restarts). */
 const fetchItems = async () => {
   try {
     const res = await fetch(new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
+    if (res.status >= 500) return null;
     return railItems(res.ok ? await res.json() : [], showing(), root.pathname, !inContraption);
   } catch {
     return null;
@@ -367,7 +368,13 @@ export async function showRail() {
   const mark = ++shown;
   const items = await fetchItems();
   if (mark !== shown) return false;
-  return drawRail(items ?? []);
+  if (!items) {
+    // Citadel restarting: keep the rail drawn and ask again, or with none drawn yet, try the whole show again.
+    if (nav) recheckSoon();
+    else setTimeout(() => mark === shown && showRail(), RECHECK_MS);
+    return !!nav;
+  }
+  return drawRail(items);
 }
 
 let switching = false;

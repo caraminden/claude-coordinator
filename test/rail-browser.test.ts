@@ -30,7 +30,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 </script>`;
 
 // What the fake Citadel answers: toc up or down, its icon broken, or no answer at all.
-const state = { tocUp: true, iconBroken: false, citadelDown: false };
+const state = { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false };
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#f93"/></svg>';
 let server: Server;
 let browser: Browser;
@@ -49,6 +49,7 @@ before(async () => {
     if (path === '/apps/_citadel/rail.js') return res.writeHead(200, { 'content-type': 'text/javascript' }).end(rail);
     if (path === '/c/api/contraptions/mine') {
       if (state.citadelDown) return req.socket.destroy();
+      if (state.citadel502) return res.writeHead(502).end();
       return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify([
         { name: 'peek', title: 'Peek', icon: '/icon.svg', up: true },
         { name: 'toc', title: 'ToC', icon: '/icon.svg', up: state.tocUp },
@@ -95,6 +96,24 @@ test('an app down when the page loaded comes back without a reload, and a rechec
   await mark(page);
   await wait(300);
   assert.ok(await sameRail(page), 'nothing down: no more redraws');
+});
+
+test('a 502 from Citadel (its proxy while it restarts) keeps the rail on a recheck, and a page loaded during one draws it once Citadel is back', { skip }, async () => {
+  Object.assign(state, { tocUp: false, iconBroken: false, citadelDown: false, citadel502: false });
+  const page = await browser.page(base, { width: 1000 });
+  assert.equal(await until(page, 'tile'), 'tile', 'greyed out at load');
+  state.citadel502 = true;
+  await wait(300);
+  assert.equal(await toc(page), 'tile', 'a 502 on a recheck: the rail stays as it was');
+  state.citadel502 = false;
+  state.tocUp = true;
+  assert.equal(await until(page, 'img'), 'img', 'back once it is up');
+  state.citadel502 = true;
+  const later = await browser.page(base, { width: 1000 });
+  await wait(300);
+  assert.equal(await toc(later), 'none', 'no rail while Citadel answers 502');
+  state.citadel502 = false;
+  assert.equal(await until(later, 'img'), 'img', 'drawn once Citadel answers');
 });
 
 test('an icon that fails to load comes back in place, without redrawing the rail', { skip }, async () => {

@@ -79,6 +79,12 @@ log_flake() (
 rerun_log=${log%.log}-rerun.log
 : >"$rerun_log"
 say "${#files[@]} test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in $rerun_log)"
+# A phase of their own in the landing's place in line (#553): with the full run they could outlast the waiters' stall.
+if [ -f "$tools/deploy-queue.sh" ]; then
+  # shellcheck source=tools/deploy-queue.sh
+  . "$tools/deploy-queue.sh"
+  queue_phase "rerunning ${#files[@]} failed test file$([ "${#files[@]}" = 1 ] || echo s) since $(date +%H:%M)"
+fi
 SECONDS=0
 for f in "${files[@]}"; do
   left=$((budget - SECONDS))

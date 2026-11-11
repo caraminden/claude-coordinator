@@ -99,15 +99,26 @@ report_me() {
   fi
 }
 
-# Tell the minions that asked for this deploy, and the journal. $1 is ok, warn or fail.
+# What the landings waiting in line see of the queued restart, which holds the lock with no ticket (deploy-queue.sh).
+restart_phase() {
+  printf '%s\n' "$$" "$1 since $(date +%H:%M)" >"$STATE/restart.tmp" && mv -f "$STATE/restart.tmp" "$STATE/restart"
+}
+
+# Tell the minions that asked for this deploy, and the journal. $1 is ok, warn or fail. The restart's last act
+# (every caller ends after it), so the lock goes first (#553): a report to a server that is down retries for
+# REPORT_RETRY s a minion, and the landings in line were waiting on that. The list is taken under the lock, so a
+# deploy that starts meanwhile adds to a new one.
 report() {
-  local ok=$1 text=$2 api token ticket
+  local ok=$1 text=$2 api token ticket list="$STATE/reporters.$$"
   case "$ok" in ok) say "$text" ;; warn) say "WARNING: $text" ;; *) say "FAILED: $text" ;; esac
-  [ -f "$STATE/reporters" ] || return 0
+  [ ! -f "$STATE/reporters" ] || mv -f "$STATE/reporters" "$list"
+  rm -f "$STATE/restart"
+  flock -u 9 2>/dev/null || true
+  [ -f "$list" ] || return 0
   while read -r api token ticket; do
     post_report "$api" "$token" "$ticket" "$ok" "$text"
-  done < <(tac "$STATE/reporters" | sort -su -k3,3) # one note per minion, with the newest of its turns' tokens
-  rm -f "$STATE/reporters"
+  done < <(tac "$list" | sort -su -k3,3) # one note per minion, with the newest of its turns' tokens
+  rm -f "$list"
 }
 
 # Push live commit $1 to $REMOTE's main, so GitHub matches what runs and keeps a copy off the box.
@@ -235,6 +246,8 @@ restart() {
   flock 9
   rm -f "$STATE/now"
   local target good saved
+  trap 'rm -f "$STATE/restart"' EXIT
+  restart_phase "copying the database"
   target=$(git_live rev-parse HEAD)
   if ! saved=$(backup_db "$target"); then
     report fail "Could not copy the database to backups/ before restarting on $(short "$target") (see journalctl --user -u $UNIT), so nothing restarted. The checkout is at $(short "$target"), but the server still runs $(health commit | cut -c1-7). Free some disk or fix the copy, then run tools/deploy.sh again."
@@ -242,6 +255,7 @@ restart() {
   fi
   [ -n "$saved" ] && say "database copied to $saved"
   say "restarting $SERVICE on $(short "$target")"
+  restart_phase "restarting $SERVICE on ${target:0:7}"
   local rc=0
   restart_healthy "$target" || rc=$?
   if [ "$rc" = 0 ]; then
@@ -261,6 +275,7 @@ restart() {
     exit 1
   fi
   say "rolling back to last-good $(short "$good")"
+  restart_phase "rolling back to ${good:0:7}"
   git_live reset -q --hard "$good"
   # Written once the checkout is back, so land.sh finds its commit gone from it. For the deploy that waits on this restart, and for the landings after it while main keeps the commit (land.sh).
   # The commit stays the first one that failed while it is still part of what failed now: a landing on top of it

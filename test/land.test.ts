@@ -730,7 +730,7 @@ test('waiters outlast the stall limit while the holder moves on, and give up onc
   try {
     assert.ok(existsSync(join(state, 'stuck')), `not while the holder was still moving: gave up after ${Date.now() - t} ms\n${b.stderr()}`);
     assert.match(b.stderr(), /2nd in line for the deploy lock, about 5 min \(ahead: a, step 1\)/);
-    assert.match(b.stderr(), /nothing has moved for .* \(ahead: a, step 10\), so this gave up/);
+    assert.match(b.stderr(), /nothing has moved for .* \(ahead: a, step 10; pid \d+, state \w; the lock is held\), so this gave up/);
     assert.deepEqual(tickets(state).length, 1, 'its ticket went with it');
     assert.deepEqual(order(state), ['a']);
   } finally {
@@ -746,7 +746,7 @@ test('the head of the line waits for a lock held outside it (the queued restart)
   try {
     await until('the lock to be held', () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
     const a = waiter(state, 'a', 'sleep 1.2');
-    await until('a to say it waits', () => /next in line for the deploy lock \(ahead: a queued restart/.test(a.stderr()));
+    await until('a to say it waits', () => /next in line for the deploy lock \(ahead: outside the line, the lock is open in pid \d+ \(sleep 600\)\)/.test(a.stderr()));
     const b = waiter(state, 'b', 'true');
     await until('b to say its place', () => /2nd in line for the deploy lock, about 2 min \(ahead: a, waiting\)/.test(b.stderr()));
     assert.deepEqual(order(state), []);

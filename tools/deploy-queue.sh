@@ -12,13 +12,15 @@
 # A ticket is four lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits), its
 # label, and its phase. A ticket whose process is gone is deleted by whoever waits behind it.
 # Outside the line, the queued restart (deploy.sh restart) and a land.sh from a branch older than this
-# take the flock directly; the head of the line waits for them like for anyone else.
+# take the flock directly; the head of the line waits for them like for anyone else. The restart says what it
+# is doing in <state>/restart ("<pid>", then its phase), which counts as progress like a ticket's phase (#553).
 # The kit's land.sh template (kit/skills/scheme-setup/templates/land.sh) carries a copy of these functions
 # inline, so a scheme copies one file: a fix to either belongs in both.
 
 QUEUE_POLL=${DEPLOY_QUEUE_POLL:-1}
 # Give up after this long with no change at the head of the line. The floor is the holder's longest
-# single phase: the test run, 630 s at most (tools/run-tests.sh); the boot check ends within 6 min.
+# single phase: the test run, 630 s at most (tools/run-tests.sh; its reruns are a phase of their own, 310 s at
+# most); the boot check ends within 6 min.
 QUEUE_STALL=${DEPLOY_QUEUE_STALL:-900}
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
 
@@ -32,6 +34,41 @@ queue_proc() {
   # A zombie (Z, or X while it is reaped) is dead, though its /proc entry stays until its parent waits on it.
   case $2 in Z | X | x) return 0 ;; esac
   echo "$1 ${21}"
+}
+
+# The state letter of a process: T or t is stopped (a frozen unit or container, a SIGSTOP).
+queue_state() {
+  local stat
+  stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
+  stat=${stat##*) }
+  echo "${stat%% *}"
+}
+
+# <state>: the queued restart's phase, while its process lives.
+queue_restart() {
+  local l
+  mapfile -t l 2>/dev/null <"$1/restart" || return 0
+  [ -n "${l[0]:-}" ] && [ -d "/proc/${l[0]}" ] || return 0
+  echo "${l[1]:-}"
+}
+
+# <state>: who holds the lock when nobody in line does and no restart says so: the processes that have the lock
+# file open and no ticket, such as what a killed landing left running. Run with fd 9 closed, or it names itself.
+queue_outside() {
+  local lock p who="" count=0 inline=" "
+  lock=$(realpath "$1/lock" 2>/dev/null) || lock=$1/lock
+  for p in "$1"/queue/[0-9]*; do inline="$inline$(head -n 1 "$p" 2>/dev/null | cut -d' ' -f1) "; done
+  for p in $(find /proc/[0-9]*/fd -maxdepth 1 -lname "$lock" 2>/dev/null | cut -d/ -f3 | sort -un); do
+    case $inline in *" $p "*) continue ;; esac
+    count=$((count + 1))
+    [ "$count" -le 3 ] || continue
+    who="$who${who:+, }pid $p ($(tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | cut -c1-80 | sed 's/ *$//'))"
+  done
+  if [ -n "$who" ]; then
+    echo "outside the line, the lock is open in $who$([ "$count" -le 3 ] || echo " and $((count - 3)) more")"
+  else
+    echo "a queued restart, or a landing started from a branch older than the line"
+  fi
 }
 
 queue_write() { # <file> <pid and start> <got> <label> <phase>: by a rename, so nobody reads half a ticket
@@ -63,7 +100,7 @@ queue_ordinal() {
 }
 
 queue_lock() {
-  local q=$1/queue label=$2 n me t l ahead head headname sig last="" since=$SECONDS said="" typical sum count line
+  local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=$SECONDS said="" typical sum count line
   mkdir -p -m 700 "$q"
   exec 9>"$1/lock"
   me=$(queue_proc $$)
@@ -91,8 +128,10 @@ queue_lock() {
         rm -f "$t"
         continue
       fi
+      # A waiter that is stopped holds nothing, so it is passed over; it tries for the lock like the head once it wakes.
+      if [ "${l[1]:-0}" = 0 ] && [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; then continue; fi
       ahead=$((ahead + 1))
-      [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"; }
+      [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *}; }
     done
 
     if [ "$ahead" = 0 ]; then
@@ -102,13 +141,16 @@ queue_lock() {
         queue_write "$DEPLOY_QUEUE_TICKET" "$me" "$(date +%s)" "$label" starting
         return 0
       fi
-      head="outside $n" headname="a queued restart, or a landing started from a branch older than the line"
+      phase=$(queue_restart "$1")
+      # No restart says it has it: who does is looked up (queue_outside) only when there is a line to print.
+      if [ -n "$phase" ]; then head="outside $n $phase" headname="the queued restart, $phase"; else head="outside $n" headname=""; fi
     fi
 
     # Progress is any change at the head of the line: a new head, or the head's next phase.
     sig="$ahead $head"
     if [ "$sig" != "$last" ]; then
       last=$sig since=$SECONDS
+      [ -n "$headname" ] || headname=$(exec 9>&-; queue_outside "$1")
       line="$(queue_ordinal $((ahead + 1))) in line for the deploy lock"
       if [ "$ahead" -gt 0 ]; then
         sum=0 count=0
@@ -121,7 +163,19 @@ queue_lock() {
       [ -n "$said" ] || echo "queue: the wait has no time limit while the line moves, so run this in the background with a long timeout rather than under a 10 min limit: a run that is stopped loses its place" >&2
       said=1
     elif [ $((SECONDS - since)) -ge "$QUEUE_STALL" ]; then
-      echo "queue: nothing has moved for $((QUEUE_STALL / 60)) min (ahead: $headname), so this gave up and nothing landed or deployed. A person needs to look at what holds the deploy lock ($1/lock) before anyone tries again" >&2
+      [ -n "$headname" ] || headname=$(exec 9>&-; queue_outside "$1")
+      detail="" look="what holds the deploy lock ($1/lock)"
+      if [ "$ahead" -gt 0 ]; then
+        detail=$(queue_state "$headpid")
+        case $detail in T | t) detail="; pid $headpid, stopped" ;; *) detail="; pid $headpid, state ${detail:-?}" ;; esac
+        if flock -n 9; then
+          flock -u 9
+          detail="$detail; the lock is free" look="pid $headpid, which is first in line and is not taking the lock"
+        else
+          detail="$detail; the lock is held"
+        fi
+      fi
+      echo "queue: nothing has moved for $((QUEUE_STALL / 60)) min (ahead: $headname$detail), so this gave up and nothing landed or deployed. A person needs to look at $look before anyone tries again" >&2
       queue_done
       return 1
     fi

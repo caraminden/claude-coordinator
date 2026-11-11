@@ -51,6 +51,8 @@ export interface Job {
   status: string;
   conclusion: string | null;
   created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
   runner_name: string | null;
   labels: string[];
   steps?: unknown[];
@@ -225,6 +227,8 @@ export class CiHealth {
   private busy = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private said = new Set<string>();
+  /** Each scheme's jobs of the last day as last read, running and waiting ones too: the CI desktop's load reads them (#534, src/ci-load.ts). */
+  recent = new Map<number, Job[]>();
 
   constructor(store: Store, deps: CiHealthDeps) {
     this.store = store;
@@ -291,11 +295,14 @@ export class CiHealth {
     const runs: Run[] = ((await this.read(`repos/${slug}/actions/runs?per_page=${RUNS}`, as))?.workflow_runs ?? [])
       .filter((r: Run) => now - at(r.created_at) <= WINDOW_MS);
     const jobs: Job[] = [];
+    const all: Job[] = [];
     for (const r of runs) {
+      const its = await this.jobs(slug, r, as);
+      all.push(...its);
       // A run under QUEUED_MS old can't have a job waiting too long yet, and an unfinished one has none that died.
-      if (r.status !== 'completed' && now - at(r.created_at) < QUEUED_MS) continue;
-      jobs.push(...(await this.jobs(slug, r, as)));
+      if (r.status === 'completed' || now - at(r.created_at) >= QUEUED_MS) jobs.push(...its);
     }
+    this.recent.set(p.id, all);
     for (const g of deadGroups(jobs)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
     out.push(...queuedProblems(jobs, now));
 

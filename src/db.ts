@@ -441,6 +441,13 @@ CREATE TABLE IF NOT EXISTS machine_projects (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   PRIMARY KEY (machine_id, project_id)
 );
+-- A CI runner agent's load samples (#534), one every 30 seconds as JSON (src/ci-load.ts Sample), kept 14 days.
+CREATE TABLE IF NOT EXISTS runner_load (
+  machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS runner_load_at ON runner_load(at);
 CREATE TABLE IF NOT EXISTS github_seen (
   ticket_id INTEGER NOT NULL REFERENCES tickets(id),
   key TEXT NOT NULL,
@@ -774,6 +781,7 @@ export const SCHEMA_HISTORY = [
   [37, 'project_seen_counts (#498)'],
   [38, 'project_seen_items (#539)'],
   [39, 'last_actions (#538)'],
+  [40, 'runner_load (#534)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2069,6 +2077,20 @@ export class Store {
 
   getMachine(id: number): Machine | undefined {
     return this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as unknown as Machine | undefined;
+  }
+
+  /** A CI runner agent's load sample (#534), as JSON. */
+  addRunnerLoad(machineId: number, at: number, data: string) {
+    this.db.prepare('INSERT INTO runner_load (machine_id, at, data) VALUES (?, ?, ?)').run(machineId, at, data);
+  }
+
+  /** Every agent's samples from `since` on, oldest first. */
+  runnerLoadSince(since: number): { machine_id: number; at: number; data: string }[] {
+    return this.db.prepare('SELECT machine_id, at, data FROM runner_load WHERE at >= ? ORDER BY at').all(since) as { machine_id: number; at: number; data: string }[];
+  }
+
+  pruneRunnerLoad(before: number) {
+    this.db.prepare('DELETE FROM runner_load WHERE at < ?').run(before);
   }
 
   /** A machine `ownerId` manages (#306), or a shared one with none. It is lent to no scheme until some are added (#438). */

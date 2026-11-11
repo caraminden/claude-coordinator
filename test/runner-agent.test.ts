@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkJob, JobRunner, jobCommand, redact, runCommand } from '../public/runner-agent.mjs';
+import { checkJob, JobRunner, jobCommand, personIdle, redact, runCommand, runnerUse, Sampler } from '../public/runner-agent.mjs';
 import { bootServer, stopProcs, until } from './helpers.ts';
 
 const ID = 'a'.repeat(24);
@@ -100,13 +100,16 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     // Stands in for Windows PowerShell: says what it was given, and the token it found in its environment.
     const ps = join(srv.root, 'win', 'System32', 'WindowsPowerShell', 'v1.0');
     mkdirSync(ps, { recursive: true });
-    writeFileSync(join(ps, 'powershell.exe'), '#!/bin/sh\necho "fake ps: $*"\necho "token was $CC_MACHINE_TOKEN"\n');
+    // For sample-load.ps1 it prints a line like the real one's: a runner with a child, two threads waiting, Cara at the PC.
+    const line = JSON.stringify({ procs: [[10, 1, 'C:\\actions-runner-vault\\bin\\Runner.Listener.exe', 1, 1000], [11, 10, 'C:\\cargo\\rustc.exe', 5, 2000]], queue: 2, quser: [' USERNAME SESSIONNAME ID STATE IDLE TIME LOGON TIME', '>cara console 1 Active 3 11/10/2026 8:01 AM'], hv: null, temp: null, restarts: ['2026-10-30T13:34:00.0000000Z'] });
+    writeFileSync(join(srv.root, 'sample.json'), line);
+    writeFileSync(join(ps, 'powershell.exe'), `#!/bin/sh\ncase "$*" in *sample-load.ps1*) cat '${join(srv.root, 'sample.json')}'; exit 0;; esac\necho "fake ps: $*"\necho "token was $CC_MACHINE_TOKEN"\n`);
     chmodSync(join(ps, 'powershell.exe'), 0o755);
     const made = await srv.call('/api/machines', { name: 'desk-runners' });
     assert.equal(made.status, 201, JSON.stringify(made.data));
     const tokenFile = join(srv.root, 'machine-token');
     writeFileSync(tokenFile, `${made.data.token}\n`);
-    agent = spawn(process.execPath, [agentFile, srv.base, '--token-file', tokenFile, '--os', 'windows'], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
+    agent = spawn(process.execPath, [agentFile, srv.base, '--token-file', tokenFile, '--os', 'windows', '--sample-ms', '200'], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
     const online = await until('the runner agent to connect', async () => (await srv.call('/api/machines')).data.find((m: any) => m.name === 'desk-runners' && m.online));
     assert.equal(online.runners, true);
     assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
@@ -123,7 +126,20 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     assert.match(job.text, /token was ccm_…/);
     assert.doesNotMatch(job.text, new RegExp(made.data.token));
 
-    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'keep-wsl-up.ps1',
+    // Its load samples (#534) reach the CI desktop view: the second look on, since CPU needs two.
+    const pc = await until('a load sample', async () => (await srv.call('/api/ci-desktop')).data.pcs.find((p: any) => p.now));
+    assert.equal(pc.now.queue, 2);
+    assert.equal(pc.now.idle_sec, 180);
+    assert.deepEqual(pc.restarts, [], 'a restart from before the last day is history');
+    assert.match(pc.verdict.text, /^Fine: CPU averaged \d+% /);
+    // Only a runner host's token sends them, and only a sample that checks out.
+    const post = (token: string, body: unknown) => fetch(`${srv.base}/api/machines/runner-load`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await post(made.data.token, { os: 'windows', host: 'x', cores: 1, cpu: 500, mem_total: 1, mem_free: 1, runners: [] })).status, 400);
+    assert.equal((await post('ccm_1_nope', {})).status, 401);
+    const laptop = await srv.call('/api/machines', { name: 'a-laptop' });
+    assert.equal((await post(laptop.data.token, { os: 'windows', host: 'x', cores: 1, cpu: 5, mem_total: 1, mem_free: 1, runners: [] })).status, 403);
+
+    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1', 'keep-wsl-up.ps1',
       'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh']) {
       assert.equal((await fetch(`${srv.base}/ci-runner/${name}`)).status, 200, name);
     }
@@ -133,4 +149,52 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     if (agent) await stopProcs([agent]);
     await srv.stop();
   }
+});
+
+test('who is at the PC, from quser: the least idle active session, nobody, or can\'t tell', () => {
+  const head = ' USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME';
+  assert.equal(personIdle([head, '>cara                  console             1  Active      none   11/10/2026 8:01 AM']), 0);
+  assert.equal(personIdle([head, '>cara                  console             1  Active         .   11/10/2026 8:01 AM']), 0);
+  assert.equal(personIdle([head, ' cara                  console             1  Active      1:05   11/10/2026 8:01 AM', ' josh                  rdp-tcp#0           2  Active         7   11/10/2026 9:00 AM']), 420);
+  assert.equal(personIdle([head, ' cara                                      3  Disc     2+03:04   11/9/2026 8:01 AM']), 1e6, 'a disconnected session is nobody at the PC');
+  assert.equal(personIdle([head, ' cara                  console             1  Active   1+00:00   11/10/2026 8:01 AM']), 86400);
+  assert.equal(personIdle([head]), 1e6);
+  assert.equal(personIdle([]), 1e6);
+  assert.equal(personIdle(null), null);
+  assert.equal(personIdle([' BENUTZERNAME SITZUNGSNAME ID STATUS LEERLAUF ANMELDEZEIT', ' cara console eins Aktiv keine 10.11.2026 08:01']), null, 'lines it can\'t read are "can\'t tell", which Citadel reads as someone there');
+});
+
+test('a runner\'s use is its Runner.Listener and everything under it, as CPU since the last look', () => {
+  const procs = [
+    { pid: 10, ppid: 1, path: 'C:\\actions-runner-peek-auras-2\\bin\\Runner.Listener.exe', cpu: 3, mem: 100 },
+    { pid: 11, ppid: 10, path: 'C:\\actions-runner-peek-auras-2\\bin\\Runner.Worker.exe', cpu: 4, mem: 200 },
+    { pid: 12, ppid: 11, path: 'C:\\Users\\x\\.cargo\\bin\\cargo.exe', cpu: 50, mem: 300 },
+    { pid: 20, ppid: 1, path: '/opt/actions-runner-claude-coordinator/bin/Runner.Listener', cpu: 1, mem: 10 },
+    { pid: 30, ppid: 1, path: 'C:\\Games\\game.exe', cpu: 900, mem: 5000 },
+    { pid: 31, ppid: 30, path: null, cpu: 1, mem: 1 },
+  ];
+  const first = runnerUse(procs, null);
+  assert.deepEqual(first.runners, [{ dir: 'C:\\actions-runner-peek-auras-2', cpu: null, mem: 600 }, { dir: '/opt/actions-runner-claude-coordinator', cpu: null, mem: 10 }]);
+  // 30 seconds on: cargo used 20 more, a new rustc (pid 13) used 25 since it began, and pid 11 is a new process under an old number.
+  const next = [...procs.map((p) => (p.pid === 12 ? { ...p, cpu: 70 } : p.pid === 11 ? { ...p, cpu: 1 } : p)), { pid: 13, ppid: 12, path: 'rustc.exe', cpu: 25, mem: 400 }];
+  assert.deepEqual(runnerUse(next, first.seen).runners, [{ dir: 'C:\\actions-runner-peek-auras-2', cpu: 46, mem: 1000 }, { dir: '/opt/actions-runner-claude-coordinator', cpu: 0, mem: 10 }]);
+  // A pid used again that points a process at its own child doesn't loop.
+  assert.equal(runnerUse([{ ...procs[0], ppid: 11 }, procs[1]], first.seen).runners.length, 1);
+});
+
+test('a sample: nothing on the first look, then percentages of the whole PC, named from each runner\'s .runner file', async () => {
+  let t = 1_000_000;
+  let procs = [{ pid: 10, ppid: 1, path: '/opt/actions-runner-vault/bin/Runner.Listener', cpu: 2, mem: 100 }];
+  let times = { idle: 1000, total: 2000 };
+  const sampler = new Sampler({ os: 'linux', dir: '/', now: () => t, times: () => times, procs: () => procs, identity: (dir: string) => ({ name: `PC-${dir.length}`, repo: 'caraminden/vault' }) });
+  assert.equal(await sampler.take(), null);
+  t += 30_000;
+  times = { idle: 1250, total: 3000 };
+  procs = [{ ...procs[0], cpu: 2 + 48 }];
+  const s = await sampler.take();
+  assert.equal(s.cpu, 75);
+  assert.equal(s.os, 'linux');
+  assert.ok(s.cores >= 1 && s.mem_total > s.mem_free);
+  // 48 CPU seconds in 30 seconds is 1.6 cores' worth: that over the PC's cores.
+  assert.deepEqual(s.runners, [{ name: 'PC-25', repo: 'caraminden/vault', dir: '/opt/actions-runner-vault', cpu: Math.round((48 / (30 * s.cores)) * 1000) / 10, mem: 100 }]);
 });

@@ -317,6 +317,8 @@ async function main() {
   const logFile = option('--log');
   // Tests run a Windows agent on Linux; nothing else passes it.
   const os = option('--os') ?? defaultOs();
+  // Tests sample faster than every 30 seconds; nothing else passes it.
+  const sampleMs = Number(option('--sample-ms')) || SAMPLE_MS;
   if (os !== 'linux' && os !== 'windows') {
     console.error('--os is linux or windows');
     process.exit(2);
@@ -362,7 +364,7 @@ async function main() {
       if (err.message !== sampleError) log(`Couldn't send a load sample (said once): ${err.message}`);
       sampleError = err.message;
     }
-    setTimeout(sample, SAMPLE_MS).unref();
+    setTimeout(sample, sampleMs).unref();
   };
   sample();
 

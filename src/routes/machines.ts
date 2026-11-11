@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { runnerAsk } from '../ci-runner.ts';
-import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, hashToken, newToken } from '../machines.ts';
+import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, hashToken, newToken, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
 
@@ -96,6 +96,12 @@ export const agentRoutes: Route[] = [
     if (!app.machines.runnerResult(machine, await readJson(req, 100_000))) throw new HttpError(410, 'No such runner job');
     return json(res, 202, {});
   }),
+  // A CI runner agent's load sample, every 30 seconds (#534, src/ci-load.ts).
+  agent('POST', '/api/machines/runner-load', async ({ req, res, app }, machine) => {
+    if (!storedCheck(machine)?.runners) throw new HttpError(403, 'Only a CI runner host sends load samples');
+    app.ciLoad.add(machine.id, await readJson(req, 500_000));
+    return json(res, 202, {});
+  }),
 ];
 
 // Anyone signed in adds machines; each manages their own, and admins manage all (#306).
@@ -164,6 +170,11 @@ export const machineRoutes: Route[] = [
     },
   })),
 
+  // The CI desktop's load (#534): each PC with a runner agent, for admins and the members of a scheme with runners there.
+  {
+    method: 'GET', path: '/api/ci-desktop', ...people,
+    handler: ({ res, app, session }) => json(res, 200, { pcs: app.ciLoad.views().filter((v) => session.admin || v.projects.some((id) => app.store.canSee(session, id))) }),
+  },
   { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app, session }) => json(res, 200, machinesFor(session, app.machines.list())) },
   {
     method: 'POST', path: '/api/machines', ...people,

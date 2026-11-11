@@ -46,6 +46,7 @@ import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
 import { CiHealth } from './src/ci-health.ts';
+import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { projectRoutes } from './src/routes/projects.ts';
@@ -476,6 +477,14 @@ const ciHealth = new CiHealth(store, {
   mandate: (project, person, key, title, quiet) => mandateAlert('CI health', project, person, key, title, undefined, quiet),
 });
 if (!BOOT_CHECK) ciHealth.start();
+// The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that
+// holds is a quiet Mandate item for every admin, cleared when it ends.
+const ciLoad = new CiLoad(store, {
+  jobs: () => store.listProjects().map((project) => ({ project, jobs: ciHealth.recent.get(project.id) ?? [] })),
+  hosts: () => machines.list().filter((m) => m.runners && m.online).map((m) => m.host ?? ''),
+  mandate: (project, person, key, title) => mandateAlert('CI load', project, person, key, title, undefined, true),
+});
+if (!BOOT_CHECK) ciLoad.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.alert = adminAlert(store, (project, person, key, title, link) => mandateAlert('In-server fallback', project, person, key, title, link));
@@ -582,7 +591,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
   get assetVersion() {

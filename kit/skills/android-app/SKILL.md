@@ -98,7 +98,7 @@ citadel-android down               # when you're done
   host, which sends it. The sender is digits with an optional leading `+` (up to 20); the text is one
   line of up to 500 characters. To see it arrive (logcat has no clear line for it):
   `adb -s emulator-5554 shell content query --uri content://sms/inbox --projection address,body`.
-  If it says the service didn't answer, the service still runs older code: `down`, then try again. Run your app with
+  If it says the service didn't answer, the service still runs older code: `down`, then try again; if that doesn't help, ask your Taskmaster (perigee's `citadel-android-adb.service` needs a restart). Run your app with
   `adb -s emulator-5554 shell monkey -p <applicationId> 1`; plain `adb -s emulator-5554 ...` works
   for anything else (logcat, input), from containers too.
 - **Other console and shell traps.** `adb emu` exits 0 even when it prints `KO: ...`, and a refused

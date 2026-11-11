@@ -18,7 +18,7 @@ echo "$*\${ADB_LOCAL_TRANSPORT_MAX_PORT:+ scan<=$ADB_LOCAL_TRANSPORT_MAX_PORT}" 
 [ -n "\${ADB_STUB_SERVER:-}" ] && { sleep 30 </dev/null >/dev/null 2>&1 & echo $! >>'${sdk}/server.pids'; }
 [ "$1" = -s ] && shift 2
 # An emulator on another computer: not there until the starter has been asked.
-if [ -n "\${ADB_STUB_FAR:-}" ] && [ ! -e '${sdk}/far-up' ]; then case "$*" in *getprop*|get-state) exit 1 ;; esac; fi
+if [ -n "\${ADB_STUB_FAR:-}" ] && [ ! -e '${sdk}/far-up' ]; then case "$*" in *getprop*|get-state|*screencap*) exit 1 ;; esac; fi
 case "$*" in
   'shell getprop sys.boot_completed') echo 1 ;;
   get-state) [ -e '${sdk}/killed' ] && exit 1; echo device ;;
@@ -282,6 +282,22 @@ test('up says the desktop is not connected when no starter answers, at once or a
   } finally {
     for (const s of open) s.destroy();
     asleep.close();
+  }
+});
+
+test('shot of a stopped far emulator says to run up and does not start it', async () => {
+  rmSync(join(sdk, 'far-up'), { force: true });
+  let asked = 0;
+  const starter = createServer((s) => { asked++; s.end('asked\n'); });
+  await new Promise<void>((r) => starter.listen(0, '127.0.0.1', r));
+  try {
+    const r = await runAsync(['shot', join(root, 'far.png')], { CITADEL_HEAVY_DIR: join(root, 'far-shot'), ADB_STUB_FAR: '1', CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port) });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /the emulator isn't up; run citadel-android up/);
+    await new Promise((res) => setTimeout(res, 300));
+    assert.equal(asked, 0, 'the starter was never asked');
+  } finally {
+    starter.close();
   }
 });
 

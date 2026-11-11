@@ -23,11 +23,13 @@ service in the distro, puts three of the distro's ports on perigee's loopback.
 - **It starts on demand** and stops itself after 15 minutes with no `citadel-android` call, as before. It gets
   4 cores and 4 GB there.
 - **While the desktop is away** (asleep, restarting, Cara not logged on) there is no emulator: `citadel-android`
-  says so within 5 seconds and exits 1. Nothing falls back to perigee. When the PC is back, the tunnel
+  says so within about 10 seconds and exits 1. Nothing falls back to perigee. When the PC is back, the tunnel
   reconnects by itself within about a minute.
 - **The key** the tunnel logs in with can do three things on perigee and nothing else: hold those three ports,
   reach perigee's adb server, and run [`perigee-key.sh`](perigee-key.sh) (hand the distro perigee's adb key and
-  console token; end a tunnel left over from before a restart). It gets no shell.
+  console token; end a tunnel left over from before a restart). It gets no shell. Reaching the adb server
+  does mean the distro could ask the phone for an `adb reverse` or `forward` to any port on perigee's
+  loopback, as any turn on perigee can.
 - `10.0.2.2` inside the phone is now the desktop's distro, not perigee. Reach a perigee server with
   `adb reverse`, as the skill says.
 

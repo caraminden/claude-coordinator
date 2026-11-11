@@ -94,7 +94,7 @@ console_step() {
   until [ -e "$out" ]; do
     if [ $((SECONDS - t0)) -ge 20 ]; then
       rm -f "$req"
-      say "the emulator's service didn't answer in 20s; it may still run code from before $1 existed: citadel-android down, then try again"
+      say "the emulator's service didn't answer in 20s; it may still run code from before $1 existed: citadel-android down, then try again; if that doesn't help, ask your Taskmaster to have citadel-android-adb.service restarted on perigee"
       return 1
     fi
     sleep 0.2
@@ -270,6 +270,8 @@ case "$cmd" in
     take_screen; need_server
     # shot is the one step that doesn't run `up` first, so it carries its own limit for a desktop that went to sleep.
     timeout 30 "$ADB" -s "$SERIAL" exec-out screencap -p >"$1" 9>&- && [ -s "$1" ]; s=$?
+    # The adb server is always there, so need_server can't tell a stopped phone; and keep_screen would start it.
+    [ $s = 0 ] || ask get-state >/dev/null 2>&1 || { say "the emulator isn't up; run citadel-android up"; exit 1; }
     keep_screen
     [ $s = 0 ] && say "saved $1" || say "screenshot failed"
     exit $s ;;

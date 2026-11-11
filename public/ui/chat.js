@@ -340,6 +340,9 @@ export function mountChat(el, opts = {}) {
     const busy = m.running && !(last?.kind === 'text' || (last?.kind === 'steps' && last.steps.some((s) => s.state === 'running')));
     if (busy !== !!live.firstChild) live.replaceChildren(...(busy ? [fromHtml('<div class="cui-working"><span class="cui-spin"></span>Thinking…</div>')] : []));
     for (const c of nodes.flatMap((n) => (n.choices ? [...n.choices.children] : []))) if (m.running) c.disabled = true;
+    // Once it ends, chips given while it ran come alive: the newest reply's, unless one was already tapped.
+    const newest = nodes.at(-1)?.choices;
+    if (!m.running && newest && !newest.querySelector('[aria-pressed="true"]')) for (const c of newest.children) c.disabled = false;
     clearInterval(tick);
     if (m.running) tick = setInterval(ticks, 1000);
     stick();

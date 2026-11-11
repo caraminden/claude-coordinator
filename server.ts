@@ -46,7 +46,7 @@ import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
 import { CiHealth } from './src/ci-health.ts';
 import { callMandate } from './src/mandate-items.ts';
-import { fallbacks } from './src/fallbacks.ts';
+import { adminAlert, fallbacks } from './src/fallbacks.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { ticketRoutes } from './src/routes/tickets.ts';
@@ -470,22 +470,9 @@ const ciHealth = new CiHealth(store, {
   mandate: (project, person, key, title) => mandateAlert('CI health', project, person, key, title),
 });
 if (!BOOT_CHECK) ciHealth.start();
-// A job that ran in the server because systemd-run failed (#519): the first of each cause is a Mandate alert for
-// every admin, from the job's scheme, linking its minion. Keyed by cause and day, so the same trouble tomorrow
-// alerts again even if today's was ticked. Admins tick it themselves; nothing clears it.
-fallbacks.alert = async (cause, job, error, ticketId) => {
-  const ticket = store.getTicket(ticketId);
-  const project = ticket && store.getProject(ticket.project_id);
-  if (!ticket || !project) return false;
-  const admins = store.listUsers().filter((u) => u.admin && !u.disabled_at && store.contraptionEnabled('mandate', u.id));
-  const day = new Date().toISOString().slice(0, 10).replaceAll('-', '');
-  const key = `fallback.${day}.${createHash('sha256').update(cause).digest('hex').slice(0, 12)}`;
-  const who = ticket.number === null ? 'the Taskmaster' : `#${ticket.number}`;
-  const title = `${job} for ${who} ran inside the server, without freezing or turn limits: systemd-run failed (${error.slice(0, 200)})`;
-  const link = `/c/#/p/${project.id}${ticket.number === null ? '' : `/t/${ticket.number}`}`;
-  const sent = await Promise.all(admins.map((u) => mandateAlert('In-server fallback', project, u, key, title, link)));
-  return !admins.length || sent.some(Boolean);
-};
+// A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
+// alert for every admin, from the job's scheme, linking its minion. Admins tick it themselves; nothing clears it.
+fallbacks.alert = adminAlert(store, (project, person, key, title, link) => mandateAlert('In-server fallback', project, person, key, title, link));
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);

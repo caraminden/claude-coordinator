@@ -4,7 +4,7 @@
   --ink: #1d1c1a;
   --muted: #6b6862;
   --line: #e2dfd8; /* dividers and card outlines: subtle on purpose */
-  --control-line: #8a867f; /* control borders (inputs, selects, bordered buttons): 3.2-3.6:1 on --bg, --panel and --code-bg, WCAG 1.4.11 (#556) */
+  --control-line: #8a867f; /* control borders (inputs, selects, bordered buttons): 3.1-3.6:1 on --bg, --panel and --code-bg, WCAG 1.4.11 (#556) */
   --accent: #c2410c;
   --running: #2563eb;
   --waiting: #b45309;

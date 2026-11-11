@@ -443,7 +443,7 @@ const CSS = `
 :where(.cui-md .cui-alt) { color: var(--citadel-muted); }
 :where(.cui-md .cui-copy) {
   float: right; margin: -0.25rem -0.25rem 0.2rem 0.6rem; padding: 0.15rem 0.5rem; line-height: 1.3;
-  border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm); background: transparent; color: var(--citadel-text);
+  border: 1px solid var(--citadel-control-border); border-radius: var(--citadel-radius-sm); background: transparent; color: var(--citadel-text);
   font: 500 var(--citadel-size-small) var(--citadel-font); cursor: pointer; user-select: none;
 }
 :where(.cui-md .cui-copy)::before { content: 'Copy'; }

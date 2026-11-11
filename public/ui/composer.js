@@ -25,7 +25,7 @@ const CSS = `
 :where(.cui-composer) {
   display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--citadel-space-2);
   margin: 0 0 env(safe-area-inset-bottom, 0px); padding: var(--citadel-space-2);
-  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-control-border); border-radius: var(--citadel-radius-lg);
 }
 :where(.cui-composer:has(.cui-composer-input:focus-visible)) { outline: 2px solid var(--citadel-focus); outline-offset: 2px; }
 :where(.cui-composer-error) { flex-basis: 100%; }

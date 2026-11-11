@@ -42,7 +42,7 @@
   background: var(--citadel-surface); color: var(--citadel-text);
   transition: background-color var(--citadel-motion), border-color var(--citadel-motion), color var(--citadel-motion);
 }
-:where(.cui-btn:hover:not(:disabled)) { border-color: color-mix(in srgb, var(--citadel-accent) 60%, var(--citadel-border)); }
+:where(.cui-btn:hover:not(:disabled)) { border-color: color-mix(in srgb, var(--citadel-accent) 60%, var(--citadel-control-border)); }
 :where(.cui-btn.cui-primary) { background: var(--citadel-accent); border-color: var(--citadel-accent); color: var(--citadel-on-accent); font-weight: 600; }
 :where(.cui-btn.cui-primary:hover:not(:disabled)) { background: color-mix(in srgb, var(--citadel-accent) 88%, var(--citadel-text)); }
 :where(.cui-btn.cui-ghost) { background: transparent; border-color: transparent; }

@@ -104,47 +104,51 @@ function reviews(bin: string, place: any = { host: true }) {
   const events: { ticketId: number; kind: string; data: any }[] = [];
   const settings = new Map<string, unknown>();
   const scratch = mkdtempSync(join(root, 'scratch-'));
+  const jobsDir = mkdtempSync(join(root, 'jobs-'));
   const ur = new UltraReviews({
-    claudeBin: bin, place: () => place, scratch: () => scratch, hostEnv: { PATH: process.env.PATH! },
+    claudeBin: bin, place: () => place, scratch: () => scratch, hostEnv: { PATH: process.env.PATH! }, jobsDir,
     emit: (ticketId, kind, data) => events.push({ ticketId, kind, data }),
     getSetting: (k) => settings.get(k) as any, setSetting: (k, v) => settings.set(k, v),
   });
   const result = () => until('the result', () => events.find((e) => e.kind === 'ultrareview_result')?.data as ReviewResult | undefined);
-  return { ur, events, settings, scratch, result };
+  return { ur, events, settings, scratch, jobsDir, result };
 }
 
 test("a review runs the CLI on the clicker's login in a scratch clone, posts the findings and deletes the clone", async () => {
   const { bin, log } = fakeClaude();
-  const { ur, events, scratch, result } = reviews(bin);
-  const saved: string[] = [];
+  const { ur, events, scratch, jobsDir, result } = reviews(bin);
+  const shared = mkdtempSync(join(root, 'shared-'));
   const spec = { mode: 'area' as const, repo: repo(), base: 'main', paths: ['src/a.ts'] };
-  const ev = await ur.start(7, 1, 'Cara', spec, { files: 1, lines: 3 }, (text) => (saved.push(text), '/shared/7/ultrareview.md'));
+  const ev = await ur.start(7, 1, 'Cara', spec, { files: 1, lines: 3 }, shared);
   assert.equal(events[0].kind, 'ultrareview');
   assert.deepEqual(events[0].data, ev);
-  assert.equal(ur.running(), 1);
+  // Without units its CLI runs as the server's child, which a restart would cut off.
+  await until('the CLI runs as a child', () => ur.running() === 1);
   await assert.rejects(ur.start(7, 1, 'Cara', spec, { files: 1, lines: 3 }), /already have an ultra review running/, 'one at a time per person: a double click never pays twice');
   const r = await result();
-  assert.deepEqual(r, { id: ev.id, ok: true, code: 0, text: '1 bug found: src/a.ts:2 off by one', file: '/shared/7/ultrareview.md' });
-  assert.deepEqual(saved, [r.text]);
+  const [file] = readdirSync(shared);
+  assert.deepEqual(r, { id: ev.id, ok: true, code: 0, text: '1 bug found: src/a.ts:2 off by one', file: join(shared, file) });
+  assert.match(readFileSync(r.file!, 'utf8'), /^# Ultra review: area `src\/a.ts`[\s\S]*off by one/);
   const seen = readFileSync(log, 'utf8');
   assert.match(seen, /^args: ultrareview ultrareview-base --trust-workspace --timeout 45$/m);
   assert.match(seen, /^branch: ultrareview-area$/m);
   assert.match(seen, /^diff: src\/a.ts $/m);
   assert.equal(ur.running(), 0);
   assert.deepEqual(readdirSync(scratch), [], 'the scratch clone is gone');
+  assert.deepEqual(readdirSync(jobsDir), [], 'and its job folder');
 });
 
 test("the CLI's refusal (a diff over its limits, credits off) shows as it said it, without colour codes", async () => {
   const { bin } = fakeClaude();
   writeFileSync(join(bin, '..', 'refuse'), '');
   const { ur, result } = reviews(bin);
-  let saved = false;
-  await ur.start(7, 1, 'Cara', { mode: 'branch', repo: repo(), base: 'main', branch: 'ticket/9-thing' }, { files: 1, lines: 1 }, () => ((saved = true), 'x'));
+  const shared = mkdtempSync(join(root, 'shared-'));
+  await ur.start(7, 1, 'Cara', { mode: 'branch', repo: repo(), base: 'main', branch: 'ticket/9-thing' }, { files: 1, lines: 1 }, shared);
   const r = await result();
   assert.equal(r.ok, false);
   assert.equal(r.code, 1);
   assert.equal(r.text, 'This diff has 900 changed files; ultrareview reviews at most 500 files and 8,000 lines.');
-  assert.equal(saved, false, 'a refusal is not saved as findings');
+  assert.deepEqual(readdirSync(shared), [], 'a refusal is not saved as findings');
 });
 
 test('nobody without a Claude login of their own can start one, and a restart reports a lost review', async () => {
@@ -236,5 +240,48 @@ test('only a person can start one: minions and the Taskmaster get 403, and a per
     assert.match(readFileSync(log, 'utf8'), /^args: ultrareview main --trust-workspace --timeout 45$/m);
   } finally {
     await srv.stop();
+  }
+});
+
+// #508: the review's CLI runs in a unit of its own, so a restart neither waits for it (interruptible 0) nor
+// kills it, and the next server posts its findings. A fake systemd-run starts it in a session of its own.
+test('a review outlives a restart: the next server follows it and posts its findings', async () => {
+  const r = repo();
+  const dir = mkdtempSync(join(root, 'restart-'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'systemd-run'), '#!/usr/bin/env bash\nwhile [ "${1#-}" != "$1" ]; do [ "$1" = -p ] && shift; shift; done\nsetsid "$@" </dev/null >/dev/null 2>&1 &\n', { mode: 0o755 });
+  const go = join(dir, 'go');
+  const started = join(dir, 'started');
+  // At most 30 s, so a failed test leaves nothing running.
+  writeFileSync(join(bin, 'claude'), `#!/bin/sh\ntouch '${started}'\nfor i in $(seq 600); do [ -e '${go}' ] && break; sleep 0.05; done\necho "1 bug found: survived the restart"\n`, { mode: 0o755 });
+  const data = join(dir, 'data');
+  mkdirSync(data, { recursive: true });
+  const store = new Store(join(data, 'coordinator.db'));
+  const P = store.createProject('A', null);
+  store.setProjectRepoDir(P.id, r);
+  const M = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'Thing', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(M.id, r, 'ticket/9-thing');
+  store.db.close();
+  const env = { CLAUDE_BIN: join(bin, 'claude'), TURN_UNITS: '1', PATH: `${bin}:${process.env.PATH}` };
+  let srv: Awaited<ReturnType<typeof bootServer>> | null = await bootServer({ root: dir, env });
+  try {
+    assert.equal((await srv.call(`/api/tickets/${M.id}/ultrareview`, { mode: 'branch', confirm: true })).status, 202);
+    await until('the CLI runs', () => existsSync(started));
+    assert.equal((await srv.call('/api/health')).data.interruptible, 0, "a restart doesn't wait for the review");
+    await srv.stop({ keepTurns: true });
+    srv = await bootServer({ root: dir, env });
+    writeFileSync(go, '');
+    const done = await until('the findings', async () => {
+      const list = (await srv!.call(`/api/tickets/${M.id}/events`)).data;
+      return (Array.isArray(list) ? list : list.events)?.find((e: any) => e.kind === 'ultrareview_result');
+    });
+    const res = typeof done.data === 'string' ? JSON.parse(done.data) : done.data;
+    assert.equal(res.ok, true, res.text);
+    assert.equal(res.text, '1 bug found: survived the restart');
+    assert.match(readFileSync(res.file, 'utf8'), /survived the restart/);
+  } finally {
+    writeFileSync(go, '');
+    await srv?.stop();
   }
 });

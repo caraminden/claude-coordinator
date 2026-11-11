@@ -17,7 +17,7 @@ import { tmpDirFor } from '../turn-tmp.ts';
 import { runsRepo } from '../wake.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
-import { cleanPaths, defaultBranch, diffSize, LIMITS, writeFindings, type ReviewSpec } from '../ultrareview.ts';
+import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '../ultrareview.ts';
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
@@ -171,7 +171,7 @@ export const ticketRoutes: Route[] = [
       const { spec, size } = await ultrareviewSpec(app, ticket, body.mode, body.paths);
       const row = app.store.getTicket(ticket.id)!;
       try {
-        const ev = await app.ultrareviews.start(ticket.id, session.uid, session.name, spec, size, (text) => writeFindings(app.sharedDir(row), spec, text));
+        const ev = await app.ultrareviews.start(ticket.id, session.uid, session.name, spec, size, app.sharedDir(row));
         return json(res, 202, ev);
       } catch (err: any) {
         throw new HttpError(409, err.message);

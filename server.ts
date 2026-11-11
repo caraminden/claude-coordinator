@@ -272,13 +272,15 @@ contraptionTurns.apiUrl = () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_H
 const ultrareviews = new UltraReviews({
   claudeBin: process.env.CLAUDE_BIN ?? 'claude', place: (uid) => claudeLink.place(uid), scratch: (uid) => claudeLink.turnsDir(uid),
   emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data), getSetting: (k) => store.getSetting(k), setSetting: (k, v) => store.setSetting(k, v), hostEnv: turnEnv(process.env),
+  jobsDir: join(DATA_DIR, 'run', 'ultrareviews'), units: () => runner.units,
 });
 // A boot check's or preview's copy names the live reviews' folders: only the live server may clear them.
 if (!BOOT_CHECK) ultrareviews.recover();
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
-// Contraption turns, app deploys and ultra reviews run as the server's children: a restart waits for them.
+// Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
+// run in units of their own as landings do; only ones that fell back to a child count.
 runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);

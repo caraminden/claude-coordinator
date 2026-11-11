@@ -159,7 +159,14 @@ export function linkifyHtml(html) {
  */
 function mendStreaming(src) {
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
-  if (lines.filter((l) => FENCE.test(l)).length % 2) return lines.join('\n');
+  // Whether the text ends inside a fence, tracked by its character and length as blocks() closes it.
+  let close = null;
+  for (const l of lines) {
+    const m = close ? null : FENCE.exec(l);
+    if (close?.test(l)) close = null;
+    else if (m) close = new RegExp(`^ {0,3}${m[1][0]}{${m[1].length},}\\s*$`);
+  }
+  if (close) return lines.join('\n');
   let line = lines.pop();
   // A partial link shows just its label until its address closes.
   line = line.replace(/!\[[^\]]*(\]\([^)\s]*)?$/, ''); // a half image waits whole: its alt text alone would flash

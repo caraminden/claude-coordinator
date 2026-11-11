@@ -242,6 +242,12 @@ test('streaming: half-written markup is closed or hidden (Mandate\'s mend)', () 
   assert.equal(md('**9:59'), p('**9:59'));
 });
 
+test('streaming: a fence inside a longer open fence leaves it open, so its code is not mended', () => {
+  assert.equal(live('````md\n```js\nconst x = a *'), '<pre><code class="language-md">```js\nconst x = a *</code></pre>');
+  assert.equal(live('````md\n```js\n| a | b'), '<pre><code class="language-md">```js\n| a | b</code></pre>');
+  assert.equal(live('````md\n```js\nx\n```\n````\nsee `item'), '<pre><code class="language-md">```js\nx\n```</code></pre><p>see <code>item</code></p>');
+});
+
 test('headingBase: a reply\'s # is an h3 by default, a document passes 1, and levels stop at 6', () => {
   assert.equal(renderMarkdown('# A\n## B'), '<h3 data-slug="a">A</h3><h4 data-slug="b">B</h4>');
   assert.equal(renderMarkdown('# A', { headingBase: 1 }), '<h1 data-slug="a">A</h1>');

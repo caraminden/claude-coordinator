@@ -156,7 +156,7 @@ test('a CI runner host is added from its own button and gets its own install lin
   await page.eval('[...document.querySelectorAll("#machine-setup .chip")].find((b) => b.textContent === "Linux in WSL").click()');
   await wait('the Linux line', 'document.querySelector("#machine-setup [aria-pressed=true]")?.textContent === "Linux in WSL"');
   const [linux] = await shown();
-  assert.equal(linux, line.replace(/^\$u = '([^']+)'.*'(ccm_[^']+)'$/, `u='$1'; curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o /tmp/install-runner-agent.sh && CC_MACHINE_TOKEN='$2' bash /tmp/install-runner-agent.sh "$u"`), 'the same address and token');
+  assert.equal(linux, line.replace(/^\$u = '([^']+)'.*'(ccm_[^']+)'$/, `u='$1'; f=$$(mktemp) && curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o "$f" && CC_MACHINE_TOKEN='$2' bash "$f" "$u"`), 'the same address and token');
   // It sits under CI runners from the start, before its agent has ever connected.
   assert.equal((await machine('runner-pc')).runners, true);
   await wait('its line under CI runners', `!!${row('runner-pc')}`);

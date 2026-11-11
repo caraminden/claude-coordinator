@@ -82,5 +82,7 @@ export function machineSetupRunnerAgent(url, token) {
 /** The Linux runner agent's install line (#510, tools/ci-runner/README.md "Linux runners in WSL"), for a root shell in the WSL distro on Cara's desktop. */
 export function machineSetupRunnerAgentLinux(url, token) {
   const u = url.replace(/\/$/, '');
-  return `u='${u}'; curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o /tmp/install-runner-agent.sh && CC_MACHINE_TOKEN='${token}' bash /tmp/install-runner-agent.sh "$u"`;
+  // A fresh file of root's own: a fixed /tmp name left by another user (an earlier try outside root) can't be
+  // overwritten, even by root (fs.protected_regular), and curl fails with "(23) Failure writing output".
+  return `u='${u}'; f=$(mktemp) && curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o "$f" && CC_MACHINE_TOKEN='${token}' bash "$f" "$u"`;
 }

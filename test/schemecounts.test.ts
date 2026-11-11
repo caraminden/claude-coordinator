@@ -75,11 +75,20 @@ test('rowTarget: a Needs-you row goes to the oldest thing its minion waits on yo
 });
 
 test('schemePill: the spinner shows beside the Needs-you count, not only at zero (#314), with the working number only over 1 (#278)', () => {
-  assert.deepEqual(schemePill({ inbox: 0, running: false, working: 0 }), { need: 0, busy: false, working: 0, label: '' }, 'nothing: hidden');
-  assert.deepEqual(schemePill({ inbox: 2, running: false, working: 0 }), { need: 2, busy: false, working: 0, label: '2 waiting on you' }, 'badge only');
-  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 1 }), { need: 0, busy: true, working: 0, label: '1 minion working' }, 'spinner only, one minion: no number');
-  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 0 }), { need: 0, busy: true, working: 0, label: 'Taskmaster working' }, 'only the Taskmaster mid-turn');
-  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 1 }), { need: 2, busy: true, working: 0, label: '2 waiting on you · 1 minion working' }, 'both');
-  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 3 }), { need: 2, busy: true, working: 3, label: '2 waiting on you · 3 minions working' }, 'both, with the working number');
+  assert.deepEqual(schemePill({ inbox: 0, running: false, working: 0 }), { need: 0, busy: false, working: 0, changed: false, label: '' }, 'nothing: hidden');
+  assert.deepEqual(schemePill({ inbox: 2, running: false, working: 0 }), { need: 2, busy: false, working: 0, changed: false, label: '2 waiting on you' }, 'badge only');
+  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 1 }), { need: 0, busy: true, working: 0, changed: false, label: '1 minion working' }, 'spinner only, one minion: no number');
+  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 0 }), { need: 0, busy: true, working: 0, changed: false, label: 'Taskmaster working' }, 'only the Taskmaster mid-turn');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 1 }), { need: 2, busy: true, working: 0, changed: false, label: '2 waiting on you · 1 minion working' }, 'both');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 3 }), { need: 2, busy: true, working: 3, changed: false, label: '2 waiting on you · 3 minions working' }, 'both, with the working number');
   assert.equal(schemePill({ inbox: 1, running: false, working: 3 }).working, 0, 'no turn running: no working number, whatever the field says');
+});
+
+test('schemePill: a count that moved since you last had the scheme open is marked, up or down, even to zero (#498)', () => {
+  assert.equal(schemePill({ inbox: 3, seenInbox: 3 }).changed, false, 'the count you left');
+  assert.equal(schemePill({ inbox: 3 }).changed, false, 'nothing seen recorded: not marked');
+  assert.deepEqual(schemePill({ inbox: 3, seenInbox: 1 }), { need: 3, busy: false, working: 0, changed: true, label: '3 waiting on you (1 when you last opened it)' }, 'up');
+  assert.equal(schemePill({ inbox: 1, seenInbox: 3 }).changed, true, 'down');
+  assert.deepEqual(schemePill({ inbox: 0, seenInbox: 3 }), { need: 0, busy: false, working: 0, changed: true, label: 'None waiting on you (3 when you last opened it)' }, 'down to none still shows');
+  assert.equal(schemePill({ inbox: 2, seenInbox: 0, running: true, working: 1 }).label, '2 waiting on you (0 when you last opened it) · 1 minion working');
 });

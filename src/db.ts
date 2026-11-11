@@ -535,6 +535,14 @@ CREATE TABLE IF NOT EXISTS project_hides (
   hidden_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, project_id)
 );
+-- The Needs-you count each person last saw on a scheme's badge (#498), so the scheme list can mark one that changed since.
+CREATE TABLE IF NOT EXISTS project_seen_counts (
+  name TEXT NOT NULL,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  count INTEGER NOT NULL,
+  seen_at INTEGER NOT NULL,
+  PRIMARY KEY (name, project_id)
+);
 CREATE TABLE IF NOT EXISTS shared_pins (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
@@ -741,6 +749,7 @@ export const SCHEMA_HISTORY = [
   [34, 'one lending list per machine, projects.machine_tools unread, machines.scoped read only for a CI runner host (#438)'],
   [35, 'machines.lend (#439)'],
   [36, 'turns.payer (#468 S05-3)'],
+  [37, 'project_seen_counts (#498)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1297,6 +1306,18 @@ export class Store {
   setProjectHidden(uid: number, projectId: number, hidden: boolean) {
     if (hidden) this.db.prepare('INSERT INTO project_hides (user_id, project_id, hidden_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid, projectId, Date.now());
     else this.db.prepare('DELETE FROM project_hides WHERE user_id = ? AND project_id = ?').run(uid, projectId);
+  }
+
+  /** The Needs-you count `name` last saw on each scheme's badge (#498): project id -> count. */
+  seenCounts(name: string): Map<number, number> {
+    const rows = this.db.prepare('SELECT project_id, count FROM project_seen_counts WHERE name = ?').all(name) as { project_id: number; count: number }[];
+    return new Map(rows.map((r) => [r.project_id, r.count]));
+  }
+
+  /** Record the count `name` saw on a scheme's badge; with `keep`, only when none is recorded yet. */
+  setSeenCount(name: string, projectId: number, count: number, keep = false) {
+    this.db.prepare(`INSERT INTO project_seen_counts (name, project_id, count, seen_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(name, project_id) DO ${keep ? 'NOTHING' : 'UPDATE SET count = excluded.count, seen_at = excluded.seen_at'}`).run(name, projectId, count, Date.now());
   }
 
   deleteProject(id: number) {

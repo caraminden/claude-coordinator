@@ -48,6 +48,8 @@ a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overfl
 .scheme-count { flex: none; display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
 .scheme-count[hidden] { display: none; }
 .scheme-count > .need { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0.1rem 0.45rem; }
+/* The count moved since you last had the scheme open (#498): violet, apart from the orange count and the blue spinner. */
+.scheme-count > .need.changed { background: var(--held); }
 /* A blue ring in a box as tall as the count's, so the row doesn't shift; a still dot without motion. */
 .scheme-count > .busy { display: inline-flex; align-items: center; padding: 0.1rem 0.2rem; }
 .scheme-count > .busy::before { content: '\2007'; width: 0; overflow: hidden; } /* a digit's height, as the count has */

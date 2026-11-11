@@ -225,15 +225,21 @@ export const projectRoutes: Route[] = [
     // hidden: this person hid it (#226); its badge stays at zero.
     // running: a minion or its Taskmaster has a turn doing work (#248; not one held on an approval card, #373), for the spinner; false when hidden.
     // working: how many minions (not the Taskmaster) have a turn doing work, the number beside the spinner (#278); 0 when hidden.
+    // seenInbox: the count this person last saw while in the scheme (#498); the badge is marked when inbox differs.
+    // A scheme they've never had open since #498 takes today's count, so nothing is marked on day one.
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id) });
+      const seenCounts = store.seenCounts(session.name);
       json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => {
         const tickets = store.listTickets(p.id);
+        const inbox = hidden.has(p.id) ? 0 : inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id));
+        if (!hidden.has(p.id) && !seenCounts.has(p.id)) store.setSeenCount(session.name, p.id, inbox, true);
         return {
           ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: tickets.filter((t) => t.kind === 'ticket').length,
           hidden: hidden.has(p.id),
-          inbox: hidden.has(p.id) ? 0 : inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
+          inbox,
+          seenInbox: hidden.has(p.id) ? inbox : (seenCounts.get(p.id) ?? inbox),
           running: !hidden.has(p.id) && tickets.some(busy),
           working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
           icon: await iconVersion(p.repo_dir),
@@ -252,6 +258,16 @@ export const projectRoutes: Route[] = [
       // Every stream of the scheme's people gets it; each tab refreshes only for its own person, like views.
       app.broadcast({ type: 'hidden', name: session.name, projectId: project.id });
       return json(res, 200, { hidden: body.hidden });
+    },
+  },
+  {
+    // The Needs-you count this person saw while in the scheme (#498): the scheme list marks the badge when the count moves off it.
+    method: 'PUT', path: '/api/projects/:project/seen-count', who: ['person'],
+    async handler({ req, res, app, session, project }) {
+      const { count } = await readJson(req);
+      if (!Number.isSafeInteger(count) || count < 0) throw new HttpError(400, 'count must be a whole number, 0 or more');
+      app.store.setSeenCount(session.name, project.id, count);
+      return json(res, 200, { count });
     },
   },
   {

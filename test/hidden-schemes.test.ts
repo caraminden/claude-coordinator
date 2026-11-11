@@ -117,3 +117,28 @@ test('running: a scheme with a turn running, its Taskmaster\'s included, says so
   assert.equal((await listed('Cara', busy.id)).working, 0, 'hidden: no count');
   store.db.close();
 });
+
+test('seenInbox: each person\'s last-seen count, taken from today\'s count at first sight, then set by the scheme page; a stranger stores nothing (#498)', async () => {
+  const { data: quartz } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Quartz' } });
+  assert.equal((await call('Cara', `/api/projects/${quartz.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
+  const store = new Store(join(root, 'data', 'coordinator.db'));
+  const t = store.createTicket({ project_id: quartz.id, kind: 'ticket', title: 'Ready one', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t.id, { state: 'ready', note: 'done' });
+  // First sight: the count as it stands, so nothing is marked changed on day one.
+  assert.deepEqual(await listed('Cara', quartz.id).then((p) => [p.inbox, p.seenInbox]), [1, 1]);
+  const t2 = store.createTicket({ project_id: quartz.id, kind: 'ticket', title: 'Another', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t2.id, { state: 'try', note: 'try it' });
+  assert.deepEqual(await listed('Cara', quartz.id).then((p) => [p.inbox, p.seenInbox]), [2, 1], 'it moved: the badge can say so');
+  assert.deepEqual(await call('Cara', `/api/projects/${quartz.id}/seen-count`, { method: 'PUT', body: { count: 2 } }), { status: 200, data: { count: 2 } });
+  assert.equal((await listed('Cara', quartz.id)).seenInbox, 2, 'opening the scheme saw it');
+  // Josh's first look takes today's 2, and Cara's mark never was his.
+  assert.equal((await listed('Josh', quartz.id)).seenInbox, 2);
+  store.updateTicket(t2.id, { state: null });
+  assert.deepEqual(await listed('Cara', quartz.id).then((p) => [p.inbox, p.seenInbox]), [1, 2], 'down counts too');
+  assert.equal((await call('Josh', `/api/projects/${quartz.id}/seen-count`, { method: 'PUT', body: { count: 1 } })).status, 200);
+  assert.equal((await listed('Cara', quartz.id)).seenInbox, 2, 'Josh\'s look is his own');
+  for (const count of [-1, 1.5, '2', null]) assert.equal((await call('Cara', `/api/projects/${quartz.id}/seen-count`, { method: 'PUT', body: { count } })).status, 400, String(count));
+  store.db.close();
+  const { data: carasOwn } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Private two' } });
+  assert.equal((await call('Josh', `/api/projects/${carasOwn.id}/seen-count`, { method: 'PUT', body: { count: 5 } })).status, 404);
+});

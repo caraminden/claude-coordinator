@@ -82,10 +82,21 @@ export function inboxStrip() {
 
 /** A scheme's pill for the scheme lists: the spinner while a turn runs, then the Needs-you count (schemePill says what shows); hidden when neither. */
 export function schemeCount(p) {
-  const { need, busy, working, label } = schemePill(p);
-  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, title: label || null, 'aria-label': label || null },
+  // The scheme you're in is never marked: you're looking at its count (#498).
+  const { need, busy, working, changed, label } = schemePill(p.id === view?.projectId ? { ...p, seenInbox: null } : p);
+  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !changed, role: label ? 'img' : null, title: label || null, 'aria-label': label || null },
     busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
-    need ? h('span', { class: 'need', 'aria-hidden': 'true' }, need) : null);
+    need || changed ? h('span', { class: `need${changed ? ' changed' : ''}`, 'aria-hidden': 'true' }, need) : null);
+}
+
+/** You're in the scheme, so its count is the one you've seen (#498): record it on the server when it moves, behind the page. */
+function markCountSeen(projectId, count) {
+  const p = view.projects?.find((q) => q.id === projectId);
+  if (!p || p.seenInbox === count) return;
+  const before = p.seenInbox;
+  p.seenInbox = count;
+  // A failed write tries again at the next redraw.
+  api(`api/projects/${projectId}/seen-count`, { method: 'PUT', body: { count } }).catch(() => { if (p.seenInbox === count) p.seenInbox = before; });
 }
 
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */
@@ -99,6 +110,7 @@ export function renderInbox() {
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
   const running = !hidden && [view.coordinator, ...view.tickets.values()].some(isWorking);
   const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && isWorking(t)).length;
+  if (!hidden) markCountSeen(view.projectId, count);
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working }));
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();

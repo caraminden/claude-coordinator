@@ -144,3 +144,48 @@ test(`a thread is resumed at most ${MAX_RESUMES} times in a row`, async () => {
   await until(() => r.isRunning(id));
   await finish(r, id);
 });
+
+test('a resume still owed when the server restarts again is resumed by the next server, queue and all (#468 S03-8)', async () => {
+  const id = newTicket();
+  const first = server();
+  first.send(id, 'Cara', 'build it');
+  first.send(id, 'Josh', 'and the docs');
+  await crash(first, id);
+  writeFileSync(prompts, '');
+
+  // The second server dies before this minion's slot in its staggered resumes comes up.
+  const second = server();
+  (second as any).resume = () => {};
+  second.recover();
+  await settle();
+  assert.equal(store.getTicket(id)!.status, 'idle');
+  second.detachAll();
+
+  const third = server();
+  third.recover();
+  await until(() => third.isRunning(id));
+  await until(() => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs'));
+  assert.match(readFileSync(prompts, 'utf8'), /\[System\]: The \S+ server restarted while you were working/);
+  await finish(third, id);
+  assert.equal(store.getSetting(`resume-owed:${id}`), null, 'the debt is paid once the resume starts');
+});
+
+test("messages queued behind a cut-off turn that isn't resumed outlive a second restart (#468 S03-8)", async () => {
+  const id = newTicket();
+  let r = server();
+  r.send(id, 'Cara', 'build it');
+  r.send(id, 'Josh', 'queued behind it');
+  // Set to be dismissed: the restart doesn't resume it, but what was queued gets a turn of its own.
+  (r as any).saveTurn(id, { closing: null });
+  await crash(r, id);
+  writeFileSync(prompts, '');
+  r = server();
+  (r as any).next = () => {};
+  r.recover();
+  await settle();
+  r.detachAll();
+  r = server();
+  r.recover();
+  await until(() => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('queued behind it'));
+  await finish(r, id);
+});

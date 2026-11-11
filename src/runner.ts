@@ -255,6 +255,8 @@ const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
 const savingKey = (ticketId: number) => `saving:${ticketId}`;
 /** Messages waiting for a minion's lane while no turn runs (its last turn's save), so a restart doesn't lose them (#259). */
 const waitingKey = (ticketId: number) => `waiting:${ticketId}`;
+/** A restart's resume of a cut-off turn not started yet, with what it carries, so a second restart still owes it (#468 S03-8). */
+const owedKey = (ticketId: number) => `resume-owed:${ticketId}`;
 /** Held mail (#405): message_taskmaster's wake: false messages, waiting for the receiving Taskmaster's next turn. */
 const mailKey = (ticketId: number) => `mail:${ticketId}`;
 /** Cold hold (#413): when the first machine message held for a cold session was held, for the cap. */
@@ -856,6 +858,11 @@ export class Runner {
           this.queues.set(t.id, [...waiting]);
           later.push(() => this.next(t.id));
         }
+        const owed = t.status !== 'running' ? this.store.getSetting<{ resumes: number; queued?: QueuedMessage[] }>(owedKey(t.id)) : null;
+        if (owed) {
+          if (owed.queued?.length) this.queues.set(t.id, [...owed.queued]);
+          later.push(() => this.resume(t.id, owed.resumes));
+        }
         if (t.status === 'running') {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // This turn's waiting cards come back: if it is still running, it still polls for them (#209).
@@ -876,19 +883,25 @@ export class Runner {
           if (turn?.stopped) {
             if (turn.queued?.length) {
               this.queues.set(t.id, [...turn.queued]);
+              this.store.setSetting(waitingKey(t.id), turn.queued);
               later.push(() => !this.isRunning(t.id) && this.next(t.id));
             }
             continue;
           }
-          if (turn?.queued?.length || unsent.length) this.queues.set(t.id, [...(turn?.queued ?? []), ...unsent]);
+          const queued = [...(turn?.queued ?? []), ...unsent];
+          if (queued.length) this.queues.set(t.id, [...queued]);
           const resumes = turn?.resumes ?? 0;
           let skipped: string | null = null;
           if (turn && 'closing' in turn) skipped = 'It was set to be dismissed, so it was not resumed.';
           else if (resumes >= MAX_RESUMES) skipped = `It was not resumed: it had already been resumed ${resumes} times in a row.`;
           if (skipped) {
             this.emit(t.id, 'note', { text: `The server restarted during this turn, so it was interrupted. ${skipped}` });
-            if (this.queued(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
+            if (queued.length) {
+              this.store.setSetting(waitingKey(t.id), queued);
+              later.push(() => !this.isRunning(t.id) && this.next(t.id));
+            }
           } else {
+            this.store.setSetting(owedKey(t.id), { resumes: resumes + 1, ...(queued.length ? { queued } : {}) });
             later.push(() => this.resume(t.id, resumes + 1));
           }
         }
@@ -979,7 +992,7 @@ export class Runner {
     this.lanes.run(ticketId, 'resume', () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
-      if (!ticket || !project || ticket.status === 'closed') return;
+      if (!ticket || !project || ticket.status === 'closed') return this.store.deleteSetting(owedKey(ticketId));
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
       if (netTries && !this.netWait(ticketId)) return;
       const person = ticket.person_id ?? this.turnPerson(ticket, project, this.peekQueue(ticketId));
@@ -987,6 +1000,7 @@ export class Runner {
         // Nothing it would have carried is dropped: the queue, held mail and a network wait wait for the next turn (#468 S03-6).
         const q = this.queues.get(ticketId);
         if (q?.length) this.store.setSetting(waitingKey(ticketId), q);
+        this.store.deleteSetting(owedKey(ticketId));
         return;
       }
       this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
@@ -1012,6 +1026,7 @@ export class Runner {
   /** Everything queued for the minion's next turn, which starts now: a network wait's held messages first, as that wait ends. */
   private takeQueue(ticketId: number): QueuedMessage[] {
     this.store.deleteSetting(waitingKey(ticketId));
+    this.store.deleteSetting(owedKey(ticketId));
     const held = this.cancelNetWait(ticketId)?.queued ?? [];
     // Held mail rides along after what woke the turn, so the turn is still that message's.
     const mail = this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [];

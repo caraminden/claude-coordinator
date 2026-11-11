@@ -4,7 +4,7 @@ import { ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPat
 import { onAppInstructionsUpdate, onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { costChip, renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
-import { showProject, showTicket } from './project.js';
+import { forgetSchemes, showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { onArtifactData, tabBridgeOpen } from './bridge-host.js';
 import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
@@ -980,6 +980,7 @@ export async function logout() {
   await pushOff().catch(() => {});
   await api('api/logout', { method: 'POST', body: {} });
   eventCache.clear();
+  forgetSchemes();
   clearTimeout(streamTimer);
   stream?.close();
   stream = null;

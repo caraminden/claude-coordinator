@@ -215,43 +215,54 @@ function rememberScheme() {
   if (schemeCache.size > SCHEME_CACHE) schemeCache.delete(schemeCache.keys().next().value);
 }
 
+/** Signing out: the next person mustn't see this one's schemes drawn, even for a moment. */
+export function forgetSchemes() {
+  schemeCache.clear();
+}
+
 /**
  * Bring a scheme drawn from its last payload up to date in place (#538), with a ring by "Minions" meanwhile,
- * then fetch its dismissed minions. A failed refresh leaves what's drawn: the stream's next resync redoes it.
+ * then fetch its dismissed minions. A failed fetch (a restart's gap) tries again, backing off to 30 s.
  */
 async function refreshScheme(projectId) {
   const list = view.tickets;
+  // The chat you're on, if the refresh brought a newer copy of it (one dismissed while you were away, say).
+  const headUp = () => {
+    const shown = view.id === view.coordinator.id ? view.coordinator : list.get(view.id);
+    if (view.tickets !== list || !shown || shown === view.ticket) return;
+    view.ticket = shown;
+    renderTicketHead();
+  };
   const panel = document.querySelector('#app .sidebar');
   panel?.setAttribute('aria-busy', 'true');
-  const got = await Promise.all([
-    api(`api/projects/${projectId}?tickets=open`),
-    api(`api/projects/${projectId}/artifacts`).catch(() => view.artifacts),
-    api(`api/projects/${projectId}/shared`).catch(() => view.shared),
-    api('api/machines').catch(() => view.machines),
-  ]).catch(() => null);
-  panel?.removeAttribute('aria-busy');
-  if (view?.kind !== 'project' || view.tickets !== list) return; // a newer load of the scheme drew its own
-  if (got) {
-    const [{ project, coordinator, tickets: open, seen, person_notes, pins }, artifacts, shared, machines] = got;
-    const now = new Set(open.map((t) => t.id));
-    // Dismissed since you left: gone until the dismissed list below brings it back as it is now.
-    for (const [id, t] of list) if (t.status !== 'closed' && !now.has(id)) list.delete(id);
-    // The stream may have brought a newer copy while this was on its way: that one stays.
-    for (const t of open) if (!(list.get(t.id)?.updated_at > t.updated_at)) list.set(t.id, t);
-    if (!(view.coordinator.updated_at > coordinator.updated_at)) view.coordinator = coordinator;
-    Object.assign(view, { project, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, machines });
-    const shown = view.id === view.coordinator.id ? view.coordinator : list.get(view.id);
-    if (shown && shown !== view.ticket) {
-      view.ticket = shown;
-      renderTicketHead();
-    }
-    renderSidebar();
-    setArtifacts(artifacts, shared);
-    renderGithubStrip();
-    renderMachineWarning();
-    renderHiddenNote();
+  let got = null, before;
+  for (let wait = 1000; !got; wait = Math.min(30_000, wait * 2)) {
+    before = new Map(list); // what the stream changes meanwhile is newer than the answer
+    got = await Promise.all([
+      api(`api/projects/${projectId}?tickets=open`),
+      api(`api/projects/${projectId}/artifacts`).catch(() => view.artifacts),
+      api(`api/projects/${projectId}/shared`).catch(() => view.shared),
+      api('api/machines').catch(() => view.machines),
+    ]).catch(() => null);
+    if (view?.kind !== 'project' || view.tickets !== list) return; // a newer load of the scheme drew its own
+    if (!got) await new Promise((r) => setTimeout(r, wait));
   }
+  panel?.removeAttribute('aria-busy');
+  const [{ project, coordinator, tickets: open, seen, person_notes, pins }, artifacts, shared, machines] = got;
+  const now = new Set(open.map((t) => t.id));
+  // Dismissed since you left: gone until the dismissed list below brings it back as it is now.
+  for (const [id, t] of list) if (t.status !== 'closed' && !now.has(id) && before.get(id) === t) list.delete(id);
+  for (const t of open) if (!(list.get(t.id)?.updated_at > t.updated_at)) list.set(t.id, t);
+  if (!(view.coordinator.updated_at > coordinator.updated_at)) view.coordinator = coordinator;
+  Object.assign(view, { project, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, machines });
+  headUp();
+  renderSidebar();
+  setArtifacts(artifacts, shared);
+  renderGithubStrip();
+  renderMachineWarning();
+  renderHiddenNote();
   await loadDismissed(projectId);
+  if (view?.kind === 'project') headUp();
 }
 
 /**

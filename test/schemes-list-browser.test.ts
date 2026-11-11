@@ -27,6 +27,7 @@ const STUB = `<script>
   // Each scheme's one minion; window.hold, when set, keeps a scheme's payload waiting until it resolves.
   window.titles = { 1: 'Alpha one', 2: 'Beta one' };
   window.hold = null;
+  window.failScheme = 0;
   const minion = (id) => ({ id: id * 100 + 1, project_id: id, kind: 'ticket', number: 1, title: titles[id], status: 'idle', updated_at: 0 });
   const coordinator = (id) => ({ id: id * 100, project_id: id, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 });
   const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -39,6 +40,7 @@ const STUB = `<script>
     if ((m = path.match(/^api\\/projects\\/(\\d+)$/))) {
       const p = schemes.find((s) => s.id === Number(m[1]));
       await window.hold;
+      if (window.failScheme-- > 0) return new Response('Bad Gateway', { status: 502 });
       return reply(200, { project: { ...p, instructions: '' }, coordinator: coordinator(p.id), tickets: [minion(p.id)], dismissed: 0, seen: {}, person_notes: {}, pins: [] });
     }
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: coordinator(Number(m[1]) / 100) });
@@ -109,11 +111,11 @@ test('going back to a scheme draws it as you left it at once, with a ring by Min
   await waitFor(page, 'Alpha with its minion', row('Alpha one'));
   await page.eval(`location.hash = '#/p/2'`);
   await waitFor(page, 'Beta with its minion', row('Beta one'));
-  // Alpha's minion is renamed while you're away, and the server is slow to say so.
-  await page.eval(`titles[1] = 'Alpha renamed'; window.hold = new Promise((r) => { window.release = r; }); location.hash = '#/p/1'`);
+  // Alpha's minion is renamed while you're away, and the server is slow to say so, then fails once (a restart's gap).
+  await page.eval(`titles[1] = 'Alpha renamed'; window.failScheme = 1; window.hold = new Promise((r) => { window.release = r; }); location.hash = '#/p/1'`);
   await waitFor(page, 'Alpha drawn without waiting for the server', `document.querySelector('.scheme-crumb [data-project-name="1"]') && ${row('Alpha one')}`);
   assert.equal(await page.eval(`document.querySelector('#app .sidebar').getAttribute('aria-busy')`), 'true', 'the Minions panel says it is refreshing');
   await page.eval(`window.release()`);
-  await waitFor(page, 'the refresh to bring the new title', row('Alpha renamed'));
+  await waitFor(page, 'the refresh to fail once and then bring the new title', row('Alpha renamed'));
   await waitFor(page, 'the ring to go', `!document.querySelector('#app .sidebar').hasAttribute('aria-busy')`);
 });

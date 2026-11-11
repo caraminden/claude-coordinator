@@ -675,10 +675,10 @@ for (const command of ALLOWED) {
 test('every kill-by-name refusal names a way to stop your own server that the tripwire allows (Mandate #86)', () => {
   for (const no of ['pkill -f dev.ts', 'killall node', 'kill $(pgrep -f dev.ts)', 'kill $(ss -ltnp | grep ":$P " | grep -o "pid=[0-9]*" | cut -d= -f2)']) {
     const why = bash(no) ?? '';
-    assert.match(why, /the pid it printed when it started/, no);
-    const named = [...why.matchAll(/`(kill \$\(ss [^`]+<your port>[^`]+)`/g)].at(-1)?.[1];
-    assert.ok(named, no);
-    assert.equal(bash(named.replace('<your port>', '18431')), null, named);
+    assert.match(why, /`kill <pid>` with the pid it printed when it started/, no);
+    const look = why.match(/`(ss -ltnp 'sport = :<your port>')`/)?.[1];
+    assert.ok(look, no);
+    for (const ok of [look.replace('<your port>', '18431'), 'kill 41234', 'kill $!']) assert.equal(bash(ok), null, ok);
   }
 });
 
@@ -690,7 +690,7 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
   const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   try {
     mkdirSync(join(wt, 'sub'), { recursive: true });
-    sh('git init -q -b ticket/9 && echo a > a.txt && git add a.txt && git commit -qm a');
+    sh('git init -q -b ticket/9 && echo a > a.txt && echo c > sub/c.txt && git add a.txt sub/c.txt && git commit -qm a');
     sh('git branch other');
     const at = (command: string, cwd: string | null = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
 
@@ -709,11 +709,15 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
       assert.match(at(move) ?? '', /^Commit first: .* 1 uncommitted tracked file\(s\) \(a\.txt\)/, move);
     }
     // A path checkout's refusal names the way to put one file back, and that way is allowed (Mandate #86's logs).
-    assert.match(at('git checkout -- a.txt')!, /`git show HEAD:path > path`/);
-    assert.match(at('git restore a.txt')!, /`git show HEAD:path > path`/);
-    for (const ok of ['git show HEAD:a.txt > a.txt', `git show HEAD:a.txt > ${wt}/a.txt`, `git -C ${wt} show HEAD:a.txt > ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
-    sh('git show HEAD:a.txt > a.txt');
-    assert.equal(sh('git status --porcelain --untracked-files=no').toString(), '', 'the file is back as it was at HEAD');
+    assert.match(at('git checkout -- a.txt')!, /`git show HEAD:\.\/path > path`/);
+    assert.match(at('git restore a.txt')!, /`git show HEAD:\.\/path > path`/);
+    for (const ok of ['git show HEAD:./a.txt > a.txt', `git show HEAD:./a.txt > ${wt}/a.txt`, `git -C ${wt} show HEAD:./a.txt > ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
+    sh('git show HEAD:./a.txt > a.txt');
+    // `./` reads the path from the folder it runs in, so it is right from a subfolder too.
+    writeFileSync(join(wt, 'sub/c.txt'), 'changed');
+    assert.equal(at('git show HEAD:./c.txt > c.txt', join(wt, 'sub')), null);
+    sh('git show HEAD:./c.txt > c.txt', join(wt, 'sub'));
+    assert.equal(sh('git status --porcelain --untracked-files=no').toString(), '', 'both files are back as they were at HEAD');
     writeFileSync(join(wt, 'a.txt'), 'changed');
     assert.match(at(`git -C ${wt} merge other`, '/tmp')!, /Commit first/);
     assert.match(at('git checkout -')!, /Commit first/);

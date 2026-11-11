@@ -405,10 +405,11 @@ export class ContraptionTurns {
     const wantCodex = isCodexModel(req.model) || !!this.store.getSetting<boolean>(codexSwitchKey(req.person));
     const at = (wantCodex && place.host && !this.codexWhy(req.person) && this.claude.codexPlace(req.person)) || place;
 
-    this.names.add(key);
+    // Busy only once the turn is recorded, so a throw here can't leave the name busy until a restart (#468 S04-8).
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
     const dir = this.turnDir(id, at);
     const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set() };
+    this.names.add(key);
     this.live.set(id, live);
     let outcome: string = 'failed';
     let usage: Usage | null = null;

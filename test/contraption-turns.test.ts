@@ -326,6 +326,20 @@ test('a turn for someone the contraption isn\'t enabled for is refused, and so i
   assert.equal(errorOf(await turn(mandate, { person: 999 })), 'not_enabled');
 });
 
+test('a turn whose start can\'t be recorded leaves its name free, not busy until a restart (#468 S04-8)', async () => {
+  const start = store.startContraptionTurn;
+  store.startContraptionTurn = () => {
+    throw new Error('database is locked');
+  };
+  try {
+    await assert.rejects(turn(mandate, { session: 'unrecorded' }), /database is locked/);
+  } finally {
+    store.startContraptionTurn = start;
+  }
+  assert.notEqual(errorOf(await turn(mandate, { session: 'unrecorded' })), 'busy');
+  assert.ok(!turns.sessions(mandate.id, cara.id).find((s) => s.name === 'unrecorded')?.busy);
+});
+
 test('a name resumes its own Claude session; fresh starts another; other contraptions and people never share it', async () => {
   const first = (await turn(mandate, { session: 'resume-me' }))[0].data.claudeSession;
   assert.equal(argAfter(lastRun().argv, '--session-id'), first);

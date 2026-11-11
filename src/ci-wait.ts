@@ -107,6 +107,8 @@ interface Watch {
   jobs: Map<number, Job[]>;
   ended?: number;
   lastAt: number;
+  /** While its run is queued: how many of the repo's queued runs are older (Josh, 2026-11-11: "Count from GitHub"). */
+  ahead?: number;
 }
 
 export interface CiRunsDeps {
@@ -132,6 +134,8 @@ export class CiRuns {
   private watches = new Map<number, Watch>();
   private cache = new Map<string, { etag: string | null; body: any }>();
   private usuals = new Map<string, { at: number; usual: number | null }>();
+  /** Each repo's queued runs, read once a poll while one of its watched runs is queued. */
+  private queues = new Map<string, { id: number; created_at: string }[]>();
   private shown = new Map<number, string>();
   private pausedUntil = 0;
   private busy = false;
@@ -187,6 +191,10 @@ export class CiRuns {
     const c = ciNow([...w.jobs.values()].flat(), !!w.ended);
     if (!c) return null;
     const usuals = [...w.usual.values()].filter((u): u is number => u != null);
+    if (c.stage === 'queued' && w.ahead != null) {
+      c.short = w.ahead ? `${w.ahead} ahead` : 'queued';
+      c.text += w.ahead ? `, ${w.ahead} run${w.ahead === 1 ? '' : 's'} ahead` : ', none ahead';
+    }
     return { ...c, what: w.what, usual: usuals.length ? Math.max(...usuals) : null };
   }
 
@@ -202,6 +210,7 @@ export class CiRuns {
     const now = this.now();
     if (this.busy || now < this.pausedUntil) return;
     this.busy = true;
+    this.queues.clear();
     try {
       const inFlight = [...this.watches.values()].reduce((n, w) => n + (w.ended ? 0 : Math.max(1, w.runs.length)), 0);
       for (const [id, w] of [...this.watches]) {
@@ -250,10 +259,33 @@ export class CiRuns {
       if (!jobs.length || jobs.some((j) => j.status !== 'completed')) complete = false;
       else if ((await this.read(`repos/${w.slug}/actions/runs/${id}`, w.as))?.status !== 'completed') complete = false;
     }
+    const c = ciNow([...w.jobs.values()].flat(), false);
+    w.ahead = c?.stage === 'queued' ? await this.ahead(w, c.since) : undefined;
     if (complete) {
       w.ended = this.now();
       for (const id of w.runs) this.cache.delete(`repos/${w.slug}/actions/runs/${id}/jobs?per_page=100`);
     }
+  }
+
+  /**
+   * How many of the repo's queued runs are older than this one: its runners are the repo's own, so other repos'
+   * runs don't hold them. shortcut: counts runs, not jobs, and every queued workflow whatever its runner labels;
+   * count queued jobs by label if a repo's workflows come to use different runners.
+   */
+  private async ahead(w: Watch, since: number): Promise<number | undefined> {
+    let runs = this.queues.get(w.slug);
+    if (!runs) {
+      try {
+        runs = (await this.read(`repos/${w.slug}/actions/runs?status=queued&per_page=100`, w.as))?.workflow_runs ?? [];
+      } catch (err: any) {
+        if (err?.rateLimited) throw err;
+        return undefined; // "queued" alone
+      }
+      this.queues.set(w.slug, runs!);
+    }
+    const mine = runs!.filter((r) => w.runs.includes(r.id)).map((r) => at(r.created_at));
+    const from = mine.length ? Math.min(...mine) : since;
+    return runs!.filter((r) => !w.runs.includes(r.id) && at(r.created_at) < from).length;
   }
 
   /** The median length of a run's workflow's last five green runs, s; the workflow's read at most hourly. */

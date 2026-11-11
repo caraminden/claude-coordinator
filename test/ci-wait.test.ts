@@ -221,3 +221,24 @@ test('a landing waiting for CI shows its run on land/<branch>; a fallback says s
   assert.deepEqual([waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['land · tests', 'CI fell back: running the full suite on perigee']);
   assert.equal(ci.view(m.id), null, 'the cancelled run is let go');
 });
+
+test('a queued run counts the repo\'s older queued runs ahead of it, read once a poll for the repo', async () => {
+  const { gh, ci, waits, pr } = setup();
+  const a = minion(), b = minion();
+  gh.answers.set('repos/o/r/actions/runs', { workflow_runs: [{ id: 6, created_at: iso(-10) }, { id: 7, created_at: iso(0) }, { id: 9, created_at: iso(5) }] });
+  gh.answers.set('repos/o/r/actions/runs/6/jobs', { jobs: [job('test', { created_at: iso(-10) })] });
+  gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { created_at: iso(5) })] });
+  ci.pr(a.id, 'o/r', undefined, pr(1, [6]));
+  ci.pr(b.id, 'o/r', undefined, pr(2, [9]));
+  await ci.tick();
+  assert.deepEqual([waits.wait(a.id)!.chip, waits.wait(a.id)!.text], ['CI · queued', 'PR #1 · queued for a runner (citadel-ci-linux), none ahead']);
+  assert.deepEqual([waits.wait(b.id)!.chip, waits.wait(b.id)!.text], ['CI · 2 ahead', 'PR #2 · queued for a runner (citadel-ci-linux), 2 runs ahead']);
+  assert.equal(gh.calls.filter((c) => c.startsWith('repos/o/r/actions/runs?status=queued')).length, 1);
+  // Started: no more queue reads, and no count.
+  gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { created_at: iso(5), status: 'in_progress', steps: steps(0, 2) })] });
+  gh.answers.set('repos/o/r/actions/runs/6/jobs', { jobs: [job('test', { created_at: iso(-10), status: 'in_progress', steps: steps(0, 2) })] });
+  gh.calls.length = 0;
+  await ci.tick();
+  assert.equal(waits.wait(b.id)!.chip, 'CI · step 1/2');
+  assert.deepEqual(gh.calls.filter((c) => c.includes('status=queued')), []);
+});

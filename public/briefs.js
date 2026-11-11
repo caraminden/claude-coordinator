@@ -2,12 +2,20 @@
 // heading that starts with "Brief", up to the next heading as high or higher, or a whole handoff-*.md
 // file. No DOM here, so test/briefs.test.js can run it.
 
+// public/ui/markdown.js's FENCE (not exported there).
+const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)/;
+
 /** The headings markdownDoc renders at the top level, in order, with the line each is on. */
 function headings(lines) {
   const out = [];
-  let fence = false;
+  let fence = null; // the open code fence's closing line, as public/ui/markdown.js closes it
   lines.forEach((l, line) => {
-    if (/^```/.test(l)) fence = !fence;
+    let f;
+    if (fence) {
+      if (fence.test(l)) fence = null;
+      return;
+    }
+    if ((f = FENCE.exec(l))) fence = new RegExp(`^ {0,3}${f[1][0] === '`' ? '`' : '~'}{${f[1].length},}\\s*$`);
     const m = !fence && /^(#{1,6})\s+(.*?)\s*#*$/.exec(l);
     if (m) out.push({ line, level: m[1].length, text: m[2].replace(/\*\*|`/g, '').trim() });
   });

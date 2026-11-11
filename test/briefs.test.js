@@ -92,3 +92,10 @@ test('the first message is the brief verbatim plus where it came from', () => {
   const [handoff] = findBriefs('# Handoff: X\nY', 'handoff-x.md');
   assert.equal(briefMessage(handoff, '/s/handoff-x.md'), '# Handoff: X\nY\n\n(Handoff file: /s/handoff-x.md)');
 });
+
+test('a fence closes only on its own kind and length, as markdownDoc reads it (#468 S11-4)', () => {
+  const nested = '## Brief 1: Nested\n````md\n```sh\n# a comment\n```\n````\nafter\n## Brief 2: Next\nx';
+  assert.deepEqual(findBriefs(nested, 'x.md').map((b) => [b.index, b.heading, b.body.split('\n').length]), [[0, 'Brief 1: Nested', 7], [1, 'Brief 2: Next', 2]]);
+  const tilde = '## Brief 1: Tilde\n~~~sh\n# a comment\n~~~\n## Brief 2: Next\nx';
+  assert.deepEqual(findBriefs(tilde, 'x.md').map((b) => [b.index, b.body]), [[0, '## Brief 1: Tilde\n~~~sh\n# a comment\n~~~'], [1, '## Brief 2: Next\nx']]);
+});

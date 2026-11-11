@@ -263,7 +263,7 @@ first tried by Cara's setup.
 
 Each runner agent also samples its PC every 30 seconds and posts the sample to Citadel, which keeps 14 days of
 them (`src/ci-load.ts`). It is read-only: it changes no runner, count, VM setting or workflow. The Machines page
-shows the result under **CI desktop load**, to every member of a scheme with runners on that PC: a verdict, CPU
+shows the result under **CI desktop load**, to everyone signed in: a verdict, CPU
 and memory now, the last 24 hours with hard restarts marked, and each pool of runners (a repo and its labels)
 with how many are busy and what waits.
 

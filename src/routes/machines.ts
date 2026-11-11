@@ -173,7 +173,8 @@ export const machineRoutes: Route[] = [
   // The CI desktop's load (#534): each PC with a runner agent, for admins and the members of a scheme with runners there.
   {
     method: 'GET', path: '/api/ci-desktop', ...people,
-    handler: ({ res, app, session }) => json(res, 200, { pcs: app.ciLoad.views().filter((v) => session.admin || v.projects.some((id) => app.store.canSee(session, id))) }),
+    // Everyone signed in sees every PC (Cara, 2026-11-11: "they should know if and how much their work is affecting the CI machine").
+    handler: ({ res, app }) => json(res, 200, { pcs: app.ciLoad.views() }),
   },
   { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app, session }) => json(res, 200, machinesFor(session, app.machines.list())) },
   {

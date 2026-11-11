@@ -5,6 +5,8 @@ import { ago, api, h } from './base.js';
 
 const REFRESH_MS = 60_000;
 const GB = 1024 ** 3;
+// Hyper-V lists WSL's own VM under an id, not a name.
+const VM_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const DOT = { fine: 'ready', more: 'fix', full: 'fix', over: 'down', crash: 'down', none: 'asleep' };
 const mins = (ms) => (ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`);
 /** An element with its style set through the CSSOM: the page's CSP refuses style attributes. */
@@ -93,7 +95,7 @@ function pools(pc) {
 
 function pcCard(pc) {
   const now = pc.now;
-  const shares = now ? [`CI runners ${Math.round(now.runners)}%`, now.wsl === null ? '' : `WSL ${Math.round(now.wsl)}%`, ...Object.entries(now.vms).map(([name, pct]) => `${name} ${Math.round(pct)}%`)].filter(Boolean).join(' · ') : '';
+  const shares = now ? [`CI runners ${Math.round(now.runners)}%`, now.wsl === null ? '' : `WSL ${Math.round(now.wsl)}%`, ...Object.entries(now.vms).map(([name, pct]) => `${VM_ID.test(name) ? 'WSL VM' : name} ${Math.round(pct)}%`)].filter(Boolean).join(' · ') : '';
   const facts = now ? [
     now.idle_sec === null ? 'can\'t tell if someone is at the PC' : now.idle_sec < 300 ? 'someone is at the PC' : 'nobody at the PC',
     now.queue === null ? '' : `${now.queue} thread${now.queue === 1 ? '' : 's'} waiting for a core`,

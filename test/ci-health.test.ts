@@ -266,6 +266,9 @@ test('billing-blocked jobs make one alert that counts up, quoting GitHub, and Ma
   await w.health.tick(t);
   assert.equal(w.puts.length, 1);
   assert.match(w.puts[0][2]!, /^CI, Peek Auras: 2 jobs on windows-latest didn't start since .*GitHub says: "The job was not started because recent account payments/);
+  // The jobs read are kept for the CI desktop's view (#534), across a restart too.
+  assert.equal(w.health.recent.get(w.peek.id)!.length, 2);
+  assert.deepEqual(new CiHealth(w.store, w.deps).recent.get(w.peek.id)!.map((j) => j.run_id), [501, 502]);
   await w.health.tick(t + MIN);
   assert.equal(w.puts.length, 2, 'Mandate was down: tried again');
   w.mandateUp.ok = true;

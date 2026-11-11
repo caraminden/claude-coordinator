@@ -304,6 +304,11 @@ export class CiHealth {
     this.store = store;
     this.deps = deps;
     this.get = deps.get ?? ghGet;
+    // The last read survives a restart: without it the CI desktop's view (#534) knew of no job until the first poll.
+    for (const p of store.listProjects()) {
+      const kept = store.getSetting<Job[]>(`ci-health:recent:${p.id}`);
+      if (Array.isArray(kept)) this.recent.set(p.id, kept);
+    }
   }
 
   /** The first look comes a poll after start, so a restart (or a test's short-lived server) doesn't ask GitHub at once. */
@@ -408,6 +413,7 @@ export class CiHealth {
       if (r.status === 'completed' || now - at(r.created_at) >= QUEUED_MS) jobs.push(...its);
     }
     this.recent.set(p.id, all);
+    this.store.setSetting(`ci-health:recent:${p.id}`, all.map(({ steps, ...j }) => j));
     for (const g of deadGroups(jobs)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
     out.push(...queuedProblems(jobs, now));
 

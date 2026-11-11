@@ -480,7 +480,8 @@ export function appInstructionsEditor() {
   const discard = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Discard');
   const saved = () => appInstructions?.text ?? '';
   const sync = () => {
-    const dirty = textarea.value.trim() !== saved().trim();
+    // Nothing to save or discard until the GET has filled the field (it stays disabled if that fails).
+    const dirty = !textarea.disabled && textarea.value.trim() !== saved().trim();
     textarea.toggleAttribute('data-draft', dirty);
     const n = textarea.value.trim().length;
     counter.textContent = `${count(n)} / ${count(MAX_INSTRUCTIONS)}`;

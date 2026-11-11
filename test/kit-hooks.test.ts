@@ -130,6 +130,9 @@ test('retro log: a red test or a failed push earns a line; a green run, a backgr
   assert.deepEqual(bashLines(failure('git push origin ticket/1', 'Exit code 1\n! [rejected] (non-fast-forward)'))[0], ['failed push', 'git push origin ticket/1: Exit code 1 ! [rejected] (non-fast-forward)']);
   assert.equal(bashLines(failure('git -C ../x push -u origin b', 'Exit code 128'))[0][0], 'failed push');
   assert.deepEqual(bashLines(failure('git commit -m "fix push race"', 'Exit code 1\nhook failed')), [], 'not a push');
+  // #468 S08-7: a push named only inside quotes, or one a red test stopped before it ran.
+  assert.deepEqual(bashLines(failure('git commit -m "fix git push hook"', 'Exit code 1\nhook failed')), [], 'a push in a message');
+  assert.deepEqual(bashLines(failure('npm test && git push', 'Exit code 1\nℹ fail 2')), [['red test', '2 failed: npm test']], 'the tests failed, so no push ran');
   assert.deepEqual(bashLines({ hook_event_name: 'PostToolUse', tool_input: { command: 'git push' }, tool_response: { stdout: '', stderr: 'ok' } }), []);
   assert.deepEqual(bashLines({ hook_event_name: 'PostToolUse', tool_input: { command: 'node --test' }, tool_response: { stdout: 'ℹ fail 0' } }), []);
   assert.deepEqual(bashLines({ hook_event_name: 'PostToolUse', tool_input: { command: 'node --test', run_in_background: true }, tool_response: { stdout: 'ℹ fail 3' } }), []);

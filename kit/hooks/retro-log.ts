@@ -183,7 +183,8 @@ export function bashLines(input: any): [string, string][] {
   const runs = readsRetroLog(command) ? [] : testRuns(command);
   const failed = runs.length ? failedTests(out, runs.map(([, r]) => r)) : 0;
   if (failed > 0) lines.push(['red test', `${failed} failed: ${runs.map(([c]) => c).join('; ').slice(0, 160)}`]);
-  if (input.hook_event_name === 'PostToolUseFailure' && /\bgit(?:\s+-C\s+\S+|\s+-\S+)*\s+push\b/.test(command)) {
+  // A push in quoted text isn't one, and a red test before it means the chain stopped there.
+  if (input.hook_event_name === 'PostToolUseFailure' && !failed && /\bgit(?:\s+-C\s+\S+|\s+-\S+)*\s+push\b/.test(mask(command))) {
     lines.push(['failed push', `${command.slice(0, 120)}: ${out.trim().split('\n').slice(-3).join(' ')}`]);
   }
   return lines;

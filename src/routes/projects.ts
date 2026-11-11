@@ -267,6 +267,8 @@ export const projectRoutes: Route[] = [
       const { count } = await readJson(req);
       if (!Number.isSafeInteger(count) || count < 0) throw new HttpError(400, 'count must be a whole number, 0 or more');
       app.store.setSeenCount(session.name, project.id, count);
+      // Their other tabs and devices unmark the badge too; each tab takes only its own person's.
+      app.broadcast({ type: 'seen-count', name: session.name, projectId: project.id, count });
       return json(res, 200, { count });
     },
   },

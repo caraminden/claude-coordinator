@@ -10,7 +10,7 @@ import { onArtifactData, tabBridgeOpen } from './bridge-host.js';
 import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
 import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
-import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, refreshInbox, refreshSchemeCounts } from './inbox.js';
+import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, onSeenCount, refreshInbox, refreshSchemeCounts } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
@@ -299,6 +299,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
+    if (msg.type === 'seen-count' && msg.name === me) onSeenCount(msg.projectId, msg.count);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };

@@ -99,6 +99,14 @@ function markCountSeen(projectId, count) {
   api(`api/projects/${projectId}/seen-count`, { method: 'PUT', body: { count } }).catch(() => { if (p.seenInbox === count) p.seenInbox = before; });
 }
 
+/** Another tab or device of yours saw a scheme's count (#498): redraw its pills, with no fetch or write, so two tabs can't set each other off. */
+export function onSeenCount(projectId, count) {
+  const p = view?.projects?.find((q) => q.id === projectId);
+  if (!p || projectId === view.projectId) return;
+  p.seenInbox = count;
+  for (const el of document.querySelectorAll(`[data-scheme-inbox="${projectId}"]`)) el.replaceWith(schemeCount(p));
+}
+
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */
 export function renderInbox() {
   if (view?.kind !== 'project' || inbox.projectId !== view.projectId) return;

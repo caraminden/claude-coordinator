@@ -11,7 +11,9 @@
 # 3. Runs the check command on the rebased commit, within LAND_CHECK_TIMEOUT whole seconds (default
 #    1800). A failure or overrun stops here.
 # 4. With the CI gate on (below): pushes the commit to the scratch branch land/<branch> on origin and
-#    waits for CI to pass exactly that commit. Red stops here.
+#    waits for CI to pass exactly that commit. Red stops here. On the way out the scratch branch is
+#    deleted and its unfinished runs cancelled, except those of a commit that landed: they finish, so
+#    main's CI can reuse what they pass.
 # 5. Fast-forwards main in the scheme's main checkout to the commit.
 # 6. Pushes main to origin from the main checkout, never forced. A failed push is reported and main
 #    stays moved; the next landing pushes it again.
@@ -409,11 +411,12 @@ ci_push() {
 }
 
 # Stops the scratch branch's runs nobody waits for now, so they don't hold a runner. Best effort.
+#   ci_cancel [commit]   spares that commit's runs: the one that just landed, whose finished jobs main's CI may reuse
 ci_cancel() {
-  local id
-  for id in $(hub gh api "repos/$slug/actions/runs?branch=$CI_REF&per_page=20" --jq '.workflow_runs[] | select(.status != "completed") | .id' 2>/dev/null); do
-    hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
-  done
+  local id sha
+  while read -r id sha; do
+    [ -z "$id" ] || [ "$sha" = "${1:-}" ] || hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
+  done < <(hub gh api "repos/$slug/actions/runs?branch=$CI_REF&per_page=20" --jq '.workflow_runs[] | select(.status != "completed") | [.id, .head_sha] | @tsv' 2>/dev/null)
 }
 
 # Asks CI about $tip, at most every CI_POLL seconds: sets green, refuses on red, repeats a lost run once, parks at the limits.
@@ -546,7 +549,8 @@ build() {
 }
 
 # On the way out, however it ends: the worktree goes back on the branch, the place in line and the lock
-# go, then the scratch branch and its runs.
+# go, then the scratch branch and its runs, except a landed commit's own runs, which finish (main's CI
+# may skip what they passed).
 leave() {
   local rc=$? main
   trap - EXIT
@@ -569,7 +573,7 @@ leave() {
   queue_done $landed
   exec 9>&-
   if [ -n "$pushed" ]; then
-    ci_cancel
+    ci_cancel "${landed:+$tip}"
     hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null
   fi
   exit "$rc"

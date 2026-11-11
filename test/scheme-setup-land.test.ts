@@ -427,7 +427,8 @@ test('the head of the line waits for a lock held outside it (an older land.sh), 
 
 // The CI gate and the stack (#537). CI is faked two ways: a CI_STATUS command that answers from a file named after
 // the commit (its exit code; no file: not started; "<code> once": that answer one time, then not started), and for
-// the built-in reader a gh that prints what the test wrote (runs.once.tsv one time, then runs.tsv).
+// the built-in reader a gh that prints what the test wrote (runs.once.tsv one time, then runs.tsv; branch-runs for
+// the scratch branch's unfinished runs, "<id>\t<commit>" a line).
 // Either way a gh stands first in PATH, so no test reaches GitHub.
 function ciSetup(branches: number, { stack = '', check = 'true', builtin = false, files = (i: number) => `f${i}.txt` } = {}) {
   const config: Record<string, string> = { ...(builtin ? { CI_WORKFLOWS: 'ci.yml slow.yml' } : { CI_STATUS: '"$CI_FAKE"' }), ...(stack ? { CI_STACK: stack } : {}) }; // no stack: the template's own depth, 3
@@ -436,7 +437,7 @@ function ciSetup(branches: number, { stack = '', check = 'true', builtin = false
   const bin = join(q.dir, 'bin');
   mkdirSync(ci);
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
   const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' };
   const started: ReturnType<typeof q.land>[] = [];
@@ -513,6 +514,31 @@ test('CI gate: red CI refuses with main untouched; no runner within the limit pa
     assert.equal(await again.exit, 75, again.stderr());
     assert.match(again.stderr(), /hasn't finished within 1 min/);
     assert.equal(spawnSync('bash', [join(c.wt, 'tools', 'land.sh')], { cwd: c.wt, encoding: 'utf8', env: { ...env, LAND_CI_START: 'soon' } }).stderr.trim(), 'land: LAND_CI_START is in whole seconds, not "soon"');
+  } finally {
+    c.stop();
+  }
+});
+
+test("CI gate: a landed commit's runs on the scratch branch are left to finish; stale ones, and a refused landing's, are cancelled", async () => {
+  const c = ciSetup(2, { stack: '1' });
+  const full = (sha: string) => git(c.main, 'rev-parse', sha);
+  const cancelled = () => [...readFileSync(join(c.ci, 'gh.log'), 'utf8').matchAll(/actions\/runs\/(\d+)\/cancel/g)].map((m) => m[1]);
+  try {
+    const a = c.land(1);
+    const sha = await c.tip(a);
+    const old = 'b'.repeat(40); // an older commit of this branch, pushed by an earlier try: it won't land
+    writeFileSync(join(c.ci, 'branch-runs'), `11\t${full(sha)}\n12\t${old}\n`);
+    c.verdict(sha, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.deepEqual(cancelled(), ['12'], 'the landed run goes on; the stale one is cancelled');
+    writeFileSync(join(c.ci, 'gh.log'), '');
+    writeFileSync(join(c.ci, 'branch-runs'), '');
+    const b = c.land(2);
+    const shb = await c.tip(b);
+    writeFileSync(join(c.ci, 'branch-runs'), `21\t${full(shb)}\n`);
+    c.verdict(shb, RED);
+    assert.equal(await b.exit, 1, b.stderr());
+    assert.deepEqual(cancelled(), ['21'], 'nothing landed, so its run is cancelled');
   } finally {
     c.stop();
   }

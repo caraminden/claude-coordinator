@@ -172,7 +172,8 @@ box), turn on `land.sh`'s CI gate: set `CI_WORKFLOWS` to the workflow files that
 add `'land/**'` to each one's `push: branches:`, and give each a concurrency group per ref. Set
 `CHECK` to what should still run on the box before anything is pushed (`true` for nothing). Then
 a landing pushes its rebased commit to `land/<branch>`, waits for CI on exactly that commit, and
-only then moves main. The first `CI_STACK` landings in line (3) run CI at once, each built on the
+only then moves main. The landed commit's runs there are left to finish (main's CI may skip
+what they passed); every other run on the scratch branch is cancelled. The first `CI_STACK` landings in line (3) run CI at once, each built on the
 one ahead, so a landing doesn't wait a whole CI round per place in line. When "every workflow
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
 `CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means

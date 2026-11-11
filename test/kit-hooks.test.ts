@@ -32,6 +32,7 @@ test('hooks.json is valid and every script it names exists in kit/hooks', () => 
 
 test('job check: refuses a minion\'s stop while its background job runs, at most twice per prompt', () => {
   assert.match(jobCheck(stop(), 'thread', 0)!, /still running: b1 \(Run the test suite\).*wait inside the turn/);
+  assert.match(jobCheck(stop(), 'thread', 0)!, /`citadel-wait pid <pid>`/, 'names a wait Claude Code lets through (#481)');
   assert.equal(jobCheck(stop(), 'thread', MAX_STOP_BLOCKS), null);
   assert.equal(jobCheck(stop(), 'coordinator', 0), null, 'the Taskmaster loads the kit too, and is left alone');
   assert.equal(jobCheck(stop({ background_tasks: [{ ...running, status: 'completed' }] }), 'thread', 0), null);

@@ -90,9 +90,11 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
   const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
   if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
-  /** citadel-android (tools/), the shared headless emulator (#381), on every turn's PATH the same way. */
-  const ANDROID_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-android');
-  if (existsSync(ANDROID_SOURCE)) cpSync(ANDROID_SOURCE, join(MCP_DIR, 'bin', 'citadel-android'));
+  // citadel-android, the shared headless emulator (#381), and citadel-wait, the one blocking command a turn waits with (#481), on every turn's PATH the same way.
+  for (const tool of ['citadel-android', 'citadel-wait']) {
+    const source = join(import.meta.dirname, '..', 'tools', tool);
+    if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
+  }
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');

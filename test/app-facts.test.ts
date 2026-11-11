@@ -21,7 +21,7 @@ test('minions and Taskmasters both hear the chat, link, strike and tripwire fact
     assert.match(p, /write the wrong words as `~~…~~` with the fix right after/, t.kind);
     assert.ok(p.includes(TRIPWIRE_BLOCKS), t.kind);
   }
-  assert.match(systemPrompt(project, minion, null, null, '/tickets', null), /one blocking command, up to 10 minutes per call/);
+  assert.match(systemPrompt(project, minion, null, null, '/tickets', null), /one blocking `citadel-wait pid <pid>`/);
 });
 
 test('deploy lines show only when the server runs the scheme', () => {

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Block until something is true, for waiting inside a turn with one command (#481): Claude Code refuses
+# `sleep N; check`, so minions need a form that passes.
+#   citadel-wait pid <pid>      until that process has exited
+#   citadel-wait port <n>       until something listens on that port on this machine
+#   citadel-wait file <path>    until that file exists
+#   citadel-wait cmd '<test>'   until the shell test exits 0
+# Exits 0 once it is true, 124 after $CITADEL_WAIT_SECONDS (default 590, under the Bash tool's
+# 10-minute cap), 2 on bad usage. Checks every 2 seconds.
+set -uo pipefail
+
+say() { echo "citadel-wait: $*" >&2; }
+usage() { say "usage: citadel-wait pid <pid> | port <n> | file <path> | cmd '<test>'"; exit 2; }
+[ $# -eq 2 ] || usage
+kind=$1 arg=$2
+limit=${CITADEL_WAIT_SECONDS:-590}
+[[ $limit =~ ^[0-9]+$ ]] || limit=590
+
+case $kind in
+  pid) [[ $arg =~ ^[0-9]+$ ]] || usage
+    done_yet() { ! kill -0 "$arg" 2>/dev/null && [ ! -d "/proc/$arg" ]; }
+    what="process $arg to exit" ;;
+  port) [[ $arg =~ ^[0-9]+$ ]] || usage
+    done_yet() { (exec 3<>"/dev/tcp/127.0.0.1/$arg") 2>/dev/null || (exec 3<>"/dev/tcp/localhost/$arg") 2>/dev/null; }
+    what="port $arg to listen" ;;
+  file) done_yet() { [ -e "$arg" ]; }
+    what="$arg to exist" ;;
+  cmd) done_yet() { bash -c "$arg" >/dev/null 2>&1; }
+    what="\`$arg\` to succeed" ;;
+  *) usage ;;
+esac
+
+SECONDS=0
+until done_yet; do
+  if [ "$SECONDS" -ge "$limit" ]; then
+    say "still waiting for $what after ${SECONDS}s; run it again to keep waiting"
+    exit 124
+  fi
+  sleep 2
+done
+say "done waiting for $what (${SECONDS}s)"

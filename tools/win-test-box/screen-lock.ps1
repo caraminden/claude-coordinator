@@ -75,8 +75,10 @@ if ($Take) {
       Write-Host 'Took the screen lock.'
       exit 0
     } catch {
-      # Someone else's lock is there; anything else (no folder, no access) is a real failure.
-      if (-not (Test-Path $lock)) { throw }
+      # Someone else's lock is there (ERROR_FILE_EXISTS, 0x80070050), or was a moment ago: its holder may
+      # have let go since, which the read below sees. Anything else (no folder, no access) is a real failure.
+      $fileExists = $_.Exception.GetBaseException().HResult -eq -2147024816
+      if (-not $fileExists -and -not (Test-Path $lock)) { throw }
     }
     $raw = Get-Content $lock -Raw -ErrorAction SilentlyContinue
     if ($null -eq $raw -and -not (Test-Path $lock)) { continue }  # let go of since we tried

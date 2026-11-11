@@ -28,6 +28,8 @@ const M2 = minion(A.id, 'Sibling');
 const GONE = minion(A.id, 'Dismissed one');
 store.updateTicket(GONE.id, { status: 'closed' });
 const OTHER = minion(B.id, 'Other scheme');
+// A question card waiting on people in the sibling's chat (#468 S06-3).
+const CARD = store.addEvent(M2.id, 'question', { id: 'q1', questions: [{ header: 'Layout', question: 'Tabs?' }] });
 
 const tokens = new Auth(PASSWORD, SECRET);
 let srv: Booted;
@@ -60,6 +62,7 @@ test('a minion lists its own scheme, leaving out dismissed ones unless asked', a
   assert.equal(open.error, false, open.text);
   assert.match(open.text, /#1 Asker/);
   assert.match(open.text, /#2 Sibling/);
+  assert.match(open.text, new RegExp(`#2 Sibling .*waiting: .*Layout.*#/p/${A.id}/t/2\\?e=${CARD.id}`), 'the card waiting on people, with its link');
   assert.doesNotMatch(open.text, /Dismissed one|Other scheme/);
   const all = await tool('list_tickets', { include_closed: true });
   assert.match(all.text, /#3 Dismissed one .*status: closed/);
@@ -78,7 +81,7 @@ test("the route gives a minion only the line's fields, and refuses another schem
   const { tickets } = await res.json();
   assert.deepEqual(tickets.map((t: any) => t.title).sort(), ['Asker', 'Sibling']);
   assert.deepEqual(Object.keys(tickets[0]).sort(), [
-    'branch', 'build', 'closing', 'created_by', 'effort', 'last_activity', 'model', 'note', 'number', 'parent', 'plugin_dirs', 'properties', 'queued', 'state', 'status', 'title', 'workflow',
+    'branch', 'build', 'closing', 'created_by', 'effort', 'last_activity', 'model', 'note', 'number', 'open_cards', 'parent', 'plugin_dirs', 'properties', 'queued', 'state', 'status', 'title', 'workflow',
   ]);
   const cross = await get(`/api/projects/${B.id}/tickets`, M1.id);
   assert.equal(cross.status, 403);

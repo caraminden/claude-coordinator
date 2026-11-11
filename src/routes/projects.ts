@@ -215,7 +215,7 @@ function visibleSchemes(store: App['store'], who: { uid?: number; admin?: boolea
 }
 
 // What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
-const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'workflow', 'plugin_dirs', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity'] as const;
+const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'workflow', 'plugin_dirs', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity', 'open_cards'] as const;
 
 export const projectRoutes: Route[] = [
   {
@@ -399,7 +399,8 @@ export const projectRoutes: Route[] = [
   },
   {
     // The scheme's minions as list_tickets prints them, for its minions too: read-only, and only the
-    // line's fields, the latest activity line among them (no approval cards, costs or paths). checkRole keeps a minion to its own scheme.
+    // line's fields, the latest activity line and waiting cards' labels and links among them (no card
+    // contents, costs or paths). checkRole keeps a minion to its own scheme.
     method: 'GET', path: '/api/projects/:project/tickets', who: ['person', 'taskmaster', 'minion'],
     handler({ res, url, app, project }) {
       const closed = url.searchParams.get('include_closed') === '1';

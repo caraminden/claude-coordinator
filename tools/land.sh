@@ -66,14 +66,22 @@ if ! "$tools/run-tests.sh" "$log"; then
 fi
 
 tip=$(git rev-parse HEAD)
-git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
-say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
-
-if ! DEPLOY_LOCKED=1 "$here/tools/deploy.sh"; then
-  # Only when the live checkout doesn't have it (a failed check put it back, or it never pulled): main follows, unless it moved on since.
+# Only when the live checkout doesn't have it (a failed check put it back, or it never pulled): main follows, unless it moved on since.
+main_back() {
   if ! git -C "$LIVE" merge-base --is-ancestor "$tip" HEAD 2>/dev/null && [ "$(git -C "$SOURCE" rev-parse main)" = "$tip" ]; then
     git -C "$SOURCE" reset -q --keep "$old"
     refuse "the deploy stopped before the live checkout took it, so main is back at $(git log -1 --format=%h "$old"); $branch keeps the rebased work. Fix it and land again"
   fi
+}
+# Killed mid-deploy (a person's Stop, a time limit): the same rule, from here on, once the deploy has put the checkout back.
+trap 'main_back; exit 130' INT
+trap 'main_back; exit 143' TERM
+trap 'main_back; exit 129' HUP
+git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
+say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
+
+if ! DEPLOY_LOCKED=1 "$here/tools/deploy.sh"; then
+  main_back
   refuse "the deploy failed after main moved; main keeps $(git log -1 --format=%h "$tip"). Read the deploy's output above"
 fi
+trap - INT TERM HUP

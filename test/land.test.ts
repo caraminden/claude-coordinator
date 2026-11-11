@@ -273,3 +273,50 @@ lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
     server.close();
   }
 });
+
+// A person pressing Stop, or a Bash time limit, ends the whole run with a signal (#468 S10-5).
+test('a land killed while the deploy tests the live checkout puts the checkout and main back', async () => {
+  const r = setup();
+  for (const f of ['deploy.sh', 'run-tests.sh']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  // Run in the live checkout (the deploy's own test run), it says so and takes a few seconds.
+  writeFileSync(join(r.source, 'test', 'slow.test.mjs'), `import { realpathSync, writeFileSync } from 'node:fs';
+if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(process.env.DEPLOY_LIVE)) {
+  writeFileSync(process.env.KILL_MARK + '.started', '');
+  await new Promise((r) => setTimeout(r, 3000));
+  writeFileSync(process.env.KILL_MARK + '.done', '');
+}
+`);
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'real deploy.sh');
+  git(r.live, 'pull', '-q', '--ff-only');
+  git(r.wt, 'rebase', '-q', 'main');
+  const base = git(r.source, 'rev-parse', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const bin = join(r.dir, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'systemctl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'systemd-run'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const mark = join(r.dir, 'kill');
+  const child = spawn('bash', [land], {
+    cwd: r.wt, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
+    env: { ...env, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_URL: 'http://127.0.0.1:9', DEPLOY_DB: join(r.dir, 'none.db'), DEPLOY_REMOTE: '', KILL_MARK: mark },
+  });
+  let stderr = '';
+  child.stderr!.on('data', (d) => (stderr += d));
+  const exited = new Promise((ok) => child.once('exit', ok));
+  const until = async (file: string) => {
+    for (const end = Date.now() + 60_000; !existsSync(file); await new Promise((ok) => setTimeout(ok, 50))) {
+      if (Date.now() > end) throw new Error(`no ${file}:\n${stderr}`);
+    }
+  };
+  await until(`${mark}.started`);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'), 'main had moved');
+  assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'), 'the live checkout had pulled it');
+  process.kill(-child.pid!, 'SIGTERM');
+  await exited;
+  await until(`${mark}.done`); // the test run itself (in a process group of its own) ends by itself
+  assert.equal(git(r.live, 'rev-parse', 'HEAD'), base, `the live checkout is back:\n${stderr}`);
+  assert.equal(git(r.source, 'rev-parse', 'main'), base, `main is back:\n${stderr}`);
+  assert.match(stderr, /putting the checkout back/);
+  assert.match(stderr, /main is back at/);
+});

@@ -2,8 +2,8 @@
 # Safe deploys for Citadel. Run it from a minion once its work is on main:
 #   tools/deploy.sh          (--now: restart even if that cuts off running turns; only with a person's OK)
 # 1. Fast-forwards the live checkout to main, runs the tests, and boots the new code on a spare port
-#    against a copy of the database (tools/boot-check.ts). Any failure puts the checkout back; nothing
-#    restarts.
+#    against a copy of the database (tools/boot-check.ts). Any failure, or a kill, puts the checkout
+#    back; nothing restarts.
 # 2. A change to public/ only: SIGHUP, and the server reloads its front end. No restart, no killed turns.
 # 3. Anything else: queues the fixed-name restart unit, which restarts straight away (running turns
 #    carry on in their own units and the new server re-attaches; it only waits while turns a restart
@@ -252,11 +252,18 @@ deploy() {
   if ! git_live rev-parse -q --verify last-good >/dev/null && systemctl --user is-active -q "$SERVICE"; then
     git_live tag last-good "$(health commit | grep . || echo "$prev")"
   fi
+  # Killed (a person's Stop, a time limit) from the pull until the restart is queued: put the checkout
+  # back too, so it never sits on untested code with nothing queued.
+  undo() { say "putting the checkout back to $(short "$prev")"; git_live reset -q --hard "$prev"; }
+  trap 'undo; exit 130' INT
+  trap 'undo; exit 143' TERM
+  trap 'undo; exit 129' HUP
   git_live pull -q --ff-only "$SOURCE" main
   new=$(git_live rev-parse HEAD)
   running=$(health commit)
   kind=$(change_kind "$LIVE" "$running" "$new")
   if [ "$kind" = none ]; then
+    trap - INT TERM HUP
     say "nothing to deploy: the server already runs $(short "$new")"
     report_me "Nothing to deploy: the server already runs $(short "$new")."
     return 0
@@ -264,7 +271,7 @@ deploy() {
   say "deploying $(short "$new") ($kind change)"
 
   # Put the checkout back on any failure from here until the restart is queued.
-  trap 'say "putting the checkout back to $(short "$prev")"; git_live reset -q --hard "$prev"' ERR
+  trap undo ERR
   say "running the tests"
   if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log"); then
     tail -n 40 "$STATE/test.log" >&2
@@ -276,7 +283,7 @@ deploy() {
     say "boot check failed; nothing deployed"
     false
   fi
-  trap - ERR
+  trap - ERR INT TERM HUP
 
   if [ "$kind" = frontend ] && [ "$(health reload)" = sighup ]; then
     systemctl --user kill -s HUP --kill-whom=main "$SERVICE"

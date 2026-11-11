@@ -149,7 +149,7 @@ exit $LASTEXITCODE
     child.stdout.on('data', (c) => { out += c; });
     child.stderr.on('data', (c) => { out += c; });
     const status = await new Promise<number | null>((r) => child.on('close', r));
-    return { status, out, asked, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+    return { status, out, asked, calls: readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean) };
   } finally {
     await new Promise((r) => citadel.close(r));
   }

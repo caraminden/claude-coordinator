@@ -60,6 +60,14 @@ function Invoke-Citadel([hashtable]$Ask) {
     return Invoke-RestMethod -Method Post -Uri $uri -Body $body -ContentType 'application/json' -Headers @{ Authorization = "Bearer $MachineToken" } -UseBasicParsing
   } catch {
     $said = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { $null }
+    # Windows PowerShell 5.1 can leave ErrorDetails empty; what Citadel said is still on the response (#476, seen on the test box).
+    if (-not $said -and $_.Exception -is [Net.WebException] -and $_.Exception.Response) {
+      try {
+        $stream = $_.Exception.Response.GetResponseStream()
+        if ($stream.CanSeek) { $stream.Position = 0 }
+        $said = (New-Object IO.StreamReader($stream)).ReadToEnd()
+      } catch { $null = $_ }
+    }
     try { $said = ($said | ConvertFrom-Json).error } catch { $null = $_ } # not JSON: keep the text as it came
     if (-not $said) { $said = $_.Exception.Message }
     throw "$said"

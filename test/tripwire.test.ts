@@ -317,6 +317,14 @@ const BLOCKED: [string, string?][] = [
   ['cd "$WT" && git push --force origin main'],
   ['cd "$WT" && git push --force origin topic'],
   ['git -C "$WT" push origin HEAD:main'],
+  // #468 S01-10: comparisons in (( )) and [[ ]] aren't redirects, but a redirect next to them still is
+  [`(( n > 1 )) && echo x > ${data}/state.db`],
+  [`[[ -n $x ]] && echo x > ${data}/state.db`],
+  [`[[ $a > $b ]]; echo x > ${data}/state.db`],
+  [`((cat x) > ${data}/state.db)`],
+  [`[[ $(echo x > ${data}/state.db) ]]`],
+  ['echo $(( $(pkill -f node) + 1 ))'],
+  [`echo "$(( n > 1 ))" > ${data}/state.db`],
 ];
 
 const ALLOWED = [
@@ -505,6 +513,13 @@ const ALLOWED = [
   // #468 S01-9: after a lost cd, a push of a named branch, or of HEAD (its branch unknown)
   'cd "$WT" && git push -u origin ticket/9',
   'cd "$WT" && git push --force-with-lease origin HEAD',
+  // #468 S01-10: < and > compare in (( )), $(( )) and [[ ]]
+  '(( total > $LIMIT )) && echo big',
+  'if (( $n > $m )); then echo x; fi',
+  'if [[ "$a" > "$b" ]]; then echo x; fi',
+  '[[ $a < $b && $c > $d ]] && echo ok',
+  'echo $(( n > $m )) "$(( n << $k ))"',
+  'while (( i < $N )); do i=$((i + 1)); done',
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

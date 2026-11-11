@@ -213,11 +213,30 @@ export function lex(s: string, home: string): Tok[] {
   let quotedStart = false;
   // Inside "…": a $( … ) or `…` in it is lexed as a command all the same (#468 S01-1), and the quotes pick up after it.
   let dq = false;
+  // Where `<` and `>` compare rather than redirect (#468 S01-10): `arith` holds the paren depth each
+  // (( … )) or $(( … )) opened at; `cond` is set inside [[ … ]].
+  const arith: number[] = [];
+  let cond = false;
+  /** Whether the (( at s[k] is arithmetic: bash reads it so when its two parens close together, else as two subshells. */
+  const arithmetic = (k: number): boolean => {
+    let depth = 2;
+    for (let j = k + 2; j < n; j++) {
+      if (s[j] === '(') depth++;
+      else if (s[j] === ')' && --depth === 1) return s[j + 1] === ')';
+    }
+    return false;
+  };
+  const inArith = () => arith.length > 0 && parens.slice(arith.at(-1)! + 1).every((p) => p === null);
   const put = (x: string) => {
     text += x;
     tmpl += x;
   };
   const flush = () => {
+    if (inWord && !unknown && !quotedStart) {
+      const t = toks.at(-1);
+      if (text === '[[' && (!t || t.kind === 'op' || (t.kind === 'word' && KEYWORDS.has(t.word.text)))) cond = true;
+      else if (text === ']]') cond = false;
+    }
     if (inWord) toks.push({ kind: 'word', word: unknown ? { text, unknown, tmpl } : { text, unknown } });
     text = '';
     tmpl = '';
@@ -226,12 +245,13 @@ export function lex(s: string, home: string): Tok[] {
     quotedStart = false;
   };
   // Open parens: null for a plain ( … ), or the word a $( … ) or `…` sits in, to pick up again after it.
-  type Saved = { text: string; tmpl: string; unknown: boolean; quotedStart: boolean; backtick: boolean; start: number; dq: boolean };
+  type Saved = { text: string; tmpl: string; unknown: boolean; quotedStart: boolean; backtick: boolean; start: number; dq: boolean; cond: boolean };
   const parens: (Saved | null)[] = [];
   const open = (backtick: boolean, start: number) => {
-    parens.push({ text, tmpl, unknown, quotedStart, backtick, start, dq });
+    if (!backtick && s[start] === '(' && arithmetic(start - 1)) arith.push(parens.length);
+    parens.push({ text, tmpl, unknown, quotedStart, backtick, start, dq, cond });
     text = tmpl = '';
-    unknown = inWord = quotedStart = dq = false;
+    unknown = inWord = quotedStart = dq = cond = false;
     toks.push({ kind: 'op', text: '$(' });
   };
   const close = (end: number) => {
@@ -239,7 +259,7 @@ export function lex(s: string, home: string): Tok[] {
     toks.push({ kind: 'op', text: ')' });
     const w = parens.pop();
     if (!w) return;
-    ({ text, tmpl, quotedStart, dq } = w);
+    ({ text, tmpl, quotedStart, dq, cond } = w);
     tmpl += mktempPath(s.slice(w.start, end), home) ?? '\0\0';
     unknown = inWord = true;
   };
@@ -358,6 +378,7 @@ export function lex(s: string, home: string): Tok[] {
     }
     if (c === '\n') {
       flush();
+      cond = false;
       toks.push({ kind: 'op', text: '\n' });
       i++;
       // Step over the bodies of heredocs started on the line that just ended, into their << word.
@@ -374,7 +395,7 @@ export function lex(s: string, home: string): Tok[] {
       }
       continue;
     }
-    if (c === '<' || c === '>' || (c === '&' && s[i + 1] === '>')) {
+    if ((c === '<' || c === '>' || (c === '&' && s[i + 1] === '>')) && !cond && !inArith()) {
       // A bare number right before is the file descriptor, not a word.
       if (inWord && !quotedStart && !unknown && /^\d+$/.test(text)) {
         text = tmpl = '';
@@ -406,6 +427,7 @@ export function lex(s: string, home: string): Tok[] {
     }
     if (c === ')') {
       close(i);
+      while (arith.length && parens.length <= arith.at(-1)!) arith.pop();
       i++;
       continue;
     }
@@ -413,7 +435,15 @@ export function lex(s: string, home: string): Tok[] {
       flush();
       const two = s.slice(i, i + 2);
       const op = ['&&', '||', '|&', ';;'].includes(two) ? two : c;
+      if (op === '(' && two === '((' && arithmetic(i)) {
+        arith.push(parens.length);
+        parens.push(null, null);
+        toks.push({ kind: 'op', text: '(' }, { kind: 'op', text: '(' });
+        i += 2;
+        continue;
+      }
       if (op === '(') parens.push(null);
+      else if (op !== '&&' && op !== '||') cond = false;
       toks.push({ kind: 'op', text: op });
       i += op.length;
       continue;

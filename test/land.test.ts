@@ -475,20 +475,29 @@ const queueState = () => {
 test('a waiter that is killed leaves the line, and the one behind it goes next', async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
-  await until('a to hold the lock', () => order(state).length === 1);
-  const b = waiter(state, 'b', 'true');
-  await until("b's ticket", () => issued(state) === 2);
-  const c = waiter(state, 'c', 'true');
-  await until('c to see its place', () => /3rd in line/.test(c.stderr()));
-  b.child.kill('SIGKILL');
-  await b.exit;
-  assert.equal(tickets(state).length, 3, 'a killed waiter leaves its ticket behind');
-  await until('c to move up past the dead ticket', () => /2nd in line/.test(c.stderr()));
-  assert.equal(tickets(state).length, 2, 'the waiter behind it removed it');
-  writeFileSync(join(state, 'go'), '');
-  assert.equal(await a.exit, 0);
-  assert.equal(await c.exit, 0, c.stderr());
-  assert.deepEqual(order(state), ['a', 'c']);
+  let c: ReturnType<typeof waiter> | undefined;
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    const b = waiter(state, 'b', 'true');
+    await until("b's ticket", () => issued(state) === 2);
+    c = waiter(state, 'c', 'true');
+    const cs = c.stderr;
+    await until('c to see its place', () => /3rd in line/.test(cs()));
+    const [ta, tb, tc] = tickets(state);
+    assert.ok(tb, 'three tickets in line');
+    b.child.kill('SIGKILL');
+    await b.exit;
+    // Not counted right after the kill: c may already have removed it by then.
+    await until('c to move up past the dead ticket', () => /2nd in line/.test(cs()));
+    assert.deepEqual(tickets(state), [ta, tc], "the waiter behind it removed the killed waiter's ticket");
+    writeFileSync(join(state, 'go'), '');
+    assert.equal(await a.exit, 0);
+    assert.equal(await c.exit, 0, c.stderr());
+    assert.deepEqual(order(state), ['a', 'c']);
+  } finally {
+    writeFileSync(join(state, 'go'), ''); // a failed check must not leave a and c waiting, which hangs the file
+    c?.child.kill('SIGKILL');
+  }
 });
 
 test('a holder that is killed leaves the line too, and its lock goes with it', async () => {

@@ -825,6 +825,8 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
       if (plain.length > 1) return hard(`\`git checkout <ref> <path>\` is blocked. ${NEVER_PATH}`);
       if (plain.length === 0) {
         if (has('-')) move = 'git checkout -';
+        // With no branch, -f still resets the working tree to HEAD (#468 S01-3).
+        else if (words.some((a) => a === '--force' || /^-[a-zA-Z]*f[a-zA-Z]*$/.test(a))) move = 'git checkout --force';
         break;
       }
       if (!dir) return null;

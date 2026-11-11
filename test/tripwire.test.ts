@@ -521,7 +521,7 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
     const at = (command: string, cwd: string | null = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
 
     // A clean tree moves freely; a name that isn't a branch or commit is a path.
-    for (const ok of ['git checkout other', 'git merge other', 'git reset --hard', 'git rebase other']) assert.equal(at(ok), null, ok);
+    for (const ok of ['git checkout other', 'git merge other', 'git reset --hard', 'git rebase other', 'git checkout -f']) assert.equal(at(ok), null, ok);
     assert.match(at('git checkout a.txt')!, /names a path.*git show HEAD:path/);
     assert.match(at("git checkout 'sub/*.txt'")!, /names a path/);
     // A name that is neither (a branch on some remote for git to set up, a typo) is left to git.
@@ -536,6 +536,8 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
     }
     assert.match(at(`git -C ${wt} merge other`, '/tmp')!, /Commit first/);
     assert.match(at('git checkout -')!, /Commit first/);
+    // A forced checkout with no branch throws the changes away too (#468 S01-3).
+    for (const move of ['git checkout -f', 'git checkout --force', 'git checkout -qf']) assert.match(at(move) ?? '', /^Commit first: .* \(a\.txt\)/, move);
     // Committing earlier in the same call is the normal way to move.
     assert.equal(at('git add -A && git commit -qm wip && git checkout other'), null);
     for (const ok of ['git checkout -b x', 'git reset a.txt', 'git merge --abort', 'git rebase --continue', 'git commit -am wip && git status']) assert.equal(at(ok), null, ok);

@@ -1,6 +1,6 @@
 ---
 name: upstream-check
-description: Check the skills and rules this repo copied from other repos against their upstream, and say which upstream changes to take. Use when a scheduled run's brief names it, or someone asks whether our third-party copies are out of date or asks to update one from its upstream.
+description: Check the skills and rules this repo copied from other repos against their upstream, and say which upstream changes to take. Use when a scheduled run's brief names it, or someone asks whether our third-party copies are out of date.
 ---
 
 # Upstream check

@@ -53,7 +53,7 @@ export function spokenText(kind: string, data: any): string {
 // About 600 tokens a chunk at most: embedding costs about 7 CPU-seconds per 500 tokens on perigee (#331's benchmark).
 const USER_MAX = 1000;
 const REPLY_MAX = 1500;
-/** A turn with no result and no later message counts as over after this: its reply so far is what it said. */
+/** A turn with no result and no later message counts as over after this, unless its minion still runs: its reply so far is what it said. */
 const STUCK_MS = 60 * 60_000;
 /** Messages that aren't a person's or a relay's ask: CI and server notices are noise. */
 const NOT_ASKS = new Set(['GitHub', 'System']);
@@ -162,8 +162,11 @@ export class Memory {
     let end = result !== null ? result + 1 : Infinity;
     if (end === Infinity) {
       // No result (refused, or the turn died): once it's stuck, its reply is what came before the next message.
-      if (now - m.created_at < STUCK_MS) return 'running';
-      end = (this.db.prepare("SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > ? AND kind = 'user_message'").get(m.ticket_id, m.id) as { id: number | null }).id ?? Infinity;
+      const next = (this.db.prepare("SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > ? AND kind = 'user_message'").get(m.ticket_id, m.id) as { id: number | null }).id;
+      // A turn still running past the hour is its minion's latest: it may yet reply.
+      const live = next === null && this.store.getTicket(m.ticket_id)?.status === 'running';
+      if (live || now - m.created_at < STUCK_MS) return 'running';
+      end = next ?? Infinity;
     }
     // The turn's last words that aren't a Grunt's: its reply.
     const rows = this.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND id > ? AND id < ? AND kind = 'claude' ORDER BY id DESC LIMIT 300")

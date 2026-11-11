@@ -90,6 +90,23 @@ test('indexes finished turns and minion titles, never tool output, a Grunt, pers
   store.db.close();
 });
 
+test('a turn still running after an hour waits for its result, and is indexed with its final reply (#468 S05-2)', async () => {
+  const { store, A, a1 } = world(join(root, 'long.db'));
+  store.updateTicket(a1.id, { status: 'running' });
+  const long = turn(store, a1.id, 'Cara', 'A long job about figs', 'Let me look at the tests first.', false);
+  const later = Date.now() + 61 * 60_000;
+  await store.memory.index(A.id, embed, 'fake', 32, later);
+  const turns = () => store.db.prepare("SELECT source_id, text FROM memory_chunks WHERE source_kind = 'turn'").all() as { source_id: number; text: string }[];
+  assert.equal(turns().some((t) => t.source_id === long.id), false, 'not while its minion is still running');
+  store.addEvent(a1.id, 'claude', assistant('Figs are done: all green.'));
+  const result = store.addEvent(a1.id, 'claude', { type: 'result', result: 'x' });
+  store.recordTurn(a1.id, { event_id: result.id, ended_at: Date.now(), session_cost_usd: 0 });
+  store.updateTicket(a1.id, { status: 'idle' });
+  await store.memory.index(A.id, embed, 'fake', 32, later);
+  assert.match(turns().find((t) => t.source_id === long.id)!.text, /Reply: Figs are done: all green\./);
+  store.db.close();
+});
+
 test("a running turn waits, and holds the mark, until its result; then it's indexed once", async () => {
   const { store, A, a1, a2 } = world(join(root, 'two.db'));
   const running = turn(store, a1.id, 'Cara', 'Still thinking about kiwis', 'Half an answer', false);

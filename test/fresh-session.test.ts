@@ -145,6 +145,32 @@ test('the handoff turn resumes the old session; the next turn starts a new one f
   await endTurn(id, 'ok');
 });
 
+test('a message queued when a manual fresh start\'s handoff turn starts is in that turn\'s record, so a restart keeps it (#468 S03-3)', async () => {
+  const id = taskmaster();
+  const before = callCount();
+  runner.send(id, 'Cara', 'first');
+  await started(id);
+  await lastCall(before);
+  runner.send(id, 'Cara', 'm1 queued');
+  assert.equal(runner.requestFresh(id, 'test'), null);
+  const count = callCount();
+  await endTurn(id, 'ok');
+  await started(id);
+  const handoff = await lastCall(count);
+  assert.match(promptText(handoff.prompt), /Call fresh_session/);
+  assert.doesNotMatch(promptText(handoff.prompt), /m1 queued/);
+  // What reattach and recover read back after a restart.
+  assert.deepEqual(store.getSetting<any>(`turn:${id}`)?.queued?.map((m: any) => m.text), ['m1 queued']);
+  assert.equal(store.getSetting(`waiting:${id}`), null, 'no stale wait left for the next turn to drop');
+  assert.equal(runner.queued(id), 1);
+  assert.equal(runner.recordHandoff(id, 'Nothing open.'), null);
+  await endTurn(id, 'ok');
+  await started(id);
+  assert.match(promptText((await lastCall(count + 1)).prompt), /m1 queued/);
+  await endTurn(id, 'ok');
+  await waitIdle(id);
+});
+
 test('a Taskmaster that hands off on its own resets when its turn ends', async () => {
   const id = taskmaster();
   runner.send(id, 'Cara', 'tidy up your context');

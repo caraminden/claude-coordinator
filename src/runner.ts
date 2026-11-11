@@ -1572,7 +1572,13 @@ export class Runner {
       const fresh = this.freshStep(ticketId);
       if (fresh) {
         const ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
-        if (this.isRunning(ticketId)) return ended;
+        if (this.isRunning(ticketId)) {
+          // The queue waits behind this turn as behind any: in its record, so a restart keeps it.
+          const q = this.queues.get(ticketId);
+          if (q?.length) this.saveTurn(ticketId, { queued: q });
+          this.store.deleteSetting(waitingKey(ticketId));
+          return ended;
+        }
         // No turn started (a preview, a refused place): drop it, or the idle lane would ask again at once,
         // and forget its size, or the idle check would ask again each minute.
         this.store.deleteSetting(freshKey(ticketId));

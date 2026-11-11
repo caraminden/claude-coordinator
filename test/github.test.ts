@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -359,4 +360,26 @@ test("read as the scheme owner, the owner's remarks during a minion's turn still
   assert.match(sent[0], /owner/);
   assert.match(sent[0], /Please rename it/);
   assert.doesNotMatch(sent[0], /Done/, "Bob's linked account is the minion's own");
+});
+
+test("the watcher reads a scheme's origin again: after it had none, and after it changed (#468 S02-5)", async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const dir = mkdtempSync(join(root, 'origin-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir });
+  git('init', '-q', '-b', 'main');
+  const store = new Store(join(root, 'origin.db'));
+  const project = store.createProject('P', null);
+  store.setProjectRepoDir(project.id, dir);
+  const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(ticket.id, dir, 'ticket/1-t');
+  const polled: string[] = [];
+  const w = new GithubWatcher(store, () => {}, async (_dir, repo) => (polled.push(repo), { pr: null, self: 'cara' }));
+  await w.tick(); // no origin yet
+  git('remote', 'add', 'origin', 'https://github.com/o/first.git');
+  t.mock.timers.tick(60 * 60_000);
+  await w.tick();
+  git('remote', 'set-url', 'origin', 'https://github.com/o/second.git');
+  t.mock.timers.tick(60 * 60_000);
+  await w.tick();
+  assert.deepEqual(polled, ['o/first', 'o/second']);
 });

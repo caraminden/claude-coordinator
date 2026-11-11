@@ -18,6 +18,7 @@ const MAX_OPEN_MS = 15 * 60_000;
 const NO_PR_MS = 30 * 60_000;
 const RATE_LIMITED_MS = 15 * 60_000;
 const TICK_MS = 15_000;
+const REPO_MS = 10 * 60_000;
 // The account's own comments this close to one of the ticket's turns count as the turn's
 // (GitHub's clock and ours differ a little, and the turn's last event lands after its last command).
 const TURN_MARGIN_MS = 30_000;
@@ -333,7 +334,8 @@ export class GithubWatcher {
   private send: (ticketId: number, text: string) => void;
   private fetch: typeof fetchSnapshot;
   private schedule = new Map<number, Schedule>();
-  private repos = new Map<number, Promise<string | null>>();
+  /** Each scheme's origin, read again after REPO_MS (scheme-repo.ts may set a new one); a failed read isn't kept. */
+  private repos = new Map<number, { at: number; repo: Promise<string | null> }>();
   private pausedUntil = 0;
   private busy = false;
   private timer: NodeJS.Timeout | null = null;
@@ -384,9 +386,12 @@ export class GithubWatcher {
       for (const { ticket, repoDir } of watched) {
         const s = this.schedule.get(ticket.id);
         if (s && Date.now() < s.nextAt) continue;
-        if (!this.repos.has(ticket.project_id)) this.repos.set(ticket.project_id, originRepo(repoDir));
-        const repo = await this.repos.get(ticket.project_id);
+        const known = this.repos.get(ticket.project_id);
+        if (!known || Date.now() - known.at >= REPO_MS) this.repos.set(ticket.project_id, { at: Date.now(), repo: originRepo(repoDir) });
+        const entry = this.repos.get(ticket.project_id)!;
+        const repo = await entry.repo;
         if (!repo) {
+          if (this.repos.get(ticket.project_id) === entry) this.repos.delete(ticket.project_id);
           this.schedule.set(ticket.id, { nextAt: Date.now() + NO_PR_MS, wait: OPEN_MS, last: '' });
           continue;
         }

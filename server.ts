@@ -551,7 +551,7 @@ function darkManifest(assets: Map<string, Buffer>) {
 }
 // The CI runner agent's installer and scripts (#328), which Cara's one-time install downloads: read from tools/ci-runner/
 // at each request, so they are always the deployed checkout's. Nothing in them is secret.
-const RUNNER_FILES = new Set(['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1',
+const RUNNER_FILES = new Set(['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1',
   // The Linux agent in WSL (#510).
   'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh', 'keep-wsl-up.ps1']);
 async function serveRunnerFile(res: ServerResponse, path: string) {

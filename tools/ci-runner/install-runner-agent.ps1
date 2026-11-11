@@ -76,6 +76,8 @@ $files = [ordered]@{
   'add-runner.ps1'    = "$url/ci-runner/add-runner.ps1"
   'list-runners.ps1'  = "$url/ci-runner/list-runners.ps1"
   'remove-runner.ps1' = "$url/ci-runner/remove-runner.ps1"
+  # The agent's load samples (#534): read-only.
+  'sample-load.ps1'   = "$url/ci-runner/sample-load.ps1"
   # Not the agent's: add-runner.ps1 -Session, run by hand from this folder, copies it into a session runner (#370).
   'start-runner.ps1'  = "$url/ci-runner/start-runner.ps1"
 }

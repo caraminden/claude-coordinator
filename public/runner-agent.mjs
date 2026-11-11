@@ -3,7 +3,8 @@
 // the PC that hosts every scheme's self-hosted GitHub Actions runners (Cara's desktop), and does exactly three
 // things when Citadel asks: add a scheme's runners, list the runner services, remove a scheme's runners. Each is a
 // PowerShell script installed next to this file (add-runner.ps1, list-runners.ps1, remove-runner.ps1); it runs only
-// those, with arguments it checks itself, one job at a time, and never downloads code. The scripts fetch their own
+// those, with arguments it checks itself, one job at a time, and never downloads code. It also reports the PC's load
+// every 30 seconds (#534, the samples below): read-only, through sample-load.ps1 on Windows and /proc on Linux. The scripts fetch their own
 // GitHub tokens from Citadel and never keep them; this file never sees one. It serves no MCP server, no workspace,
 // no shell, and never restarts the PC.
 //
@@ -15,8 +16,8 @@
 // It dials out to Citadel like the machine agent (public/machine-agent.mjs) and holds an event stream open, so the
 // PC needs no open port. tools/ci-runner/install-runner-agent.ps1 installs it; tools/ci-runner/README.md says how.
 import { spawn } from 'node:child_process';
-import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
-import { hostname } from 'node:os';
+import { appendFileSync, readFileSync, readdirSync, readlinkSync, realpathSync, statfsSync } from 'node:fs';
+import { cpus, freemem, hostname, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -131,6 +132,165 @@ export class JobRunner {
   }
 }
 
+// ---- Load samples (#534; Josh, 2026-11-11: "can we also monitor the performance impact on my desktop?") ----
+// Every 30 seconds the agent posts what the PC is doing to Citadel: whole-PC CPU, memory and disk, each runner's
+// share, and on Windows whether a person is there, the Hyper-V guests' share and hard restarts. It only reads.
+export const SAMPLE_MS = 30_000;
+const SAMPLE_LIMIT_MS = 20_000;
+// Asked again this often: the event is written early in a boot, but the agent may start earlier still.
+const RESTARTS_EVERY = 60;
+
+/** Idle and total CPU time over every core, in ms: two of these give the CPU % between them. */
+export function cpuTimes(list = cpus()) {
+  let idle = 0;
+  let total = 0;
+  for (const c of list) {
+    idle += c.times.idle;
+    for (const t of Object.values(c.times)) total += t;
+  }
+  return { idle, total };
+}
+
+/**
+ * Seconds since the last keyboard or mouse input of whoever is at the PC, from quser's lines: the least idle
+ * Active session. 1e6 with nobody logged on or every session disconnected; null when the lines don't read
+ * (Citadel then assumes someone is there).
+ */
+export function personIdle(lines) {
+  if (!Array.isArray(lines)) return null;
+  let best = null;
+  let read = 0;
+  for (const line of lines) {
+    const m = /\s\d+\s+(\S+)\s+(none|\.|\d+\+\d+:\d+|\d+:\d+|\d+)\s/.exec(` ${line}`);
+    if (!m) continue;
+    read++;
+    if (!/^active$/i.test(m[1])) continue;
+    const [, days, hours, mins] = /^(?:(\d+)\+)?(?:(\d+):)?(\d+)$/.exec(m[2]) ?? [];
+    const idle = mins === undefined ? 0 : (Number(days ?? 0) * 1440 + Number(hours ?? 0) * 60 + Number(mins)) * 60;
+    best = best === null ? idle : Math.min(best, idle);
+  }
+  // A header alone (or nothing) is nobody logged on; lines that are there but don't parse are a Windows in another language.
+  if (best !== null) return best;
+  return read || lines.filter((l) => String(l).trim()).length <= 1 ? 1e6 : null;
+}
+
+/**
+ * Each runner's CPU seconds since the last look and its memory now, from a process list: a runner is a
+ * Runner.Listener and everything under it. `procs` are { pid, ppid, path, cpu, mem }; `prev` is the last look's
+ * pid → CPU seconds (null on the first, when CPU can't be told yet).
+ * shortcut: a process that ended between two looks takes its last seconds with it, so a build made of many short
+ * compiler runs reads a little low; exact needs a Windows job object or a cgroup per runner.
+ */
+export function runnerUse(procs, prev) {
+  const kids = new Map();
+  for (const p of procs) (kids.get(p.ppid) ?? kids.set(p.ppid, []).get(p.ppid)).push(p);
+  const seen = new Map(procs.map((p) => [p.pid, p.cpu]));
+  const runners = [];
+  for (const root of procs) {
+    const m = /^(.*)[\\/]bin[\\/]Runner\.Listener(?:\.exe)?$/i.exec(root.path ?? '');
+    if (!m) continue;
+    let cpu = 0;
+    let mem = 0;
+    const done = new Set();
+    const walk = [root];
+    while (walk.length) {
+      const p = walk.pop();
+      // A pid used again can point a parent at its own child.
+      if (done.has(p.pid)) continue;
+      done.add(p.pid);
+      const before = prev?.get(p.pid);
+      cpu += before === undefined || p.cpu < before ? p.cpu : p.cpu - before;
+      mem += p.mem;
+      walk.push(...(kids.get(p.pid) ?? []));
+    }
+    runners.push({ dir: m[1], cpu: prev ? cpu : null, mem });
+  }
+  return { runners, seen };
+}
+
+/** Linux's process list from /proc, as runnerUse reads it. A process that ends mid-read is skipped. */
+export function linuxProcs(proc = '/proc') {
+  const out = [];
+  for (const name of readdirSync(proc)) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const stat = readFileSync(join(proc, name, 'stat'), 'utf8');
+      // The command sits in brackets and may hold spaces and brackets: the fields start after its last one.
+      const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      let path = '';
+      try { path = readlinkSync(join(proc, name, 'exe')); } catch {}
+      // utime and stime in ticks of 1/100 s, rss in 4 KB pages: what every Linux the runners use has.
+      out.push({ pid: Number(name), ppid: Number(f[1]), path, cpu: (Number(f[11]) + Number(f[12])) / 100, mem: Number(f[21]) * 4096 });
+    } catch {}
+  }
+  return out;
+}
+
+/** A runner folder's name and repo on GitHub, from the .runner file its setup wrote; just the folder if it doesn't read. */
+function runnerIdentity(dir, read = readFileSync) {
+  try {
+    const conf = JSON.parse(String(read(join(dir, '.runner'), 'utf8')).replace(/^\uFEFF/, ''));
+    return { name: String(conf.agentName ?? ''), repo: String(conf.gitHubUrl ?? '').replace(/^https:\/\/github\.com\//i, '').toLowerCase() };
+  } catch {
+    return { name: '', repo: '' };
+  }
+}
+
+/** Takes samples: it remembers the last look, so each sample's percentages cover the time since the one before. */
+export class Sampler {
+  constructor({ os = defaultOs(), dir, run = runCommand, identity = runnerIdentity, now = Date.now, times = cpuTimes, procs = linuxProcs } = {}) {
+    Object.assign(this, { os, dir, run, identity, now, times, procs, last: null, count: 0, names: new Map() });
+  }
+
+  /** What only the platform can say: the process list, and on Windows the rest of sample-load.ps1's line. */
+  async platform() {
+    if (this.os === 'linux') {
+      let pressure = null;
+      try { pressure = Number(/some avg10=\S+ avg60=([\d.]+)/.exec(readFileSync('/proc/pressure/cpu', 'utf8'))?.[1] ?? NaN); } catch {}
+      return { procs: this.procs(), pressure: Number.isFinite(pressure) ? pressure : null };
+    }
+    const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(this.dir, 'sample-load.ps1')];
+    if (this.count % RESTARTS_EVERY === 0) args.push('-Restarts');
+    const { code, output } = await this.run({ command: join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args }, process.env, SAMPLE_LIMIT_MS);
+    if (code !== 0) throw new Error(`sample-load.ps1 ended with exit ${code}: ${output.split('\n').at(-1)}`);
+    const raw = JSON.parse(output.split('\n').at(-1));
+    return {
+      procs: (raw.procs ?? []).map(([pid, ppid, path, cpu, mem]) => ({ pid, ppid, path, cpu, mem })),
+      queue: raw.queue ?? null, idle_sec: personIdle(raw.quser), hv: raw.hv ?? null, temp: raw.temp ?? null,
+      ...(Array.isArray(raw.restarts) ? { restarts: raw.restarts } : {}),
+    };
+  }
+
+  /** One sample, or null on the first look of the CPU clock (there is nothing to compare with yet). */
+  async take() {
+    const { procs, ...rest } = await this.platform();
+    this.count++;
+    const at = this.now();
+    const times = this.times();
+    const cores = cpus().length || 1;
+    const { runners, seen } = runnerUse(procs, this.last?.seen ?? null);
+    const last = this.last;
+    this.last = { at, times, seen };
+    if (!last || at <= last.at) return null;
+    const total = times.total - last.times.total;
+    let disk = {};
+    try {
+      const fs = statfsSync(this.dir);
+      disk = { disk_total: fs.blocks * fs.bsize, disk_free: fs.bavail * fs.bsize };
+    } catch {}
+    return {
+      at, host: hostname(), os: this.os, cores,
+      cpu: total > 0 ? Math.round((1 - (times.idle - last.times.idle) / total) * 1000) / 10 : 0,
+      mem_total: totalmem(), mem_free: freemem(), ...disk, ...rest,
+      runners: runners.map((r) => {
+        if (!this.names.has(r.dir)) this.names.set(r.dir, this.identity(r.dir));
+        // Its share of the whole PC: CPU seconds used, over the seconds every core had.
+        return { ...this.names.get(r.dir), dir: r.dir, cpu: Math.round((r.cpu / ((at - last.at) / 1000 * cores)) * 1000) / 10, mem: r.mem };
+      }),
+    };
+  }
+}
+
 /** Server-sent events from a fetch body, one parsed JSON message per event. */
 async function* events(body) {
   const decoder = new TextDecoder();
@@ -184,6 +344,27 @@ async function main() {
       log(`Couldn't send the answer to job ${reply.id}: ${err.message}`);
     }
   }
+
+  // Load samples (#534) go out on their own clock, whatever the stream to Citadel is doing; a failure is said once
+  // until one gets through, and never touches a job.
+  const sampler = new Sampler({ os, dir: jobs.dir });
+  let sampleError = '';
+  const sample = async () => {
+    try {
+      const body = await sampler.take();
+      if (body) {
+        const res = await fetch(new URL('/api/machines/runner-load', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(`Citadel answered ${res.status}`);
+      }
+      if (sampleError) log('Load samples are getting through again.');
+      sampleError = '';
+    } catch (err) {
+      if (err.message !== sampleError) log(`Couldn't send a load sample (said once): ${err.message}`);
+      sampleError = err.message;
+    }
+    setTimeout(sample, SAMPLE_MS).unref();
+  };
+  sample();
 
   let retry = 0;
   for (;;) {

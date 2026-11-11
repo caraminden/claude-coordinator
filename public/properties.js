@@ -318,7 +318,15 @@ async function renderPropertiesPage() {
     return;
   }
   if (!reg || !body.isConnected) return;
-  const status = h('p', { class: 'muted small', role: 'status' });
+  // A form being filled in keeps its node through the redraw (anyone's registry change redraws), so what's typed stays.
+  const focused = document.activeElement;
+  const typing = (form) => [...form.elements].some((e) => e.type === 'text' && (e === focused || e.value.trim()));
+  const keep = (name, build) => {
+    const old = body.querySelector(`form[data-form="${CSS.escape(name)}"]`);
+    return old && typing(old) ? old : build();
+  };
+  // One status line for every render, so a kept form's errors still show.
+  const status = body.querySelector(':scope > p.props-status') ?? h('p', { class: 'muted small props-status', role: 'status' });
   const run = async (path, payload, done) => {
     status.textContent = '';
     try {
@@ -365,11 +373,12 @@ async function renderPropertiesPage() {
       const warn = h('div', { class: 'pv-warn' });
       const add = async (force) => {
         const payload = { key: k.key, force, values: [{ value: value.value.trim(), aliases: aliases.value.split(',').map((a) => a.trim()).filter(Boolean) }] };
-        const warnings = await run('values', payload);
+        const warnings = await run('values', payload, () => form.reset());
         warn.replaceChildren(...(warnings ? [h('span', {}, warnings.join(' ')), btn('Add anyway', 'It really is different', () => add(true))] : []));
       };
-      return h('form', { class: 'row pv-add', onsubmit: (e) => { e.preventDefault(); if (value.value.trim()) add(false); } },
+      const form = h('form', { class: 'row pv-add', 'data-form': `values:${k.key}`, onsubmit: (e) => { e.preventDefault(); if (value.value.trim()) add(false); } },
         value, aliases, h('button', { type: 'submit', class: 'small' }, 'Add'), warn);
+      return form;
     };
     // Approving a key approves every value listed under it too.
     const waiting = values.filter((v) => v.status === 'proposed' || !v.reviewed).length;
@@ -383,7 +392,7 @@ async function renderPropertiesPage() {
       k.description ? h('p', { class: 'muted small prop-desc' }, threadRefs(k.description)) : '',
       values.length ? h('div', { class: 'pv-list' }, values.map(valueChip)) : '',
       archived.length ? h('p', { class: 'muted small' }, 'Archived: ', archived.map((v) => [v.value, ' ', edit ? btn('Restore', `Offer ${v.value} again`, () => review(k, v, 'restore')) : '', ' '])) : '',
-      edit && k.value_kind === 'enum' && k.status !== 'archived' ? addForm() : '');
+      edit && k.value_kind === 'enum' && k.status !== 'archived' ? keep(`values:${k.key}`, addForm) : '');
   };
 
   const newKeyForm = () => {
@@ -395,15 +404,16 @@ async function renderPropertiesPage() {
     const global = h('input', { type: 'checkbox' });
     const warn = h('div', { class: 'pv-warn' });
     const add = async (force) => {
-      const warnings = await run('keys', { key: key.value.trim(), label: label.value, description: description.value, value_kind: kind.value, multi: multi.checked, global: global.checked, force });
+      const warnings = await run('keys', { key: key.value.trim(), label: label.value, description: description.value, value_kind: kind.value, multi: multi.checked, global: global.checked, force }, () => form.reset());
       warn.replaceChildren(...(warnings ? [h('span', {}, warnings.join(' ')), btn('Add anyway', 'It really is different', () => add(true))] : []));
     };
-    return h('form', { class: 'prop-new-key', onsubmit: (e) => { e.preventDefault(); if (key.value.trim()) add(false); } },
+    const form = h('form', { class: 'prop-new-key', 'data-form': 'new-key', onsubmit: (e) => { e.preventDefault(); if (key.value.trim()) add(false); } },
       h('h3', { class: 'settings-label' }, 'New key'),
       h('div', { class: 'row pv-add' }, key, label, kind, h('label', { class: 'small' }, multi, ' several'),
         reg.globalOwner === view.projectId ? h('label', { class: 'small' }, global, ' every scheme') : ''),
       h('div', { class: 'row pv-add' }, description, h('button', { type: 'submit', class: 'small' }, 'Add key')),
       warn);
+    return form;
   };
 
   const live = (k) => k.status !== 'archived';
@@ -416,6 +426,7 @@ async function renderPropertiesPage() {
     ...global.map(keyBlock),
     h('h3', { class: 'settings-label' }, view.project.name),
     ...(own.length ? own.map(keyBlock) : [h('p', { class: 'muted small' }, 'No keys of its own yet.')]),
-    newKeyForm(),
+    keep('new-key', newKeyForm),
   ].filter(Boolean));
+  if (focused?.isConnected && !body.contains(document.activeElement) && body.contains(focused)) focused.focus({ preventScroll: true });
 }

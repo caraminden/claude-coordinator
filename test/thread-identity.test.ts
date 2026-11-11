@@ -120,6 +120,15 @@ test('wake_when_live posts to its own internal id, which its token may do', asyn
   assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake`));
 });
 
+test('close_self says when it cleared state ready (#480)', async () => {
+  respond = () => [202, { cleared: true }];
+  const r = await tool('close_self', {});
+  assert.ok(!r.isError, r.content[0].text);
+  assert.match(r.content[0].text, /^Dismissed \(state ready cleared\)/);
+  respond = () => [202, { cleared: false }];
+  assert.doesNotMatch((await tool('close_self', {})).content[0].text, /cleared/);
+});
+
 test('close_self on a server older than the tool says to wait for the restart', async () => {
   respond = () => [403, { error: 'A thread may only update itself' }];
   const r = await tool('close_self', {});

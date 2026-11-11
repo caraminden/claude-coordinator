@@ -981,7 +981,7 @@ const THREAD_TOOLS = [
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it. It refuses while a question or plan card is open or the state is try or ready.`,
+      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it. It refuses while a question or plan card is open or the state is try; a state ready is cleared.`,
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the minion with the dismissal, e.g. "Merged abc1234; live after the restart"' } },
@@ -1300,9 +1300,10 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       return `tools/land.sh exited ${r.code}${r.code === 0 ? '' : ' (read its output: main only moved if it says so)'}.\n\n${String(r.output).slice(-12_000)}`;
     }
-    case 'close_self':
+    case 'close_self': {
+      let closed: any;
       try {
-        await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });
+        closed = await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });
       } catch (err: any) {
         // A server from before close_self refuses the route with its generic "only itself" error.
         if (/only update itself|Not found/.test(err.message)) {
@@ -1310,7 +1311,8 @@ async function runTool(name: string, args: any): Promise<string> {
         }
         throw err;
       }
-      return 'This minion will be dismissed when your turn ends (unless the turn fails or a new message arrives). Finish your reply now.';
+      return `${closed?.cleared ? 'Dismissed (state ready cleared): do not set state ready again this turn, since that keeps it open. ' : ''}This minion will be dismissed when your turn ends (unless the turn fails or a new message arrives). Finish your reply now.`;
+    }
     case 'wake_when_live': {
       const target = ROLE === 'thread' ? TICKET : await id(args);
       const r = await call('POST', `/api/tickets/${target}/wake`, { commit: args.commit ?? null, reason: args.reason });

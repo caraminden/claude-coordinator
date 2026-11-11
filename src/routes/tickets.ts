@@ -742,10 +742,12 @@ export const ticketRoutes: Route[] = [
       // A thread closes itself once its current turn ends (close_self); the token decides which thread.
       const body = await readJson(req);
       const reason = typeof body.reason === 'string' && body.reason.trim() ? str(body.reason.trim(), 'Reason', 500) : null;
-      const kept = runner.keptOpen(id);
+      // A state ready is cleared rather than refused (#480): a finished minion sets it by habit before close_self.
+      const kept = runner.keptOpen(id, true);
       if (kept) throw new HttpError(409, `Not dismissed: ${kept}. Leave the minion open for them; if nothing is left for people (the card was answered in the chat, or there is nothing to try), settle the card or clear the state first`);
+      const cleared = app.store.getTicket(id)!.state === 'ready';
       if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
-      return json(res, 202, ticketView(app, id));
+      return json(res, 202, { ...ticketView(app, id), cleared });
     },
   },
 ];

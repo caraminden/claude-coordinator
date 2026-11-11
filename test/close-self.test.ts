@@ -105,12 +105,18 @@ test('a message queued during the turn keeps it open and runs next', async () =>
   assert.equal(store.getTicket(id)!.status, 'idle');
 });
 
-test('refuses while a question or plan card waits on people, or the state is try or ready', async () => {
+test('refuses while a question or plan card waits on people, or the state is try', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
-  store.addEvent(id, 'question', { id: 'q1', questions: [] });
+  const q = store.addEvent(id, 'question', { id: 'q1', questions: [{ header: 'Layout', question: 'Tabs or list?' }] });
   assert.match(runner.keptOpen(id)!, /card is still waiting/);
+  // close_self's own refusal carries the card's link (#480).
+  assert.match(runner.keptOpen(id, true)!, new RegExp(`question card "Layout": \\[open it\\]\\(#/p/${project.id}/t/${store.getTicket(id)!.number}\\?e=${q.id}\\) is still waiting`));
   assert.equal(runner.closeAfterTurn(id, null), false);
+  // A card keeps it open even in state ready, and the refusal leaves the state alone.
+  store.updateTicket(id, { state: 'ready' });
+  assert.equal(runner.closeAfterTurn(id, null), false);
+  assert.equal(store.getTicket(id)!.state, 'ready');
   const plan = newTicket();
   store.addEvent(plan, 'plan', { id: 'p1', status: 'pending' });
   assert.match(runner.keptOpen(plan)!, /card is still waiting/);
@@ -119,6 +125,8 @@ test('refuses while a question or plan card waits on people, or the state is try
     store.updateTicket(t, { state });
     assert.match(runner.keptOpen(t)!, new RegExp(`state is ${state}`));
   }
+  store.updateTicket(t, { state: 'try' });
+  assert.match(runner.keptOpen(t, true)!, /state is try/);
   for (const state of [null, 'parked', 'pending-deploy']) {
     store.updateTicket(t, { state });
     assert.equal(runner.keptOpen(t), null);
@@ -126,14 +134,40 @@ test('refuses while a question or plan card waits on people, or the state is try
   await endTurn(id, 'ok');
 });
 
-test('a card posted or try/ready set after close_self keeps it open at the turn end', async () => {
+test('state try refuses close_self mid-turn', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
-  assert.equal(runner.closeAfterTurn(id, null), true);
-  store.updateTicket(id, { state: 'ready' });
+  store.updateTicket(id, { state: 'try' });
+  assert.equal(runner.closeAfterTurn(id, null), false);
+  assert.equal(store.getTicket(id)!.state, 'try');
   await endTurn(id, 'ok');
   assert.equal(store.getTicket(id)!.status, 'idle');
-  assert.deepEqual(notes(id), ['Claude asked to dismiss this minion, but its state is ready, which tells people something is waiting for them, so it stays open.']);
+});
+
+test('state ready with no card clears and dismisses (#480)', async () => {
+  const id = newTicket();
+  runner.send(id, 'Cara', 'ship it');
+  store.updateTicket(id, { state: 'ready', note: 'merged' });
+  assert.equal(runner.keptOpen(id, true), null);
+  assert.equal(runner.closeAfterTurn(id, 'Merged abc1234'), true);
+  assert.equal(store.getTicket(id)!.state, null);
+  await endTurn(id, 'ok');
+  assert.equal(store.getTicket(id)!.status, 'closed');
+  assert.deepEqual(notes(id), ['Claude dismissed this minion: Merged abc1234']);
+});
+
+test('a card posted or try/ready set after close_self keeps it open at the turn end', async () => {
+  for (const after of ['ready', 'try', 'card']) {
+    const id = newTicket();
+    runner.send(id, 'Cara', 'ship it');
+    assert.equal(runner.closeAfterTurn(id, null), true);
+    if (after === 'card') store.addEvent(id, 'question', { id: 'q1', questions: [] });
+    else store.updateTicket(id, { state: after });
+    await endTurn(id, 'ok');
+    assert.equal(store.getTicket(id)!.status, 'idle', after);
+    const why = after === 'card' ? 'a question or plan card is still waiting on people' : `its state is ${after}, which tells people something is waiting for them`;
+    assert.deepEqual(notes(id), [`Claude asked to dismiss this minion, but ${why}, so it stays open.`]);
+  }
 });
 
 test('close() marks a ticket closed, as the coordinator does', () => {

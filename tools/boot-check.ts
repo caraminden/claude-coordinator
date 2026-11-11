@@ -1,19 +1,21 @@
 // Boot check for tools/deploy.sh: syntax-check the front end, start a checkout's server on a spare port
 // against a copy of the database, confirm it serves the app, that the app renders in headless Chromium
 // without a console error, and that a minion turn and a Taskmaster turn start through the runner's real
-// arguments (with tools/boot-check-claude.ts as claude, which checks the turn's MCP server initializes
-// and reaches the API), then stop it. Prints the front-end version it served; exits non-zero with the reason on any
+// arguments (with tools/boot-check-claude.ts as claude, which checks the turn's MCP server initializes,
+// reads the longest chat and the scheme instructions, and that no launch argument nears Linux's cap), that
+// the file viewer's details of a linked and a shared file load, then stop it. Prints the front-end version it served; exits non-zero with the reason on any
 // failure.
 //   node tools/boot-check.ts <checkout> <coordinator.db>
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import { copyDb } from '../src/db-copy.ts';
 import { listeningPort } from '../src/ports.ts';
+import { projectDir, projectSharedDir } from '../src/workspace.ts';
 
 const [checkout, db] = process.argv.slice(2);
 if (!checkout || !db) throw new Error('usage: boot-check.ts <checkout> <coordinator.db>');
@@ -63,16 +65,26 @@ try {
   copied = true;
   arm();
 
-  // The turns to start: the Taskmaster of the scheme with the most minions (the largest arguments)
+  // The turns to start: the Taskmaster of the scheme with the most worktrees (the largest arguments)
   // and a new minion there. Both run in folders of their own, never a real worktree, and nothing is
   // held for the usage limit in the copy.
   begin('migrating the copy');
   const turnStore = new Store(copy);
   // A running ultra review's record names its live working folder, which a server recovering it would delete.
   turnStore.deleteSetting('ultrareview_running');
-  const busiest = turnStore.db.prepare(`select c.id, c.project_id, c.permission_mode, c.branch from tickets c where c.kind = 'coordinator'
-    order by (select count(*) from tickets t where t.project_id = c.project_id) desc limit 1`).get() as any;
+  // A scheme's worktree folders beside the live database: a Taskmaster's launch lists each one (#92).
+  const worktrees = (projectId: number) => {
+    try {
+      return readdirSync(join(projectDir(dirname(db), projectId), 'tickets'), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+    } catch {
+      return [];
+    }
+  };
+  const busiest = (turnStore.db.prepare(`select id, project_id, permission_mode, branch from tickets where kind = 'coordinator'`).all() as any[])
+    .map((c) => ({ ...c, worktrees: worktrees(c.project_id) })).sort((a, b) => b.worktrees.length - a.worktrees.length)[0];
   const turnChecks: { what: string; id: number; dir: string }[] = [];
+  // A file in the new minion's folder and one in the scheme's shared folder, for the file viewer's details (#157).
+  const fileChecks: { what: string; path: string }[] = [];
   if (busiest) {
     const minion = turnStore.createTicket({ project_id: busiest.project_id, title: 'Boot check', permission_mode: busiest.permission_mode, created_by: 'boot-check' });
     for (const [what, id, branch] of [['Taskmaster', busiest.id, busiest.branch], ['minion', minion.id, null]] as const) {
@@ -81,6 +93,19 @@ try {
       turnStore.setTicketDir(id, dir, branch);
       turnChecks.push({ what, id, dir });
     }
+    // Empty stand-ins for them where the copy's server looks (its own data folder), so the Taskmaster's launch is the live size.
+    for (const name of busiest.worktrees) mkdirSync(join(projectDir(root, busiest.project_id), 'tickets', name), { recursive: true });
+    console.error(`boot-check: the Taskmaster of scheme ${busiest.project_id}, with ${busiest.worktrees.length} worktrees`);
+    // What the Taskmaster's stand-in claude reads back: the longest open chat (#120 broke read_ticket past
+    // one page) and the first line of the scheme's instructions.
+    const longest = turnStore.db.prepare(`select t.number from events e join tickets t on t.id = e.ticket_id
+      where t.project_id = ? and t.number is not null and t.status != 'closed' group by e.ticket_id order by count(*) desc limit 1`).get(busiest.project_id) as any;
+    const instructions = turnStore.getProject(busiest.project_id)?.instructions?.split('\n').find((l: string) => l.trim())?.trim() ?? null;
+    writeFileSync(join(turnChecks[0].dir, 'boot-check.json'), JSON.stringify({ longest: longest?.number ?? null, instructions }));
+    const shared = projectSharedDir(root, busiest.project_id);
+    mkdirSync(shared, { recursive: true });
+    for (const [where, dir] of [['linked', turnChecks[1].dir], ['shared', shared]]) writeFileSync(join(dir, 'boot-check.md'), `# Boot check\n\nA ${where} file.\n`);
+    fileChecks.push({ what: 'a linked file', path: `/api/tickets/${minion.id}/file?path=boot-check.md&info` }, { what: 'a shared file', path: `/api/projects/${busiest.project_id}/shared/file?path=boot-check.md&info` });
     turnStore.deleteSetting('limit-resumes');
   } else {
     console.error('boot-check: no Taskmaster in the database, so no turn was started');
@@ -126,6 +151,13 @@ try {
   if (!login.ok || !cookie) fail(`Signing in answered ${login.status}`);
   begin('render in Chromium');
   await pageCheck(`${base}/`, cookie);
+  begin("file viewer's details");
+  for (const { what, path } of fileChecks) {
+    const r = await fetch(`${base}${path}`, { headers: { Cookie: cookie } });
+    const body = await r.text();
+    const name = (() => { try { return JSON.parse(body).name; } catch { return null; } })();
+    if (!r.ok || name !== 'boot-check.md') fail(`The file viewer's details of ${what} (GET ${path}) answered ${r.status}: ${body.slice(0, 300)}`);
+  }
   begin('Taskmaster and minion turns');
 
   // A person's message starts each turn; the stand-in claude leaves report.json in its folder.

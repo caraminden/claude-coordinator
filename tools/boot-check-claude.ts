@@ -1,15 +1,17 @@
 // A stand-in for `claude -p` that tools/boot-check.ts runs one minion turn and one Taskmaster turn
 // with, through the runner's real arguments. An argument over Linux's 128 KiB cap fails the turn's spawn
-// (E2BIG) before this runs; it checks the rest a turn needs to start: a --settings that parses, and the
-// turn's own MCP server (the pinned copy, with the turn's environment) answering initialize, tools/list
-// and a read-only tool call. It writes what it found to report.json in its working directory and ends
-// the turn as claude would.
+// (E2BIG) before this runs, and this fails any over 100 KiB; it checks the rest a turn needs to start: a
+// --settings that parses, and the turn's own MCP server (the pinned copy, with the turn's environment)
+// answering initialize, tools/list and read-only tool calls (a Taskmaster's: list_tickets, read_ticket on
+// the longest chat and the scheme instructions, as boot-check.json in its folder names them). It writes
+// what it found to report.json in its working directory and ends the turn as claude would.
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
 const role = process.env.COORDINATOR_ROLE ?? '';
+const MAX_ARG = 100 * 1024;
 const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 
 async function check(): Promise<string> {
@@ -34,16 +36,36 @@ async function check(): Promise<string> {
     if (reply.error) throw new Error(`MCP ${method} failed: ${JSON.stringify(reply.error)}`);
     return reply.result;
   };
+  let id = 0;
+  const tool = async (name: string, params: object = {}): Promise<string> => {
+    const result = await call(++id, 'tools/call', { name, arguments: params });
+    const text = (result.content ?? []).map((c: any) => c.text ?? '').join('\n');
+    if (result.isError) throw new Error(`MCP ${name} failed: ${text.slice(0, 1000)}`);
+    return text;
+  };
   try {
-    await call(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'boot-check-claude', version: '1' } });
-    const tools = (await call(2, 'tools/list', {})).tools as { name: string }[];
+    await call(++id, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'boot-check-claude', version: '1' } });
+    const tools = (await call(++id, 'tools/list', {})).tools as { name: string }[];
     if (!tools?.length) throw new Error(`The ${role} MCP server listed no tools`);
-    // Both read through the API with the turn's token.
-    const name = role === 'coordinator' ? 'list_tickets' : 'list_properties';
-    const result = await call(3, 'tools/call', { name, arguments: {} });
-    if (result.isError) throw new Error(`MCP ${name} failed: ${JSON.stringify(result.content)}`);
-    // Headroom under the 128 KiB cap, for the deploy's log.
-    return `${tools.length} tools; largest argument ${Math.max(...args.map((a) => Buffer.byteLength(a)))} bytes`;
+    // All read through the API with the turn's token: the calls that broke live before (#120, #142).
+    const found = [`${tools.length} tools`];
+    if (role !== 'coordinator') await tool('list_properties');
+    else {
+      await tool('list_tickets');
+      // What boot-check.ts picked from the copy: the scheme's longest open chat, and the first line of its instructions.
+      const want = JSON.parse(readFileSync('boot-check.json', 'utf8'));
+      if (want.longest) {
+        await tool('read_ticket', { ticket_id: want.longest });
+        found.push(`read_ticket #${want.longest}`);
+      }
+      const instructions = await tool('get_project_instructions');
+      if (want.instructions && !instructions.includes(want.instructions)) throw new Error(`MCP get_project_instructions left out the scheme's instructions: ${instructions.slice(0, 300)}`);
+    }
+    // Linux refuses any one argument over 128 KiB (E2BIG), which stopped every Taskmaster turn once (#92): fail well before.
+    const largest = args.reduce((a, b) => (Buffer.byteLength(b) > Buffer.byteLength(a) ? b : a), '');
+    const bytes = Buffer.byteLength(largest);
+    if (bytes > MAX_ARG) throw new Error(`The largest launch argument is ${bytes} bytes, over ${MAX_ARG / 1024} KiB (Linux's cap is 128 KiB): ${largest.slice(0, 80)}…`);
+    return `${found.join('; ')}; largest argument ${bytes} bytes`;
   } finally {
     mcp.kill();
   }

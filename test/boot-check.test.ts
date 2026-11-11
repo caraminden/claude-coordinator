@@ -3,11 +3,11 @@
 // doesn't open there either, and Citadel's page must still boot without a console error.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, test } from 'node:test';
+import { after, describe, test } from 'node:test';
 import { promisify } from 'node:util';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
@@ -40,6 +40,90 @@ test('a contraption whose service is down and whose keys don\'t open in the copy
   const run = await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), repo, db], { timeout: 190_000 })
     .then(({ stdout }) => ({ ok: true, out: stdout }), (err) => ({ ok: false, out: `${err.stderr}` }));
   assert.ok(run.ok, run.out.slice(0, 2000));
+});
+
+// The smoke pass after the boot (#486): a database with a Taskmaster, a minion with a long chat and
+// scheme instructions; a copy of this checkout passes, and each copy with one of the historical breaks
+// put back fails, naming the call. Run together, each with its own server and Chromium.
+describe('the smoke pass through the turn tools, the file viewer and the launch arguments', { concurrency: true, skip: !hasChromium && 'no headless Chromium (the boot check needs one)' }, () => {
+  const dir = join(root, 'smoke');
+  const db = join(dir, 'coordinator.db');
+  mkdirSync(dir);
+  const store = new Store(db);
+  store.createUser({ name: 'Boot', login: 'boot', admin: true, server_login: true });
+  const p = store.createProject('Smoke', null);
+  store.setProjectInstructions(p.id, '\nShip small changes.\nSecond line.', 'boot');
+  store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'boot' });
+  store.createTicket({ project_id: p.id, title: 'Short chat', permission_mode: 'default', created_by: 'boot' });
+  const long = store.createTicket({ project_id: p.id, title: 'Long chat', permission_mode: 'default', created_by: 'boot' });
+  // Past one page of the chat (#120).
+  for (let i = 0; i < 300; i++) store.addEvent(long.id, 'user_message', { author: 'Boot', text: `Message ${i}` });
+  // A git rule per worktree goes in the Taskmaster's settings when its scheme has a repo.
+  store.setProjectRepoDir(p.id, join(dir, 'repo'));
+  mkdirSync(join(dir, 'repo'));
+  for (let i = 0; i < 70; i++) mkdirSync(join(dir, 'projects', String(p.id), 'tickets', String(i)), { recursive: true });
+  store.db.close();
+
+  /** A copy of this checkout with `file`'s `from` replaced by `to`, the break under test. */
+  function brokenCheckout(name: string, file: string, from: string, to: string): string {
+    const checkout = join(dir, name);
+    for (const part of ['server.ts', 'package.json', 'src', 'public', 'kit', 'tools']) cpSync(join(repo, part), join(checkout, part), { recursive: true });
+    const text = readFileSync(join(checkout, file), 'utf8');
+    assert.ok(text.includes(from), `${file} no longer has the line this fixture breaks: ${from}`);
+    writeFileSync(join(checkout, file), text.replace(from, to));
+    return checkout;
+  }
+  const bootCheck = (checkout: string) => promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), checkout, db], { timeout: 190_000 })
+    .then(({ stderr }) => ({ ok: true, out: `${stderr}` }), (err) => ({ ok: false, out: `${err.stderr}` }));
+
+  test('a healthy checkout passes, reading the longest chat and the instructions', { timeout: 200_000 }, async () => {
+    const run = await bootCheck(repo);
+    assert.ok(run.ok, run.out.slice(0, 2000));
+    assert.match(run.out, /the Taskmaster of scheme \d+, with 70 worktrees/);
+    assert.match(run.out, new RegExp(`Taskmaster turn started \\(\\d+ tools; read_ticket #${long.number}; largest argument \\d+ bytes\\)`));
+  });
+
+  // #43: a new import the pinned copy of mcp.ts lacked (the pinner follows only `from './x'`), so every turn's tool server died on start.
+  test('a tool server that dies on start fails it', { timeout: 200_000 }, async () => {
+    const checkout = brokenCheckout('no-tool-server', 'src/mcp.ts', "import { existsSync } from 'node:fs';", "import { existsSync } from 'node:fs';\nimport './appname-extra.ts';");
+    writeFileSync(join(checkout, 'src', 'appname-extra.ts'), '');
+    const run = await bootCheck(checkout);
+    assert.equal(run.ok, false);
+    assert.match(run.out, /turn started, but: The (coordinator|thread) MCP server exited before answering initialize/);
+  });
+
+  // #120: /events started paging by default, and read_ticket, still reading the bare route, failed on every minion (#142).
+  test('a read_ticket that fails on a long chat fails it', { timeout: 200_000 }, async () => {
+    const checkout = brokenCheckout('paged-read', 'src/mcp.ts', '`/api/tickets/${n}/events?after=0`', '`/api/tickets/${n}/events`');
+    const run = await bootCheck(checkout);
+    assert.equal(run.ok, false);
+    assert.match(run.out, /A Taskmaster turn started, but: MCP read_ticket failed/);
+  });
+
+  // #157: #144 dropped res from the handler, so the viewer's details of every linked file threw.
+  test('a file-details route that throws fails it', { timeout: 200_000 }, async () => {
+    const checkout = brokenCheckout('no-file-info', 'src/routes/files.ts', 'const { res, url, app, ticket } = ctx;', 'const { url, app, ticket } = ctx;');
+    const run = await bootCheck(checkout);
+    assert.equal(run.ok, false);
+    assert.match(run.out, /The file viewer's details of a linked file \(GET \/api\/tickets\/\d+\/file\?path=boot-check\.md&info\) answered 500/);
+  });
+
+  test('a launch argument over 100 KiB fails it', { timeout: 200_000 }, async () => {
+    const checkout = brokenCheckout('big-argument', 'src/turn-launch.ts', "  args.push('--settings', join(dir, 'settings.json'));", "  args.push('--settings', join(dir, 'settings.json'), '--append-system-prompt', 'x'.repeat(110 * 1024));");
+    const run = await bootCheck(checkout);
+    assert.equal(run.ok, false);
+    assert.match(run.out, /turn started, but: The largest launch argument is 112640 bytes, over 100 KiB/);
+  });
+
+  // #92: the Taskmaster's inline --settings held a git rule per worktree and passed Linux's 128 KiB cap at about 90 of
+  // them. Put back inline, the 70 worktrees beside this database take it past the cap in the copy, which mirrors them,
+  // and its spawn fails as it did live (the test above holds the 100 KiB line; without the mirror this one passes).
+  test('a launch argument that grows with the worktrees fails it', { timeout: 200_000 }, async () => {
+    const checkout = brokenCheckout('inline-settings', 'src/turn-launch.ts', "  args.push('--settings', join(dir, 'settings.json'));", "  args.push('--settings', JSON.stringify(settings));");
+    const run = await bootCheck(checkout);
+    assert.equal(run.ok, false);
+    assert.match(run.out, /A Taskmaster turn could not start \([^)]*\): Could not start claude: spawn E2BIG/);
+  });
 });
 
 // The live ultra review's record names its live working folder, which a server that recovers it would

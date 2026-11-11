@@ -417,10 +417,13 @@ interrupt turns:
    boots the new code on a spare port against a copy of the database
    (`tools/boot-check.ts`: `node --check` on `public/*.js`, `/api/health`, the
    app signed in and rendered in Playwright's headless Chromium with no console
-   error, the MCP server's initialize and one tool call, and a minion turn and a
-   Taskmaster turn started through the runner's real arguments with
-   `tools/boot-check-claude.ts` as claude). If any of that fails it puts the
-   checkout back and exits non-zero; nothing restarts.
+   error, the file viewer's details of a linked and a shared file, and a minion
+   turn and a Taskmaster turn started through the runner's real arguments with
+   `tools/boot-check-claude.ts` as claude: each turn's MCP server answers
+   initialize and read-only calls, the Taskmaster's including `read_ticket` on
+   the longest open chat and the scheme instructions, and no launch argument
+   passes 100 KiB, with the busiest scheme's worktree folders mirrored). If any
+   of that fails it puts the checkout back and exits non-zero; nothing restarts.
 2. If everything changed since the commit the server booted from is under
    `public/`, it sends `SIGHUP`. The server re-reads `public/` and tells open
    tabs, which reload once nobody is typing. No restart, no interrupted turns.

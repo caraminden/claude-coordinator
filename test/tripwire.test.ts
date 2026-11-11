@@ -332,6 +332,16 @@ const BLOCKED: [string, string?][] = [
   ['deno run -A server.ts'],
   ["PORT=8700 bash -c 'node server.ts'"],
   ["DATA_DIR=/tmp/d bash -c 'node tools/x.ts && node server.ts'"],
+  // #468 S01-12: a search pattern or a message isn't read, but the files a command reads still are
+  ['grep -e token ~/.ssh/id_rsa'],
+  ['grep -f ~/.ssh/id_rsa src/x.ts'],
+  ['grep /home/u/.ssh/id_rsa ~/.ssh/id_rsa'],
+  ['git commit -F ~/.ssh/id_rsa'],
+  ['git commit -m x -- ~/.ssh/id_rsa'],
+  ['git commit -m x /home/josh/notes.md'],
+  ['git -C /home/josh/repo commit -m x'],
+  ['gh pr create --title x --body-file ~/.ssh/id_rsa'],
+  ['watch systemctl --user restart claude-coordinator'],
 ];
 
 const ALLOWED = [
@@ -531,6 +541,16 @@ const ALLOWED = [
   'node tools/count.ts src/server.ts',
   'node --test-reporter spec tools/count.ts ~/claude-coordinator/server.ts',
   "DATA_DIR=/tmp/d PORT=8700 bash -c 'node server.ts'",
+  // #468 S01-12: words that only look like paths: a search pattern, a commit message or PR text, an echoed systemctl
+  "grep -rn '/home/cody' src",
+  "grep -n '~/.ssh' README.md",
+  "grep -rn '/proc/self/environ' src test",
+  "rg -n -e '/home/cody' -e '~/.ssh/id_rsa' src",
+  "git commit -m '/home/josh paths are blocked now'",
+  "git commit -am '~/.ssh is off limits'",
+  "git commit --message='/proc/1/environ is blocked'",
+  "gh pr create --title '/home/josh is blocked' --body '~/.ssh/id_rsa too'",
+  'echo systemctl --user restart claude-coordinator',
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

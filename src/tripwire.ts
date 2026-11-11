@@ -140,8 +140,48 @@ function secretInside(root: string, cfg: TripwireConfig): string | null {
   return secrets.find((x) => x !== root && under(x, root)) ?? null;
 }
 const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag']);
+// Commands that only print their words, or look a command up by name, without running it.
+const PRINTERS = /^(echo|printf|man|which|type|whatis|apropos)$/;
 // grep and rg options whose value is the next word (alone, or ending a cluster like -rnA 3).
 const SEARCH_VALUE = /^-[a-zA-Z]*[efmABCdDtTgjM]$|^--(regexp|file|max-count|context|before-context|after-context|type|type-not|glob|iglob|threads|max-depth|include|exclude|exclude-dir|max-columns)$/;
+
+/**
+ * Words a command only takes as text, not a path it reads (#468 S01-12): a grep or rg's patterns (-e's
+ * values, or its first plain word; a -f file is still read), and git's commit message and gh's title and body.
+ */
+function textOperands(name: string, args: Word[]): Set<Word> {
+  const out = new Set<Word>();
+  if (SEARCHERS.has(name)) {
+    let given = false;
+    let first: Word | undefined;
+    for (let k = 0; k < args.length; k++) {
+      const t = args[k].text;
+      if (t === '--') {
+        first ??= args[k + 1];
+        break;
+      }
+      if (!t.startsWith('-') || t === '-') first ??= args[k];
+      else if (/^-[a-zA-Z]*e$|^--regexp$/.test(t)) {
+        given = true;
+        if (args[k + 1]) out.add(args[++k]);
+      } else if (t.startsWith('--regexp=')) (given = true), out.add(args[k]);
+      else {
+        if (/^-[a-zA-Z]*[ef]|^--(regexp|file)\b/.test(t)) given = true;
+        if (SEARCH_VALUE.test(t)) k++;
+      }
+    }
+    if (!given && first) out.add(first);
+  }
+  const value = name === 'git' ? /^(-[a-zA-Z]*m|--message)$/ : name === 'gh' ? /^(-t|--title|-b|--body|--subject)$/ : null;
+  const inline = name === 'git' ? /^--message=/ : name === 'gh' ? /^--(title|body|subject)=/ : null;
+  if (value && inline) {
+    for (let k = 0; k < args.length; k++) {
+      if (value.test(args[k].text) && args[k + 1]) out.add(args[++k]);
+      else if (inline.test(args[k].text)) out.add(args[k]);
+    }
+  }
+  return out;
+}
 
 /** The folders a grep or rg names to search: its plain words after the pattern, which -e or -f give instead. */
 function searchRoots(args: Word[]): Word[] {
@@ -806,7 +846,9 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
     if (dir && under(dir, cfg.checkout) && (sub === 'pull' || sub === 'merge') && rest.includes('--ff-only') && !hasDeployScript(cfg)) return null;
     return hard(`git ${sub} would change ${dir}. ${inDir}`);
   }
-  const targets = sub === 'clone' ? args.slice(j + 1).filter((w) => !w.text.startsWith('-')).slice(1) : args.slice(j + 1);
+  // A commit or tag message is text, not a path (#468 S01-12).
+  const message = textOperands('git', args.slice(j + 1));
+  const targets = sub === 'clone' ? args.slice(j + 1).filter((w) => !w.text.startsWith('-')).slice(1) : args.slice(j + 1).filter((w) => !message.has(w));
   // Relative paths after -C are relative to that folder.
   for (const w of targets) {
     for (const p of pathsOf(w, { ...st, cwd: dir }, cfg)) {
@@ -1083,7 +1125,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
     }
   }
-  for (const w of METADATA.has(name) ? [] : args) {
+  const text = textOperands(name, args);
+  for (const w of METADATA.has(name) ? [] : args.filter((x) => !text.has(x))) {
     if (w.unknown && ENVIRON_HIDDEN.test(w.text)) return hard(`Reading ${w.text.replace('//', '/<pid>/')} is blocked. ${ENVIRON_WHY}`);
     for (const p of pathsOf(w, st, cfg)) {
       const why = readReason(p, cfg);
@@ -1105,7 +1148,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   if (run[0] && SHELLS.has(basename(run[0].text))) run = fromOperand(run.slice(1));
   if (run[0] && !run[0].text.startsWith('-') && pathsOf(run[0], st, cfg).includes(deploy)) return null;
 
-  const sysctl = words.findIndex((w, k) => k >= i && basename(w.text) === 'systemctl');
+  // A command that only prints or searches its words (`echo systemctl …`) doesn't run it (#468 S01-12).
+  const sysctl = PRINTERS.test(name) || SEARCHERS.has(name) ? -1 : words.findIndex((w, k) => k >= i && basename(w.text) === 'systemctl');
   if (sysctl >= 0) {
     const plain = words.slice(sysctl + 1).filter((w) => !w.text.startsWith('-')).map((w) => w.text);
     const [verb, ...units] = plain;

@@ -7,7 +7,7 @@ const CARD_EVENTS = new Set(['question', 'question_result', 'plan', 'plan_result
 /** A chat event that opens or settles a card (a typed answer settles one too). */
 export const cardEvent = (event) => CARD_EVENTS.has(event.kind) || (event.kind === 'user_message' && !!JSON.parse(event.data).answer);
 
-/** A minion moved into or out of ready/try, offered or lost its replies, was dismissed or reopened, or changed hands (or is new to us). */
+/** A minion moved into or out of ready/complete/try, offered or lost its replies, was dismissed or reopened, or changed hands (or is new to us). */
 export const countMoved = (before, after) => !before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')
   || before.properties?.assigned !== after.properties?.assigned;
 

@@ -191,3 +191,13 @@ test('close() marks a ticket closed, as the coordinator does', () => {
   assert.equal(store.getTicket(id)!.status, 'closed');
   assert.deepEqual(notes(id), ['Coordinator closed this ticket.']);
 });
+
+test('a new turn clears complete with its note, since "nothing left" is stale once work starts; ready keeps its note (#547)', async () => {
+  for (const [state, note] of [['complete', null], ['ready', 'merged']] as const) {
+    const id = newTicket();
+    store.updateTicket(id, { state, note: state === 'complete' ? 'nothing left' : 'merged' });
+    runner.send(id, 'Cara', 'one more thing');
+    assert.deepEqual([store.getTicket(id)!.state, store.getTicket(id)!.note], [null, note], state);
+    await endTurn(id, 'ok');
+  }
+});

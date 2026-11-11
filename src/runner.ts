@@ -1864,10 +1864,10 @@ export class Runner {
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
     // sets another state or a person wrote to it (personWrote).
-    // A limited minion's note is the server's, about the wait this turn ends.
+    // A limited minion's note is the server's, about the wait this turn ends; a complete one's says nothing is left (#547).
     // A minion parked on start_after stays parked through a turn that answers a message (#261).
     if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, { state: ticket.state, note: ticket.note });
-    else if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, ticket.state === 'limited' ? { state: null, note: null } : { state: null });
+    else if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
     this.cancelLimitWait(ticket.id);
     // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
     if (ticket.note === NET_NOTE) this.store.updateTicket(ticket.id, { note: null });

@@ -125,7 +125,7 @@ function clip(s: string, max = MAX_BODY): string {
 
 /**
  * The notification for something that happened in a thread, or null if it isn't worth one:
- * a question card, a turn that failed, or a state of ready, try or blocked. Replies alone never are.
+ * a question card, a turn that failed, or a state of ready, complete, try or blocked. Replies alone never are.
  */
 export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectName = ''): PushMessage | null {
   let body: string;

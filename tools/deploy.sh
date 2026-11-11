@@ -352,7 +352,7 @@ deploy() {
     exit 1
   fi
   # The queued restart takes the lock before it restarts: let go, or it waits out the 60 s below.
-  queue_done
+  queue_done ok
   flock -u 9
   # Usually it is live within seconds; say so here, as this turn carries on through the restart.
   for _ in $(seq 60); do

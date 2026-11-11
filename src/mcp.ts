@@ -985,7 +985,7 @@ const THREAD_TOOLS = [
     ? [{
       name: 'land',
       description:
-        "Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. It rebases onto main, runs the tests, fast-forwards main and deploys, and returns land.sh's output once it ends, which can take several minutes.",
+        "Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. It rebases onto main, runs the tests, fast-forwards main and deploys, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line for the deploy lock ahead of it (its output says the place).",
       inputSchema: { type: 'object', properties: {} },
     }]
     : []),

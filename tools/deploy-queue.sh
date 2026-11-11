@@ -7,7 +7,8 @@
 #   queue_lock <state dir> <label>   wait in line, then hold the lock on fd 9. Returns 1 only when
 #                                    nothing has moved for DEPLOY_QUEUE_STALL seconds.
 #   queue_phase <text>               say what the holder is doing now: the waiters' sign of progress
-#   queue_done                       leave the line (the caller lets go of fd 9, or exits)
+#   queue_done [ok]                  leave the line (the caller lets go of fd 9, or exits); ok: it went
+#                                    all the way, so its time counts toward the waiters' estimate
 # A ticket is four lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits), its
 # label, and its phase. A ticket whose process is gone is deleted by whoever waits behind it.
 # Outside the line, the queued restart (deploy.sh restart) and a land.sh from a branch older than this
@@ -36,16 +37,17 @@ queue_write() { # <file> <pid and start> <got> <label> <phase>: by a rename, so 
 queue_phase() {
   local t=${DEPLOY_QUEUE_TICKET:-} l
   [ -n "$t" ] && [ -e "$t" ] || return 0
-  mapfile -t l <"$t" 2>/dev/null || return 0
+  mapfile -t l 2>/dev/null <"$t" || return 0
   queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "$1" 2>/dev/null || true
 }
 
 queue_done() {
   local t=${DEPLOY_QUEUE_TICKET:-} l took
   [ -n "$t" ] && [ -e "$t" ] || return 0
-  mapfile -t l <"$t" 2>/dev/null || true
-  # How long it held the lock, for the next waiters' estimate (the newest 5 are kept).
-  if [ "${l[1]:-0}" -gt 0 ] 2>/dev/null; then
+  mapfile -t l 2>/dev/null <"$t" || true
+  # How long it held the lock, for the next waiters' estimate (the newest 5 are kept). Not a run that
+  # stopped early (a conflict, a red test): a few of those would promise everyone a one-minute wait.
+  if [ "${1:-}" = ok ] && [ "${l[1]:-0}" -gt 0 ] 2>/dev/null; then
     took=$(dirname "$t")/.took
     { tail -n 4 "$took" 2>/dev/null; echo $(($(date +%s) - l[1])); } >"$took.tmp$$" && mv -f "$took.tmp$$" "$took"
   fi 2>/dev/null
@@ -79,7 +81,7 @@ queue_lock() {
     for t in "$q"/[0-9]*; do
       [[ ${t##*/} =~ ^[0-9]+$ ]] || continue # not a ticket half-written, or the glob itself
       [[ ${t##*/} < $n ]] || break
-      mapfile -t l <"$t" 2>/dev/null || continue
+      mapfile -t l 2>/dev/null <"$t" || continue
       # Its process is gone (killed, or its turn was stopped): it leaves the line.
       if [ -z "${l[0]:-}" ] || [ "$(queue_proc "${l[0]%% *}")" != "${l[0]}" ]; then
         rm -f "$t"
@@ -90,7 +92,8 @@ queue_lock() {
     done
 
     if [ "$ahead" = 0 ]; then
-      if flock -n 9; then
+      # A short blocking wait, not a poll: the lockers outside the line block in the kernel, and a poller would lose to every one of them.
+      if flock -w "$QUEUE_POLL" 9; then
         [ -z "$said" ] || echo "queue: got the deploy lock" >&2
         queue_write "$DEPLOY_QUEUE_TICKET" "$me" "$(date +%s)" "$label" starting
         return 0
@@ -118,6 +121,6 @@ queue_lock() {
       queue_done
       return 1
     fi
-    sleep "$QUEUE_POLL"
+    [ "$ahead" = 0 ] || sleep "$QUEUE_POLL"
   done
 }

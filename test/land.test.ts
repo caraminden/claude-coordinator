@@ -446,13 +446,14 @@ test('ten landings started together land in the order they arrived, each told it
   assert.match(done[9].stderr, /queue: 2nd in line for the deploy lock, about \d+ min \(ahead: ticket\/9-x, /);
   assert.match(done[9].stderr, /queue: got the deploy lock/);
   assert.deepEqual(tickets(state), [], 'every ticket is gone');
+  assert.equal(readFileSync(join(state, 'queue', '.took'), 'utf8').trim().split('\n').length, 5, 'the newest five landings were timed, for the estimate');
   assert.equal(spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status, 0, 'the deploy lock is free');
 });
 
 // Fake work for the line itself: wait in line, note the turn, then hold the lock while $3 runs.
 const queueLib = join(import.meta.dirname, '..', 'tools', 'deploy-queue.sh');
 function waiter(state: string, label: string, work: string, extra: Record<string, string> = {}) {
-  const child = spawn('bash', ['-c', '. "$0"; queue_lock "$1" "$2" || exit 1; echo "$2" >>"$1/order"; eval "$3"', queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
+  const child = spawn('bash', ['-c', '. "$0"; queue_lock "$1" "$2" || exit 1; echo "$2" >>"$1/order"; eval "$3"; queue_done ok', queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
   let stderr = '';
   child.stderr!.on('data', (d) => (stderr += d));
   const exit = new Promise<number | null>((ok) => child.on('close', ok));

@@ -104,3 +104,4 @@ if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" "$here/tools/deploy.sh"; then
   refuse "the deploy failed after main moved; main keeps $(git log -1 --format=%h "$tip"). Read the deploy's output above"
 fi
 trap - INT TERM HUP
+queue_done ok

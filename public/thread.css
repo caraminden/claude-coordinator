@@ -354,13 +354,10 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .load-earlier { display: flex; justify-content: center; padding: 0.5rem 0; }
 .load-earlier > button { display: inline-flex; align-items: center; gap: 0.45em; }
 .load-earlier > button[aria-busy='true'] { opacity: 1; color: var(--muted); }
-.narration { margin: 0.25rem 0 0.5rem; color: var(--muted); font-size: 0.9em; }
-.narration > summary { cursor: pointer; padding: max(0.3rem, var(--tap-pad)) 0; list-style: none; }
-.narration > summary::-webkit-details-marker { display: none; }
-.narration > summary:hover { color: var(--ink); }
-.narration .notes { border-left: 2px solid var(--line); padding: 0 0 0 0.75rem; margin: 0.25rem 0 0.5rem 0.3rem; }
-.narration .note-text > :first-child { margin-top: 0; }
-.narration .note-text > :last-child { margin-bottom: 0.4rem; }
+/* A turn's older milestone lines, collapsed into one boxed row like a Taskmaster message (#578). */
+.msg.narration > .notes { display: grid; gap: 0.5rem; padding: 0 0.85rem 0.6rem; }
+.msg.narration .note-text > :first-child { margin-top: 0; }
+.msg.narration .note-text > :last-child { margin-bottom: 0; }
 /* A long message from the middle of a turn: its first lines, fading out above "Show all" */
 .msg.clamped > .md { max-height: 16em; overflow: hidden; mask-image: linear-gradient(to bottom, #000 65%, transparent); }
 .msg > .show-all { display: block; margin: 0.4rem 0 0.1rem; padding: 0.2rem 0.65rem; font-size: 0.85em; }

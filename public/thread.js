@@ -176,8 +176,9 @@ export async function jumpToEvent(target) {
   if (!find() && view.page?.more && id < view.page.events[0].id) await showEarlier(null, id);
   const found = find();
   if (!found) return false;
-  // A reply collapsed into the turn's narration or a Taskmaster update shows as that collapsed row.
-  const el = found.parentElement.closest('#log details:not([open])') ?? found;
+  // A line collapsed into the turn's updates opens its row (#578); a collapsed Taskmaster message shows as its row.
+  for (let d = found.parentElement.closest('#log details'); d; d = d.parentElement.closest('#log details')) d.open = true;
+  const el = found;
   el.scrollIntoView({ block: 'center' });
   holdInPlace(el, el.getBoundingClientRect().top);
   el.classList.remove('jumped');
@@ -852,11 +853,14 @@ export function appendEvent(event, scroll = true) {
   const nodes = [];
   // The turn's words the sorter has settled, to collapse or keep once they're in the log.
   const settle = [];
+  // The newest line of the minion's own words this event added, if any.
+  let spoke = null;
 
   if (event.kind === 'user_message') {
-    // Narration after a message goes in a row below it, not back into the one above.
-    view.narrationEl = null;
-    if (view.folds.length) view.folds.push({ fate: 'break' }); // and so when the turn's lines fold at its answer
+    // Narration after a message goes in a row below it, not back into the one above. A line still
+    // waiting to collapse joins the row above first, so the break waits its turn behind it.
+    if (view.folds.length) view.folds.push({ fate: 'break' });
+    else view.narrationEl = null;
     if (data.author === me && data.sendId) {
       // Our own message, already shown when it was sent: swap in the server's copy, found by its sendId (#392).
       const i = view.pendingMessages.findIndex((m) => m.sendId === data.sendId);
@@ -912,17 +916,18 @@ export function appendEvent(event, scroll = true) {
   } else if (event.kind === 'strike') {
     // strike_text: redraw the message it struck, wherever it shows now (a bubble or a collapsed update).
     for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) {
-      el.closest('.coord')?.querySelector('summary .preview')?.replaceChildren(...previewNodes(el.source, data.strikes));
+      const row = el.closest('.coord');
       el.replaceWith(messageBody(el.source, data.strikes, el.ticketId, data.event));
+      if (row?.matches('.narration')) narrationSummary(row);
+      else row?.querySelector('summary .preview')?.replaceChildren(...previewNodes(el.source, data.strikes));
     }
   } else if (event.kind === 'replaced') {
     // A reply the link check sent back gives way to its rewrite (#281): the bubble, or its line in the collapsed row.
     for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) {
-      const fold = el.closest('details.narration');
+      const row = el.closest('details.narration');
       (el.closest('.note-text') ?? el.closest('.msg') ?? el).remove();
-      const n = fold?.querySelector('.notes').childElementCount;
-      if (n === 0) fold.remove();
-      else if (fold) fold.querySelector('summary').replaceChildren(h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
+      if (row?.querySelector('.notes').childElementCount === 0) row.remove();
+      else if (row) narrationSummary(row);
     }
   } else if (event.kind === 'plan_result') {
     view.cards.get(data.id)?.settle(data);
@@ -971,6 +976,7 @@ export function appendEvent(event, scroll = true) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
           const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);
+          spoke = msg;
           view.latestReply = event.id;
           settle.push(...view.narration.text({ el: msg, body, text: block.text }));
         } else if (block.type === 'tool_use') {
@@ -1018,10 +1024,17 @@ export function appendEvent(event, scroll = true) {
   else log.append(...nodes, ...view.pendingMessages.map((m) => m.el));
   if (event.kind === 'question' || event.kind === 'plan') view.heldCards.push(...nodes);
   else if (event.kind === 'user_message' || (event.kind === 'claude' && data.type === 'result')) view.heldCards = [];
-  // While the turn runs, its milestone lines stay in the chat; they fold once its answer arrives (#551).
+  // While the turn runs, its newest milestone line stays in the chat; the ones above it collapse as each
+  // newer line arrives (#578), and the last at its answer (#551).
   for (const s of settle) {
     if (turnLive()) view.folds.push(s);
     if (s.fate !== 'fold' || !turnLive()) settleText(s.text, s.fate);
+  }
+  if (spoke && turnLive()) {
+    // The newest line stays out even when the work in the same message has settled it already.
+    const newest = view.folds.at(-1)?.text?.el === spoke ? view.folds.pop() : null;
+    flushFolds();
+    if (newest) view.folds.push(newest);
   }
   if (event.kind === 'claude' && data.type === 'result') flushFolds();
   renderTyping();
@@ -1122,8 +1135,7 @@ function stamped(el, event) {
 
 /**
  * Collapse or keep one of the turn's words, as narrationSorter settled it. Collapsed remarks go in an
- * "updates along the way" row, one per stretch between kept messages, where the first of them
- * was.
+ * "N updates" row, one per stretch between kept messages, where the first of them was.
  */
 function settleText(t, fate) {
   if (fate !== 'fold') {
@@ -1132,15 +1144,23 @@ function settleText(t, fate) {
     return;
   }
   if (!view.narrationEl?.isConnected) {
-    view.narrationEl = h('details', { class: 'narration', 'data-at': t.el.dataset.at }, h('summary', {}), h('div', { class: 'notes' }));
+    view.narrationEl = h('details', { class: 'msg coord narration', 'data-at': t.el.dataset.at }, h('summary', {}), h('div', { class: 'notes' }));
     t.el.before(view.narrationEl);
   }
   t.el.remove();
-  const notes = view.narrationEl.querySelector('.notes');
-  notes.append(h('div', { class: 'note-text' }, t.body));
-  const n = notes.childElementCount;
-  view.narrationEl.querySelector('summary').replaceChildren(
-    h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
+  // Its event id goes with it, so a jump link (?e=) still finds the line inside the row.
+  view.narrationEl.querySelector('.notes').append(h('div', { class: 'note-text', 'data-eid': t.el.dataset.eid }, t.body));
+  narrationSummary(view.narrationEl);
+}
+
+/** A collapsed row's one line (#578): how many updates are in it, then the newest of them. */
+function narrationSummary(row) {
+  const bodies = row.querySelectorAll(':scope > .notes > .note-text > [data-body]');
+  const n = bodies.length;
+  const last = bodies[n - 1];
+  row.querySelector('summary').replaceChildren(
+    h('span', { class: 'who' }, h('span', { class: 'name' }, `${n} update${n === 1 ? '' : 's'}`)),
+    h('span', { class: 'preview' }, last ? previewNodes(last.source, last.strikes) : ''));
 }
 
 /** Show a long message's first lines, with a button for the rest. */
@@ -1158,7 +1178,7 @@ function unclamp(msg) {
 function messageBody(text, strikes, ticketId, eventId) {
   const body = markdown(struckSource(text, strikes), ticketId);
   body.dataset.body = eventId;
-  Object.assign(body, { source: text, ticketId });
+  Object.assign(body, { source: text, ticketId, strikes });
   return body;
 }
 
@@ -1363,13 +1383,14 @@ function turnLive() {
 }
 
 /**
- * Fold the running turn's milestone lines into "updates along the way", as a reload would show them: at
- * its answer, or when it stops without one. Words kept whole break the run, as they do on a reload.
+ * Collapse the running turn's settled milestone lines into their "N updates" rows, as a reload would show
+ * them: each time a newer line arrives (#578), at its answer, or when it stops without one. Words kept
+ * whole break the run, as they do on a reload.
  */
 function flushFolds() {
   const folds = view.folds;
   view.folds = [];
-  view.narrationEl = null;
+  // No reset of view.narrationEl here: mid-turn, a line joins the row its stretch already has (#578).
   for (const { text, fate } of folds) {
     if (fate !== 'fold') view.narrationEl = null;
     else if (text.el.isConnected) settleText(text, fate); // not one replaced by its rewrite (#281)

@@ -187,7 +187,7 @@ test("a restart that can't be queued says to run deploy.sh again, and leaves nob
     assert.equal(err.code, 1, err.stderr);
     assert.match(err.stderr, /deploy: could not queue the restart \(Failed to start transient service unit: Access denied\), so nothing restarted: the live checkout is at \w+ "b\.txt: mine", but the server still runs \w+\. Run tools\/deploy\.sh again to queue it/);
     assert.match(err.stderr.trimEnd().split('\n').at(-1)!, /land: the deploy failed after main moved; main keeps \w+\. The deploy's lines above say why and what to do$/);
-    assert.ok(!existsSync(join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'reporters')), 'no reporter line left behind');
+    for (const f of ['reporters', 'reporter-commits']) assert.ok(!existsSync(join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', f)), `no ${f} line left behind`);
   }));
 
 // F12a, in deploy.sh: its test run that can't write its temp file never ran a test.

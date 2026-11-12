@@ -134,20 +134,22 @@ restart_phase() {
 # with its restart behind it), and a server that is down costs REPORT_RETRY s a report, which one after another
 # outlasted the landings waiting in line.
 # A minion whose own commit is older than what this restart was for hears which was its own (#553 M11): the report is
-# about the tip, and the failure may be in either.
+# about the tip, and the failure may be in either. The commits are in reporter-commits ("<ticket> <commit>"), not a field of
+# reporters, which a restart queued by an older copy of this file reads as three fields.
 report() {
   local ok=$1 text=$2 api token ticket mine tip own
   case "$ok" in ok) say "$text" ;; warn) say "WARNING: $text" ;; *) say "FAILED: $text" ;; esac
   [ -f "$STATE/reporters" ] || return 0
   restart_phase "posting its reports"
   tip=${R_TARGET:-$(git_live rev-parse HEAD)}
-  while read -r api token ticket mine; do
+  while read -r api token ticket; do
+    mine=$(awk -v t="$ticket" '$1 == t { c = $2 } END { print c }' "$STATE/reporter-commits" 2>/dev/null) || mine=
     own=
     [ -z "$mine" ] || [ "$mine" = "$tip" ] || own=" This restart was for your $(short "$mine") and the newer commits up to $(short "$tip")."
     post_report "$api" "$token" "$ticket" "$ok" "$text$own" &
   done < <(tac "$STATE/reporters" | sort -su -k3,3) # one note per minion, with the newest of its turns' tokens
   wait
-  rm -f "$STATE/reporters"
+  rm -f "$STATE/reporters" "$STATE/reporter-commits"
 }
 
 # Push live commit $1 to $REMOTE's main, so GitHub matches what runs and keeps a copy off the box.
@@ -330,6 +332,7 @@ restart() {
     report fail "Could not copy the database to ${saved:-$(dirname "$DB")/backups/}${cause:+ ($cause)} before restarting on $(short "$target"), so nothing restarted. The checkout is at $(short "$target"), but the server still runs $(health commit | cut -c1-7). Free some disk or fix the copy, then run tools/deploy.sh again."
     exit 1
   fi
+  cat "$STATE/backup.err" >&2 2>/dev/null || true # what the copy said, for the journal, as before
   rm -f "$STATE/backup.err"
   R_BACKUP=$(date +%s)
   [ -n "$saved" ] && say "database copied to $saved"
@@ -510,7 +513,7 @@ deploy() {
   # reads it only once it has the lock, which this holds until below, or after its 2 h wait for turns.
   reporter() {
     if [ -n "${COORDINATOR_TICKET:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ]; then
-      (umask 077 && echo "${COORDINATOR_API:-$URL} $COORDINATOR_TOKEN $COORDINATOR_TICKET $new" >>"$STATE/reporters")
+      (umask 077 && echo "${COORDINATOR_API:-$URL} $COORDINATOR_TOKEN $COORDINATOR_TICKET" >>"$STATE/reporters" && echo "$COORDINATOR_TICKET $new" >>"$STATE/reporter-commits")
     fi
   }
   # The unit runs a private copy of the version just pulled, so a later pull or a rollback can't

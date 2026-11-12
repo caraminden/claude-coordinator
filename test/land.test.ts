@@ -196,7 +196,11 @@ test('a landing stopped while it waits for CI is logged as stopped there, not la
   let stderr = '';
   child.stderr!.on('data', (d) => (stderr += d));
   const done = new Promise((ok) => child.once('close', ok));
-  for (const end = Date.now() + 30_000; !/waiting for CI on/.test(stderr); await new Promise((ok) => setTimeout(ok, 50))) assert.ok(Date.now() < end, stderr);
+  // Killed once a poll has seen the run going (land.sh's "cirun" mark), so the line has a ci-run time to show; a kill
+  // before that first answer rightly says ci-run - (#578 saw it on the desktop runner).
+  const times = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', `times-${child.pid}`);
+  const running = () => existsSync(times) && /^cirun /m.test(readFileSync(times, 'utf8'));
+  for (const end = Date.now() + 30_000; !running(); await new Promise((ok) => setTimeout(ok, 50))) assert.ok(Date.now() < end, stderr);
   child.kill('SIGTERM');
   await done;
   assert.match(timings(shared).join('\n'), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy - · live - · stopped at ci( \(exit \d+\))?$/);

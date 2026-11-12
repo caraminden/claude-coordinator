@@ -212,8 +212,9 @@ test('a job behind a head of the line that has stopped moving names it, goes pas
   } finally {
     writeFileSync(go, '');
     process.kill(b.child.pid!, 'SIGCONT');
+    // Awaited here too: a job left waiting after a failed assertion would poll the deleted lock folder for good.
+    assert.equal(await b.done, 0, 'the stopped job runs once it is woken');
   }
-  assert.equal(await b.done, 0, 'the stopped job runs once it is woken');
 });
 
 test('a job that waits while no slot changes hands gives up at the limit, loudly, without running', async () => {
@@ -252,6 +253,6 @@ test('jobs going past a stopped head still start one at a time on a busy box, ea
   } finally {
     writeFileSync(pressureFile, psi(5));
     process.kill(head.child.pid!, 'SIGCONT');
+    for (const j of [...jobs, head]) assert.equal(await j.done, 0);
   }
-  for (const j of [...jobs, head]) assert.equal(await j.done, 0);
 });

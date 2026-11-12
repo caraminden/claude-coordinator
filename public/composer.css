@@ -104,3 +104,19 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 .composer .send-menu[hidden] { display: none; }
 .composer .send-menu button { white-space: nowrap; border: 0; }
 .composer .send-menu button:hover, .composer .send-menu button:focus-visible { background: var(--line); }
+/* The Taskmaster's cards waiting on you (public/waiting.js), on top of its composer: one link per card. */
+#chat-waiting[hidden] { display: none; }
+.waiting-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-bottom: 0.5rem; padding: 0.4rem 0.55rem; border-radius: 6px; background: var(--notice-bg); font-size: 0.85rem; line-height: 1.3; max-height: 6.5rem; overflow-y: auto; }
+.waiting-head { font-weight: 650; margin-right: 0.15rem; }
+a.waiting-card { --chip: var(--waiting); display: inline-flex; gap: 0.3rem; align-items: baseline; max-width: min(100%, 26rem); min-width: 0; padding: calc(0.2rem - 1px) calc(0.55rem - 1px); border: 1px solid color-mix(in srgb, var(--chip) 55%, var(--control-line)); border-radius: 999px; background: var(--panel); color: var(--ink); text-decoration: none; }
+a.waiting-card:hover, a.waiting-card:focus-visible { background: color-mix(in srgb, var(--chip) 14%, var(--panel)); }
+a.waiting-card .what { font-weight: 650; color: var(--chip); flex: none; }
+a.waiting-card .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* On a phone it stays one row that scrolls sideways, so the chat keeps its room however many wait. */
+@media (max-width: 800px) {
+  .waiting-strip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .waiting-head, a.waiting-card { flex: none; }
+  a.waiting-card { max-width: 75vw; }
+  /* A row that scrolls drops its end padding; this keeps the last card off the edge. */
+  .waiting-strip::after { content: ''; flex: none; width: 0.2rem; }
+}

@@ -20,6 +20,7 @@ import { askHeader } from './askcard.js';
 import { firstSentence, GITHUB_NAME, machineAuthor, shortDuration, shortNote, ticketActionRef } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerChip, payerLine } from './payer.js';
+import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, nowDoing, planEstimate, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, speaker } from './cards.js';
@@ -256,6 +257,8 @@ export function chatSection(chatId, ticket) {
   // Whose plan your message runs on, only when that's news (public/payer.js); under the replies, right over the box.
   form.prepend(h('div', { id: 'chat-payer', hidden: true }));
   form.prepend(h('div', { class: 'replies-bar', id: 'chat-replies', hidden: true }));
+  // The Taskmaster's cards still waiting on people, as links, on top (public/waiting.js).
+  form.prepend(h('div', { id: 'chat-waiting', hidden: true }));
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
 
@@ -358,6 +361,15 @@ export function renderBranch(status) {
   el.hidden = !parts.length;
 }
 
+/** Fill the Taskmaster's waiting-cards strip over its composer (public/waiting.js); a minion's chat has none. */
+function renderWaiting() {
+  const slot = document.getElementById('chat-waiting');
+  if (!slot || !view.ticket) return;
+  const strip = isCoordinator(view.ticket) ? waitingStrip(view.ticket) : null;
+  slot.hidden = !strip;
+  slot.replaceChildren(strip ?? '');
+}
+
 export function renderTicketHead() {
   renderModelPicker();
   const el = document.getElementById('ticket-head');
@@ -385,6 +397,7 @@ export function renderTicketHead() {
     const line = payerLine(t, form.sendText);
     slot.hidden = !line;
     slot.replaceChildren(line ?? '');
+    renderWaiting();
   }
   const actions = [];
   // The minion's branch, running on a copy of the data (start_preview, src/previews.ts).

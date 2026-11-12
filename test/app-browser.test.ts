@@ -4,6 +4,7 @@
 //   review's card waits on its review, not on you, running or finished; a loop card waits until someone clicks
 //   Continue, and stops at the click, not when the server's event lands.
 // - A list row's card badge (sidebar.js threadRow, #575) opens its minion's oldest open card; the rest of the row opens the chat.
+// - The Taskmaster's waiting strip (waiting.js, #608) links each of its own open cards and is gone with none.
 // - The Codex line under the Claude bar reads a window past its reset as 0%, as Codex's own bar and Settings do.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -122,6 +123,24 @@ test('a row\'s card badge opens the oldest open card, the rest of the row the ch
   assert.equal(await page.eval('location.hash'), '#/p/2/t/7?e=11', 'the badge opens the oldest card');
   await page.eval(`document.querySelector('[data-id="7"] .name').click()`);
   assert.equal(await page.eval('location.hash'), '#/p/2/t/7', 'the rest of the row opens the chat');
+});
+
+test('the Taskmaster\'s waiting strip links each of its open cards, oldest first, and is gone with none', { skip }, async () => {
+  const page = await open();
+  const got = await page.eval<{ none: boolean; head: string; links: string[][] }>(`(async () => {
+    const { waitingStrip } = await import('/waiting.js');
+    const strip = waitingStrip({ id: 1, kind: 'coordinator', project_id: 2, open_cards: [
+      { minion: null, kind: 'question', what: 'question', label: 'Layout', href: '#/p/2?e=11' },
+      { minion: null, kind: 'plan', what: 'plan', label: 'Build 9', href: '#/p/2?e=12' }] });
+    document.body.prepend(strip);
+    return { none: waitingStrip({ id: 1, kind: 'coordinator', open_cards: [] }) === null, head: strip.querySelector('.waiting-head').textContent,
+      links: [...strip.querySelectorAll('a')].map((a) => [a.getAttribute('href'), a.textContent]) };
+  })()`);
+  assert.equal(got.none, true, 'nothing waits, no strip');
+  assert.equal(got.head, '2 cards wait on you');
+  assert.deepEqual(got.links, [['#/p/2?e=11', 'questionLayout'], ['#/p/2?e=12', 'planBuild 9']]);
+  await page.eval(`document.querySelectorAll('.waiting-strip a')[1].click()`);
+  assert.equal(await page.eval('location.hash'), '#/p/2?e=12', 'a click opens the chat at that card');
 });
 
 // Needs you (inbox.js) around a dismissal (#589; Josh, 2026-11-12: "It shouldnt require a refresh to drop out, dismissed

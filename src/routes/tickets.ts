@@ -550,7 +550,8 @@ export const ticketRoutes: Route[] = [
       if (card.status !== 'pending') throw new HttpError(409, card.machine ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} these notes` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
       if (card.machine && notes === null) {
         const machine = store.getMachine(card.machine.id);
-        if (!machine || !managesMachine(session, machine)) throw new HttpError(403, `Only ${card.machine.owner ? `${card.machine.owner}, who owns ${card.machine.name},` : 'an admin'}${card.machine.owner ? ' or an admin' : ''} can approve its notes`);
+        if (!machine) throw new HttpError(409, `${card.machine.name} was removed`);
+        if (!managesMachine(session, machine)) throw new HttpError(403, `Only ${card.machine.owner ? `${card.machine.owner}, who owns ${card.machine.name},` : 'an admin'}${card.machine.owner ? ' or an admin' : ''} can approve its notes`);
         // Approve writes what the card showed, or nothing: notes changed since (on the Machines page) aren't overwritten unseen.
         if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
         patchMachine(app, session, machine, { notes: card.plan });

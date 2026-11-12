@@ -182,7 +182,7 @@ export function planCard(ticketId, card) {
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
   const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !m }, m ? 'Reject' : 'Send notes');
   const el = h('div', { class: 'qcard pcard' },
-    h('div', { class: 'who' }, speaker(m ? `proposes new notes for ${m.name}` : 'proposes a plan')),
+    h('div', { class: 'who' }, speaker(m ? 'proposes machine notes' : 'proposes a plan')),
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : 'Plan'), card.summary),
     h('div', { class: 'pbody' }, m ? notesBody(card) : markdown(card.plan, ticketId)),
     notes,

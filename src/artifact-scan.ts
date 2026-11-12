@@ -21,7 +21,8 @@ export class ArtifactScanner {
   // What each project's shared folder held at the last scan, so a change can tell open pages to refresh.
   private sharedSeen = new Map<number, string>();
   private nameFixes = new Map<string, { match: string | null; at: number }>();
-  // The paths each ticket's replies linked, up to the last event read: a scan reads only what came since (#609).
+  // The paths each ticket's replies linked, up to the last event read: a scan reads only what came since (#609). A reply's
+  // text never changes once stored (strikes and replaced only add fields; the one rewrite, events_slimmed, runs at boot).
   private links = new Map<number, { cwd: string; upTo: number; linked: Set<string> }>();
 
   private store: Store;

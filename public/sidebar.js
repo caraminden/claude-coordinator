@@ -1,7 +1,7 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
 import { account, ago, api, costText, h, isCoordinator, isSeen, jumpHref, listGroupsOf, schemeIcon, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
-import { app, crumbs, sending, setSending, usage } from './core.js';
+import { app, crumbs, openHash, sending, setSending, usage } from './core.js';
 import { fitHeight, loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -374,6 +374,7 @@ export function threadRow(t, href = threadHref(t)) {
   // on a working or waiting row or one paused partway through its plan (a card, ready, blocked).
   const bar = wait && (wait.total || wait.usual) ? waitBar(wait)
     : t.steps && (st.counted || t.steps.done < t.steps.total) ? waitBar(!wait && t.steps.usual ? { since: t.steps.since, usual: t.steps.usual } : t.steps) : '';
+  const card = cardBadge(t.open_cards ?? []);
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks any settled row that changed since you last opened it.
@@ -383,10 +384,32 @@ export function threadRow(t, href = threadHref(t)) {
   return h('a', { class: `thread-row s-${t.status} f-${st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
+    card,
     st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
     wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, waitWords(wait), ' · ', waitClock(wait))
       : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
     bar);
+}
+
+/**
+ * The row's open-card badge (#575, Cara 2026-11-11: "shows if they have a pending card (maybe you missed it?)
+ * clicking that indicator specifically would open to the card"): it stays until the cards are answered or settled,
+ * read or not, and opens the oldest. `cards` is the row's open_cards (Runner.cardLinks), oldest first.
+ */
+function cardBadge(cards) {
+  if (!cards.length) return '';
+  const go = (e) => {
+    // The row is a link to the chat; this goes to the card in it instead.
+    e.preventDefault();
+    e.stopPropagation();
+    openHash(cards[0].href);
+  };
+  const what = `${cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
+  return h('span', {
+    class: 'card-badge', role: 'link', tabindex: 0,
+    title: cards.length > 1 ? `${cards.length} cards wait on you: open the oldest, the ${what}` : `Open the ${what}`,
+    onclick: go, onkeydown: (e) => { if (e.key === 'Enter') go(e); },
+  }, cards.length > 1 ? `${cards.length} cards` : 'card');
 }

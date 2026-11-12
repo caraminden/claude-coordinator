@@ -3,6 +3,7 @@
 // - The composer's Card button (thread.js renderCardJump) shows only for a card still waiting on a person. An ultra
 //   review's card waits on its review, not on you, running or finished; a loop card waits until someone clicks
 //   Continue, and stops at the click, not when the server's event lands.
+// - A list row's card badge (sidebar.js threadRow, #575) opens its minion's oldest open card; the rest of the row opens the chat.
 // - The Codex line under the Claude bar reads a window past its reset as 0%, as Codex's own bar and Settings do.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -106,4 +107,19 @@ test('the Codex line under the Claude bar reads a 5-hour window past its reset a
   assert.equal(line.text, 'Codex 40%');
   assert.equal(line.level, '');
   assert.match(line.title, /^5-hour window: 0%\nWeekly: 40%, resets /);
+});
+
+test('a row\'s card badge opens the oldest open card, the rest of the row the chat, and a row without cards has none', { skip }, async () => {
+  const page = await open();
+  await page.eval(`(async () => {
+    const { threadRow } = await import('/sidebar.js');
+    const row = (id, open_cards) => threadRow({ id, number: id, project_id: 2, kind: 'ticket', title: 'T' + id, status: 'idle', updated_at: Date.now(), open_cards });
+    document.body.prepend(row(7, [{ kind: 'question', label: 'A', href: '#/p/2/t/7?e=11' }, { kind: 'plan', label: 'B', href: '#/p/2/t/7?e=12' }]), row(8, []));
+  })()`);
+  assert.equal(await page.eval(`document.querySelector('[data-id="7"] .card-badge').textContent`), '2 cards');
+  assert.equal(await page.eval(`!!document.querySelector('[data-id="8"] .card-badge')`), false);
+  await page.eval(`document.querySelector('[data-id="7"] .card-badge').click()`);
+  assert.equal(await page.eval('location.hash'), '#/p/2/t/7?e=11', 'the badge opens the oldest card');
+  await page.eval(`document.querySelector('[data-id="7"] .name').click()`);
+  assert.equal(await page.eval('location.hash'), '#/p/2/t/7', 'the rest of the row opens the chat');
 });

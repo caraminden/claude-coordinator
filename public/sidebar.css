@@ -44,7 +44,7 @@
 .g-promoted > h3 { color: hsl(150 50% 34%); }
 .g-parked > h3 { color: var(--muted); }
 .g-pinned > h3 { color: var(--accent); }
-.thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 0.4rem; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
+.thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; column-gap: 0; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
 .thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
 .thread-row:hover { border-color: var(--line); }
 .thread-row.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
@@ -70,6 +70,13 @@
 #coordinator-row .thread-row { margin-bottom: 0.5rem; }
 .thread-row.coordinator .name::before { content: "◆ "; color: var(--accent); }
 .thread-row .queued { font-size: 0.8em; color: var(--running); }
+/* The top line's chips keep their own gap, so a row without one (the empty grid tracks) puts its state flush right. */
+.thread-row :is(.queued, .card-badge, .state) { margin-left: 0.4rem; }
+/* An open card waiting on people (#575): an outlined amber chip beside the state pill, a link to the card itself. */
+.thread-row .card-badge { align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: calc(0.1rem - 1px) calc(0.45rem - 1px);
+  border: 1px solid var(--waiting); border-radius: 999px; color: var(--waiting); background: var(--panel); cursor: pointer; }
+.thread-row .card-badge:hover, .thread-row .card-badge:focus-visible { background: color-mix(in srgb, var(--waiting) 18%, var(--panel)); }
+@media (max-width: 800px) { .thread-row .card-badge { padding: calc(0.25rem - 1px) calc(0.6rem - 1px); } }
 .thread-row .state { align-self: center; font-weight: 650; white-space: nowrap; font-size: 0.78em; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums;
   color: var(--c); background: color-mix(in srgb, var(--t, var(--c)) 15%, var(--panel)); }
 .thread-row .state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
@@ -79,7 +86,7 @@
 .thread-row .pnote { grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; color: color-mix(in srgb, var(--waiting) 80%, var(--ink)); }
 .thread-row.s-closed .name { color: var(--muted); }
 /* The minion's cost so far shares the note's line, at its right end. */
-.thread-row .cost { grid-row: 2; grid-column: 2 / -1; text-align: right; font-size: 0.75em; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.thread-row .cost { grid-row: 2; grid-column: 2 / -1; padding-left: 0.4rem; text-align: right; font-size: 0.75em; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .thread-row:has(> .cost) .note { grid-column: 1 / 2; }
 
 /* Search: threads list and find-in-chat */

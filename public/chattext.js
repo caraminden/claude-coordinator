@@ -15,7 +15,8 @@ export function ticketActionRef({ block, result }) {
 }
 
 export function firstSentence(text, max = 200) {
-  const flat = String(text ?? '').replace(/[*`#>]/g, '').replace(/\s+/g, ' ').trim();
+  // Heading and quote marks only at a line's start, so "#473" and "a > b" keep theirs.
+  const flat = String(text ?? '').replace(/^[ \t]*(#+|>)[ \t]*/gm, '').replace(/[*`]/g, '').replace(/\s+/g, ' ').trim();
   const sentence = flat.match(/^.*?[.!?](\s|$)/)?.[0].trim() ?? flat;
   return sentence.length > max ? `${sentence.slice(0, max - 1).replace(/\s+\S*$/, '')}…` : sentence;
 }

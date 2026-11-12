@@ -62,6 +62,10 @@ test('firstSentence keeps the first sentence as plain text, cut at a word under 
     ['one two thr', 10, 'one two…'],
     // A single word longer than the limit is cut mid-word.
     ['abcdefghijkl', 5, 'abcd…'],
+    // A minion's number keeps its #, and a > in the text stays; only heading and quote marks at a line's start go.
+    ['Merged in #473. Next', 200, 'Merged in #473.'],
+    ['a > b holds. Next', 200, 'a > b holds.'],
+    ['## Done\n> Shipped it. Then', 200, 'Done Shipped it.'],
     // The default limit is 200.
     [`${'word '.repeat(39)}words`, undefined, `${'word '.repeat(39)}words`],
     [`${'word '.repeat(39)}wordsx`, undefined, `${'word '.repeat(38)}word…`],

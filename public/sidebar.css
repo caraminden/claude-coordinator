@@ -72,10 +72,12 @@
 .thread-row .queued { font-size: 0.8em; color: var(--running); }
 /* The top line's chips keep their own gap, so a row without one (the empty grid tracks) puts its state flush right. */
 .thread-row :is(.queued, .card-badge, .state) { margin-left: 0.4rem; }
-/* An open card waiting on people (#575): an outlined amber chip beside the state pill, a link to the card itself. */
-.thread-row .card-badge { align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: calc(0.1rem - 1px) calc(0.45rem - 1px);
-  border: 1px solid var(--waiting); border-radius: 999px; color: var(--waiting); background: var(--panel); cursor: pointer; }
-.thread-row .card-badge:hover, .thread-row .card-badge:focus-visible { background: color-mix(in srgb, var(--waiting) 18%, var(--panel)); }
+/* An open card waiting on people (#575): an outlined amber chip beside the state pill, a link to the card itself;
+   grey like the parked pill on a parked or dismissed row. */
+.thread-row .card-badge { --chip: var(--waiting); align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: calc(0.1rem - 1px) calc(0.45rem - 1px);
+  border: 1px solid var(--chip); border-radius: 999px; color: var(--chip); background: var(--panel); cursor: pointer; }
+.thread-row.f-idle .card-badge { --chip: var(--closed); }
+.thread-row .card-badge:hover, .thread-row .card-badge:focus-visible { background: color-mix(in srgb, var(--chip) 18%, var(--panel)); }
 /* On phones its hit area reaches the full control height (#471) without growing the chip or the row. */
 @media (max-width: 800px) {
   .thread-row .card-badge { position: relative; padding: calc(0.25rem - 1px) calc(0.6rem - 1px); }

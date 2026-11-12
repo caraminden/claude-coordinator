@@ -76,7 +76,11 @@
 .thread-row .card-badge { align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: calc(0.1rem - 1px) calc(0.45rem - 1px);
   border: 1px solid var(--waiting); border-radius: 999px; color: var(--waiting); background: var(--panel); cursor: pointer; }
 .thread-row .card-badge:hover, .thread-row .card-badge:focus-visible { background: color-mix(in srgb, var(--waiting) 18%, var(--panel)); }
-@media (max-width: 800px) { .thread-row .card-badge { padding: calc(0.25rem - 1px) calc(0.6rem - 1px); } }
+/* On phones its hit area reaches the full control height (#471) without growing the chip or the row. */
+@media (max-width: 800px) {
+  .thread-row .card-badge { position: relative; padding: calc(0.25rem - 1px) calc(0.6rem - 1px); }
+  .thread-row .card-badge::after { content: ''; position: absolute; inset: min(0px, calc((100% - var(--control-h)) / 2)) -0.3rem; }
+}
 .thread-row .state { align-self: center; font-weight: 650; white-space: nowrap; font-size: 0.78em; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums;
   color: var(--c); background: color-mix(in srgb, var(--t, var(--c)) 15%, var(--panel)); }
 .thread-row .state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }

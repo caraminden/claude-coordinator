@@ -401,15 +401,16 @@ export function threadRow(t, href = threadHref(t)) {
 function cardBadge(cards) {
   if (!cards.length) return '';
   const go = (e) => {
-    // The row is a link to the chat; this goes to the card in it instead.
+    // The row is a link to the chat; this goes to the card in it instead, in a new tab as a link would on ctrl or middle click.
     e.preventDefault();
     e.stopPropagation();
-    openHash(cards[0].href);
+    if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey) window.open(new URL(cards[0].href, location.href).href, '_blank');
+    else openHash(cards[0].href);
   };
   const what = `${cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
   return h('span', {
     class: 'card-badge', role: 'link', tabindex: 0,
     title: cards.length > 1 ? `${cards.length} cards wait on you: open the oldest, the ${what}` : `Open the ${what}`,
-    onclick: go, onkeydown: (e) => { if (e.key === 'Enter') go(e); },
+    onclick: go, onauxclick: (e) => { if (e.button === 1) go(e); }, onkeydown: (e) => { if (e.key === 'Enter') go(e); },
   }, cards.length > 1 ? `${cards.length} cards` : 'card');
 }

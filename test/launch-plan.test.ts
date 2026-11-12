@@ -58,6 +58,8 @@ const adds: [string, Partial<TurnFacts>, Record<string, string>][] = [
   ['memory', { memory: true }, { COORDINATOR_MEMORY: '1' }],
   ['the typer', { typer: { id: 7, login: 'josh' } }, { CITADEL_PERSON_ID: '7', CITADEL_PERSON_LOGIN: 'josh' }],
   ['home contraptions', { homeContraptions: ['a', 'b'] }, { COORDINATOR_HOME_CONTRAPTIONS: 'a,b' }],
+  // A minion turn that got machines is offered propose_machine_notes for them (#617).
+  ['lent machines', { machines: [{ id: 3, name: 'perigee-godot', owner_id: null, servers: ['mcp'] }, { id: 4, name: 'josh-box', owner_id: 2, servers: ['mcp'] }] as TurnFacts['machines'] }, { COORDINATOR_MACHINES: 'perigee-godot,josh-box' }],
   ['a GitHub login', { env: { ...base.env, github: { GH_TOKEN: 'gh' } } }, { GH_TOKEN: 'gh' }],
   ['citadel-heavy', { env: { ...base.env, heavy: { CITADEL_HEAVY_URL: 'u' } } }, { CITADEL_HEAVY_URL: 'u' }],
   ['a temp folder', { folders: { ...base.folders, tmp: '/t' } }, { TMPDIR: '/t', TMP: '/t', TEMP: '/t', CLAUDE_CODE_TMPDIR: '/t' }],

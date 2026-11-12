@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { isAbsolute, join, sep } from 'node:path';
 import { cleanPluginPicks, lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
+import { lendsMachine, managesMachine } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
 import { cardHref } from '../card-links.ts';
@@ -12,6 +13,7 @@ import { runnerLabel } from '../ci-runner.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
+import { lineDiff } from '../instructions.ts';
 import { landArgs } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
@@ -25,6 +27,7 @@ import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '..
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
+import { machineNotes, patchMachine } from './machines.ts';
 import { ensureCoordinator } from './projects.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
@@ -150,6 +153,25 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
   }
   if (!size.files) throw new HttpError(400, spec.mode === 'branch' ? `Nothing to review: ${spec.branch} has no changes against ${base}` : 'Nothing to review: those paths hold no files');
   return { spec, size };
+}
+
+/**
+ * Post a plan card that waits, across restarts, for a person. A new one replaces any earlier one of its kind still open
+ * (waiting, or sent back for changes): a plan replaces plans, and a machine's notes card (#617) that machine's earlier ones.
+ */
+function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number } }) {
+  const { store, runner } = app;
+  for (const e of store.listEvents(id)) {
+    const old = e.kind === 'plan' ? JSON.parse(e.data) : null;
+    if (old?.status !== 'pending' && old?.status !== 'revising') continue;
+    if (old.machine?.id !== card.machine?.id) continue;
+    store.setEventData(e.id, { ...old, status: 'superseded' });
+    runner.emit(id, 'plan_result', { id: old.id, status: 'superseded' });
+  }
+  const event = runner.emit(id, 'plan', { id: randomBytes(6).toString('hex'), ...card, status: 'pending' });
+  runner.broadcastTicket(id);
+  app.notify(id, { kind: 'plan', summary: card.summary, eventId: event.id });
+  return event;
 }
 
 export const ticketRoutes: Route[] = [
@@ -479,18 +501,35 @@ export const ticketRoutes: Route[] = [
       const body = await readJson(req);
       const plan = str(body.plan, 'Plan', 20_000);
       const summary = str(body.summary, 'Summary', 200);
-      // A new plan replaces any earlier one still open (waiting, or sent back for changes).
-      for (const e of store.listEvents(id)) {
-        const old = e.kind === 'plan' ? JSON.parse(e.data) : null;
-        if (old?.status !== 'pending' && old?.status !== 'revising') continue;
-        store.setEventData(e.id, { ...old, status: 'superseded' });
-        runner.emit(id, 'plan_result', { id: old.id, status: 'superseded' });
-      }
-      const planId = randomBytes(6).toString('hex');
-      const event = runner.emit(id, 'plan', { id: planId, summary, plan, status: 'pending' });
-      runner.broadcastTicket(id);
-      app.notify(id, { kind: 'plan', summary, eventId: event.id });
-      return json(res, 201, { id: planId, href: cardHref(ticket, event.id) });
+      const event = postPlan(app, id, { summary, plan });
+      return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id) });
+    },
+  },
+  {
+    method: 'POST', path: '/api/tickets/:ticket/machine-notes', who: ['minion'], refuse: 'Only the minion itself can propose a machine\'s notes in its chat',
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      const { store } = app;
+      // A minion proposes a machine's whole new notes (#617, Josh: "Minion proposes, owner approves"): a plan card
+      // only the machine's owner or an admin can approve, which writes them through the Machines page's PATCH.
+      const body = await readJson(req);
+      const name = str(body.machine, 'Machine', 30).toLowerCase();
+      const notes = machineNotes(body.notes);
+      const project = store.getProject(ticket.project_id)!;
+      const asker = store.turnAsker(ticket.id);
+      const machine = store.listMachines().find((m) => m.name === name);
+      // As a turn of this minion's gets it (src/runner.ts): lent to this scheme, and someone's own only on its owner's ask.
+      if (!machine || !lendsMachine(store, machine, project, asker === null ? [] : [asker])) throw new HttpError(404, `No machine called ${name} that this minion gets`);
+      if (notes === machine.notes) throw new HttpError(400, `Those are already ${name}'s notes`);
+      const owner = machine.owner_id === null ? null : store.getUser(machine.owner_id)?.name ?? null;
+      const event = postPlan(app, ticket.id, {
+        summary: `New notes for ${name}`,
+        plan: notes,
+        machine: { id: machine.id, name, owner },
+        old: machine.notes,
+        diff: lineDiff(machine.notes, notes),
+      });
+      return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id), owner });
     },
   },
   {
@@ -502,18 +541,30 @@ export const ticketRoutes: Route[] = [
       // A person approves a plan card (the go) or sends it back with notes; never the minion or the Taskmaster.
       const body = await readJson(req);
       if (body.verdict !== 'approve' && body.verdict !== 'revise') throw new HttpError(400, 'verdict must be approve or revise');
-      const notes = body.verdict === 'revise' ? str(body.notes, 'Notes', 10_000) : null;
       const event = store.listEvents(id).find((e) => e.kind === 'plan' && JSON.parse(e.data).id === body.planId);
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
-      if (card.status === 'superseded') throw new HttpError(409, 'A newer plan replaced this one');
-      if (card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
-      const result = { status: body.verdict === 'approve' ? 'approved' : 'revising', by: session.name, at: Date.now() };
+      // A machine's notes card (#617): a reason to reject is optional, and only its owner or an admin approves.
+      const notes = body.verdict === 'approve' ? null : card.machine && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
+      if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : 'A newer plan replaced this one');
+      if (card.status !== 'pending') throw new HttpError(409, card.machine ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} these notes` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
+      if (card.machine && notes === null) {
+        const machine = store.getMachine(card.machine.id);
+        if (!machine || !managesMachine(session, machine)) throw new HttpError(403, `Only ${card.machine.owner ? `${card.machine.owner}, who owns ${card.machine.name},` : 'an admin'}${card.machine.owner ? ' or an admin' : ''} can approve its notes`);
+        // Approve writes what the card showed, or nothing: notes changed since (on the Machines page) aren't overwritten unseen.
+        if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
+        patchMachine(app, session, machine, { notes: card.plan });
+      }
+      const result = { status: body.verdict === 'approve' ? 'approved' : card.machine ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });
       runner.emit(id, 'plan_result', { id: card.id, ...result });
-      runner.send(id, session.name, notes === null
-        ? `Plan approved: build it this way. ("${card.summary}")`
-        : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
+      runner.send(id, session.name, card.machine
+        ? notes === null
+          ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`
+          : `Rejected your proposed notes for ${card.machine.name}; they are unchanged.${notes ? `\n\n${notes}` : ''}`
+        : notes === null
+          ? `Plan approved: build it this way. ("${card.summary}")`
+          : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
         [], { plan: { planId: card.id, verdict: body.verdict } });
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));

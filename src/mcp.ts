@@ -23,6 +23,8 @@ const IN_CONTAINER = process.env.COORDINATOR_CONTAINER === '1';
 const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 // The contraptions whose home is this scheme (#266): it may deploy them.
 const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean);
+// The machines this minion's turn got (#617): it may propose new notes for them.
+const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
 const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
@@ -183,6 +185,20 @@ const PROPOSE_PLAN = {
       plan: { type: 'string', maxLength: 20000, description: 'The whole plan in markdown: what you will change and how, what you will not do, and how you will test it. At most 20,000 characters' },
     },
     required: ['summary', 'plan'],
+  },
+};
+
+const PROPOSE_MACHINE_NOTES = {
+  name: 'propose_machine_notes',
+  description:
+    "Propose a connected machine's whole new notes (its owner's instructions that every scheme using it reads as \"Notes on <machine> from its owner\") as a card in this chat with a diff, when your work changes how the machine should be used. Only its owner or an admin can approve it; approving saves them, rejecting leaves them as they are, and either comes as a message. Send the full text minions should read, not just the change: it replaces the old notes. A newer proposal for the same machine replaces an open one. Link every mention of the card, as with propose_plan.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      machine: { type: 'string', enum: MACHINES, description: 'The machine' },
+      notes: { type: 'string', maxLength: 2000, description: 'The whole new notes, at most 2,000 characters' },
+    },
+    required: ['machine', 'notes'],
   },
 };
 
@@ -1337,6 +1353,10 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!items.length) return 'Nothing in the catalogue.';
       return items.map((c: any) => `${c.kind} ${c.name} (${c.source})${c.in_kit && c.source !== 'kit' ? ' [kit has one]' : ''}: ${c.description || 'no description'}`).join('\n');
     }
+    case 'propose_machine_notes': {
+      const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
+      return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
+    }
     case 'propose_plan': {
       const { href } = await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
       return `The plan card is in the chat${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.`;
@@ -1473,7 +1493,7 @@ function toolList() {
   const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, CI_RUNNERS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory] : [...TOOLS, CI_RUNNERS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory];
-  return [...THREAD_TOOLS, CI_RUNNERS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, CI_RUNNERS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

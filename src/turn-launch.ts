@@ -486,6 +486,8 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER) env.COORDINATOR_APP_INSTRUCTIONS = '1';
   // A contraption's home scheme may deploy it (#266): its Taskmaster and minions are offered deploy_contraption for it.
   if (facts.homeContraptions.length) env.COORDINATOR_HOME_CONTRAPTIONS = facts.homeContraptions.join(',');
+  // A minion may propose new notes for the machines its turn got (#617).
+  if (ticket.kind !== 'coordinator' && machines.length) env.COORDINATOR_MACHINES = machines.map((m) => m.name).join(',');
   const configDir = place.host ? claudeConfigDir(env) : place.configDir;
   let command = place.host ? facts.claudeBin : resolveClaude(facts.claudeBin);
   if (codex) {

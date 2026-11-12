@@ -1807,9 +1807,9 @@ export class Store {
       .all(ticketId, ticketId) as unknown as EventRow[];
   }
 
-  /** A chat's newest plan card, or undefined. */
+  /** A chat's newest plan card (not a machine's notes card, #617), or undefined. */
   latestPlan(ticketId: number): EventRow | undefined {
-    return this.db.prepare("SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' ORDER BY id DESC LIMIT 1").get(ticketId) as unknown as EventRow | undefined;
+    return this.db.prepare("SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' AND json_extract(data, '$.machine') IS NULL ORDER BY id DESC LIMIT 1").get(ticketId) as unknown as EventRow | undefined;
   }
 
   /** The backup chat's lines (src/backup.ts): the newest `limit` messages, notes, errors and replies with text after `afterId`, oldest first. */

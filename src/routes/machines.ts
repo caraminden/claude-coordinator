@@ -21,6 +21,55 @@ function machineName(v: unknown): string {
   return name;
 }
 
+/** A machine's new notes, as minions will read them; throws on anything else. */
+export function machineNotes(v: unknown): string {
+  if (typeof v !== 'string') throw new HttpError(400, 'notes must be text');
+  const notes = v.replace(/\r\n/g, '\n').trim();
+  if (notes.length > MAX_MACHINE_NOTES) throw new HttpError(400, `Notes are limited to ${MAX_MACHINE_NOTES.toLocaleString('en')} characters`);
+  return notes;
+}
+
+/**
+ * Change a machine: any of name, notes, lend (what is ticked), workspace_tools, always_on and projects (the schemes it is
+ * lent to: the whole list). The one write path for its settings: the Machines page's PATCH, and an approved notes card (#617).
+ */
+export function patchMachine(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: any) {
+  if (!managesMachine(session, machine)) throw new HttpError(404, 'No such machine');
+  const lend = body.lend === undefined ? undefined : cleanLend(body.lend);
+  if (lend === null) throw new HttpError(400, 'lend must be { server: a found MCP server\'s name or null, workspaces: [names] }');
+  let projects: number[] | undefined;
+  if (body.projects !== undefined) {
+    // A scheme the person can't see isn't theirs to add; one already on the list (an admin's doing) may stay.
+    const had = app.store.machineProjects(machine.id);
+    if (!(Array.isArray(body.projects) && body.projects.every((id: unknown) => Number.isInteger(id) && app.store.getProject(id as number) && (had.includes(id as number) || app.store.canSee(session, id as number))))) {
+      throw new HttpError(400, 'projects must be a list of scheme ids');
+    }
+    projects = body.projects;
+  }
+  const fields: { name?: string; notes?: string; workspace_tools?: number; always_on?: number } = {};
+  for (const k of ['workspace_tools', 'always_on'] as const) {
+    if (body[k] === undefined) continue;
+    if (typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false`);
+    fields[k] = body[k] ? 1 : 0;
+  }
+  if (body.name !== undefined) fields.name = machineName(body.name);
+  if (body.notes !== undefined) fields.notes = machineNotes(body.notes);
+  try {
+    app.store.updateMachine(machine.id, fields);
+  } catch {
+    throw new HttpError(409, 'A machine with that name already exists');
+  }
+  if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
+  if (lend) app.machines.setLend(machine.id, lend);
+  // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
+  if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
+  // Switched on: its workspace tools get their first check now.
+  if (fields.workspace_tools === 1) app.machines.checkIfDue(machine.id);
+  if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.machineGranted(machine.id, id));
+  app.broadcast({ type: 'machines', machines: app.machines.list() });
+  return app.machines.view(app.store.getMachine(machine.id)!);
+}
+
 /** A file a workspace session's fetch_file sends: saved in that minion's shared files, under machine-files/<machine>/. */
 async function machineUpload({ req, res, url, app }: Ctx, machine: Machine) {
   const ticketId = app.machines.workspaceTicket(machine, url.searchParams.get('session') ?? '');
@@ -218,47 +267,7 @@ export const machineRoutes: Route[] = [
   },
   {
     method: 'PATCH', path: '/api/machines/:machine', ...people,
-    handler: managed(async ({ req, res, app, machine, session }) => {
-      // Any of name, notes, lend (what is ticked), workspace_tools, always_on and projects (the schemes it is lent to: the whole list).
-      const body = await readJson(req);
-      const lend = body.lend === undefined ? undefined : cleanLend(body.lend);
-      if (lend === null) throw new HttpError(400, 'lend must be { server: a found MCP server\'s name or null, workspaces: [names] }');
-      let projects: number[] | undefined;
-      if (body.projects !== undefined) {
-        // A scheme the person can't see isn't theirs to add; one already on the list (an admin's doing) may stay.
-        const had = app.store.machineProjects(machine.id);
-        if (!(Array.isArray(body.projects) && body.projects.every((id: unknown) => Number.isInteger(id) && app.store.getProject(id as number) && (had.includes(id as number) || app.store.canSee(session, id as number))))) {
-          throw new HttpError(400, 'projects must be a list of scheme ids');
-        }
-        projects = body.projects;
-      }
-      const fields: { name?: string; notes?: string; workspace_tools?: number; always_on?: number } = {};
-      for (const k of ['workspace_tools', 'always_on'] as const) {
-        if (body[k] === undefined) continue;
-        if (typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false`);
-        fields[k] = body[k] ? 1 : 0;
-      }
-      if (body.name !== undefined) fields.name = machineName(body.name);
-      if (body.notes !== undefined) {
-        if (typeof body.notes !== 'string') throw new HttpError(400, 'notes must be text');
-        fields.notes = body.notes.replace(/\r\n/g, '\n').trim();
-        if (fields.notes.length > MAX_MACHINE_NOTES) throw new HttpError(400, `Notes are limited to ${MAX_MACHINE_NOTES.toLocaleString('en')} characters`);
-      }
-      try {
-        app.store.updateMachine(machine.id, fields);
-      } catch {
-        throw new HttpError(409, 'A machine with that name already exists');
-      }
-      if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
-      if (lend) app.machines.setLend(machine.id, lend);
-      // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
-      if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
-      // Switched on: its workspace tools get their first check now.
-      if (fields.workspace_tools === 1) app.machines.checkIfDue(machine.id);
-      if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.machineGranted(machine.id, id));
-      app.broadcast({ type: 'machines', machines: app.machines.list() });
-      return json(res, 200, app.machines.view(app.store.getMachine(machine.id)!));
-    }),
+    handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, patchMachine(app, session, machine, await readJson(req)))),
   },
   {
     // Check now (#437): what the hourly check does, asked for; it answers once the check ends.

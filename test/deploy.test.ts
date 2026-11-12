@@ -18,7 +18,8 @@ testPins();
 const repo = join(import.meta.dirname, '..');
 // The scripts refuse to run in a person's Claude container (COORDINATOR_CONTAINER=1); these tests stand in for the host.
 // DEPLOY_LOCKED and DEPLOY_TESTED leak in when this suite runs under a deploy (#514).
-const hostEnv = { ...scriptEnv(), COORDINATOR_CONTAINER: undefined };
+// COORDINATOR_SHARED_DIR: a minion's or a landing's real one would get the test restarts' timing lines (#565).
+const hostEnv = { ...scriptEnv(), COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined };
 const root = mkdtempSync(join(tmpdir(), 'deploy-test-'));
 const procs: ChildProcess[] = [];
 after(async () => {

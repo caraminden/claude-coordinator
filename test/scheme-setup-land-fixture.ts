@@ -11,7 +11,8 @@ import { scriptEnv } from './script-env.ts';
 const templates = join(import.meta.dirname, '..', 'kit', 'skills', 'scheme-setup', 'templates');
 export const root = mkdtempSync(join(tmpdir(), 'scheme-land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
-export const env = { ...scriptEnv(), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+// COORDINATOR_CONTAINER: the template refuses in a container turn (#577), and these tests run there too.
+export const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined }), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 export const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 export let n = 0;

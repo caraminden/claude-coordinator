@@ -1,0 +1,37 @@
+# The land and deploy pipeline's files, and the tests that run only the pipeline's scripts (#581).
+# tools/run-tests.sh reads it: a change that touches none of these paths leaves out the test files listed here (the
+# lines under test/ ending .test.ts), so a flaky or wrong pipeline test can't block a product land. A change to any of
+# them, a run on main itself (the nightly, deploy.sh) and `npm test` run every file. A path ending / covers its folder.
+# A test file goes here only if it imports nothing from outside test/, directly or through its fixtures, and every
+# tools/ file it reads is listed: test/pipeline-files.test.ts (on every land) checks both.
+tools/pipeline-files.txt
+tools/land.sh
+tools/deploy.sh
+tools/deploy-queue.sh
+tools/run-tests.sh
+tools/citadel-wait
+tools/citadel-heavy
+tools/boot-check.ts
+tools/failed-files-reporter.ts
+tools/progress-reporter.ts
+tools/citadel-node
+tools/citadel-node.cjs
+src/land.ts
+.github/workflows/tests.yml
+kit/skills/scheme-setup/templates/
+test/script-env.ts
+test/land-fixture.ts
+test/land-recover-fixture.ts
+test/scheme-setup-land-fixture.ts
+test/land.test.ts
+test/land-queue.test.ts
+test/land-deploy.test.ts
+test/land-recover.test.ts
+test/land-boot-check.test.ts
+test/land-overlap.test.ts
+test/scheme-setup-land.test.ts
+test/scheme-setup-land-ci.test.ts
+test/run-tests.test.ts
+test/run-tests-scope.test.ts
+test/citadel-wait.test.ts
+test/citadel-heavy.test.ts

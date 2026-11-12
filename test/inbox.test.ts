@@ -67,6 +67,27 @@ test('a card a person handled by typing in the chat leaves the inbox; the Taskma
   assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['q-relayed', 'p-new']);
 });
 
+test('only a person\'s own message clears a card: another scheme\'s Taskmaster (live or held mail), relays, Mandate and briefs don\'t (#610)', () => {
+  const store = new Store(join(root, 'not-people.sqlite'));
+  const p = store.createProject('Peek', null).id;
+  const tm = store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' }).id;
+  const minion = store.createTicket({ project_id: p, title: 'm', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+
+  store.addEvent(tm, 'question', { id: 'q-held-mail', questions: [] });
+  store.addEvent(tm, 'user_message', { author: 'Taskmaster of Citadel', text: 'fyi', mail: true, cold: true, from: 99 });
+  store.addEvent(tm, 'question', { id: 'q-live-relay', questions: [] });
+  store.addEvent(tm, 'user_message', { author: 'Taskmaster of Citadel', text: 'fyi', from: 99 });
+  store.addEvent(tm, 'user_message', { author: 'Mandate', text: 'Josh ticked an item (key k)' });
+  store.addEvent(minion, 'plan', { id: 'p-brief', summary: 's', plan: 'p', status: 'pending' });
+  store.addEvent(minion, 'user_message', { author: 'Josh', text: 'Scheduled run: do the thing', brief: true });
+
+  assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['q-held-mail', 'q-live-relay', 'p-brief']);
+  assert.deepEqual(store.recentCards(p, 10).map((r) => r.reply), [null, null, null]);
+
+  store.addEvent(tm, 'user_message', { author: 'Josh', text: 'Centred, go', typed: true });
+  assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['p-brief'], 'a person typing in the chat still handles its cards');
+});
+
 test('openCardAt: when a minion\'s oldest open card was posted, for the list\'s "?" badge; answered, settled, superseded and dismissed cards don\'t count', () => {
   const store = new Store(join(root, 'card-at.sqlite'));
   const p = store.createProject('One', null).id;

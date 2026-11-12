@@ -239,6 +239,8 @@ test('a turn\'s snapshot lists the scheme\'s recently settled cards with who set
   const click = runner.emit(a.id, 'user_message', { author: 'Cara', text: 'My answers…', answer: { questionId: 'q1', answers: [{ selected: ['Done, I ran it'] }] } });
   const open = ask(a, 'q2', 'Layout');
   runner.emit(a.id, 'user_message', { author: 'Taskmaster', text: 'Any news?' });
+  // Another scheme's Taskmaster's held mail answers nothing (#610).
+  runner.emit(a.id, 'user_message', { author: 'Taskmaster of Peek', text: 'fyi', mail: true, cold: true, from: 99 });
   const plan = runner.emit(a.id, 'plan', { id: 'p1', summary: 'Build it', plan: 'x', status: 'approved', by: 'Josh', at: 1_000 });
   const typed = ask(b, 'q3', 'Name');
   const reply = runner.emit(b.id, 'user_message', { author: 'Josh', text: 'Call it Keep' });

@@ -12,6 +12,15 @@ export const buildOwnerKey = (projectId: number, build: number) => `build-owner:
 /** A minion's task-list state as of its last finished turn, so a restart replays only what came since (#530; src/runner.ts progressFor). */
 export const planKey = (ticketId: number) => `plan:${ticketId}`;
 
+/**
+ * SQL on user_message event `a`: a person wrote it in that chat, so it can answer or handle a card there.
+ * Not a relay from another chat (`from`: a minion, this or another scheme's Taskmaster), held mail, a
+ * brief, Mandate's hook news, nor a name that isn't a person's (#610).
+ */
+const PERSON_WROTE = `json_extract(a.data, '$.from') IS NULL AND json_extract(a.data, '$.mail') IS NULL AND json_extract(a.data, '$.brief') IS NULL
+  AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${[...NOT_PEOPLE, 'Mandate'].map((n) => `'${n.toLowerCase().replace(/'/g, "''")}'`).join(', ')})
+  AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'`;
+
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** Each project has one long-lived coordinator ticket that manages the others. */
 export type TicketKind = 'ticket' | 'coordinator';
@@ -1881,15 +1890,12 @@ export class Store {
    * a click on another card (`reply`), and an approval's result (`result`). For the link check (#531).
    */
   recentCards(projectId: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
-    const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
     return this.db.prepare(`
       SELECT * FROM (
         SELECT e.*, t.number, t.kind AS tkind, t.status AS tstatus,
           (SELECT json_object('author', json_extract(a.data, '$.author'), 'at', a.created_at, 'text', substr(json_extract(a.data, '$.text'), 1, 200),
               'answer', json(json_extract(a.data, '$.answer')))
-            FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id
-              AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${bots.map(() => '?').join(', ')})
-              AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'
+            FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id AND ${PERSON_WROTE}
               AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), json_extract(e.data, '$.id')) = json_extract(e.data, '$.id')
             ORDER BY a.id LIMIT 1) AS reply,
           (SELECT json_set(r.data, '$.at', r.created_at) FROM events r WHERE r.ticket_id = e.ticket_id AND r.kind = 'approval_result' AND r.id > e.id
@@ -1897,23 +1903,20 @@ export class Store {
         FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
         WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval')
         ORDER BY e.id DESC LIMIT ?)
-      ORDER BY id`).all(...bots, projectId, limit) as any;
+      ORDER BY id`).all(projectId, limit) as any;
   }
 
   private openCardsWhere(scope: string, id: number): EventRow[] {
-    const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
     return this.db.prepare(`
       SELECT e.* FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
       WHERE ${scope} AND t.status != 'closed' AND e.kind IN ('plan', 'question') AND (
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
         OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
       AND NOT EXISTS (
-        SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id
-          AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${bots.map(() => '?').join(', ')})
-          AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'
+        SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id AND ${PERSON_WROTE}
           -- a click on another card answers that card, not this one
           AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), json_extract(e.data, '$.id')) = json_extract(e.data, '$.id'))
-      ORDER BY e.id`).all(id, ...bots) as unknown as EventRow[];
+      ORDER BY e.id`).all(id) as unknown as EventRow[];
   }
 
   /** The text of a ticket's replies that may link files (subagents' included). */

@@ -17,7 +17,7 @@ import type { Wait } from './waits.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
-import { previewKey } from './previews.ts';
+import { buildPreviewPath, previewKey } from './previews.ts';
 import { isAuthFailure, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
@@ -1837,7 +1837,11 @@ export class Runner {
     // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
     const builds = landsBuilds(project.repo_dir);
     const build = builds && ticket.kind !== 'coordinator' && ticket.build
-      ? { build: ticket.build, branch: buildBranch(project.repo_dir, ticket.build), owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id }
+      ? {
+        build: ticket.build, branch: buildBranch(project.repo_dir, ticket.build), owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
+        // Only this server's own scheme has build previews (src/previews.ts).
+        preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
+      }
       : null;
     writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds));
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's

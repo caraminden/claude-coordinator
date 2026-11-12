@@ -35,6 +35,14 @@ test("the build minion gets its steps from the start, and the first makes the br
   const once = buildLines({ build: 7, branch: 'build/7', owner: true }).join('\n');
   assert.doesNotMatch(once, /git branch build\/7 main/, 'made already');
   assert.doesNotMatch(once, /You are a feeder/);
+  assert.doesNotMatch(once, /preview/i, 'a scheme this server does not run has no build preview');
+});
+
+test("in this server's own scheme, the build minion is told its preview's link, for its list and the go card", () => {
+  const lines = buildLines({ build: 7, branch: 'build/7', owner: true, preview: 'https://app.example/preview/build/7/' }).join('\n');
+  assert.match(lines, /Its preview, the tip of `build\/7` on a fresh copy of the live data, is at https:\/\/app\.example\/preview\/build\/7\//);
+  assert.match(lines, /put that link in the build's list and on the go card/);
+  assert.doesNotMatch(buildLines({ build: 7, branch: 'build/7', owner: false, preview: 'https://app.example/preview/build/7/' }).join('\n'), /preview/i, 'feeders have no use for it');
 });
 
 test('the Taskmaster gets the test for suggesting a build only when the scheme can land one', () => {

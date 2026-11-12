@@ -423,7 +423,9 @@ export const projectRoutes: Route[] = [
       const pins = caller ? [] : app.store.pinnedTickets(session.name, project.id);
       // Each build branch's standing, for its header in the list (src/builds.ts); [] without build branches.
       const builds = app.builds?.get(project.id) ?? [];
-      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, dismissed, seen, person_notes, pins, builds });
+      // Builds' previews are of this server's own code, so only its own scheme's headers link one (src/previews.ts).
+      const build_previews = !!app.previews && app.previews.buildScheme()?.id === project.id;
+      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, dismissed, seen, person_notes, pins, builds, build_previews });
     },
   },
   {

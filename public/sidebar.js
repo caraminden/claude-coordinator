@@ -218,11 +218,15 @@ function groupHeading(group) {
   return label || value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-/** A build's heading; one with a branch (src/builds.ts) also says how many feeders are merged in and open, and how far it is behind main. */
+/**
+ * A build's heading; one with a branch (src/builds.ts) also says how many feeders are merged in and open,
+ * and how far it is behind main, and in this server's own scheme links the branch's preview (src/previews.ts).
+ */
 function buildHeading(s) {
   const b = view.builds?.find((x) => x.build === s.build);
   return ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : '',
-    b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`) : ''];
+    b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`,
+      view.buildPreviews ? [' · ', h('a', { href: `../preview/build/${b.build}/`, target: '_blank', rel: 'noopener', title: `build/${b.build}'s tip on a copy of the data` }, 'Preview')] : '') : ''];
 }
 
 export function renderSidebar() {

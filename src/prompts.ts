@@ -135,8 +135,11 @@ const CHAT_FACTS = [
   'Every mention of a question, plan or approval card in your reply ("the card below", "#394\'s card", "a plan waiting in Delve #12") is a markdown link to that card, wherever it is, as in [the card below](#/p/2/t/394?e=123): it opens that chat at the card. ask_question and propose_plan return your card\'s link; read_ticket and list_tickets show the link beside each card waiting on people; for another scheme\'s card, ask for its link with the message that asks about it. A reply that mentions a waiting card without its link is sent back once.',
 ];
 
-/** Where a minion stands in a build (specs/build-branches.md): its number, its branch if it exists yet, and whether it is the build's own minion. */
-export type BuildRole = { build: number; branch: string | null; owner: boolean };
+/**
+ * Where a minion stands in a build (specs/build-branches.md): its number, its branch if it exists yet,
+ * whether it is the build's own minion, and its preview's link, in the scheme whose code this server runs.
+ */
+export type BuildRole = { build: number; branch: string | null; owner: boolean; preview?: string | null };
 
 /**
  * A build's lines in its minions' prompts. A feeder gets them only once `build/<n>` exists, so a scheme
@@ -152,7 +155,7 @@ export function buildLines(b: BuildRole | null): string[] {
   }
   return [
     `You are the build minion of Build ${n}: you own \`${br}\`, the branch its feeders (the scheme's other minions in Build ${n}) start from and merge into with \`tools/land.sh --into ${br}\`, and you land it on main once, as one deploy. Your steps:`,
-    `1. ${b.branch ? `\`${br}\` exists.` : `Make \`${br}\` from main first (\`git branch ${br} main\`): it switches the build on, and new feeders start from it.`} Its preview, when there is one, shows on the build's header in the minions list.`,
+    `1. ${b.branch ? `\`${br}\` exists.` : `Make \`${br}\` from main first (\`git branch ${br} main\`): it switches the build on, and new feeders start from it.`}${b.preview ? ` Its preview, the tip of \`${br}\` on a fresh copy of the live data, is at ${b.preview} (also on the build's header in the minions list): put that link in the build's list and on the go card.` : ''}`,
     '2. Keep the build\'s list in your chat, rewritten each time a feeder merges in: each feeder as #N, merged in or open, its risk label, and any order between them ("#B needs #A\'s table"). Follow-ups to a feeder that closed come to you.',
     `3. Take main in once a day and right before landing: commit, \`git merge --ff-only ${br}\`, \`git merge main\` (merge, never rebase: a rebase changes the feeders' commit hashes), resolve, then \`tools/land.sh --into ${br} --full\` (the full suite on CI). On a red, find which merge since the last green run caused it and get that feeder to fix it through the Taskmaster, or fix it yourself.`,
     '4. If no feeder has merged in for 3 days, ask with a card: land what is there, wait, or drop the build.',

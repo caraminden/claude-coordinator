@@ -76,7 +76,7 @@ queue_outside() {
   if [ -n "$who" ]; then
     echo "outside the line, the lock is open in $who$([ "$count" -le 3 ] || echo " and $((count - 3)) more")"
   else
-    echo "a landing started from a branch older than the line, or a restart queued before it had a lock of its own"
+    echo "a queued restart, or a landing started from a branch older than the line"
   fi
 }
 

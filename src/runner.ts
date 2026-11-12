@@ -332,14 +332,24 @@ export function parseResetTime(text: string, now = Date.now()): number | null {
   }
 }
 
+// en-US formatters by their options, made once: a new one per date (toLocaleTimeString) took 0.1 ms, and the
+// settled cards of a scheme-refs snapshot format hundreds (#609). A zone Intl doesn't know throws, as before.
+const formats = new Map<string, Intl.DateTimeFormat>();
+function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = JSON.stringify(opts);
+  let f = formats.get(key);
+  if (!f) formats.set(key, f = new Intl.DateTimeFormat('en-US', opts));
+  return f;
+}
+
 /** "3:31pm", in the account's zone when Claude named it; "Fri 3:31pm" on another day, "Thu, Nov 5 3:31pm" six days or more out (a weekly limit). */
 export function clockTime(ms: number, tz?: string, now = Date.now()): string {
   const say = (timeZone?: string) => {
-    const time = new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone }).replace(' ', '').toLowerCase();
-    const day = (at: number) => new Date(at).toLocaleDateString('en-US', { timeZone });
+    const time = dateFormat({ hour: 'numeric', minute: '2-digit', timeZone }).format(ms).replace(' ', '').toLowerCase();
+    const day = (at: number) => dateFormat({ timeZone }).format(at);
     if (day(ms) === day(now)) return time;
     const far = ms - now >= 6 * 86_400_000;
-    return `${new Date(ms).toLocaleDateString('en-US', { weekday: 'short', ...(far && { month: 'short', day: 'numeric' }), timeZone })} ${time}`;
+    return `${dateFormat({ weekday: 'short', ...(far && { month: 'short', day: 'numeric' }), timeZone }).format(ms)} ${time}`;
   };
   try {
     return say(tz);
@@ -2714,12 +2724,20 @@ export class Runner {
     });
   }
 
+  /** What every turn's scheme-refs snapshot in a scheme shares, read once however many turns run there (#609). */
+  refsShared(projectId: number) {
+    const tickets = this.store.listTickets(projectId);
+    const links = new Map(tickets.map((t) => [t.id, this.cardLinks(t)]));
+    const open = new Set([...links.values()].flat().map((c) => c.href));
+    return { project: this.store.getProject(projectId)!, projects: this.store.listProjects(), tickets, links, settled: this.settledCards(projectId, open) };
+  }
+
   /** Write a turn's scheme-refs snapshot (scheme-refs.ts) for `ticket`, with its scheme's cards waiting on people. */
-  private writeRefs(file: string, ticket: Ticket) {
-    const project = this.store.getProject(ticket.project_id)!;
-    const tickets = this.store.listTickets(project.id);
-    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => this.cardLinks(t, t.id === ticket.id)) };
-    const refs = { ...schemeRefs(project, this.store.listProjects(), tickets, cards), settled: this.settledCards(project.id, new Set(cards.cards.map((c) => c.href))) };
+  private writeRefs(file: string, ticket: Ticket, shared = this.refsShared(ticket.project_id)) {
+    const { project, projects, tickets, links, settled } = shared;
+    // Only the turn's own cards say where each sits (`placed`).
+    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => t.id === ticket.id ? this.cardLinks(t, true) : links.get(t.id)!) };
+    const refs = { ...schemeRefs(project, projects, tickets, cards), settled };
     // Whole or not at all: the link check may read it mid-turn.
     writeFileSync(`${file}.new`, JSON.stringify(refs));
     renameSync(`${file}.new`, file);
@@ -2728,12 +2746,13 @@ export class Runner {
   /** A card was posted or settled in `ticketId`'s chat: the running turns of its scheme get it in their snapshot, so the link check knows it. */
   private refreshRefs(ticketId: number) {
     const projectId = this.store.getTicket(ticketId)?.project_id;
+    let shared: ReturnType<Runner['refsShared']> | undefined;
     for (const [id, turn] of this.turns) {
       const t = this.store.getTicket(id);
       const file = join(turn.dir, 'scheme-refs.json');
       if (t?.project_id !== projectId || !existsSync(file)) continue;
       try {
-        this.writeRefs(file, t);
+        this.writeRefs(file, t, shared ??= this.refsShared(projectId));
       } catch {
         // A stale snapshot only means a card goes unchecked.
       }

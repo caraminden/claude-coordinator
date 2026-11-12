@@ -116,7 +116,7 @@ test('a row\'s card badge opens the oldest open card, the rest of the row the ch
     const row = (id, open_cards) => threadRow({ id, number: id, project_id: 2, kind: 'ticket', title: 'T' + id, status: 'idle', updated_at: Date.now(), open_cards });
     document.body.prepend(row(7, [{ kind: 'question', label: 'A', href: '#/p/2/t/7?e=11' }, { kind: 'plan', label: 'B', href: '#/p/2/t/7?e=12' }]), row(8, []));
   })()`);
-  assert.equal(await page.eval(`document.querySelector('[data-id="7"] .card-badge').textContent`), '2 cards');
+  assert.equal(await page.eval(`document.querySelector('[data-id="7"] .card-badge').textContent`), '2 questions');
   assert.equal(await page.eval(`!!document.querySelector('[data-id="8"] .card-badge')`), false);
   await page.eval(`document.querySelector('[data-id="7"] .card-badge').click()`);
   assert.equal(await page.eval('location.hash'), '#/p/2/t/7?e=11', 'the badge opens the oldest card');

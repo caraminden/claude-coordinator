@@ -8,7 +8,7 @@ import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
-import { byUrgency, rowState, SHIP } from './threadstate.js';
+import { byUrgency, rowBar, rowState, SHIP } from './threadstate.js';
 import { waitBar, waitClock, waitWords } from './wait.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
@@ -370,10 +370,9 @@ export function threadRow(t, href = threadHref(t)) {
   const wait = !coord && t.status !== 'closed' && t.wait;
   // A wait says more than the ship badge ("restart · 2 turns" over "deploying"), so the row shows one.
   const ship = shipStage?.badge && !wait ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
-  // The chat head's bar (#573): a wait's own estimate, else the running step against its guess, else steps done,
-  // on a working or waiting row or one paused partway through its plan (a card, ready, blocked).
-  const bar = wait && (wait.total || wait.usual) ? waitBar(wait)
-    : t.steps && (st.counted || t.steps.done < t.steps.total) ? waitBar(!wait && t.steps.usual ? { since: t.steps.since, usual: t.steps.usual } : t.steps) : '';
+  // The chat head's bar (#573), only while it works or waits on a land, CI or a deploy (threadstate.js rowBar).
+  const barOf = rowBar({ ...t, wait }, st);
+  const bar = barOf ? waitBar(barOf) : '';
   const card = cardBadge(t.open_cards ?? []);
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
@@ -410,7 +409,8 @@ function cardBadge(cards) {
   const what = `${cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
   return h('span', {
     class: 'card-badge', role: 'link', tabindex: 0,
-    title: cards.length > 1 ? `${cards.length} cards wait on you: open the oldest, the ${what}` : `Open the ${what}`,
+    title: cards.length > 1 ? `${cards.length} questions wait on you: open the oldest, the ${what}` : `Open the ${what}`,
     onclick: go, onauxclick: (e) => { if (e.button === 1) go(e); }, onkeydown: (e) => { if (e.key === 'Enter') go(e); },
-  }, cards.length > 1 ? `${cards.length} cards` : 'card');
+    // Cara, 2026-11-11: "Lets rename the "card" pill to "question"", plan and approval cards included.
+  }, cards.length > 1 ? `${cards.length} questions` : 'question');
 }

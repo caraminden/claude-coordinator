@@ -2,7 +2,7 @@
 // kind of minion gets, the usage-limit countdowns, and the list's order.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { byUrgency, rowState, SHIP } from '../public/threadstate.js';
+import { byUrgency, rowBar, rowState, SHIP } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -144,4 +144,24 @@ test('a wait reads elapsed against its usual, and runs late past 15% over', asyn
   // A CI run that ended stops its clock there, and isn't late any more.
   assert.equal(waitTime({ since: NOW - HOUR, ended: NOW - HOUR + 95_000, usual: 160 }, NOW), '1m 35s of ~2m 40s');
   assert.equal(waitLate({ since: NOW - HOUR, ended: NOW - 1000, usual: 160 }, NOW), false);
+});
+
+test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none while it waits on a person (#575)', () => {
+  const bar = (over) => { const row = t(over); return rowBar(row, rowState(row, null, NOW)); };
+  const half = { done: 2, total: 4 };
+  const ci = { kind: 'ci', stage: 'ci', since: NOW - MIN, usual: 5 * MIN };
+  // Cara, 2026-11-11: "if a minion is asking a question it shouldnt have a progress bar right?"
+  assert.equal(bar({ steps: half, pending_card_at: NOW - MIN }), null, 'an open card, plan half done');
+  for (const state of ['ready', 'try', 'complete', 'blocked', 'parked']) assert.equal(bar({ steps: half, state }), null, state);
+  assert.equal(bar({ steps: half }), null, 'your move');
+  assert.equal(bar({ status: 'error', state: 'limited', steps: half }), null, 'at the usage limit');
+  assert.equal(bar({ status: 'running', approvals: 1, steps: half }), null, 'an approval card holds the turn');
+  assert.equal(bar({ status: 'closed', steps: half }), null, 'dismissed');
+  assert.equal(bar({ steps: half, state: 'ready', wait: ci }), null, 'a stale wait on a row waiting on you');
+  assert.deepEqual(bar({ status: 'running', steps: half }), half, 'working: steps done');
+  assert.deepEqual(bar({ status: 'running', steps: { ...half, since: NOW - MIN, usual: 120 } }), { since: NOW - MIN, usual: 120 }, 'working: the running step against its guess');
+  assert.equal(bar({ status: 'running', steps: half, wait: ci }), ci, 'a CI wait in the turn');
+  assert.equal(bar({ state: 'outside', steps: half, wait: ci }), ci, 'waiting on CI after the turn');
+  assert.equal(bar({ state: 'pending-deploy', wait: { kind: 'deploy', stage: 'restart', total: 3, done: 1 } }).total, 3, 'a deploy');
+  assert.equal(bar({ state: 'outside', steps: half }), null, 'waiting elsewhere with no estimate of its own');
 });

@@ -60,6 +60,20 @@ function limitState(t, waited, usage, now) {
   return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
 }
 
+/**
+ * What a list row's bar (#573) fills from, or null for none: a wait with its own estimate (a land, CI, a deploy),
+ * else the plan's running step or its steps done, only while the minion works. A row waiting on a person (a card,
+ * an approval, ready, try it), blocked, parked or at the usage limit has none; the card badge flags a card (Cara,
+ * 2026-11-11: "if a minion is asking a question it shouldnt have a progress bar right?"). `st` is its rowState.
+ */
+export function rowBar(t, st) {
+  if (st.rank === 0 || t.status === 'closed') return null;
+  const working = t.status === 'running', w = t.wait;
+  if (w && (w.total || w.usual) && (working || t.state === 'outside' || t.state === 'pending-deploy')) return w;
+  if (!working || !t.steps) return null;
+  return !w && t.steps.usual ? { since: t.steps.since, usual: t.steps.usual } : t.steps;
+}
+
 /** Where a minion's change is (t.ship, src/branch.ts): its colour family, and its badge in the list (none on its branch). */
 export const SHIP = {
   branch: { fam: 'idle', badge: '' },

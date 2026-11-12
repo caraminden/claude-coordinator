@@ -410,10 +410,13 @@ export const projectRoutes: Route[] = [
     async handler({ res, url, app, session, caller, project }) {
       const coordinator = await ensureCoordinator(app, project);
       const which = url.searchParams.get('tickets');
+      // ?number=N sends only that minion: the Taskmaster's tools turn a number into an id this way, on each call (#609).
+      const number = url.searchParams.has('number') ? Number(url.searchParams.get('number')) : null;
       const all = app.store.listTickets(project.id).filter((t) => t.kind === 'ticket');
       const dismissed = all.filter((t) => t.status === 'closed').length;
       const tickets = all
         .filter((t) => which === 'open' ? t.status !== 'closed' : which === 'closed' ? t.status === 'closed' : true)
+        .filter((t) => number === null || t.number === number)
         .map((t) => app.runner.view(t));
       // When this person last looked at each thread, so rows they have already seen can be shown quieter.
       const seen = caller ? {} : app.store.seenTimes(session.name, project.id);

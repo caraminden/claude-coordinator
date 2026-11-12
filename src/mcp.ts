@@ -909,7 +909,7 @@ function transcript(events: any[]): string[] {
 async function id(args: any): Promise<number> {
   const n = Number(args.ticket_id);
   if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
-  const { tickets } = await call('GET', `/api/projects/${PROJECT}`);
+  const { tickets } = await call('GET', `/api/projects/${PROJECT}?number=${n}`); // one minion's view, not the whole scheme's (#609)
   const ticket = tickets.find((t: any) => t.number === n);
   if (!ticket) throw new Error(`There is no minion #${n} in this scheme`);
   return ticket.id;

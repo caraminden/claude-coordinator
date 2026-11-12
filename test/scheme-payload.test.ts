@@ -38,6 +38,11 @@ test('the scheme payload: everything, the open minions with a count of the dismi
   assert.deepEqual(await ids(''), [open, gone, gone2].sort());
   assert.deepEqual(await ids('?tickets=open'), [open]);
   assert.deepEqual(await ids('?tickets=closed'), [gone, gone2].sort());
+  // The Taskmaster's tools turn a number into an id with ?number= (#609), a dismissed minion's too.
+  const n = (id: number) => (srv.call(`/api/tickets/${id}`) as Promise<any>).then((r) => r.data.ticket.number);
+  assert.deepEqual(await ids(`?number=${await n(gone)}`), [gone]);
+  assert.deepEqual(await ids(`?number=${await n(open)}`), [open]);
+  assert.deepEqual(await ids('?number=9999'), []);
 });
 
 test('the scheme list names each scheme\'s Taskmaster', async () => {

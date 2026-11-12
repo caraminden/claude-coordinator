@@ -226,6 +226,8 @@ for (const when of ['during the turn', 'during the save']) {
     const save = heldSaves(r1);
     const { id, cwd } = minion();
     r1.send(id, 'Cara', 'one');
+    // The turn may first restore the earlier test's memory note off the event loop (#612): a message sent then rides along.
+    await until(() => r1.isRunning(id), 'the turn to start');
     if (when === 'during the turn') r1.send(id, 'Cara', `two, ${when}`);
     writeFileSync(go, '');
     await until(() => save.saves() === 1, 'the turn to end and start saving');

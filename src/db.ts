@@ -716,6 +716,37 @@ CREATE TABLE IF NOT EXISTS state.claude_state (
 CREATE INDEX IF NOT EXISTS state.claude_state_owner ON claude_state(project_id, ticket_id);
 `;
 
+const PUT_CLAUDE_STATE = `INSERT INTO claude_state (path, project_id, ticket_id, size, mtime, data) VALUES (?, ?, ?, ?, ?, ?)
+  ON CONFLICT(path) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id,
+    size = excluded.size, mtime = excluded.mtime, data = excluded.data`;
+
+/**
+ * state.db on a connection of its own, for the worker thread that moves session blobs (src/sessions.ts): a
+ * 60 MB row read or written on the server's connection held the event loop for seconds (#612).
+ */
+export class StateDb {
+  private db: DatabaseSync;
+
+  constructor(path: string) {
+    // A long wait: it runs off the event loop, and the server's own connection may be writing.
+    this.db = new DatabaseSync(path, { timeout: 30_000 });
+    this.db.exec('PRAGMA synchronous = NORMAL; PRAGMA journal_size_limit = 16777216;');
+  }
+
+  getData(path: string): { data: Uint8Array; mtime: number } | undefined {
+    return this.db.prepare('SELECT data, mtime FROM claude_state WHERE path = ?').get(path) as { data: Uint8Array; mtime: number } | undefined;
+  }
+
+  /** As Store.putClaudeState, but never over a newer copy: another login's save may have landed since this one's check (#259). */
+  put(row: Required<ClaudeStateRow>) {
+    this.db.prepare(`${PUT_CLAUDE_STATE} WHERE excluded.mtime >= claude_state.mtime`).run(row.path, row.project_id, row.ticket_id, row.size, row.mtime, row.data);
+  }
+
+  close() {
+    this.db.close();
+  }
+}
+
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
@@ -882,7 +913,7 @@ export class Store {
    * files as one, so a crash in between leaves the rows in both and the next start repeats it.
    */
   private attachState() {
-    this.db.prepare('ATTACH DATABASE ? AS state').run(this.path === ':memory:' ? ':memory:' : join(dirname(this.path), 'state.db'));
+    this.db.prepare('ATTACH DATABASE ? AS state').run(this.statePath ?? ':memory:');
     // auto_vacuum only takes before the file's first table, so a new state.db gets it; the prune frees space with incremental_vacuum.
     this.db.exec('PRAGMA state.auto_vacuum = INCREMENTAL; PRAGMA state.journal_mode = WAL; PRAGMA state.synchronous = NORMAL;');
     // A WAL file keeps its biggest size unless capped: the move alone grew state.db's to its whole size.
@@ -1640,13 +1671,12 @@ export class Store {
   }
 
   putClaudeState(row: Required<ClaudeStateRow>) {
-    this.db
-      .prepare(
-        `INSERT INTO claude_state (path, project_id, ticket_id, size, mtime, data) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(path) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id,
-           size = excluded.size, mtime = excluded.mtime, data = excluded.data`,
-      )
-      .run(row.path, row.project_id, row.ticket_id, row.size, row.mtime, row.data);
+    this.db.prepare(PUT_CLAUDE_STATE).run(row.path, row.project_id, row.ticket_id, row.size, row.mtime, row.data);
+  }
+
+  /** state.db's file, for a second connection to it (StateDb); null for an in-memory store. */
+  get statePath(): string | null {
+    return this.path === ':memory:' ? null : join(dirname(this.path), 'state.db');
   }
 
   deleteClaudeState(path: string) {

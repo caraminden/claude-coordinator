@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { gzipSync } from 'node:zlib';
-import { projectSlug, restoreSession, saveSession, transcriptPath } from '../src/sessions.ts';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { projectSlug, restoreAhead, restoreSession, saveSession, transcriptPath } from '../src/sessions.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
@@ -144,6 +144,8 @@ test("a restore that fails doesn't cost the database its copy: the turn resumes,
   r.send(t.id, 'Cara', 'one');
   await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[0].resume, 'kept');
+  // The restore ahead on a worker failed too (#612): only the turn start's own try says so, once.
+  assert.equal(notes(t.id).filter((n) => n.startsWith('Could not restore the session from the database')).length, 1, notes(t.id).join('\n'));
   await new Promise((res) => setTimeout(res, 300)); // the failed turn's save
   assert.equal(store.getTicket(t.id)!.session_id, 'kept');
   assert.ok(store.getClaudeState(path), "the database's copy survives the failed turn");
@@ -152,6 +154,81 @@ test("a restore that fails doesn't cost the database its copy: the turn resumes,
   await until(() => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[1].resume, 'kept');
   assert.equal(store.getTicket(t.id)!.status, 'idle');
+});
+
+test("a big restore and save run off the event loop, and a file whose mtime only rounded up isn't written back again (#612)", async () => {
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(root, 'wt-612');
+  store.setTicketDir(t.id, cwd, null);
+  store.updateTicket(t.id, { session_id: 'big' });
+  const ticket = store.getTicket(t.id)!;
+  const path = join('projects', projectSlug(cwd), 'big.jsonl');
+  // 64 MB of transcript-like lines; the biggest stored on live is 98 MB raw.
+  const line = JSON.stringify({ type: 'assistant', text: 'x'.repeat(200) }) + '\n';
+  const text = Buffer.from(line.repeat(Math.ceil(64e6 / line.length)));
+  const put = () => store.putClaudeState({ path, project_id: project.id, ticket_id: t.id, size: text.length, mtime: 1_700_000_000_123, data: gzipSync(text) });
+  const dir = (name: string) => join(root, `config-612-${name}`);
+  const file = join(dir('ahead'), path);
+  put();
+  // Not written by the call itself, and written while this thread never yields: by another thread, so the loop stays free.
+  const ahead = restoreAhead(store, ticket, project, dir('ahead'))!;
+  assert.equal(existsSync(file), false, 'nothing is written on the event loop');
+  const deadline = Date.now() + 60_000;
+  while (!(existsSync(file) && statSync(file).mtimeMs === 1_700_000_000_123)) assert.ok(Date.now() < deadline, 'the worker never wrote the file');
+  assert.equal(await ahead, 1);
+  assert.equal(readFileSync(file).equals(text), true, 'the worker wrote the whole file');
+  assert.equal(restoreAhead(store, ticket, project, dir('ahead')), null, 'nothing left to restore: the turn starts at once');
+  assert.equal(restoreSession(store, ticket, project, dir('ahead')), 0);
+  // The save stores it again from the worker's connection, not the server's, with the same rounded mtime the restore reads.
+  store.deleteClaudeState(path);
+  const putOnLoop = store.putClaudeState;
+  store.putClaudeState = () => assert.fail('the save wrote the row on the event loop');
+  try {
+    await saveSession(store, ticket, project, dir('ahead'), null);
+  } finally {
+    store.putClaudeState = putOnLoop;
+  }
+  assert.equal(gunzipSync(store.getClaudeState(path, true)!.data!).equals(text), true);
+  assert.equal(store.getClaudeState(path)!.mtime, 1_700_000_000_123);
+  // A file whose mtime has a fraction that rounded up when saved is the same file, not an older one.
+  utimesSync(join(dir('ahead'), path), 1_700_000_000.1226, 1_700_000_000.1226);
+  assert.ok(statSync(join(dir('ahead'), path)).mtimeMs < 1_700_000_000_123);
+  assert.equal(restoreAhead(store, ticket, project, dir('ahead')), null);
+  assert.equal(restoreSession(store, ticket, project, dir('ahead')), 0);
+  // An older copy is still written back.
+  utimesSync(join(dir('ahead'), path), 1_700_000_000, 1_700_000_000);
+  assert.equal(await restoreAhead(store, ticket, project, dir('ahead')), 1);
+  store.deleteClaudeState(path);
+});
+
+test('while a turn waits for its restore, its message is saved for a restart, and a dismissal then starts no turn (#612)', async () => {
+  rmSync(seen, { force: true });
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(root, 'wt-612-wait');
+  mkdirSync(cwd);
+  store.setTicketDir(t.id, cwd, null);
+  store.updateTicket(t.id, { session_id: 'waits', person_id: cara.id });
+  const text = JSON.stringify({ turn: 0 }) + '\n';
+  const put = () => store.putClaudeState({ path: join('projects', projectSlug(cwd), 'waits.jsonl'), project_id: project.id, ticket_id: t.id, size: text.length, mtime: Date.now(), data: gzipSync(text) });
+  put();
+  const r = runner();
+  r.send(t.id, 'Cara', 'one');
+  assert.equal(r.isRunning(t.id), false, 'the turn waits for the restore');
+  assert.deepEqual(store.getSetting<{ text: string }[]>(`waiting:${t.id}`)?.map((m) => m.text), ['one'], 'a restart now would still run it');
+  await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
+  assert.equal(turns()[0].resume, 'waits');
+  assert.equal(store.getSetting(`waiting:${t.id}`), null, 'the turn took it');
+  await until(() => !(r as any).lanes.busy(t.id)); // its save
+  // Again, with the host's copy gone, and dismissed before the restore is back.
+  rmSync(join(hostConfig, 'projects', projectSlug(cwd)), { recursive: true });
+  put();
+  r.send(t.id, 'Cara', 'two');
+  assert.equal(r.isRunning(t.id), false);
+  await r.close(t.id, 'Dismissed.');
+  await new Promise((res) => setTimeout(res, 200));
+  assert.equal(turns().length, 1, 'no turn for a dismissed minion');
+  assert.equal(store.getSetting(`waiting:${t.id}`), null);
+  assert.equal(store.getTicket(t.id)!.status, 'closed');
 });
 
 // C1: a person's container can write its turn's stream and its own volume, so neither a session id nor a link

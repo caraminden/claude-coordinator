@@ -14,7 +14,7 @@ import type { SchemeRefs } from './scheme-refs.ts';
 import { cardHref, cardLabel, cardText, cardWhat, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
-import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
+import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
@@ -1054,7 +1054,7 @@ export class Runner {
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return;
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
-    this.lanes.run(ticketId, 'resume', () => {
+    this.lanes.run(ticketId, 'resume', () => this.afterRestore(ticketId, (ticket, project) => ticket.person_id ?? this.turnPerson(ticket, project, this.peekQueue(ticketId)), () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') return this.store.deleteSetting(owedKey(ticketId));
@@ -1071,6 +1071,43 @@ export class Runner {
       this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
       // It carries on the interrupted turn, so it runs for that turn's person.
       return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries);
+    }));
+  }
+
+  /**
+   * Run a lane's turn step once the minion's stored session is back in the config dir its turn will use
+   * (restoreAhead: on a worker thread, as a 60 MB transcript held the event loop for seconds, #612). With nothing
+   * to restore, as on most turns, the step runs at once, so a turn still counts as running as soon as it starts.
+   * startTurn's own restore stays: it finds the files in place, and retries and reports a restore that failed here.
+   * `person` guesses whose turn it is; a wrong guess only leaves the work to startTurn's restore. `keepQueue`
+   * saves the queue while it waits, as next() does behind a busy lane (a resume's is in its owed record).
+   */
+  private afterRestore(ticketId: number, person: (ticket: Ticket, project: Project) => number | null, step: () => unknown, keepQueue = false): unknown {
+    let ahead: Promise<number> | null = null;
+    try {
+      const ticket = this.noTurns ? undefined : this.store.getTicket(ticketId);
+      const project = ticket && this.store.getProject(ticket.project_id);
+      // Nothing stored, nothing to restore: no need to ask whose Claude it runs on.
+      if (ticket && project && ticket.status !== 'closed' && (this.store.listClaudeState(project.id, ticket.id).length || this.store.listClaudeState(project.id, null).length)) {
+        const place = this.placeFor?.(person(ticket, project)) ?? { host: true as const };
+        if (!('refused' in place)) ahead = restoreAhead(this.store, ticket, project, place.host ? claudeConfigDir(process.env) : place.configDir);
+      }
+    } catch (err: any) {
+      // The turn's start meets the same trouble itself, and says so.
+      console.error(`Ticket ${ticketId}: could not check its session files before the turn: ${err.message}`);
+    }
+    if (!ahead) return step();
+    // No turn record holds the queue until the turn starts: a restart meanwhile starts it from here, as after a save.
+    const q = this.queues.get(ticketId);
+    if (keepQueue && q?.length) this.store.setSetting(waitingKey(ticketId), q);
+    return ahead.then(
+      (n) => n && console.log(`Ticket ${ticketId}: restored the Claude session from the database off the event loop (${n} file${n === 1 ? '' : 's'}).`),
+      (err) => console.error(`Ticket ${ticketId}: restoring the session off the event loop failed, so the turn's start tries again: ${err.message}`),
+    ).then(() => {
+      if (this.store.getTicket(ticketId)?.status !== 'closed') return step();
+      // Dismissed meanwhile, which a running turn would have refused: no turn, now or once the lane is free.
+      this.queues.delete(ticketId);
+      this.store.deleteSetting(waitingKey(ticketId));
     });
   }
 
@@ -1714,7 +1751,9 @@ export class Runner {
       if (!this.isRunning(ticketId) && q?.length) this.store.setSetting(waitingKey(ticketId), q);
       return;
     }
-    this.lanes.run(ticketId, 'turn', () => {
+    // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
+    const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.peekQueue(ticketId));
+    this.lanes.run(ticketId, 'turn', () => this.afterRestore(ticketId, person, () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project) return;
@@ -1755,7 +1794,7 @@ export class Runner {
         return;
       }
       return this.startTurn(project, ticket, this.takeQueue(ticketId), person);
-    });
+    }, true));
   }
 
   /** The one person whose own typed message a ticket's running turn answers (TurnState.typedBy), else null. */

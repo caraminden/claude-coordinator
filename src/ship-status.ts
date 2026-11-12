@@ -98,8 +98,10 @@ export class ShipStatus {
     this.polling = true;
     try {
       for (const [id, { status }] of this.cache) {
-        if (this.d.store.getTicket(id)?.status === 'closed') continue;
-        if (status?.deploy && !status.deploy.live) await this.branch(id).catch(() => {});
+        // A feeder folded into its build closes before it ships (specs/build-branches.md): its chip turns live once the build lands.
+        const folded = !status?.merged && !!status?.build?.merged;
+        if (!folded && this.d.store.getTicket(id)?.status === 'closed') continue;
+        if (folded || (status?.deploy && !status.deploy.live)) await this.branch(id).catch(() => {});
         else this.changed(id);
       }
     } finally {

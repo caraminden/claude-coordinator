@@ -224,6 +224,17 @@ test('a feeder folded into its build and dismissed is merged for a chain, and li
   live.git('merge', '-q', '--ff-only', 'build/7'); // the build lands
   assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
   assert.deepEqual(started.map((s) => s.c.ticket), [afterMerged, afterLive]);
+
+  // In a scheme whose code this server doesn't run, live means merged: in the build is enough.
+  reset();
+  other.git('branch', 'build/3', 'main');
+  const feeder = minion(delve.id, other);
+  store.updateTicket(feeder.id, { build: 3 });
+  const follower = await chain(w, feeder.id, 'live', delve.id, other);
+  other.git('update-ref', 'refs/heads/build/3', other.work(feeder.branch));
+  store.updateTicket(feeder.id, { status: 'closed' });
+  assert.equal(await w.check(), 1);
+  assert.deepEqual([started.map((s) => s.c.ticket), held.length], [[follower], 0]);
 });
 
 // #229: a squash (or rebase) merge on GitHub leaves none of the branch's commits on main, so a leader

@@ -318,6 +318,22 @@ test('the poll re-reads only merged work that is not live, and a failed deploy s
   assert.notEqual(ship.ship(t.id)?.stage, 'failed');
 });
 
+// Build branches (#592): a feeder folded into its build closes then, so the poll keeps reading it until the build lands.
+test('the poll re-reads a dismissed feeder folded into its build until its chip turns live', async () => {
+  const { store, t, ship, lookups, set } = ships();
+  set({ ...merged(false), merged: false, deploy: null, build: { n: 7, merged: true, ahead: 0 } });
+  await ship.branch(t.id);
+  assert.equal(ship.ship(t.id)?.stage, 'build');
+  store.updateTicket(t.id, { status: 'closed' });
+  const before = lookups.length;
+  set({ ...merged(true), build: { n: 7, merged: true, ahead: 0 } });
+  await ship.poll();
+  assert.equal(lookups.length, before + 1, 'folded and dismissed: looked at again');
+  assert.equal(ship.ship(t.id)?.stage, 'live');
+  await ship.poll();
+  assert.equal(lookups.length, before + 1, 'live and dismissed: left alone');
+});
+
 test('a check after a turn looks up the PR again unless the minion is still running', async () => {
   const { t, ship, lookups } = ships();
   await ship.branch(t.id);

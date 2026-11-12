@@ -270,9 +270,9 @@ export class LiveWaiters {
     const landed = await this.landed(b);
     if (!landed) {
       // A feeder folded into its build (specs/build-branches.md) has shipped as far as it goes alone, and
-      // closes then: merged means in the build, and live waits for the build to land.
+      // closes then: merged means in the build, and live waits for the build to land (where this server runs the code).
       const ref = leader.build ? await buildRefOf(b.repo, leader.build) : null;
-      if (ref && (await within(b.repo, ref, b.tip))) return c.when === 'merged' ? 'go' : 'wait';
+      if (ref && (await within(b.repo, ref, b.tip))) return c.when === 'merged' || !(await runs(b.repo, this.head)) ? 'go' : 'wait';
       return closed ? 'unshipped' : 'wait';
     }
     if (c.when === 'merged' || !(await runs(b.repo, this.head))) return 'go';

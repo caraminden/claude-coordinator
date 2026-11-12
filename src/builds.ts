@@ -70,7 +70,7 @@ export async function buildSummaries(store: Store, projectId: number): Promise<B
   return out;
 }
 
-/** The summaries per scheme, kept fresh by the ship poll and a feeder's branch check, broadcast on change. */
+/** The summaries per scheme, read again by server.ts's poll (so a header can trail a land by one poll), broadcast on change. */
 export class Builds {
   private cache = new Map<number, { list: BuildSummary[]; json: string }>();
   private running = new Map<number, Promise<void>>();

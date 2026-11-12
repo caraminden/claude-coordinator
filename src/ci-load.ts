@@ -310,6 +310,9 @@ export class CiLoad {
   private store: Store;
   private deps: CiLoadDeps;
   private kept: { at: number; views: PcView[] } | null = null;
+  // The last day's samples, oldest first: read once, then kept as they come in (add), so views never reads runner_load
+  // again (a day is ~4.6 MB, scattered through the database: 0.5 s held cold on live, #613).
+  private recent: { machine: number; at: number; s: Sample }[] | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
 
@@ -330,7 +333,18 @@ export class CiLoad {
 
   /** A runner agent's sample, kept for 14 days. */
   add(machineId: number, body: unknown, now = Date.now()) {
-    this.store.addRunnerLoad(machineId, now, JSON.stringify(cleanSample(body, now)));
+    const data = JSON.stringify(cleanSample(body, now));
+    this.store.addRunnerLoad(machineId, now, data);
+    if (this.recent) {
+      this.recent.push({ machine: machineId, at: now, s: JSON.parse(data) });
+      if (this.recent.length > 1 && this.recent.at(-2)!.at > now) this.recent.sort((a, b) => a.at - b.at);
+    }
+    this.kept = null;
+  }
+
+  /** A deleted machine's samples go with it (its rows cascade). */
+  forget(machineId: number) {
+    this.recent = this.recent?.filter((r) => r.machine !== machineId) ?? null;
     this.kept = null;
   }
 
@@ -343,8 +357,12 @@ export class CiLoad {
       return repo ? jobs.map((j) => loadJob(repo, j)) : [];
     });
     const byHost = new Map<string, Sample[]>(this.deps.hosts().filter(Boolean).map((h) => [h.toLowerCase(), []]));
-    for (const row of this.store.runnerLoadSince(now - DAY_MS)) {
-      const s = JSON.parse(row.data) as Sample;
+    const since = now - DAY_MS;
+    this.recent ??= this.store.runnerLoadSince(since).map((r) => ({ machine: r.machine_id, at: r.at, s: JSON.parse(r.data) as Sample }));
+    const old = this.recent.findIndex((r) => r.at >= since);
+    if (old > 0) this.recent.splice(0, old);
+    for (const { at, s } of this.recent) {
+      if (at < since) continue; // every sample, when none is from the last day (old = -1)
       (byHost.get(s.host.toLowerCase()) ?? byHost.set(s.host.toLowerCase(), []).get(s.host.toLowerCase())!).push(s);
     }
     const views = [...byHost].sort(([a], [b]) => a.localeCompare(b)).map(([host, samples]) => pcView(samples.at(-1)?.host ?? host, samples, jobs, projects, now));

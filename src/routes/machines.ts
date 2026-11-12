@@ -273,6 +273,7 @@ export const machineRoutes: Route[] = [
     method: 'DELETE', path: '/api/machines/:machine', ...people,
     handler: managed(({ res, app, machine }) => {
       app.store.deleteMachine(machine.id);
+      app.ciLoad.forget(machine.id);
       app.machines.disconnect(machine.id);
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       return json(res, 200, {});

@@ -209,3 +209,21 @@ test('a verdict that holds for 30 minutes is one quiet Mandate item per admin, c
   assert.equal(sent.length, 2);
   assert.deepEqual(sent[1], ['Peek Auras/Cara/ciload.desktop-g248ij8', null]);
 });
+
+test('views keep up with samples as they come in, and drop a deleted machine and samples over a day old (#613)', () => {
+  const store = new Store(join(root, 'recent.db'));
+  const load = new CiLoad(store, { jobs: () => [], hosts: () => [], mandate: async () => true });
+  const desk = store.createMachine('desk', '', 'Cara');
+  const lab = store.createMachine('lab', '', 'Cara');
+  const DAY = 24 * 60 * MIN;
+  load.add(desk.id, sample(0, { host: 'DESK' }), NOW - DAY + MIN);
+  assert.deepEqual(load.views(NOW).map((v) => v.host), ['DESK'], 'read from the database once');
+  load.add(lab.id, sample(0, { host: 'LAB' }), NOW + 1);
+  assert.deepEqual(load.views(NOW + 1).map((v) => v.host), ['DESK', 'LAB'], 'a sample after the first read shows');
+  store.deleteMachine(lab.id); // as DELETE /api/machines/:machine does
+  load.forget(lab.id);
+  assert.deepEqual(load.views(NOW + 2).map((v) => v.host), ['DESK']);
+  assert.deepEqual(load.views(NOW + 2 * MIN).map((v) => v.host), [], 'over a day old');
+  assert.deepEqual(new CiLoad(store, { jobs: () => [], hosts: () => [], mandate: async () => true }).views(NOW + 2 * MIN), [], 'the same as a fresh read');
+  store.db.close();
+});

@@ -98,6 +98,9 @@ type Pending = { project_id: number; ticket_id: number; person_id: number | null
 export class Memory {
   private db: DatabaseSync;
   private store: Store;
+  // Each minion's indexed title-and-note text, by ticket id: read once, so a pass reads just the tickets table, not
+  // every ticket chunk with its 4 KB vector each minute (#613).
+  private ticketTexts: Map<number, string> | null = null;
 
   constructor(store: Store) {
     this.store = store;
@@ -122,7 +125,10 @@ export class Memory {
     for (let i = 0; i < todo.length; i += PER_REQUEST) {
       const part = todo.slice(i, i + PER_REQUEST);
       const vecs = await embed(part.map((p) => p.text));
-      part.forEach((p, j) => put.run(p.project_id, p.ticket_id, p.person_id, p.source_kind, p.source_id, p.ts, p.text, new Uint8Array(vecs[j].buffer), model));
+      part.forEach((p, j) => {
+        put.run(p.project_id, p.ticket_id, p.person_id, p.source_kind, p.source_id, p.ts, p.text, new Uint8Array(vecs[j].buffer), model);
+        if (p.source_kind === 'ticket') this.ticketTexts?.set(p.source_id, p.text);
+      });
     }
     if (turns.mark !== null) this.store.setSetting(this.markKey(projectId), turns.mark);
     return todo.length;
@@ -196,13 +202,14 @@ export class Memory {
 
   /** Minions (not the Taskmaster) whose title and note aren't indexed as they read now. */
   private pendingTickets(projectId: number): Pending[] {
-    const rows = this.db.prepare(`SELECT t.id, t.number, t.title, t.note, t.person_id, t.updated_at, m.text AS indexed FROM tickets t
-      LEFT JOIN memory_chunks m ON m.source_kind = 'ticket' AND m.source_id = t.id
-      WHERE t.project_id = ? AND t.kind = 'ticket' ORDER BY t.id`).all(projectId) as { id: number; number: number; title: string; note: string | null; person_id: number | null; updated_at: number; indexed: string | null }[];
+    const indexed = (this.ticketTexts ??= new Map(
+      (this.db.prepare("SELECT source_id, text FROM memory_chunks WHERE source_kind = 'ticket'").all() as { source_id: number; text: string }[]).map((r) => [r.source_id, r.text]),
+    ));
+    const rows = this.db.prepare(`SELECT id, number, title, note, person_id, updated_at FROM tickets
+      WHERE project_id = ? AND kind = 'ticket' ORDER BY id`).all(projectId) as { id: number; number: number; title: string; note: string | null; person_id: number | null; updated_at: number }[];
     return rows
-      .map((t) => ({ project_id: projectId, ticket_id: t.id, person_id: t.person_id, source_kind: 'ticket' as const, source_id: t.id, ts: t.updated_at, text: `#${t.number} ${t.title}${t.note ? `\n${t.note}` : ''}`, indexed: t.indexed }))
-      .filter((t) => t.text !== t.indexed)
-      .map(({ indexed, ...p }) => p);
+      .map((t) => ({ project_id: projectId, ticket_id: t.id, person_id: t.person_id, source_kind: 'ticket' as const, source_id: t.id, ts: t.updated_at, text: `#${t.number} ${t.title}${t.note ? `\n${t.note}` : ''}` }))
+      .filter((t) => t.text !== indexed.get(t.ticket_id));
   }
 
   /** Rows embedded by another model, to embed again with this one. */
@@ -242,6 +249,7 @@ export class Memory {
 
   deleteTicket(ticketId: number) {
     this.db.prepare('DELETE FROM memory_chunks WHERE ticket_id = ?').run(ticketId);
+    this.ticketTexts?.delete(ticketId);
   }
 }
 
@@ -277,6 +285,8 @@ export class MemoryIndexer {
         more = false;
         for (const p of this.store.listProjects()) {
           if (!this.indexed(p.id) || out.has(p.id)) continue;
+          // A scheme with nothing to embed never awaits: without this, every scheme's reads ran as one stall (0.7 s on live, #613).
+          await new Promise((r) => setImmediate(r));
           try {
             if ((await this.store.memory.index(p.id, this.embed, this.model, 8)) > 0) more = true;
           } catch (err) {

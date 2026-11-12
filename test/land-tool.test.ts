@@ -60,6 +60,30 @@ test("any scheme's minion lands through the tool when its worktree has tools/lan
   assert.equal(run.output.trim(), 'landed-other');
 });
 
+// A container turn couldn't land the fix for a commit whose deploy was rolled back: land.sh wants LAND_FIX=1 for one
+// that changes none of its files, and the tool had no way to pass it (#553's handoff).
+test('the land tool passes LAND_FIX=1 only when asked to with fix: true', async () => {
+  const store = new Store(join(srv.data, 'coordinator.db'));
+  const project = store.createProject('Fix', null);
+  store.setProjectRepoDir(project.id, join(srv.root, 'fix-repo'));
+  const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(srv.root, 'fix-worktree');
+  mkdirSync(join(cwd, 'tools'), { recursive: true });
+  writeFileSync(join(cwd, 'tools', 'land.sh'), 'echo "fix:${LAND_FIX:-none}"\n');
+  store.setTicketDir(minion.id, cwd, null);
+  const token = agentToken(srv.data, minion.id);
+  const auth = { Authorization: `Bearer ${token}` };
+  const land = async (body?: object) => {
+    const post = await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { method: 'POST', headers: body ? { ...auth, 'Content-Type': 'application/json' } : auth, body: body ? JSON.stringify(body) : undefined });
+    assert.equal(post.status, 202);
+    return (await until('land.sh ends', async () => { const b = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json(); return b.code === null ? null : b; })).output.trim();
+  };
+  assert.equal(await land(), 'fix:none');
+  assert.equal(await land({}), 'fix:none');
+  assert.equal(await land({ fix: 'yes' }), 'fix:none', 'only true');
+  assert.equal(await land({ fix: true }), 'fix:1');
+});
+
 test("a container turn of any scheme is offered the land tool; a host turn is not", async () => {
   const tools = (extra: Record<string, string>) => new Promise<string[]>((resolve, reject) => {
     const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {

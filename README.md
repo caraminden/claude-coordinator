@@ -466,7 +466,10 @@ interrupt turns:
    tags it `last-good` and reports. If it doesn't come up or stay up, it resets
    to `last-good` and restarts again. `tools/deploy.sh --now` restarts without
    waiting, cutting off those turns (#33's auto-resume picks them up); the
-   tripwire asks a person before it runs.
+   tripwire asks a person before it runs. It takes a place in the line and
+   runs the checks again first; for a restart that is already queued and
+   waiting on turns, `touch ~/claude-coordinator/.git/cc-deploy/now` (the
+   same person's OK) sends it ahead within 10 s instead.
 4. Once the new code is live (after the reload, or after the healthy restart
    and `last-good` tag, inside the unit), it pushes that commit to `main` on
    GitHub (`origin`), with the gh CLI's git credentials. GitHub's `main` is
@@ -487,6 +490,21 @@ deploy), and a rollback report names it. `src/db.ts` keeps a `schema_version`
 setting: bump `SCHEMA_VERSION` with any schema or data migration, and
 `test/schema-compat.test.ts` checks the last release (`last-good`, else
 `origin/main`) still reads and writes the migrated database.
+
+The limits are environment variables, for a person who needs to change one for
+a run (the defaults are set for perigee; each script's comments say more):
+
+| Variable | Default | What it limits |
+|---|---|---|
+| `LAND_CI_START` | 90 s | `land.sh`: wait for a runner to take the CI job, then fall back |
+| `LAND_CI_TIMEOUT` | 360 s | `land.sh`: wait for the CI run to finish, then fall back |
+| `LAND_CI_DOWN` | 600 s | `land.sh`: after a landing's CI wait ran out, the next landings skip CI for this long |
+| `DEPLOY_QUEUE_STALL` | 900 s | the line: give up when nothing at its head has moved for this long |
+| `DEPLOY_TEST_TIMEOUT` | 600 s | `run-tests.sh`: the suite on perigee |
+| `DEPLOY_BOOT_TIMEOUT` | 420 s | `deploy.sh`: the boot check, from outside (it gives up by itself at 180 s) |
+| `DEPLOY_UNKNOWN_WAIT` | 60 s | the queued restart: a server that is up but doesn't answer, before it restarts anyway |
+| `CITADEL_HEAVY_MAX_WAIT` | 3600 s | `citadel-heavy`: give up (exit 75) when no slot has changed hands for this long |
+| `CITADEL_HEAVY_HEAD_STALE` | 60 s | `citadel-heavy`: a head of the line silent this long is stopped, and jobs go past it |
 
 ## Permissions
 

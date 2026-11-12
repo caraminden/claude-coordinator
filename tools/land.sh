@@ -150,7 +150,7 @@ bad_check() {
   git -C "$SOURCE" merge-base --is-ancestor "$bad" main 2>/dev/null || { rm -f "$state/bad"; return 0; }
   [ -z "${LAND_FIX:-}" ] || return 0
   ! comm -12 <(git diff --name-only "$good" "$bad" | sort) <(git diff --name-only main HEAD | sort) | grep -q . || return 0
-  refuse "main holds $(git log -1 --format='%h "%s"' "$bad"), whose deploy was rolled back (the restart on it failed: its report is in the chat of the minion that deployed it), and $branch changes none of the files that deploy changed, so its deploy would be rolled back too. Nothing landed. Land the fix for it first (or its revert); if $branch is that fix, run LAND_FIX=1 tools/land.sh (the land tool can't pass it: from a turn in a container, ask the Taskmaster or a person to run that in $PWD)"
+  refuse "main holds $(git log -1 --format='%h "%s"' "$bad"), whose deploy was rolled back (the restart on it failed: its report is in the chat of the minion that deployed it), and $branch changes none of the files that deploy changed, so its deploy would be rolled back too. Nothing landed. Land the fix for it first (or its revert); if $branch is that fix, run LAND_FIX=1 tools/land.sh (from a turn in a container: the land tool with fix: true)"
 }
 bad_check
 

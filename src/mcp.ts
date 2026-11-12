@@ -992,7 +992,7 @@ const THREAD_TOOLS = [
       name: 'land',
       description:
         `Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. ${DEPLOYS ? 'It rebases onto main, runs the tests, fast-forwards main and deploys' : "It lands the branch as the scheme's land.sh does"}, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place).`,
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', properties: { fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: lands it anyway (LAND_FIX=1 for land.sh)' } } },
     }]
     : []),
   ...(DEPLOYS
@@ -1343,7 +1343,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `The preview is up at ${url}. Post that link in your reply (the minion's view also shows an Open preview button) and set state try.`;
     }
     case 'land': {
-      let r = await call('POST', `/api/tickets/${TICKET}/land`, {});
+      let r = await call('POST', `/api/tickets/${TICKET}/land`, args.fix === true ? { fix: true } : {});
       while (r.code === null) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         try {

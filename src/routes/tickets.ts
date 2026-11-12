@@ -695,14 +695,18 @@ export const ticketRoutes: Route[] = [
   {
     // The land tool (src/land.ts): run tools/land.sh in this minion's worktree on the host, for a turn in a container.
     method: 'POST', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can land its branch',
-    handler(ctx) {
+    async handler(ctx) {
       const { req, res, app, ticket } = ctx;
+      // { fix: true }: LAND_FIX=1, for the fix of a commit whose deploy was rolled back (tools/land.sh's bad_check). No body from older tools.
+      const body = (req.headers['content-type'] ?? '').startsWith('application/json') ? await readJson(req) : {};
       if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree lands with tools/land.sh');
       // Any scheme's: a container turn that ran land.sh itself couldn't see the host's landings in line (#574).
       if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
       // Only a minion's own bearer token gets here (who: minion).
       const token = String(req.headers.authorization).replace(/^Bearer /, '');
-      return json(res, 202, app.landings.start(ticket.id, ticket.cwd, app.runner.hostEnv(ticket, token)));
+      const env = app.runner.hostEnv(ticket, token);
+      if (body?.fix === true) env.LAND_FIX = '1';
+      return json(res, 202, app.landings.start(ticket.id, ticket.cwd, env));
     },
   },
   {

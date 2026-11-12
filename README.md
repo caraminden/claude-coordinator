@@ -181,7 +181,7 @@ uses the built-in `node:sqlite`.
 | `deploy/citadel-embed.service`, `deploy/embed-install.sh` | Semantic memory's embedding model (llama-server with Qwen3-Embedding-0.6B on localhost:21434) and its installer |
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
 | `deploy/offbox.sh`, `deploy/offbox-serve.sh`, `deploy/desktop/` | The off-box copy set backup.sh refreshes, the forced command the desktop's key runs, and the desktop's pull script and setup |
-| `tools/land.sh` | Lands a minion's branch: rebase onto main, test, fast-forward main, deploy, under the deploy lock |
+| `tools/land.sh` | Lands a minion's branch: rebase onto main, test, fast-forward main, deploy, under the deploy lock; `--into build/<n>` and `--build` for build branches |
 | `tools/deploy-queue.sh` | The line for the deploy lock, sourced by `land.sh` and `deploy.sh`: oldest waiter first, each told its place |
 | `tools/deploy.sh`, `tools/boot-check.ts` | Safe deploys: checks, front-end reloads, restarts that keep turns running, rollback |
 | `tools/ci-runner/`, `src/ci-runner.ts`, `public/runner-agent.mjs` | Every scheme's CI on self-hosted runners on Cara's desktop: the runner agent there (installed once, as SYSTEM) that adds, lists and removes a scheme's runners when a member asks through `ci_runners`, its scripts, the `runs-on` line, and the route that mints runner tokens with the scheme owner's GitHub login |
@@ -419,6 +419,16 @@ runs it on perigee instead (`LAND_CI=0` forces that). A conflict
 or a red test stops it before `main` moves; a deploy whose checks fail puts
 `main` back too.
 
+A big feature can run as a build: a branch `build/<n>` its minions merge into and
+that lands on `main` once (the design is `specs/build-branches.md` in the scheme's
+shared folder). `tools/land.sh --into build/<n> <test files>` merges a feeder in:
+it rebases onto the build, runs only the named test files and moves the branch,
+with no CI, no deploy and `main` untouched. `--into build/<n> --full` is the build
+minion's merge of `main`, on the full suite in the lands' line, and `--build` lands
+the build: `main` comes in by merge, not rebase, so the build's merges and its
+feeders' commit hashes survive, then the gate and deploy as above, then the branch
+is deleted. A plain land refuses a branch that carries a build's commits.
+
 Landings and deploys wait for the deploy lock in a line (`tools/deploy-queue.sh`),
 oldest first: each takes a numbered ticket in `.git/cc-deploy/queue/` of the live
 checkout, and only the oldest ticket tries the lock. A waiter prints its place, an
@@ -499,6 +509,7 @@ a run (the defaults are set for perigee; each script's comments say more):
 | `LAND_CI_START` | 90 s | `land.sh`: wait for a runner to take the CI job, then fall back |
 | `LAND_CI_TIMEOUT` | 360 s | `land.sh`: wait for the CI run to finish, then fall back |
 | `LAND_CI_DOWN` | 600 s | `land.sh`: after a landing's CI wait ran out, the next landings skip CI for this long |
+| `LAND_BUILD_WAIT` | 1800 s | `land.sh --into`, `--full`, `--build`: wait for the run on the same build ahead of it |
 | `DEPLOY_QUEUE_STALL` | 900 s | the line: give up when nothing at its head has moved for this long |
 | `DEPLOY_TEST_TIMEOUT` | 600 s | `run-tests.sh`: the suite on perigee |
 | `DEPLOY_BOOT_TIMEOUT` | 420 s | `deploy.sh`: the boot check, from outside (it gives up by itself at 180 s) |

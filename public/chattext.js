@@ -24,8 +24,9 @@ export function shortDuration(ms) {
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
   if (s < 600) return `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ''}`;
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
+  // Round to minutes first, so 59m 50s reads "1h 0m", not "60m".
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
 /** Short wording for the notes the server writes often (null hides one); anything else stays as it is. */

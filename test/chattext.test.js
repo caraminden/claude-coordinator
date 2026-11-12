@@ -86,6 +86,10 @@ test('shortDuration rounds to seconds, then minutes and seconds, then minutes, t
     [3600 * S, '1h 0m'],
     [3900 * S, '1h 5m'],
     [2 * 3600 * S + 29 * 60 * S, '2h 29m'],
+    // Just under an hour mark rounds up into it: never "60m" or "1h 60m".
+    [3570 * S, '1h 0m'],
+    [3599 * S, '1h 0m'],
+    [7170 * S, '2h 0m'],
   ];
   for (const [ms, want] of rows) assert.equal(shortDuration(ms), want, `${ms}ms`);
 });

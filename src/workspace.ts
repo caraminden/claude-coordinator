@@ -1,6 +1,6 @@
 // Project checkouts and per-ticket working directories.
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -137,6 +137,20 @@ export function buildBranch(repoDir: string | null, build: number | null | undef
     }
   }
   return null;
+}
+
+/**
+ * Whether the scheme's land script can merge into a build (`tools/land.sh --into build/<n>`), read from
+ * its checkout. Until it can, no prompt mentions builds: a build minion could make the branch but nothing
+ * could merge into it or land it.
+ */
+export function landsBuilds(repoDir: string | null): boolean {
+  if (!repoDir) return false;
+  try {
+    return /--into\b/.test(readFileSync(join(repoDir, 'tools', 'land.sh'), 'utf8'));
+  } catch {
+    return false;
+  }
 }
 
 /**

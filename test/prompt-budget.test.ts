@@ -56,6 +56,14 @@ for (const role of ['minion', 'taskmaster'] as const) {
   });
 }
 
+// Build branches (#592): the build minion's steps and the Taskmaster's test for a build fit the same budgets.
+test("a build minion's and a Taskmaster's prompt with builds on stay within the budgets too", () => {
+  const owner = systemPrompt(project, { ...minion, build: 7 }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], { build: 7, branch: null, owner: true }, true);
+  const taskmaster = systemPrompt(project, { ...minion, kind: 'coordinator' }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], null, true);
+  assert.ok(owner.length <= BUDGET.minion, `build minion: ${owner.length} > ${BUDGET.minion}`);
+  assert.ok(taskmaster.length <= BUDGET.taskmaster, `Taskmaster: ${taskmaster.length} > ${BUDGET.taskmaster}`);
+});
+
 test('the growth list names a line that grew and one that is new', () => {
   const tripwire = 'A tripwire hook checks every tool call and stops known accidents: ';
   const was = lineSizes(`Keep this.\n${tripwire}a, b`);

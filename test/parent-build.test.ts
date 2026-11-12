@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
-import { Store } from '../src/db.ts';
+import { buildOwnerKey, Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, stopTurns } from './helpers.ts';
 
 // A minion started for another minion (#273) records it as its parent and rides its build, unless the
@@ -29,6 +30,12 @@ store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true 
 // Delve has a `build` property key, so the property follows the column there.
 const Delve = store.createProject('Delve', null);
 const Citadel = store.createProject('Citadel', null);
+// A scheme with a repo, for the build branch base (#592).
+const repo = join(root, 'repo');
+execFileSync('git', ['init', '--quiet', '-b', 'main', repo]);
+execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', 'init'], { cwd: repo });
+const Repo = store.createProject('Repo', null);
+store.setProjectRepoDir(Repo.id, repo);
 
 function ticket(p: { id: number }, kind: 'coordinator' | 'ticket', build: number | null = null) {
   const t = store.createTicket({ project_id: p.id, kind, title: kind === 'ticket' ? 'Parent' : 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
@@ -116,4 +123,30 @@ test('a new minion rides its parent\'s build unless the create sets one', async 
   const mine = await srv.call(`/api/projects/${Delve.id}/tickets`, { message: 'mine', parent: 2 });
   assert.equal(mine.status, 201, JSON.stringify(mine.data));
   assert.deepEqual([store.getTicket(mine.data.id)!.parent, store.getTicket(mine.data.id)!.build], [2, null]);
+
+  // Build branches (#592): build_owner marks the build's own minion, and needs a build.
+  t = await made({ build: 11, build_owner: true, parent: null });
+  assert.equal(store.getSetting(buildOwnerKey(Delve.id, 11)), t.id);
+  t = await made({ properties: { type: 'chore', build: 12 }, build_owner: true, parent: null });
+  assert.equal(store.getSetting(buildOwnerKey(Delve.id, 12)), t.id, 'a build given as the property counts');
+  t = await made({ build: 11, parent: null });
+  assert.notEqual(store.getSetting(buildOwnerKey(Delve.id, 11)), t.id, 'a feeder is no owner');
+  const count = store.listTickets(Delve.id).length;
+  const refused = await create({ build_owner: true, parent: null });
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /build_owner needs a build/);
+  assert.equal(store.listTickets(Delve.id).length, count, 'nothing made');
+
+  // A minion created in a build whose branch exists starts from it; another build, from main.
+  const g = (args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  g(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', 'on build 4']);
+  g(['branch', 'build/4']);
+  g(['reset', '--quiet', '--hard', 'HEAD~1']);
+  const inRepo = async (build: number) => {
+    const r = await srv.call(`/api/projects/${Repo.id}/tickets`, { message: 'feed it', build });
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: store.getTicket(r.data.id)!.cwd, encoding: 'utf8' }).trim();
+  };
+  assert.equal(await inRepo(4), g(['rev-parse', 'build/4']));
+  assert.equal(await inRepo(5), g(['rev-parse', 'main']));
 });

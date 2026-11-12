@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
-import { askerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
+import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
 import { KEEP, SENT_BACK } from './link-check.ts';
@@ -16,7 +16,7 @@ import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
-import { projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
+import { buildBranch, landsBuilds, projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { isAuthFailure, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
@@ -1834,7 +1834,12 @@ export class Runner {
     // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
     const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
     // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
-    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : []));
+    // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
+    const builds = landsBuilds(project.repo_dir);
+    const build = builds && ticket.kind !== 'coordinator' && ticket.build
+      ? { build: ticket.build, branch: buildBranch(project.repo_dir, ticket.build), owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id }
+      : null;
+    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds));
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
     // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
     let tmp: string | null = null;

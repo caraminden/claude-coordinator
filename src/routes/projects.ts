@@ -6,7 +6,7 @@ import { cleanPluginDirs, cleanPluginPicks, cleanRules, lines } from '../approva
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { askerKey, EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
+import { askerKey, buildOwnerKey, EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
@@ -642,6 +642,9 @@ export const projectRoutes: Route[] = [
       }
       // Its build: the one the create sets (null: none), as `build` or the build property; else its parent's, else its start_after leader's.
       const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : parent?.build ?? leader?.build ?? null;
+      // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
+      const owner = body.build_owner === true;
+      if (owner && !build && !given('build')) throw new HttpError(400, 'build_owner needs a build: pass build (the scheme\'s highest build number plus one for a new one)');
       // Started from a brief in a file (#129): one minion per brief, so a second start is refused.
       const brief = body.brief == null ? null : { path: str(body.brief.path, 'Brief path', 1000), heading: typeof body.brief.heading === 'string' ? body.brief.heading.trim().slice(0, 500) : '' };
       if (brief && !store.claimBrief(project.id, brief.path, brief.heading, session.name)) throw new HttpError(409, 'That brief has been started already');
@@ -649,6 +652,8 @@ export const projectRoutes: Route[] = [
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
+      const ownBuild = owner ? store.getTicket(id)?.build ?? null : null;
+      if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.
       const asker = caller && store.turnAsker(caller.id);
       if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);

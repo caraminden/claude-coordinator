@@ -135,12 +135,37 @@ const CHAT_FACTS = [
   'Every mention of a question, plan or approval card in your reply ("the card below", "#394\'s card", "a plan waiting in Delve #12") is a markdown link to that card, wherever it is, as in [the card below](#/p/2/t/394?e=123): it opens that chat at the card. ask_question and propose_plan return your card\'s link; read_ticket and list_tickets show the link beside each card waiting on people; for another scheme\'s card, ask for its link with the message that asks about it. A reply that mentions a waiting card without its link is sent back once.',
 ];
 
+/** Where a minion stands in a build (specs/build-branches.md): its number, its branch if it exists yet, and whether it is the build's own minion. */
+export type BuildRole = { build: number; branch: string | null; owner: boolean };
+
+/**
+ * A build's lines in its minions' prompts. A feeder gets them only once `build/<n>` exists, so a scheme
+ * that uses the build label without build branches (Delve) sees nothing new; the build minion gets its
+ * steps from the start, since making the branch is the first of them.
+ */
+export function buildLines(b: BuildRole | null): string[] {
+  if (!b || (!b.owner && !b.branch)) return [];
+  const n = b.build;
+  const br = `build/${n}`;
+  if (!b.owner) {
+    return [`You are a feeder in Build ${n}: your base is \`${br}\`, not main, and the build lands on main once, through its build minion. Wherever the Git, shipping and self-review rules say main, read \`${br}\` (the base check, the diff you review). If your branch isn't based on it yet (you were moved into the build after you started), rebase onto it first. When your work is tested and self-reviewed, merge it in with \`tools/land.sh --into ${br} <the test files you touched>\`: no CI run and no deploy. Never land on main or deploy (no plain \`tools/land.sh\`, no PR to main). On a conflict, rebase onto \`${br}\` keeping the other feeders' changes, re-test and run it again; when feeders disagree on behaviour, not just lines, ask the build minion through the Taskmaster. A high risk label doesn't hold your merge: the build's go card covers it, so put the label in your note. Once merged in, set the note "folded into Build ${n}" and close_self in that turn: for you that counts as landed. Follow-ups go to the build minion.`];
+  }
+  return [
+    `You are the build minion of Build ${n}: you own \`${br}\`, the branch its feeders (the scheme's other minions in Build ${n}) start from and merge into with \`tools/land.sh --into ${br}\`, and you land it on main once, as one deploy. Your steps:`,
+    `1. ${b.branch ? `\`${br}\` exists.` : `Make \`${br}\` from main first (\`git branch ${br} main\`): it switches the build on, and new feeders start from it.`} Its preview, when there is one, shows on the build's header in the minions list.`,
+    '2. Keep the build\'s list in your chat, rewritten each time a feeder merges in: each feeder as #N, merged in or open, its risk label, and any order between them ("#B needs #A\'s table"). Follow-ups to a feeder that closed come to you.',
+    `3. Take main in once a day and right before landing: commit, \`git merge --ff-only ${br}\`, \`git merge main\` (merge, never rebase: a rebase changes the feeders' commit hashes), resolve, then \`tools/land.sh --into ${br} --full\` (the full suite on CI). On a red, find which merge since the last green run caused it and get that feeder to fix it through the Taskmaster, or fix it yourself.`,
+    '4. If no feeder has merged in for 3 days, ask with a card: land what is there, wait, or drop the build.',
+    `5. Once every feeder on the list is merged in: take main in one last time, self-review the whole diff against main with a claude-fable-5-2 reviewer as for a high-risk change, label the build with the highest of its feeders' labels and that review's, and post one go card (ask_question, kind merge) with the list, the label and what wasn't verified, whatever the label. On the go, run \`tools/land.sh --build\` from your worktree with your branch at the build's tip: one CI run, one deploy.`,
+  ];
+}
+
 /**
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = []): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false): string {
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir, builds), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this minion.';
@@ -151,6 +176,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     ROLE_FRAMING,
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,
+    ...buildLines(build),
     // Parked on start_after (#261): a message gets an answer, and the work waits for its brief.
     ...(held ? [`You are parked: your brief is held until ${held}. Answer the message you got without starting the work; Start now on your page (or the Taskmaster's message_ticket with start_now) starts you with your brief. End the turn with the state and note you have now.`] : []),
     'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with TaskCreate before starting it:',
@@ -223,7 +249,10 @@ function machineTools(machines: TurnMachine[]): string[] {
   ];
 }
 
-function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null): string {
+/** The Taskmaster's test for suggesting a build (specs/build-branches.md, section 4), once the scheme's land.sh can merge into one. */
+export const BUILDS_LINE = 'Builds: a big feature can run as a build, a branch `build/<n>` that its minions (feeders) merge into and that lands on main once, with one go card. Suggest one with an ask_question card when all three hold: three or more minions build one feature (or two that run for more than a day); half of it live is worse than none (people would meet two versions of one thing, a page moved without its parts, a format only one side reads); and it can\'t just stay dark (an unlinked route or an unused table ships straight to live). Never for bug fixes, the land pipeline, process and kit docs, refactors, or a batch of independent jobs; when in doubt, no build. On a yes, start its build minion with create_ticket: build the scheme\'s highest build number plus one, build_owner: true, type chore, title "Build <n>: <feature>". It makes the branch first; feeders created in that build start from it. A feeder that closed as "folded into Build <n>" is done: its work waits in the build, not live yet.';
+
+function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null, builds = false): string {
   return [
     `You are the Taskmaster for scheme "${project.name}" in ${APP_NAME}, a shared web app where several people chat with Claude Code sessions called minions.`,
     ROLE_FRAMING,
@@ -236,6 +265,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       : `The ${APP_NAME}-wide instructions (shown right before the scheme instructions when set) apply to every scheme. Only people (in ${APP_NAME}'s settings) and the ${APP_NAME} scheme's ${AGENT_NAME} change them: to propose a change, message that ${AGENT_NAME} with message_taskmaster, and put rules for this scheme alone in the scheme instructions.`,
     'Each minion is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to minions rather than doing it yourself; give each new minion a self-contained first message, since it cannot see this conversation.',
     'Minion titles are the short ask, about 30 characters ("Usage bar in the top bar"), with no number, type, build or emoji ("Lairs", not "Lairs · Build #8"); the app shows the number and build, and the minions label themselves as they work. Give each new minion a `type` (and the scheme\'s keys) in create_ticket\'s properties. You can fix a minion\'s title, state or note with update_ticket and its properties with set_properties, and assign it to a major build with its build field (the minions list groups each build\'s minions together; null takes it out).',
+    ...(builds ? [BUILDS_LINE] : []),
     'Minions run in the background. To see progress, read them; do not wait or poll in a loop. Dismiss minions when people agree they are done.',
     project.repo_dir
       ? `The scheme's main checkout is at ${project.repo_dir} and minion worktrees are under ${ticketsDir} (one folder per minion). You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`.`

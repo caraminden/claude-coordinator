@@ -24,6 +24,9 @@
 #
 # While the full run goes, <log without .log>.progress holds its file counts (#545: tools/citadel-node and
 # tools/progress-reporter.ts), for the landing's wait in Citadel; it goes once the full run ends, before any rerun.
+#
+# Exit 3: no test ran, because its temp file or log could not be written (a full or read-only TMPDIR, an unwritable
+# log): a line on stderr says which, so the caller doesn't call it a red run (#553 F12a). node --test never exits 3.
 set -uo pipefail
 log=$1
 limit=${DEPLOY_TEST_TIMEOUT:-600}
@@ -42,7 +45,8 @@ scope=(systemd-run --user --scope --quiet --collect --slice=citadel.slice -p "CP
 [[ $cgroup =~ /user@[0-9]+\.service/.+/([^/]+\.(service|scope))$ ]] && scope+=(-p "BindsTo=${BASH_REMATCH[1]}")
 scope+=(--)
 [ -n "$weight" ] && timeout 20 "${scope[@]}" true >/dev/null 2>&1 || scope=()
-failed=$(mktemp)
+failed=$(mktemp) || { echo "run-tests: could not make a temp file in ${TMPDIR:-/tmp} (full, or not writable), so no test ran" >&2; exit 3; }
+: >"$log" || { rm -f "$failed"; echo "run-tests: could not write the log $log, so no test ran" >&2; exit 3; }
 progress=${log%.log}.progress
 unset CITADEL_TEST_PROGRESS # the reruns below count nothing
 rm -f "$progress" "$progress.tmp"

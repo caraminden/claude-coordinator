@@ -72,6 +72,50 @@ test('red tests stop it before main moves', () => {
   assert.equal(r.note(), null);
 });
 
+// M6: land-test.log is shared, so the next landing overwrote a red run's log within a second; the red one is kept by branch.
+test("a red run's full log is kept under the branch's name, so the next landing doesn't overwrite it", () => {
+  const r = setup();
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  const kept = join(state, 'land-red-ticket-1-x.log');
+  const res = r.run({ FAIL_TESTS: '1' });
+  assert.equal(res.status, 1);
+  assert.ok(res.stderr.includes(`tests failed on the rebased branch (full log: ${kept})`), res.stderr);
+  assert.match(readFileSync(kept, 'utf8'), /red/);
+  assert.equal(r.run().status, 0, 'the same branch, green');
+  assert.match(readFileSync(kept, 'utf8'), /red/, 'still the red run');
+});
+
+// F12a: a test run that can't write its temp file or its log never ran a test, but read "tests failed on the rebased branch".
+test("a test run that can't write its temp file or its log says so and that no test ran", async (t) => {
+  const cases: [string, (r: ReturnType<typeof setup>, state: string) => Record<string, string>, RegExp][] = [
+    ['a read-only TMPDIR', (r) => {
+      const tmp = join(r.dir, 'ro-tmp');
+      mkdirSync(tmp, { mode: 0o555 });
+      return { TMPDIR: tmp };
+    }, /run-tests: could not make a temp file in .*ro-tmp/],
+    ['an unwritable land-test.log', (_, state) => {
+      mkdirSync(state, { recursive: true, mode: 0o700 });
+      writeFileSync(join(state, 'land-test.log'), '', { mode: 0o444 });
+      return {};
+    }, /run-tests: could not write the log .*land-test\.log/],
+  ];
+  for (const [name, prep, said] of cases) {
+    await t.test(name, () => {
+      const r = setup();
+      r.commit(r.wt, 'b.txt', 'mine\n');
+      const main = git(r.source, 'rev-parse', 'main');
+      const res = r.run({ ...prep(r, join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy')), TEST_RUNS: join(r.dir, 'runs') });
+      assert.equal(res.status, 1, res.stderr);
+      assert.match(res.stderr, said);
+      assert.match(res.stderr, /land: no test ran: the test run could not write its files \(the run-tests line above says which\), so main is untouched/);
+      assert.doesNotMatch(res.stderr, /tests failed/);
+      assert.ok(!existsSync(join(r.dir, 'runs')), 'no test ran');
+      assert.equal(git(r.source, 'rev-parse', 'main'), main);
+    });
+  }
+});
+
 // The test run holds the deploy lock, so it must end however a test goes wrong (#377).
 test('a red test that leaks a handle ends the run at once instead of holding the lock', () => {
   const r = setup();
@@ -115,6 +159,8 @@ case "$*" in
   *"/actions/runs?head_sha="*)
     sha=\${2#*head_sha=} sha=\${sha%%&*}
     [ "\${FAKE_CI:-}" != down ] || exit 1
+    [ "\${FAKE_CI:-}" != rate ] || { echo 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)' >&2; exit 1; }
+    [ "\${FAKE_CI:-}" != garbage ] || { echo '<html><body>Bad gateway</body></html>'; exit 0; }
     lag=0
     if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
     if [ "$lag" = 0 ] && [ "$(git -C "${hub}" rev-parse -q --verify "refs/heads/land/ticket/1-x" 2>/dev/null)" = "$sha" ]; then
@@ -128,7 +174,7 @@ case "$*" in
     elif [ "\${FAKE_OLD_RUN%% *}" = "$sha" ]; then
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
-  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; echo "\${FAKE_RUNNERS:-1}" ;;
+  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; echo "\${FAKE_RUNNERS:-1}" ;;
   *"/actions/runs/7/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
   "run view "*) printf 'test\\tthe full suite\\t2026 run-tests: test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n'; echo "not ok 1 - the red test's output" ;;
 esac
@@ -311,6 +357,54 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
       if (extra.LAND_CI === '0') assert.equal(c.calls(), '', 'GitHub is never asked');
     });
   }
+});
+
+// F12d: CI's own reason reaches the landing: a rate limit, an error page or a rejected push all read "GitHub didn't answer"
+// or "no runner started the job" before, and an error page waited out the full 90 s.
+test("when CI can't answer, the fallback says what gh or git said, at once", async (t) => {
+  const cases: [string, Record<string, string>, RegExp][] = [
+    ['a rate limit', { FAKE_CI: 'rate' }, /CI FALLBACK: GitHub didn't answer \(gh: API rate limit exceeded for installation ID 1\. \(HTTP 403\)\)/],
+    ['an error page for the runs', { FAKE_CI: 'garbage' }, /CI FALLBACK: GitHub didn't answer \(it sent something that isn't a run: <html><body>Bad gateway/],
+    ['an error page for the runners', { FAKE_CI: 'queued', FAKE_RUNNERS: 'garbage' }, /CI FALLBACK: GitHub didn't say which runners are online \(it sent: <html>Bad gateway<\/html>\)/],
+    ['a rejected push', { FAKE_CI: 'queued', REJECT: '1' }, /CI FALLBACK: pushing \w+ to GitHub failed \(remote: denied by the test hook; .*\)/],
+  ];
+  for (const [name, extra, why] of cases) {
+    await t.test(name, () => {
+      const r = setup();
+      const c = ci(r);
+      if (extra.REJECT) writeFileSync(join(r.dir, 'hub.git', 'hooks', 'pre-receive'), "#!/bin/sh\necho 'denied by the test hook' >&2\nexit 1\n", { mode: 0o755 });
+      r.commit(r.wt, 'b.txt', 'mine\n');
+      const t0 = Date.now();
+      const res = c.run(extra);
+      assert.equal(res.status, 0, res.stderr);
+      assert.match(res.stderr, why);
+      assert.ok(Date.now() - t0 < 60_000, 'it does not wait out the 90 s for a runner');
+      assert.equal(c.localRuns(), 1);
+    });
+  }
+});
+
+// M14: after a refusal, cancelling the CI run and deleting land/<branch> ran before the landing left the line, so a
+// hung gh or push held the deploy lock up to 60 s more.
+test('a refused landing lets go of the deploy lock before it cleans up on GitHub', { timeout: 60_000 }, async () => {
+  const r = setup();
+  const c = ci(r);
+  // Deleting the scratch branch hangs 8 s.
+  writeFileSync(join(r.dir, 'hub.git', 'hooks', 'pre-receive'), '#!/bin/sh\nwhile read old new ref; do [ "$new" != 0000000000000000000000000000000000000000 ] || sleep 8; done\n', { mode: 0o755 });
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const lock = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'lock');
+  let stderr = '';
+  let ended = false;
+  const landing = landAsync(r.wt, { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', FAKE_CI: 'red' }, 50_000, (e) => (stderr = e)).finally(() => (ended = true));
+  const until = async (what: string, cond: () => boolean, ms: number) => {
+    for (const end = Date.now() + ms; !cond(); await new Promise((ok) => setTimeout(ok, 20))) if (Date.now() > end) throw new Error(`timed out waiting for ${what}: ${stderr}`);
+  };
+  await until('the refusal', () => /tests failed on the rebased branch in CI/.test(stderr), 30_000);
+  await until('the lock to be free', () => spawnSync('flock', ['-n', lock, 'true']).status === 0, 4_000);
+  assert.ok(!ended, 'freed while the cleanup still runs');
+  const res = await landing;
+  assert.equal(res.status, 1, res.stderr);
+  assert.equal(c.refs(), '', 'the scratch branch still goes');
 });
 
 // F11: with CI stuck, every landing in line waited its own 90 s (or 6 min) to learn the same thing.

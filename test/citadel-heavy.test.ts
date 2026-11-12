@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -255,4 +255,18 @@ test('jobs going past a stopped head still start one at a time on a busy box, ea
     process.kill(head.child.pid!, 'SIGCONT');
     for (const j of [...jobs, head]) assert.equal(await j.done, 0);
   }
+});
+
+// M13: the wait file of a waiter killed past its trap stayed for good.
+test("a job deletes the wait files of waiters killed long ago, and leaves a live waiter's", () => {
+  const { dir, env } = folder(1);
+  mkdirSync(dir, { recursive: true });
+  const old = join(dir, 'wait-123-456'), fresh = join(dir, 'wait-124-457');
+  writeFileSync(old, 'x\n');
+  writeFileSync(fresh, 'x\n');
+  const hourAgo = Date.now() / 1000 - 3600;
+  utimesSync(old, hourAgo, hourAgo);
+  assert.equal(spawnSync(heavy, ['true'], { env }).status, 0);
+  assert.ok(!existsSync(old), 'an hour stale: its waiter is long gone');
+  assert.ok(existsSync(fresh), 'a fresh one may be a waiter in another container');
 });

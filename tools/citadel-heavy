@@ -125,6 +125,8 @@ tell() {
 # of it, and freshened at least every 20 s: one older than a minute is a waiter killed past its trap. The
 # random part: containers' pids can repeat each other's.
 waitfile="$dir/wait-$$-$RANDOM$RANDOM"
+# Those of waiters killed past their trap are never freshened again (#553 M13): ten minutes is thirty missed freshenings.
+find "$dir" -maxdepth 1 -name 'wait-*' -mmin +10 -delete 2>/dev/null || true
 waiting_on() { printf '%s\n' "$who" "$what" "$started" "$1" >"$waitfile.tmp" 2>/dev/null && mv -f "$waitfile.tmp" "$waitfile" 2>/dev/null; }
 started=$(date +%s)
 trap 'rm -f "$waitfile" "$waitfile.tmp"' EXIT

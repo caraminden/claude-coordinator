@@ -341,7 +341,8 @@ test('the restart refuses to restart when it cannot copy the database first', ()
     env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: join(dir, 'coordinator.db'), DEPLOY_NOW: '1', DEPLOY_URL: 'http://127.0.0.1:1', DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_REMOTE: '' },
   });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /FAILED: Could not copy the database to backups\/ .*so nothing restarted/);
+  // F12e: the report names the file and the cause, not only the journal.
+  assert.match(r.stderr, /FAILED: Could not copy the database to \S+\/refuse-data\/backups\/pre-deploy-\w+\.db \(mkdir: [^)]*backups[^)]*\) before restarting on .*so nothing restarted/);
   assert.doesNotMatch(r.stderr, /restarting no-such-citadel-unit/);
   // Run by hand as tools/deploy.sh restart, it must not delete the tracked script: only the unit's private copy goes.
   assert.ok(existsSync(copy), 'a script that is not the private copy stays');
@@ -352,6 +353,37 @@ test('the restart refuses to restart when it cannot copy the database first', ()
   const usage = spawnSync('bash', [copy, 'no-such-command'], { encoding: 'utf8', env: hostEnv });
   assert.equal(usage.status, 2);
   assert.doesNotMatch(usage.stderr, /restart/, 'the usage line does not offer the restart');
+});
+
+// M11: two minions that ride one restart were both told about its tip commit, so the one whose own commit was older
+// read only about the other's.
+test("each minion's report of a restart names its own commit when the restart carried newer ones too", { timeout: 30_000 }, async () => {
+  const live = join(root, 'ride-live');
+  const dir = join(root, 'ride-data');
+  mkdirSync(dir);
+  execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  const commit = (m: string) => {
+    execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', m]);
+    return execFileSync('git', ['-C', live, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+  const mine = commit('mine');
+  const theirs = commit('theirs');
+  new Store(join(dir, 'coordinator.db')).db.close();
+  writeFileSync(join(dir, 'backups'), 'not a folder'); // the restart fails at its first step, and reports
+  const srv = await standIn(() => 201);
+  try {
+    mkdirSync(join(live, '.git', 'cc-deploy'), { mode: 0o700 });
+    writeFileSync(join(live, '.git', 'cc-deploy', 'reporters'), `${srv.url} tok 7 ${mine}\n${srv.url} tok 8 ${theirs}\n`);
+    const copy = join(root, 'ride-deploy.sh');
+    cpSync(join(repo, 'tools', 'deploy.sh'), copy);
+    await promisify(execFile)('bash', [copy, 'restart'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: join(dir, 'coordinator.db'), DEPLOY_NOW: '1', DEPLOY_URL: 'http://127.0.0.1:1', DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_REMOTE: '' } }).catch((e) => e);
+    const text = (t: string) => JSON.parse(srv.seen.find((s) => s.url === `/api/tickets/${t}/deploy`)!.body).text as string;
+    const s7 = mine.slice(0, 7), s8 = theirs.slice(0, 7);
+    assert.match(text('7'), new RegExp(`^Could not copy the database .* This restart was for your ${s7}\\w* "mine" and the newer commits up to ${s8}\\w* "theirs"\\.$`));
+    assert.doesNotMatch(text('8'), /This restart was for your/, 'the tip is its own');
+  } finally {
+    srv.close();
+  }
 });
 
 test('deploy.sh copies the database while the live server keeps writing it (#497)', { timeout: 60_000 }, async () => {

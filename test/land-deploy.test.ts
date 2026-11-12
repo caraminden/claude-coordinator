@@ -174,3 +174,33 @@ if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(proces
   assert.match(stderr, /putting the checkout back/);
   assert.match(stderr, /main is back at/);
 });
+
+// M10: when systemd-run can't queue the restart, the reporter line stayed for some later restart to post to, and the
+// landing said "Read the deploy's output above" instead of what to do.
+test("a restart that can't be queued says to run deploy.sh again, and leaves nobody to report to", () =>
+  withRealDeploy(async (r, run) => {
+    const failing = join(r.dir, 'failing-bin');
+    mkdirSync(failing);
+    writeFileSync(join(failing, 'systemd-run'), '#!/bin/sh\necho "Failed to start transient service unit: Access denied" >&2\nexit 1\n', { mode: 0o755 });
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const err = await run(land, r.wt, { PATH: `${failing}:${join(r.dir, 'bin')}:${process.env.PATH}`, COORDINATOR_TICKET: '7', COORDINATOR_TOKEN: 'tok', COORDINATOR_API: 'http://127.0.0.1:1' }).then(() => assert.fail('the landing should fail'), (e) => e);
+    assert.equal(err.code, 1, err.stderr);
+    assert.match(err.stderr, /deploy: could not queue the restart \(Failed to start transient service unit: Access denied\), so nothing restarted: the live checkout is at \w+ "b\.txt: mine", but the server still runs \w+\. Run tools\/deploy\.sh again to queue it/);
+    assert.match(err.stderr.trimEnd().split('\n').at(-1)!, /land: the deploy failed after main moved; main keeps \w+\. The deploy's lines above say why and what to do$/);
+    assert.ok(!existsSync(join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'reporters')), 'no reporter line left behind');
+  }));
+
+// F12a, in deploy.sh: its test run that can't write its temp file never ran a test.
+test("deploy.sh's test run that can't write its temp file says no test ran, and puts the checkout back", () =>
+  withRealDeploy(async (r, run, runs) => {
+    r.commit(r.source, 'b.txt', 'theirs\n');
+    const before = git(r.live, 'rev-parse', 'HEAD');
+    const tmp = join(r.dir, 'ro-tmp');
+    mkdirSync(tmp, { mode: 0o555 });
+    const err = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, { TMPDIR: tmp }).then(() => assert.fail('the deploy should fail'), (e) => e);
+    assert.match(err.stderr, /run-tests: could not make a temp file in \S+ro-tmp/);
+    assert.match(err.stderr, /deploy: no test ran: the test run could not write its files \(the run-tests line above says which\); nothing deployed/);
+    assert.doesNotMatch(err.stderr, /tests failed/);
+    assert.deepEqual(runs(), []);
+    assert.equal(git(r.live, 'rev-parse', 'HEAD'), before);
+  }));

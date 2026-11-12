@@ -111,14 +111,26 @@ queue_ordinal() {
 queue_lock() {
   local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=$SECONDS said="" typical sum count line
   mkdir -p -m 700 "$q"
-  exec 9>"$1/lock"
+  # Unopened, every flock below fails at once ("Bad file descriptor") for the whole stall (#553 F12b).
+  if ! exec 9>"$1/lock"; then
+    echo "queue: can't open the deploy lock $1/lock for writing, so nothing landed or deployed: a person needs to look at it" >&2
+    return 1
+  fi
   me=$(queue_proc $$)
   # The ticket and its number, under a lock of its own that is only ever held for these few lines: the
   # ticket is in the folder before the next number goes out, so nobody behind it can miss it.
   n=$(
     exec 8>"$q/.seq.lock"
     flock 8
-    n=$(printf '%010d' $(($(cat "$q/.seq" 2>/dev/null || echo 0) + 1)))
+    n=$(cat "$q/.seq" 2>/dev/null) || n=0
+    # Junk in it (#553 F12c) failed every landing after its deploy: number on from the newest ticket instead (an empty
+    # one, from a write cut off, quietly).
+    if ! [[ $n =~ ^[0-9]{1,10}$ ]]; then
+      t=$(find "$q" -maxdepth 1 -regex '.*/[0-9]+' -printf '%f\n' 2>/dev/null | sort | tail -n 1)
+      [ -z "$n" ] || echo "queue: $q/.seq held no ticket number (\"$(head -c 40 <<<"$n")\"); numbering goes on from the newest ticket, $((10#${t:-0}))" >&2
+      n=${t:-0}
+    fi
+    n=$(printf '%010d' $((10#$n + 1)))
     queue_write "$q/$n" "$me" 0 "$label" waiting
     echo "$((10#$n))" >"$q/.seq"
     echo "$n"

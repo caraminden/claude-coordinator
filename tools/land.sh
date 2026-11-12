@@ -173,10 +173,19 @@ CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
 hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&-; }
 ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why=''
-# The newest run of the workflow on this commit, into ci_*; nothing when there is none. Fails when GitHub doesn't answer.
+# What gh or git said on stderr ($state/ci.err), as " (<its first lines>)" (git's "To <remote>" left out) for a reason (#553 F12d: a rate limit, a missing gh
+# and a rejected push all read alike). Nothing when it said nothing.
+ci_said() {
+  local s
+  s=$(grep -v -e '^[[:space:]]*$' -e '^To ' "$state/ci.err" 2>/dev/null | head -n 4 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed ':a;N;$!ba;s/\n/; /g' | cut -c1-300) || true
+  [ -z "$s" ] || echo " ($s)"
+}
+# The newest run of the workflow on this commit, into ci_*; nothing when there is none. Fails when GitHub doesn't answer
+# with one (an error page is no answer).
 ci_run() {
   local run
-  run=$(hub gh api "repos/$ci_slug/actions/runs?head_sha=$tip&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>/dev/null) || return 1
+  run=$(hub gh api "repos/$ci_slug/actions/runs?head_sha=$tip&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>"$state/ci.err") || return 1
+  [ -z "$run" ] || [[ $run =~ ^[0-9]+$'\t' ]] || { echo "it sent something that isn't a run: $(head -c 100 <<<"$run")" >"$state/ci.err"; return 1; }
   read -r ci_id ci_status ci_result ci_url <<<"$run" || true
 }
 # Leaves nothing behind on GitHub: a run nobody waits for is cancelled, and the scratch branch goes.
@@ -201,16 +210,17 @@ ci_gate() {
     why="CI gave no answer to a landing $((now - down_at)) s ago ($down_why), so this one doesn't wait for it (it is asked again from $(date -d "@$((down_at + CI_DOWN))" +%H:%M))"
     return 2
   fi
-  ci_run || { why="GitHub didn't answer"; return 2; }
+  ci_run || { why="GitHub didn't answer$(ci_said)"; return 2; }
   # A run of this commit that is green or still going (a landing stopped and started again) will do; otherwise a new one.
   if [ -z "$ci_id" ] || { [ "$ci_status" = completed ] && [ "$ci_result" != success ]; }; then
     stale=$ci_id ci_id=''
     # shortcut: with the repo variable CI_RUNNER=github (hosted runners) this finds no runner and falls back; look at the variable too if that is ever used for long.
-    online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>/dev/null) || { why="GitHub didn't say which runners are online"; return 2; }
-    [ "$online" -gt 0 ] 2>/dev/null || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
+    online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || { why="GitHub didn't say which runners are online$(ci_said)"; return 2; }
+    [[ $online =~ ^[0-9]+$ ]] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
+    [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
     ci_pushed=1
     # Forced on purpose: land/<branch> is a scratch branch only this script writes and deletes, so there is no one's work to overwrite.
-    hub git push -q "$REMOTE" "+$tip:refs/heads/$CI_REF" 2>/dev/null || { why="pushing $short to GitHub failed"; return 2; }
+    hub git push -q "$REMOTE" "+$tip:refs/heads/$CI_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; return 2; }
   fi
   say "waiting for CI on $short: the full suite on Cara's desktop (at most $((CI_LIMIT / 60)) min, then it runs here)"
   queue_phase "waiting for CI since $(date +%H:%M)"
@@ -236,7 +246,8 @@ ci_gate() {
   esac
 }
 
-trap 'land_timing $? || true; ci_done; queue_done' EXIT
+# The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
+trap 'land_timing $? || true; queue_done; exec 9>&-; ci_done' EXIT
 fellback=
 rc=0
 land_mark ci ci
@@ -266,9 +277,16 @@ else
   # A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.
   [ -z "$(git status --porcelain --ignored)" ] && tested=$tip || tested=
   log="$state/land-test.log"
-  if ! "$tools/run-tests.sh" "$log" 9>&-; then # without the lock's fd: a run that outlives a killed land.sh must not hold it
+  trc=0
+  "$tools/run-tests.sh" "$log" 9>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
+  [ "$trc" != 3 ] || refuse "no test ran: the test run could not write its files (the run-tests line above says which), so main is untouched"
+  if [ "$trc" != 0 ]; then
     tail -n 40 "$log" >&2
-    refuse "tests failed on the rebased branch (full log: $log), so main is untouched"
+    # The shared log is the next landing's within a second (#553 M6): a red one is kept under the branch's name, for two weeks.
+    find "$state" -maxdepth 1 -name 'land-red-*.log' -mtime +14 -delete 2>/dev/null || true
+    kept="$state/land-red-${branch//\//-}.log"
+    cp "$log" "$kept" 2>/dev/null || kept=$log
+    refuse "tests failed on the rebased branch (full log: $kept), so main is untouched"
   fi
 fi
 
@@ -311,7 +329,7 @@ trap 'main_back; exit 129' HUP
 bad_check # again: a rollback may have come while this one waited for CI
 # Until this ends by itself, however the deploy goes; a kill that skips the trap leaves it for the next landing.
 printf '%s\n' "$old $tip" "$branch" >"$state/moving"
-trap 'land_timing $? || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; ci_done; queue_done' EXIT
+trap 'land_timing $? || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&-; ci_done' EXIT
 moved=1
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
@@ -320,7 +338,7 @@ land_mark deploy deploy
 
 if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" DEPLOY_TIMES="$times" "$here/tools/deploy.sh"; then
   main_back
-  refuse "the deploy failed after main moved; main keeps $(git log -1 --format=%h "$tip"). Read the deploy's output above"
+  refuse "the deploy failed after main moved; main keeps $(git log -1 --format=%h "$tip"). The deploy's lines above say why and what to do"
 fi
 trap - INT TERM HUP
 land_mark landed

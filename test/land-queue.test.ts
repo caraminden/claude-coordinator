@@ -1,7 +1,7 @@
 // The line for the deploy lock that tools/land.sh waits in.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { root, env, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
@@ -289,5 +289,41 @@ test("the queued restart's phases show to the waiters and count as progress", { 
   } finally {
     restart.kill('SIGKILL');
     b?.child.kill('SIGKILL');
+  }
+});
+
+// F12b: a lock file that can't be opened printed "flock: 9: Bad file descriptor" about once a second for the whole
+// 15 min stall, then blamed a holder.
+test("a deploy lock that can't be opened gives up at once and says so, not a flock error a second", async () => {
+  const state = queueState();
+  writeFileSync(join(state, 'lock'), '', { mode: 0o444 });
+  const a = waiter(state, 'a', 'true', { DEPLOY_QUEUE_STALL: '3' });
+  assert.equal(await a.exit, 1, a.stderr());
+  assert.match(a.stderr(), /queue: can't open the deploy lock \S+\/lock for writing, so nothing landed or deployed: a person needs to look at it/);
+  assert.doesNotMatch(a.stderr(), /Bad file descriptor|nothing has moved/);
+  assert.deepEqual(tickets(state), []);
+});
+
+// F12c: junk in queue/.seq made a landing go live and still exit 1, and every later one too, until a person deleted
+// it, and nothing named .seq.
+test('a queue/.seq that holds no number is named, and the next ticket still goes behind the ones in line', async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
+  let b: ReturnType<typeof waiter> | undefined;
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    writeFileSync(join(state, 'queue', '.seq'), 'junk\n');
+    b = waiter(state, 'b', 'true');
+    const bs = b.stderr;
+    await until('b to wait', () => /2nd in line/.test(bs()));
+    assert.match(bs(), /queue: \S+\/queue\/\.seq held no ticket number \("junk"\); numbering goes on from the newest ticket, 1/);
+    writeFileSync(join(state, 'go'), '');
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await b.exit, 0, bs());
+    assert.deepEqual(order(state), ['a', 'b']);
+    assert.equal(issued(state), 2);
+    assert.deepEqual(readdirSync(join(state, 'queue')).filter((f) => f.includes('.tmp')), [], 'no half-written tickets left');
+  } finally {
+    for (const w of [a, b]) w?.child.kill('SIGKILL');
   }
 });

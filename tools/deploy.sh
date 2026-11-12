@@ -133,13 +133,18 @@ restart_phase() {
 # restart still holds its lock here (letting go first would let the next deploy find this unit "already" queued,
 # with its restart behind it), and a server that is down costs REPORT_RETRY s a report, which one after another
 # outlasted the landings waiting in line.
+# A minion whose own commit is older than what this restart was for hears which was its own (#553 M11): the report is
+# about the tip, and the failure may be in either.
 report() {
-  local ok=$1 text=$2 api token ticket
+  local ok=$1 text=$2 api token ticket mine tip own
   case "$ok" in ok) say "$text" ;; warn) say "WARNING: $text" ;; *) say "FAILED: $text" ;; esac
   [ -f "$STATE/reporters" ] || return 0
   restart_phase "posting its reports"
-  while read -r api token ticket; do
-    post_report "$api" "$token" "$ticket" "$ok" "$text" &
+  tip=${R_TARGET:-$(git_live rev-parse HEAD)}
+  while read -r api token ticket mine; do
+    own=
+    [ -z "$mine" ] || [ "$mine" = "$tip" ] || own=" This restart was for your $(short "$mine") and the newer commits up to $(short "$tip")."
+    post_report "$api" "$token" "$ticket" "$ok" "$text$own" &
   done < <(tac "$STATE/reporters" | sort -su -k3,3) # one note per minion, with the newest of its turns' tokens
   wait
   rm -f "$STATE/reporters"
@@ -210,11 +215,11 @@ backup_db() {
   local dir out tmp
   dir=$(dirname "$DB")/backups
   out=$dir/pre-deploy-$(git_live rev-parse --short "$1").db || return 1
+  echo "$out" # first, so a copy that fails still names its file
   if [ ! -e "$out" ]; then
     tmp=$dir/.pre-deploy.db.tmp
     (umask 077 && mkdir -p "$dir" && rm -f "$tmp" && sqlite3 "$DB" ".timeout 30000" "VACUUM INTO '$tmp'" && sqlite3 "$tmp" "PRAGMA journal_mode = WAL" >/dev/null && mv -f "$tmp" "$out") || { rm -f "$tmp"; return 1; }
   fi
-  echo "$out"
 }
 
 # Keep the newest $BACKUPS pre-deploy copies. Only after a healthy deploy, so fixing forward after a
@@ -269,7 +274,7 @@ restart() {
   init_state
   # Its timing line (#565): epoch seconds of each step, and how it ended (any exit not given one was cut off).
   unset R_FIRST
-  R_START=$(date +%s) R_LOCK='' R_BACKUP='' R_RESTART='' R_UP='' R_SETTLED='' R_COMMIT='' R_OUT=stopped
+  R_START=$(date +%s) R_LOCK='' R_BACKUP='' R_RESTART='' R_UP='' R_SETTLED='' R_COMMIT='' R_TARGET='' R_OUT=stopped
   trap 'restart_timing || true; rm -f "$STATE/restart"' EXIT
   local i=0 n unknown='' told=''
   # $STATE/now: a --now deploy that found this restart already queued and waiting.
@@ -315,12 +320,17 @@ restart() {
   local target good saved
   restart_phase "copying the database"
   target=$(git_live rev-parse HEAD)
-  R_COMMIT=${target:0:7}
-  if ! saved=$(backup_db "$target"); then
+  R_COMMIT=${target:0:7} R_TARGET=$target
+  # The copy's own error goes in the report (#553 F12e), not only the journal.
+  if ! saved=$(backup_db "$target" 2>"$STATE/backup.err"); then
+    local cause
+    cause=$(grep -v '^[[:space:]]*$' "$STATE/backup.err" 2>/dev/null | head -n 1 | cut -c1-200) || true
+    cat "$STATE/backup.err" >&2 2>/dev/null || true
     R_OUT="no database copy"
-    report fail "Could not copy the database to backups/ before restarting on $(short "$target") (see journalctl --user -u $UNIT), so nothing restarted. The checkout is at $(short "$target"), but the server still runs $(health commit | cut -c1-7). Free some disk or fix the copy, then run tools/deploy.sh again."
+    report fail "Could not copy the database to ${saved:-$(dirname "$DB")/backups/}${cause:+ ($cause)} before restarting on $(short "$target"), so nothing restarted. The checkout is at $(short "$target"), but the server still runs $(health commit | cut -c1-7). Free some disk or fix the copy, then run tools/deploy.sh again."
     exit 1
   fi
+  rm -f "$STATE/backup.err"
   R_BACKUP=$(date +%s)
   [ -n "$saved" ] && say "database copied to $saved"
   say "restarting $SERVICE on $(short "$target")"
@@ -439,7 +449,12 @@ deploy() {
   else
     say "running the tests"
     queue_phase "deploying: running the tests since $(date +%H:%M)"
-    if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log" 9>&- 7>&-); then # without the locks' fds: a run that outlives a killed deploy must not hold it
+    local trc=0
+    (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log" 9>&- 7>&-) || trc=$? # without the locks' fds: a run that outlives a killed deploy must not hold it
+    if [ "$trc" = 3 ]; then
+      say "no test ran: the test run could not write its files (the run-tests line above says which); nothing deployed"
+      false
+    elif [ "$trc" != 0 ]; then
       tail -n 40 "$STATE/test.log" >&2
       say "tests failed (full log: $STATE/test.log); nothing deployed"
       false
@@ -490,10 +505,14 @@ deploy() {
     say "the server did not pick up the new front end on SIGHUP; queuing a restart instead"
   fi
 
-  # The restart runs after this turn ends, so remember who to tell how it went.
-  if [ -n "${COORDINATOR_TICKET:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ]; then
-    (umask 077 && echo "${COORDINATOR_API:-$URL} $COORDINATOR_TOKEN $COORDINATOR_TICKET" >>"$STATE/reporters")
-  fi
+  # The restart runs after this turn ends, so remember who to tell how it went, and which commit was this deploy's.
+  # Only once a restart is queued (#553 M10): a line for none would go to whichever restart came next. The restart
+  # reads it only once it has the lock, which this holds until below, or after its 2 h wait for turns.
+  reporter() {
+    if [ -n "${COORDINATOR_TICKET:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ]; then
+      (umask 077 && echo "${COORDINATOR_API:-$URL} $COORDINATOR_TOKEN $COORDINATOR_TICKET $new" >>"$STATE/reporters")
+    fi
+  }
   # The unit runs a private copy of the version just pulled, so a later pull or a rollback can't
   # rewrite the script under it.
   local copy="$STATE/restart-$new-$$.sh"
@@ -505,11 +524,13 @@ deploy() {
     --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_UNKNOWN_WAIT="$UNKNOWN_WAIT" --setenv=DEPLOY_IDLE_POLL="$IDLE_POLL" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
     --setenv=COORDINATOR_SHARED_DIR="${COORDINATOR_SHARED_DIR:-}" \
     bash "$copy" restart 2>&1 9>&- 7>&-); then
+    reporter
     mark queued
     if [ -n "$NOW" ]; then say "restart queued as $UNIT with --now: it restarts at once, cutting off turns not in a unit of their own (this one too, if so)"
     else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi
   elif grep -qi 'already' <<<"$out"; then
     rm -f "$copy"
+    reporter
     mark queued
     if [ -n "$NOW" ]; then
       touch "$STATE/now"
@@ -518,7 +539,7 @@ deploy() {
     return 0
   else
     rm -f "$copy"
-    say "could not queue the restart: $out"
+    say "could not queue the restart ($(grep -v '^[[:space:]]*$' <<<"$out" | head -n 1 | cut -c1-200)), so nothing restarted: the live checkout is at $(short "$new"), but the server still runs $(health commit | cut -c1-7). Run tools/deploy.sh again to queue it"
     exit 1
   fi
   # The queued restart takes the restart lock before it restarts: let go, or it waits out the wait below. The deploy

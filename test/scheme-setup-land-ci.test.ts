@@ -1,7 +1,7 @@
 // The scheme-setup template land.sh: the CI gate and the stack.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { env, git, landLockFree, sleep, until, queueSetup } from './scheme-setup-land-fixture.ts';
@@ -89,12 +89,42 @@ test('CI gate: red CI refuses with main untouched; no runner within the limit pa
     assert.deepEqual(c.scratch(), []);
     assert.deepEqual([c.on(1), c.on(2)], ['ticket/1-x', 'ticket/2-x']);
     assert.deepEqual(c.tickets(), []);
-    // A run that never ends parks too.
-    const again = c.land(2, { LAND_CI_TIMEOUT: '1' });
+    // A run that never ends parks too. LAND_CI_DOWN=0: b's park left a note that would skip the wait.
+    const again = c.land(2, { LAND_CI_TIMEOUT: '1', LAND_CI_DOWN: '0' });
     c.verdict(await c.tip(again), 2);
     assert.equal(await again.exit, 75, again.stderr());
     assert.match(again.stderr(), /hasn't finished within 1 min/);
     assert.equal(spawnSync('bash', [join(c.wt, 'tools', 'land.sh')], { cwd: c.wt, encoding: 'utf8', env: { ...env, LAND_CI_START: 'soon' } }).stderr.trim(), 'land: LAND_CI_START is in whole seconds, not "soon"');
+  } finally {
+    c.stop();
+  }
+});
+
+// Citadel's pipeline failure drill, F11 (#553): with CI stuck, every landing in line waited out the same limit to learn
+// the same thing.
+test('CI gate: after a landing parked on a CI limit, those of the next minutes park at once and say why; a run already going is waited for, and green clears it', async () => {
+  const c = ciSetup(2, { stack: '1' });
+  const down = join(c.state, 'ci-down');
+  try {
+    const a = c.land(1, { LAND_CI_START: '1' });
+    assert.equal(await a.exit, 75, a.stderr());
+    assert.ok(existsSync(down), 'the landing that waited out the limit leaves a note');
+    const b = c.land(2, { LAND_CI_START: '20' });
+    assert.equal(await b.exit, 75, b.stderr());
+    assert.match(b.stderr(), /CI gave no answer to a landing \d+ s ago \(no runner started CI on [0-9a-f]{12} within 1 min\), so this one doesn't wait for it and nothing landed; CI is asked again from \d\d:\d\d\. Park/);
+    assert.doesNotMatch(b.stderr(), /no runner has started CI/);
+    assert.deepEqual(c.tickets(), []);
+    // A run that a runner has taken is no outage: it is waited for, and its green takes the note away.
+    const sha = git(c.wts[1], 'rev-parse', 'HEAD').slice(0, 12); // main hasn't moved, so this is the commit CI gets
+    c.verdict(sha, 2);
+    const again = c.land(2, { LAND_CI_START: '1' });
+    await until('it to see the run going', () => /CI is already running on/.test(again.stderr()));
+    await sleep(1500);
+    assert.equal(again.child.exitCode, null, again.stderr());
+    c.verdict(sha, GREEN);
+    assert.equal(await again.exit, 0, again.stderr());
+    assert.ok(!existsSync(down), 'a green run takes the note away');
+    assert.deepEqual(c.landed(), ['f2.txt: 2']);
   } finally {
     c.stop();
   }

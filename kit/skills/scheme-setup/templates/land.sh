@@ -21,7 +21,8 @@
 # commit when the check or CI was red on top of main (so the fix starts from there); anything else
 # leaves it where it was. While this runs, the worktree sits on a detached commit: don't work in it.
 # Exit: 0 landed; 1 refused (a conflict, a clash, a red check, red CI) or main moved but its push
-# failed; 75 CI gave no verdict (no runner took the run, it ran too long, or it was lost twice):
+# failed; 75 CI gave no verdict (no runner took the run, it ran too long, or it was lost twice; or,
+# for LAND_CI_DOWN seconds after a landing waited out one of those limits, no runner has taken this one's yet):
 # nothing is wrong with the branch and nothing landed, so park and run this again once a person says
 # the runners are back.
 set -euo pipefail
@@ -103,11 +104,12 @@ CHECK_LIMIT=${LAND_CHECK_TIMEOUT:-1800}
 # CI's limits, in whole seconds, counted for the head of the line only (a run behind it may just be
 # waiting for a runner the ones ahead are using): a runner takes the run within CI_START, and the run
 # ends within CI_LIMIT. CI is asked every CI_POLL. For CI_GRACE after a push, an older run of the
-# same commit may still be the one that answers, so red or lost is not believed yet.
-for v in LAND_CI_START LAND_CI_TIMEOUT LAND_CI_POLL LAND_CI_GRACE; do
+# same commit may still be the one that answers, so red or lost is not believed yet. For CI_DOWN after a
+# landing waited out CI_START or CI_LIMIT, the next ones park as soon as no runner has taken theirs.
+for v in LAND_CI_START LAND_CI_TIMEOUT LAND_CI_POLL LAND_CI_GRACE LAND_CI_DOWN; do
   [[ ${!v:-0} =~ ^[0-9]+$ ]] || refuse "$v is in whole seconds, not \"${!v}\""
 done
-CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60}
+CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60} CI_DOWN=${LAND_CI_DOWN:-600}
 [[ $CI_STACK =~ ^[1-9][0-9]*$ ]] || refuse "CI_STACK is a number from 1 up, not \"$CI_STACK\""
 CI_ON=1
 [ -n "$CI_WORKFLOWS$CI_STATUS" ] || CI_ON='' CI_STACK=1 CI_LIMIT=0
@@ -131,6 +133,14 @@ queue_proc() {
   # A zombie (Z, or X while it is reaped) is dead, though its /proc entry stays until its parent waits on it.
   case $2 in Z | X | x) return 0 ;; esac
   echo "$1 ${21}"
+}
+
+# The state letter of a process: T or t is stopped (a frozen unit or container, a SIGSTOP).
+queue_state() {
+  local stat
+  stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
+  stat=${stat##*) }
+  echo "${stat%% *}"
 }
 
 queue_write() { # <file> <pid and start> <got> <label> <phase> <commit>: by a rename, so nobody reads half a ticket
@@ -183,7 +193,7 @@ queue_join() {
 }
 
 queue_look() {
-  local q=$Q_DIR t l ahead=0 head="" headname="" sig typical sum count line
+  local q=$Q_DIR t l ahead=0 head="" headname="" headpid="" sig typical sum count line detail look
   Q_PRED='' Q_PREDNAME=''
   for t in "$q"/[0-9]*; do
     [[ ${t##*/} =~ ^[0-9]+$ ]] || continue # not a ticket half-written, or the glob itself
@@ -194,8 +204,11 @@ queue_look() {
       rm -f "$t"
       continue
     fi
+    # A waiter that is stopped holds nothing, so it is passed over; it tries for the lock like the head once it wakes.
+    # Those this one passed so are waiting on its lock, not ahead of it.
+    if [ "${l[1]:-0}" = 0 ] && { [ -n "$Q_HELD" ] || [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; }; then continue; fi
     ahead=$((ahead + 1))
-    [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"; }
+    [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *}; }
     # The last one seen is the one directly ahead. "skip": that one is red or in conflict where it sits, and
     # lands only if what is ahead of it fails, so the ones behind build on the one ahead of it meanwhile.
     [ "${l[4]:-}" = skip ] || { Q_PRED=${l[4]:-} Q_PREDNAME=${l[2]:-?}; }
@@ -212,7 +225,14 @@ queue_look() {
       queue_set 1 "$(date +%s)"
       return 0
     fi
+    # Held by a landing behind this one in line: it passed this one while it was stopped.
     head="outside $Q_N" headname="a landing started from a branch whose land.sh is older than the line"
+    for t in "$q"/[0-9]*; do
+      [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
+      [ "${l[1]:-0}" != 0 ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]:-}" ] || continue
+      head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"
+      break
+    done
   fi
 
   # Progress is any change at the head of the line: a new head, or the head's next phase.
@@ -231,7 +251,18 @@ queue_look() {
     [ -n "$Q_SAID" ] || echo "queue: the wait has no time limit while the line moves, so run this in the background with a long timeout rather than under a 10 min limit: a run that is stopped loses its place" >&2
     Q_SAID=1
   elif [ $((SECONDS - Q_SINCE)) -ge "$QUEUE_STALL" ]; then
-    echo "queue: nothing has moved for $(((QUEUE_STALL + 59) / 60)) min (ahead: $headname), so this gave up and nothing landed. A person needs to look at what holds the land lock (${q%/land-queue}/land.lock) before anyone tries again" >&2
+    detail="" look="what holds the land lock (${q%/land-queue}/land.lock)"
+    if [ "$ahead" -gt 0 ]; then
+      detail=$(queue_state "$headpid")
+      case $detail in T | t) detail="; pid $headpid, stopped" ;; *) detail="; pid $headpid, state ${detail:-?}" ;; esac
+      if flock -n 9; then
+        flock -u 9
+        detail="$detail; the lock is free" look="pid $headpid, which is first in line and is not taking the lock,"
+      else
+        detail="$detail; the lock is held"
+      fi
+    fi
+    echo "queue: nothing has moved for $(((QUEUE_STALL + 59) / 60)) min (ahead: $headname$detail), so this gave up and nothing landed. A person needs to look at $look before anyone tries again" >&2
     return 1
   fi
 }
@@ -430,9 +461,21 @@ ci_cancel() {
   done < <(hub gh api "repos/$slug/actions/runs?branch=$CI_REF&per_page=20" --jq '.workflow_runs[] | select(.status != "completed") | [.id, .head_sha] | @tsv' 2>/dev/null)
 }
 
+# A CI outage is paid once: a landing that waited out a limit leaves <state>/ci-down ("<when> <why>"), so the ones of
+# the next CI_DOWN seconds don't each wait to learn the same thing. ci_down <why> writes it; ci_down_fresh puts what
+# to say into $down while it is fresh.
+ci_down() { printf '%s %s\n' "$(date +%s)" "$1" >"$state/ci-down" 2>/dev/null || true; }
+ci_down_fresh() {
+  local at why now
+  read -r at why 2>/dev/null <"$state/ci-down" || return 1
+  now=$(date +%s)
+  [[ $at =~ ^[0-9]+$ ]] && [ $((now - at)) -lt "$CI_DOWN" ] || return 1
+  down="CI gave no answer to a landing $((now - at)) s ago ($why), so this one doesn't wait for it and nothing landed; CI is asked again from $(date -d "@$((at + CI_DOWN))" +%H:%M)"
+}
+
 # Asks CI about $tip, at most every CI_POLL seconds: sets green, refuses on red, repeats a lost run once, parks at the limits.
 ci_ask() {
-  local rc=0 waited busy
+  local rc=0 waited busy down=''
   [ $((SECONDS - ci_last)) -ge "$CI_POLL" ] || return 0
   ci_last=$SECONDS
   ci_verdict || rc=$?
@@ -442,6 +485,7 @@ ci_ask() {
   case $rc in
     0)
       green=1
+      rm -f "$state/ci-down"
       say "CI is green on ${tip:0:12}"
       queue_phase "CI passed ${tip:0:12}"
       return 0 ;;
@@ -467,7 +511,7 @@ ci_ask() {
   [ "$Q_AHEAD" = 0 ] || return 0
   waited=$((SECONDS - ci_clock))
   [ "$rc" != 2 ] || ci_begun=1
-  if [ -z "$ci_begun" ] && [ "$waited" -ge "$CI_START" ]; then
+  if [ -z "$ci_begun" ] && { [ "$waited" -ge "$CI_START" ] || { [ "$rc" = 3 ] && ci_down_fresh; }; }; then
     cat "$cilog" >&2
     [ "$rc" = 3 ] || park "CI gave no answer about ${tip:0:12} for $(((CI_START + 59) / 60)) min (exit $rc from ${CI_STATUS:-gh}; above), so nothing landed. That is GitHub or this box's gh login, not the runners or the branch: a person needs to look. Park, and run this again after"
     # Runs going elsewhere in the repo mean the runners are there and busy (the ones stacked behind this, say): the
@@ -478,10 +522,13 @@ ci_ask() {
       ci_begun=1
       return 0
     fi
+    [ -z "$down" ] || park "$down. Park, and run this again once a person says the runners are back"
+    ci_down "no runner started CI on ${tip:0:12} within $(((CI_START + 59) / 60)) min"
     park "no runner has started CI on ${tip:0:12} within $(((CI_START + 59) / 60)) min (the machine they run on is probably off or asleep), so nothing landed. Park, and run this again once a person says the runners are back"
   fi
   if [ "$waited" -ge "$CI_LIMIT" ]; then
     cat "$cilog" >&2
+    ci_down "CI on ${tip:0:12} didn't finish within $(((CI_LIMIT + 59) / 60)) min"
     park "CI on ${tip:0:12} hasn't finished within $(((CI_LIMIT + 59) / 60)) min, so nothing landed. Park, and run this again later"
   fi
 }
@@ -551,7 +598,7 @@ build() {
     # A run of this very commit that is green or going (its pull request's, say) will do; otherwise a new one.
     ci_verdict || rc=$?
     case $rc in
-      0) green=1 && say "CI already passed ${tip:0:12}" ;;
+      0) green=1 && rm -f "$state/ci-down" && say "CI already passed ${tip:0:12}" ;;
       2) say "CI is already running on ${tip:0:12}" ;;
       *) ci_push ;;
     esac

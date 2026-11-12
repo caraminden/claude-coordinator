@@ -355,3 +355,71 @@ test('the head of the line waits for a lock held outside it (an older land.sh), 
     older.kill('SIGKILL');
   }
 });
+
+// Citadel's pipeline failure drill, F3 (#553), in the template's own line: a frozen unit or container stops a waiter
+// (state T). It holds nothing, yet everyone behind it waited on it with the lock free.
+test('a waiter that is frozen is passed over: the one behind it takes the lock and lands, and it goes when it wakes', async () => {
+  const q = queueSetup(3);
+  const gate = { a: join(q.dir, 'gate-a'), c: join(q.dir, 'gate-c') };
+  q.open(); // b's check
+  const a = q.land(1, { GATE: gate.a });
+  let b: ReturnType<typeof q.land> | undefined;
+  let c: ReturnType<typeof q.land> | undefined;
+  try {
+    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+    b = q.land(2);
+    const bs = b.stderr;
+    await until('b to say its place', () => /2nd in line/.test(bs()));
+    process.kill(b.child.pid!, 'SIGSTOP');
+    c = q.land(3, { GATE: gate.c });
+    const cs = c.stderr;
+    await until('c to say its place', () => /in line for the land lock/.test(cs()));
+    writeFileSync(gate.a, '');
+    assert.equal(await a.exit, 0, a.stderr());
+    await until('c to take the lock past the frozen b', () => /got the land lock/.test(cs()), 15_000);
+    // Awake again while the one that passed it has the lock: that is a landing in line, not one older than the line.
+    process.kill(b.child.pid!, 'SIGCONT');
+    await until('b to say what it waits for now', () => /next in line for the land lock \(ahead: ticket\/3-x, running the check since/.test(bs()));
+    assert.doesNotMatch(bs(), /older than the line/);
+    writeFileSync(gate.c, '');
+    assert.equal(await c.exit, 0, cs());
+    assert.equal(await b.exit, 0, bs());
+    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f3.txt: 3', 'f2.txt: 2']);
+  } finally {
+    for (const g of Object.values(gate)) writeFileSync(g, '');
+    if (b) { b.child.kill('SIGCONT'); b.child.kill('SIGKILL'); }
+    c?.child.kill('SIGKILL');
+  }
+});
+
+test('giving up names the process at the head of the line, its state and whether the lock is held or free', async () => {
+  const q = queueSetup(3);
+  const a = q.land(1);
+  const stall = { LAND_CHECK_TIMEOUT: '1', LAND_QUEUE_SLACK: '1' };
+  let stuck: ReturnType<typeof spawn> | undefined;
+  try {
+    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+    process.kill(a.child.pid!, 'SIGSTOP'); // the holder itself is frozen: nobody can pass it
+    const b = q.land(2, stall);
+    assert.equal(await b.exit, 1, b.stderr());
+    assert.match(b.stderr(), new RegExp(`nothing has moved for 1 min \\(ahead: ticket/1-x, running the check since \\d\\d:\\d\\d; pid ${a.child.pid}, stopped; the lock is held\\), so this gave up`));
+    a.child.kill('SIGKILL');
+    q.open(); // its check's subshell outlives it, holding its stderr open until the check ends
+    await a.exit;
+    // First in line, awake, and not taking the free lock.
+    stuck = spawn('sleep', ['60'], { stdio: 'ignore' });
+    const pid = stuck.pid!;
+    await until('the stuck process to run', () => existsSync(`/proc/${pid}/stat`));
+    const started = readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').split(' ')[19];
+    const seq = Number(readFileSync(join(q.state, 'land-queue', '.seq'), 'utf8')) + 1;
+    writeFileSync(join(q.state, 'land-queue', String(seq).padStart(10, '0')), `${pid} ${started}\n0\nstuck\nwaiting\n-\n`);
+    writeFileSync(join(q.state, 'land-queue', '.seq'), `${seq}\n`);
+    const c = q.land(3, stall);
+    assert.equal(await c.exit, 1, c.stderr());
+    assert.match(c.stderr(), new RegExp(`nothing has moved for 1 min \\(ahead: stuck, waiting; pid ${pid}, state S; the lock is free\\), so this gave up and nothing landed\\. A person needs to look at pid ${pid}, which is first in line and is not taking the lock, before anyone tries again`));
+  } finally {
+    q.open();
+    a.child.kill('SIGKILL');
+    stuck?.kill('SIGKILL');
+  }
+});

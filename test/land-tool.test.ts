@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { landArgs } from '../src/land.ts';
 import { agentToken, bootServer, REPO, until } from './helpers.ts';
 
 // The land tool (src/land.ts) for a container turn: the server runs the minion's tools/land.sh on the
@@ -175,5 +176,121 @@ curl -sS -o /dev/null -w 'report: %{http_code}\\n' -X POST "$COORDINATOR_API/api
     await first?.stop();
     await next?.stop();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// #597: a container turn's build minion or feeder couldn't pass land.sh's build forms through the tool. The server
+// turns { into, files, full, build } into land.sh's arguments, and only into the shapes land.sh accepts.
+test('landArgs gives land.sh only the shapes it accepts, files as paths inside the worktree', () => {
+  const root = mkdtempSync(join(tmpdir(), 'land-args-'));
+  const cwd = join(root, 'wt');
+  mkdirSync(join(cwd, 'test', 'sub'), { recursive: true });
+  writeFileSync(join(cwd, 'test', 'a.test.ts'), '');
+  writeFileSync(join(cwd, 'test', 'sub', 'b.test.ts'), '');
+  writeFileSync(join(cwd, '-x.test.ts'), '');
+  writeFileSync(join(root, 'outside.test.ts'), '');
+  symlinkSync(join(root, 'outside.test.ts'), join(cwd, 'test', 'link.test.ts'));
+  try {
+    assert.deepEqual(landArgs({}, cwd), [], 'no arguments: a plain land, as before');
+    assert.deepEqual(landArgs({ fix: true } as any, cwd), []);
+    assert.deepEqual(landArgs({ build: false, full: false, files: [], into: null }, cwd), []);
+    assert.deepEqual(landArgs({ build: true }, cwd), ['--build']);
+    assert.deepEqual(landArgs({ into: 'build/7', full: true }, cwd), ['--into', 'build/7', '--full']);
+    assert.deepEqual(landArgs({ into: 'build/12', files: ['test/a.test.ts', './test/sub/b.test.ts', join(cwd, 'test', 'a.test.ts')] }, cwd),
+      ['--into', 'build/12', 'test/a.test.ts', 'test/sub/b.test.ts', 'test/a.test.ts'], 'in order, relative to the worktree');
+    assert.deepEqual(landArgs({ into: 'build/7' }, cwd), ['--into', 'build/7'], 'no files: land.sh lets only a docs-only change through');
+    assert.deepEqual(landArgs({ into: 'build/7', files: ['-x.test.ts'] }, cwd), ['--into', 'build/7', './-x.test.ts'], 'never read as an option');
+
+    const refused = (body: object, re: RegExp) => assert.throws(() => landArgs(body as any, cwd), re, JSON.stringify(body));
+    for (const into of ['build/0', 'build/07', 'build/1234567', 'build/7; rm -rf ~', 'main', '--full', 'build/x', ' build/7', 'build/7\n']) refused({ into }, /into must be a build branch/);
+    refused({ into: 7 }, /into must be/);
+    refused({ into: 'build/7', files: ['../outside.test.ts'] }, /not a file in your worktree/);
+    refused({ into: 'build/7', files: [join(root, 'outside.test.ts')] }, /not a file in your worktree/);
+    refused({ into: 'build/7', files: ['test/link.test.ts'] }, /not a file in your worktree/);
+    refused({ into: 'build/7', files: ['test/missing.test.ts'] }, /not a file in your worktree/);
+    refused({ into: 'build/7', files: ['test'] }, /not a file in your worktree/);
+    refused({ into: 'build/7', files: [''] }, /not a file in your worktree/);
+    refused({ into: 'build/7', files: 'test/a.test.ts' }, /files must be a list/);
+    refused({ into: 'build/7', files: [1] }, /files must be a list/);
+    refused({ into: 'build/7', full: true, files: ['test/a.test.ts'] }, /name no files/);
+    refused({ into: 'build/7', full: 'yes' }, /full must be/);
+    refused({ files: ['test/a.test.ts'] }, /go with into/);
+    refused({ full: true }, /go with into/);
+    refused({ build: true, into: 'build/7' }, /build takes nothing more/);
+    refused({ build: true, files: ['test/a.test.ts'] }, /build takes nothing more/);
+    refused({ build: 'true' }, /build must be/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the land route hands land.sh those arguments, and refuses a bad call without starting it', async () => {
+  const store = new Store(join(srv.data, 'coordinator.db'));
+  const project = store.createProject('Args', null);
+  store.setProjectRepoDir(project.id, join(srv.root, 'args-repo'));
+  const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(srv.root, 'args-worktree');
+  mkdirSync(join(cwd, 'tools'), { recursive: true });
+  mkdirSync(join(cwd, 'test'));
+  writeFileSync(join(cwd, 'test', 'a.test.ts'), '');
+  writeFileSync(join(cwd, 'test', 'b.test.ts'), '');
+  writeFileSync(join(cwd, 'tools', 'land.sh'), 'echo "n=$#"; for a in "$@"; do echo "[$a]"; done\n');
+  store.setTicketDir(minion.id, cwd, null);
+  const auth = { Authorization: `Bearer ${agentToken(srv.data, minion.id)}` };
+  const post = (body?: object) => fetch(`${srv.base}/api/tickets/${minion.id}/land`, { method: 'POST', headers: body ? { ...auth, 'Content-Type': 'application/json' } : auth, body: body ? JSON.stringify(body) : undefined });
+  const land = async (body?: object) => {
+    const res = await post(body);
+    assert.equal(res.status, 202);
+    return (await until('land.sh ends', async () => { const b = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json(); return b.code === null ? null : b; })).output.trim();
+  };
+  assert.equal(await land(), 'n=0', 'no body: land.sh as before');
+  assert.equal(await land({}), 'n=0');
+  assert.equal(await land({ into: 'build/3', files: ['test/b.test.ts', 'test/a.test.ts'] }), 'n=4\n[--into]\n[build/3]\n[test/b.test.ts]\n[test/a.test.ts]');
+  assert.equal(await land({ into: 'build/3', full: true }), 'n=3\n[--into]\n[build/3]\n[--full]');
+  assert.equal(await land({ build: true }), 'n=1\n[--build]');
+
+  for (const body of [{ into: 'build/3; touch pwned' }, { into: 'build/3', files: ['../args-repo/x.test.ts'] }, { full: true }]) {
+    const res = await post(body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+  }
+  const last = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json();
+  assert.equal(last.output.trim(), 'n=1\n[--build]', 'a refused call started nothing');
+});
+
+test('the land tool sends into, files, full and build on to the server, and nothing for a plain call', async () => {
+  const bodies: any[] = [];
+  const api = createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      if (req.method === 'POST') bodies.push(JSON.parse(raw || '{}'));
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ output: 'ok', code: 0 }));
+    });
+  });
+  await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
+  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+    env: {
+      ...process.env, MACHINES_URL: undefined, COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`, COORDINATOR_TOKEN: '7.sig',
+      COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: '1', COORDINATOR_CONTAINER: '1',
+    },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  try {
+    const replies = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+    let id = 0;
+    const land = async (args: object) => {
+      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name: 'land', arguments: args } }) + '\n');
+      const { result } = JSON.parse((await replies.next()).value);
+      assert.match(result.content[0].text, /exited 0/);
+    };
+    await land({});
+    await land({ fix: false });
+    await land({ into: 'build/3', files: ['test/a.test.ts', 'test/b.test.ts'] });
+    await land({ into: 'build/3', full: true });
+    await land({ build: true, fix: true });
+    assert.deepEqual(bodies, [{}, {}, { into: 'build/3', files: ['test/a.test.ts', 'test/b.test.ts'] }, { into: 'build/3', full: true }, { build: true, fix: true }]);
+  } finally {
+    child.kill();
+    api.close();
   }
 });

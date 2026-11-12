@@ -992,8 +992,17 @@ const THREAD_TOOLS = [
     ? [{
       name: 'land',
       description:
-        `Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. ${DEPLOYS ? 'It rebases onto main, runs the tests, fast-forwards main and deploys' : "It lands the branch as the scheme's land.sh does"}, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place).`,
-      inputSchema: { type: 'object', properties: { fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: lands it anyway (LAND_FIX=1 for land.sh)' } } },
+        `Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. ${DEPLOYS ? 'It rebases onto main, runs the tests, fast-forwards main and deploys' : "It lands the branch as the scheme's land.sh does"}, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place). With no arguments it is a plain \`tools/land.sh\`. A build's minions pass its forms: \`tools/land.sh --into build/<n> <test files>\` is { into: "build/<n>", files: [...] }, \`tools/land.sh --into build/<n> --full\` is { into: "build/<n>", full: true }, and \`tools/land.sh --build\` is { build: true }.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "A feeder's merge into its build, or the build minion's merge of main: the build branch, build/<n> (land.sh --into build/<n>). With files, or with full: true" },
+          files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files this change touched, as paths in your worktree (e.g. test/land-tool.test.ts); only these run. None only for a docs-only change' },
+          full: { type: 'boolean', description: 'With into, no files: the build minion takes main in and the whole suite runs (land.sh --into build/<n> --full)' },
+          build: { type: 'boolean', description: "The build minion's land of its build on main, with its branch at the build's tip (land.sh --build). Nothing else with it" },
+          fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: lands it anyway (LAND_FIX=1 for land.sh)' },
+        },
+      },
     }]
     : []),
   ...(DEPLOYS
@@ -1345,7 +1354,11 @@ async function runTool(name: string, args: any): Promise<string> {
       return `The preview is up at ${url}. Post that link in your reply (the minion's view also shows an Open preview button) and set state try.`;
     }
     case 'land': {
-      let r = await call('POST', `/api/tickets/${TICKET}/land`, args.fix === true ? { fix: true } : {});
+      // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).
+      const body: Record<string, unknown> = {};
+      for (const k of ['into', 'files', 'full', 'build'] as const) if (args[k] !== undefined) body[k] = args[k];
+      if (args.fix === true) body.fix = true;
+      let r = await call('POST', `/api/tickets/${TICKET}/land`, body);
       while (r.code === null) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         try {

@@ -12,6 +12,7 @@ import { runnerLabel } from '../ci-runner.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
+import { landArgs } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
 import { repoSlug } from '../prlinks.ts';
@@ -706,7 +707,14 @@ export const ticketRoutes: Route[] = [
       const token = String(req.headers.authorization).replace(/^Bearer /, '');
       const env = app.runner.hostEnv(ticket, token);
       if (body?.fix === true) env.LAND_FIX = '1';
-      return json(res, 202, app.landings.start(ticket.id, ticket.cwd, env));
+      // { into, files, full, build }: land.sh's build-branch forms (#597), checked to the shapes it accepts.
+      let args: string[];
+      try {
+        args = landArgs(body ?? {}, ticket.cwd);
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      return json(res, 202, app.landings.start(ticket.id, ticket.cwd, env, args));
     },
   },
   {

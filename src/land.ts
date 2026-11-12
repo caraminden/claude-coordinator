@@ -10,8 +10,8 @@
 // (tests, a dev copy) or when systemd-run fails, it runs as the server's child, which a restart would
 // cut off: only those count toward the runner's interruptible().
 import { createHash } from 'node:crypto';
-import { readdirSync, rmSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { HostJobs } from './host-job.ts';
 
 export interface Landing {
@@ -26,6 +26,60 @@ const MAX_OUTPUT = 64 * 1024;
 const KEEP_MS = 14 * 24 * 3600_000;
 /** Said when the wrapper ended without writing a code: its unit was stopped, or a restart cut off a child. */
 export const NO_CODE = '\n[land.sh ended without an exit code: it was stopped, or a restart cut it off. Check `git log main`.]';
+
+/** At most this many test files in one call: a feeder names the few its change touched. */
+const MAX_FILES = 200;
+
+/**
+ * The land tool's arguments, turned into land.sh's (#597), or an Error saying what was wrong. Only the shapes
+ * land.sh accepts come out: nothing, `--build`, `--into build/<n> --full`, or `--into build/<n> <files>` with
+ * each file an existing file inside the worktree, passed as a path relative to it. No free-form text reaches it.
+ */
+export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown; build?: unknown }, cwd: string): string[] {
+  const { into, files, full, build } = body;
+  if (build !== undefined && typeof build !== 'boolean') throw new Error('build must be true or false');
+  if (full !== undefined && typeof full !== 'boolean') throw new Error('full must be true or false');
+  if (into !== undefined && into !== null && typeof into !== 'string') throw new Error('into must be a build branch, build/<n>');
+  if (files !== undefined && files !== null && !(Array.isArray(files) && files.every((f) => typeof f === 'string'))) throw new Error('files must be a list of test file paths');
+  const list = (files ?? []) as string[];
+  if (build) {
+    if (into || full || list.length) throw new Error('build takes nothing more: not into, full or files (it lands the build your branch is at the tip of)');
+    return ['--build'];
+  }
+  if (!into) {
+    if (full || list.length) throw new Error('full and files go with into: build/<n>');
+    return [];
+  }
+  if (!/^build\/[1-9][0-9]{0,5}$/.test(into)) throw new Error(`into must be a build branch, build/<n>, not ${JSON.stringify(into.slice(0, 80))}`);
+  if (full) {
+    if (list.length) throw new Error('full runs the whole suite: name no files with it');
+    return ['--into', into, '--full'];
+  }
+  if (list.length > MAX_FILES) throw new Error(`at most ${MAX_FILES} files`);
+  let root: string;
+  try {
+    root = realpathSync(cwd);
+  } catch {
+    throw new Error('this minion\'s worktree is missing');
+  }
+  const rel = list.map((f) => {
+    const bad = () => new Error(`${JSON.stringify(f.slice(0, 200))} is not a file in your worktree: name the test files this change touched, as paths inside it`);
+    if (!f || f.includes('\0')) throw bad();
+    let real: string;
+    try {
+      // Symlinks resolved, so a link can't point the run outside the worktree.
+      real = realpathSync(resolve(root, f));
+      if (!statSync(real).isFile()) throw bad();
+    } catch {
+      throw bad();
+    }
+    const r = relative(root, real);
+    if (!r || r === '..' || r.startsWith(`..${sep}`) || isAbsolute(r)) throw bad();
+    // Never one land.sh or node would read as an option.
+    return r.startsWith('-') ? `.${sep}${r}` : r;
+  });
+  return ['--into', into, ...rel];
+}
 
 export class Landings {
   private readonly root: string;
@@ -45,11 +99,11 @@ export class Landings {
     return join(this.root, String(ticketId));
   }
 
-  /** Start land.sh for a minion, unless one runs already; the tool polls get() until it ends. */
-  start(ticketId: number, cwd: string, env: Record<string, string>): Landing {
+  /** Start land.sh for a minion, with `args` from landArgs(), unless one runs already; the tool polls get() until it ends. */
+  start(ticketId: number, cwd: string, env: Record<string, string>, args: string[] = []): Landing {
     const now = this.get(ticketId);
     if (now && now.code === null) return now;
-    this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh'], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId });
+    this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh', ...args], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId });
     return { output: '', code: null };
   }
 

@@ -6,10 +6,10 @@
 //   node godot-on-demand.mjs idle-check                          perigee-godot-idle.timer: stop it if unused
 //
 // The bridge sits between the machine agent and `godot-ai attach`, passing MCP lines through untouched.
-// Every line either way stamps the activity file, and so does a tool call still waiting on its answer
-// (once a minute), so a session in progress never looks idle. A request that needs the editor (anything
-// but the handshake and the listings) first starts the unit if it is down and holds until the editor
-// has dialled in to godot-ai's WebSocket port (READY seconds at most, then SETTLE), so the minion's call waits
+// A tool call and its answer stamp the activity file, and so does a call still waiting on its answer
+// (once a minute), so a session in progress never looks idle. The handshake, listings and pings don't
+// (#615). A request that needs the editor (anything but the handshake and the listings) first starts
+// the unit if it is down and holds until the editor has dialled in to godot-ai's WebSocket port (READY seconds at most, then SETTLE), so the minion's call waits
 // rather than fails. The godot-ai backend runs here on the host, owned by the attach bridges, not in
 // the editor's container: stopping the editor leaves every session open, and the editor reconnects to
 // the same backend when it starts again.
@@ -212,13 +212,14 @@ export function bridge(command, cfg = settings(), { input = process.stdin, outpu
   // Lines go to the server in order: one held for the editor holds the ones behind it.
   let chain = Promise.resolve();
   lines(input, (line) => {
-    stamp();
     let msg = null;
     try {
       msg = JSON.parse(line);
     } catch {}
     const needs = needsEditor(msg);
-    if (needs) pending.add(msg.id);
+    // Only editor work is use: every turn in a scheme the machine is lent to opens a session and sends a
+    // handshake, so stamping those kept the editor up around the clock (#615).
+    if (needs) pending.add(msg.id), stamp();
     // A call the client gave up on gets no answer: stop counting it as in flight.
     if (msg?.method === 'notifications/cancelled') pending.delete(msg.params?.requestId);
     chain = chain.then(async () => {
@@ -227,10 +228,9 @@ export function bridge(command, cfg = settings(), { input = process.stdin, outpu
     });
   }, () => chain.then(() => child.stdin.end()));
   lines(child.stdout, (line) => {
-    stamp();
     try {
       const msg = JSON.parse(line);
-      if (msg && msg.id !== undefined && msg.method === undefined) pending.delete(msg.id);
+      if (msg && msg.id !== undefined && msg.method === undefined && pending.delete(msg.id)) stamp();
     } catch {}
     output.write(`${line}\n`);
   });

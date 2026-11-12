@@ -222,13 +222,18 @@ test('bridge: the handshake goes straight through, a tool call waits for the edi
   s.used(NOW - 3 * H);
   b.send({ jsonrpc: '2.0', id: 1, method: 'initialize' });
   await until(() => b.seen(1));
-  assert.ok(b.fresh(), 'the handshake counts as use');
+  // Every turn in a lent scheme opens a session: its handshake isn't use, or the editor never goes idle (#615).
+  assert.equal(b.fresh(), false, 'the handshake does not count as use');
+  b.send({ jsonrpc: '2.0', id: 4, method: 'ping' });
+  await until(() => b.seen(4));
+  assert.equal(b.fresh(), false, 'nor does a ping');
 
   // U+2028 in the arguments, as script text can hold: JSON leaves it raw, and the line must stay whole.
   b.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'script_patch', arguments: { text: 'a\u2028b\u2029c' } } });
   b.send({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(b.seen(3), false, 'the listing waits behind the held call, to keep the order');
+  assert.ok(b.fresh(), 'a tool call counts as use');
   b.ready();
   await until(() => b.seen(3));
   assert.equal(b.seen(2), false);

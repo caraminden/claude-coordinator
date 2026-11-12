@@ -9,8 +9,10 @@ The `perigee-godot` machine is the Godot 4.7.2 .NET editor on `~/delve-godot` (a
   the tool list) starts the unit if it is down and holds until the editor has dialled in to
   godot-ai's WebSocket port 9500 (at most 180 s, then 5 s more for the plugin's handshake), so the
   minion's call waits instead of failing.
-- **Stop when idle.** Every MCP line either way stamps `~/.local/state/perigee-godot/last-call`, and a
-  tool call still waiting on its answer re-stamps it each minute. `perigee-godot-idle.timer` runs
+- **Stop when idle.** A tool call and its answer stamp `~/.local/state/perigee-godot/last-call`, and a
+  tool call still waiting on its answer re-stamps it each minute. The handshake, listings and pings
+  don't: every turn in a scheme the machine is lent to opens a session, about 56 a day, and when those
+  counted the editor never went 2 hours quiet (#615). `perigee-godot-idle.timer` runs
   `godot-on-demand.mjs idle-check` every 10 minutes, which stops the unit once both the last call and
   the unit's start are 2 hours old. It never touches a frozen unit and never starts anything. Its
   first run after install finds no stamp and starts the 2-hour clock instead of stopping.

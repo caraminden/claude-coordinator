@@ -356,9 +356,9 @@ test('the head of the line waits for a lock held outside it (an older land.sh), 
   }
 });
 
-// Citadel's pipeline failure drill, F3 (#553), in the template's own line: a frozen unit or container stops a waiter
-// (state T). It holds nothing, yet everyone behind it waited on it with the lock free.
-test('a waiter that is frozen is passed over: the one behind it takes the lock and lands, and it goes when it wakes', async () => {
+// Citadel's pipeline failure drill, F3 (#553), in the template's own line: a waiter stopped by a SIGSTOP (state T) holds
+// no land lock, yet everyone behind it waited on it with the lock free. A frozen cgroup shows state S: not covered.
+test('a waiter that is stopped (SIGSTOP) is passed over: the one behind it takes the lock and lands, and it goes when it wakes', async () => {
   const q = queueSetup(3);
   const gate = { a: join(q.dir, 'gate-a'), c: join(q.dir, 'gate-c') };
   q.open(); // b's check
@@ -376,7 +376,7 @@ test('a waiter that is frozen is passed over: the one behind it takes the lock a
     await until('c to say its place', () => /in line for the land lock/.test(cs()));
     writeFileSync(gate.a, '');
     assert.equal(await a.exit, 0, a.stderr());
-    await until('c to take the lock past the frozen b', () => /got the land lock/.test(cs()), 15_000);
+    await until('c to take the lock past the stopped b', () => /got the land lock/.test(cs()), 15_000);
     // Awake again while the one that passed it has the lock: that is a landing in line, not one older than the line.
     process.kill(b.child.pid!, 'SIGCONT');
     await until('b to say what it waits for now', () => /next in line for the land lock \(ahead: ticket\/3-x, running the check since/.test(bs()));
@@ -399,7 +399,7 @@ test('giving up names the process at the head of the line, its state and whether
   let stuck: ReturnType<typeof spawn> | undefined;
   try {
     await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
-    process.kill(a.child.pid!, 'SIGSTOP'); // the holder itself is frozen: nobody can pass it
+    process.kill(a.child.pid!, 'SIGSTOP'); // the holder itself is stopped: nobody can pass it
     const b = q.land(2, stall);
     assert.equal(await b.exit, 1, b.stderr());
     assert.match(b.stderr(), new RegExp(`nothing has moved for 1 min \\(ahead: ticket/1-x, running the check since \\d\\d:\\d\\d; pid ${a.child.pid}, stopped; the lock is held\\), so this gave up`));

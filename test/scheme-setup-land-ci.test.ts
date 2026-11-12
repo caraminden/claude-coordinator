@@ -172,6 +172,40 @@ test('CI gate: under a fresh outage note, a run is given CI_GRACE to be taken, a
   }
 });
 
+// A process and everything under it, parents first, so a stopped parent starts nothing new. Its children are listed
+// before it is signalled, so a killed parent's children are still found.
+function signalTree(pid: number, signal: NodeJS.Signals) {
+  const children = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  try { process.kill(pid, signal); } catch { return; }
+  for (const child of children) signalTree(Number(child), signal);
+}
+
+// Review of the stopped-waiter port: a stacked waiter stopped mid-check keeps the check lock in its subshell, so the one
+// that passed it waited on that lock for ever, and everyone behind it gave up at the stall limit.
+test('the stack: a waiter stopped (SIGSTOP) mid-check keeps the check lock, and the one that passes it refuses at the limit, naming it', async () => {
+  const c = ciSetup(3, { stack: '2', check: 'until [ -e "$GATE" ]; do sleep 0.05; done' });
+  const gate = { a: join(c.dir, 'gate-a'), b: join(c.dir, 'gate-b'), c: join(c.dir, 'gate-c') };
+  writeFileSync(gate.a, '');
+  writeFileSync(gate.c, '');
+  let b: ReturnType<typeof c.land> | undefined;
+  try {
+    const a = c.land(1, { GATE: gate.a });
+    await c.tip(a); // checked, and waiting for CI
+    b = c.land(2, { GATE: gate.b });
+    await until('b to run its check, stacked on a', () => /running the check/.test(c.phase(c.tickets()[1] ?? '')));
+    signalTree(b.child.pid!, 'SIGSTOP'); // its check's time limit is stopped with it
+    const d = c.land(3, { GATE: gate.c, LAND_CHECK_TIMEOUT: '2', LAND_QUEUE_SLACK: '4' });
+    assert.equal(await d.exit, 1, d.stderr());
+    assert.match(d.stderr(), new RegExp(`the check lock \\(\\S+/land-check\\.lock\\) was still taken after 6s, so the check never ran and nothing landed: ticket/2-x's check holds it \\(its landing is pid ${b.child.pid}, stopped\\)`));
+    assert.equal(a.child.exitCode, null, 'the head still waits for its CI');
+    assert.deepEqual(c.landed(), []);
+  } finally {
+    if (b) { signalTree(b.child.pid!, 'SIGCONT'); signalTree(b.child.pid!, 'SIGKILL'); }
+    for (const g of Object.values(gate)) writeFileSync(g, '');
+    c.stop();
+  }
+});
+
 test("CI gate: a landed commit's runs on the scratch branch are left to finish; stale ones, and a refused landing's, are cancelled", async () => {
   const c = ciSetup(2, { stack: '1' });
   const full = (sha: string) => git(c.main, 'rev-parse', sha);

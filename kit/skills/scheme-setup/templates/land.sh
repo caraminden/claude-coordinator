@@ -120,6 +120,10 @@ CI_ON=1
 # shortcut: a waiter counts with its own limits, not the holder's; write the holder's into its
 # ticket if landings in one scheme ever run with different limits.
 QUEUE_STALL=$((CHECK_LIMIT * CI_STACK + CI_LIMIT + ${LAND_QUEUE_SLACK:-300}))
+# The wait for the check lock: the checks ahead of this one (at most CI_STACK, each within CHECK_LIMIT, and half the
+# slack for the 30 s each may take to die) end within it, so past it the check holding it is stopped (a SIGSTOP) or
+# hung. Shorter than QUEUE_STALL, so the one waiting refuses before the ones behind it give up.
+CHECK_WAIT=$((CHECK_LIMIT * CI_STACK + ${LAND_QUEUE_SLACK:-300} / 2))
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
 QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID=''
 
@@ -135,7 +139,7 @@ queue_proc() {
   echo "$1 ${21}"
 }
 
-# The state letter of a process: T or t is stopped (a frozen unit or container, a SIGSTOP).
+# The state letter of a process: T or t is stopped (a SIGSTOP). A frozen cgroup (systemctl --user freeze) shows S, not this.
 queue_state() {
   local stat
   stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
@@ -216,8 +220,9 @@ queue_look() {
       rm -f "$t"
       continue
     fi
-    # A waiter that is stopped holds nothing, so it is passed over; it tries for the lock like the head once it wakes.
-    # Those this one passed so are waiting on its lock, not ahead of it.
+    # A waiter that is stopped (a SIGSTOP) holds no land lock, so it is passed over; it tries for the lock like the head
+    # once it wakes. Those this one passed so are waiting on its lock, not ahead of it. A check it was running keeps
+    # the check lock: CHECK_WAIT bounds that.
     if [ "${l[1]:-0}" = 0 ] && { [ -n "$Q_HELD" ] || [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; }; then continue; fi
     ahead=$((ahead + 1))
     [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *}; }
@@ -277,6 +282,20 @@ queue_look() {
     echo "queue: nothing has moved for $(((QUEUE_STALL + 59) / 60)) min (ahead: $headname$detail), so this gave up and nothing landed. A person needs to look at $look before anyone tries again" >&2
     return 1
   fi
+}
+
+# Whose check holds the check lock, by the phase in the tickets, for when it never comes.
+check_holder() {
+  local t l s
+  for t in "$Q_DIR"/[0-9]*; do
+    [[ ${t##*/} =~ ^[0-9]+$ ]] && [ "$t" != "$QUEUE_TICKET" ] && mapfile -t l 2>/dev/null <"$t" || continue
+    [[ ${l[3]:-} == "running the check"* ]] || continue
+    s=$(queue_state "${l[0]%% *}")
+    case $s in T | t) s=stopped ;; *) s="state ${s:-?}" ;; esac
+    echo "${l[2]:-?}'s check holds it (its landing is pid ${l[0]%% *}, $s)"
+    return 0
+  done
+  echo "no landing in line says it is running its check, so it may be one a killed landing left running"
 }
 
 # Numbered things: what minions number in parallel, so two can take the same "next" one and both
@@ -588,14 +607,16 @@ build() {
   say "running $CHECK"
   queue_phase "waiting to run the check"
   log="$state/land-check-${branch//\//-}.log"
+  rm -f "$log" # the check makes it as it starts: none afterwards means the check lock never came
   # It runs under the lock when this is the head, so it has a time limit (LAND_CHECK_TIMEOUT, in seconds), and
   # 9>&- keeps a process it leaves running from holding the lock after this script ends. One check at a time,
   # under a lock of its own (fd 7): the ones stacked behind the head check too, and the box is shared.
   (
-    flock 7
+    flock -w "$CHECK_WAIT" 7 || exit 1
     queue_phase "running the check since $(date +%H:%M)"
     timeout -k 30 "$CHECK_LIMIT" bash -c "$CHECK" >"$log" 2>&1 9>&- 7>&-
   ) 7>"$state/land-check.lock" 9>&- || rc=$? # 9>&-: this subshell outlives a killed landing, and mustn't keep its lock
+  [ "$rc" = 0 ] || [ -e "$log" ] || refuse "the check lock ($state/land-check.lock) was still taken after ${CHECK_WAIT}s, so the check never ran and nothing landed: $(check_holder). A person needs to look at it before anyone tries again"
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
   fi

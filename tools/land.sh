@@ -19,6 +19,20 @@
 #    the live checkout went back, main goes back too, so main only ever holds what passed.
 # For a restart that cuts off running turns (only with a person's OK), land first, then run
 # tools/deploy.sh --now: it joins the restart this one queued.
+#
+# Build branches (#593, specs/build-branches.md in the scheme's shared folder): a build is a branch build/<n>, checked out nowhere.
+#   tools/land.sh --into build/<n> <test files>   a feeder merges into it: rebases onto build/<n> (no rebase when it is
+#       already under the branch), runs only the named test files, and moves build/<n> by compare-and-swap. No CI, no
+#       deploy, main untouched. With no test files it refuses, unless the change is docs only (*.md, docs/).
+#       It waits only for other merges into the same build (a lock per build), not in the lands' line.
+#   tools/land.sh --into build/<n> --full         the build minion's merge of main: build/<n> must already be under the
+#       branch (never a rebase, which would flatten the merge), and the full suite runs as for a land (the gate below),
+#       in the lands' line, so CI's citadel-tests group still runs one at a time.
+#   tools/land.sh --build                          lands the build its branch is at the tip of: main comes in by merge
+#       (not rebase: that would flatten the build's merges of main and change its feeders' commit hashes), then the gate,
+#       the fast-forward and the deploy as above, then build/<n> is deleted.
+#   A plain land refuses a branch that carries commits of a build/* that main doesn't have: half a build would go live.
+# Lock order: the deploy lock (fd 9) before a build's lock (fd 6), and --into takes only the build's, so none waits on the other.
 # Paths can be overridden with DEPLOY_LIVE and DEPLOY_SOURCE, as for deploy.sh (how it is tested).
 set -euo pipefail
 
@@ -58,11 +72,16 @@ land_timing() (
   else
     fb=- ciq=$(span "${t[ci]}" "${t[cirun]:-${t[gate]}}") cir=$(span "${t[cirun]}" "${t[gate]}")
   fi
-  if [ -n "${t[landed]}" ]; then out=landed; [ -n "${t[live]}" ] || out="landed, not live yet"
+  if [ -n "${t[merged]}" ]; then out=merged
+  elif [ -n "${t[landed]}" ]; then out=landed; [ -n "${t[live]}" ] || out="landed, not live yet"
   elif [ "$rc" = 1 ]; then out="refused at $phase"
   else out="stopped at $phase"; [ "$rc" = 0 ] || out="$out (exit $rc)"; fi # a kill before the signal traps can end it with 0
   if [ -n "${t[live]}" ]; then live=$((${t[live]} - ${t[queued]:-${t[live]}})); else live=-; fi
-  retro_log "timing · $branch · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[ci]}") · ci-queue $ciq · ci-run $cir · fallback $fb · deploy $(span "${t[deploy]}" "${t[queued]}") · live $live · $out"
+  if [ "$mode" = into ]; then # only its own test files: no CI, no deploy
+    retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[tests]}") · tests $(span "${t[tests]}" "${t[gate]}") · $out"
+  else
+    retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[ci]}") · ci-queue $ciq · ci-run $cir · fallback $fb · deploy $(span "${t[deploy]}" "${t[queued]}") · live $live · $out"
+  fi
   rm -f "$times"
 ) >/dev/null 2>&1
 
@@ -70,7 +89,24 @@ land_timing() (
 [ "${COORDINATOR_CONTAINER:-}" != 1 ] || refuse "this turn runs in a container: call the land tool (mcp__thread) instead, which runs land.sh on the host"
 # Inside a slot it would hold a heavy slot, shared by every scheme, while it waits on the deploy lock.
 [ -z "${CITADEL_HEAVY_HELD:-}" ] || refuse "run it on its own, not under citadel-heavy: it would hold a heavy slot other schemes need while it waits for the deploy lock"
-[ $# -eq 0 ] || refuse "takes no arguments (for --now, land first, then run tools/deploy.sh --now with a person's OK)"
+args=("$@") # for the rebased copy (the execs below)
+mode=land build='' files=()
+case ${1:-} in
+  '') ;;
+  --into)
+    build=${2:-}
+    [[ $build =~ ^build/[1-9][0-9]{0,5}$ ]] || refuse "--into takes a build branch, build/<n>, then the test files the change touched (or --full)"
+    shift 2
+    mode=into
+    if [ "${1:-}" = --full ]; then
+      mode=full
+      shift
+      [ $# -eq 0 ] || refuse "--full runs the whole suite: name no test files with it"
+    fi
+    files=("$@") ;;
+  --build) [ $# -eq 1 ] || refuse "--build takes nothing more: run it from the build minion's branch at the build's tip" ; mode=build ;;
+  *) refuse "takes no arguments besides --into build/<n> <test files>, --into build/<n> --full and --build (for --now, land first, then run tools/deploy.sh --now with a person's OK)" ;;
+esac
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) # before the cd below, which would break a relative path to it
 self=$(stat -c %d:%i "$tools/land.sh") # which file bash is reading; the rebase below may replace it
 here=$(git rev-parse --show-toplevel)
@@ -78,6 +114,28 @@ cd "$here" # the tests run from the worktree's top, wherever in it this was star
 branch=$(git branch --show-current)
 { [ -n "$branch" ] && [ "$branch" != main ]; } || refuse "run it from a minion's branch, not main or a detached HEAD"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
+label=$branch # for the retro log's lines: which kind of run this is
+untouched="main is untouched"
+case $mode in
+  into | full)
+    label="$branch · into $build"
+    [ "$mode" = into ] || label="$label, full"
+    untouched="$build is untouched"
+    [[ $branch != build/* ]] || refuse "run it from a feeder's branch or the build minion's own, not from a build branch"
+    git show-ref -q --verify "refs/heads/$build" || refuse "$build doesn't exist: its build minion makes it (git branch $build main), so nothing merged"
+    for f in "${files[@]}"; do { [[ $f != -* ]] && [ -f "$f" ]; } || refuse "$f is not a file in $here: name the test files this change touched"; done
+    if [ "$mode" = into ] && [ ${#files[@]} -eq 0 ]; then
+      code=$(git diff --name-only "refs/heads/$build...HEAD" | grep -vE '\.md$|^docs/' || true)
+      [ -z "$code" ] || refuse "name the test files this change touched (tools/land.sh --into $build <test files>): only a docs-only change (*.md, docs/) merges in untested, and it changes $(head -n 3 <<<"$code" | sed ':a;N;$!ba;s/\n/, /g')$([ "$(wc -l <<<"$code")" -le 3 ] || echo ' and more'). Nothing merged"
+    fi ;;
+  land)
+    # The guard: a branch on a build's commits (a feeder that ran the usual command) would put part of that build live.
+    while read -r ref; do
+      for mb in $(git merge-base --all HEAD "$ref" 2>/dev/null); do
+        git merge-base --is-ancestor "$mb" main || refuse "$branch carries commits of ${ref#refs/heads/} that main doesn't have, so landing it would put part of that build live; nothing landed. Merge it into the build instead: tools/land.sh --into ${ref#refs/heads/} <the test files you touched>"
+      done
+    done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/')
+esac
 
 state=$(git -C "$LIVE" rev-parse --absolute-git-dir)/cc-deploy
 mkdir -p -m 700 "$state"
@@ -86,7 +144,13 @@ mkdir -p -m 700 "$state"
 # is still to do; 2: done, by the copy that started this one).
 resumed= redo=
 [ -n "${LAND_REBASED:-}" ] && [ /dev/fd/9 -ef "$state/lock" ] && resumed=1 redo=${LAND_REDO:-}
-unset LAND_REBASED LAND_REDO
+if [ "$mode" = build ]; then
+  # The rebased copy is past the merge of main, so HEAD is no longer at the build's tip: the copy that merged names it.
+  if [ -n "$resumed" ]; then build=${LAND_BUILD:-}; else build=$(git for-each-ref --points-at HEAD --format='%(refname:lstrip=2)' 'refs/heads/build/'); fi
+  [[ $build =~ ^build/[1-9][0-9]{0,5}$ ]] || refuse "$branch is not at the tip of a build branch${build:+ (it is at more than one: $(echo $build))}: bring it to its build's tip first (git merge --ff-only build/<n>). Nothing landed"
+  label="$branch · lands $build"
+fi
+unset LAND_REBASED LAND_REDO LAND_BUILD
 quiet=$resumed
 [ "$redo" != 1 ] || quiet=
 times=$state/times-$$ # the same in the rebased copy, which is this process
@@ -96,49 +160,98 @@ if [ -z "$resumed" ]; then
 fi
 # shellcheck source=tools/deploy-queue.sh
 . "$tools/deploy-queue.sh"
+# One writer per build branch, on fd 6: a merge into it, its --full run or its land. Merges into a build take a minute,
+# so they wait only for each other, not in the lands' line; --full and --build take this after the deploy lock.
+build_lock() {
+  local lock=$state/build-${build#build/}.lock wait=${LAND_BUILD_WAIT:-1800}
+  exec 6>"$lock" || { say "can't open $lock for writing, so nothing merged: a person needs to look at it"; return 1; }
+  flock -n 6 && return 0
+  say "waiting for the run on $build ahead of this one (a merge into it, its full run or its land) to end"
+  flock -w "$wait" 6 && return 0
+  say "waited $((wait / 60)) min for the run on $build ahead of this one, so nothing merged: run it again later, or look at what holds $lock"
+  return 1
+}
 # The rebased copy is the same process, so the ticket it was started with (none, from a land.sh older than the
 # line) still names it; only the trap that removes it at the end has to be set again.
+# The rebased copy holds them already (an exec keeps its fds).
 if [ -z "$resumed" ]; then
-  queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
+  if [ "$mode" != into ]; then queue_lock "$state" "$branch" || { land_timing 1; exit 1; }; fi
+  [ -z "$build" ] || build_lock || { land_timing 1; queue_done; exit 1; }
   land_mark lock rebase
 fi
 trap 'land_timing $? || true; queue_done' EXIT
-# Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
-[ "$(git -C "$SOURCE" branch --show-current)" = main ] || refuse "$SOURCE is not on main; a person needs to look"
-[ -z "$(git -C "$SOURCE" status --porcelain --untracked-files=no)" ] || refuse "$SOURCE has uncommitted changes; a person needs to look"
-# What a landing or deploy killed outright left half-done (#553): the checkout, then main, go back first.
-# Not beside a restart still being judged (#566): it restarted on that checkout, so both wait for the restart lock below.
-exec 7>"$state/restart.lock"
-if flock -n 7; then
-  deploy_unchecked_back "$state" "$LIVE"
-  main_moving_back "$state" "$LIVE" "$SOURCE"
-  flock -u 7
+if [ -n "$build" ]; then
+  # Under its lock only land.sh moves it, so this is what a merge into it compares and swaps against.
+  base=$(git rev-parse -q --verify "refs/heads/$build") || refuse "$build doesn't exist (a build that landed is deleted), so nothing merged"
+  [ "$mode" != build ] || [ -n "$resumed" ] || [ "$base" = "$(git rev-parse HEAD)" ] || refuse "$build moved on while this waited ($(git log -1 --format='%h "%s"' "$base")): bring $branch to it (git merge --ff-only $build) and run it again. Nothing landed"
 fi
-exec 7>&-
+if [ "$mode" = land ] || [ "$mode" = build ]; then
+  # Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
+  [ "$(git -C "$SOURCE" branch --show-current)" = main ] || refuse "$SOURCE is not on main; a person needs to look"
+  [ -z "$(git -C "$SOURCE" status --porcelain --untracked-files=no)" ] || refuse "$SOURCE has uncommitted changes; a person needs to look"
+  # What a landing or deploy killed outright left half-done (#553): the checkout, then main, go back first.
+  # Not beside a restart still being judged (#566): it restarted on that checkout, so both wait for the restart lock below.
+  exec 7>"$state/restart.lock"
+  if flock -n 7; then
+    deploy_unchecked_back "$state" "$LIVE"
+    main_moving_back "$state" "$LIVE" "$SOURCE"
+    flock -u 7
+  fi
+  exec 7>&-
+fi
 
 old=$(git -C "$SOURCE" rev-parse main)
 # A commit that came off main again (its restart was rolled back) while this branch was already rebased onto it
 # (#566: the gate runs beside that restart) is still under this branch, and a plain rebase would carry it back onto
 # main. It is left behind, unless it is this branch's own.
+# <onto> <rebase|merge> <refusal> <what to do>: a rebase or merge that stopped. Which files collide is worth a retro-log
+# line (the architecture check counts them).
+conflict() {
+  local conflicted what
+  conflicted=$(git diff --name-only --diff-filter=U 2>/dev/null | sed ':a;N;$!ba;s/\n/, /g' || true)
+  if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h "$1"): $conflicted"; else what=": no conflicted files found (the $2 may not have started)"; fi
+  retro_log "land conflict · $label$what"
+  git "$2" --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
+  refuse "$3${conflicted:+; conflicted files: $conflicted}. $4"
+}
 under=
-while read -r t b; do
+if [ "$mode" = build ] && [ "$redo" = 1 ]; then
+  git reset -q --keep "$base" # main went back while this waited: main is merged in again without what came off it
+fi
+[ "$mode" = into ] || [ "$mode" = full ] || while read -r t b; do
   [ "$b" != "$branch" ] && git merge-base --is-ancestor "$t" HEAD 2>/dev/null && ! git merge-base --is-ancestor "$t" main 2>/dev/null || continue
   { [ -n "$under" ] && git merge-base --is-ancestor "$t" "$under"; } || under=$t
 done < <(cat "$state/taken-back" 2>/dev/null || true)
-[ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
-[ -n "$quiet" ] || queue_phase "rebasing onto main"
-[ -n "$quiet" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
-if ! git rebase -q ${under:+--onto} main ${under:+"$under"}; then
-  # Which files collide is worth a retro-log line (the architecture check counts them).
-  conflicted=$(git diff --name-only --diff-filter=U 2>/dev/null | sed ':a;N;$!ba;s/\n/, /g' || true)
-  if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h main): $conflicted"; else what=": no conflicted files found (the rebase may not have started)"; fi
-  retro_log "land conflict · $branch$what"
-  git rebase --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
-  refuse "the rebase onto main failed (see git's output above), so nothing landed${conflicted:+; conflicted files: $conflicted}. On conflicts: run git rebase ${under:+--onto }main${under:+ $(git rev-parse --short "$under")}, resolve them keeping the other minions' changes, re-test, commit, then run this again"
-fi
+case $mode in
+  land)
+    [ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
+    [ -n "$quiet" ] || queue_phase "rebasing onto main"
+    [ -n "$quiet" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
+    git rebase -q ${under:+--onto} main ${under:+"$under"} || conflict main rebase "the rebase onto main failed (see git's output above), so nothing landed" "On conflicts: run git rebase ${under:+--onto }main${under:+ $(git rev-parse --short "$under")}, resolve them keeping the other minions' changes, re-test, commit, then run this again" ;;
+  into | full)
+    if git merge-base --is-ancestor "$base" HEAD; then
+      say "$build is already under $branch: no rebase"
+    else
+      # A rebase would flatten the build minion's merge of main.
+      [ "$mode" = into ] || refuse "$build has commits this branch doesn't: run git merge $build (not a rebase), re-test, then run this again. Nothing merged"
+      say "rebasing $branch onto $build ($(git log -1 --format='%h "%s"' "$base"))"
+      git rebase -q "$base" || conflict "$base" rebase "the rebase onto $build failed (see git's output above), so $build is untouched" "On conflicts: run git rebase $build, resolve them keeping the other feeders' changes, re-test, commit, then run this again"
+    fi ;;
+  build)
+    # Its merges of main can't be left behind the way a land leaves this commit behind, so it is taken out by hand.
+    [ -z "$under" ] || refuse "$build carries $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back, so landing it would put that back live. Nothing landed: revert it on your branch, run tools/land.sh --into $build --full, then this again"
+    if git merge-base --is-ancestor main HEAD; then
+      [ -n "$quiet" ] || say "$build already has main ($(git log -1 --format='%h "%s"' main))"
+    else
+      [ -n "$quiet" ] || queue_phase "merging main into $build"
+      say "merging main ($(git log -1 --format='%h "%s"' main)) into $build on $branch"
+      git merge -q --no-edit main || conflict main merge "merging main into $build failed (see git's output above), so nothing landed" "Take main in on your branch by hand (git merge main), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again"
+    fi ;;
+esac
 # Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):
-# go on in the rebased one instead. It keeps the lock on fd 9, and its own rebase finds nothing to do.
-[ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} exec bash "$tools/land.sh"
+# go on in the rebased one instead. It keeps the lock on fd 9 (and the build's on fd 6), and its own rebase finds
+# nothing to do. Not --into: that holds no deploy lock for the copy to find, and only tests and moves a branch.
+[ "$mode" = into ] || [ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build exec bash "$tools/land.sh" "${args[@]}"
 
 # <state>/bad: "<commit> <last-good> <when> <what it restarted on>", left by the restart that rolled <commit>'s deploy back (tools/deploy.sh).
 # While main still holds that commit every deploy pulls it in again and is rolled back too (#553), so only its fix
@@ -152,7 +265,7 @@ bad_check() {
   ! comm -12 <(git diff --name-only "$good" "$bad" | sort) <(git diff --name-only main HEAD | sort) | grep -q . || return 0
   refuse "main holds $(git log -1 --format='%h "%s"' "$bad"), whose deploy was rolled back (the restart on it failed: its report is in the chat of the minion that deployed it), and $branch changes none of the files that deploy changed, so its deploy would be rolled back too. Nothing landed. Land the fix for it first (or its revert); if $branch is that fix, run LAND_FIX=1 tools/land.sh (from a turn in a container: the land tool with fix: true)"
 }
-bad_check
+[ "$mode" = into ] || [ "$mode" = full ] || bad_check
 
 # The gate (#523): the full suite, green on this exact commit. Cara's desktop runs it (.github/workflows/tests.yml, on
 # the Linux runner in WSL) so perigee doesn't: the commit goes to a scratch branch land/<branch> on GitHub, and this
@@ -163,6 +276,29 @@ bad_check
 # broken). A red run is red: it refuses, and never falls back.
 tip=$(git rev-parse HEAD)
 short=$(git rev-parse --short HEAD)
+
+# The end of --into: build/<n> moves to what was tested, unless something moved it meanwhile (the compare-and-swap).
+merge_into() {
+  git update-ref -m "land.sh --into" "refs/heads/$build" "$tip" "$base" || refuse "$build moved while this ran (not by land.sh, which holds its lock), so nothing merged: run it again"
+  land_mark merged
+  queue_done ok
+  say "$build is now at $(git log -1 --format='%h "%s"' "$tip"); main and the live checkout are untouched"
+  exit 0
+}
+# A feeder's merge into a build runs only the test files it touched (Cara's pick, specs/build-branches.md): no CI.
+if [ "$mode" = into ]; then
+  land_mark tests tests
+  if [ ${#files[@]} -gt 0 ]; then
+    say "running ${files[*]} on $short"
+    guard=()
+    [ -r test/leak-guard.ts ] && guard=(--test-global-setup=test/leak-guard.ts)
+    timeout -k 30 "${DEPLOY_TEST_TIMEOUT:-600}" "$tools/citadel-node" --test --test-force-exit "${guard[@]}" "${files[@]}" >&2 9>&- 6>&- || refuse "tests failed on the rebased branch (output above), so $build is untouched; $branch keeps the rebased work"
+  else
+    say "a docs-only change: no tests to run"
+  fi
+  land_mark gate
+  merge_into
+fi
 REMOTE=${DEPLOY_REMOTE-origin}
 CI_WORKFLOW=.github/workflows/tests.yml
 CI_LABEL=citadel-ci-linux
@@ -171,7 +307,7 @@ CI_STEP='the full suite' # the workflow's step that runs the tests; a run that f
 CI_DOWN=${LAND_CI_DOWN:-600} # how long one landing's unanswered wait for CI spares the next ones theirs
 CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI_POLL:-5}
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
-hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&-; }
+hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
 ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why=''
 # What gh or git said on stderr ($state/ci.err), as " (<its first lines>)" (git's "To <remote>" left out) for a reason (#553 F12d: a rate limit, a missing gh
 # and a rejected push all read alike). Nothing when it said nothing.
@@ -247,7 +383,7 @@ ci_gate() {
 }
 
 # The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
-trap 'land_timing $? || true; queue_done; exec 9>&- 7>&-; ci_done' EXIT
+trap 'land_timing $? || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 fellback=
 rc=0
 land_mark ci ci
@@ -263,7 +399,7 @@ elif [ "$rc" = 1 ]; then
   while read -r f load; do
     retro_log "flake · $f · load $load · $branch · in CI"
   done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
-  refuse "tests failed on the rebased branch in CI ($ci_url), so main is untouched"
+  refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else
   ci_done
   fellback=$why
@@ -278,16 +414,20 @@ else
   [ -z "$(git status --porcelain --ignored)" ] && tested=$tip || tested=
   log="$state/land-test.log"
   trc=0
-  "$tools/run-tests.sh" "$log" 9>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
-  [ "$trc" != 3 ] || refuse "no test ran: the test run could not write its files (the run-tests line above says which), so main is untouched"
+  "$tools/run-tests.sh" "$log" 9>&- 6>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
+  [ "$trc" != 3 ] || refuse "no test ran: the test run could not write its files (the run-tests line above says which), so $untouched"
   if [ "$trc" != 0 ]; then
     tail -n 40 "$log" >&2
     # The shared log is the next landing's within a second (#553 M6): a red one is kept under the branch's name, for two weeks.
     find "$state" -maxdepth 1 -name 'land-red-*.log' -mtime +14 -delete 2>/dev/null || true
     kept="$state/land-red-${branch//\//-}.log"
     cp "$log" "$kept" 2>/dev/null || kept=$log
-    refuse "tests failed on the rebased branch (full log: $kept), so main is untouched"
+    refuse "tests failed on the rebased branch (full log: $kept), so $untouched"
   fi
+fi
+if [ "$mode" = full ]; then
+  [ -z "$fellback" ] || say "merged on perigee's own test run, not CI: $fellback"
+  merge_into
 fi
 
 # The restart lock (#566, tools/deploy-queue.sh): from here on this moves main and the live checkout, so a restart
@@ -302,7 +442,7 @@ if [ "$(git -C "$SOURCE" rev-parse main)" != "$old" ]; then
   say "main went back to $(git -C "$SOURCE" log -1 --format='%h "%s"' main) while this waited (the restart ahead was rolled back): rebasing $branch onto it and testing again"
   flock -u 7
   exec 7>&-
-  LAND_REBASED=1 LAND_REDO=1 exec bash "$tools/land.sh"
+  LAND_REBASED=1 LAND_REDO=1 LAND_BUILD=$build exec bash "$tools/land.sh" "${args[@]}"
 fi
 
 # Only when the live checkout doesn't have it (a failed check or a rolled-back restart put it back, or it never pulled): main follows, unless it moved on since.
@@ -329,18 +469,29 @@ trap 'main_back; exit 129' HUP
 bad_check # again: a rollback may have come while this one waited for CI
 # Until this ends by itself, however the deploy goes; a kill that skips the trap leaves it for the next landing.
 printf '%s\n' "$old $tip" "$branch" >"$state/moving"
-trap 'land_timing $? || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&-; ci_done' EXIT
+trap 'land_timing $? || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 moved=1
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
 queue_phase "deploying"
 land_mark deploy deploy
 
-if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" DEPLOY_TIMES="$times" "$here/tools/deploy.sh"; then
+if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" DEPLOY_TIMES="$times" "$here/tools/deploy.sh" 6>&-; then
   main_back
   refuse "the deploy failed after main moved; main keeps $(git log -1 --format=%h "$tip"). The deploy's lines above say why and what to do"
 fi
 trap - INT TERM HUP
 land_mark landed
+if [ "$mode" = build ]; then
+  # Landed: the branch goes, so the app stops calling it open. Its tip stays in the log line, for a rollback.
+  if git update-ref -d "refs/heads/$build" "$base"; then
+    say "deleted $build, which is on main now (to make it again if its restart is rolled back: git branch $build $(git rev-parse --short "$base"))"
+  else
+    say "$build moved during the land (not by land.sh), so it stays: what is in it after $(git rev-parse --short "$base") isn't on main"
+  fi
+  if [ -n "$REMOTE" ] && git show-ref -q --verify "refs/remotes/$REMOTE/$build"; then
+    hub git push -q "$REMOTE" ":refs/heads/$build" 2>/dev/null || say "couldn't delete $build on $REMOTE: delete it there by hand, or the app still counts the build as open"
+  fi
+fi
 queue_done ok
 [ -z "$fellback" ] || say "landed on perigee's own test run, not CI: $fellback"

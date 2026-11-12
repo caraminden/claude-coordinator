@@ -59,10 +59,10 @@ exit "\${FAKE_DEPLOY_EXIT:-0}"
 
 
 // Run land.sh in its own process group, so a run that hangs can be stopped with everything it started.
-export function landAsync(cwd: string, extra: Record<string, string>, limit: number, seen?: (stderr: string) => void): Promise<{ status: number | null; stderr: string; ms: number }> {
+export function landAsync(cwd: string, extra: Record<string, string>, limit: number, seen?: (stderr: string) => void, args: string[] = []): Promise<{ status: number | null; stderr: string; ms: number }> {
   return new Promise((resolve) => {
     const t = Date.now();
-    const child = spawn('bash', [land], { cwd, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, ...extra } });
+    const child = spawn('bash', [land, ...args], { cwd, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, ...extra } });
     let stderr = '';
     child.stderr!.on('data', (d) => seen?.((stderr += d)));
     const timer = setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }, limit);

@@ -24,6 +24,7 @@ test/land-fixture.ts
 test/land-recover-fixture.ts
 test/scheme-setup-land-fixture.ts
 test/land.test.ts
+test/land-build.test.ts
 test/land-queue.test.ts
 test/land-deploy.test.ts
 test/land-recover.test.ts

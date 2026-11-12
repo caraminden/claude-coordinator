@@ -2,10 +2,11 @@
 // build minion takes main in with --into build/<n> --full and lands the build with --build, and a plain land refuses
 // a branch that carries a build's commits.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { git, setup, ci } from './land-fixture.ts';
+import { git, setup, ci, env, landAsync } from './land-fixture.ts';
 
 type R = ReturnType<typeof setup>;
 const has = (r: R, ref: string) => git(r.source, 'for-each-ref', '--format=%(refname)', ref) !== '';
@@ -124,6 +125,7 @@ test('--full takes main in: it waits for the full suite on CI, keeps the merge c
   takeMain(r, bwt);
   const head = git(bwt, 'rev-parse', 'HEAD');
   const main = tipOf(r, 'main');
+  const ran = c.localRuns(); // the feeder's merge ran its test file
   const res = c.run({}, ['--into', 'build/3', '--full'], bwt);
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /waiting for CI on .*CI passed on/s);
@@ -132,7 +134,7 @@ test('--full takes main in: it waits for the full suite on CI, keeps the merge c
   assert.equal(git(r.source, 'rev-list', '--merges', '--count', 'main..build/3'), '1');
   assert.equal(git(r.source, 'merge-base', '--is-ancestor', folded, 'build/3') || 'yes', 'yes', "the feeder's commit keeps its hash");
   assert.match(c.calls(), new RegExp(`head_sha=${head}&`));
-  assert.equal(c.localRuns(), 0);
+  assert.equal(c.localRuns(), ran, 'no test run here');
   assert.equal(tipOf(r, 'main'), main);
   assert.equal(r.note(), null, 'no deploy');
   assert.equal(c.refs(), '', 'the scratch branch goes');
@@ -227,5 +229,43 @@ test("a plain land refuses a branch that carries a build's commits, and one with
   res = r.run({}, [], plain);
   assert.equal(res.status, 0, res.stderr);
   assert.equal(tipOf(r, 'main'), git(plain, 'rev-parse', 'HEAD'));
+  assert.equal(r.note(), 'locked=1 held=yes');
+});
+
+test('two feeders merging into one build at once both get in, one after the other', async () => {
+  const r = setup();
+  build(r);
+  r.commit(r.wt, 'b.txt', 'one\n');
+  const other = worktree(r, 'ticket/2-y');
+  r.commit(other, 'c.txt', 'two\n');
+  const extra = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note') };
+  const args = ['--into', 'build/3', OK];
+  const [a, b] = await Promise.all([landAsync(r.wt, extra, 60_000, undefined, args), landAsync(other, extra, 60_000, undefined, args)]);
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(b.status, 0, b.stderr);
+  assert.deepEqual(git(r.source, 'log', '--format=%s', 'build/3').split('\n').sort(), ['b.txt: one', 'base', 'c.txt: two']);
+  assert.equal(r.note(), null);
+});
+
+test('a merge of main that changes land.sh hands --build over to the merged copy, which lands the build (#500)', () => {
+  const r = setup();
+  // The worktree runs its own tools/land.sh, as a minion does; main's newer one says it is the one running.
+  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'real land.sh');
+  build(r);
+  const bwt = worktree(r, 'ticket/9-build');
+  r.commit(bwt, 'b.txt', 'in the build\n');
+  git(r.source, 'branch', '-f', 'build/3', 'ticket/9-build');
+  const script = join(r.source, 'tools', 'land.sh');
+  writeFileSync(script, readFileSync(script, 'utf8').replace('say "running the tests"', 'say "running the tests (the merged land.sh)"'));
+  git(r.source, 'commit', '-qam', 'newer land.sh');
+  const res = spawnSync('bash', [join(bwt, 'tools', 'land.sh'), '--build'], { cwd: bwt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note') } });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /running the tests \(the merged land\.sh\)/);
+  assert.equal(res.stderr.match(/merging main/g)?.length, 1, res.stderr);
+  assert.equal(tipOf(r, 'main'), git(bwt, 'rev-parse', 'HEAD'));
+  assert.equal(git(r.source, 'rev-list', '--merges', '--count', 'main'), '1');
+  assert.equal(has(r, 'refs/heads/build/3'), false, 'the merged copy knew which build to delete');
   assert.equal(r.note(), 'locked=1 held=yes');
 });

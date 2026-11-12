@@ -72,6 +72,14 @@ runs and flake hunts run on a CI or desktop runner (the scheme's stress or flake
 `citadel:run-on-windows` for Windows), because perigee carries every agent and the Citadel
 server: a Peek minion's 100-run loop there helped push its load to 88.
 
+**On perigee, starve the test, not the box** (Josh, 2026-11-12, "Cap it: quota mode"). When a stress
+run does run there, in a window a person picked, it runs one suite at a time, off-hours. Load comes from a
+CPU quota on the test's own scope (`systemd-run --user --scope -p CPUQuota=10% <test command>`), which
+reproduced Citadel #470's starved-turn flakes. A browser test whose process sleeps while the page's timers
+run needs a different tool: an event-loop stall preloaded into the test process with `NODE_OPTIONS=--import`.
+#470's run used busy loops on every core and two suites at once, which held the live server for more than
+2 s 27 times in 90 minutes (worst 7.3 s).
+
 **Stress runs don't share the land gate's queue.** A runner that serves landings is theirs first. A run in
 the gate workflow's concurrency group (Citadel's `citadel-tests`) holds it for the whole run, and a land
 that pushes meanwhile waits behind it. land.sh gives up on a runner after 90 s and falls back to the suite

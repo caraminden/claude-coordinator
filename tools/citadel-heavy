@@ -129,22 +129,67 @@ waiting_on() { printf '%s\n' "$who" "$what" "$started" "$1" >"$waitfile.tmp" 2>/
 started=$(date +%s)
 trap 'rm -f "$waitfile" "$waitfile.tmp"' EXIT
 
-# The line: whoever holds the queue lock is next and polls for a free slot; the rest wait behind it.
+# No wait is endless (#553): when no slot has changed hands for $max_wait s of waiting (a holder stopped or stuck),
+# it gives up with status 75 and runs nothing. Slots that do change hands restart the clock, so a long line is fine.
+max_wait=${CITADEL_HEAVY_MAX_WAIT:-3600}
+hands() { cat "$dir"/slot-*.who 2>/dev/null; }
+held=$(hands)
+moved=$SECONDS
+stuck() {
+  local now
+  now=$(hands)
+  if [ "$now" != "$held" ]; then held=$now moved=$SECONDS; fi
+  [ $((SECONDS - moved)) -ge "$max_wait" ] || return 0
+  say "gave up: no heavy slot has changed hands in $(dur $((SECONDS - moved))) of waiting, so nothing ran ($who: $what). A holder below is stopped or stuck: wake or stop it by its pid, then run this again"
+  holders
+  exit 75
+}
+
+# The line: whoever holds the queue lock is next and polls for a free slot; the rest wait behind it. queue.who names
+# it and is freshened at every look (#553): one stale for $head_stale s while the lock is held is a job stopped or
+# frozen at the head, and the jobs behind go for the slots past it rather than wait on it in silence. Its age, not
+# its pid: jobs in other containers share the line, and their pids mean nothing here. A head started by a copy from
+# before this doesn't freshen the file, so it can be passed over while healthy: that costs it its turn, nothing else.
+poll=${CITADEL_HEAVY_POLL:-2}
+head_stale=${CITADEL_HEAVY_HEAD_STALE:-60}
+next() { cat "$dir/queue.who" 2>/dev/null || echo "a job that doesn't say"; }
+head_age() {
+  local m
+  m=$(stat -c %Y "$dir/queue.who" 2>/dev/null) || return 1 # none yet: nobody is passed over
+  echo $(($(date +%s) - m))
+}
 exec 7<>"$dir/queue"
 since=$SECONDS
+past= got= # got: it holds a slot already, taken past a stopped head
 if ! flock -n 7; then
   waiting_on line
-  say "others are in line for a heavy slot first; waiting ($who: $what)"
+  say "others are in line for a heavy slot first (next: $(next)); waiting ($who: $what)"
   holders
-  until flock -w 20 7; do touch "$waitfile" 2>/dev/null; done
+  told=$SECONDS
+  until flock -w "$poll" 7; do
+    touch "$waitfile" 2>/dev/null
+    stuck
+    if age=$(head_age) && [ "$age" -ge "$head_stale" ]; then
+      [ -n "$past" ] || say "the job next in line ($(next)) has not moved for $age s (stopped or frozen), so this one goes past it ($who: $what)"
+      past=1
+      if admit; then got=1; break; fi
+    fi
+    if [ $((SECONDS - told)) -ge 60 ]; then
+      say "still waiting after $(((SECONDS - since) / 60)) min, in line behind $(next) ($who: $what)"
+      told=$SECONDS
+    fi
+  done
 fi
-if ! admit; then
+[ -n "$got" ] || printf '%s: %s (since %s)\n' "$who" "$what" "$(date +%H:%M)" >"$dir/queue.who" 2>/dev/null
+if [ -z "$got" ] && ! admit; then
   waiting_on "$waiting"
   tell ""
   told=$SECONDS
   said=$waiting
   until admit; do
-    sleep "${CITADEL_HEAVY_POLL:-2}"
+    sleep "$poll"
+    touch "$dir/queue.who" 2>/dev/null
+    stuck
     if [ "$waiting" = "$said" ]; then touch "$waitfile" 2>/dev/null; else waiting_on "$waiting"; fi
     if [ "$waiting" != "$said" ] || [ $((SECONDS - told)) -ge 60 ]; then
       tell "still waiting after $(((SECONDS - since) / 60)) min: "

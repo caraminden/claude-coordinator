@@ -35,11 +35,14 @@ async function pipe(t: { after: (fn: () => void) => void }, worktrees: number) {
   for (const f of ['land.sh', 'deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(source, 'tools', f));
   writeFileSync(join(source, 'test', 'ok.test.mjs'), "import { test } from 'node:test';\ntest('ok', () => {});\n");
   // BOOT_MARK: say it started (with its parent's pid) and wait for BOOT_GATE, so a test can kill the deploy mid-check.
-  writeFileSync(join(source, 'tools', 'boot-check.ts'), `import { existsSync, writeFileSync } from 'node:fs';
+  writeFileSync(join(source, 'tools', 'boot-check.ts'), `import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const { BOOT_MARK: mark, BOOT_GATE: gate } = process.env;
 if (mark) {
-  writeFileSync(mark, String(process.ppid));
+  // deploy.sh's pid: it runs this under timeout(1), which is then the parent.
+  const up = (pid: number) => Number(readFileSync('/proc/' + pid + '/stat', 'utf8').split(') ').pop()!.split(' ')[1]);
+  const parent = process.ppid;
+  writeFileSync(mark, String(readFileSync('/proc/' + parent + '/comm', 'utf8').trim() === 'timeout' ? up(parent) : parent));
   while (gate && !existsSync(gate)) await new Promise((r) => setTimeout(r, 50));
 }
 if (existsSync(join(process.argv[2], 'BOOT_BAD'))) process.exit(1);
@@ -150,9 +153,11 @@ test('a killed landing whose commit an earlier queued restart has since made liv
   const tip = p.commit(p.wts[0], 'a.txt', 'first\n');
   p.commit(p.wts[1], 'b.txt', 'innocent\n');
   const mark = join(p.dir, 'boot-started');
-  const first = p.start(land, p.wts[0], { BOOT_MARK: mark, BOOT_GATE: join(p.dir, 'boot-go') });
+  const gate = join(p.dir, 'boot-go');
+  const first = p.start(land, p.wts[0], { BOOT_MARK: mark, BOOT_GATE: gate });
   await until('the boot check to start', () => existsSync(mark));
   process.kill(-first.pid, 'SIGKILL');
+  writeFileSync(gate, ''); // the boot check runs under timeout(1), in a process group of its own: it outlives the kill and ends by itself
   await first.done;
   await until('the lock to be free', p.lockFree);
   assert.equal(git(p.live, 'rev-parse', 'HEAD'), tip, 'the killed deploy had pulled it');
@@ -269,7 +274,7 @@ test('a restart waiting on running turns says so to the landing: how many, for h
   const tip = p.commit(p.wts[0], 'b.txt', 'innocent\n');
   writeFileSync(join(p.dir, 'interruptible'), '1');
   t.after(() => writeFileSync(join(p.dir, 'interruptible'), '0')); // a failed test leaves no restart waiting
-  const res = await p.run(land, p.wts[0], { DEPLOY_IDLE_POLL: '0.2' });
+  const res = await p.run(land, p.wts[0], { DEPLOY_IDLE_POLL: '0.2', DEPLOY_IDLE_TRIES: '3000' });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /not live yet: the restart is waiting for 1 running turn a restart would cut off to finish \(at most \d+ min more\).*tools\/deploy\.sh --now/);
   assert.match(p.restartLog(), /waiting for 1 running turn a restart would cut off/, 'the restart says so in its own log too');

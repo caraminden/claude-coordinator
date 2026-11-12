@@ -28,6 +28,8 @@ URL=${DEPLOY_URL:-http://127.0.0.1:8573}
 DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}
 UNIT=${DEPLOY_UNIT:-cc-restart-when-idle}
 IDLE_TRIES=${DEPLOY_IDLE_TRIES:-720} # 10 s apart: 2 h
+BOOT_TIMEOUT=${DEPLOY_BOOT_TIMEOUT:-420} # boot-check.ts gives up by itself at 180 s, twice over
+UNKNOWN_WAIT=${DEPLOY_UNKNOWN_WAIT:-60} # how long a restart waits on a server that is up but doesn't answer
 NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
 SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520)
@@ -225,25 +227,46 @@ restart_healthy() {
   healthy "$1" && [ "$(main_pid)" = "$pid" ] || return 2
 }
 
+turns() { if [ "$1" = 1 ]; then echo "1 running turn"; else echo "${1:-some} running turns"; fi; }
+
 # Queued as the restart unit: restart once no turn would be cut off (at once with --now), roll back if
 # the new code doesn't come up or stay up.
 restart() {
   case "$0" in */cc-deploy/restart-*.sh) rm -f "$0" ;; esac # the unit's private copy (see deploy), never the tracked script; bash keeps reading it from the open file
   init_state
   trap 'rm -f "$STATE/restart"' EXIT
-  local i=0
+  local i=0 n unknown='' told=''
   # $STATE/now: a --now deploy that found this restart already queued and waiting.
   while [ -z "$NOW" ] && [ ! -e "$STATE/now" ]; do
-    if [ "$(interruptible)" = 0 ]; then
+    n=$(interruptible)
+    if [ "$n" = 0 ]; then
       sleep 2
-      [ "$(interruptible)" = 0 ] && break
+      n=$(interruptible)
+      [ "$n" = 0 ] && break
+    fi
+    # A server that stays up but silent (#553: seen after a failed rollback) can't say whether a turn runs, and
+    # would never say none does: after a short while that is a broken server, which a restart is the cure for.
+    if [ "$n" = '?' ]; then
+      unknown=${unknown:-$SECONDS}
+      if [ $((SECONDS - unknown)) -ge "$UNKNOWN_WAIT" ]; then
+        say "the server has not answered for $((SECONDS - unknown)) s while its unit is up, so it can't say which turns are running: restarting now"
+        break
+      fi
+    else
+      unknown=
+    fi
+    # Said at the start and every 15 min (#553): the wait is up to 2 h, and the journal showed nothing of it.
+    if [ -z "$told" ] || [ $((SECONDS - told)) -ge 900 ]; then
+      told=$SECONDS
+      if [ "$n" = '?' ]; then say "the server is not answering while its unit is up; waiting at most $UNKNOWN_WAIT s for it to say which turns are running"
+      else say "waiting for $(turns "$n") a restart would cut off to finish, at most $(((IDLE_TRIES - i) * 10 / 60)) min more; tools/deploy.sh --now restarts without waiting"; fi
     fi
     i=$((i + 1))
     if [ "$i" -ge "$IDLE_TRIES" ]; then
       report fail "Gave up after $((IDLE_TRIES * 10 / 60)) min waiting for the turns a restart would cut off (ones not in a unit of their own) to finish, so nothing restarted. The checkout is at $(short HEAD), but the server still runs $(health commit | cut -c1-7). Run tools/deploy.sh again to queue another restart, or with a person's OK, tools/deploy.sh --now."
       exit 1
     fi
-    sleep 10
+    sleep "${DEPLOY_IDLE_POLL:-10}"
   done
 
   exec 9>"$STATE/lock"
@@ -370,8 +393,15 @@ deploy() {
   fi
   queue_phase "deploying: boot check since $(date +%H:%M)"
   say "boot check: the new code on a spare port with a copy of the database"
-  if ! version=$("$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" 9>&-); then # not as `node`: ananicy would idle it (deploy/priority.md); no lock fd, as the tests
-    say "boot check failed; nothing deployed"
+  # A limit from outside (#553): boot-check.ts's own is a timer, which a blocking call in the new code defeats, and a
+  # check that never returns would hold the lock until a person killed it. timeout stops the whole process group.
+  local boot_rc=0
+  version=$(timeout -k 10 "$BOOT_TIMEOUT" "$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" 9>&-) || boot_rc=$? # not as `node`: ananicy would idle it (deploy/priority.md); no lock fd, as the tests
+  if [ "$boot_rc" != 0 ]; then
+    case $boot_rc in
+      124 | 137) say "the boot check hung: stopped after $BOOT_TIMEOUT s, far past its own limit. That is not a verdict on the change (a failed check says what broke): run it again, and if it hangs again, look for a call in the new code that blocks the server's start. Nothing deployed" ;;
+      *) say "boot check failed; nothing deployed" ;;
+    esac
     false
   fi
   trap - ERR INT TERM HUP
@@ -442,7 +472,14 @@ deploy() {
       exit 1
     fi
   done
-  say "not live yet after $limit s; the restart reports here when it is (see journalctl --user -u $UNIT)"
+  # The usual reason (#553): the restart waits for running turns, up to 2 h, and this line was all the landing heard.
+  local n
+  n=$(interruptible)
+  if [ -z "$NOW" ] && [[ $n =~ ^[1-9][0-9]*$ ]]; then
+    say "not live yet: the restart is waiting for $(turns "$n") a restart would cut off to finish (at most $((IDLE_TRIES * 10 / 60)) min more), and reports here when it is live. To restart without waiting: tools/deploy.sh --now (see journalctl --user -u $UNIT)"
+  else
+    say "not live yet after $limit s; the restart reports here when it is (see journalctl --user -u $UNIT)"
+  fi
 }
 
 case "${1:-}" in

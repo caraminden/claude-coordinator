@@ -467,7 +467,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   const pidFile = join(root, `${name}-mainpid`);
   writeFileSync(pidFile, '100');
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "$*" >>'${log}'\n[ "$2" = show ] && cat '${pidFile}'\nexit 0\n`, { mode: 0o755 });
-  const restarts = () => (existsSync(log) ? execFileSync('grep', ['-c', ' restart ', log], { encoding: 'utf8' }).trim() : '0');
+  const restarts = () => (existsSync(log) ? String(readFileSync(log, 'utf8').split(' restart ').length - 1) : '0');
   let n = 0;
   const state = join(live, '.git', 'cc-deploy');
   // What a waiting landing would see: the restart's phase at each request. Each report's answer is held until all

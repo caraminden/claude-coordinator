@@ -110,6 +110,7 @@ CI_WORKFLOW=.github/workflows/tests.yml
 CI_LABEL=citadel-ci-linux
 CI_REF=land/$branch
 CI_STEP='the full suite' # the workflow's step that runs the tests; a run that fails in any other never ran them
+CI_DOWN=${LAND_CI_DOWN:-600} # how long one landing's unanswered wait for CI spares the next ones theirs
 CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI_POLL:-5}
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
 hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&-; }
@@ -126,12 +127,22 @@ ci_done() {
   [ -z "$ci_pushed" ] || hub git push -q "$REMOTE" ":refs/heads/$CI_REF" >/dev/null 2>&1 || true
   ci_id='' ci_pushed=''
 }
+ci_down() { printf '%s %s\n' "$(date +%s)" "$why" >"$state/ci-down" 2>/dev/null || true; }
 # 0: green on this commit. 1: red. 2: no answer, with the reason in $why.
 ci_gate() {
   local url online step stale='' started=$SECONDS waited
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
   ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
+  # A CI outage is paid once (#553): a landing that waited out a limit leaves a note, and those of the next minutes
+  # go straight to the run here instead of each waiting to learn the same thing.
+  local down_at='' down_why='' now
+  now=$(date +%s)
+  read -r down_at down_why 2>/dev/null <"$state/ci-down" || true
+  if [[ $down_at =~ ^[0-9]+$ ]] && [ $((now - down_at)) -lt "$CI_DOWN" ]; then
+    why="CI gave no answer to a landing $((now - down_at)) s ago ($down_why), so this one doesn't wait for it (it is asked again from $(date -d "@$((down_at + CI_DOWN))" +%H:%M))"
+    return 2
+  fi
   ci_run || { why="GitHub didn't answer"; return 2; }
   # A run of this commit that is green or still going (a landing stopped and started again) will do; otherwise a new one.
   if [ -z "$ci_id" ] || { [ "$ci_status" = completed ] && [ "$ci_result" != success ]; }; then
@@ -150,12 +161,12 @@ ci_gate() {
     [ "$ci_id" != "$stale" ] || ci_id='' ci_status=''
     [ "$ci_status" != completed ] || break
     waited=$((SECONDS - started))
-    if [ "$ci_status" != in_progress ] && [ "$waited" -ge "$CI_START" ]; then why="no runner started the job within ${CI_START}s"; return 2; fi
-    if [ "$waited" -ge "$CI_LIMIT" ]; then why="CI didn't finish within ${CI_LIMIT}s"; return 2; fi
+    if [ "$ci_status" != in_progress ] && [ "$waited" -ge "$CI_START" ]; then why="no runner started the job within ${CI_START}s"; ci_down; return 2; fi
+    if [ "$waited" -ge "$CI_LIMIT" ]; then why="CI didn't finish within ${CI_LIMIT}s"; ci_down; return 2; fi
     sleep "$CI_POLL"
   done
   case $ci_result in
-    success) say "CI passed on $short in $((SECONDS - started))s ($ci_url)" ;;
+    success) rm -f "$state/ci-down"; say "CI passed on $short in $((SECONDS - started))s ($ci_url)" ;;
     failure)
       # Red only when the tests ran: a run that failed setting up (no user manager, a download) says nothing about this commit.
       step=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq '[.jobs[].steps[] | select(.conclusion == "failure") | .name][0] // empty' 2>/dev/null) || step=''

@@ -28,6 +28,7 @@ import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_C
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, progressLine, stepInfo } from '../public/progress.js';
+import { packPlan, unpackPlan } from './history.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
@@ -178,8 +179,6 @@ interface LiveTurn {
 
 /** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
 const contextKey = (ticketId: number) => `context:${ticketId}`;
-/** The task-list rules a saved state (planKey) was built by: one from another public/progress.js is rebuilt in full, so no deploy leaves old counts (#530). */
-const PLAN_RULES = createHash('sha256').update(readFileSync(new URL('../public/progress.js', import.meta.url))).digest('hex').slice(0, 16);
 
 /**
  * A Taskmaster's fresh start (#406): asked for (why), its handoff once the old session wrote it with
@@ -2508,10 +2507,10 @@ export class Runner {
   private progressFor(ticketId: number) {
     let p = this.progress.get(ticketId);
     if (!p) {
-      const saved = this.store.getSetting<any>(planKey(ticketId));
-      const usable = saved?.rules === PLAN_RULES && Number.isInteger(saved.upTo) && Array.isArray(saved.p?.tasks) && Array.isArray(saved.p.pendingCreates);
-      p = usable ? { ...saved.p, pendingCreates: new Map(saved.p.pendingCreates) } as ReturnType<typeof createProgress> : createProgress();
-      const rows = this.store.planEvents(ticketId, undefined, usable ? saved.upTo : 0);
+      const saved = unpackPlan(this.store.getSetting(planKey(ticketId)));
+      const usable = saved != null;
+      p = saved?.p ?? createProgress();
+      const rows = this.store.planEvents(ticketId, undefined, saved?.upTo ?? 0);
       for (const row of rows) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
       // Steps finishing from here on are recorded (#571); those before were, live or by backfillStepTimes.
       p.finished = [];
@@ -2524,7 +2523,7 @@ export class Runner {
 
   /** Save a ticket's task-list state, which holds every event up to `upTo`. */
   private savePlan(ticketId: number, p: ReturnType<typeof createProgress>, upTo: number) {
-    this.store.setSetting(planKey(ticketId), { rules: PLAN_RULES, upTo, p: { ...p, pendingCreates: [...p.pendingCreates], finished: undefined } });
+    this.store.setSetting(planKey(ticketId), packPlan(p, upTo));
   }
 
   /** Write the steps a ticket's plan finished since the last call to step_times (#571). */

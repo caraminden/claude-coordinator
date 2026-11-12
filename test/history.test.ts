@@ -279,3 +279,34 @@ test('a newer page carries on from the last replay, with the task list a full re
   assert.equal(back.more, true);
   assert.equal(reads[0], 0);
 });
+
+test("after a restart, a chat's first open carries on from the saved replay, not from the start (#613)", () => {
+  const { store, t } = setup('restart');
+  const plan = (id: string, subject: string) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TaskCreate', input: { subject, description: subject } }] } });
+  const made = (id: string, n: number) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully: x` }] } });
+  turn(store, t.id, 3, [plan('r1', 'One'), made('r1', 1)]);
+  turn(store, t.id, 3);
+  turn(store, t.id, 3);
+  const first = historyPage(store, t.id, { limit: 12 });
+  assert.deepEqual(first.tasks.map((x: any) => x.subject), ['One']);
+  turn(store, t.id, 3, [plan('r2', 'Two'), made('r2', 2)]);
+  turn(store, t.id, 3);
+  // A new Store on the same file is a restart: nothing kept in memory.
+  const again = new Store(join(root, 'restart.db'));
+  const reads: number[] = [];
+  const planEvents = again.planEvents.bind(again);
+  again.planEvents = (id, before, after) => {
+    reads.push(after ?? 0);
+    return planEvents(id, before, after);
+  };
+  const later = historyPage(again, t.id, { limit: 12 });
+  assert.equal(reads[0], first.events[0].id - 1, 'it reads on from where the last open before the restart stopped');
+  const full = createProgress();
+  for (const row of planEvents(t.id, later.events[0].id)) applyEvent(full, row.kind, JSON.parse(row.data), row.created_at);
+  // As the client gets them: the saved state is JSON, which drops keys left undefined.
+  assert.deepEqual(JSON.parse(JSON.stringify(later.tasks)), JSON.parse(JSON.stringify(full.tasks)));
+  assert.deepEqual(later.tasks.map((x: any) => x.subject), ['One', 'Two']);
+  // Deleting the minion deletes its saved replay too.
+  again.deleteTicket(t.id);
+  assert.equal(again.getSetting(`plan:${t.id}:page`), null);
+});

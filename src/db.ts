@@ -11,6 +11,8 @@ export const askerKey = (ticketId: number) => `asker:${ticketId}`;
 export const buildOwnerKey = (projectId: number, build: number) => `build-owner:${projectId}:${build}`;
 /** A minion's task-list state as of its last finished turn, so a restart replays only what came since (#530; src/runner.ts progressFor). */
 export const planKey = (ticketId: number) => `plan:${ticketId}`;
+/** A minion's task-list state just before the furthest chat page start read, so a restart's first open replays only what came since (#613; src/history.ts planBefore). */
+export const pagePlanKey = (ticketId: number) => `plan:${ticketId}:page`;
 
 /**
  * SQL on user_message event `a`: a person wrote it in that chat, so it can answer or handle a card there.
@@ -1448,6 +1450,7 @@ export class Store {
   deleteTicket(id: number) {
     this.deleteSetting(askerKey(id));
     this.deleteSetting(planKey(id));
+    this.deleteSetting(pagePlanKey(id));
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);

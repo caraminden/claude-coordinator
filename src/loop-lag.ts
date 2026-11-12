@@ -22,73 +22,95 @@ function frameName(f: CallFrame): string {
 }
 
 /**
- * What ran between `from` and `to` (hrtime microseconds) by the profile's samples: its commonest stacks, each as
+ * What ran between `from` and `to` (hrtime microseconds) by the profiles' samples: its commonest stacks, each as
  * the innermost frame and then up to three of this repo's own frames outward, as "70% leaf < caller < handler".
  * Empty when no sample falls in the window.
  */
-export function namedStacks(profile: Profile, from: number, to: number, top = 3): string {
-  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
-  const parent = new Map<number, number>();
-  for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+export function namedStacks(profiles: Profile[], from: number, to: number, top = 3): string {
   const counts = new Map<string, number>();
   let total = 0;
-  let t = profile.startTime;
-  for (let i = 0; i < profile.samples.length; i++) {
-    t += profile.timeDeltas[i];
-    if (t < from) continue;
-    if (t > to) break;
-    const leaf = byId.get(profile.samples[i]);
-    if (!leaf || leaf.callFrame.functionName === '(idle)') continue;
-    const names = [frameName(leaf.callFrame)];
-    for (let id = parent.get(leaf.id); id !== undefined && names.length < 4; id = parent.get(id)) {
-      const f = byId.get(id)!.callFrame;
-      if (!f.url.startsWith(ROOT) || /\/node_modules\//.test(f.url)) continue;
-      const name = frameName(f);
-      if (names.at(-1) !== name) names.push(name);
+  for (const profile of profiles) {
+    const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+    const parent = new Map<number, number>();
+    for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+    let t = profile.startTime;
+    for (let i = 0; i < profile.samples.length; i++) {
+      t += profile.timeDeltas[i];
+      if (t < from) continue;
+      if (t > to) break;
+      const leaf = byId.get(profile.samples[i]);
+      if (!leaf || leaf.callFrame.functionName === '(idle)') continue;
+      const names = [frameName(leaf.callFrame)];
+      for (let id = parent.get(leaf.id); id !== undefined && names.length < 4; id = parent.get(id)) {
+        const f = byId.get(id)!.callFrame;
+        if (!f.url.startsWith(ROOT) || /\/node_modules\//.test(f.url)) continue;
+        const name = frameName(f);
+        if (names.at(-1) !== name) names.push(name);
+      }
+      const key = names.join(' < ');
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      total++;
     }
-    const key = names.join(' < ');
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-    total++;
   }
   return [...counts].sort((a, b) => b[1] - a[1]).slice(0, top).map(([key, n]) => `${Math.round((100 * n) / total)}% ${key}`).join('; ');
 }
 
-/** The always-on sampler: `take` hands over the profile so far and starts the next. */
+/**
+ * The always-on sampler: `take` hands over the profile so far and starts the next, one take at a time. The roll's
+ * profile is kept until the next take, so a stall that spans a roll is still found in it.
+ */
 class Sampler {
-  private session = new Session();
-  private busy = false;
+  private session: Session | null = new Session();
+  private chain: Promise<unknown>;
+  private rolled: Profile | null = null;
   private fresh?: NodeJS.Timeout;
-  ready: Promise<boolean>;
+  private log: (text: string) => void;
 
-  constructor() {
-    this.ready = (async () => {
-      this.session.connect();
-      await this.session.post('Profiler.enable');
-      await this.session.post('Profiler.setSamplingInterval', { interval: SAMPLE_US });
-      await this.session.post('Profiler.start');
-      this.fresh = setInterval(() => void this.take(), FRESH_MS).unref();
-      return true;
-    })().catch(() => false);
+  constructor(log: (text: string) => void) {
+    this.log = log;
+    this.chain = (async () => {
+      const s = this.session!;
+      s.connect();
+      await s.post('Profiler.enable');
+      await s.post('Profiler.setSamplingInterval', { interval: SAMPLE_US });
+      await s.post('Profiler.start');
+      this.fresh = setInterval(() => void this.next().then((p) => (this.rolled = p)), FRESH_MS).unref();
+    })().catch((err) => {
+      this.log(`The event-loop sampler did not start (${err?.message ?? err}): stall lines won't say what ran.`);
+      this.stop();
+    });
   }
 
-  /** The profile since the last take, or null while another take runs or when the sampler failed. */
-  async take(): Promise<Profile | null> {
-    if (this.busy || !(await this.ready)) return null;
-    this.busy = true;
-    try {
-      const { profile } = await this.session.post('Profiler.stop');
-      await this.session.post('Profiler.start');
-      return profile as unknown as Profile;
-    } catch {
-      return null;
-    } finally {
-      this.busy = false;
-    }
+  /** The profiles covering the time since the take before the last roll: none while the sampler is down. */
+  async take(): Promise<Profile[]> {
+    const p = await this.next();
+    const out = [this.rolled, p].filter((x): x is Profile => !!x);
+    this.rolled = null;
+    return out;
+  }
+
+  private next(): Promise<Profile | null> {
+    const run = this.chain.then(async () => {
+      const s = this.session;
+      if (!s) return null;
+      try {
+        const { profile } = await s.post('Profiler.stop');
+        await s.post('Profiler.start');
+        return profile as unknown as Profile;
+      } catch (err: any) {
+        this.log(`The event-loop sampler stopped (${err?.message ?? err}): stall lines won't say what ran.`);
+        this.stop();
+        return null;
+      }
+    });
+    this.chain = run;
+    return run;
   }
 
   stop() {
     clearInterval(this.fresh);
-    this.session.disconnect();
+    this.session?.disconnect();
+    this.session = null;
   }
 }
 
@@ -97,7 +119,7 @@ class Sampler {
  * each line also names what ran (namedStacks). `stop` ends the watch and the sampler.
  */
 export function watchLoopLag(log: (text: string) => void = console.warn, every = 100, over = 500, { profile = false } = {}): { stop(): void } {
-  const sampler = profile ? new Sampler() : null;
+  const sampler = profile ? new Sampler(log) : null;
   let last = process.hrtime.bigint();
   const timer = setInterval(() => {
     const now = process.hrtime.bigint();
@@ -108,8 +130,8 @@ export function watchLoopLag(log: (text: string) => void = console.warn, every =
     const line = `The event loop was held for ${(held / 1000).toFixed(1)} s: the server answered nobody meanwhile.`;
     if (!sampler) return log(line);
     const to = Number(now / 1000n);
-    void sampler.take().then((p) => {
-      const ran = p ? namedStacks(p, from, to) : '';
+    void sampler.take().then((ps) => {
+      const ran = namedStacks(ps, from, to);
       log(ran ? `${line} Running: ${ran}` : line);
     });
   }, every).unref();

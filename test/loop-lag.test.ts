@@ -58,6 +58,9 @@ test('namedStacks counts only the window, leaf first then the repo\'s own caller
     samples: [4, 4, 4, 5, 5],
     timeDeltas: [10, 10, 10, 10, 10],
   };
-  assert.equal(namedStacks(profile, 1015, 1045), '67% all (node:sqlite) < listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 33% (garbage collector)');
-  assert.equal(namedStacks(profile, 2000, 3000), '', 'no sample in the window');
+  assert.equal(namedStacks([profile], 1015, 1045), '67% all (node:sqlite) < listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 33% (garbage collector)');
+  assert.equal(namedStacks([profile], 2000, 3000), '', 'no sample in the window');
+  // A stall across the sampler's roll is read from both profiles, the roll's and the next.
+  const next = { ...profile, startTime: 1050, samples: [4], timeDeltas: [5] };
+  assert.equal(namedStacks([profile, next], 1015, 1060), '60% all (node:sqlite) < listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 40% (garbage collector)'); // 1020-1050 and 1055
 });

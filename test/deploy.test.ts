@@ -482,7 +482,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   const srv = await standIn((req) => {
     try { phases.add(readFileSync(join(state, 'restart'), 'utf8').split('\n')[1]); } catch {}
     if (req.url === '/api/health') return health(Number(restarts()), ++n, { good, target, pidFile });
-    lockHeldAtReport.push(spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
+    lockHeldAtReport.push(spawnSync('flock', ['-n', join(state, 'restart.lock'), 'true']).status !== 0);
     return new Promise<string>((ok) => {
       const late = setTimeout(() => { together = false; ok('{}'); }, 5000);
       held.push(() => { clearTimeout(late); ok('{}'); });

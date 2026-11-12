@@ -33,7 +33,16 @@ export async function pipe(t: { after: (fn: () => void) => void }, worktrees: nu
   mkdirSync(join(source, 'test'));
   git(source, 'init', '-q', '-b', 'main');
   for (const f of ['land.sh', 'deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(source, 'tools', f));
-  writeFileSync(join(source, 'test', 'ok.test.mjs'), "import { test } from 'node:test';\ntest('ok', () => {});\n");
+  // TEST_MARK gets a line per run; TEST_GATE holds a run until that file is there; TEST_FAIL makes it red.
+  writeFileSync(join(source, 'test', 'ok.test.mjs'), `import { appendFileSync, existsSync } from 'node:fs';
+import { test } from 'node:test';
+const { TEST_MARK: mark, TEST_GATE: gate, TEST_FAIL: fail } = process.env;
+test('ok', async () => {
+  if (mark) appendFileSync(mark, 'run\\n');
+  while (gate && !existsSync(gate)) await new Promise((r) => setTimeout(r, 50));
+  if (fail) throw new Error('red');
+});
+`);
   // BOOT_MARK: say it started (with its parent's pid) and wait for BOOT_GATE, so a test can kill the deploy mid-check.
   writeFileSync(join(source, 'tools', 'boot-check.ts'), `import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -75,7 +84,7 @@ exit 0
   writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
 while [ $# -gt 0 ] && [ "$1" != bash ]; do case $1 in --setenv=*) export "\${1#--setenv=}" ;; esac; shift; done
 unset DEPLOY_LOCKED DEPLOY_TESTED DEPLOY_QUEUE_TICKET
-("$@" >>"$PIPE/restart.log" 2>&1; echo $? >>"$PIPE/restart.done") 9>&- </dev/null >/dev/null 2>&1 &
+("$@" >>"$PIPE/restart.log" 2>&1; echo $? >>"$PIPE/restart.done") 9>&- 7>&- </dev/null >/dev/null 2>&1 &
 `, { mode: 0o755 });
   const server = createServer((_, res) => {
     const commit = readFileSync(running, 'utf8').trim();
@@ -103,10 +112,12 @@ unset DEPLOY_LOCKED DEPLOY_TESTED DEPLOY_QUEUE_TICKET
       let stderr = '';
       child.stderr!.on('data', (d) => (stderr += d));
       const done = new Promise<{ status: number | null; stderr: string }>((ok) => child.once('close', (status) => ok({ status, stderr })));
-      return { pid: child.pid!, done };
+      return { pid: child.pid!, done, stderr: () => stderr };
     },
     run(script: string, cwd: string, extra: Record<string, string> = {}) { return this.start(script, cwd, extra).done; },
     lockFree: () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status === 0,
+    restartLockFree: () => spawnSync('flock', ['-n', join(state, 'restart.lock'), 'true']).status === 0,
+    restartsDone: () => (existsSync(join(dir, 'restart.done')) ? readFileSync(join(dir, 'restart.done'), 'utf8').trim().split('\n').length : 0),
     // Every queued restart runs on after the deploy that queued it: wait for the k-th to end. Its exit codes so far.
     async restarts(k: number) {
       const done = join(dir, 'restart.done');

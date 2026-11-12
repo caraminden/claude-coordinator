@@ -26,8 +26,8 @@ async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: 
   mkdirSync(bin);
   writeFileSync(join(bin, 'systemctl'), '#!/bin/sh\nexit 1\n');
   writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
-lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
-(flock -w 20 "$lock" true && echo got >${JSON.stringify(restarted)} && git -C "$DEPLOY_LIVE" tag -f last-good HEAD) >/dev/null 2>&1 &
+lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/restart.lock
+(flock -w 20 "$lock" true && echo got >${JSON.stringify(restarted)} && git -C "$DEPLOY_LIVE" tag -f last-good HEAD) 7>&- >/dev/null 2>&1 &
 `);
   for (const f of ['systemctl', 'systemd-run']) chmodSync(join(bin, f), 0o755);
   const server = createServer((_, res) => res.end(JSON.stringify({ ok: true, commit: existsSync(restarted) ? git(r.source, 'rev-parse', 'main') : base })));
@@ -57,12 +57,12 @@ test('the real deploy.sh takes the lock land.sh holds, lets go of it once the re
 
 // A killed deploy must not leave its test run or boot check holding the lock (ultra review A4), and the boot check
 // runs under a name ananicy's node rule doesn't match (A5b).
-test("deploy.sh's test run and boot check don't get the deploy lock's fd 9, and the boot check isn't named node", () =>
+test("deploy.sh's test run and boot check don't get the deploy lock's fd 9 or the restart lock's fd 7, and the boot check isn't named node", () =>
   withRealDeploy(async (r, run) => {
     const fd9 = join(r.dir, 'fd9');
-    writeFileSync(join(r.source, 'tools', 'run-tests.sh'), '#!/usr/bin/env bash\n[ -e /proc/self/fd/9 ] && echo tests open >>"$FD9_NOTE" || echo tests closed >>"$FD9_NOTE"\n');
+    writeFileSync(join(r.source, 'tools', 'run-tests.sh'), '#!/usr/bin/env bash\n{ [ -e /proc/self/fd/9 ] || [ -e /proc/self/fd/7 ]; } && echo tests open >>"$FD9_NOTE" || echo tests closed >>"$FD9_NOTE"\n');
     // node opens descriptors of its own, so the boot check looks at what its fd 9 is.
-    writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "import { appendFileSync, readlinkSync } from 'node:fs';\nimport { basename } from 'node:path';\nlet fd9 = '';\ntry { fd9 = readlinkSync('/proc/self/fd/9'); } catch {}\nappendFileSync(process.env.FD9_NOTE, `boot ${fd9.endsWith('/cc-deploy/lock') ? 'open' : 'closed'} ${basename(process.argv0)}\\n`);\nconsole.log('v1');\n");
+    writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "import { appendFileSync, readlinkSync } from 'node:fs';\nimport { basename } from 'node:path';\nlet fd9 = '', fd7 = '';\ntry { fd9 = readlinkSync('/proc/self/fd/9'); } catch {}\ntry { fd7 = readlinkSync('/proc/self/fd/7'); } catch {}\nappendFileSync(process.env.FD9_NOTE, `boot ${fd9.endsWith('/cc-deploy/lock') || fd7.endsWith('/cc-deploy/restart.lock') ? 'open' : 'closed'} ${basename(process.argv0)}\\n`);\nconsole.log('v1');\n");
     git(r.source, 'commit', '-qam', 'stand-ins that look for fd 9');
     const res = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, { FD9_NOTE: fd9 });
     assert.match(res.stderr, /live now: the server restarted on/);

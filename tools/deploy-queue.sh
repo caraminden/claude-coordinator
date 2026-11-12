@@ -11,8 +11,8 @@
 #                                    all the way, so its time counts toward the waiters' estimate
 # A ticket is four lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits), its
 # label, and its phase. A ticket whose process is gone is deleted by whoever waits behind it.
-# Outside the line, the queued restart (deploy.sh restart) and a land.sh from a branch older than this
-# take the flock directly; the head of the line waits for them like for anyone else. The restart says what it
+# Outside the line, a queued restart from before the restart lock (below) and a land.sh from a branch older than
+# the line take the flock directly; the head of the line waits for them like for anyone else. The restart says what it
 # is doing in <state>/restart ("<pid> <the pid's start time>", then its phase), which counts as progress like a ticket's phase (#553).
 # The kit's land.sh template (kit/skills/scheme-setup/templates/land.sh) carries a copy of these functions
 # inline, so a scheme copies one file: a fix to either belongs in both.
@@ -76,7 +76,7 @@ queue_outside() {
   if [ -n "$who" ]; then
     echo "outside the line, the lock is open in $who$([ "$count" -le 3 ] || echo " and $((count - 3)) more")"
   else
-    echo "a queued restart, or a landing started from a branch older than the line"
+    echo "a landing started from a branch older than the line, or a restart queued before it had a lock of its own"
   fi
 }
 
@@ -202,10 +202,12 @@ queue_lock() {
   done
 }
 
-# What a kill leaves behind (#553). Not part of the line (and not in the kit's copy): two notes in <state>, written
-# and read only by whoever holds the lock, so the next one to hold it can finish what a SIGKILL cut off.
+# What a kill leaves behind (#553). Not part of the line (and not in the kit's copy): notes in <state>, so the next
+# one to hold the locks can finish what a SIGKILL cut off. The first two are written and read only under the deploy
+# lock; taken-back is also written, with no lock, by a landing whose own restart was rolled back (land.sh's main_back).
 #   unchecked   the commit the live checkout was on before a pull whose checks have not ended (tools/deploy.sh)
-#   moving      "<main before> <tip>" of a landing that moved main and has not seen its deploy end (tools/land.sh)
+#   moving      "<main before> <tip>", then its branch, of a landing that moved main and has not seen its deploy end (tools/land.sh)
+#   taken-back  "<tip> <branch>" of each landing whose commit came off main again, newest last (tools/land.sh reads it before it rebases)
 
 # <state> <live>: a deploy died between its pull and the end of its checks, so the checkout goes back. Not when a
 # restart queued before it has since come up healthy on that commit (last-good holds it): the server runs it.
@@ -223,12 +225,49 @@ deploy_unchecked_back() {
 # <state> <live> <source>: a landing died after it moved main, and the live checkout never took its commit
 # (the deploy's checks failed, or never ran). Nothing has landed on top (main is still its tip), so main goes back.
 main_moving_back() {
-  local old tip
+  local l old tip
   [ -s "$1/moving" ] || return 0
-  read -r old tip <"$1/moving" || true
+  mapfile -t l <"$1/moving" || true
+  read -r old tip <<<"${l[0]:-}" || true
+  [ -n "$tip" ] && [ "$(git -C "$3" rev-parse main)" = "$tip" ] || { rm -f "$1/moving"; return 0; }
+  if git -C "$2" merge-base --is-ancestor "$tip" HEAD 2>/dev/null; then
+    # In the checkout with the restart on it still to be judged (#566: that restart runs beside the next landing):
+    # the note stays for whoever looks once it has its verdict.
+    ! git -C "$2" merge-base --is-ancestor "$tip" last-good 2>/dev/null || rm -f "$1/moving"
+    return 0
+  fi
+  taken_back "$1" "$tip" "${l[1]:-}" # before main goes back, so a kill in between still leaves the record
   rm -f "$1/moving"
-  [ -n "$tip" ] && [ "$(git -C "$3" rev-parse main)" = "$tip" ] || return 0
-  ! git -C "$2" merge-base --is-ancestor "$tip" HEAD 2>/dev/null || return 0
   git -C "$3" reset -q --keep "$old" || return 0
   echo "queue: an earlier landing was killed after it moved main to $(git -C "$3" log -1 --format='%h "%s"' "$tip") and before its deploy went through; main is back at $(git -C "$3" log -1 --format=%h "$old")" >&2
+}
+
+# <state> <tip> <branch>: a landing's commit came off main again. A branch that was rebased onto it meanwhile still
+# holds it, and would carry it back onto main (tools/land.sh leaves it behind). The newest 20 are kept.
+taken_back() {
+  { tail -n 19 "$1/taken-back" 2>/dev/null; echo "$2 $3"; } >"$1/taken-back.tmp$$" && mv -f "$1/taken-back.tmp$$" "$1/taken-back"
+}
+
+# The restart lock (#566): <state>/restart.lock, on fd 7. Not part of the line either (the kit's copy has no restart).
+# The queued restart (deploy.sh restart) holds it from the database copy until it ends: settled, or rolled back, and
+# reported. Whoever moves main or the live checkout holds it too, taken after the deploy lock and never before it.
+# So the restart no longer needs the deploy lock, and the next landing rebases and passes its gate beside it; only
+# its fast-forward and its deploy wait for the restart's verdict. A restart still waiting on busy turns holds nothing.
+#   restart_lock <state>   hold it on fd 7. Returns 1 when it wasn't let go within DEPLOY_RESTART_WAIT seconds (a
+#                          restart ends within about 5 min: two restarts with their settle checks, and the reports).
+restart_lock() {
+  local phase said="" started=$SECONDS limit=${DEPLOY_RESTART_WAIT:-600}
+  exec 7>"$1/restart.lock"
+  until flock -w "$QUEUE_POLL" 7; do
+    phase=$(queue_restart "$1")
+    [ -n "$said" ] || echo "queue: waiting for the restart ahead to have its verdict${phase:+ ($phase)}; main and the live checkout stay as they are until then" >&2
+    [ -n "$said" ] || said=" since $(date +%H:%M)"
+    # The restart's own phase is the sign of progress for the landings behind this one.
+    if [ -n "$phase" ]; then queue_phase "deploying: waiting for the restart ahead: $phase"; else queue_phase "deploying: waiting for the restart ahead$said"; fi
+    if [ $((SECONDS - started)) -ge "$limit" ]; then
+      echo "queue: the restart lock ($1/restart.lock) has not been let go for $limit s (${phase:-no restart says it holds it}), so this gave up. A person needs to look at the restart (journalctl --user -u ${DEPLOY_UNIT:-cc-restart-when-idle}) before anyone tries again" >&2
+      exec 7>&-
+      return 1
+    fi
+  done
 }

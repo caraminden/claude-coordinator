@@ -427,7 +427,14 @@ time limit while the line moves; it gives up only after 15 minutes with no chang
 at the head of the line (no new head, no new phase), which means the holder is
 stuck and a person needs to look. A waiter whose process is gone drops out by
 itself, so a stopped run loses its place: run `land.sh` in the background with a
-long timeout. The queued restart takes the lock outside the line.
+long timeout.
+
+The queued restart has a lock of its own, the restart lock (`.git/cc-deploy/restart.lock`),
+from its database copy until it has its verdict and has reported. So it restarts at
+once, and the next landing in line rebases and waits for CI beside it. That landing
+takes the restart lock before it moves `main` or the live checkout, so neither moves
+while a restart is still being judged. If the restart is rolled back and its commit
+comes off `main`, the landing behind rebases without it and waits for CI again.
 
 `tools/deploy.sh` on its own deploys whatever is on `main`. Restarting doesn't
 interrupt turns:

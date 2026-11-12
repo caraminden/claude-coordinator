@@ -3,6 +3,9 @@
 #   tools/land.sh
 # Under the deploy lock (the one tools/deploy.sh takes), so landings and deploys go one at a time, in the
 # order they asked (tools/deploy-queue.sh): it says its place in line, and waits as long as the line moves.
+# The restart the landing before it queued may still be running: steps 1 and 2 go on beside it, and steps 3 and 4
+# wait for its verdict (the restart lock, #566). If that restart was rolled back and its commit came off main,
+# steps 1 and 2 are done again without it.
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 # 2. Needs the full suite green on the rebased commit, with main untouched otherwise. Cara's desktop runs it
@@ -79,9 +82,13 @@ branch=$(git branch --show-current)
 state=$(git -C "$LIVE" rev-parse --absolute-git-dir)/cc-deploy
 mkdir -p -m 700 "$state"
 # LAND_REBASED: this is the rebased land.sh, started below by the one that rebased, and it holds the lock on fd 9.
-resumed=
-[ -n "${LAND_REBASED:-}" ] && [ /dev/fd/9 -ef "$state/lock" ] && resumed=1
-unset LAND_REBASED
+# LAND_REDO with it: main went back while this waited for the restart ahead, so this starts over, once (1: the rebase
+# is still to do; 2: done, by the copy that started this one).
+resumed= redo=
+[ -n "${LAND_REBASED:-}" ] && [ /dev/fd/9 -ef "$state/lock" ] && resumed=1 redo=${LAND_REDO:-}
+unset LAND_REBASED LAND_REDO
+quiet=$resumed
+[ "$redo" != 1 ] || quiet=
 times=$state/times-$$ # the same in the rebased copy, which is this process
 if [ -z "$resumed" ]; then
   rm -f "$times" # what a killed landing with this pid left
@@ -100,23 +107,38 @@ trap 'land_timing $? || true; queue_done' EXIT
 [ "$(git -C "$SOURCE" branch --show-current)" = main ] || refuse "$SOURCE is not on main; a person needs to look"
 [ -z "$(git -C "$SOURCE" status --porcelain --untracked-files=no)" ] || refuse "$SOURCE has uncommitted changes; a person needs to look"
 # What a landing or deploy killed outright left half-done (#553): the checkout, then main, go back first.
-deploy_unchecked_back "$state" "$LIVE"
-main_moving_back "$state" "$LIVE" "$SOURCE"
+# Not beside a restart still being judged (#566): it restarted on that checkout, so both wait for the restart lock below.
+exec 7>"$state/restart.lock"
+if flock -n 7; then
+  deploy_unchecked_back "$state" "$LIVE"
+  main_moving_back "$state" "$LIVE" "$SOURCE"
+  flock -u 7
+fi
+exec 7>&-
 
 old=$(git -C "$SOURCE" rev-parse main)
-[ -n "$resumed" ] || queue_phase "rebasing onto main"
-[ -n "$resumed" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
-if ! git rebase -q main; then
+# A commit that came off main again (its restart was rolled back) while this branch was already rebased onto it
+# (#566: the gate runs beside that restart) is still under this branch, and a plain rebase would carry it back onto
+# main. It is left behind, unless it is this branch's own.
+under=
+while read -r t b; do
+  [ "$b" != "$branch" ] && git merge-base --is-ancestor "$t" HEAD 2>/dev/null && ! git merge-base --is-ancestor "$t" main 2>/dev/null || continue
+  { [ -n "$under" ] && git merge-base --is-ancestor "$t" "$under"; } || under=$t
+done < <(cat "$state/taken-back" 2>/dev/null || true)
+[ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
+[ -n "$quiet" ] || queue_phase "rebasing onto main"
+[ -n "$quiet" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
+if ! git rebase -q ${under:+--onto} main ${under:+"$under"}; then
   # Which files collide is worth a retro-log line (the architecture check counts them).
   conflicted=$(git diff --name-only --diff-filter=U 2>/dev/null | sed ':a;N;$!ba;s/\n/, /g' || true)
   if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h main): $conflicted"; else what=": no conflicted files found (the rebase may not have started)"; fi
   retro_log "land conflict · $branch$what"
   git rebase --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
-  refuse "the rebase onto main failed (see git's output above), so nothing landed${conflicted:+; conflicted files: $conflicted}. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
+  refuse "the rebase onto main failed (see git's output above), so nothing landed${conflicted:+; conflicted files: $conflicted}. On conflicts: run git rebase ${under:+--onto }main${under:+ $(git rev-parse --short "$under")}, resolve them keeping the other minions' changes, re-test, commit, then run this again"
 fi
 # Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):
 # go on in the rebased one instead. It keeps the lock on fd 9, and its own rebase finds nothing to do.
-[ -n "$resumed" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 exec bash "$tools/land.sh"
+[ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} exec bash "$tools/land.sh"
 
 # <state>/bad: "<commit> <last-good> <when> <what it restarted on>", left by the restart that rolled <commit>'s deploy back (tools/deploy.sh).
 # While main still holds that commit every deploy pulls it in again and is rolled back too (#553), so only its fix
@@ -149,7 +171,7 @@ CI_STEP='the full suite' # the workflow's step that runs the tests; a run that f
 CI_DOWN=${LAND_CI_DOWN:-600} # how long one landing's unanswered wait for CI spares the next ones theirs
 CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI_POLL:-5}
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
-hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&-; }
+hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&-; }
 ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why=''
 # The newest run of the workflow on this commit, into ci_*; nothing when there is none. Fails when GitHub doesn't answer.
 ci_run() {
@@ -250,12 +272,35 @@ else
   fi
 fi
 
+# The restart lock (#566, tools/deploy-queue.sh): from here on this moves main and the live checkout, so a restart
+# still being judged has its verdict first. The rebase and the gate above ran beside it.
+restart_lock "$state" || refuse "nothing landed: main is untouched, and $branch keeps the rebased work"
+# With that lock a rollback is final: a commit it took out of the checkout comes off main here, if its own landing hasn't yet.
+deploy_unchecked_back "$state" "$LIVE"
+main_moving_back "$state" "$LIVE" "$SOURCE"
+if [ "$(git -C "$SOURCE" rev-parse main)" != "$old" ]; then
+  # The gate passed a commit that sits on what came off main: the rebase and the gate are done again, by the land.sh of that rebase.
+  [ -z "$redo" ] || refuse "main moved again while this waited for the restart ahead, for the second time, so nothing landed. A person needs to look at main and $state"
+  say "main went back to $(git -C "$SOURCE" log -1 --format='%h "%s"' main) while this waited (the restart ahead was rolled back): rebasing $branch onto it and testing again"
+  flock -u 7
+  exec 7>&-
+  LAND_REBASED=1 LAND_REDO=1 exec bash "$tools/land.sh"
+fi
+
 # Only when the live checkout doesn't have it (a failed check or a rolled-back restart put it back, or it never pulled): main follows, unless it moved on since.
+moved=
 main_back() {
+  [ -n "$moved" ] || return 0
   # A deploy killed outright never put the checkout back; only with the lock, which a deploy that got as far as queuing its restart has let go of.
-  ! flock -n 9 2>/dev/null || deploy_unchecked_back "$state" "$LIVE"
-  if ! git -C "$LIVE" merge-base --is-ancestor "$tip" HEAD 2>/dev/null && [ "$(git -C "$SOURCE" rev-parse main)" = "$tip" ]; then
+  # Nor beside a restart being judged on that checkout (#566): then the next landing does it, with both locks.
+  ! flock -n 9 2>/dev/null || ! flock -n 7 2>/dev/null || deploy_unchecked_back "$state" "$LIVE"
+  git -C "$LIVE" merge-base --is-ancestor "$tip" HEAD 2>/dev/null && return 0
+  if [ "$(git -C "$SOURCE" rev-parse main)" = "$tip" ]; then
+    taken_back "$state" "$tip" "$branch" # first: the landing behind looks for it the moment main goes back
     git -C "$SOURCE" reset -q --keep "$old"
+  fi
+  # Also when the landing behind this one took it off main first (it does once the restart has its verdict).
+  if ! git -C "$SOURCE" merge-base --is-ancestor "$tip" main 2>/dev/null; then
     refuse "the live checkout doesn't have it (the deploy stopped before taking it, or its restart was rolled back), so main is back at $(git log -1 --format=%h "$old"); $branch keeps the rebased work. Fix it and land again"
   fi
 }
@@ -265,8 +310,9 @@ trap 'main_back; exit 143' TERM
 trap 'main_back; exit 129' HUP
 bad_check # again: a rollback may have come while this one waited for CI
 # Until this ends by itself, however the deploy goes; a kill that skips the trap leaves it for the next landing.
-echo "$old $tip" >"$state/moving"
-trap 'land_timing $? || true; [ "$(cat "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; ci_done; queue_done' EXIT
+printf '%s\n' "$old $tip" "$branch" >"$state/moving"
+trap 'land_timing $? || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; ci_done; queue_done' EXIT
+moved=1
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
 queue_phase "deploying"

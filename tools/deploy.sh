@@ -14,6 +14,8 @@
 #    in the journal. Before restarting it copies the database to backups/pre-deploy-<commit>.db (newest
 #    3 kept, rotated only after a healthy deploy), so a rollback that can't read what the new code
 #    wrote can be restored by hand. No copy, no restart.
+#    The restart holds the restart lock (tools/deploy-queue.sh) from the database copy until it ends, and this takes
+#    it before the pull: no pull, reload or restart while another restart is still being judged (#566).
 # 4. Once the new code is live (either way), pushes that commit to GitHub's main, never forced. A failed
 #    push is logged and shows in the report, but the deploy stands.
 # Every path and name can be overridden with DEPLOY_* variables, which is how it is tested on a dev copy.
@@ -128,7 +130,7 @@ restart_phase() {
 }
 
 # Tell the minions that asked for this deploy, and the journal. $1 is ok, warn or fail. All at once (#553): the
-# restart still holds the lock here (letting go first would let the next deploy find this unit "already" queued,
+# restart still holds its lock here (letting go first would let the next deploy find this unit "already" queued,
 # with its restart behind it), and a server that is down costs REPORT_RETRY s a report, which one after another
 # outlasted the landings waiting in line.
 report() {
@@ -304,8 +306,10 @@ restart() {
     sleep "$IDLE_POLL"
   done
 
-  exec 9>"$STATE/lock"
-  flock 9
+  # The restart lock, not the deploy lock (#566, tools/deploy-queue.sh): the next landing rebases and passes its gate
+  # beside this, and takes this lock before it moves main or the checkout.
+  exec 7>"$STATE/restart.lock"
+  flock 7
   R_LOCK=$(date +%s)
   rm -f "$STATE/now"
   local target good saved
@@ -384,8 +388,12 @@ deploy() {
   if [ -z "$inherited" ]; then
     DEPLOY_TESTED=
     queue_lock "$STATE" "tools/deploy.sh" || exit 1
-    deploy_unchecked_back "$STATE" "$LIVE" # a deploy killed outright (#553); land.sh has done it when the lock is its own
   fi
+  # The restart lock too (#566), unless land.sh holds it on fd 7: a restart still being judged has its verdict first.
+  if [ -z "$inherited" ] || ! [ /dev/fd/7 -ef "$STATE/restart.lock" ]; then
+    restart_lock "$STATE" || exit 1
+  fi
+  [ -n "$inherited" ] || deploy_unchecked_back "$STATE" "$LIVE" # a deploy killed outright (#553); land.sh has done it when the lock is its own
   [ -f "$STATE/FAILED" ] && say "warning: the last rollback failed too (see journalctl --user -u $UNIT); carrying on" && rm -f "$STATE/FAILED"
   if [ -n "$(git_live status --porcelain --untracked-files=no)" ]; then
     say "$LIVE has local changes; refusing to deploy over them"
@@ -431,7 +439,7 @@ deploy() {
   else
     say "running the tests"
     queue_phase "deploying: running the tests since $(date +%H:%M)"
-    if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log" 9>&-); then # without the lock's fd: a run that outlives a killed deploy must not hold it
+    if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log" 9>&- 7>&-); then # without the locks' fds: a run that outlives a killed deploy must not hold it
       tail -n 40 "$STATE/test.log" >&2
       say "tests failed (full log: $STATE/test.log); nothing deployed"
       false
@@ -445,7 +453,7 @@ deploy() {
   # once (it stops the check) rather than after the check ends. Not as `node`: ananicy would idle it
   # (deploy/priority.md); no lock fd, as with the tests.
   local boot_rc=0 boot_since=$SECONDS
-  timeout -k 10 "$BOOT_TIMEOUT" "$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" >"$STATE/boot.out" 9>&- &
+  timeout -k 10 "$BOOT_TIMEOUT" "$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" >"$STATE/boot.out" 9>&- 7>&- &
   boot_pid=$!
   wait "$boot_pid" || boot_rc=$?
   boot_pid=
@@ -496,7 +504,7 @@ deploy() {
     --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
     --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_UNKNOWN_WAIT="$UNKNOWN_WAIT" --setenv=DEPLOY_IDLE_POLL="$IDLE_POLL" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
     --setenv=COORDINATOR_SHARED_DIR="${COORDINATOR_SHARED_DIR:-}" \
-    bash "$copy" restart 2>&1); then
+    bash "$copy" restart 2>&1 9>&- 7>&-); then
     mark queued
     if [ -n "$NOW" ]; then say "restart queued as $UNIT with --now: it restarts at once, cutting off turns not in a unit of their own (this one too, if so)"
     else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi
@@ -513,9 +521,11 @@ deploy() {
     say "could not queue the restart: $out"
     exit 1
   fi
-  # The queued restart takes the lock before it restarts: let go, or it waits out the 60 s below.
+  # The queued restart takes the restart lock before it restarts: let go, or it waits out the wait below. The deploy
+  # lock goes with it, so the next in line rebases and passes its gate while that restart is judged (#566).
   queue_done ok
   flock -u 9
+  flock -u 7
   # Usually it is live within seconds and checked again SETTLE s later (last-good moves); say how that went here, as
   # this turn carries on through the restart. A rollback fails this deploy (#553), so land.sh takes the commit off main.
   local bad was limit=$((HEALTHY_WAIT * 2 + SETTLE + 15))

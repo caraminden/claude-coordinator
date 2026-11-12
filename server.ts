@@ -214,7 +214,8 @@ if (previews) {
   // Builds' previews are of this server's own code, so only its own scheme has them; checked again once a deploy moves the live commit.
   let own: { head: string | null; id: number | null } | null = null;
   previews.buildScheme = () => {
-    if (own?.head !== waiters.head) own = { head: waiters.head, id: store.listProjects().find((p) => runsRepo(p.repo_dir, waiters.head))?.id ?? null };
+    // Only a found scheme is kept: one made or cloned after the first look is found on the next.
+    if (own?.head !== waiters.head || own.id === null) own = { head: waiters.head, id: store.listProjects().find((p) => runsRepo(p.repo_dir, waiters.head))?.id ?? null };
     return own.id === null ? null : store.getProject(own.id) ?? null;
   };
 }

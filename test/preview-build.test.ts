@@ -89,6 +89,20 @@ test('the first page load after the tip moved restarts it on the new commit', as
   assert.equal((await health()).commit, moved);
 });
 
+test('a branch deleted while its preview boots leaves nothing running and no worktree', async () => {
+  git(['branch', 'build/11', live]);
+  const booting = page('/preview/build/11/');
+  // Past its tip check, well inside the boot (checkout, copy, spawn and health checks: hundreds of ms).
+  await new Promise((r) => setTimeout(r, 50));
+  git(['branch', '-D', 'build/11']);
+  assert.equal((await page('/preview/build/11/')).status, 404);
+  await booting;
+  assert.equal(existsSync(join(data, 'projects', String(project.id), 'build-previews', '11')), false);
+  assert.equal(existsSync(join(data, 'previews', 'build-11')), false);
+  // No preview left: a request that isn't a page load finds none running.
+  assert.equal((await fetch(`${base}/preview/build/11/api/health`, { headers: { Cookie: cookie } })).status, 404);
+});
+
 test('a minion preview route never reads "build" as a ticket id', async () => {
   assert.equal((await page('/preview/build/')).status, 404);
   assert.equal((await page('/preview/buildx/7/')).status, 404);

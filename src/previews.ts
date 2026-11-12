@@ -205,6 +205,8 @@ export class Previews {
 
   /** A build that landed or was dropped: stop its preview and remove its worktree (its copy of the data goes with the stop). */
   private async dropBuild(scheme: Project, n: number, name = String(n)) {
+    // A boot under way would otherwise come up after the halt, on a worktree removed under it.
+    await this.starting.get(buildKey(n))?.catch(() => {});
     await this.halt(buildKey(n));
     const dir = join(this.buildsDir(scheme), name);
     if (!existsSync(dir)) return;

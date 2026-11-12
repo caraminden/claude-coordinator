@@ -715,7 +715,7 @@ export class CiHealth {
       if (!(err instanceof GhError) || err.status !== 404) throw err;
       const owner = as && p.owner_id != null ? this.store.getUser(p.owner_id) : null;
       const who = !as ? "the box's GitHub login" : `${owner?.name ?? "the scheme owner"}'s linked GitHub`;
-      throw new Error(`${who} can't see ${slug} (GitHub answers 404): it has no access to the repo, or its invite is still waiting to be accepted.`);
+      throw new Error(`${who} can't see ${slug} (GitHub answers 404): it has no access to the repo or its invite is still waiting to be accepted, or the repo isn't at that address (deleted, or repo_url is wrong).`);
     }
   }
 

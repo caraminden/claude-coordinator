@@ -351,7 +351,7 @@ test("a repo the scheme's GitHub login can't see says so, naming whose login it 
   }
   const lines = said.filter((l) => l.includes('FuckSpamTexts'));
   assert.equal(lines.length, 2, said.join('\n'));
-  assert.match(lines[0], /^CI health check of FuckSpamTexts failed \(said once until a restart\): Josh's linked GitHub can't see caraminden\/fuckspamtexts \(GitHub answers 404\): it has no access to the repo, or its invite is still waiting to be accepted\.$/);
+  assert.match(lines[0], /^CI health check of FuckSpamTexts failed \(said once until a restart\): Josh's linked GitHub can't see caraminden\/fuckspamtexts \(GitHub answers 404\): it has no access to the repo or its invite is still waiting to be accepted, or the repo isn't at that address \(deleted, or repo_url is wrong\)\.$/);
   assert.match(lines[1], /: the box's GitHub login can't see caraminden\/fuckspamtexts \(GitHub answers 404\)/, 'a scheme read as the box says so');
   assert.equal(w.puts.length, 0, 'an unreadable repo clears and raises nothing');
 });

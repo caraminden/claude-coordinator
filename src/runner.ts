@@ -2491,9 +2491,11 @@ export class Runner {
     if (!p.finished?.length) return;
     const t = this.store.getTicket(ticketId);
     try {
-      this.store.addStepTimes(ticketId, p.finished.splice(0), t?.last_effort ?? t?.effort ?? null);
+      this.store.addStepTimes(ticketId, p.finished, t?.last_effort ?? t?.effort ?? null);
+      p.finished.length = 0;
     } catch (err) {
-      console.error(`Ticket ${ticketId}: could not record its finished steps:`, err);
+      // Kept for the next event's try: the backfill has run, so nothing else would record them.
+      console.error(`Ticket ${ticketId}: could not record its finished steps, will retry:`, err);
     }
   }
 
@@ -2518,6 +2520,7 @@ export class Runner {
     for (const project of this.store.listProjects()) {
       for (const t of this.store.listTickets(project.id)) {
         const p = { ...createProgress(), finished: [] as FinishedStep[] };
+        // shortcut: effort is the minion's now, not when each step ran; nothing reads it yet, and live rows are right.
         for (const row of this.store.planEvents(t.id)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
         this.store.addStepTimes(t.id, p.finished, t.last_effort ?? t.effort ?? null);
         await new Promise((r) => setImmediate(r));

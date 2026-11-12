@@ -324,6 +324,8 @@ export function applyEvent(p, kind, data, at = null) {
     // A plan finished in an earlier turn belongs to that chunk of work, not this one.
     if (p.tasks.length && allDone(p)) p.tasks = [];
     // A step underway counts working time again; a turn that died with no result stopped at its last event.
+    // shortcut: replays see no tool results (Store.planEvents), so a call running when a turn was cut off counts
+    // only to its start; worth a turn-end time from the turns table if cut-off turns start skewing the ratio.
     for (const t of p.tasks) {
       settle(t, lastAt);
       if (t.status === 'in_progress' && at != null) t.workFrom = at;

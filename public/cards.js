@@ -174,9 +174,10 @@ export function planCard(ticketId, card) {
   // A machine's notes card (#617): only its owner or an admin approves; anyone may reject, with an optional reason.
   const m = card.machine;
   const mayApprove = !m || !!account?.admin || (m.owner != null && m.owner === me);
-  const status = h('span', { class: 'muted', role: 'status' });
-  const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove,
-    title: mayApprove ? null : `Only ${m.owner ? `${m.owner}, who owns ${m.name}, or an admin` : 'an admin'} can approve its notes` }, 'Approve');
+  // Said beside the greyed-out Approve, not only in its tooltip, so a phone or keyboard shows why.
+  const hint = mayApprove ? '' : `Only ${m.owner ? `${m.owner} (its owner)` : 'an admin'}${m.owner ? ' or an admin' : ''} can approve`;
+  const status = h('span', { class: 'muted', role: 'status' }, hint);
+  const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, 'Approve');
   const revise = h('button', { type: 'button', class: 'small secondary' }, m ? 'Reject' : 'Revise');
   const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: m ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
@@ -216,7 +217,7 @@ export function planCard(ticketId, card) {
         if (rank) return;
         el.classList.remove('answered');
         approve.hidden = revise.hidden = false;
-        status.textContent = '';
+        status.textContent = hint;
         if (verdict === 'revise') editing(true);
       },
       label: m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,

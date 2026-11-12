@@ -1919,18 +1919,24 @@ export class Store {
       ORDER BY e.id`).all(id) as unknown as EventRow[];
   }
 
-  /** The text of a ticket's replies that may link files (subagents' included). */
-  replyTexts(ticketId: number): string[] {
+  /**
+   * The text of a ticket's replies that may link files (subagents' included), from its Claude events after event
+   * `after`, at most `limit` events read: `upTo` is the last one read, and `more` that there may be more after it.
+   * Read in pages from where the last scan stopped, since a long chat's whole history read cold held the server
+   * a second (#609).
+   */
+  replyTexts(ticketId: number, after = 0, limit = -1): { texts: string[]; upTo: number; more: boolean } {
     const rows = this.db
-      .prepare("SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' AND data LIKE '%\"type\":\"assistant\"%' AND data LIKE '%](%'")
-      .all(ticketId) as { data: string }[];
+      .prepare("SELECT id, CASE WHEN data LIKE '%\"type\":\"assistant\"%' AND data LIKE '%](%' THEN data END AS data FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? ORDER BY id LIMIT ?")
+      .all(ticketId, after, limit) as { id: number; data: string | null }[];
     const texts: string[] = [];
     for (const { data } of rows) {
+      if (data == null) continue;
       const content = JSON.parse(data).message?.content;
       if (!Array.isArray(content)) continue;
       for (const b of content) if (b?.type === 'text' && typeof b.text === 'string') texts.push(b.text);
     }
-    return texts;
+    return { texts, upTo: rows.at(-1)?.id ?? after, more: limit >= 0 && rows.length === limit };
   }
 
   /** Pass every stored Claude event through `fn` and save what it returns (null deletes the event). */

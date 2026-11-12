@@ -12,6 +12,8 @@ export const SCAN_DELAY_MS = 2000;
 // The file a broken link's name finds (findByName), kept a while: a scan runs every few seconds, and
 // broken links stay in the replies for good.
 const NAME_FIX_MS = 10 * 60_000;
+/** Claude events read per step of a reply scan, with the loop let go between steps (#609). */
+const REPLY_PAGE = 200;
 
 export class ArtifactScanner {
   private scanTimers = new Map<number, NodeJS.Timeout>();
@@ -19,6 +21,8 @@ export class ArtifactScanner {
   // What each project's shared folder held at the last scan, so a change can tell open pages to refresh.
   private sharedSeen = new Map<number, string>();
   private nameFixes = new Map<string, { match: string | null; at: number }>();
+  // The paths each ticket's replies linked, up to the last event read: a scan reads only what came since (#609).
+  private links = new Map<number, { cwd: string; upTo: number; linked: Set<string> }>();
 
   private store: Store;
   private dataDir: string;
@@ -74,6 +78,20 @@ export class ArtifactScanner {
     this.sharedSeen.set(projectId, sig);
   }
 
+  /** The paths a ticket's replies linked so far, reading only the events since the last call, a page at a time. */
+  private async linkedSoFar(ticketId: number, cwd: string): Promise<Set<string>> {
+    let seen = this.links.get(ticketId);
+    if (seen?.cwd !== cwd) this.links.set(ticketId, seen = { cwd, upTo: 0, linked: new Set() });
+    for (let more = true; more;) {
+      const page = this.store.replyTexts(ticketId, seen.upTo, REPLY_PAGE);
+      for (const p of linkedPaths(page.texts, cwd)) seen.linked.add(p);
+      seen.upTo = page.upTo;
+      more = page.more;
+      if (more) await new Promise((r) => setImmediate(r));
+    }
+    return seen.linked;
+  }
+
   async scan(ticketId: number) {
     // One scan per ticket at a time; a request during a scan waits for it, then rescans.
     while (this.scanning.has(ticketId)) await this.scanning.get(ticketId);
@@ -88,7 +106,7 @@ export class ArtifactScanner {
       ];
       // Only files a reply linked are meant for people; the rest are the ticket's own working files.
       // A pinned file stays listed either way.
-      const linked = linkedPaths(this.store.replyTexts(ticketId), ticket.cwd);
+      const linked = new Set(await this.linkedSoFar(ticketId, ticket.cwd));
       // A link with the wrong folders counts for the one file of its name, as the chat opens it (#281).
       for (const abs of [...linked]) {
         if (!isArtifact(abs) || (await realpath(abs).catch(() => null))) continue;

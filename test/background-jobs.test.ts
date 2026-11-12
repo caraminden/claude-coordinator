@@ -216,6 +216,34 @@ test('a scan lists only the files a reply linked, and the shared folder broadcas
   assert.deepEqual((await scanner.sharedFiles(project.id)).map((f) => f.path), ['spec.md']);
 });
 
+test('a scan reads only the replies since the last one, a page at a time, and keeps what earlier ones linked (#609)', async () => {
+  const { store, project, broadcast } = setup();
+  const cwd = join(root, `cwd-${dbs}`);
+  mkdirSync(cwd, { recursive: true });
+  for (const f of ['a.md', 'b.md', 'c.md']) writeFileSync(join(cwd, f), `# ${f}`);
+  const t = minion(store, project.id);
+  store.setTicketDir(t.id, cwd, null);
+  const scanner = new ArtifactScanner(store, join(root, `data-${dbs}`), broadcast, 0);
+  reply(store, t.id, `[a](${join(cwd, 'a.md')})`);
+  for (let i = 0; i < 450; i++) reply(store, t.id, `step ${i}, no link`); // past two pages
+  reply(store, t.id, `[b](${join(cwd, 'b.md')})`);
+  const reads: number[] = [];
+  const read = store.replyTexts.bind(store);
+  store.replyTexts = (id, after, limit) => {
+    reads.push(after ?? 0);
+    return read(id, after, limit);
+  };
+  await scanner.scan(t.id);
+  assert.deepEqual(store.listArtifacts(project.id).map((a) => a.path).sort(), ['a.md', 'b.md']);
+  assert.equal(reads.length, 3, `452 events read 200 at a time: ${reads}`);
+  reads.length = 0;
+  reply(store, t.id, `[c](${join(cwd, 'c.md')})`);
+  await scanner.scan(t.id);
+  assert.deepEqual(store.listArtifacts(project.id).map((a) => a.path).sort(), ['a.md', 'b.md', 'c.md'], 'the earlier links stay');
+  assert.equal(reads.length, 1);
+  assert.ok(reads[0] > 0, 'it starts after the last event read');
+});
+
 test('scans of one minion run one at a time, and schedule() coalesces calls within its delay', async () => {
   const { store, project } = setup();
   const cwd = join(root, `cwd-${dbs}`);

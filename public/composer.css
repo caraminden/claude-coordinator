@@ -116,7 +116,8 @@ a.waiting-card .label { overflow: hidden; text-overflow: ellipsis; white-space: 
 @media (max-width: 800px) {
   .waiting-strip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .waiting-head, a.waiting-card { flex: none; }
-  a.waiting-card { max-width: 75vw; }
+  /* A tap target as tall as the controls, its words centred. */
+  a.waiting-card { max-width: 75vw; min-height: var(--control-h); align-items: center; padding-block: 0; }
   /* A row that scrolls drops its end padding; this keeps the last card off the edge. */
   .waiting-strip::after { content: ''; flex: none; width: 0.2rem; }
 }

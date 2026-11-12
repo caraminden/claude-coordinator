@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setView } from '../public/base.js';
-import { elapsedText, firstSentence, machineAuthor, shortDuration, shortNote, ticketActionRef } from '../public/chattext.js';
+import { firstSentence, machineAuthor, shortDuration, shortNote, ticketActionRef } from '../public/chattext.js';
+import { elapsedText } from '../public/wait.js';
 
 test('ticketActionRef links the minion a Taskmaster tool created, messaged or updated, from its result', () => {
   const act = (name, result) => ticketActionRef({ block: { name }, result });
@@ -170,7 +171,7 @@ test('machineAuthor shows this scheme\'s own Taskmaster by the scheme\'s name, f
   assert.equal(machineAuthor('Coordinator'), 'Citadel Taskmaster');
 });
 
-test('elapsedText counts a running turn in whole seconds, then minutes with two-digit seconds, then hours', () => {
+test('elapsedText (wait.js) counts a running turn in whole seconds, then minutes with two-digit seconds, then hours', () => {
   const S = 1000;
   const rows = [
     // ms           want

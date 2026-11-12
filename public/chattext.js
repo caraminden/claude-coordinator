@@ -34,7 +34,8 @@ export function shortNote(text) {
   let m;
   // Older threads stored a note on every session restore; restores are silent now.
   if (/^Restored this thread's Claude session from the app's database/.test(text)) return null;
-  if (text === 'The server restarted during this turn, so it was interrupted.') return '⚠ Interrupted by a server restart';
+  // A restart that couldn't resume the turn says why after it (src/runner.ts); the reason stays.
+  if ((m = text.match(/^The server restarted during this turn, so it was interrupted\.( .+)?$/s))) return `⚠ Interrupted by a server restart${m[1] ? `.${m[1]}` : ''}`;
   if ((m = text.match(/^(.+?) renamed this (?:ticket|minion) from ".*" to "(.*)"\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”`;
   if ((m = text.match(/^(.+?) set this (?:thread|minion) to (.+?) (from the next turn|from now on)\.$/))) return `⚙ ${m[1]}: ${m[2]}${m[3] === 'from the next turn' ? ' next turn' : ''}`;
   if ((m = text.match(/^(.+?) (updated|cleared) the (?:project|scheme) instructions; they apply from each (?:thread|minion)'s next turn\.$/))) return `📋 ${m[1]} ${m[2]} the scheme instructions`;

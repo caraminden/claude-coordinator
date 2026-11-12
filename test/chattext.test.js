@@ -102,6 +102,8 @@ test('shortNote shortens the notes the server writes often and leaves the rest a
     ['Claude renamed this minion from "Usage bar" to "Usage bar: hours".', '✎ Renamed “Usage bar: hours”'],
     // Older threads said "ticket"; a title may span lines.
     ['Cara renamed this ticket from "Old" to "Two\nlines".', '✎ Cara renamed it “Two\nlines”'],
+    // src/runner.ts: a restart that couldn't resume the turn says why, and the reason stays.
+    ['The server restarted during this turn, so it was interrupted. It was set to be dismissed, so it was not resumed.', '⚠ Interrupted by a server restart. It was set to be dismissed, so it was not resumed.'],
     // Model and effort: "from the next turn" while a turn runs, "from now on" otherwise.
     ['Cara set this minion to Opus 5.5 from the next turn.', '⚙ Cara: Opus 5.5 next turn'],
     ['Cara set this minion to high effort from now on.', '⚙ Cara: high effort'],

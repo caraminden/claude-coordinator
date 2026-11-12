@@ -164,3 +164,31 @@ test('the ship line says where the change is, and why it is not moving', () => {
   assert.equal(line({ deploy: { pulled: true, live: false } }, 0, 'Gave up after 120 min waiting for turns, so nothing restarted. Run it again.')?.text,
     'Not live, the last deploy failed: Gave up after 120 min waiting for turns, so nothing restarted');
 });
+
+// Build branches (#592, specs/build-branches.md): a feeder folded into build/<n> reads as folded, and once
+// the build lands (main takes it by merge, then fast-forwards) its own commit, hash unchanged, goes live.
+test('a feeder folded into its build reads as folded, then live once the build lands, its commit unchanged', async () => {
+  git(repo, 'branch', 'build/7', 'main');
+  git(repo, 'checkout', '-q', '-b', 'feeder', 'build/7');
+  const mine = commit(repo);
+  git(repo, 'checkout', '-q', 'main');
+  const inBuild = (head: string | null = running) => branchStatus(repo, 'feeder', started, false, { head, checkoutDir: live }, 7);
+  assert.equal(shipLine(await inBuild(), 0, null)?.stage, 'branch', 'not merged in yet');
+  git(repo, 'update-ref', 'refs/heads/build/7', mine); // tools/land.sh --into build/7
+  const folded = shipLine(await inBuild(), 0, null);
+  assert.deepEqual([folded?.stage, folded?.text], ['build', 'Folded into Build 7, not live until the build lands']);
+  assert.equal(shipLine(await status('feeder'), 0, null)?.stage, 'branch', 'without its build, just a branch');
+
+  // main moves on; the build minion merges it in, and the build lands by merge and fast-forward.
+  writeFileSync(join(repo, 'g'), 'elsewhere');
+  git(repo, 'add', 'g');
+  git(repo, 'commit', '-q', '-m', 'main moves on');
+  git(repo, 'checkout', '-q', '-b', 'build-minion', 'build/7');
+  git(repo, 'merge', '-q', '--no-edit', 'main');
+  git(repo, 'update-ref', 'refs/heads/build/7', git(repo, 'rev-parse', 'HEAD'));
+  git(repo, 'checkout', '-q', 'main');
+  merge('build/7');
+  const after = await inBuild(git(repo, 'rev-parse', 'main'));
+  assert.equal(after?.tip, mine, 'the feeder commit keeps its hash');
+  assert.equal(shipLine(after, 0, null)?.stage, 'live');
+});

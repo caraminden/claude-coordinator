@@ -16,6 +16,8 @@ export interface BranchStatus {
   merged: boolean;
   /** Nothing committed on the branch since the ticket started. */
   empty: boolean;
+  /** For a minion in a build whose branch exists: whether build/<n> has all its work (it folded in). */
+  build?: { n: number; merged: boolean } | null;
   pr: { number: number; title: string; state: 'OPEN' | 'CLOSED' | 'MERGED'; url: string; draft: boolean } | null;
   /**
    * For merged work in the repo the server itself runs from: whether the live checkout has pulled it
@@ -60,7 +62,7 @@ async function findPr(repoDir: string, branch: string): Promise<BranchStatus['pr
  * Status of a ticket's branch in the project's checkout. Merged means its commits are all in the
  * local default branch or origin's (tickets here are often merged locally rather than through a PR).
  */
-export async function branchStatus(repoDir: string, branch: string, startedAt: number, withPr: boolean, live: Live | null = null): Promise<BranchStatus | null> {
+export async function branchStatus(repoDir: string, branch: string, startedAt: number, withPr: boolean, live: Live | null = null, build: number | null = null): Promise<BranchStatus | null> {
   const tip = await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir);
   if (!tip) return null;
   const originHead = await tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir);
@@ -68,12 +70,7 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
   const bases = [];
   if (await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${localDefault}`], repoDir)) bases.push(localDefault);
   if (originHead) bases.push(originHead);
-  // A branch only fast-forwarded to a newer main has a new tip but none of its own work, so ask its reflog
-  // (madeCommits). With no reflog (they expire), a branch whose newest commit predates the ticket is still
-  // where it was cut from.
-  const made = await madeCommits(repoDir, branch, Math.floor(startedAt / 1000));
-  const tipTime = Number(await tryGit(['log', '-1', '--format=%ct', branch], repoDir)) * 1000;
-  const empty = made === null ? !tipTime || tipTime < startedAt : !made;
+  const empty = await emptyBranch(repoDir, branch, startedAt);
   let ahead = 0;
   let merged = false;
   for (const base of bases) {
@@ -82,6 +79,8 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
     if (base === bases[0]) ahead = count;
     if (count === 0) merged = !empty;
   }
+  // In a build with a branch (specs/build-branches.md): whether its work is in build/<n> yet.
+  const buildRef = build ? await buildRefOf(repoDir, build) : null;
   return {
     branch,
     tip,
@@ -89,9 +88,30 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
     ahead,
     merged,
     empty,
+    build: buildRef ? { n: build!, merged: !empty && await contains(repoDir, buildRef, `refs/heads/${branch}`) === true } : null,
     pr: withPr ? await findPr(repoDir, branch) : null,
     deploy: merged && live ? await deployed(repoDir, branch, live) : null,
   };
+}
+
+/**
+ * Nothing committed on the branch since the minion started (`startedAt`, ms). A branch only fast-forwarded
+ * to a newer main has a new tip but none of its own work, so ask its reflog (madeCommits). With no reflog
+ * (they expire), a branch whose newest commit predates the minion is still where it was cut from.
+ */
+export async function emptyBranch(repoDir: string, branch: string, startedAt: number): Promise<boolean> {
+  const made = await madeCommits(repoDir, branch, Math.floor(startedAt / 1000));
+  if (made !== null) return !made;
+  const tipTime = Number(await tryGit(['log', '-1', '--format=%ct', branch], repoDir)) * 1000;
+  return !tipTime || tipTime < startedAt;
+}
+
+/** Build <n>'s branch as a ref: local build/<n>, else origin's; null when it has none (src/workspace.ts buildBranch). */
+export async function buildRefOf(repoDir: string, build: number): Promise<string | null> {
+  for (const ref of [`refs/heads/build/${build}`, `refs/remotes/origin/build/${build}`]) {
+    if (await tryGit(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], repoDir)) return ref;
+  }
+  return null;
 }
 
 /**
@@ -139,12 +159,12 @@ async function deployed(repoDir: string, branch: string, live: Live): Promise<Br
 
 /**
  * Where a minion's change is, as one line for its bar and a stage for its row's badge: on its branch,
- * on main, deploying, live, or not live because the last deploy failed. Live is by ancestry: the
+ * folded into its build, on main, deploying, live, or not live because the last deploy failed. Live is by ancestry: the
  * running server contains the branch, whichever minion's deploy carried it there. Null before the
  * minion has committed anything.
  */
 export interface Ship {
-  stage: 'branch' | 'main' | 'deploying' | 'live' | 'failed';
+  stage: 'branch' | 'build' | 'main' | 'deploying' | 'live' | 'failed';
   text: string;
   /** The branch's newest commit, short. */
   commit: string;
@@ -156,6 +176,8 @@ export function shipLine(s: BranchStatus | null, interruptible: number, failure:
   if (!s || s.empty) return null;
   const commit = s.tip.slice(0, 7);
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  // A feeder folded into its build: done for now, live when the build lands (main takes it by merge, so its hashes stay).
+  if (!s.merged && s.build?.merged) return { stage: 'build', text: `Folded into Build ${s.build.n}, not live until the build lands`, commit };
   if (!s.merged) return { stage: 'branch', text: `On its branch: ${plural(s.ahead, 'commit')} not on ${s.base ?? 'main'}`, commit };
   // Another scheme's repo: merged is as far as it goes here.
   if (!s.deploy) return { stage: 'main', text: `Merged into ${s.base ?? 'main'}`, commit };

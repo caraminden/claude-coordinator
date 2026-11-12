@@ -44,7 +44,7 @@ export class ShipStatus {
     if (!ticket?.branch || !project?.repo_dir) return null;
     const cached = this.cache.get(ticketId);
     const prFresh = cached && Date.now() - cached.prAt < maxPrAge;
-    const status = await (this.d.status ?? branchStatus)(project.repo_dir, ticket.branch, ticket.created_at, !prFresh, { head: this.d.liveHead(), checkoutDir: this.d.checkoutDir });
+    const status = await (this.d.status ?? branchStatus)(project.repo_dir, ticket.branch, ticket.created_at, !prFresh, { head: this.d.liveHead(), checkoutDir: this.d.checkoutDir }, ticket.build);
     if (status && prFresh) status.pr = cached.status?.pr ?? null;
     const json = JSON.stringify(status);
     this.cache.set(ticketId, { status, prAt: prFresh ? cached.prAt : Date.now(), json });

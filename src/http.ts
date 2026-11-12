@@ -10,6 +10,7 @@ import { gzip } from 'node:zlib';
 // Types only: this module loads nothing of the app's, so any module can import it.
 import type { Auth, Session } from './auth.ts';
 import type { BranchStatus } from './branch.ts';
+import type { Builds } from './builds.ts';
 import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket } from './db.ts';
 import type { MachineRelay } from './machines.ts';
 import type { GithubLink } from './github-link.ts';
@@ -238,6 +239,8 @@ export interface App {
   newMinion(project: Project, m: { title: string; props: Record<string, unknown>; model?: string | null; effort?: string | null; build?: number | null }, by: string): Promise<{ id: number; number: number; notes: string[] }>;
   startChained(c: Chain, why: string): Promise<void>;
   ticketBranch(ticketId: number): Promise<BranchStatus | null>;
+  /** Build branches' headers (src/builds.ts). */
+  builds: Pick<Builds, 'get'>;
   sharedFiles(projectId: number): Promise<SharedFile[]>;
   sharedDir(ticket: Ticket): string;
   registryChanged(projectId: number, global: boolean): void;

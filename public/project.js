@@ -72,7 +72,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const earlyPage = early && !earlyCached ? loadEvents(early).catch(() => null) : null;
   // The scheme list is redrawn behind on a switch (refreshSchemes below); only a first load waits for it, for the shelf.
   const known = view?.projects?.length ? view.projects : null;
-  const [{ project, coordinator, tickets: open, dismissed, seen, person_notes, pins }, artifacts, shared, projects, machines] = stale
+  const [{ project, coordinator, tickets: open, dismissed, seen, person_notes, pins, builds }, artifacts, shared, projects, machines] = stale
     ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes }, stale.artifacts, stale.shared, known, stale.machines]
     : await Promise.all([
     // The dismissed minions come behind the first paint (loadDismissed): most of a big scheme's payload (#538).
@@ -110,6 +110,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     personNotes: person_notes ?? {}, // ticket id -> people's note on it { text, by, at } (#146)
     pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
+    builds: builds ?? [], // build branches' headers: { build, merged, open, behind } (src/builds.ts)
     artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects: projects ?? view?.projects ?? [],
     file: main.file ?? null,
     ...chatView(chatId, ticket),
@@ -251,13 +252,13 @@ async function refreshScheme(projectId) {
     if (!got) await new Promise((r) => setTimeout(r, wait));
   }
   panel?.removeAttribute('aria-busy');
-  const [{ project, coordinator, tickets: open, seen, person_notes, pins }, artifacts, shared, machines] = got;
+  const [{ project, coordinator, tickets: open, seen, person_notes, pins, builds }, artifacts, shared, machines] = got;
   const now = new Set(open.map((t) => t.id));
   // Dismissed since you left: gone until the dismissed list below brings it back as it is now.
   for (const [id, t] of list) if (t.status !== 'closed' && !now.has(id) && before.get(id) === t) list.delete(id);
   for (const t of open) if (!(list.get(t.id)?.updated_at > t.updated_at)) list.set(t.id, t);
   if (!(view.coordinator.updated_at > coordinator.updated_at)) view.coordinator = coordinator;
-  Object.assign(view, { project, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, machines });
+  Object.assign(view, { project, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, builds: builds ?? view.builds, machines });
   headUp();
   renderSidebar();
   setArtifacts(artifacts, shared);

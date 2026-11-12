@@ -27,6 +27,8 @@
    (number + short ask, state, then a terse note), stripes restarting in each section. */
 .thread-group { margin-top: 0.8rem; }
 .thread-group > h3, .thread-group > summary { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.25rem; padding-left: 0.4rem; border-left: 3px solid currentColor; }
+/* A build branch's counts (src/builds.ts): on their own line under the build's name, in sentence case. */
+.thread-group > h3 .build-counts { display: block; font-weight: normal; text-transform: none; letter-spacing: normal; }
 .thread-group > summary { cursor: pointer; color: var(--muted); list-style: none; }
 .thread-group > summary::-webkit-details-marker { display: none; }
 .thread-group > summary::after { content: ' ▸'; }

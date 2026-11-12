@@ -56,6 +56,7 @@ import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { ticketRoutes } from './src/routes/tickets.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
+import { Builds } from './src/builds.ts';
 import { Waits } from './src/waits.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
@@ -399,6 +400,8 @@ const artifacts = new ArtifactScanner(store, DATA_DIR, broadcast);
 const sharedDir = artifacts.sharedDir;
 const ships = new ShipStatus({ store, runner, broadcast, liveHead: () => waiters.head, checkoutDir: import.meta.dirname });
 const ticketBranch = ships.branch;
+// Each build branch's header in the minions list (src/builds.ts): feeders folded in and open, commits behind main.
+const builds = new Builds({ store, broadcast });
 runner.ship = ships.ship;
 
 // What each minion waits on (#544): the land line in this checkout's git dir (tools/deploy-queue.sh), the heavy slots.
@@ -483,6 +486,8 @@ const SHIP_POLL_MS = 15_000;
 if (!BOOT_CHECK || PREVIEW) {
   void safely('branch sweep', () => ships.sweep());
   setInterval(() => void safely('ship poll', () => ships.poll()), SHIP_POLL_MS).unref();
+  void safely('builds', () => builds.poll());
+  setInterval(() => void safely('builds', () => builds.poll()), 2 * SHIP_POLL_MS).unref();
   // A few small files, so every 2 s: a landing's phases last tens of seconds.
   setInterval(() => void safely('waits', () => waits.poll()), 2_000).unref();
   ciRuns.start();
@@ -655,7 +660,7 @@ const app: App = {
   get assetVersion() {
     return ASSET_VERSION;
   },
-  broadcast, notify, newMinion, startChained: startChain, ticketBranch, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
+  broadcast, notify, newMinion, startChained: startChain, ticketBranch, builds, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
 };
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes, ...contraptionRoutes]);
 

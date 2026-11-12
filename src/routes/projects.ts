@@ -421,7 +421,9 @@ export const projectRoutes: Route[] = [
       const person_notes = caller ? {} : app.store.personNotes(project.id);
       // This person's pinned minions (#179), oldest pin first.
       const pins = caller ? [] : app.store.pinnedTickets(session.name, project.id);
-      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, dismissed, seen, person_notes, pins });
+      // Each build branch's standing, for its header in the list (src/builds.ts); [] without build branches.
+      const builds = app.builds?.get(project.id) ?? [];
+      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, dismissed, seen, person_notes, pins, builds });
     },
   },
   {

@@ -97,6 +97,7 @@ export function cardChip(cards) {
 /** Where a minion's change is (t.ship, src/branch.ts): its colour family, and its badge in the list (none on its branch). */
 export const SHIP = {
   branch: { fam: 'idle', badge: '' },
+  build: { fam: 'work', badge: 'folded' }, // into its build branch: done for now, live when the build lands
   main: { fam: 'work', badge: 'on main' },
   deploying: { fam: 'wait', badge: 'deploying' },
   live: { fam: 'done', badge: 'live' },

@@ -322,6 +322,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
     if (msg.type === 'seen-items' && msg.name === me) onSeenItems(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
+    if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) { view.builds = msg.builds; renderSidebar(); }
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
   es.onerror = () => {
@@ -547,7 +548,7 @@ async function resync() {
     held = hold;
   }
   try {
-    const [{ coordinator, tickets, seen, person_notes, pins }, artifacts, chat] = await Promise.all([
+    const [{ coordinator, tickets, seen, person_notes, pins, builds }, artifacts, chat] = await Promise.all([
       api(`api/projects/${view.projectId}`),
       api(`api/projects/${view.projectId}/artifacts`),
       view.id ? api(`api/tickets/${view.id}`) : null,
@@ -558,6 +559,7 @@ async function resync() {
     view.seen = seen ?? view.seen;
     view.personNotes = person_notes ?? view.personNotes;
     view.pins = pins ?? view.pins;
+    view.builds = builds ?? view.builds;
     if (view.id) markSeen(view.id);
     renderSidebar();
     // Cards raised or settled while the stream was down, here or in other schemes.

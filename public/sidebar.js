@@ -218,6 +218,13 @@ function groupHeading(group) {
   return label || value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+/** A build's heading; one with a branch (src/builds.ts) also says how many feeders are merged in and open, and how far it is behind main. */
+function buildHeading(s) {
+  const b = view.builds?.find((x) => x.build === s.build);
+  return ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : '',
+    b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`) : ''];
+}
+
 export function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
@@ -234,7 +241,7 @@ export function renderSidebar() {
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
   const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project)).map((s) =>
     h('section', { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
-      h('h3', {}, s.build ? ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : ''] : s.key === 'parked' ? 'Parked' : s.group ? groupHeading(s.group) : TYPES[s.type].section),
+      h('h3', {}, s.build ? buildHeading(s) : s.key === 'parked' ? 'Parked' : s.group ? groupHeading(s.group) : TYPES[s.type].section),
       s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t))));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.map((t) => [t.id, t]));

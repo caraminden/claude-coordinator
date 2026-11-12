@@ -269,3 +269,68 @@ test('a merge of main that changes land.sh hands --build over to the merged copy
   assert.equal(has(r, 'refs/heads/build/3'), false, 'the merged copy knew which build to delete');
   assert.equal(r.note(), 'locked=1 held=yes');
 });
+
+// A commit X that came off main (its restart was rolled back, tools/deploy-queue.sh taken_back) after the build minion
+// had merged main in with X on it.
+// `onIt`: a worktree that rebased onto main while X was there.
+function takenBack(r: R, bwt: string, onIt?: string) {
+  const before = tipOf(r, 'main');
+  r.commit(r.source, 'x.txt', 'rolled back\n');
+  const x = tipOf(r, 'main');
+  if (onIt) git(onIt, 'rebase', '-q', 'main');
+  git(bwt, 'merge', '--ff-only', 'build/3');
+  git(bwt, 'merge', '-q', '--no-edit', 'main');
+  assert.equal(r.run({}, ['--into', 'build/3', '--full'], bwt).status, 0);
+  git(r.source, 'reset', '-q', '--keep', before);
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  writeFileSync(join(state, 'taken-back'), `${x} ticket/7-x\n`);
+  return x;
+}
+
+test('--build refuses a build that carries a commit that came off main, and lands once that commit is reverted in it', () => {
+  const r = setup();
+  build(r);
+  const bwt = worktree(r, 'ticket/9-build');
+  const x = takenBack(r, bwt);
+  r.commit(r.source, 'n.txt', 'main moved on\n');
+  let res = r.run({}, ['--build'], bwt);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, new RegExp(`build/3 carries ${x.slice(0, 7)} .*came off main.*git revert --no-edit main\\.\\.${x.slice(0, 7)}`, 's'));
+  git(bwt, 'revert', '--no-edit', `main..${x}`);
+  assert.equal(r.run({}, ['--into', 'build/3', '--full'], bwt).status, 0);
+  res = r.run({}, ['--build'], bwt);
+  assert.equal(res.status, 0, res.stderr);
+  assert.ok(!existsSync(join(r.source, 'x.txt')), "what came off main isn't back on it");
+  assert.equal(has(r, 'refs/heads/build/3'), false);
+});
+
+test("the guard lets through a plain branch whose only shared commit with a build came off main, and the land leaves it behind", () => {
+  const r = setup();
+  build(r);
+  const bwt = worktree(r, 'ticket/9-build');
+  const x = takenBack(r, bwt, r.wt);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /came off main when its deploy was rolled back: leaving it behind/);
+  assert.ok(!existsSync(join(r.source, 'x.txt')));
+  assert.equal(git(r.source, 'log', '--format=%s', 'main', '-2'), 'b.txt: mine\nbase');
+  assert.notEqual(tipOf(r, 'main'), x);
+});
+
+test('a --build that stopped after merging main says how to go on', () => {
+  const r = setup();
+  const c = ci(r);
+  build(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  assert.equal(into(r, [OK]).status, 0);
+  const bwt = worktree(r, 'ticket/9-build');
+  r.commit(r.source, 'm.txt', 'on main\n');
+  assert.equal(c.run({ FAKE_CI: 'red' }, ['--build'], bwt).status, 1);
+  const res = c.run({}, ['--build'], bwt);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /one merge ahead of build\/3 .*run tools\/land\.sh --into build\/3 --full first/s);
+  assert.equal(c.run({}, ['--into', 'build/3', '--full'], bwt).status, 0);
+  assert.equal(c.run({}, ['--build'], bwt).status, 0);
+  assert.equal(tipOf(r, 'main'), git(bwt, 'rev-parse', 'HEAD'));
+});

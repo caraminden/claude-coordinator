@@ -129,8 +129,8 @@ const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
 // A preview goes with the server that started it, however that one goes (it is reparented then).
 const PARENT = process.ppid;
 if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000).unref();
-// Stalls of the event loop are named in the journal (#526), the start's own synchronous work included.
-if (!BOOT_CHECK) watchLoopLag();
+// Stalls of the event loop are named in the journal (#526), the start's own synchronous work included, with the code that ran (#609).
+if (!BOOT_CHECK) watchLoopLag(console.warn, 100, 500, { profile: true });
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.

@@ -1,6 +1,8 @@
 # The scheme's own settings and hooks for tools/land.sh, which sources this file. tools/land.sh is the Citadel
 # kit's, copied byte for byte: never edit it here, put what is this scheme's in this file. Plain shell, sourced
-# under set -euo pipefail, so a mistake here stops every landing: run the scheme's land tests after editing.
+# under set -euo pipefail, so a mistake here stops every landing (a command that fails, a last line like
+# `[ x ] && y` that comes out false: use if): run the scheme's land tests after editing. High risk by file, like
+# land.sh.
 # Set only what differs from the core's default (shown); leave the rest commented.
 
 # The check command, exactly as Project facts names it under "Check commands" ('true' while it has none).
@@ -30,8 +32,9 @@
 # PUSH_MAIN=1
 
 # Step 7: run once per branch that landed, after main was pushed, with the land lock and the place in line
-# already free, from the landing's worktree. Its output shows with the landing's; a failure is only warned
-# about and the landing still exits 0. Keep a network call in it under a timeout.
+# already free. The head of a batch runs it for each member it landed, from the head's worktree: use only the
+# arguments, never the current branch. Its output shows with the landing's; a failure is only warned about and
+# the landing still exits 0. Keep a network call in it under a timeout.
 # land_after() { # <commit> <branch>
 #   timeout 60 gh pr close "$2" --comment "Landed as $1" >/dev/null 2>&1 || true
 # }

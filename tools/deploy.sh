@@ -538,7 +538,7 @@ deploy() {
   fi
   trap - ERR INT TERM HUP
   rm -f "$STATE/unchecked"
-  kit_land_drift "$prev" "$new"
+  kit_land_drift "$prev" "$new" || true
 
   queue_phase "deploying: going live"
   if [ "$kind" = frontend ] && [ "$(health reload)" = sighup ]; then

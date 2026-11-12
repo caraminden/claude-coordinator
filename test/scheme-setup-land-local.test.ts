@@ -33,7 +33,7 @@ test("the local file's settings win over the core's defaults", () => {
   assert.match(res.stderr, /running echo from-local; false/);
   assert.match(res.stderr, /the check failed on the rebased branch/);
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
-  // And BRANCH: the clash refusal and the rest name the local file's branch, not "main".
+  // And BRANCH: the landing and the clash refusal name the local file's branch, not "main".
   const m = setup('true', {}, 'BRANCH=trunk\n');
   git(m.main, 'branch', '-m', 'main', 'trunk');
   m.commit(m.wt, 'b.txt', 'mine\n');
@@ -41,6 +41,31 @@ test("the local file's settings win over the core's defaults", () => {
   assert.equal(ok.status, 0, ok.stderr);
   assert.match(ok.stderr, /trunk is now at/);
   assert.equal(git(m.origin, 'rev-parse', 'trunk'), git(m.wt, 'rev-parse', 'HEAD'));
+  m.commit(m.main, 'CLAUDE.md', '# R\n\n- **Numbered things:** files db/NNNN-*.sql\n');
+  m.commit(m.main, 'db/0001-theirs.sql', 'x\n');
+  m.commit(m.wt, 'db/0001-mine.sql', 'y\n');
+  const clash = m.run();
+  assert.equal(clash.status, 1, clash.stderr);
+  assert.match(clash.stderr, /takes a number trunk already has .*Renumber yours past trunk's highest \(bump the version past trunk's\)/);
+});
+
+test('a land.local.sh that fails, or whose last line comes out false, stops the landing and says so; PUSH_MAIN is 0 or 1', () => {
+  for (const local of ['false\nCHECK=true\n', '[ -n "${NOPE:-}" ] && CI_STACK=2\n']) {
+    const r = setup('true', {}, local);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const before = git(r.main, 'rev-parse', 'main');
+    const res = r.run();
+    assert.equal(res.status, 1, res.stderr);
+    assert.match(res.stderr, /land\.local\.sh failed \(exit 1\), so nothing ran/);
+    assert.equal(git(r.main, 'rev-parse', 'main'), before);
+  }
+  const r = setup('true', {}, 'PUSH_MAIN=no\n');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const was = git(r.origin, 'rev-parse', 'main');
+  const res = r.run();
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /PUSH_MAIN is 1 \(push main\) or 0 \(keep it local\), not "no"/);
+  assert.equal(git(r.origin, 'rev-parse', 'main'), was);
 });
 
 test('PUSH_MAIN=0 lands on main and pushes nothing, and land_after does not run', () => {

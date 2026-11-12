@@ -69,16 +69,24 @@ CI_BATCH=${LAND_BATCH:-1}
 # 0: main stays in the main checkout and is never pushed (a scheme whose origin isn't its own).
 PUSH_MAIN=1
 
-# The scheme's own settings and hooks: every value above it sets wins. Plain shell, sourced here.
-#   land_after <commit> <branch>  step 7: run once per branch that landed, after main was pushed, with the
-#                                 lock and the place in line already free, from the landing's worktree.
-#                                 A failure (or an exit) in it is only warned about.
-# shellcheck source=/dev/null
-[ ! -f "$(dirname "${BASH_SOURCE[0]}")/land.local.sh" ] || . "$(dirname "${BASH_SOURCE[0]}")/land.local.sh"
-
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
 park() { say "$*"; exit 75; }
+
+# The scheme's own settings and hooks: every value above it sets wins. Plain shell, sourced here under set -e, so
+# a command in it that fails (its last line too: a false `[ x ] && y`) stops the landing, loudly.
+#   land_after <commit> <branch>  step 7: run once per branch that landed, after main was pushed, with the
+#                                 lock and the place in line already free. The head of a batch runs it for each
+#                                 member it landed, from its own worktree: only the arguments name the landing.
+#                                 A failure (or an exit) in it is only warned about.
+LOCAL=$(dirname "${BASH_SOURCE[0]}")/land.local.sh
+if [ -f "$LOCAL" ]; then
+  trap 'say "$LOCAL failed (exit $?), so nothing ran: a command in it, or its last line, came out false"' EXIT
+  # shellcheck source=/dev/null
+  . "$LOCAL"
+  trap - EXIT
+fi
+[[ $PUSH_MAIN =~ ^[01]$ ]] || refuse "PUSH_MAIN is 1 (push main) or 0 (keep it local), not \"$PUSH_MAIN\""
 
 # A turn in its person's Claude container has its own pid namespace: this script there can't see the landings
 # running on the host, so it would delete their places in line as dead, and they its own (Theory of Crafting,

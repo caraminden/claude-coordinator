@@ -38,6 +38,41 @@ test("landing keeps the calling turn's token: land.sh gets it, and the turn's to
   assert.equal(run.output.trim(), `token:${token}`);
 });
 
+// Theory of Crafting, 2026-11-11: only this server's own scheme had the tool, so another scheme's container turn ran
+// land.sh in the container, where it can't see the host landings in line.
+test("any scheme's minion lands through the tool when its worktree has tools/land.sh, and is told when it has none", async () => {
+  const store = new Store(join(srv.data, 'coordinator.db'));
+  const project = store.createProject('Other', null);
+  store.setProjectRepoDir(project.id, join(srv.root, 'other-repo'));
+  const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(srv.root, 'other-worktree');
+  mkdirSync(join(cwd, 'tools'), { recursive: true });
+  store.setTicketDir(minion.id, cwd, null);
+  const token = agentToken(srv.data, minion.id);
+  const call = (method: string) => fetch(`${srv.base}/api/tickets/${minion.id}/land`, { method, headers: { Authorization: `Bearer ${token}` } });
+
+  const none = await call('POST');
+  assert.equal(none.status, 404);
+  assert.match((await none.json()).error, /no tools\/land\.sh/);
+  writeFileSync(join(cwd, 'tools', 'land.sh'), 'echo landed-other\n');
+  assert.equal((await call('POST')).status, 202);
+  const run = await until('land.sh ends', async () => { const body = await (await call('GET')).json(); return body.code === null ? null : body; });
+  assert.equal(run.output.trim(), 'landed-other');
+});
+
+test("a container turn of any scheme is offered the land tool; a host turn is not", async () => {
+  const tools = (extra: Record<string, string>) => new Promise<string[]>((resolve) => {
+    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: undefined, COORDINATOR_CONTAINER: undefined, ...extra },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    createInterface({ input: child.stdout! }).once('line', (l) => { child.kill(); resolve(JSON.parse(l).result.tools.map((t: any) => t.name)); });
+    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
+  });
+  assert.ok((await tools({ COORDINATOR_CONTAINER: '1' })).includes('land'));
+  assert.ok(!(await tools({})).includes('land'));
+});
+
 test('the land tool says the server restarted when the landing it started is no longer known, rather than failing (#468 S06-6)', async () => {
   // A server that started the landing, then restarted (a deploy) and forgot it before the next poll.
   const api = createServer((req, res) => {

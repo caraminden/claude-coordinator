@@ -17,7 +17,7 @@ const TICKET = Number(process.env.COORDINATOR_TICKET);
 const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
 // A minion of the scheme whose code this server runs (runner.ts): only there do deploys and previews mean anything.
 const DEPLOYS = process.env.COORDINATOR_DEPLOYS === '1';
-/** This turn runs in its person's Claude container (#213), where tools/land.sh can't. */
+/** This turn runs in its person's Claude container (#213), where tools/land.sh can't: any scheme's (#574). */
 const IN_CONTAINER = process.env.COORDINATOR_CONTAINER === '1';
 // Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions and the contraptions.
 const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
@@ -986,11 +986,11 @@ const THREAD_TOOLS = [
     description: `Park until this scheme's CI runners are back: after land.sh exits 75 (CI gave no verdict, nearly always because the machine the runners run on is off), call this, set state parked and end your turn. ${APP_NAME} checks the scheme's GitHub runners every 5 minutes and messages you once one labelled <scheme-slug>-ci, <scheme-slug>-ci-linux or <scheme-slug>-desktop is online, so you can run land again. If it can't read the runners with the scheme's GitHub login, it says so at its next check instead. Woken once, then forgotten; a second call replaces the first.`,
     inputSchema: { type: 'object', properties: { reason: { type: 'string', maxLength: 1000, description: 'What to do once they are back (at most 1,000 characters); it comes back in the wake message, e.g. "run tools/land.sh again"' } }, required: ['reason'] },
   },
-  ...(DEPLOYS && IN_CONTAINER
+  ...(IN_CONTAINER
     ? [{
       name: 'land',
       description:
-        "Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. It rebases onto main, runs the tests, fast-forwards main and deploys, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line for the deploy lock ahead of it (its output says the place).",
+        "Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. It lands the branch as the scheme's land.sh does (here: rebase onto main, the tests, fast-forward main, deploy) and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place).",
       inputSchema: { type: 'object', properties: {} },
     }]
     : []),

@@ -104,6 +104,18 @@ test('a process the check leaves running does not hold the land lock', () => {
   }
 });
 
+// Theory of Crafting, 2026-11-11: a landing run inside a person's container can't see the host's pids (its own pid
+// namespace), so it swept every live ticket ahead of it as dead. The land tool runs it on the host instead.
+test("refuses in a person's container, before it takes a place in line", () => {
+  const r = setup();
+  r.commit(r.wt, 'b.txt', 'two\n');
+  const res = r.run({ COORDINATOR_CONTAINER: '1' });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /runs in a container: call the land tool/);
+  assert.equal(existsSync(join(r.main, '.git', 'land-queue')), false, 'it never joined the line');
+  assert.equal(git(r.main, 'log', '-1', '--format=%s'), 'base');
+});
+
 test('a rebase conflict aborts and leaves main untouched', () => {
   const r = setup();
   r.commit(r.wt, 'a.txt', 'mine\n');

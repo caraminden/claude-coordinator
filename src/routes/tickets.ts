@@ -1,6 +1,7 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join, sep } from 'node:path';
 import { cleanPluginPicks, lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
 import { AGENT_NAME } from '../auth.ts';
@@ -17,7 +18,6 @@ import { repoSlug } from '../prlinks.ts';
 import { NOTIFY_STATES } from '../push.ts';
 import { tripwireConfig } from '../turn-launch.ts';
 import { tmpDirFor } from '../turn-tmp.ts';
-import { runsRepo } from '../wake.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
 import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '../ultrareview.ts';
@@ -694,8 +694,9 @@ export const ticketRoutes: Route[] = [
     method: 'POST', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can land its branch',
     handler(ctx) {
       const { req, res, app, ticket } = ctx;
-      const project = app.store.getProject(ticket.project_id)!;
-      if (ticket.kind !== 'ticket' || !ticket.cwd || !runsRepo(project.repo_dir, app.waiters.head)) throw new HttpError(403, 'Only a minion of the scheme this server runs lands with tools/land.sh');
+      if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree lands with tools/land.sh');
+      // Any scheme's: a container turn that ran land.sh itself couldn't see the host's landings in line (#574).
+      if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
       // Only a minion's own bearer token gets here (who: minion).
       const token = String(req.headers.authorization).replace(/^Bearer /, '');
       return json(res, 202, app.landings.start(ticket.id, ticket.cwd, app.runner.hostEnv(ticket, token)));

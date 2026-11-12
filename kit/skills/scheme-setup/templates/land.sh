@@ -59,6 +59,11 @@ say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
 park() { say "$*"; exit 75; }
 
+# A turn in its person's Claude container has its own pid namespace: this script there can't see the landings
+# running on the host, so it would delete their places in line as dead, and they its own (Theory of Crafting,
+# 2026-11-11). Citadel's land tool runs it on the host for such a turn.
+[ "${COORDINATOR_CONTAINER:-}" != 1 ] || refuse "this turn runs in a container: call the land tool (mcp__thread) instead, which runs land.sh on the host"
+
 # The line for the land lock. The lock itself is the flock on <.git>/land.lock, on fd 9: that alone
 # keeps landings one at a time. The kernel grants a flock in no order, though, so several landings
 # waiting on it meant some lost every round and timed out (2026-11-10). So waiters line up first:

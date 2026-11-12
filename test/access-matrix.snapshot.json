@@ -1649,7 +1649,7 @@
   "outsider": "403 Only the minion itself can land its branch",
   "tmA": "403 Only the minion itself can land its branch",
   "tmB": "403 Only the minion itself can land its branch",
-  "m1": "403 Only a minion of the scheme this server runs lands with tools/land.sh",
+  "m1": "404 This worktree has no tools/land.sh: land the way the scheme instructions say",
   "m2": "403 A minion may only update itself"
  },
  "GET /api/tickets/:minion1/messages": {

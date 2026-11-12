@@ -8,6 +8,7 @@
 tools/land.sh
 tools/deploy.sh
 tools/deploy-queue.sh
+tools/kit-land-drift.sh
 tools/run-tests.sh
 tools/citadel-wait
 tools/citadel-heavy
@@ -32,6 +33,8 @@ test/land-boot-check.test.ts
 test/land-overlap.test.ts
 test/scheme-setup-land.test.ts
 test/scheme-setup-land-ci.test.ts
+test/scheme-setup-land-local.test.ts
+test/kit-land-drift.test.ts
 # Not test/run-tests.test.ts: its leak test loads the real test/leak-guard.ts, which imports src/ through helpers.ts.
 test/run-tests-scope.test.ts
 test/citadel-wait.test.ts

@@ -120,6 +120,31 @@ report_me() {
   fi
 }
 
+# A deploy whose range (<from> <to>) changes the kit's land.sh template lists the schemes whose tools/land.sh now
+# differ from it (tools/kit-land-drift.sh, #602) and tells the Taskmaster in one message, as the deploying minion
+# (a deploy run by hand only prints it). Sent once the tests and the boot check passed. Best effort: it never stops
+# a deploy.
+# shortcut: a restart that is then rolled back has still sent it; the list is only ever read as "sync these".
+kit_land_drift() {
+  local rc=0 list text body
+  git_live diff --quiet "$1" "$2" -- kit/skills/scheme-setup/templates/land.sh 2>/dev/null || rc=$?
+  [ "$rc" = 1 ] || return 0
+  list=$("$LIVE/tools/kit-land-drift.sh" "$(dirname "$(dirname "$SOURCE")")" 2>&1) || { say "the kit's land.sh changed, but the drift check failed: $list"; return 0; }
+  if [ -z "$list" ]; then
+    say "the kit's land.sh changed; every scheme's tools/land.sh already matches it"
+    return 0
+  fi
+  say "the kit's land.sh changed; these schemes' tools/land.sh differ from it: $(tr '\n' ';' <<<"$list" | sed 's/;$//; s/;/; /g')"
+  [ -n "${COORDINATOR_TICKET:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ] || return 0
+  text="tools/deploy.sh: $(short "$2") changes the kit's land.sh template (kit/skills/scheme-setup/templates/land.sh). These schemes' tools/land.sh differ from it (project number, repo):
+$(sed 's/^/- /' <<<"$list")
+Send each one a sync: copy the template over tools/land.sh byte for byte (the scheme's settings and land_after stay in tools/land.local.sh), run the scheme's land tests, and land it as high risk. A scheme with no tools/land.local.sh yet needs its migration to the local file first (Citadel #602's handoffs)."
+  body=$(node -e 'console.log(JSON.stringify({text:process.argv[1]}))' "$text")
+  curl -fsS -o /dev/null --max-time "$REPORT_WAIT" -X POST "${COORDINATOR_API:-$URL}/api/tickets/$COORDINATOR_TICKET/coordinator" \
+    -K - -H 'Content-Type: application/json' -d "$body" 2>/dev/null <<<"header = \"Authorization: Bearer $COORDINATOR_TOKEN\"" ||
+    say "could not tell the Taskmaster about the drifted land.sh copies (above)"
+}
+
 # What the landings waiting in line see of the queued restart, which holds the lock with no ticket (deploy-queue.sh).
 restart_phase() {
   local stat
@@ -513,6 +538,7 @@ deploy() {
   fi
   trap - ERR INT TERM HUP
   rm -f "$STATE/unchecked"
+  kit_land_drift "$prev" "$new"
 
   queue_phase "deploying: going live"
   if [ "$kind" = frontend ] && [ "$(health reload)" = sighup ]; then
@@ -613,7 +639,8 @@ case "${1:-}" in
   change-kind) change_kind "$2" "$3" "$4" ;;
   push-github) push_github "$2" ;;
   post-report) post_report "$2" "$3" "$4" "$5" "$6" ;;
+  kit-land-drift) kit_land_drift "$2" "$3" ;;
   backup-db) backup_db "$2" ;;
   rotate-backups) rotate_backups ;;
-  *) echo "usage: $0 [--now | interruptible | waiting-on | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--now | interruptible | waiting-on | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | kit-land-drift <from> <to> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
 esac

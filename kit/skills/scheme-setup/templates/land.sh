@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Land a minion's branch on main: run it from the minion's worktree once its work is committed.
 #   tools/land.sh
+# Don't edit this file in a scheme: it is the Citadel kit's (kit/skills/scheme-setup/templates/land.sh), copied
+# byte for byte, so a kit fix reaches a scheme as one copy. The scheme's settings and hooks go in tools/land.local.sh
+# next to it (the kit's land.local.sh shows each one), which this sources; a setting the core gains gets a default here.
 # This is the route CLAUDE.md names under "Project facts", "How a change ships". One landing at a
 # time, under a lock in the scheme repo's .git, in the order they asked: it says its place in line
 # and waits as long as the line moves, so run it in the background with a long timeout (a run that
@@ -18,8 +21,10 @@
 # 5. Fast-forwards main in the scheme's main checkout to the commit; with batches, the head of the
 #    line moves it to the deepest commit of its batch CI passed, which lands every member up to there.
 #    Main only ever moves to a commit CI passed.
-# 6. Pushes main to origin from the main checkout, never forced. A failed push is reported and main
-#    stays moved; the next landing pushes it again.
+# 6. Pushes main to origin from the main checkout, never forced (not with PUSH_MAIN=0). A failed push is
+#    reported and main stays moved; the next landing pushes it again.
+# 7. Once main is pushed and the lock and the place in line are free: runs land.local.sh's land_after, if it
+#    has one, for each branch that landed. Its failures are warnings, never a failed landing.
 # Until step 5 main is untouched. The branch itself only moves when it lands, or to the rebased
 # commit when the check or CI was red on top of main (so the fix starts from there); anything else
 # leaves it where it was. While this runs, the worktree sits on a detached commit: don't work in it.
@@ -61,6 +66,15 @@ CI_STACK=${LAND_STACK_DEPTH:-3}
 # How many landings share one CI run (below, "Batches"): the stack then counts batches, and only the last
 # of each batch runs CI. 1: every landing runs its own, as above. A deep line on slow CI: 3 or 4.
 CI_BATCH=${LAND_BATCH:-1}
+# 0: main stays in the main checkout and is never pushed (a scheme whose origin isn't its own).
+PUSH_MAIN=1
+
+# The scheme's own settings and hooks: every value above it sets wins. Plain shell, sourced here.
+#   land_after <commit> <branch>  step 7: run once per branch that landed, after main was pushed, with the
+#                                 lock and the place in line already free, from the landing's worktree.
+#                                 A failure (or an exit) in it is only warned about.
+# shellcheck source=/dev/null
+[ ! -f "$(dirname "${BASH_SOURCE[0]}")/land.local.sh" ] || . "$(dirname "${BASH_SOURCE[0]}")/land.local.sh"
 
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
@@ -463,6 +477,7 @@ blocked='' # why it can't land on $base (a conflict, a clash, a red check, red C
            # from their tickets if a red landing holding up the ones behind it ever costs real time.
 keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
 green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 landed='' ci_skipped=''
+main_pushed='' # step 7 runs land_after only once this is set
 verdict=-  # CI's verdict on $tip, as its ticket says it: -, running, green or red
 B_NUM=''   # with batches: which batch this one is in, from the head's (1); "Batches" below
 fronted='' # with batches: it has been in the head's batch, so CI's limits count
@@ -657,7 +672,7 @@ build() {
     printf '%s\n' "$clashes" | sed 's/^/land:   /' >&2
     [ "$rc" != 2 ] || refuse "fix that line in $FACTS (commit it on this branch), then run this again. Nothing landed and $branch is back where it was"
     [ "$rc" = 1 ] || refuse "the numbered-things check itself failed (exit $rc), so nothing landed and $branch is back where it was; a person needs to look"
-    blocked="this branch takes a number main already has (above), so nothing landed and $branch is back where it was. Renumber yours past main's highest (bump the version past main's), commit, then run this again"
+    blocked="this branch takes a number $BRANCH already has (above), so nothing landed and $branch is back where it was. Renumber yours past $BRANCH's highest (bump the version past $BRANCH's), commit, then run this again"
     return 0
   fi
 
@@ -793,7 +808,8 @@ batch_landed() {
 
 # On the way out, however it ends: the worktree goes back on the branch, the place in line and the lock
 # go, then the scratch branch and its runs, except a landed commit's own runs, which finish (main's CI
-# may skip what they passed).
+# may skip what they passed). Then step 7, once main was pushed: land_after for this branch and, as the
+# head of a batch, for each member it landed.
 leave() {
   local rc=$? main
   trap - EXIT
@@ -818,6 +834,13 @@ leave() {
   if [ -n "$pushed" ]; then
     ci_cancel
     hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null
+  fi
+  if [ -n "$main_pushed" ] && declare -F land_after >/dev/null; then
+    local i after=("$tip $branch")
+    [ -z "$BATCH" ] || for ((i = 2; i <= ${GI:-0}; i++)); do after+=("${B_SHA[i]} ${B_LABEL[i]}"); done
+    for i in "${after[@]}"; do
+      (land_after "${i%% *}" "${i#* }") >&2 || say "land.local.sh's land_after failed for ${i#* } (exit $?), which landed all the same"
+    done
   fi
   exit "$rc"
 }
@@ -903,6 +926,10 @@ if [ -n "$BATCH" ] && [ "$GI" != 1 ]; then
   say "landed in a batch with ${with#, }, on ${B_LABEL[GI]}'s CI run"
 fi
 
+if [ "$PUSH_MAIN" = 0 ]; then
+  say "PUSH_MAIN is 0, so $BRANCH stays local"
+  exit 0
+fi
 if ! git -C "$MAIN" remote get-url origin >/dev/null 2>&1; then
   say "no origin remote, so $BRANCH stays local"
   exit 0
@@ -912,6 +939,7 @@ queue_phase "pushing $BRANCH to origin"
 # route that may make it.
 if out=$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$MAIN" push -q --no-verify origin "$BRANCH" 2>&1); then
   say "pushed $BRANCH to origin"
+  main_pushed=1
 else
   say "$BRANCH moved, but the push to origin failed: $out"
   say "the next landing retries it; if origin's $BRANCH moved on its own (rejected as non-fast-forward), a person merges it into $MAIN first"

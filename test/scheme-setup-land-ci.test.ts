@@ -11,9 +11,9 @@ import { env, git, landLockFree, sleep, until, queueSetup } from './scheme-setup
 // the built-in reader a gh that prints what the test wrote (runs.once.tsv one time, then runs.tsv; branch-runs for
 // the scratch branch's unfinished runs, "<id>\t<commit>" a line).
 // Either way a gh stands first in PATH, so no test reaches GitHub.
-function ciSetup(branches: number, { stack = '', batch = '', check = 'true', builtin = false, files = (i: number) => `f${i}.txt` } = {}) {
+function ciSetup(branches: number, { stack = '', batch = '', check = 'true', builtin = false, files = (i: number) => `f${i}.txt`, local = undefined as string | undefined } = {}) {
   const config: Record<string, string> = { ...(builtin ? { CI_WORKFLOWS: 'ci.yml slow.yml' } : { CI_STATUS: '"$CI_FAKE"' }), ...(stack ? { CI_STACK: stack } : {}) }; // no stack: the template's own depth, 3
-  const q = queueSetup(branches, check, config, files);
+  const q = queueSetup(branches, check, config, files, local);
   const ci = join(q.dir, 'ci');
   const bin = join(q.dir, 'bin');
   mkdirSync(ci);
@@ -785,6 +785,25 @@ test('batches: a member whose branch got a commit while it waited says that comm
     assert.match(b.stderr(), /landed in a batch \(main is now [0-9a-f]{12}\), but ticket\/2-x or this worktree's HEAD moved while it waited, so what was committed since is not on main/);
     assert.deepEqual(c.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3']);
     assert.equal(git(c.main, 'rev-parse', 'ticket/2-x'), late, 'the branch keeps its late commit');
+  } finally {
+    c.stop();
+  }
+});
+
+test("batches: the head runs land.local.sh's land_after for itself and each member it landed, once main is pushed", async () => {
+  const c = ciSetup(3, { stack: '1', batch: '3', check: gated, local: 'land_after() { echo "$1 $2" >>"$(git rev-parse --path-format=absolute --git-common-dir)/after.log"; }\n' });
+  try {
+    const log = join(c.state, 'after.log');
+    const [a, b, d] = await c.lands(1, 2, 3);
+    c.open();
+    const td = await c.tip(d);
+    const tb = c.parent(td);
+    const ta = c.parent(tb);
+    c.verdict(td, GREEN);
+    for (const l of [a, b, d]) assert.equal(await l.exit, 0, l.stderr());
+    // Every landing shares the log, so a member that ran the hook itself would add a line of its own.
+    const lines = readFileSync(log, 'utf8').trim().split('\n').map((l) => l.replace(/^(.{12})\S*/, '$1'));
+    assert.deepEqual(lines, [`${ta} ticket/1-x`, `${tb} ticket/2-x`, `${td} ticket/3-x`]);
   } finally {
     c.stop();
   }

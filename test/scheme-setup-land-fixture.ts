@@ -16,7 +16,8 @@ export const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined }), GIT_AUT
 export const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 export let n = 0;
-export function setup(check = 'test ! -e red', config: Record<string, string> = {}) {
+// local: the scheme's tools/land.local.sh, which the template sources (none: no such file).
+export function setup(check = 'test ! -e red', config: Record<string, string> = {}, local?: string) {
   const dir = join(root, String(++n));
   const main = join(dir, 'repo');
   mkdirSync(join(main, 'tools'), { recursive: true });
@@ -31,6 +32,7 @@ export function setup(check = 'test ! -e red', config: Record<string, string> = 
   let script = readFileSync(landSh, 'utf8').replace(/^CHECK=.*$/m, () => `CHECK='${check}'`);
   for (const [key, value] of Object.entries(config)) script = script.replace(new RegExp(`^${key}=.*$`, 'm'), () => `${key}='${value}'`);
   writeFileSync(landSh, script);
+  if (local !== undefined) writeFileSync(join(main, 'tools', 'land.local.sh'), local);
   writeFileSync(join(main, 'a.txt'), 'one\n');
   git(main, 'add', '-A');
   git(main, 'commit', '-qm', 'base');
@@ -60,8 +62,8 @@ export async function until(what: string, cond: () => boolean, ms = 30_000) {
   for (const end = Date.now() + ms; !cond(); await sleep(20)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
 }
 const gated = 'until [ -e "$GATE" ]; do sleep 0.05; done';
-export function queueSetup(branches: number, check = gated, config: Record<string, string> = {}, files = (i: number) => `f${i}.txt`) {
-  const r = setup(check, config);
+export function queueSetup(branches: number, check = gated, config: Record<string, string> = {}, files = (i: number) => `f${i}.txt`, local?: string) {
+  const r = setup(check, config, local);
   const state = git(r.main, 'rev-parse', '--absolute-git-dir');
   const gate = join(r.dir, 'gate');
   const wts = [r.wt];

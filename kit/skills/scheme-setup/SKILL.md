@@ -155,11 +155,15 @@ The template carries no `permissions.allow` list: minions run in bypassPermissio
 rules change nothing, and the prompts left (Claude Code's check on an `rm` it cannot resolve)
 ignore allow rules and hooks alike; the minion prompt teaches the `rm` habits that avoid them.
 If the scheme's main branch has a name other than `main` or `master`, add it to `is_protected`
-in `guard.sh`, to the `case` in `pre-push`, and to `BRANCH` in `land.sh`.
+in `guard.sh`, to the `case` in `pre-push`, and to `BRANCH` in `land.local.sh`.
 
-When the plan names `tools/land.sh` as the pusher, copy `land.sh` there too (executable) and
-set its `CHECK` line to the check command from Project facts, or `true` while there is none
-(your done note says so). It rebases, runs the check, fast-forwards the main checkout and
+When the plan names `tools/land.sh` as the pusher, copy `land.sh` there too (executable), byte
+for byte, and `land.local.sh` to `tools/land.local.sh`. Every setting below goes in `land.local.sh`,
+never in `land.sh`: the core stays the kit's, so a kit fix reaches the scheme as one copy, and
+Citadel's deploy lists the schemes whose copy differs. Set `CHECK` there to the check command from
+Project facts, or `true` while there is none (your done note says so); `PUSH_MAIN=0` keeps main
+local, and `land_after` is the hook for what the scheme does after a landing is pushed (closing a
+PR, say). It rebases, runs the check, fast-forwards the main checkout and
 pushes main; read its header. Landings wait for its lock in a line, oldest first, with no time
 limit while the line moves: a minion runs it in the background with a long timeout, since a run
 that is stopped loses its place. Before the check it refuses a branch that takes a migration

@@ -32,7 +32,7 @@ const STUB = `<script>
     line('Line two: writing the fix.'),
     ev('user_message', { author: 'coordinator', text: 'One more piece for your branch.' }),
     line('Line three: tests pass.'),
-    line('Line four: landing.'),
+    line('Line four: landing after #576.'),
   ];
   const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   window.fetch = async (input) => {
@@ -102,7 +102,7 @@ test('only the newest line of a running turn stays out; the ones above collapse 
     '[2 updates: Line two: writing the fix.]',
     'message',
     '[1 update: Line three: tests pass.]',
-    'Line four: landing.',
+    'Line four: landing after #576.',
   ]);
   // A newer line: the one above it joins its stretch's row, not a new one.
   await page.eval(`push('Line five: live.')`);
@@ -111,7 +111,7 @@ test('only the newest line of a running turn stays out; the ones above collapse 
     'message',
     '[2 updates: Line two: writing the fix.]',
     'message',
-    '[2 updates: Line four: landing.]',
+    '[2 updates: Line four: landing after #576.]',
     'Line five: live.',
   ]);
 });

@@ -1357,7 +1357,8 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
 
 /** A collapsed message's one line: its text without Markdown marks, struck words keeping their line. */
 function previewNodes(text, strikes) {
-  const flat = (t) => t.replace(/[#*_`>\[\]~]/g, '').replace(/\s+/g, ' ');
+  // A heading's # marks go, but not a #575 reference's.
+  const flat = (t) => t.replace(/(^|\s)#{1,6}(?=\s)/g, '$1').replace(/[*_`>\[\]~]/g, '').replace(/\s+/g, ' ');
   // A URL in the one-line preview is still a link (Citadel-wide: links are clickable); it opens without toggling the message.
   // URLs are found before the marks go, so a link with _ or # in it keeps them.
   const links = (t) => t.split(/(https?:\/\/[^\s()<>\[\]`]+[^\s()<>\[\]`.,;:!?'"*_~])/).map((bit, i) => (i % 2

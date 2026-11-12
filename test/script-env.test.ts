@@ -34,13 +34,18 @@ test('the list covers everything the scripts export or pass to a child by assign
 });
 
 // The suites that really run these scripts (the others only name their paths, or stand in for them). A new suite that
-// runs one belongs here.
-const RUNS_SCRIPTS = ['land.test.ts', 'land-recover.test.ts', 'deploy.test.ts', 'run-tests.test.ts', 'run-tests-scope.test.ts', 'scheme-setup-land.test.ts'];
+// runs one belongs here. Split suites build their env once, in a fixture of their own that they import.
+const FIXTURES = ['land-fixture.ts', 'land-recover-fixture.ts', 'scheme-setup-land-fixture.ts'];
+const RUNS_SCRIPTS = [
+  'land.test.ts', 'land-deploy.test.ts', 'land-queue.test.ts', 'land-recover.test.ts', 'land-boot-check.test.ts', 'deploy.test.ts',
+  'run-tests.test.ts', 'run-tests-scope.test.ts', 'scheme-setup-land.test.ts', 'scheme-setup-land-ci.test.ts',
+];
 
 test('the suites that start land.sh, deploy.sh or run-tests.sh start them with scriptEnv', () => {
-  for (const f of RUNS_SCRIPTS) {
+  for (const f of [...FIXTURES, ...RUNS_SCRIPTS]) {
     const text = readFileSync(join(import.meta.dirname, f), 'utf8');
-    assert.match(text, /from '\.\/script-env\.ts'/, `${f} must build its env with scriptEnv (test/script-env.ts)`);
+    const from = FIXTURES.includes(f) ? ['script-env.ts'] : ['script-env.ts', ...FIXTURES];
+    assert.ok(from.some((m) => text.includes(`from './${m}'`)), `${f} must build its env with scriptEnv (test/script-env.ts)`);
     assert.doesNotMatch(text, /\.\.\.process\.env\b(?![^}]*\bscriptEnv)/, `${f} spreads process.env itself: use scriptEnv()`);
   }
 });

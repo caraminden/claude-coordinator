@@ -8,7 +8,7 @@
 # 2. A change to public/ only: SIGHUP, and the server reloads its front end. No restart, no killed turns.
 # 3. Anything else: queues the fixed-name restart unit, which restarts straight away (running turns
 #    carry on in their own units and the new server re-attaches; it only waits while turns a restart
-#    would cut off are running, see interruptible), waits up to 30 s for a healthy server, checks it is still
+#    would cut off are running, see interruptible, or for 60 s on a server that is up but doesn't answer), waits up to 30 s for a healthy server, checks it is still
 #    healthy 30 s later, and tags it last-good. If the new code doesn't come up or stay up, it rolls the checkout back to last-good and restarts
 #    again. It reports how it went in the deploying minion's chat (failures as errors, which push) and
 #    in the journal. Before restarting it copies the database to backups/pre-deploy-<commit>.db (newest
@@ -29,6 +29,7 @@ DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}
 UNIT=${DEPLOY_UNIT:-cc-restart-when-idle}
 IDLE_TRIES=${DEPLOY_IDLE_TRIES:-720} # 10 s apart: 2 h
 BOOT_TIMEOUT=${DEPLOY_BOOT_TIMEOUT:-420} # boot-check.ts gives up by itself at 180 s, twice over
+IDLE_POLL=${DEPLOY_IDLE_POLL:-10} # seconds between looks at the running turns (tests shrink it)
 UNKNOWN_WAIT=${DEPLOY_UNKNOWN_WAIT:-60} # how long a restart waits on a server that is up but doesn't answer
 NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
@@ -162,7 +163,8 @@ running_minions() {
 
 # Running turns a restart would cut off: those not in a unit of their own. A server from before turn
 # units doesn't say, and every one of its turns would be cut off; a server that is down has none left.
-# One that doesn't answer while its unit is still up (slow or stuck) is not down: ? keeps the wait going.
+# One that doesn't answer while its unit is still up (slow or stuck) is not down: ? keeps the wait going, but only
+# for DEPLOY_UNKNOWN_WAIT s (60) of unbroken silence (#553): after that the restart goes ahead.
 interruptible() {
   local n
   n=$(health interruptible)
@@ -266,7 +268,7 @@ restart() {
       report fail "Gave up after $((IDLE_TRIES * 10 / 60)) min waiting for the turns a restart would cut off (ones not in a unit of their own) to finish, so nothing restarted. The checkout is at $(short HEAD), but the server still runs $(health commit | cut -c1-7). Run tools/deploy.sh again to queue another restart, or with a person's OK, tools/deploy.sh --now."
       exit 1
     fi
-    sleep "${DEPLOY_IDLE_POLL:-10}"
+    sleep "$IDLE_POLL"
   done
 
   exec 9>"$STATE/lock"
@@ -358,7 +360,8 @@ deploy() {
   # Killed (a person's Stop, a time limit) from the pull until the restart is queued: put the checkout
   # back too, so it never sits on untested code with nothing queued.
   # $STATE/unchecked: for a kill no trap sees (SIGKILL), the next holder of the lock does the same (deploy-queue.sh).
-  undo() { say "putting the checkout back to $(short "$prev")"; git_live reset -q --hard "$prev"; rm -f "$STATE/unchecked"; }
+  local boot_pid=''
+  undo() { [ -z "$boot_pid" ] || kill "$boot_pid" 2>/dev/null || true; say "putting the checkout back to $(short "$prev")"; git_live reset -q --hard "$prev"; rm -f "$STATE/unchecked"; }
   trap 'undo; exit 130' INT
   trap 'undo; exit 143' TERM
   trap 'undo; exit 129' HUP
@@ -394,14 +397,23 @@ deploy() {
   queue_phase "deploying: boot check since $(date +%H:%M)"
   say "boot check: the new code on a spare port with a copy of the database"
   # A limit from outside (#553): boot-check.ts's own is a timer, which a blocking call in the new code defeats, and a
-  # check that never returns would hold the lock until a person killed it. timeout stops the whole process group.
-  local boot_rc=0
-  version=$(timeout -k 10 "$BOOT_TIMEOUT" "$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" 9>&-) || boot_rc=$? # not as `node`: ananicy would idle it (deploy/priority.md); no lock fd, as the tests
+  # check that never returns would hold the lock until a person killed it. timeout stops the check's whole process
+  # group, the server and browser it started included. In the background with a wait, so a TERM here runs undo at
+  # once (it stops the check) rather than after the check ends. Not as `node`: ananicy would idle it
+  # (deploy/priority.md); no lock fd, as with the tests.
+  local boot_rc=0 boot_since=$SECONDS
+  timeout -k 10 "$BOOT_TIMEOUT" "$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" >"$STATE/boot.out" 9>&- &
+  boot_pid=$!
+  wait "$boot_pid" || boot_rc=$?
+  boot_pid=
+  version=$(cat "$STATE/boot.out")
   if [ "$boot_rc" != 0 ]; then
-    case $boot_rc in
-      124 | 137) say "the boot check hung: stopped after $BOOT_TIMEOUT s, far past its own limit. That is not a verdict on the change (a failed check says what broke): run it again, and if it hangs again, look for a call in the new code that blocks the server's start. Nothing deployed" ;;
-      *) say "boot check failed; nothing deployed" ;;
-    esac
+    # 124: timeout stopped it. 137 only past the limit (its KILL after a TERM that didn't take): sooner, something else killed it.
+    if [ "$boot_rc" = 124 ] || { [ "$boot_rc" = 137 ] && [ $((SECONDS - boot_since)) -ge "$BOOT_TIMEOUT" ]; }; then
+      say "the boot check hung: stopped after $BOOT_TIMEOUT s, far past its own limit. That is not a verdict on the change (a failed check says what broke): run it again, and if it hangs again, look for a call in the new code that blocks the server's start. Nothing deployed"
+    else
+      say "boot check failed; nothing deployed"
+    fi
     false
   fi
   trap - ERR INT TERM HUP
@@ -437,7 +449,7 @@ deploy() {
   if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
     --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
-    --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
+    --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_UNKNOWN_WAIT="$UNKNOWN_WAIT" --setenv=DEPLOY_IDLE_POLL="$IDLE_POLL" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
     bash "$copy" restart 2>&1); then
     if [ -n "$NOW" ]; then say "restart queued as $UNIT with --now: it restarts at once, cutting off turns not in a unit of their own (this one too, if so)"
     else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi

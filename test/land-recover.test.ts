@@ -268,6 +268,28 @@ test('a boot check that never returns is stopped at its time limit, called a han
   assert.ok(p.lockFree(), 'the deploy lock is free');
 });
 
+// The boot check runs under timeout(1), in a process group of its own, and bash runs a trap only between commands:
+// waited on in the foreground, a TERM to the deploy took effect only once the check ended.
+test('a deploy stopped with TERM during its boot check stops the check and puts the checkout back at once', { timeout: 120_000 }, async (t) => {
+  const p = await pipe(t, 1);
+  p.commit(p.wts[0], 'b.txt', 'innocent\n');
+  const mark = join(p.dir, 'boot-started');
+  const gate = join(p.dir, 'boot-go');
+  const landing = p.start(land, p.wts[0], { BOOT_MARK: mark, BOOT_GATE: gate });
+  await until('the boot check to start', () => existsSync(mark));
+  const giveUp = setTimeout(() => writeFileSync(gate, ''), 30_000);
+  const at = performance.now();
+  process.kill(Number(readFileSync(mark, 'utf8')), 'SIGTERM');
+  const res = await landing.done; // ends once the boot check has let go of stderr
+  clearTimeout(giveUp);
+  assert.ok(performance.now() - at < 15_000, `not after the check ended by itself: ${Math.round(performance.now() - at)} ms`);
+  assert.notEqual(res.status, 0, res.stderr);
+  assert.match(res.stderr, /putting the checkout back/);
+  assert.equal(git(p.live, 'rev-parse', 'HEAD'), p.base);
+  assert.equal(git(p.source, 'rev-parse', 'main'), p.base, 'main is back');
+  assert.ok(p.lockFree(), 'the deploy lock is free');
+});
+
 // F6: the landing said only "not live yet", then nothing for up to 2 h.
 test('a restart waiting on running turns says so to the landing: how many, for how long at most, and how to skip the wait', { timeout: 120_000 }, async (t) => {
   const p = await pipe(t, 1);

@@ -232,3 +232,26 @@ test('a job that waits while no slot changes hands gives up at the limit, loudly
   }
   assert.equal(await a.done, 0);
 });
+
+test('jobs going past a stopped head still start one at a time on a busy box, each after its own wait on the load', async () => {
+  const { env, pressureFile } = folder(2);
+  writeFileSync(pressureFile, psi(90));
+  const head = job({ ...env, CITADEL_HEAVY_LOAD_WAIT: '600' }, 'Peek #2', 'true');
+  await until('the head to wait on the load', () => /the box is busy/.test(head.err()));
+  process.kill(head.child.pid!, 'SIGSTOP');
+  // Two slots are free. Each on its own clock, both would give up on the load after 2 s and start together.
+  const late = { ...env, CITADEL_HEAVY_HEAD_STALE: '1', CITADEL_HEAVY_LOAD_WAIT: '2' };
+  const ups = ['c', 'd'].map((x) => join(root, `past-${x}-up`));
+  const jobs = ups.map((up, i) => job(late, `Delve #${i}`, touch(up)));
+  const n = () => ups.filter((up) => existsSync(up)).length;
+  try {
+    await until('one to start', () => n() >= 1);
+    const first = performance.now();
+    await until('the other to start', () => n() === 2);
+    assert.ok(performance.now() - first >= 1500, `the second waited its own 2 s on the load: ${Math.round(performance.now() - first)} ms apart`);
+  } finally {
+    writeFileSync(pressureFile, psi(5));
+    process.kill(head.child.pid!, 'SIGCONT');
+  }
+  for (const j of [...jobs, head]) assert.equal(await j.done, 0);
+});

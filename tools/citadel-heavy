@@ -140,7 +140,7 @@ stuck() {
   now=$(hands)
   if [ "$now" != "$held" ]; then held=$now moved=$SECONDS; fi
   [ $((SECONDS - moved)) -ge "$max_wait" ] || return 0
-  say "gave up: no heavy slot has changed hands in $(dur $((SECONDS - moved))) of waiting, so nothing ran ($who: $what). A holder below is stopped or stuck: wake or stop it by its pid, then run this again"
+  say "gave up: no heavy slot has changed hands in $(dur $((SECONDS - moved))) of waiting, so nothing ran ($who: $what). The holders below are stopped, stuck or running longer than that: check them by pid (wake or stop a stuck one), then run this again"
   holders
   exit 75
 }
@@ -160,7 +160,8 @@ head_age() {
 }
 exec 7<>"$dir/queue"
 since=$SECONDS
-past= got= # got: it holds a slot already, taken past a stopped head
+exec 6<>"$dir/queue.past"
+past= told_past= got= # past: it is the one going past a stopped head; got: it holds a slot already, taken past a stopped head
 if ! flock -n 7; then
   waiting_on line
   say "others are in line for a heavy slot first (next: $(next)); waiting ($who: $what)"
@@ -170,9 +171,13 @@ if ! flock -n 7; then
     touch "$waitfile" 2>/dev/null
     stuck
     if age=$(head_age) && [ "$age" -ge "$head_stale" ]; then
-      [ -n "$past" ] || say "the job next in line ($(next)) has not moved for $age s (stopped or frozen), so this one goes past it ($who: $what)"
-      past=1
-      if admit; then got=1; break; fi
+      [ -n "$told_past" ] || say "the job next in line ($(next)) has not moved for $age s (stopped or frozen), so this one goes past it ($who: $what)"
+      told_past=1
+      # One at a time past the head, as in the line itself: each would else run its own load clock and start together.
+      if [ -n "$past" ] || flock -n 6; then
+        past=1
+        if admit; then got=1; break; fi
+      fi
     fi
     if [ $((SECONDS - told)) -ge 60 ]; then
       say "still waiting after $(((SECONDS - since) / 60)) min, in line behind $(next) ($who: $what)"
@@ -198,7 +203,7 @@ if [ -z "$got" ] && ! admit; then
     fi
   done
 fi
-exec 7>&-
+exec 7>&- 6>&-
 rm -f "$waitfile"
 [ -z "$forced" ] || say "the box is still busy ($(load_text)) after $(dur "$load_wait") waiting on it, so this starts anyway in slot $((slot + 1))"
 [ $((SECONDS - since)) -lt 2 ] || [ -n "$forced" ] || say "got slot $((slot + 1)) after $((SECONDS - since))s"

@@ -188,7 +188,7 @@ process.stdin.setEncoding('utf8').on('data', (d) => {
 });`];
 
 /** A bridge over fakeMcp, with the editor's readiness held until ready() is called. */
-function fakeBridge(s: ReturnType<typeof stub>) {
+function fakeBridge(s: ReturnType<typeof stub>, keepEveryMs = 20) {
   const input = new PassThrough();
   const output = new PassThrough();
   const replies: any[] = [];
@@ -203,7 +203,7 @@ function fakeBridge(s: ReturnType<typeof stub>) {
   });
   let ready!: () => void;
   const editorUp = new Promise<void>((r) => (ready = r));
-  const child = bridge(fakeMcp, s.cfg, { input, output, log: () => {}, ensure: () => editorUp, keepEveryMs: 20 });
+  const child = bridge(fakeMcp, s.cfg, { input, output, log: () => {}, ensure: () => editorUp, keepEveryMs });
   // A failed assertion mustn't leave the fake running and the run hanging.
   after(() => child.exitCode === null && child.kill());
   const send = (m: object) => input.write(`${JSON.stringify(m)}\n`);
@@ -264,5 +264,21 @@ test('bridge: a call the client cancelled stops keeping the editor up', async ()
   s.used(NOW - 3 * H);
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(b.fresh(), false);
+  assert.equal(await b.close(), 0);
+});
+
+test('bridge: a tool call and its answer each count as use, with no keep-alive to cover them', async () => {
+  const s = stub('stamps', { ActiveState: 'active' });
+  const b = fakeBridge(s, 3600_000);
+  b.ready();
+  s.used(NOW - 3 * H);
+  b.send({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'editor_state' } });
+  await until(b.fresh);
+  // Past the 5 s throttle, as an answer after a long call is.
+  await new Promise((r) => setTimeout(r, 5_100));
+  s.used(NOW - 3 * H);
+  b.send({ jsonrpc: '2.0', method: 'test/release' });
+  await until(() => b.seen(8));
+  assert.ok(b.fresh(), 'the answer counts as use');
   assert.equal(await b.close(), 0);
 });

@@ -35,6 +35,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <div id="sk14" style="line-height:1.4"><span class="cui-skeleton"></span><span class="cui-skeleton" data-width="short"></span></div>
 <p id="after-sk14">After the 1.4 skeletons</p>
 <div role="button" tabindex="0" id="toggle"><span class="cui-status" style="width:120px"><span class="cui-status-text" data-tip="A long status inside a header that toggles" data-tip-overflow>A long status inside a header that toggles</span></span></div>
+<div class="row"><input id="field"><textarea id="area"></textarea><div id="editable" contenteditable>Notes</div><input type="checkbox" id="tick"></div>
 <script type="module">
   import { statusSlot, steadyLabel, statusSlotHtml, statusTextHtml, statusWorkingHtml, steadyLabelHtml, toast } from '/ui/status.js';
   Object.assign(window, { statusSlotHtml, statusTextHtml, statusWorkingHtml, steadyLabelHtml, toast });
@@ -290,4 +291,92 @@ test('a toast shown in a modal dialog stays up, back in the page, when that dial
   assert.equal(await page.eval('document.querySelector(".cui-toast").matches(":popover-open")'), true, 'still shown');
   assert.equal(await page.eval('document.querySelector(".cui-toast-say").isConnected'), true, 'still heard');
   assert.equal(await page.eval('window.hidden'), 0, 'not gone, so its failure is not final yet');
+});
+
+// Ctrl-Z (Cmd-Z) beside a toast's Undo (Josh, 2026-11-12: "We should support Ctrl-Z for undo in addition to the toast").
+const UNDO_PAGE = `(() => {
+  window.ran = [];
+  window.prevented = [];
+  window.addEventListener('keydown', (e) => window.prevented.push(e.defaultPrevented));
+  window.offer = (name, opts = {}) => toast(name, { undo: { run: () => window.ran.push(name), ...opts } });
+})()`;
+const MODS = { ctrl: 2, meta: 4, shift: 8, alt: 1 };
+async function undoKey(page: Page, mods: (keyof typeof MODS)[] = ['ctrl'], key = 'z') {
+  const modifiers = mods.reduce((n, m) => n | MODS[m], 0);
+  for (const type of ['rawKeyDown', 'keyUp']) await page.send('Input.dispatchKeyEvent', { type, key, code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers });
+}
+const toastText = (page: Page) => page.eval<string | null>(`document.querySelector('.cui-toast:popover-open')?.textContent ?? null`);
+
+test('Ctrl-Z runs the newest Undo, then the one before, each once, and says so in place of the toast', { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  await page.eval(UNDO_PAGE);
+  await page.eval(`offer('Deleted a'), offer('Deleted b')`);
+  assert.equal(await toastText(page), 'Deleted bUndo');
+  await undoKey(page);
+  assert.deepEqual(await page.eval('window.ran'), ['Deleted b']);
+  assert.equal(await toastText(page), 'Undone: Deleted b', 'the toast now says what the key did, with no Undo left on it');
+  assert.equal(await page.eval('document.querySelector(".cui-toast-action")'), null);
+  // The older one's toast is long gone; the key still reaches it.
+  await undoKey(page, ['meta']);
+  assert.deepEqual(await page.eval('window.ran'), ['Deleted b', 'Deleted a'], 'Cmd-Z too');
+  await undoKey(page);
+  assert.deepEqual(await page.eval('window.ran'), ['Deleted b', 'Deleted a'], 'nothing left: nothing runs');
+  assert.deepEqual(await page.eval('window.prevented'), [true, true, false], 'the key is taken only when it undid something');
+});
+
+test("an Undo pressed by its button doesn't run again on Ctrl-Z; the key goes to the one before", { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  await page.eval(UNDO_PAGE);
+  await page.eval(`offer('a'), offer('b')`);
+  assert.equal(await page.eval('document.querySelector(".cui-toast-action").getAttribute("aria-keyshortcuts")'), 'Control+Z');
+  const { x, y } = await page.centre('.cui-toast-action');
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+  assert.equal(await toastText(page), null, 'the button sends its toast away');
+  await undoKey(page);
+  await undoKey(page);
+  assert.deepEqual(await page.eval('window.ran'), ['b', 'a']);
+});
+
+test('Ctrl-Z passes over an Undo that no longer makes sense, and not Shift (redo) or Alt', { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  await page.eval(UNDO_PAGE);
+  await page.eval(`window.bLive = false; offer('a'), offer('b', { live: () => window.bLive })`);
+  await undoKey(page, ['ctrl', 'shift']);
+  await undoKey(page, ['ctrl', 'alt']);
+  await undoKey(page, []);
+  assert.deepEqual(await page.eval('window.ran'), []);
+  await undoKey(page);
+  assert.deepEqual(await page.eval('window.ran'), ['a']);
+  await page.eval('window.bLive = true');
+  await undoKey(page);
+  assert.deepEqual(await page.eval('window.ran'), ['a'], 'b went when it was passed over');
+});
+
+test("Ctrl-Z in a text field, a textarea or contenteditable is the field's own undo; on a checkbox it's the toast's", { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  await page.eval(UNDO_PAGE);
+  await page.eval(`offer('a')`);
+  for (const [id, prop] of [['field', 'value'], ['area', 'value'], ['editable', 'textContent']]) {
+    await page.eval(`document.getElementById('${id}').focus()`);
+    const before = await page.eval<string>(`document.getElementById('${id}').${prop}`);
+    await page.send('Input.insertText', { text: 'typed' });
+    assert.notEqual(await page.eval(`document.getElementById('${id}').${prop}`), before);
+    await undoKey(page);
+    assert.equal(await page.eval(`document.getElementById('${id}').${prop}`), before, `${id}: its own undo took the typing back`);
+    assert.deepEqual(await page.eval('window.ran'), [], `${id}: the toast's Undo didn't run`);
+  }
+  await page.eval(`document.getElementById('tick').focus()`);
+  await undoKey(page);
+  assert.deepEqual(await page.eval('window.ran'), ['a']);
+});
+
+test("a toast's hide() hides it while it's the one showing, never a newer one; undo with action throws", { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  await page.eval(`window.hidden = 0; window.first = toast('One', { onHide: () => window.hidden++ }); window.second = toast('Two')`);
+  await page.eval('window.first.hide()');
+  assert.equal(await toastText(page), 'Two');
+  assert.equal(await page.eval('window.hidden'), 1, 'its onHide ran once, when Two replaced it');
+  await page.eval('window.second.hide()');
+  assert.equal(await toastText(page), null);
+  await assert.rejects(page.eval(`toast('x', { undo: { run() {} }, action: { label: 'Retry', run() {} } })`), /undo` or `action/);
 });

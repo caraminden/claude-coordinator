@@ -49,5 +49,11 @@ export function steadyLabelHtml(labels: Record<string, string>, current?: string
 /** Say `text` in passing: a toast (div.cui-toast) at the bottom centre, in the top layer, so it moves nothing, for
  * `ms` (default 4000) or until tapped. One at a time; a screen reader hears it from a live region. `action` adds a
  * button after the text (button.cui-toast-action) that calls `run` and sends the toast away: "Couldn't save" · Retry.
- * `onHide` is called once when this toast goes: its time is up, a tap, its action, or a newer toast replacing it. */
-export function toast(text: string, opts?: { tone?: StatusTone; ms?: number; action?: { label: string; run: () => void }; onHide?: () => void }): void;
+ * `onHide` is called once when this toast goes: its time is up, a tap, its action, or a newer toast replacing it.
+ * `undo` (instead of `action`, never both: that throws) is an Undo button that Ctrl-Z (Cmd-Z on a Mac) presses too,
+ * the newest first, then the one before, even after its toast has gone, never while focus is in a text field
+ * (its own undo wins there). `live()`, if given, says it still makes sense; once false, Ctrl-Z passes it over. Each
+ * Undo runs at most once, by key or button; the key shows "Undone: <text>" in place of the toast. Make `run` show
+ * the undone state at once (optimistic() for its request). Returns the toast's `hide()`, which hides it only while
+ * it's still the one showing. */
+export function toast(text: string, opts?: { tone?: StatusTone; ms?: number; action?: { label: string; run: () => void }; undo?: { run: () => void; live?: () => boolean }; onHide?: () => void }): { hide(): void };

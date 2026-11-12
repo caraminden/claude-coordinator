@@ -679,7 +679,7 @@ background: var(--citadel-warn-tint);</code></pre></div>
       </div>
       <div class="mk-about">
         <p>A status change moves nothing (Cara, 2026-11-04: "set up rules that make sure status changes like that dont move any UI elements"). The status line is always drawn, 22px tall, empty when there's nothing to say; its text stays on one line, cut off with an ellipsis and whole in a tooltip (only while it's cut off). Working is a spinner and its words in the same line; a tone colours it. A button whose label changes stacks every label in one cell, so it keeps its widest label's width. Press Save: "Save" → "Saving…" → "Saved", and nothing around it shifts.</p>
-        <p>In a card's header the slot is <code>cui-status-fill</code>: it takes what the row has left and never widens the card, so a long error is cut off on a phone. A tone can sit on one text (the error beside a chip). Something said in passing is a toast (press Copy link): the top layer, bottom centre, gone after 4s or a tap, so it takes no room at all. With an action (<code>toast(text, { action: { label, run } })</code>) a button sits after the text, centred: Retry on a failed click, Undo on a delete.</p>
+        <p>In a card's header the slot is <code>cui-status-fill</code>: it takes what the row has left and never widens the card, so a long error is cut off on a phone. A tone can sit on one text (the error beside a chip). Something said in passing is a toast (press Copy link): the top layer, bottom centre, gone after 4s or a tap, so it takes no room at all. With an action (<code>toast(text, { action: { label, run } })</code>) a button sits after the text, centred: Retry on a failed click; Undo on a delete is <code>toast(text, { undo: { run } })</code>, which Ctrl-Z (Cmd-Z) presses too, outside text fields.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/status.js</code> (<code>statusSlot</code>, <code>steadyLabel</code>, <code>toast</code>, and <code>statusSlotHtml</code>, <code>statusTextHtml</code>, <code>statusWorkingHtml</code>, <code>steadyLabelHtml</code> for views that draw HTML) · <code>.cui-status</code>, <code>.cui-status-text</code>, <code>.cui-status-fill</code>, <code>.cui-steady</code>, <code>.cui-toast</code>, <code>.cui-toast-text</code>, <code>.cui-toast-action</code> in <code>ui/base.css</code></p>
       </div>
     </div>
@@ -975,7 +975,7 @@ row.innerHTML =
         <li><b>17.</b> A colour never carries meaning alone.</li>
         <li><b>18.</b> Text is never clipped and never widens the page; prose about 75ch at most; full height in <code>dvh</code>.</li>
         <li><b>19.</b> Empty and failed states say what next.</li>
-        <li><b>20.</b> Undo over "are you sure?".</li>
+        <li><b>20.</b> Undo over "are you sure?", and Ctrl-Z with it (<code>toast(text, { undo: { run } })</code>).</li>
         <li><b>21.</b> A view worth coming back to has its own URL.</li>
       </ul>
     </div>

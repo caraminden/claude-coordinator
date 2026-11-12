@@ -15,7 +15,8 @@
 // cut off). steadyLabel() stacks every label a button can show in one grid cell and shows one, so the
 // button keeps the width of its widest label. Both work from plain markup too: this module only writes it,
 // and the *Html() builders write the same markup as strings, escaped, for views that draw HTML. toast()
-// says something in passing in the top layer, so it takes no room at all, with a button (Retry) when it has one.
+// says something in passing in the top layer, so it takes no room at all, with a button (Retry) when it has one,
+// and with Undo, Ctrl-Z (Cmd-Z) presses it too.
 
 const TONES = new Set(['ok', 'warn', 'danger', 'info', 'violet', 'neutral']);
 
@@ -110,10 +111,56 @@ let say = null;
 let timer = 0;
 let onHide = null;
 let up = false; // shown, and not yet gone (hideToast)
+let shown = 0; // which toast is the latest, for its hide()
 
 /** The topmost open modal dialog, or null (also where :modal isn't supported). */
 function topModal() {
   try { return [...document.querySelectorAll('dialog:modal')].at(-1) ?? null; } catch { return null; }
+}
+
+// Ctrl-Z (Cmd-Z on a Mac) beside a toast's Undo (Josh, 2026-11-12: "We should support Ctrl-Z for undo in
+// addition to the toast"; lifted from The Trans Agenda's undo-state.ts). Every Undo offered, newest last; the key
+// runs the newest that hasn't run and still makes sense, then the one before. Each runs once, by key or button.
+const undos = [];
+let keyed = false;
+
+/** Ctrl-Z or Cmd-Z, not with Shift (redo) or Alt: the letter Z, or on a layout with no Latin letters the key where Z sits. */
+function isUndoKey(e) {
+  const k = (e.key ?? '').toLowerCase();
+  return (k === 'z' || (!/^[a-z]$/.test(k) && e.code === 'KeyZ')) && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+}
+
+// Input types with no text to undo: Ctrl-Z there is the app's.
+const NO_TEXT = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
+/** Focus is in something with its own text undo (a text field, a textarea, contenteditable): Ctrl-Z is the browser's. */
+function isTyping(el) {
+  if (!el?.tagName) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName.toLowerCase();
+  return tag === 'textarea' || (tag === 'input' && !NO_TEXT.has((el.type || 'text').toLowerCase()));
+}
+
+/** Run `u` unless it already ran; true if it ran now. */
+function take(u) {
+  if (u.done) return false;
+  u.done = true;
+  const i = undos.indexOf(u);
+  if (i >= 0) undos.splice(i, 1);
+  u.run();
+  return true;
+}
+
+function onUndoKey(e) {
+  if (e.defaultPrevented || e.repeat || !isUndoKey(e) || isTyping(e.target) || isTyping(document.activeElement)) return;
+  for (let u = undos.pop(); u; u = undos.pop()) {
+    if (u.live && !u.live()) continue; // gone stale: passed over and dropped
+    e.preventDefault();
+    u.done = true;
+    u.run();
+    // In place of its toast (or the newer one): what the key did, with no Undo left to press twice.
+    toast(`Undone: ${u.text}`);
+    return;
+  }
 }
 
 function hideToast() {
@@ -130,9 +177,21 @@ function hideToast() {
  * Say `text` in passing: a toast at the bottom centre, in the top layer, for `ms` (default 4 s) or until it's
  * tapped. One at a time: a new one replaces the last. A screen reader hears it from a live region. `action`
  * ({ label, run }) adds a button after the text that runs `run` and sends the toast away (Retry); `onHide` is
- * called once when this toast goes, however it goes (its time, a tap, its action, a newer toast).
+ * called once when this toast goes, however it goes (its time, a tap, its action, a newer toast). `undo`
+ * ({ run, live }) is an Undo button that Ctrl-Z (Cmd-Z) also presses, outside text fields, after the toast has
+ * gone too, while `live()` (if given) says it still makes sense; either way it runs once. Returns { hide }.
  */
 export function toast(text, opts = {}) {
+  if (opts.undo && opts.action) throw new Error('toast: one button, so `undo` or `action`, not both');
+  let action = opts.action;
+  if (opts.undo) {
+    const u = { text, run: opts.undo.run, live: opts.undo.live, done: false };
+    undos.push(u);
+    if (undos.length > 50) undos.shift();
+    if (!keyed) document.addEventListener('keydown', onUndoKey);
+    keyed = true;
+    action = { label: 'Undo', run: () => take(u) };
+  }
   if (!pop?.isConnected) {
     pop = document.createElement('div');
     pop.className = 'cui-toast';
@@ -159,22 +218,30 @@ export function toast(text, opts = {}) {
   else delete pop.dataset.tone;
   pop.textContent = text;
   // The live region says the text; the toast itself is hidden from a screen reader unless it has a button to reach.
-  pop.toggleAttribute('aria-hidden', !opts.action);
-  if (opts.action) {
+  pop.toggleAttribute('aria-hidden', !action);
+  if (action) {
     const line = document.createElement('span');
     line.className = 'cui-toast-text';
     line.textContent = text;
     const act = document.createElement('button');
     act.type = 'button';
     act.className = 'cui-btn cui-small cui-toast-action';
-    act.textContent = opts.action.label;
-    act.addEventListener('click', () => opts.action.run());
+    act.textContent = action.label;
+    act.addEventListener('click', () => action.run());
+    if (opts.undo) {
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+      act.setAttribute('aria-keyshortcuts', mac ? 'Meta+Z' : 'Control+Z');
+      act.dataset.tip = mac ? '⌘Z' : 'Ctrl+Z';
+    }
     pop.replaceChildren(line, act);
   }
   pop.showPopover();
   up = true;
   onHide = opts.onHide ?? null;
+  const mine = ++shown;
   // A frame later, so a live region made just now is in place before it changes and is heard.
   requestAnimationFrame(() => pop.matches(':popover-open') && (say.textContent = text));
   timer = setTimeout(hideToast, opts.ms ?? 4000);
+  // Hides this toast if it's still the one showing; a newer one is left alone.
+  return { hide: () => up && shown === mine && hideToast() };
 }

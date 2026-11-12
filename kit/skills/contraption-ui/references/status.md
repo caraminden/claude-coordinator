@@ -20,8 +20,10 @@ save.current;                                  // 'saving'
 
 toast('Copied the link');                      // in passing: the top layer, bottom centre, 4 s or a tap
 toast('Couldn\'t copy', { tone: 'danger', ms: 6000 });
-toast('Deleted 3 todos', { action: { label: 'Undo', run: restore } });  // a button after the text; it sends the toast away
+toast('Couldn\'t save', { action: { label: 'Retry', run: save } });  // a button after the text; it sends the toast away
+toast('Deleted 3 todos', { undo: { run: restore } });  // Undo, and Ctrl-Z (Cmd-Z) presses it too: see below
 toast('Saved', { onHide: () => {} });          // called once when this toast goes, however it goes
+const t = toast('Uploading…', { ms: 60000 }); t.hide();  // hides it, if it's still the one showing
 ```
 
 Views that draw HTML strings get the same markup from builders, with the text escaped (`inner` is yours):
@@ -62,9 +64,21 @@ tap opens a cut-off status's tip, as for anything a tap doesn't act on; inside a
   new one replaces the last), in the top layer at the bottom centre, so it moves nothing; a tap sends it
   away; a screen reader hears it from a live region. Not for an error someone has to act on: that stays
   in the page's own status line until it's dealt with.
-- **Something you can undo or retry** ("Deleted 3 todos" · Undo): `toast(text, { action: { label, run } })`.
+- **Something you can retry** ("Couldn't save" · Retry): `toast(text, { action: { label, run } })`.
   The button sits after the text, centred, and its tap runs `run` and sends the toast away. A failed click
   is `optimistic()`'s job (below), which makes this toast for you.
+- **Something you can undo** ("Deleted 3 todos" · Undo): `toast(text, { undo: { run, live } })`, never
+  an `action` labelled Undo (rule 20). Ctrl-Z (Cmd-Z on a Mac) presses the newest Undo, then the one
+  before, even after its toast has gone; one document listener, added with the first Undo.
+  - Each Undo runs once, by key or button. The key puts "Undone: <text>" in place of the toast.
+  - Never while focus is in a text field, a textarea or contenteditable: Ctrl-Z there is the field's own.
+    Nor when another listener already took the key (`preventDefault()`), and it takes the key only
+    when it undid something.
+  - `live()` (optional) says it still makes sense: once false (its view left, the item decided again),
+    the key passes it over and drops it. Give it one whenever `run` closes over something that can go.
+  - `run` shows the undone state at once and sends behind it (`optimistic()`), like any click (rule 23).
+  - The button carries `aria-keyshortcuts` and a tip naming the key. `undo` and `action` together throw:
+    a toast has one button.
 - **Something that has to be big** (an error with a retry, a banner): overlay it (a `cui-tip`-style card in
   the top layer, `position: fixed`), never insert it into the flow.
 

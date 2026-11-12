@@ -35,7 +35,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/chat.js` (+ `.d.ts`) | The chat log: your messages, replies, tool runs, Grunt rows, reply chips, the working line, messages sent mid-turn | ES module import, needs base.css; [references/chat.md](references/chat.md) |
 | `ui/tip.js` (+ `.d.ts`) | Tooltips: `data-tip` on anything, opened on hover, focus, a tap or a long press | ES module import, needs base.css; [references/tooltip.md](references/tooltip.md) |
 | `ui/dialog.js` (+ `.d.ts`) | The dialog: every modal. Its head and ✕ stay at the top while the body scrolls; a backdrop click and Escape close it | `cui-dialog` in base.css, `mountDialogs()` once; [references/base-parts.md](references/base-parts.md#dialog) |
-| `ui/status.js` (+ `.d.ts`) | A status line that's always there, a button label that keeps its width, a toast (with a Retry or Undo button), and the headless check that nothing moved | ES module import, needs base.css; [references/status.md](references/status.md) |
+| `ui/status.js` (+ `.d.ts`) | A status line that's always there, a button label that keeps its width, a toast (with a Retry, or an Undo that Ctrl-Z presses too), and the headless check that nothing moved | ES module import, needs base.css; [references/status.md](references/status.md) |
 | `ui/optimistic.js` (+ `.d.ts`) | `optimistic()`: a click shows its result at once and sends behind it; a failure rolls back that item with a Retry toast (rule 23) | ES module import, needs base.css; [references/status.md](references/status.md#optimistic-actions) |
 | Your `manifest.webmanifest` | Installing your app on its own, beside Citadel's | [references/installing.md](references/installing.md) |
 
@@ -181,8 +181,10 @@ fails a view that's a wall of plain text (`citadel:critique`).
 19. **Empty and failed say what next.** An empty list or search says why and offers the next step
     ("No todos yet. Add one below."); an error says what failed and the way out (Retry, what was
     kept), as the `cui-notice` example in [references/base-parts.md](references/base-parts.md) does.
-20. **Undo over "are you sure?".** A delete or bulk change acts at once and offers Undo
-    (`toast(text, { action: { label: 'Undo', run } })`); ask first only when nothing could bring it back.
+20. **Undo over "are you sure?", and Ctrl-Z with it.** A delete or bulk change acts at once and offers
+    Undo with `toast(text, { undo: { run } })`, never a hand-made `action: { label: 'Undo' }`: `undo`
+    makes Ctrl-Z (Cmd-Z) press it too, outside text fields, each Undo once. Ask first only when nothing
+    could bring it back.
 21. **A view worth coming back to has its own URL.** A tab, item or filter someone would share,
     reload or go Back to updates the URL (`history.pushState`; `replaceState` for small steps), and
     that URL opens the same view.

@@ -204,6 +204,9 @@ test('landArgs gives land.sh only the shapes it accepts, files as paths inside t
     const refused = (body: object, re: RegExp) => assert.throws(() => landArgs(body as any, cwd), re, JSON.stringify(body));
     for (const into of ['build/0', 'build/07', 'build/1234567', 'build/7; rm -rf ~', 'main', '--full', 'build/x', ' build/7', 'build/7\n']) refused({ into }, /into must be a build branch/);
     refused({ into: 7 }, /into must be/);
+    refused({ into: '' }, /into must be a build branch/);
+    refused({ into: '', files: ['test/a.test.ts'] }, /into must be a build branch/);
+    refused({ build: true, into: '' }, /build takes nothing more/);
     refused({ into: 'build/7', files: ['../outside.test.ts'] }, /not a file in your worktree/);
     refused({ into: 'build/7', files: [join(root, 'outside.test.ts')] }, /not a file in your worktree/);
     refused({ into: 'build/7', files: ['test/link.test.ts'] }, /not a file in your worktree/);
@@ -249,7 +252,7 @@ test('the land route hands land.sh those arguments, and refuses a bad call witho
   assert.equal(await land({ into: 'build/3', full: true }), 'n=3\n[--into]\n[build/3]\n[--full]');
   assert.equal(await land({ build: true }), 'n=1\n[--build]');
 
-  for (const body of [{ into: 'build/3; touch pwned' }, { into: 'build/3', files: ['../args-repo/x.test.ts'] }, { full: true }]) {
+  for (const body of [{ into: '' }, { into: 'build/3; touch pwned' }, { into: 'build/3', files: ['../args-repo/x.test.ts'] }, { full: true }]) {
     const res = await post(body);
     assert.equal(res.status, 400, JSON.stringify(body));
   }

@@ -43,10 +43,11 @@ export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown
   if (files !== undefined && files !== null && !(Array.isArray(files) && files.every((f) => typeof f === 'string'))) throw new Error('files must be a list of test file paths');
   const list = (files ?? []) as string[];
   if (build) {
-    if (into || full || list.length) throw new Error('build takes nothing more: not into, full or files (it lands the build your branch is at the tip of)');
+    if ((into !== undefined && into !== null) || full || list.length) throw new Error('build takes nothing more: not into, full or files (it lands the build your branch is at the tip of)');
     return ['--build'];
   }
-  if (!into) {
+  // Only a missing into is a plain land: an empty or wrong one is refused, never read as main.
+  if (into === undefined || into === null) {
     if (full || list.length) throw new Error('full and files go with into: build/<n>');
     return [];
   }

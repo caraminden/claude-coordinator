@@ -32,6 +32,8 @@ lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
 flock -n "$lock" true && held=no || held=yes
 echo "locked=$DEPLOY_LOCKED held=$held" >"$DEPLOY_NOTE"
 until [ -z "\${FAKE_DEPLOY_GATE:-}" ] || [ -e "\$FAKE_DEPLOY_GATE" ]; do sleep 0.05; done
+[ "\${FAKE_DEPLOY_EXIT:-0}" != 0 ] || [ -z "\${DEPLOY_TIMES:-}" ] || echo "queued \$(date +%s)" >>"\$DEPLOY_TIMES"
+[ "\${FAKE_DEPLOY_EXIT:-0}" != 0 ] || [ -n "\${FAKE_NOT_LIVE:-}" ] || [ -z "\${DEPLOY_TIMES:-}" ] || echo "live \$(date +%s)" >>"\$DEPLOY_TIMES"
 exit "\${FAKE_DEPLOY_EXIT:-0}"
 `);
   chmodSync(join(source, 'tools', 'deploy.sh'), 0o755);

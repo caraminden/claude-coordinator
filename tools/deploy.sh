@@ -43,6 +43,22 @@ say() { echo "deploy: $*" >&2; }
 git_live() { git -C "$LIVE" "$@"; }
 short() { git_live log -1 --format='%h "%s"' "$1"; }
 
+# For land.sh's timing line (#565): "queued <t>" once the restart is queued or the front end reloaded, "live <t>" once
+# it is live, in the file land.sh names in DEPLOY_TIMES (trusted with DEPLOY_LOCKED only). Never fails the deploy.
+TIMES=
+mark() { [ -z "$TIMES" ] || { echo "$1 $(date +%s)" >>"$TIMES"; } 2>/dev/null || true; }
+
+# A line in the scheme's retro log, as tools/land.sh's retro_log writes it (the same header: test/land.test.ts pins
+# it). The queued restart's timing line goes there. Best effort: any failure is swallowed.
+retro_log() (
+  set +eu
+  [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
+  dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
+  mkdir -p "$dir" || exit 0
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, and per test file that failed in a land or deploy run and passed alone (flake). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
+  printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
+) >/dev/null 2>&1 || true
+
 # A field of the running server's /api/health, or nothing if it doesn't answer (or predates it).
 health() {
   curl -fsS --max-time 3 "$URL/api/health" 2>/dev/null |
@@ -221,13 +237,26 @@ main_pid() { systemctl --user show -p MainPID --value "$SERVICE" 2>/dev/null || 
 # Restart=always would bring it back healthy-looking (#520). The second check gets the same wait, as that
 # first minute is slow (re-attaching turns, startup checks) and slow isn't down.
 restart_healthy() {
+  R_UP='' R_SETTLED='' # for the restart's timing line
   systemctl --user restart "$SERVICE" || return 1
   healthy "$1" || return 1
+  R_UP=$(date +%s)
   local pid
   pid=$(main_pid)
   sleep "$SETTLE"
   healthy "$1" && [ "$(main_pid)" = "$pid" ] || return 2
+  R_SETTLED=$(date +%s)
 }
+
+# The queued restart's line in the retro log (#565), when it ends however it ends.
+restart_timing() (
+  set +eu
+  local now up settled
+  now=$(date +%s)
+  span() { if [ -n "$1" ]; then echo $((${2:-$now} - $1)); else echo -; fi; } # <start> [<end>, else now]; - if it never started
+  read -r up settled <<<"${R_FIRST-$R_UP $R_SETTLED}"
+  retro_log "restart · ${R_COMMIT:-$(git_live rev-parse --short HEAD)} · idle-wait $(span "$R_START" "$R_LOCK") · backup $(span "$R_LOCK" "$R_BACKUP") · healthy $([ -n "$up" ] && span "$R_RESTART" "$up" || echo -) · settle $([ -n "$settled" ] && span "$up" "$settled" || echo -) · $R_OUT"
+) >/dev/null 2>&1
 
 turns() { if [ "$1" = 1 ]; then echo "1 running turn"; else echo "${1:-some} running turns"; fi; }
 
@@ -236,7 +265,10 @@ turns() { if [ "$1" = 1 ]; then echo "1 running turn"; else echo "${1:-some} run
 restart() {
   case "$0" in */cc-deploy/restart-*.sh) rm -f "$0" ;; esac # the unit's private copy (see deploy), never the tracked script; bash keeps reading it from the open file
   init_state
-  trap 'rm -f "$STATE/restart"' EXIT
+  # Its timing line (#565): epoch seconds of each step, and how it ended (any exit not given one was cut off).
+  unset R_FIRST
+  R_START=$(date +%s) R_LOCK='' R_BACKUP='' R_RESTART='' R_UP='' R_SETTLED='' R_COMMIT='' R_OUT=stopped
+  trap 'restart_timing || true; rm -f "$STATE/restart"' EXIT
   local i=0 n unknown='' told=''
   # $STATE/now: a --now deploy that found this restart already queued and waiting.
   while [ -z "$NOW" ] && [ ! -e "$STATE/now" ]; do
@@ -265,6 +297,7 @@ restart() {
     fi
     i=$((i + 1))
     if [ "$i" -ge "$IDLE_TRIES" ]; then
+      R_OUT="gave up waiting for turns"
       report fail "Gave up after $((IDLE_TRIES * 10 / 60)) min waiting for the turns a restart would cut off (ones not in a unit of their own) to finish, so nothing restarted. The checkout is at $(short HEAD), but the server still runs $(health commit | cut -c1-7). Run tools/deploy.sh again to queue another restart, or with a person's OK, tools/deploy.sh --now."
       exit 1
     fi
@@ -273,19 +306,25 @@ restart() {
 
   exec 9>"$STATE/lock"
   flock 9
+  R_LOCK=$(date +%s)
   rm -f "$STATE/now"
   local target good saved
   restart_phase "copying the database"
   target=$(git_live rev-parse HEAD)
+  R_COMMIT=${target:0:7}
   if ! saved=$(backup_db "$target"); then
+    R_OUT="no database copy"
     report fail "Could not copy the database to backups/ before restarting on $(short "$target") (see journalctl --user -u $UNIT), so nothing restarted. The checkout is at $(short "$target"), but the server still runs $(health commit | cut -c1-7). Free some disk or fix the copy, then run tools/deploy.sh again."
     exit 1
   fi
+  R_BACKUP=$(date +%s)
   [ -n "$saved" ] && say "database copied to $saved"
   say "restarting $SERVICE on $(short "$target")"
   restart_phase "restarting $SERVICE on ${target:0:7}"
   local rc=0
+  R_RESTART=$(date +%s)
   restart_healthy "$target" || rc=$?
+  R_OUT=$([ "$rc" = 0 ] && echo live || echo "rolled back") R_FIRST="$R_UP $R_SETTLED" # the rollback's restart_healthy sets them again
   if [ "$rc" = 0 ]; then
     git_live tag -f last-good "$target" >/dev/null
     rm -f "$STATE/bad"
@@ -299,6 +338,7 @@ restart() {
   [ "$rc" = 2 ] && why="the server answered healthy on it, then stopped answering or was restarted within ${SETTLE} s"
   good=$(git_live rev-parse -q --verify 'last-good^{commit}' || true)
   if [ -z "$good" ] || [ "$good" = "$target" ]; then
+    R_OUT="failed, nothing to roll back to"
     report fail "Deploy of $(short "$target") failed: $why, and there is no older last-good commit to roll back to. Check journalctl --user -u $SERVICE."
     exit 1
   fi
@@ -321,6 +361,7 @@ restart() {
   if restart_healthy "$good"; then
     report fail "Deploy of $(short "$target") failed: $why. Rolled back to last-good $(short "$good"), which is up and healthy.${saved:+ The database from before the deploy is in $saved, should the rollback have trouble with what the new code wrote.} A landing takes its commit back off main; after a deploy by hand main still has it: fix forward and deploy again. Details: journalctl --user -u $SERVICE."
   else
+    R_OUT="failed, and so did the rollback"
     touch "$STATE/FAILED"
     report fail "Deploy of $(short "$target") failed: $why, and the rollback to $(short "$good") did not come up healthy either. The service is likely down: check journalctl --user -u $SERVICE.${saved:+ The database from before the deploy is in $saved.}"
   fi
@@ -338,7 +379,7 @@ deploy() {
   # nested run) must still wait in line and lock (#514).
   local inherited=
   if [ -n "${DEPLOY_LOCKED:-}" ]; then
-    if [ /dev/fd/9 -ef "$STATE/lock" ]; then inherited=1; else say "DEPLOY_LOCKED is set but fd 9 isn't the deploy lock; taking the lock"; fi
+    if [ /dev/fd/9 -ef "$STATE/lock" ]; then inherited=1 TIMES=${DEPLOY_TIMES:-}; else say "DEPLOY_LOCKED is set but fd 9 isn't the deploy lock; taking the lock"; fi
   fi
   if [ -z "$inherited" ]; then
     DEPLOY_TESTED=
@@ -374,6 +415,8 @@ deploy() {
     trap - INT TERM HUP
     rm -f "$STATE/unchecked" "$STATE/bad" # a revert of the commit that was rolled back ends here: main is good again
     say "nothing to deploy: the server already runs $(short "$new")"
+    mark queued
+    mark live
     report_me "Nothing to deploy: the server already runs $(short "$new")."
     return 0
   fi
@@ -422,9 +465,11 @@ deploy() {
   queue_phase "deploying: going live"
   if [ "$kind" = frontend ] && [ "$(health reload)" = sighup ]; then
     systemctl --user kill -s HUP --kill-whom=main "$SERVICE"
+    mark queued
     for _ in $(seq 10); do
       sleep 1
       if [ "$(health version)" = "$version" ]; then
+        mark live
         git_live tag -f last-good "$new" >/dev/null
         rm -f "$STATE/bad"
         say "live now: the server reloaded the front end ($version); open tabs reload when idle. No restart."
@@ -450,11 +495,14 @@ deploy() {
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
     --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
     --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_UNKNOWN_WAIT="$UNKNOWN_WAIT" --setenv=DEPLOY_IDLE_POLL="$IDLE_POLL" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
+    --setenv=COORDINATOR_SHARED_DIR="${COORDINATOR_SHARED_DIR:-}" \
     bash "$copy" restart 2>&1); then
+    mark queued
     if [ -n "$NOW" ]; then say "restart queued as $UNIT with --now: it restarts at once, cutting off turns not in a unit of their own (this one too, if so)"
     else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi
   elif grep -qi 'already' <<<"$out"; then
     rm -f "$copy"
+    mark queued
     if [ -n "$NOW" ]; then
       touch "$STATE/now"
       say "a restart is already queued as $UNIT; with --now it goes ahead at once and deploys this too, and reports here"
@@ -475,6 +523,7 @@ deploy() {
   for _ in $(seq "$limit"); do
     sleep 1
     if git_live merge-base --is-ancestor "$new" last-good 2>/dev/null; then
+      mark live
       say "live now: the server restarted on $(short "$new") and stayed healthy"
       return 0
     fi

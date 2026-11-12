@@ -1,6 +1,6 @@
 // A landing or deploy killed part way, and a restart waiting on running turns (#553).
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { git, until, pipe, land, subjects } from './land-recover-fixture.ts';
@@ -94,4 +94,37 @@ test('a restart waiting on running turns says so to the landing: how many, for h
   writeFileSync(join(p.dir, 'interruptible'), '0');
   assert.deepEqual(await p.restarts(1), ['0']);
   assert.equal(git(p.live, 'rev-parse', 'last-good'), tip);
+});
+
+// #565: how long each phase of a landing took, and each queued restart, in the day's retro log.
+test('a landing and its restart each leave a timing line in the retro log, landed or rolled back', { timeout: 200_000 }, async (t) => {
+  const p = await pipe(t, 2);
+  const shared = join(p.dir, 'shared');
+  const lines = () => {
+    const day = join(shared, 'retro-log');
+    return existsSync(day) ? readFileSync(join(day, readdirSync(day)[0], 'land.md'), 'utf8').split('\n').filter((l) => / · (timing|restart) · /.test(l)) : [];
+  };
+  const good = p.commit(p.wts[0], 'b.txt', 'fine\n');
+  let res = await p.run(land, p.wts[0], { COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 0, res.stderr);
+  await p.restarts(1);
+  // Two processes write them, the restart and land.sh, so either can come first.
+  const kind = (k: string, from = 0) => lines().slice(from).filter((l) => l.includes(` · ${k} · `));
+  assert.equal(lines().length, 2, lines().join('\n'));
+  assert.match(kind('restart')[0], /^- \d\d:\d\d:\d\dZ · restart · [0-9a-f]{7} · idle-wait \d+ · backup \d+ · healthy \d+ · settle \d+ · live$/);
+  assert.ok(kind('restart')[0].includes(` · ${good.slice(0, 7)} · `), kind('restart')[0]);
+  // LAND_CI=0 here: the suite ran on "perigee", after no wait for CI, and the CI fields are empty.
+  assert.match(kind('timing')[0], /^- \d\d:\d\d:\d\dZ · timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live \d+ · landed$/);
+
+  git(p.wts[1], 'rebase', '-q', 'main');
+  p.commit(p.wts[1], 'RUN_BAD', 'never comes up\n');
+  res = await p.run(land, p.wts[1], { COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1, res.stderr);
+  await p.restarts(2);
+  // It answered healthy at no point, so there was no settle check; land.sh's deploy saw no "live".
+  const [restart, timing] = [kind('restart', 2), kind('timing', 2)];
+  assert.equal(restart.length, 1, lines().join('\n'));
+  assert.match(restart[0], /· restart · [0-9a-f]{7} · idle-wait \d+ · backup \d+ · healthy - · settle - · rolled back$/);
+  assert.equal(timing.length, 1, lines().join('\n'));
+  assert.match(timing[0], /· timing · ticket\/2-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live - · refused at deploy$/);
 });

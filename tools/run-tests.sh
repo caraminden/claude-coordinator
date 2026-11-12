@@ -65,13 +65,13 @@ if [ "${#files[@]}" -gt "$max_reruns" ]; then
   exit "$rc"
 fi
 
-# Best effort, as land.sh's conflict lines: no shared folder or a failed write never changes the run's result.
+# Best effort, as land.sh's conflict lines (the header as land.sh writes it: test/land.test.ts pins it): no shared folder or a failed write never changes the run's result.
 log_flake() (
   set +e
   [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
   dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
   mkdir -p "$dir" || exit 0
-  [ -e "$dir/land.md" ] || printf '# Retro log: land.sh\n\nWritten by tools/land.sh and tools/run-tests.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, and per test file that failed in a land or deploy run and passed alone (flake).\n\n' >>"$dir/land.md"
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, and per test file that failed in a land or deploy run and passed alone (flake). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
   branch=$(git branch --show-current 2>/dev/null)
   printf -- '- %sZ · flake · %s · load %s%s\n' "$(date -u +%T)" "$1" "$load" "${branch:+ · $branch}" >>"$dir/land.md"
 ) >/dev/null 2>&1

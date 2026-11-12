@@ -30,9 +30,13 @@ test("a rebase that changes land.sh hands over to the rebased copy, which keeps 
   const script = join(r.source, 'tools', 'land.sh');
   writeFileSync(script, readFileSync(script, 'utf8').replace('say "running the tests"', 'say "running the tests (the rebased land.sh)"'));
   git(r.source, 'commit', '-qam', 'newer land.sh');
-  const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note') } });
+  const shared = join(r.dir, 'shared');
+  const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), COORDINATOR_SHARED_DIR: shared } });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /running the tests \(the rebased land\.sh\)/);
+  // One timing line for the whole landing, with the first copy's wait in line and rebase kept (#565).
+  assert.equal(timings(shared).length, 1, landLog(shared));
+  assert.match(timings(shared)[0], /· line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live \d+ · landed$/);
   assert.equal(res.stderr.match(/rebasing/g)?.length, 1, res.stderr);
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
   assert.equal(r.note(), 'locked=1 held=yes', 'the deploy still runs under the lock');
@@ -157,6 +161,80 @@ test('green CI on the exact rebased commit lands it without a test run here, and
   assert.equal(r.note(), 'locked=1 held=yes');
 });
 
+// #565: one line per landing with how long each phase took, landed or refused.
+const timings = (shared: string) => landLog(shared).split('\n').filter((l) => l.includes(' · timing · '));
+test('a landing leaves one timing line with every phase; CI that answers fills the CI fields', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  let res = c.run({ COORDINATOR_SHARED_DIR: shared, FAKE_LAG: '2' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(landLog(shared), /^# Retro log: land\.sh\n\nWritten by .*`timing` line per landing.*`restart` line per queued restart/s, 'the header names the new lines');
+  // Whichever writer makes the day's file writes the header, so the three copies are one text.
+  const header = (f: string) => readFileSync(join(import.meta.dirname, '..', 'tools', f), 'utf8').split('\n').find((l) => l.includes("'# Retro log: land.sh'"))?.trim();
+  assert.ok(header('land.sh'));
+  assert.equal(header('deploy.sh'), header('land.sh'));
+  assert.equal(header('run-tests.sh'), header('land.sh'));
+  assert.deepEqual(timings(shared).length, 1);
+  assert.match(timings(shared)[0], /^- \d\d:\d\d:\d\dZ · timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy \d+ · live \d+ · landed$/);
+  // A deploy whose restart isn't live by the time it ends.
+  r.commit(r.wt, 'b.txt', 'two\n');
+  res = c.run({ COORDINATOR_SHARED_DIR: shared, FAKE_NOT_LIVE: '1' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(timings(shared)[1], /· fallback - · deploy \d+ · live - · landed, not live yet$/);
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  assert.deepEqual(readdirSync(state).filter((f) => f.startsWith('times-')), [], "deploy.sh's times file goes at the end");
+});
+
+test('a landing stopped while it waits for CI is logged as stopped there, not landed', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const child = spawn('bash', [land], { cwd: r.wt, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), COORDINATOR_SHARED_DIR: shared, PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', FAKE_CI: 'running', LAND_CI_TIMEOUT: '60' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr!.on('data', (d) => (stderr += d));
+  const done = new Promise((ok) => child.once('close', ok));
+  for (const end = Date.now() + 30_000; !/waiting for CI on/.test(stderr); await new Promise((ok) => setTimeout(ok, 50))) assert.ok(Date.now() < end, stderr);
+  child.kill('SIGTERM');
+  await done;
+  assert.match(timings(shared).join('\n'), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy - · live - · stopped at ci( \(exit \d+\))?$/);
+  assert.ok(c.calls());
+});
+
+test('a landing that gives up in line leaves a timing line too', () => {
+  const r = setup();
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  mkdirSync(state, { recursive: true });
+  const holder = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 600', join(state, 'lock')], { stdio: 'ignore' });
+  try {
+    while (spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status === 0) spawnSync('sleep', ['0.05']);
+    const shared = join(r.dir, 'shared');
+    const res = r.run({ COORDINATOR_SHARED_DIR: shared, DEPLOY_QUEUE_STALL: '1' });
+    assert.equal(res.status, 1, res.stderr);
+    assert.match(res.stderr, /nothing has moved/);
+    assert.match(timings(shared).join('\n'), /^- \S+ · timing · ticket\/1-x · line \d+ · rebase - · ci-queue - · ci-run - · fallback - · deploy - · live - · refused at line$/);
+  } finally {
+    holder.kill('SIGKILL');
+  }
+});
+
+test("a retro log that can't be written changes neither a landing's output nor its exit code", () => {
+  const runs = ['', 'blocker'].map((shared) => {
+    const r = setup();
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const blocker = join(r.dir, 'blocker');
+    writeFileSync(blocker, 'a file, not a folder\n');
+    const res = r.run({ COORDINATOR_SHARED_DIR: shared && blocker });
+    assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+    return { status: res.status, stderr: res.stderr.replace(/\b[0-9a-f]{7,40}\b/g, 'H').replace(/\d\d:\d\d/g, 'T').replace(/\/\d+\//g, '/N/') };
+  });
+  assert.deepEqual(runs[1], runs[0]);
+  assert.equal(runs[0].status, 0);
+});
+
 test('a run of this very commit that is already green lands at once; one that was red is run again', () => {
   const r = setup();
   const c = ci(r);
@@ -188,6 +266,7 @@ test('red CI refuses with main untouched, shows the failed log, and never falls 
   const res = c.run({ FAKE_CI: 'red', COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 1);
   assert.match(landLog(shared), /· flake · test\/slow\.test\.ts · load 31\.5 · ticket\/1-x · in CI$/m, 'a flake CI labelled reaches the retro log');
+  assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy - · live - · refused at ci$/m);
   assert.match(res.stderr, /the red test's output\n.*tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK/);
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
@@ -219,6 +298,7 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
       assert.match(res.stderr, why);
       assert.match(res.stderr.trimEnd().split('\n').at(-1)!, /landed on perigee's own test run, not CI: /, 'the last line says it again');
       assert.match(landLog(shared), /^- \d\d:\d\d:\d\dZ · ci fallback · ticket\/1-x · /m);
+      assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live \d+ · landed$/m);
       assert.equal(c.localRuns(), 1);
       assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
       assert.equal(c.refs(), '', 'nothing is left on GitHub');
@@ -304,6 +384,7 @@ test('a conflict is logged to the retro-log with its files, and the refusal name
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   const log = landLog(shared);
   assert.match(log, new RegExp(`^- \\d\\d:\\d\\d:\\d\\dZ · land conflict · ticket/1-x onto ${main.slice(0, 7)}: a\\.txt$`, 'm'));
+  assert.deepEqual(timings(shared).map((l) => l.replace(/^- \S+ · /, '').replace(/\d+/g, 'N')), ['timing · ticket/N-x · line N · rebase N · ci-queue - · ci-run - · fallback - · deploy - · live - · refused at rebase']);
 });
 
 test('a rebase that cannot start logs no conflicted files', () => {

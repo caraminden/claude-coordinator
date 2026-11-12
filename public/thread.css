@@ -135,7 +135,7 @@ button.secondary.act-reopen { --act: var(--done); }
 .msg.user.github { background: var(--panel); border-color: var(--line); border-left: 3px solid var(--muted); }
 .msg .who { font-size: 0.8em; color: var(--muted); margin-bottom: 0.2rem; }
 .msg.coord { padding: 0; }
-.msg.coord > summary { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.45rem 0.85rem; cursor: pointer; list-style: none; font-size: 0.8em; color: var(--muted); }
+.msg.coord > summary { display: flex; align-items: baseline; gap: 0.5rem; padding: max(0.45rem, var(--tap-pad)) 0.85rem; cursor: pointer; list-style: none; font-size: 0.8em; color: var(--muted); }
 .msg.coord > summary::-webkit-details-marker { display: none; }
 .msg.coord > summary::before { content: '▸'; flex: none; }
 .msg.coord[open] > summary::before { content: '▾'; }

@@ -11,7 +11,7 @@ import { env, git, landLockFree, sleep, until, queueSetup } from './scheme-setup
 // the built-in reader a gh that prints what the test wrote (runs.once.tsv one time, then runs.tsv; branch-runs for
 // the scratch branch's unfinished runs, "<id>\t<commit>" a line).
 // Either way a gh stands first in PATH, so no test reaches GitHub.
-function ciSetup(branches: number, { stack = '', check = 'true', builtin = false, files = (i: number) => `f${i}.txt` } = {}) {
+function ciSetup(branches: number, { stack = '', batch = '', check = 'true', builtin = false, files = (i: number) => `f${i}.txt` } = {}) {
   const config: Record<string, string> = { ...(builtin ? { CI_WORKFLOWS: 'ci.yml slow.yml' } : { CI_STATUS: '"$CI_FAKE"' }), ...(stack ? { CI_STACK: stack } : {}) }; // no stack: the template's own depth, 3
   const q = queueSetup(branches, check, config, files);
   const ci = join(q.dir, 'ci');
@@ -20,7 +20,7 @@ function ciSetup(branches: number, { stack = '', check = 'true', builtin = false
   mkdirSync(bin);
   writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null || echo 0 ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
-  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' };
+  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', ...(batch ? { LAND_BATCH: batch } : {}) };
   const started: ReturnType<typeof q.land>[] = [];
   const land = (i: number, extra: Record<string, string> = {}) => started[started.push(q.land(i, { ...ciEnv, ...extra })) - 1];
   type L = ReturnType<typeof land>;
@@ -268,8 +268,8 @@ test('the stack: a red run in the middle is refused, and the one behind it build
     const [a, b, d] = await c.lands(1, 2, 3);
     const [ta, tb, td] = [await c.tip(a), await c.tip(b), await c.tip(d)];
     c.verdict(td, RED); // red only because it sits on the 2nd: not believed while the 2nd hasn't landed
-    await until('the 3rd to see red', () => /CI is red/.test(d.stderr()));
-    assert.match(d.stderr(), /sits on ticket\/2-x's, which hasn't landed: waiting to see whether it does/);
+    // Two lines, written one after the other: wait for the second.
+    await until('the 3rd to see red', () => /CI is red[^]*sits on ticket\/2-x's, which hasn't landed: waiting to see whether it does/.test(d.stderr()));
     c.verdict(tb, RED);
     await until('the 2nd to see red', () => /CI is red/.test(b.stderr()));
     assert.equal(c.parent(await c.tip(d, 2)), ta, "the 3rd builds again on the 1st's commit at once, past the red 2nd");
@@ -609,6 +609,163 @@ test('CI gate: a commit put on the branch while its landing waited is not landed
     assert.equal(git(c.wt, 'rev-parse', 'HEAD'), late, 'the worktree is back on the branch, late commit and all');
     assert.equal(spawnSync('bash', [join(c.wt, 'tools', 'land.sh')], { cwd: c.wt, encoding: 'utf8', env: { ...env, LAND_STACK_DEPTH: '0' } }).stderr.trim(), 'land: CI_STACK is a number from 1 up, not "0"');
   } finally {
+    c.stop();
+  }
+});
+
+// Batches (#600, the design in Citadel's specs/batched-landings.md): CI_BATCH landings share one CI run on the top commit.
+// CI_STACK 1, as Peek Auras runs it: one batch runs CI, the next builds ahead.
+const gated = 'until [ -e "$GATE" ]; do sleep 0.05; done';
+const branchAt = (c: ReturnType<typeof ciSetup>, i: number) => git(c.main, 'rev-parse', `ticket/${i}-x`).slice(0, 12);
+
+test('batches: three share one run on the top commit; main moves once, straight to it, and each lands on its own commit', async () => {
+  const c = ciSetup(3, { stack: '1', batch: '3', check: gated });
+  try {
+    const [a, b, d] = await c.lands(1, 2, 3);
+    c.open(); // the checks, once all three are in line: otherwise each is the top for a moment, and pushes
+    const td = await c.tip(d);
+    const tb = c.parent(td);
+    const ta = c.parent(tb);
+    assert.equal(c.parent(ta), c.mainAt(), 'the batch is stacked on main');
+    assert.deepEqual(c.scratch(), [`land/ticket/3-x ${td}`], 'only the top pushed');
+    c.verdict(td, GREEN);
+    for (const l of [a, b, d]) assert.equal(await l.exit, 0, l.stderr());
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3']);
+    assert.equal(c.mainAt(), td);
+    assert.equal(git(c.main, 'reflog', '--format=%gs', 'main').split('\n').filter((l) => /merge/.test(l)).length, 1, 'main moved once');
+    assert.equal([a, b, d].filter((l) => /pushed main to origin/.test(l.stderr())).length, 1, 'and was pushed once');
+    assert.equal(git(c.origin, 'rev-parse', 'main').slice(0, 12), td);
+    assert.deepEqual([c.sent(a), c.sent(b)], [[], []], 'the members below the top sent nothing to CI');
+    assert.match(a.stderr(), /landed in a batch with ticket\/2-x, ticket\/3-x, on ticket\/3-x's CI run/);
+    assert.match(b.stderr(), /landed in a batch with ticket\/1-x, ticket\/3-x, on ticket\/3-x's CI run \(main is now [0-9a-f]{12}\)/);
+    assert.match(d.stderr(), /landed in a batch with ticket\/1-x, ticket\/2-x, on its own CI run/);
+    assert.deepEqual([1, 2, 3].map(c.on), ['ticket/1-x', 'ticket/2-x', 'ticket/3-x']);
+    assert.deepEqual([1, 2, 3].map((i) => branchAt(c, i)), [ta, tb, td], 'each branch sits on its own commit');
+    assert.equal(readFileSync(join(c.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 1, 'only the head held the lock, so only it is timed');
+    assert.deepEqual(c.scratch(), []);
+    assert.deepEqual(c.tickets(), []);
+    assert.ok(landLockFree(c));
+    assert.equal(spawnSync('bash', [join(c.wt, 'tools', 'land.sh')], { cwd: c.wt, encoding: 'utf8', env: { ...env, LAND_BATCH: '0' } }).stderr.trim(), 'land: CI_BATCH is a number from 1 up, not "0"');
+  } finally {
+    c.stop();
+  }
+});
+
+test('batches: a red top bisects; the bottom lands, the bad middle is refused on main, and the top builds again and lands on its own run', async () => {
+  const c = ciSetup(3, { stack: '1', batch: '3', check: gated });
+  try {
+    const [a, b, d] = await c.lands(1, 2, 3);
+    c.open();
+    const td = await c.tip(d);
+    const tb = c.parent(td);
+    const ta = c.parent(tb);
+    c.verdict(td, RED);
+    assert.equal(await c.tip(a), ta, 'the halfway member pushes its commit as it is');
+    assert.deepEqual(c.sent(b), []);
+    c.verdict(ta, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(c.mainAt(), ta);
+    assert.equal(await c.tip(b), tb, 'then the next halfway one: the 2nd, now on main');
+    c.verdict(tb, RED);
+    assert.equal(await b.exit, 1, b.stderr());
+    assert.match(b.stderr(), /CI is red on [0-9a-f]{12} \(above\), so main is untouched/);
+    assert.equal(c.on(2), 'ticket/2-x');
+    assert.equal(branchAt(c, 2), tb, "the refused one's branch moves to its rebased commit, on main");
+    const again = await c.tip(d, 2);
+    assert.equal(c.parent(again), ta, 'the top builds again on main');
+    c.verdict(again, GREEN);
+    assert.equal(await d.exit, 0, d.stderr());
+    assert.doesNotMatch(d.stderr(), /landed in a batch/);
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f3.txt: 3']);
+    assert.equal(c.mainAt(), again);
+    assert.deepEqual(c.scratch(), []);
+  } finally {
+    c.stop();
+  }
+});
+
+test('batches: a member in conflict where it sits is skipped and the batch closes over it with no run of its own; on main it is refused', async () => {
+  // The 1st and 2nd both rewrite a.txt; the 3rd touches something else.
+  const c = ciSetup(3, { stack: '1', batch: '3', files: (i) => (i === 3 ? 'f3.txt' : 'a.txt') });
+  try {
+    const mine = git(c.wts[1], 'rev-parse', 'HEAD');
+    const [a, b, d] = await c.lands(1, 2, 3);
+    const td = await c.tip(d);
+    await until('the 2nd to meet the conflict', () => /on top of ticket\/1-x's commit, which hasn't landed: the rebase onto main failed/.test(b.stderr()));
+    const ta = c.parent(td);
+    assert.equal(c.parent(ta), c.mainAt(), "the top is built on the 1st's commit, past the 2nd");
+    c.verdict(td, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await d.exit, 0, d.stderr());
+    assert.match(d.stderr(), /landed in a batch with ticket\/1-x, on its own CI run/);
+    assert.equal(await b.exit, 1, b.stderr());
+    assert.match(b.stderr(), /the rebase onto main failed/);
+    assert.deepEqual(c.sent(b), [], 'nothing of the 2nd went to CI');
+    assert.deepEqual(c.landed(), ['a.txt: 1', 'f3.txt: 3']);
+    assert.equal(git(c.wts[1], 'rev-parse', 'HEAD'), mine, "the 2nd's branch is where it was");
+  } finally {
+    c.stop();
+  }
+});
+
+test('batches: a member killed mid-batch makes the ones behind build again, and nothing lands from a commit that held it', async () => {
+  const c = ciSetup(3, { stack: '1', batch: '3', check: gated });
+  try {
+    const [a, b, d] = await c.lands(1, 2, 3);
+    c.open();
+    const td = await c.tip(d);
+    const ta = c.parent(c.parent(td));
+    assert.deepEqual([c.sent(a), c.sent(b)], [[], []]);
+    b.child.kill('SIGKILL');
+    await b.exit;
+    const again = await c.tip(d, 2);
+    assert.equal(c.parent(again), ta, "the top builds again on the 1st's commit");
+    c.verdict(td, GREEN); // the run of the commit that held the killed one
+    await sleep(400);
+    assert.deepEqual(c.landed(), [], 'a green run on it lands nothing');
+    c.verdict(again, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await d.exit, 0, d.stderr());
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f3.txt: 3']);
+    assert.equal(c.mainAt(), again);
+  } finally {
+    c.stop();
+  }
+});
+
+test('batches: a ticket from a land.sh older than batches (five lines) is a batch of its own, read as no verdict and never landed by another', async () => {
+  const c = ciSetup(3, { batch: '3' }); // the template's stack, 3: each batch of one runs CI
+  const older = spawn('sleep', ['600'], { stdio: 'ignore' });
+  try {
+    const [a] = await c.lands(1);
+    const stat = readFileSync(`/proc/${older.pid}/stat`, 'utf8');
+    const ticket = join(c.state, 'land-queue', '0000000002');
+    const write = (commit: string) => writeFileSync(ticket, `${older.pid} ${stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]}\n0\nticket/0-old\nwaiting for CI\n${commit}\n`);
+    write('-');
+    writeFileSync(join(c.state, 'land-queue', '.seq'), '2\n');
+    const [d] = await c.lands(3);
+    const ta = await c.tip(a);
+    assert.equal(c.sent(a).length, 1, 'the 1st is a batch of its own, the older one being next, so it runs CI');
+    // The older landing builds on the 1st's commit and says nothing of CI, as it would.
+    const old = git(c.main, 'commit-tree', '-p', git(c.main, 'rev-parse', ta), '-m', 'old', `${ta}^{tree}`);
+    write(old);
+    const td = await c.tip(d);
+    assert.equal(c.parent(td), old.slice(0, 12), "the 3rd builds on the older one's commit");
+    c.verdict(old.slice(0, 12), GREEN);
+    c.verdict(td, GREEN);
+    c.verdict(ta, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(c.mainAt(), ta, 'the 1st landed only itself');
+    await sleep(400);
+    assert.equal(d.child.exitCode, null, 'the 3rd waits behind the older one');
+    older.kill('SIGKILL');
+    const again = await c.tip(d, 2);
+    assert.equal(c.parent(again), ta);
+    c.verdict(again, GREEN);
+    assert.equal(await d.exit, 0, d.stderr());
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f3.txt: 3']);
+  } finally {
+    older.kill('SIGKILL');
     c.stop();
   }
 });

@@ -13,8 +13,11 @@
 # 4. With the CI gate on (below): pushes the commit to the scratch branch land/<branch> on origin and
 #    waits for CI to pass exactly that commit. Red stops here. On the way out the scratch branch is
 #    deleted and its unfinished runs cancelled, except those of a commit that landed: they finish, so
-#    main's CI can reuse what they pass.
-# 5. Fast-forwards main in the scheme's main checkout to the commit.
+#    main's CI can reuse what they pass. With batches (CI_BATCH over 1, "Batches" below) only the
+#    last of a batch pushes, and its run covers the commits of the ones ahead of it in the batch.
+# 5. Fast-forwards main in the scheme's main checkout to the commit; with batches, the head of the
+#    line moves it to the deepest commit of its batch CI passed, which lands every member up to there.
+#    Main only ever moves to a commit CI passed.
 # 6. Pushes main to origin from the main checkout, never forced. A failed push is reported and main
 #    stays moved; the next landing pushes it again.
 # Until step 5 main is untouched. The branch itself only moves when it lands, or to the rebased
@@ -55,6 +58,9 @@ CI_STATUS=''
 # How many landings at the front of the line run CI at once, each on top of the ones ahead of it
 # (below, "The stack"). 1: only the head of the line. Runners that can't carry three runs at once: 2.
 CI_STACK=${LAND_STACK_DEPTH:-3}
+# How many landings share one CI run (below, "Batches"): the stack then counts batches, and only the last
+# of each batch runs CI. 1: every landing runs its own, as above. A deep line on slow CI: 3 or 4.
+CI_BATCH=${LAND_BATCH:-1}
 
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
@@ -76,10 +82,11 @@ park() { say "$*"; exit 75; }
 #   queue_phase <text>              say what this one is doing now: the waiters' sign of progress
 #   queue_done [ok]                 leave the line; ok: it went all the way, so its time counts
 #                                   toward the waiters' estimate
-# A ticket is five lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits),
-# its label, its phase, and the commit it built ("-" while it has none, "skip" when it can't land where
-# it sits; see "The stack"). A ticket
-# whose process is gone is deleted by whoever waits behind it.
+# A ticket is seven lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits),
+# its label, its phase, the commit it built ("-" while it has none, "skip" when it can't land where
+# it sits; see "The stack"), CI's verdict on that commit ("-", running, green or red) and the commit
+# it built on ("-" while it has none; both for "Batches"). A ticket whose process is gone is deleted
+# by whoever waits behind it.
 # A land.sh from a branch older than the line takes the flock directly; the head of the line waits
 # for it like for anyone else.
 # The same line as Citadel's own tools/deploy-queue.sh, kept inline so a scheme copies one file: a
@@ -97,6 +104,18 @@ park() { say "$*"; exit 75; }
 # wait for it to leave.
 # The commit is built on a detached HEAD from the branch as it was, so the branch never holds
 # another minion's unlanded commits, whatever stops this script.
+#
+# Batches (CI_BATCH over 1). The stack's unit becomes a batch: the first CI_STACK x CI_BATCH in line (skipped
+# tickets left out) build as above, in batches of CI_BATCH, and only the last of each batch (its top: the last in
+# line, if the batch isn't full) pushes, so one run covers them all. The next CI_BATCH build ahead: they rebase
+# and check, and push once they move into the window. The head lands to the deepest green commit of its batch,
+# after checking main and every member's commit sit under it and asking CI about it afresh; each member whose
+# commit is then on main says it landed in a batch and leaves. The commits in the middle of a batch never ran CI
+# on their own. A red top bisects: the member halfway between the deepest green one (or main) and the shallowest
+# red one pushes its commit as it is. Red isn't final until the member's commit sits on main, so nobody marks
+# itself skip for it, and nobody pushes with a red ticket ahead. A newcomer that joins a batch that isn't full is
+# its new top; the old top's run goes on. A ticket with no sixth line is from a land.sh older than batches: it is
+# a batch of its own, never landed by another.
 QUEUE_POLL=${LAND_QUEUE_POLL:-1}
 CHECK_LIMIT=${LAND_CHECK_TIMEOUT:-1800}
 [[ $CHECK_LIMIT =~ ^[0-9]+$ ]] || refuse "LAND_CHECK_TIMEOUT is in whole seconds, not \"$CHECK_LIMIT\""
@@ -111,21 +130,27 @@ for v in LAND_CI_START LAND_CI_TIMEOUT LAND_CI_POLL LAND_CI_GRACE LAND_CI_DOWN; 
 done
 CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60} CI_DOWN=${LAND_CI_DOWN:-600}
 [[ $CI_STACK =~ ^[1-9][0-9]*$ ]] || refuse "CI_STACK is a number from 1 up, not \"$CI_STACK\""
+[[ $CI_BATCH =~ ^[1-9][0-9]*$ ]] || refuse "CI_BATCH is a number from 1 up, not \"$CI_BATCH\""
 CI_ON=1
-[ -n "$CI_WORKFLOWS$CI_STATUS" ] || CI_ON='' CI_STACK=1 CI_LIMIT=0
+[ -n "$CI_WORKFLOWS$CI_STATUS" ] || CI_ON='' CI_STACK=1 CI_LIMIT=0 CI_BATCH=1
+BATCH='' BUILDERS=$CI_STACK BISECT=0 # BUILDERS: how many in line build at once
+if [ "$CI_BATCH" -gt 1 ]; then
+  BATCH=1 BUILDERS=$(((CI_STACK + 1) * CI_BATCH))
+  while [ $((1 << BISECT)) -lt "$CI_BATCH" ]; do BISECT=$((BISECT + 1)); done # a red batch's bisect: ceil(log2 CI_BATCH) more runs
+fi
 # Give up after this long with no change at the head of the line. The head's longest single phases
-# are the check (which may wait for the checks of the ones stacked behind it) and the CI run, so the
-# limit is those plus slack (the 30 s a check gets to die, the 60 s push): it stays longer than them
-# whatever a scheme sets them to.
+# are the check (which may wait for the checks of the ones stacked behind it) and the CI run (with batches,
+# the runs of a bisect too), so the limit is those plus slack (the 30 s a check gets to die, the 60 s push):
+# it stays longer than them whatever a scheme sets them to.
 # shortcut: a waiter counts with its own limits, not the holder's; write the holder's into its
 # ticket if landings in one scheme ever run with different limits.
-QUEUE_STALL=$((CHECK_LIMIT * CI_STACK + CI_LIMIT + ${LAND_QUEUE_SLACK:-300}))
-# The wait for the check lock: the checks ahead of this one (at most CI_STACK, each within CHECK_LIMIT, and half the
+QUEUE_STALL=$((CHECK_LIMIT * BUILDERS + CI_LIMIT * (1 + BISECT) + ${LAND_QUEUE_SLACK:-300}))
+# The wait for the check lock: the checks ahead of this one (at most BUILDERS, each within CHECK_LIMIT, and half the
 # slack for the 30 s each may take to die) end within it, so past it the check holding it is stopped (a SIGSTOP, a
 # frozen cgroup) or hung. Shorter than QUEUE_STALL, so the one waiting refuses before the ones behind it give up.
-CHECK_WAIT=$((CHECK_LIMIT * CI_STACK + ${LAND_QUEUE_SLACK:-300} / 2))
+CHECK_WAIT=$((CHECK_LIMIT * BUILDERS + ${LAND_QUEUE_SLACK:-300} / 2))
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
-QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID=''
+QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID='' Q_LINE=()
 
 # "<pid> <start time>" of a live process, or nothing. The start time tells a reused pid apart.
 queue_proc() {
@@ -151,8 +176,8 @@ queue_state() {
   echo "$stat"
 }
 
-queue_write() { # <file> <pid and start> <got> <label> <phase> <commit>: by a rename, so nobody reads half a ticket
-  printf '%s\n' "$2" "$3" "$4" "$5" "$6" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
+queue_write() { # <file> <pid and start> <got> <label> <phase> <commit> <verdict> <base>: by a rename, so nobody reads half a ticket
+  printf '%s\n' "$2" "$3" "$4" "$5" "$6" "$7" "$8" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
 }
 
 queue_set() { # <line, from 0> <text>: change one line of this landing's ticket
@@ -160,7 +185,7 @@ queue_set() { # <line, from 0> <text>: change one line of this landing's ticket
   [ -n "$t" ] && [ -e "$t" ] || return 0
   mapfile -t l 2>/dev/null <"$t" || return 0
   l[$1]=$2
-  queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "${l[3]:-}" "${l[4]:--}" 2>/dev/null || true
+  queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "${l[3]:-}" "${l[4]:--}" "${l[5]:--}" "${l[6]:--}" 2>/dev/null || true
 }
 
 queue_phase() { queue_set 3 "$1"; }
@@ -205,7 +230,7 @@ queue_join() {
       n=${t:-0}
     fi
     n=$(printf '%010d' $((10#$n + 1)))
-    queue_write "$Q_DIR/$n" "$Q_ME" 0 "$Q_LABEL" waiting -
+    queue_write "$Q_DIR/$n" "$Q_ME" 0 "$Q_LABEL" waiting - - -
     echo "$((10#$n))" >"$Q_DIR/.seq"
     echo "$n"
   )
@@ -214,7 +239,7 @@ queue_join() {
 
 queue_look() {
   local q=$Q_DIR t l ahead=0 head="" headname="" headpid="" sig typical sum count line detail look
-  Q_PRED='' Q_PREDNAME=''
+  Q_PRED='' Q_PREDNAME='' Q_LINE=()
   for t in "$q"/[0-9]*; do
     [[ ${t##*/} =~ ^[0-9]+$ ]] || continue # not a ticket half-written, or the glob itself
     [[ ${t##*/} < $Q_N ]] || break
@@ -232,7 +257,9 @@ queue_look() {
     [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *}; }
     # The last one seen is the one directly ahead. "skip": that one is red or in conflict where it sits, and
     # lands only if what is ahead of it fails, so the ones behind build on the one ahead of it meanwhile.
-    [ "${l[4]:-}" = skip ] || { Q_PRED=${l[4]:-} Q_PREDNAME=${l[2]:-?}; }
+    # Q_LINE: the ones ahead that aren't skipped, for batches: label, commit, verdict ("old" from a land.sh older than
+    # batches), base, pid.
+    [ "${l[4]:-}" = skip ] || { Q_PRED=${l[4]:-} Q_PREDNAME=${l[2]:-?}; Q_LINE+=("${l[2]:-?} ${l[4]:--} ${l[5]:-old} ${l[6]:--} ${l[0]}"); }
   done
   Q_AHEAD=$ahead
   [[ $Q_PRED =~ ^[0-9a-f]{40,}$ ]] || Q_PRED='' # "-": it has built nothing yet; no line: older than the stack
@@ -266,7 +293,7 @@ queue_look() {
       [ ! -f "$q/.took" ] || while read -r typical; do [[ $typical =~ ^[0-9]+$ ]] && sum=$((sum + typical)) count=$((count + 1)); done <"$q/.took" || true
       typical=$((count ? sum / count : QUEUE_TYPICAL))
       [ "$typical" -gt 0 ] || typical=1
-      line="$line, about $(((ahead * typical + 59) / 60)) min"
+      line="$line, about $((((ahead + CI_BATCH - 1) / CI_BATCH * typical + 59) / 60)) min"
     fi
     echo "queue: $line (ahead: $headname)" >&2
     [ -n "$Q_SAID" ] || echo "queue: the wait has no time limit while the line moves, so run this in the background with a long timeout rather than under a 10 min limit: a run that is stopped loses its place" >&2
@@ -436,17 +463,20 @@ blocked='' # why it can't land on $base (a conflict, a clash, a red check, red C
            # from their tickets if a red landing holding up the ones behind it ever costs real time.
 keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
 green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 landed='' ci_skipped=''
+verdict=-  # CI's verdict on $tip, as its ticket says it: -, running, green or red
+B_NUM=''   # with batches: which batch this one is in, from the head's (1); "Batches" below
+fronted='' # with batches: it has been in the head's batch, so CI's limits count
 
-# CI's verdict on $tip, by the exit codes in the header at CI_STATUS; what it found goes to $cilog.
+# CI's verdict on [commit] ($tip if none), by the exit codes in the header at CI_STATUS; what it found goes to $cilog.
 ci_verdict() {
-  local runs w path id status result one failed skipped rank worst=0 worst_rank=0
+  local sha=${1:-$tip} runs w path id status result one failed skipped rank worst=0 worst_rank=0
   : >"$cilog"
   ci_skipped=''
   if [ -n "$CI_STATUS" ]; then
-    timeout 120 bash -c "$CI_STATUS \"\$1\"" _ "$tip" >"$cilog" 2>&1 9>&-
+    timeout 120 bash -c "$CI_STATUS \"\$1\"" _ "$sha" >"$cilog" 2>&1 9>&-
     return
   fi
-  runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$tip&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5
+  runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5
   for w in $CI_WORKFLOWS; do
     one=3
     while IFS=$'\t' read -r path id status result url; do
@@ -468,7 +498,7 @@ ci_verdict() {
       echo "$w: $status $result $url" >>"$cilog"
       break # the newest run of this workflow on the commit
     done <<<"$runs"
-    [ "$one" != 3 ] || echo "$w: not started on ${tip:0:12}" >>"$cilog"
+    [ "$one" != 3 ] || echo "$w: not started on ${sha:0:12}" >>"$cilog"
     # The worst of the workflows: red, then no verdict, not started, running, green.
     case $one in 1) rank=4 ;; 4) rank=3 ;; 3) rank=2 ;; 2) rank=1 ;; *) rank=0 ;; esac
     [ "$rank" -le "$worst_rank" ] || worst=$one worst_rank=$rank
@@ -479,6 +509,23 @@ ci_verdict() {
 # The commit goes to the scratch branch, which starts CI on it. Deleted first: a push of the commit
 # the branch already has (a run to repeat) would start nothing. Forced on purpose: only this script
 # writes land/<branch>, so there is no one's work to overwrite. --no-verify: the check ran above.
+# CI on $tip, begun: a run of this very commit that is green or going (its pull request's, say) will do;
+# otherwise a new one.
+ci_start() {
+  local rc=0
+  ci_clock=$SECONDS ci_last=$SECONDS ci_begun=''
+  ci_verdict || rc=$?
+  case $rc in
+    0) green=1 && rm -f "$state/ci-down" && say "CI already passed ${tip:0:12}" ;;
+    2) say "CI is already running on ${tip:0:12}" ;;
+    *) ci_push ;;
+  esac
+  verdict=running
+  [ -z "$green" ] || verdict=green
+  queue_set 5 "$verdict"
+  queue_phase "waiting for CI on ${tip:0:12} since $(date +%H:%M)"
+}
+
 ci_push() {
   [ -n "$pushed" ] || ci_cancel # what a landing of this branch that was killed left running (a landed one's runs go on)
   hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
@@ -519,9 +566,10 @@ ci_ask() {
   fi
   case $rc in
     0)
-      green=1
+      green=1 verdict=green
       rm -f "$state/ci-down"
       say "CI is green on ${tip:0:12}"
+      queue_set 5 green
       queue_phase "CI passed ${tip:0:12}"
       return 0 ;;
     1)
@@ -529,8 +577,10 @@ ci_ask() {
       say "CI is red on ${tip:0:12}"
       [ "$Q_AHEAD" = 0 ] || say "that commit sits on $Q_PREDNAME's, which hasn't landed: waiting to see whether it does before giving up"
       blocked="CI is red on ${tip:0:12} (above), so $BRANCH is untouched. Fix it, commit, then run this again"
-      keep=$tip tip=''
-      queue_set 4 skip # nobody builds on a red commit
+      keep=$tip verdict=red
+      queue_set 5 red
+      # Nobody builds on a red commit. In a batch they already have: it stays, and the bisect finds where the fault is.
+      [ -n "$BATCH" ] || { tip=''; queue_set 4 skip; }
       queue_phase "CI is red"
       return 0 ;;
     4)
@@ -543,7 +593,7 @@ ci_ask() {
       queue_phase "waiting for CI on ${tip:0:12} again since $(date +%H:%M)"
       return 0 ;;
   esac
-  [ "$Q_AHEAD" = 0 ] || return 0
+  [ "$Q_AHEAD" = 0 ] || [ "$B_NUM" = 1 ] || return 0 # the limits count at the front: the head, or with batches the head's batch
   waited=$((SECONDS - ci_clock))
   [ "$rc" != 2 ] || ci_begun=1
   # Under a fresh note, not before CI_GRACE after the push: GitHub may not have handed the run to a runner yet, and
@@ -575,8 +625,10 @@ ci_ask() {
 build() {
   local want=$1 on phase rc=0 clashes fork log
   [ -z "$pushed" ] || ci_cancel # its run is on a commit that will never land now
-  base=$want tip='' blocked='' keep='' green='' retried='' pushed_at=''
+  base=$want tip='' blocked='' keep='' green='' retried='' pushed_at='' verdict=-
   queue_set 4 -
+  queue_set 5 -
+  queue_set 6 "$want"
   if [ "$Q_AHEAD" = 0 ]; then
     on="$BRANCH ($(git log -1 --format='%h "%s"' "$want"))" phase="rebasing onto $BRANCH"
   else
@@ -632,18 +684,99 @@ build() {
   fi
 
   tip=$(git rev-parse HEAD)
-  if [ -n "$CI_ON" ]; then
-    ci_clock=$SECONDS ci_last=$SECONDS ci_begun=''
-    # A run of this very commit that is green or going (its pull request's, say) will do; otherwise a new one.
-    ci_verdict || rc=$?
-    case $rc in
-      0) green=1 && rm -f "$state/ci-down" && say "CI already passed ${tip:0:12}" ;;
-      2) say "CI is already running on ${tip:0:12}" ;;
-      *) ci_push ;;
-    esac
-    queue_phase "waiting for CI on ${tip:0:12} since $(date +%H:%M)"
+  if [ -n "$BATCH" ]; then
+    queue_phase "checked ${tip:0:12}: CI runs on its batch's top"
+  elif [ -n "$CI_ON" ]; then
+    ci_start
   fi
   queue_set 4 "$tip"
+}
+
+# Batches (CI_BATCH over 1; the header at "Batches"). batch_look walks the line from the head: the ones ahead as
+# queue_look saw them, this one, then the ones behind, leaving out the gone, the skipped and the stopped, as
+# queue_look does ahead. It sets B_NUM (this one's batch, from the head's, 1), B_I (its place in the batch, from 1),
+# B_LABEL, B_SHA, B_VER, B_BASE and B_PID (each member's, from 1), and B_RED when a ticket ahead of this one is red.
+batch_add() { # <label> <commit> <verdict> <base> <pid and start>: the next in line joins the last batch, or starts one
+  if [ "$B_N" != 0 ] && { [ "$3" = old ] || [ "$B_N" = "$CI_BATCH" ]; }; then
+    B_AT=$((B_AT + 1)) B_N=0 B_LABEL=('') B_SHA=('') B_VER=('') B_BASE=('') B_PID=('')
+  fi
+  B_N=$((B_N + 1))
+  [ "$3" != old ] || B_N=$CI_BATCH # a land.sh older than batches is a batch of its own
+  B_LABEL+=("$1") B_SHA+=("$2") B_VER+=("$3") B_BASE+=("$4") B_PID+=("$5")
+}
+
+batch_look() {
+  local e t l label sha ver bas pid
+  B_AT=1 B_N=0 B_LABEL=('') B_SHA=('') B_VER=('') B_BASE=('') B_PID=('') B_RED=''
+  for e in "${Q_LINE[@]}"; do
+    read -r label sha ver bas pid <<<"$e"
+    [ "$ver" != red ] || B_RED=1
+    batch_add "$label" "$sha" "$ver" "$bas" "$pid"
+  done
+  batch_add "$branch" "${tip:--}" "$verdict" "${base:--}" "$Q_ME"
+  B_NUM=$B_AT B_I=$B_N
+  for t in "$Q_DIR"/[0-9]*; do
+    [ "$B_N" -lt "$CI_BATCH" ] || break
+    [[ ${t##*/} =~ ^[0-9]+$ ]] && [[ ${t##*/} > $Q_N ]] && mapfile -t l 2>/dev/null <"$t" || continue
+    [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && [ "${l[4]:-}" != skip ] || continue
+    if [ "${l[1]:-0}" = 0 ] && [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; then continue; fi
+    [ -n "${l[5]:-}" ] || break # older than batches: the next batch
+    batch_add "${l[2]:-?}" "${l[4]:--}" "${l[5]}" "${l[6]:--}" "${l[0]}"
+  done
+}
+
+# Which member of a red batch runs CI next: halfway between the deepest green one (0: main) and the shallowest red one.
+batch_mid() {
+  local i hi='' lo=0
+  for ((i = 1; i < ${#B_VER[@]}; i++)); do [ "${B_VER[i]}" != red ] || { hi=$i; break; }; done
+  [ -n "$hi" ] || return 0
+  for ((i = 1; i < hi; i++)); do [ "${B_VER[i]}" != green ] || lo=$i; done
+  [ $((hi - lo)) -le 1 ] || echo $(((lo + hi) / 2))
+}
+
+# Whether this one pushes now: in a batch that runs CI, never with a red ticket ahead (its fault may be in this
+# commit too: the bisect ahead goes first), and only as its batch's top or as a red batch's next halfway member.
+batch_push() {
+  [ "$B_NUM" -le "$CI_STACK" ] && [ -z "$B_RED" ] || return 1
+  [ "$B_I" = $((${#B_SHA[@]} - 1)) ] || [ "$(batch_mid)" = "$B_I" ]
+}
+
+# The head: the deepest green member of its batch, as G (its commit) and GI, once it may land. Its ticket's green is
+# checked: main and every member's commit, the head's down to G's, sit under G, each built on the one ahead (the
+# head on main: a member killed since leaves a gap), CI passes G when asked again now, and the members up to G are
+# all still running (one killed meanwhile must not land).
+batch_green() {
+  local i rc=0 under
+  G='' GI=''
+  for ((i = ${#B_VER[@]} - 1; i >= 1; i--)); do [ "${B_VER[i]}" != green ] || { GI=$i; break; }; done
+  [ -n "$GI" ] && [[ ${B_SHA[GI]} =~ ^[0-9a-f]{40,}$ ]] || return 1
+  G=${B_SHA[GI]} under=$(git rev-parse "refs/heads/$BRANCH")
+  git merge-base --is-ancestor "$under" "$G" 2>/dev/null || return 1
+  for ((i = 1; i <= GI; i++)); do
+    [ "${B_BASE[i]}" = "$under" ] && [[ ${B_SHA[i]} =~ ^[0-9a-f]{40,}$ ]] && git merge-base --is-ancestor "${B_SHA[i]}" "$G" 2>/dev/null || return 1
+    under=${B_SHA[i]}
+  done
+  ci_verdict "$G" || rc=$?
+  case $rc in
+    0) ;;
+    [1-4])
+      cat "$cilog" >&2
+      refuse "${B_LABEL[GI]}'s ticket says CI passed ${G:0:12}, but CI says otherwise now (exit $rc from ${CI_STATUS:-gh}; above), so nothing landed. A person needs to look before anyone tries again" ;;
+    *) return 1 ;; # no answer this time: asked again on the next look
+  esac
+  for ((i = 2; i <= GI; i++)); do [ "$(queue_proc "${B_PID[i]%% *}")" = "${B_PID[i]}" ] || return 1; done
+}
+
+# A member whose commit the head landed (its commit is on main now): it says so and leaves as landed.
+batch_landed() {
+  local i with='' on='its own'
+  for ((i = 1; i < ${#B_SHA[@]}; i++)); do
+    [[ ${B_SHA[i]} =~ ^[0-9a-f]{40,}$ ]] && git merge-base --is-ancestor "${B_SHA[i]}" "refs/heads/$BRANCH" 2>/dev/null || continue
+    if [ "$i" = "$B_I" ]; then on='its own'; else with="$with, ${B_LABEL[i]}" on="${B_LABEL[i]}'s"; fi
+  done
+  keep=$tip landed=ok
+  say "landed in a batch with ${with#, }, on $on CI run (${BRANCH} is now $(git rev-parse --short=12 "refs/heads/$BRANCH"))"
+  exit 0
 }
 
 # On the way out, however it ends: the worktree goes back on the branch, the place in line and the lock
@@ -661,7 +794,7 @@ leave() {
     if [ "$(git rev-parse "refs/heads/$branch")" != "$pre" ]; then
       say "$branch moved while this ran, so it is left as it is now"
       git checkout -q "$branch" 9>&-
-    elif [ -n "$keep" ] && { [ "$keep" = "$main" ] || [ "$base" = "$main" ]; }; then
+    elif [ -n "$keep" ] && { [ "$keep" = "$main" ] || [ "$base" = "$main" ] || [ -n "$landed" ]; }; then
       git checkout -q -B "$branch" "$keep" 9>&-
     else
       git checkout -q "$branch" 9>&-
@@ -679,9 +812,17 @@ leave() {
 
 queue_join "$state" "$branch"
 trap leave EXIT
-seen_main=''
+seen_main='' looked=''
 while :; do
+  # In a batch, landed by the head: its commit is under the one the head moved main to.
+  if [ -n "$BATCH" ] && [ -n "$tip" ] && git merge-base --is-ancestor "$tip" "refs/heads/$BRANCH" 2>/dev/null; then batch_landed; fi
   queue_look || exit 1
+  if [ -n "$BATCH" ]; then
+    batch_look
+    looked=1
+    # The limits on CI count from here: until now its run could be waiting on the batches ahead.
+    [ "$B_NUM" != 1 ] || [ -n "$fronted" ] || fronted=1 ci_clock=$SECONDS ci_begun=''
+  fi
   if [ "$Q_AHEAD" = 0 ]; then
     [ -n "$Q_HELD" ] || continue # queue_look waited on the lock, so this is no busy loop
     if [ -z "$seen_main" ]; then
@@ -691,6 +832,9 @@ while :; do
       seen_main=1 ci_clock=$SECONDS ci_begun='' # the limits on CI count from here: until now its run could be waiting on the ones ahead
     fi
     want=$(git rev-parse "refs/heads/$BRANCH")
+  elif [ -n "$BATCH" ]; then
+    want='' # the batches that run CI and the one that builds ahead build; further back waits
+    [ "$B_NUM" -gt $((CI_STACK + 1)) ] || want=$Q_PRED
   elif [ "$Q_AHEAD" -lt "$CI_STACK" ] && [ -n "$Q_PRED" ]; then
     want=$Q_PRED
   else
@@ -702,18 +846,28 @@ while :; do
     # it sat on has landed and only skipped ones are ahead for a moment, so the build and its CI run still stand.
     if [ -n "$base" ] && [ "$base" != "$(git rev-parse "refs/heads/$BRANCH")" ]; then
       [ -z "$pushed" ] || ci_cancel
-      base='' tip='' blocked='' green=''
+      base='' tip='' blocked='' green='' verdict=-
       queue_set 4 -
+      queue_set 5 -
+      queue_set 6 -
       queue_phase waiting
     fi
   elif [ "$want" != "$base" ]; then
     build "$want"
+    looked='' # the line may have moved while it built (a check takes minutes): batches decide on the next look
     [ -z "$blocked" ] || [ "$Q_AHEAD" = 0 ] || queue_set 4 skip
     [ -z "$blocked" ] || [ "$Q_AHEAD" = 0 ] || say "that was on top of $Q_PREDNAME's commit, which hasn't landed: ${blocked%%, so *}. Not final: waiting to see whether that one lands"
   fi
 
   if [ -n "$blocked" ]; then
     [ "$Q_AHEAD" != 0 ] || refuse "$blocked"
+  elif [ -n "$tip" ] && [ -n "$BATCH" ]; then
+    if [ -n "$looked" ]; then
+      [ "$verdict" != - ] || ! batch_push || ci_start
+      [ "$verdict" != running ] || ci_ask
+      B_VER[B_I]=$verdict
+      if [ "$Q_AHEAD" = 0 ] && [ -z "$blocked" ] && batch_green; then break; fi
+    fi
   elif [ -n "$tip" ]; then
     [ -z "$CI_ON" ] || [ -n "$green" ] || ci_ask
     if [ "$Q_AHEAD" = 0 ] && { [ -z "$CI_ON" ] || [ -n "$green" ]; }; then break; fi
@@ -721,14 +875,21 @@ while :; do
   sleep "$QUEUE_POLL"
 done
 
-# The head of the line, holding the lock, with $tip checked (and green in CI) on exactly today's main.
+# The head of the line, holding the lock, with $tip checked (and green in CI) on exactly today's main; with
+# batches, main moves to G, the deepest green commit of its batch, which holds $tip.
 # The merge keeps the lock, so nobody sees main half moved if this script is killed; gc.auto=0, so no git gc
 # detaches from it holding the lock.
 # A commit made here or on the branch while this waited is not in $tip: CI never saw it.
 { [ "$(git rev-parse HEAD)" = "$tip" ] && [ "$(git rev-parse "refs/heads/$branch")" = "$pre" ]; } || refuse "$branch or this worktree's HEAD moved while the landing waited, so what CI passed is not what is here now and nothing landed. Put any commit made meanwhile on $branch, then run this again"
-git -C "$MAIN" -c gc.auto=0 merge -q --ff-only "$tip" || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
+to=$tip
+[ -z "$BATCH" ] || to=$G
+git -C "$MAIN" -c gc.auto=0 merge -q --ff-only "$to" || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
 keep=$tip landed=ok # it landed, so its time counts toward the estimate, whatever the push does
-say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$tip")"
+say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$to")"
+if [ -n "$BATCH" ] && [ "$GI" != 1 ]; then
+  with=$(printf ', %s' "${B_LABEL[@]:2:GI-1}")
+  say "landed in a batch with ${with#, }, on ${B_LABEL[GI]}'s CI run"
+fi
 
 if ! git -C "$MAIN" remote get-url origin >/dev/null 2>&1; then
   say "no origin remote, so $BRANCH stays local"

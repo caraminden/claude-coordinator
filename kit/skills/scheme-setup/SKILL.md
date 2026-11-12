@@ -174,7 +174,9 @@ add `'land/**'` to each one's `push: branches:`, and give each a concurrency gro
 a landing pushes its rebased commit to `land/<branch>`, waits for CI on exactly that commit, and
 only then moves main. The landed commit's runs there are left to finish (main's CI may skip
 what they passed); every other run on the scratch branch is cancelled. The first `CI_STACK` landings in line (3) run CI at once, each built on the
-one ahead, so a landing doesn't wait a whole CI round per place in line. When "every workflow
+one ahead, so a landing doesn't wait a whole CI round per place in line. `CI_BATCH` (1, off) lets that many share one
+run on the last one's commit: for a line that often runs deep on slow CI, 3 or 4, with `CI_STACK` set to the runs
+the runners carry at once; the header says how a red batch is bisected. When "every workflow
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
 `CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion

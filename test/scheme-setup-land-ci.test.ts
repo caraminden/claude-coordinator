@@ -769,3 +769,23 @@ test('batches: a ticket from a land.sh older than batches (five lines) is a batc
     c.stop();
   }
 });
+
+test('batches: a member whose branch got a commit while it waited says that commit is not on main, and exits 1', async () => {
+  const c = ciSetup(3, { stack: '1', batch: '3', check: gated });
+  try {
+    const [a, b, d] = await c.lands(1, 2, 3);
+    c.open();
+    const td = await c.tip(d);
+    git(c.main, 'branch', '-f', 'ticket/2-x', git(c.main, 'commit-tree', '-p', 'ticket/2-x', '-m', 'late', 'ticket/2-x^{tree}'));
+    const late = git(c.main, 'rev-parse', 'ticket/2-x');
+    c.verdict(td, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await d.exit, 0, d.stderr());
+    assert.equal(await b.exit, 1, b.stderr());
+    assert.match(b.stderr(), /landed in a batch \(main is now [0-9a-f]{12}\), but ticket\/2-x or this worktree's HEAD moved while it waited, so what was committed since is not on main/);
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3']);
+    assert.equal(git(c.main, 'rev-parse', 'ticket/2-x'), late, 'the branch keeps its late commit');
+  } finally {
+    c.stop();
+  }
+});

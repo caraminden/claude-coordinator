@@ -466,6 +466,7 @@ green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 lan
 verdict=-  # CI's verdict on $tip, as its ticket says it: -, running, green or red
 B_NUM=''   # with batches: which batch this one is in, from the head's (1); "Batches" below
 fronted='' # with batches: it has been in the head's batch, so CI's limits count
+g_last='' g_quiet='' # with batches, the head: when it last asked CI about the commit it lands, and since when with no answer
 
 # CI's verdict on [commit] ($tip if none), by the exit codes in the header at CI_STATUS; what it found goes to $cilog.
 ci_verdict() {
@@ -744,7 +745,8 @@ batch_push() {
 # The head: the deepest green member of its batch, as G (its commit) and GI, once it may land. Its ticket's green is
 # checked: main and every member's commit, the head's down to G's, sit under G, each built on the one ahead (the
 # head on main: a member killed since leaves a gap), CI passes G when asked again now, and the members up to G are
-# all still running (one killed meanwhile must not land).
+# all still running (one killed meanwhile must not land). CI is asked at most every CI_POLL, and with no answer for
+# CI_START it parks, as ci_ask does.
 batch_green() {
   local i rc=0 under
   G='' GI=''
@@ -756,20 +758,30 @@ batch_green() {
     [ "${B_BASE[i]}" = "$under" ] && [[ ${B_SHA[i]} =~ ^[0-9a-f]{40,}$ ]] && git merge-base --is-ancestor "${B_SHA[i]}" "$G" 2>/dev/null || return 1
     under=${B_SHA[i]}
   done
+  [ -z "$g_last" ] || [ $((SECONDS - g_last)) -ge "$CI_POLL" ] || return 1
+  g_last=$SECONDS
   ci_verdict "$G" || rc=$?
   case $rc in
-    0) ;;
+    0) g_quiet='' ;;
     [1-4])
       cat "$cilog" >&2
       refuse "${B_LABEL[GI]}'s ticket says CI passed ${G:0:12}, but CI says otherwise now (exit $rc from ${CI_STATUS:-gh}; above), so nothing landed. A person needs to look before anyone tries again" ;;
-    *) return 1 ;; # no answer this time: asked again on the next look
+    *)
+      g_quiet=${g_quiet:-$SECONDS}
+      [ $((SECONDS - g_quiet)) -lt "$CI_START" ] || { cat "$cilog" >&2; park "CI gave no answer about ${G:0:12} for $(((CI_START + 59) / 60)) min (exit $rc from ${CI_STATUS:-gh}; above), so nothing landed. That is GitHub or this box's gh login, not the runners or the branch: a person needs to look. Park, and run this again after"; }
+      return 1 ;;
   esac
   for ((i = 2; i <= GI; i++)); do [ "$(queue_proc "${B_PID[i]%% *}")" = "${B_PID[i]}" ] || return 1; done
 }
 
-# A member whose commit the head landed (its commit is on main now): it says so and leaves as landed.
+# A member whose commit the head landed (its commit is on main now): it says so and leaves as landed, unless a commit
+# was made on the branch or here while it waited: that one is not on main, so it refuses as the head would.
 batch_landed() {
   local i with='' on='its own'
+  if [ "$(git rev-parse HEAD)" != "$tip" ] || [ "$(git rev-parse "refs/heads/$branch")" != "$pre" ]; then
+    keep=''
+    refuse "${tip:0:12} landed in a batch ($BRANCH is now $(git rev-parse --short=12 "refs/heads/$BRANCH")), but $branch or this worktree's HEAD moved while it waited, so what was committed since is not on $BRANCH. Put it on $branch, then run this again"
+  fi
   for ((i = 1; i < ${#B_SHA[@]}; i++)); do
     [[ ${B_SHA[i]} =~ ^[0-9a-f]{40,}$ ]] && git merge-base --is-ancestor "${B_SHA[i]}" "refs/heads/$BRANCH" 2>/dev/null || continue
     if [ "$i" = "$B_I" ]; then on='its own'; else with="$with, ${B_LABEL[i]}" on="${B_LABEL[i]}'s"; fi

@@ -62,6 +62,8 @@ const STUCK_MS = 60 * 60_000;
 const LIVE_MS = 24 * 60 * 60_000;
 /** Texts per embed request. */
 const PER_REQUEST = 2;
+/** Vectors a search reads at a time (1 MB), so a cold read holds the server briefly between yields. */
+const SEARCH_PAGE = 256;
 /** Messages that aren't a person's or a relay's ask: CI and server notices are noise. */
 const NOT_ASKS = new Set(['GitHub', 'System']);
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -226,22 +228,30 @@ export class Memory {
   async search(projectId: number, query: string, embed: Embed, model: string, opts: { limit?: number; ticketId?: number; personId?: number; openMinions?: boolean } = {}): Promise<MemoryHit[]> {
     const [q] = await embed([query], true);
     const limit = Math.min(Math.max(Math.floor(opts.limit ?? 5), 1), 20);
-    const rows = this.db.prepare(`SELECT m.id, m.vec FROM memory_chunks m JOIN tickets t ON t.id = m.ticket_id
-      WHERE m.project_id = ?1 AND t.project_id = ?1 AND m.model = ?2 AND m.ts >= t.created_at
+    const page = this.db.prepare(`SELECT m.id, m.vec FROM memory_chunks m JOIN tickets t ON t.id = m.ticket_id
+      WHERE m.project_id = ?1 AND t.project_id = ?1 AND m.model = ?2 AND m.ts >= t.created_at AND m.id > ?4
         ${opts.ticketId !== undefined ? 'AND m.ticket_id = ?3' : opts.personId !== undefined ? "AND m.person_id = ?3 AND m.source_kind = 'turn'" : ''}
-        ${opts.openMinions ? "AND m.source_kind = 'ticket' AND t.status != 'closed'" : ''}`)
-      .all(projectId, model, ...[opts.ticketId ?? opts.personId].filter((x) => x !== undefined)) as { id: number; vec: Uint8Array }[];
+        ${opts.openMinions ? "AND m.source_kind = 'ticket' AND t.status != 'closed'" : ''}
+      ORDER BY m.id LIMIT ${SEARCH_PAGE}`);
     const top: { id: number; score: number }[] = [];
-    for (const r of rows) {
-      const v = new Float32Array(r.vec.slice().buffer); // a copy: the blob's offset needn't be 4-aligned
-      if (v.length !== q.length) continue;
-      let s = 0;
-      for (let i = 0; i < v.length; i++) s += v[i] * q[i];
-      if (top.length < limit || s > top[top.length - 1].score) {
-        top.push({ id: r.id, score: s });
-        top.sort((a, b) => b.score - a.score);
-        if (top.length > limit) top.pop();
+    // In pages with a yield between them: read cold, Citadel's 3.5k vectors (14 MB) held the server 1.0 s in one go (#614).
+    let after = 0;
+    for (;;) {
+      const rows = page.all(projectId, model, opts.ticketId ?? opts.personId ?? null, after) as { id: number; vec: Uint8Array }[];
+      for (const r of rows) {
+        const v = new Float32Array(r.vec.slice().buffer); // a copy: the blob's offset needn't be 4-aligned
+        if (v.length !== q.length) continue;
+        let s = 0;
+        for (let i = 0; i < v.length; i++) s += v[i] * q[i];
+        if (top.length < limit || s > top[top.length - 1].score) {
+          top.push({ id: r.id, score: s });
+          top.sort((a, b) => b.score - a.score);
+          if (top.length > limit) top.pop();
+        }
       }
+      if (rows.length < SEARCH_PAGE) break;
+      after = rows[rows.length - 1].id;
+      await new Promise((r) => setImmediate(r));
     }
     const get = this.db.prepare('SELECT m.ticket_id, t.number, t.title, t.kind, t.status, m.source_kind, m.source_id, m.ts, m.text FROM memory_chunks m JOIN tickets t ON t.id = m.ticket_id WHERE m.id = ?');
     return top.map(({ id, score }) => ({ ...(get.get(id) as unknown as Omit<MemoryHit, 'score'>), score: Math.round(score * 1000) / 1000 }));

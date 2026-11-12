@@ -1939,17 +1939,29 @@ export class Store {
       ORDER BY id`).all(projectId, limit) as any;
   }
 
+  // Card events found answered, settled or no longer pending. None ever waits again (a plan never goes back to pending,
+  // and events are only appended), so later reads skip their rows: cold, re-reading Citadel's 335 card rows and the
+  // messages after them was 270 ms of the scheme list's 340 ms (#614).
+  private doneCards = new Set<number>();
+
   private openCardsWhere(scope: string, id: number): EventRow[] {
-    return this.db.prepare(`
-      SELECT e.* FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
-      WHERE ${scope} AND t.status != 'closed' AND e.kind IN ('plan', 'question') AND (
+    // Index-only: events_ticket_kind holds (ticket_id, kind, id).
+    const ids = (this.db.prepare(`SELECT e.id FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
+      WHERE ${scope} AND t.status != 'closed' AND e.kind IN ('plan', 'question')`).all(id) as { id: number }[])
+      .map((r) => r.id).filter((i) => !this.doneCards.has(i));
+    if (!ids.length) return [];
+    const open = this.db.prepare(`
+      SELECT e.* FROM events e WHERE e.id IN (SELECT value FROM json_each(?)) AND (
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
         OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
       AND NOT EXISTS (
         SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id AND ${PERSON_WROTE}
           -- a click on another card answers that card, not this one
           AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), json_extract(e.data, '$.id')) = json_extract(e.data, '$.id'))
-      ORDER BY e.id`).all(id) as unknown as EventRow[];
+      ORDER BY e.id`).all(JSON.stringify(ids)) as unknown as EventRow[];
+    const still = new Set(open.map((e) => e.id));
+    for (const i of ids) if (!still.has(i)) this.doneCards.add(i);
+    return open;
   }
 
   /**

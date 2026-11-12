@@ -201,6 +201,27 @@ test('a new title or note, or a new model, embeds again; a deleted minion takes 
   store.db.close();
 });
 
+test('a search reads the vectors in pages and still finds the best across all of them, yielding between pages (#614)', async () => {
+  const { store, A, a1, a2 } = world(join(root, 'pages.db'));
+  const put = store.db.prepare("INSERT INTO memory_chunks (project_id, ticket_id, source_kind, source_id, ts, text, vec, model) VALUES (?, ?, 'turn', ?, ?, ?, ?, 'fake')");
+  const now = Date.now();
+  // 600 rows, more than two pages; the best match sits on the last one, a narrowed search's on the first.
+  for (let i = 0; i < 600; i++) {
+    const text = i === 599 ? 'dentist dentist' : i === 3 ? 'usage dentist' : `filler ${i} words`;
+    put.run(A.id, i === 3 ? a2.id : a1.id, 10_000 + i, now, text, new Uint8Array(fakeVec(text).buffer));
+  }
+  let ticks = 0;
+  let on = true;
+  const tick = () => { if (on) { ticks++; setImmediate(tick); } };
+  setImmediate(tick);
+  const hits = await store.memory.search(A.id, 'dentist', embed, 'fake', { limit: 2 });
+  on = false;
+  assert.deepEqual(hits.map((h) => h.text), ['dentist dentist', 'usage dentist']);
+  assert.ok(ticks > 0, 'other work ran between pages');
+  assert.deepEqual((await store.memory.search(A.id, 'dentist', embed, 'fake', { ticketId: a2.id, limit: 20 })).map((h) => h.text), ['usage dentist']);
+  store.db.close();
+});
+
 test('the route: the indexer fills it in the background, and nobody reads a scheme they are not in', async () => {
   // The embedding service, faked over HTTP as llama-server answers.
   const fake = createServer(async (req, res) => {

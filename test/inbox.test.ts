@@ -111,6 +111,28 @@ test('openCardAt: when a minion\'s oldest open card was posted, for the list\'s 
   assert.equal(store.openCardAt(gone), null);
 });
 
+test('open cards read again on the same server: an answered card stays gone, new ones show, and a reopened minion\'s cards come back (#614)', () => {
+  const store = new Store(join(root, 'cards-again.sqlite'));
+  const p = store.createProject('One', null).id;
+  const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const a = minion('a'), b = minion('b');
+  const ids = () => store.openCards(p).map((e) => JSON.parse(e.data).id);
+
+  store.addEvent(a, 'question', { id: 'q1', questions: [] });
+  store.addEvent(b, 'plan', { id: 'p1', summary: 's', plan: 'p', status: 'pending' });
+  assert.deepEqual(ids(), ['q1', 'p1']);
+  store.updateTicket(b, { status: 'closed' });
+  store.addEvent(a, 'user_message', { author: 'Cara', text: 'answers', answer: { questionId: 'q1', answers: [] } });
+  assert.deepEqual(ids(), []);
+  assert.equal(store.openCardAt(a), null);
+
+  store.addEvent(a, 'question', { id: 'q2', questions: [] });
+  assert.deepEqual(ids(), ['q2'], 'a card posted after the done ones were remembered');
+  store.updateTicket(b, { status: 'idle' });
+  assert.deepEqual(ids(), ['p1', 'q2'], "a dismissed minion's card wasn't taken as done");
+  assert.ok(store.openCardAt(b));
+});
+
 test('each item carries the chat event it jumps to: its card\'s for approvals, questions and plans; none for ready and replies (#236)', () => {
   const store = new Store(join(root, 'events.sqlite'));
   const approvals = new Approvals((ticketId, kind, data) => store.addEvent(ticketId, kind, data));

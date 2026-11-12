@@ -247,7 +247,7 @@ ci_gate() {
 }
 
 # The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
-trap 'land_timing $? || true; queue_done; exec 9>&-; ci_done' EXIT
+trap 'land_timing $? || true; queue_done; exec 9>&- 7>&-; ci_done' EXIT
 fellback=
 rc=0
 land_mark ci ci

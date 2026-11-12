@@ -389,6 +389,32 @@ test("each minion's report of a restart names its own commit when the restart ca
   }
 });
 
+// F12b for #566's restart lock: a restart that couldn't open it died on set -e, and the minion that deployed heard nothing.
+test("a queued restart that can't open the restart lock tells the minions, and restarts nothing", { timeout: 30_000 }, async () => {
+  const live = join(root, 'rlock-live');
+  const dir = join(root, 'rlock-data');
+  mkdirSync(dir);
+  execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'one']);
+  new Store(join(dir, 'coordinator.db')).db.close();
+  const srv = await standIn(() => 201);
+  try {
+    mkdirSync(join(live, '.git', 'cc-deploy'), { mode: 0o700 });
+    writeFileSync(join(live, '.git', 'cc-deploy', 'restart.lock'), '', { mode: 0o444 });
+    writeFileSync(join(live, '.git', 'cc-deploy', 'reporters'), `${srv.url} tok 7\n`);
+    const copy = join(root, 'rlock-deploy.sh');
+    cpSync(join(repo, 'tools', 'deploy.sh'), copy);
+    const res = await promisify(execFile)('bash', [copy, 'restart'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: join(dir, 'coordinator.db'), DEPLOY_NOW: '1', DEPLOY_URL: 'http://127.0.0.1:1', DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_REMOTE: '' } }).catch((e) => e);
+    assert.notEqual(res.code ?? 0, 0, 'a failed restart');
+    const sent = srv.seen.find((s) => s.url === '/api/tickets/7/deploy');
+    assert.ok(sent, `minion 7 hears of it: ${res.stderr}`);
+    assert.match(JSON.parse(sent.body).text, /^Could not open the restart lock \S+restart\.lock, so nothing restarted/);
+    assert.ok(!existsSync(join(dir, 'backups')), 'no database copy');
+  } finally {
+    srv.close();
+  }
+});
+
 test('deploy.sh copies the database while the live server keeps writing it (#497)', { timeout: 60_000 }, async () => {
   const live = join(root, 'busy-live');
   const dir = join(root, 'busy-data');

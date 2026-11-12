@@ -304,6 +304,16 @@ test("a deploy lock that can't be opened gives up at once and says so, not a flo
   assert.deepEqual(tickets(state), []);
 });
 
+// The same for the restart lock (#566 put it beside the deploy lock): it waited out DEPLOY_RESTART_WAIT on a bad fd, then blamed a restart.
+test("a restart lock that can't be opened gives up at once and says so", () => {
+  const state = queueState();
+  writeFileSync(join(state, 'restart.lock'), '', { mode: 0o444 });
+  const res = spawnSync('bash', ['-c', `. '${queueLib}'; restart_lock "$1"`, 'x', state], { encoding: 'utf8', timeout: 20_000, env: { ...process.env, DEPLOY_RESTART_WAIT: '3' } });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /queue: can't open the restart lock \S+\/restart\.lock for writing, so nothing landed or deployed: a person needs to look at it/);
+  assert.doesNotMatch(res.stderr, /Bad file descriptor|has not been let go/);
+});
+
 // F12c: junk in queue/.seq made a landing go live and still exit 1, and every later one too, until a person deleted
 // it, and nothing named .seq.
 test('a queue/.seq that holds no number is named, and the next ticket still goes behind the ones in line', async () => {

@@ -315,7 +315,11 @@ restart() {
 
   # The restart lock, not the deploy lock (#566, tools/deploy-queue.sh): the next landing rebases and passes its gate
   # beside this, and takes this lock before it moves main or the checkout.
-  exec 7>"$STATE/restart.lock"
+  if ! exec 7>"$STATE/restart.lock"; then # under set -e it would end here with no word to anyone (#553 F12b)
+    R_OUT="could not open the restart lock"
+    report fail "Could not open the restart lock $STATE/restart.lock, so nothing restarted: a person needs to look at it. The checkout is at $(short HEAD), but the server still runs $(health commit | cut -c1-7)."
+    exit 1
+  fi
   flock 7
   R_LOCK=$(date +%s)
   rm -f "$STATE/now"

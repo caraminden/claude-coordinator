@@ -269,7 +269,10 @@ taken_back() {
 #                          restart ends within about 5 min: two restarts with their settle checks, and the reports).
 restart_lock() {
   local phase said="" started=$SECONDS limit=${DEPLOY_RESTART_WAIT:-600}
-  exec 7>"$1/restart.lock"
+  if ! exec 7>"$1/restart.lock"; then
+    echo "queue: can't open the restart lock $1/restart.lock for writing, so nothing landed or deployed: a person needs to look at it" >&2
+    return 1
+  fi
   until flock -w "$QUEUE_POLL" 7; do
     phase=$(queue_restart "$1")
     [ -n "$said" ] || echo "queue: waiting for the restart ahead to have its verdict${phase:+ ($phase)}; main and the live checkout stay as they are until then" >&2

@@ -357,7 +357,7 @@ test('the head of the line waits for a lock held outside it (an older land.sh), 
 });
 
 // Citadel's pipeline failure drill, F3 (#553), in the template's own line: a waiter stopped by a SIGSTOP (state T) holds
-// no land lock, yet everyone behind it waited on it with the lock free. A frozen cgroup shows state S: not covered.
+// no land lock, yet everyone behind it waited on it with the lock free. A frozen cgroup is below.
 test('a waiter that is stopped (SIGSTOP) is passed over: the one behind it takes the lock and lands, and it goes when it wakes', async () => {
   const q = queueSetup(3);
   const gate = { a: join(q.dir, 'gate-a'), c: join(q.dir, 'gate-c') };
@@ -389,6 +389,32 @@ test('a waiter that is stopped (SIGSTOP) is passed over: the one behind it takes
     for (const g of Object.values(gate)) writeFileSync(g, '');
     if (b) { b.child.kill('SIGCONT'); b.child.kill('SIGKILL'); }
     c?.child.kill('SIGKILL');
+  }
+});
+
+// The same for a waiter frozen with `systemctl freeze` (the cgroup freezer, #585): state S, and "frozen 1" in its cgroup's
+// cgroup.events. A fake cgroup root stands in for /sys/fs/cgroup, so nothing real is frozen.
+test('a waiter whose cgroup is frozen (state S) is passed over like a stopped one: the one behind it takes the free lock and lands', async () => {
+  const q = queueSetup(1);
+  const sleeper = spawn('sleep', ['60'], { stdio: 'ignore' });
+  try {
+    const pid = sleeper.pid!;
+    await until('the frozen one to be in state S, as a frozen cgroup leaves it', () => /\) S /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')));
+    const start = readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').split(' ')[19];
+    const cg = readFileSync(`/proc/${pid}/cgroup`, 'utf8').match(/^0::(.*)$/m)![1];
+    const fake = join(q.dir, 'cgroup');
+    mkdirSync(join(fake, cg), { recursive: true });
+    writeFileSync(join(fake, cg, 'cgroup.events'), 'populated 1\nfrozen 1\n');
+    mkdirSync(join(q.state, 'land-queue'), { recursive: true });
+    writeFileSync(join(q.state, 'land-queue', '0000000001'), `${pid} ${start}\n0\nticket/9-frozen\nwaiting\n-\n`);
+    writeFileSync(join(q.state, 'land-queue', '.seq'), '1\n');
+    q.open();
+    const a = q.land(1, { LAND_CHECK_TIMEOUT: '1', LAND_QUEUE_SLACK: '1', LAND_QUEUE_CGROUP: fake });
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.deepEqual(q.landed(), ['f1.txt: 1']);
+    assert.deepEqual(q.tickets(), ['0000000001'], 'the frozen one keeps its place, to go when it thaws');
+  } finally {
+    sleeper.kill('SIGKILL');
   }
 });
 

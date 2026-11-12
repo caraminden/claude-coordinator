@@ -175,8 +175,8 @@ test('the head of the line waits for a lock held outside it (the queued restart)
   }
 });
 
-// The pipeline failure drill's F3 (#553): a frozen unit or container stops a waiter (state T). It holds nothing, yet
-// everyone behind it waited on it with the lock free, and gave up.
+// The pipeline failure drill's F3 (#553): a SIGSTOP stops a waiter (state T). It holds nothing, yet everyone behind it
+// waited on it with the lock free, and gave up. A frozen cgroup is below.
 test('a waiter that is frozen is passed over: the one behind it takes the lock, and it goes when it wakes', { timeout: 60_000 }, async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
@@ -205,6 +205,38 @@ test('a waiter that is frozen is passed over: the one behind it takes the lock, 
     assert.deepEqual(order(state), ['a', 'c', 'b']);
   } finally {
     for (const w of [a, b, c]) w?.child.kill('SIGKILL');
+  }
+});
+
+// A waiter frozen with `systemctl freeze` (the cgroup freezer, #585) shows state S, not T. Its cgroup's cgroup.events
+// says "frozen 1": that counts as stopped too. A fake cgroup root stands in for /sys/fs/cgroup, so nothing real is frozen.
+function frozenWaiter(state: string, label: string) {
+  const sleeper = spawn('sleep', ['60'], { stdio: 'ignore' });
+  const pid = sleeper.pid!;
+  const start = readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').split(' ')[19];
+  const cg = readFileSync(`/proc/${pid}/cgroup`, 'utf8').match(/^0::(.*)$/m)![1];
+  const fake = join(state, 'cgroup');
+  mkdirSync(join(fake, cg), { recursive: true });
+  writeFileSync(join(fake, cg, 'cgroup.events'), 'populated 1\nfrozen 1\n');
+  mkdirSync(join(state, 'queue'), { recursive: true });
+  writeFileSync(join(state, 'queue', '0000000001'), `${pid} ${start}\n0\n${label}\nwaiting\n`);
+  writeFileSync(join(state, 'queue', '.seq'), '1\n');
+  return { sleeper, cgroupRoot: fake };
+}
+
+test('a waiter whose cgroup is frozen (state S) is passed over like a stopped one: the one behind it takes the free lock', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const f = frozenWaiter(state, 'frozen');
+  let c: ReturnType<typeof waiter> | undefined;
+  try {
+    await until('the frozen one to be in state S, as a frozen cgroup leaves it', () => /\) S /.test(readFileSync(`/proc/${f.sleeper.pid}/stat`, 'utf8')));
+    c = waiter(state, 'c', 'true', { DEPLOY_QUEUE_STALL: '3', DEPLOY_QUEUE_CGROUP: f.cgroupRoot });
+    assert.equal(await c.exit, 0, c.stderr());
+    assert.deepEqual(order(state), ['c']);
+    assert.ok(existsSync(join(state, 'queue', '0000000001')), 'the frozen one keeps its place, to go when it thaws');
+  } finally {
+    f.sleeper.kill('SIGKILL');
+    c?.child.kill('SIGKILL');
   }
 });
 

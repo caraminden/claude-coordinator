@@ -121,8 +121,8 @@ CI_ON=1
 # ticket if landings in one scheme ever run with different limits.
 QUEUE_STALL=$((CHECK_LIMIT * CI_STACK + CI_LIMIT + ${LAND_QUEUE_SLACK:-300}))
 # The wait for the check lock: the checks ahead of this one (at most CI_STACK, each within CHECK_LIMIT, and half the
-# slack for the 30 s each may take to die) end within it, so past it the check holding it is stopped (a SIGSTOP) or
-# hung. Shorter than QUEUE_STALL, so the one waiting refuses before the ones behind it give up.
+# slack for the 30 s each may take to die) end within it, so past it the check holding it is stopped (a SIGSTOP, a
+# frozen cgroup) or hung. Shorter than QUEUE_STALL, so the one waiting refuses before the ones behind it give up.
 CHECK_WAIT=$((CHECK_LIMIT * CI_STACK + ${LAND_QUEUE_SLACK:-300} / 2))
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
 QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID=''
@@ -139,12 +139,16 @@ queue_proc() {
   echo "$1 ${21}"
 }
 
-# The state letter of a process: T or t is stopped (a SIGSTOP). A frozen cgroup (systemctl --user freeze) shows S, not this.
+# The state letter of a process: T or t is stopped (a SIGSTOP), and so is a process in a frozen cgroup.
 queue_state() {
-  local stat
+  local stat cg
   stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
   stat=${stat##*) }
-  echo "${stat%% *}"
+  stat=${stat%% *}
+  # A frozen cgroup (systemctl freeze, a paused container) leaves its processes in state S: its cgroup.events says it.
+  if [[ $stat != [Tt] ]] && cg=$(grep -m 1 '^0::' "/proc/$1/cgroup" 2>/dev/null) &&
+    grep -qx 'frozen 1' "${LAND_QUEUE_CGROUP:-/sys/fs/cgroup}${cg#0::}/cgroup.events" 2>/dev/null; then stat=T; fi
+  echo "$stat"
 }
 
 queue_write() { # <file> <pid and start> <got> <label> <phase> <commit>: by a rename, so nobody reads half a ticket
@@ -220,9 +224,9 @@ queue_look() {
       rm -f "$t"
       continue
     fi
-    # A waiter that is stopped (a SIGSTOP) holds no land lock, so it is passed over; it tries for the lock like the head
-    # once it wakes. Those this one passed so are waiting on its lock, not ahead of it. A check it was running keeps
-    # the check lock: CHECK_WAIT bounds that.
+    # A waiter that is stopped (a SIGSTOP, a frozen cgroup) holds no land lock, so it is passed over; it tries for the
+    # lock like the head once it wakes. Those this one passed so are waiting on its lock, not ahead of it. A check it
+    # was running keeps the check lock: CHECK_WAIT bounds that.
     if [ "${l[1]:-0}" = 0 ] && { [ -n "$Q_HELD" ] || [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; }; then continue; fi
     ahead=$((ahead + 1))
     [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *}; }

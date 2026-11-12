@@ -36,12 +36,16 @@ queue_proc() {
   echo "$1 ${21}"
 }
 
-# The state letter of a process: T or t is stopped (a frozen unit or container, a SIGSTOP).
+# The state letter of a process: T or t is stopped (a SIGSTOP), and so is a process in a frozen cgroup (#585).
 queue_state() {
-  local stat
+  local stat cg
   stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
   stat=${stat##*) }
-  echo "${stat%% *}"
+  stat=${stat%% *}
+  # A frozen cgroup (systemctl freeze, a paused container) leaves its processes in state S: its cgroup.events says it.
+  if [[ $stat != [Tt] ]] && cg=$(grep -m 1 '^0::' "/proc/$1/cgroup" 2>/dev/null) &&
+    grep -qx 'frozen 1' "${DEPLOY_QUEUE_CGROUP:-/sys/fs/cgroup}${cg#0::}/cgroup.events" 2>/dev/null; then stat=T; fi
+  echo "$stat"
 }
 
 # <state>: the queued restart's phase, while its process lives.

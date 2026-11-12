@@ -2,7 +2,7 @@
 // kind of minion gets, the usage-limit countdowns, and the list's order.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { byUrgency, rowBar, rowState, SHIP } from '../public/threadstate.js';
+import { byUrgency, rowBar, rowState, rowUnread, SHIP } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -164,4 +164,40 @@ test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none
   assert.equal(bar({ state: 'outside', steps: half, wait: ci }), ci, 'waiting on CI after the turn');
   assert.equal(bar({ state: 'pending-deploy', wait: { kind: 'deploy', stage: 'restart', total: 3, done: 1 } }).total, 3, 'a deploy');
   assert.equal(bar({ state: 'outside', steps: half }), null, 'waiting elsewhere with no estimate of its own');
+});
+
+test('rowUnread: an unseen row is unread only when it has something for a person, never while it works or waits on the system (#576)', () => {
+  // Cara, 2026-11-11, of a row waiting to land and one deploying: "isnt that for when there is something you need to do?"
+  const unread = (over, usage = null) => { const row = t(over); return rowUnread(row, rowState(row, usage, NOW), false); };
+  const line = { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line, behind #575 (waiting for CI)', since: NOW - MIN, usual: 160 };
+  const ci = (stage) => ({ ...line, kind: 'ci', stage, chip: `CI · ${stage}` });
+  const forPerson = [
+    [{}, 'your move'],
+    [{ state: 'ready' }, 'ready'],
+    [{ state: 'complete', note: 'read the report' }, 'complete'],
+    [{ state: 'try' }, 'try it'],
+    [{ state: 'ready', pending_card_at: NOW - MIN }, 'an open card'],
+    [{ status: 'running', approvals: 1 }, 'an approval'],
+    [{ status: 'error' }, 'stuck'],
+    [{ state: 'blocked' }, 'blocked'],
+    [{ status: 'error', state: 'limited' }, 'limit hit, reset seen since', { session: { status: 'allowed' }, updatedAt: NOW }],
+  ];
+  for (const [over, what, usage] of forPerson) assert.equal(unread(over, usage), true, what);
+  const notForPerson = [
+    [{ state: 'outside', wait: line }, 'waiting to land'],
+    [{ state: 'pending-deploy', steps: { done: 1, total: 1 }, wait: { ...line, kind: 'restart', stage: 'restart', chip: 'restart · 2 turns' } }, 'deploying'],
+    [{ state: 'pending-deploy' }, 'deploying, no wait yet'],
+    [{ state: 'outside' }, 'waiting elsewhere'],
+    [{ state: 'outside', wait: ci('queued') }, 'CI queued'],
+    [{ state: 'outside', wait: ci('passed') }, 'CI passed: green chip, still the minion\'s move'],
+    [{ state: 'outside', wait: ci('failed') }, 'CI failed: red chip, still the minion\'s move'],
+    [{ status: 'error', state: 'limited', limit_resume_at: NOW + HOUR }, 'usage limit, resumes by itself'],
+    [{ status: 'error', state: 'limited' }, 'usage limit, nothing known'],
+    [{ status: 'running' }, 'working'],
+    [{ status: 'running', wait: ci('failed') }, 'working, CI failed in the turn'],
+    [{ state: 'parked' }, 'parked'],
+    [{ status: 'closed', state: 'ready' }, 'dismissed'],
+  ];
+  for (const [over, what] of notForPerson) assert.equal(unread(over), false, what);
+  assert.equal(rowUnread(t({ state: 'ready' }), rowState(t({ state: 'ready' }), null, NOW), true), false, 'seen since it changed');
 });

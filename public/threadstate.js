@@ -11,6 +11,14 @@ export function byUrgency(a, b, usage, now = Date.now()) {
 }
 
 /**
+ * Whether a list row shows unread (a dot and a bold title): it changed since you last opened it and has something for a
+ * person: your move, ready or complete, stuck or blocked. Never while it works, waits on a land, CI, a deploy or the usage
+ * limit, or is parked or dismissed (#576; Cara, 2026-11-11: "isnt that for when there is something you need to do?").
+ * By rank, not family: a wait recolours the chip (CI passed is green) without making it your move. `st` is its rowState.
+ */
+export const rowUnread = (t, st, seen) => !seen && (st.rank === 0 || (st.rank === 2 && t.state === 'blocked'));
+
+/**
  * A thread's state pill, coloured by family (one meaning each): you (amber, your move, with how
  * long it has waited), done (green), broken (red), work (blue, with steps done), wait (violet: the
  * usage reset, a deploy, CI), idle (grey: parked, dismissed). `cell` is the pill's text and `pulse`

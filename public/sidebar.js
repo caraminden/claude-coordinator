@@ -8,7 +8,7 @@ import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
-import { byUrgency, rowBar, rowState, SHIP } from './threadstate.js';
+import { byUrgency, rowBar, rowState, rowUnread, SHIP } from './threadstate.js';
 import { waitBar, waitClock, waitWords } from './wait.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
@@ -376,9 +376,9 @@ export function threadRow(t, href = threadHref(t)) {
   const card = cardBadge(t.open_cards ?? []);
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
-  // Unread (a dot and a bold title) marks any settled row that changed since you last opened it.
+  // Unread (a dot and a bold title) marks a row with something for a person that changed since you last opened it.
   const yours = !coord && st.rank === 0 ? ' yours' : '';
-  const unread = !coord && st.fam !== 'work' && st.fam !== 'idle' && !isSeen(t) ? ' unread' : '';
+  const unread = !coord && rowUnread(t, st, isSeen(t)) ? ' unread' : '';
   // No one-tap replies on list rows (#130): a stray tap on "Merge it" would ship work nobody opened.
   return h('a', { class: `thread-row s-${t.status} f-${st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),

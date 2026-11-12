@@ -166,6 +166,12 @@ test("a shell command's phase comes from the command first, then from its descri
     ['git status', '', 'explore'],
     ['cd repo && git log --oneline', '', 'explore'],
     ['sed -n 1,20p app.js', '', 'explore'],
+    // git run on another folder (-C) or with a setting (-c) is still the same git subcommand.
+    ['git -C /home/x/repo log --oneline -5', '', 'explore'],
+    ['git -C /repo log -5', 'Show recent commits', 'explore'],
+    ['git -C /repo commit -m x', '', 'save'],
+    ['git -c user.name=x commit -m x', '', 'save'],
+    ['git -C /repo add -A', '', 'change'],
     ['grep -rn foo src | head', '', 'explore'],
     // The command says nothing; the description decides.
     ['jj st', 'Deploy the app', 'save'],

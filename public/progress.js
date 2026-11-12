@@ -124,7 +124,8 @@ function describeCommand(command) {
  * checking they work, or saving them to git. Uses the command itself, then Claude's description.
  */
 function commandPhase(command, description = '') {
-  const c = String(command ?? '');
+  // git's options before the subcommand (-C <dir>, -c <name=value>) don't change which subcommand it is.
+  const c = String(command ?? '').replace(/\bgit((?: -[Cc] \S+| --(?:git-dir|work-tree)[= ]\S+)+)(?= )/g, 'git');
   if (/\bgit (commit|merge|push|pull|rebase|cherry-pick)\b|\bgh pr\b/.test(c)) return 'save';
   if (/\bsed -i|\bperl -i|\.write\(|writeFile|\bgit (add|checkout|restore|stash)\b|\b(mv|cp|rm|mkdir|touch|ln)\s|(^|[^2&])>\s*[\w./~-]+\.\w+|\b(npm|pnpm|yarn|pip3?|uv) (i|install|add)\b/.test(c)) return 'change';
   if (/(^|\W)(npm|pnpm|yarn|bun) (run )?test|pytest|jest|vitest|go test|cargo test|node --test|--check\b|\btsc\b|eslint|\bcurl\b|\bwget\b|systemctl|journalctl|screenshot|\b(node|python3?|deno|bun) (?!-e)\S+\.(m?js|ts|py)\b/.test(c)) return 'verify';

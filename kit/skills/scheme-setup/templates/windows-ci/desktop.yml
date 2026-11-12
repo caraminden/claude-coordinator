@@ -10,10 +10,14 @@
 # as passed: GitHub reports a run whose jobs were skipped as a success.
 name: desktop
 
+# When it runs (#603): on the commit a landing is about to land, which tools/land.sh pushes to land/<branch> (list this
+# file in its CI_WORKFLOWS), and when started by hand. Not on pull requests: only the land run decides, on the exact
+# commit that lands, and a PR's run tests a commit that is stale once main moves while doubling the runners' work
+# (Peek Auras, 2026-11-12). Not on main either: every commit there already passed here on land/**. Citadel's PR
+# watcher expects no checks on a PR when no workflow runs on pull_request, so it stays quiet.
 on:
   push:
-    branches: [main]
-  pull_request:
+    branches: ['land/**']
   workflow_dispatch:
 
 permissions:
@@ -22,7 +26,7 @@ permissions:
 concurrency:
   # One group per workflow, never shared with windows.yml's.
   group: desktop-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -33,7 +37,6 @@ jobs:
   # A locked PC, a Remote Desktop session left disconnected and a desktop that is never shown all refuse it, and then
   # every desktop test would fail on that, not on the scheme's code.
   screen:
-    if: github.event_name != 'pull_request' || vars.CI_RUNNER != 'github'
     runs-on: ${{ vars.CI_RUNNER == 'github' && 'windows-latest' || fromJSON('["self-hosted", "<scheme-slug>-desktop"]') }}
     timeout-minutes: 5
     outputs:

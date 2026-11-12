@@ -72,7 +72,8 @@ export interface PrSnapshot {
   /** GitHub's MERGEABLE, CONFLICTING or UNKNOWN (still working it out). */
   mergeable?: string;
   baseRef?: string;
-  /** The repo has Actions workflows on its default branch, so a PR with no checks is missing some. */
+  /** A workflow on the repo's default branch runs on pull_request, so a PR with no checks is missing some. Landings
+   * that CI gates on land/** need none (#603), and then a PR with no checks is how it should be. */
   hasCi?: boolean;
   /** A draft PR: a repo may run no PR CI on drafts, so no checks there is expected. */
   draft?: boolean;
@@ -229,7 +230,7 @@ export function githubRepo(remote: string): string | null {
 const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
   viewer { login }
   repository(owner: $owner, name: $name) {
-    workflows: object(expression: "HEAD:.github/workflows") { __typename }
+    workflows: object(expression: "HEAD:.github/workflows") { ... on Tree { entries { name object { ... on Blob { text } } } } }
     pullRequests(headRefName: $branch, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) {
       nodes {
         number url state isDraft headRefOid mergedAt closedAt mergeable baseRefName
@@ -281,6 +282,23 @@ function remark(kind: Remark['kind'], node: any, extra: Partial<Remark> = {}): R
   };
 }
 
+/**
+ * Whether a workflow file's `on:` names pull_request (or pull_request_target), in any of YAML's shapes: `on: pull_request`,
+ * `on: [push, pull_request]`, or a `pull_request:` key or `- pull_request` item under `on:`. Comments don't count.
+ */
+export function runsOnPullRequest(yaml: string): boolean {
+  const lines = yaml.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '').trimEnd());
+  const i = lines.findIndex((l) => /^["']?on["']?\s*:/.test(l));
+  if (i < 0) return false;
+  const pr = /(^|[\s\[,{-])pull_request(_target)?\b/;
+  if (pr.test(lines[i].replace(/^[^:]*:/, ''))) return true;
+  for (const l of lines.slice(i + 1)) {
+    if (/^\S/.test(l)) break; // the next top-level key
+    if (/^\s+(-\s*)?["']?pull_request(_target)?["']?\s*(:|$)/.test(l)) return true;
+  }
+  return false;
+}
+
 /** Turn the GraphQL answer into a snapshot of the branch's newest PR (null if it has none). */
 export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string | null } {
   const self = data?.viewer?.login ?? null;
@@ -307,7 +325,7 @@ export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string 
       remarks,
       mergeable: n.mergeable,
       baseRef: n.baseRefName,
-      hasCi: !!data.repository.workflows,
+      hasCi: (data.repository.workflows?.entries ?? []).some((e: any) => /\.ya?ml$/.test(e.name) && runsOnPullRequest(e.object?.text ?? '')),
       draft: !!n.isDraft,
     },
   };

@@ -173,10 +173,15 @@ check each regex matches what it should (`perl -ne 'print "$1\n" if /<regex>/' <
 
 When the plan has CI decide what lands (the scheme's checks run on runners, not on the shared
 box), turn on `land.sh`'s CI gate: set `CI_WORKFLOWS` to the workflow files that must be green,
-add `'land/**'` to each one's `push: branches:`, and give each a concurrency group per ref. Set
+add `'land/**'` to each one's `push: branches:`, and give each a concurrency group per ref. Take
+`pull_request` out of their triggers, and `main` too: the land run is the one that decides, on the exact
+commit that lands, so a PR run only tests a commit that goes stale once main moves, and a main run tests
+a commit that already passed. Each doubles the runners' work per landing (#603: Peek's PR runs were 3,700
+runner-minutes in a week). Keep `workflow_dispatch` for runs by hand; the Windows CI kit's workflows have
+this shape. Citadel's PR watcher expects no checks on a PR when no workflow runs on `pull_request`. Set
 `CHECK` to what should still run on the box before anything is pushed (`true` for nothing). Then
 a landing pushes its rebased commit to `land/<branch>`, waits for CI on exactly that commit, and
-only then moves main. The landed commit's runs there are left to finish (main's CI may skip
+only then moves main. The landed commit's runs there are left to finish (a scheme that keeps CI on main can skip
 what they passed); every other run on the scratch branch is cancelled. The first `CI_STACK` landings in line (3) run CI at once, each built on the
 one ahead, so a landing doesn't wait a whole CI round per place in line. `CI_BATCH` (1, off) lets that many share one
 run on the last one's commit: for a line that often runs deep on slow CI, 3 or 4, with `CI_STACK` set to the runs

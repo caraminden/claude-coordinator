@@ -4,15 +4,19 @@
 # Everything that needs no desktop runs here, on the scheme's build runners (<scheme-slug>-ci: Windows services under
 # NETWORK SERVICE on Cara's PC, `ci_runners add`). Jobs that open windows or read the screen are desktop.yml, a
 # workflow of its own on the session runner, so a desktop runner that is gone or busy never holds this workflow's
-# concurrency group, and main gets a build verdict on every push (Peek Auras, 2026-11-06).
-# Setting the repository variable CI_RUNNER to `github` sends main to GitHub's windows-latest (minutes billed at 2x
-# there, so pull requests are then skipped). Ask Cara before setting it.
+# concurrency group, and a landing gets a build verdict even while the desktop is away (Peek Auras, 2026-11-06).
+# Setting the repository variable CI_RUNNER to `github` sends the runs to GitHub's windows-latest (minutes billed at 2x
+# there). Ask Cara before setting it.
 name: windows
 
+# When it runs (#603): on the commit a landing is about to land, which tools/land.sh pushes to land/<branch> (list this
+# file in its CI_WORKFLOWS), and when started by hand. Not on pull requests: only the land run decides, on the exact
+# commit that lands, and a PR's run tests a commit that is stale once main moves while doubling the runners' work
+# (Peek Auras, 2026-11-12). Not on main either: every commit there already passed here on land/**. Citadel's PR
+# watcher expects no checks on a PR when no workflow runs on pull_request, so it stays quiet.
 on:
   push:
-    branches: [main]
-  pull_request:
+    branches: ['land/**']
   workflow_dispatch:
 
 permissions:
@@ -21,9 +25,8 @@ permissions:
 concurrency:
   # One group per workflow, never shared with desktop.yml's.
   group: windows-${{ github.ref }}
-  # A run on main is never cancelled once it starts; a newer push to a PR replaces its run. GitHub keeps at most one
-  # pending run per group, so while the PC is busy or off only the newest commit waits.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # tools/land.sh cancels its own runs that no longer count, and lets a landed commit's run finish.
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -31,7 +34,6 @@ defaults:
 
 jobs:
   build:
-    if: github.event_name != 'pull_request' || vars.CI_RUNNER != 'github'
     runs-on: ${{ vars.CI_RUNNER == 'github' && 'windows-latest' || fromJSON('["self-hosted", "<scheme-slug>-ci"]') }}
     timeout-minutes: 60
     steps:

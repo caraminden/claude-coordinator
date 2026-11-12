@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { GithubWatcher, NO_CHECKS_MS, STUCK_MS, check as checkOf, decide, githubRepo, parseSnapshot, turnSpans, verdict, type Check, type PrSnapshot, type Remark } from '../src/github.ts';
+import { GithubWatcher, NO_CHECKS_MS, STUCK_MS, check as checkOf, decide, githubRepo, parseSnapshot, runsOnPullRequest, turnSpans, verdict, type Check, type PrSnapshot, type Remark } from '../src/github.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'github-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -232,9 +232,30 @@ test('CI stuck waiting for a runner says so once, and the verdict still comes af
 
 test('the snapshot carries whether the PR conflicts, its base and whether the repo has workflows', () => {
   const data = (workflows: unknown) => ({ viewer: { login: 'cara' }, repository: { workflows, pullRequests: { nodes: [{ number: 67, url: 'u', state: 'OPEN', headRefOid: SHA, mergeable: 'CONFLICTING', baseRefName: 'main' }] } } });
-  const { pr: got } = parseSnapshot(data({ __typename: 'Tree' }));
+  const tree = (...files: [string, string][]) => ({ entries: files.map(([name, text]) => ({ name, object: { text } })) });
+  const { pr: got } = parseSnapshot(data(tree(['tests.yml', 'on:\n  push:\n    branches: [\'land/**\']\n'], ['ci.yml', 'on: [push, pull_request]\n'])));
   assert.deepEqual([got!.mergeable, got!.baseRef, got!.hasCi, got!.checks], ['CONFLICTING', 'main', true, []]);
   assert.equal(parseSnapshot(data(null)).pr!.hasCi, false);
+  // Workflows that CI only on land/** (#603), and files that aren't workflows: a PR is expected to have no checks.
+  assert.equal(parseSnapshot(data(tree(['tests.yml', 'on:\n  push:\n    branches: [\'land/**\']\n'], ['notes.md', 'on: pull_request']))).pr!.hasCi, false);
+});
+
+test('a workflow runs on pull_request only when its on: says so (#603)', () => {
+  for (const yes of [
+    'on: pull_request',
+    'on: [push, pull_request]',
+    "'on': {push: {branches: [main]}, pull_request: {}}",
+    'on:\n  push:\n    branches: [main]\n  pull_request:\n    types: [opened]\njobs: {}',
+    'name: x\non:\n  - push\n  - pull_request\n',
+    'on:\n  pull_request_target:\n',
+  ]) assert.equal(runsOnPullRequest(yes), true, yes);
+  for (const no of [
+    'on:\n  push:\n    branches: [main, \'land/**\']\n  workflow_dispatch:\njobs:\n  t:\n    if: github.event_name == \'pull_request\'\n',
+    'on:\n  push:\n  # pull_request: off since #603\n  workflow_dispatch:\n',
+    '# runs on pull_request\non: push',
+    'on:\n  pull_request_review:\n',
+    'jobs: {}',
+  ]) assert.equal(runsOnPullRequest(no), false, no);
 });
 
 test('the watcher times a head commit with no checks and a queued check from when it first saw them, a new push restarting the clock', async (t) => {

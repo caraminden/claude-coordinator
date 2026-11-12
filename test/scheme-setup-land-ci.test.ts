@@ -130,6 +130,48 @@ test('CI gate: after a landing parked on a CI limit, those of the next minutes p
   }
 });
 
+// Review of the above: under a fresh note the head parked on its first look after its own push, before GitHub could hand
+// the run to a runner, and on a red or lost verdict that CI_GRACE shows as "not started", calling either a runner outage.
+test('CI gate: under a fresh outage note, a run is given CI_GRACE to be taken, and a red or lost one is red or run again, not parked', async () => {
+  const c = ciSetup(3, { stack: '1' });
+  const fresh = () => writeFileSync(join(c.state, 'ci-down'), `${Math.floor(Date.now() / 1000)} no runner started CI on 0123456789ab within 1 min\n`);
+  const parked = /doesn't wait for it/;
+  try {
+    // Queued at first, then taken: it lands.
+    fresh();
+    const a = c.land(1, { LAND_CI_GRACE: '4' });
+    const sa = await c.tip(a);
+    await sleep(1000);
+    assert.equal(a.child.exitCode, null, a.stderr());
+    c.verdict(sa, 2);
+    await sleep(300);
+    c.verdict(sa, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.doesNotMatch(a.stderr(), parked);
+    // Red, which the grace shows as not started for a while: red, not an outage.
+    fresh();
+    const b = c.land(2, { LAND_CI_GRACE: '2' });
+    c.verdict(await c.tip(b), RED);
+    assert.equal(await b.exit, 1, b.stderr());
+    assert.match(b.stderr(), /CI is red on [0-9a-f]{12} \(above\), so main is untouched/);
+    assert.doesNotMatch(b.stderr(), parked);
+    // Lost: run again once, and the new run gets its own grace to be taken.
+    const d = c.land(3, { LAND_CI_GRACE: '3' });
+    const sd = await c.tip(d);
+    c.verdict(sd, LOST);
+    await until('the lost run to be run again', () => /running it again, once/.test(d.stderr()));
+    c.verdict(sd, 3);
+    await sleep(1000);
+    assert.equal(d.child.exitCode, null, d.stderr());
+    c.verdict(sd, GREEN);
+    assert.equal(await d.exit, 0, d.stderr());
+    assert.doesNotMatch(d.stderr(), parked);
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f3.txt: 3']);
+  } finally {
+    c.stop();
+  }
+});
+
 test("CI gate: a landed commit's runs on the scratch branch are left to finish; stale ones, and a refused landing's, are cancelled", async () => {
   const c = ciSetup(2, { stack: '1' });
   const full = (sha: string) => git(c.main, 'rev-parse', sha);

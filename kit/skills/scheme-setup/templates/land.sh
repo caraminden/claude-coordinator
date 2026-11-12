@@ -523,7 +523,9 @@ ci_ask() {
   [ "$Q_AHEAD" = 0 ] || return 0
   waited=$((SECONDS - ci_clock))
   [ "$rc" != 2 ] || ci_begun=1
-  if [ -z "$ci_begun" ] && { [ "$waited" -ge "$CI_START" ] || { [ "$rc" = 3 ] && ci_down_fresh; }; }; then
+  # Under a fresh note, not before CI_GRACE after the push: GitHub may not have handed the run to a runner yet, and
+  # until then a red or lost verdict shows as rc 3 (above).
+  if [ -z "$ci_begun" ] && { [ "$waited" -ge "$CI_START" ] || { [ "$rc" = 3 ] && { [ -z "$pushed_at" ] || [ $((SECONDS - pushed_at)) -ge "$CI_GRACE" ]; } && ci_down_fresh; }; }; then
     cat "$cilog" >&2
     [ "$rc" = 3 ] || park "CI gave no answer about ${tip:0:12} for $(((CI_START + 59) / 60)) min (exit $rc from ${CI_STATUS:-gh}; above), so nothing landed. That is GitHub or this box's gh login, not the runners or the branch: a person needs to look. Park, and run this again after"
     # Runs going elsewhere in the repo mean the runners are there and busy (the ones stacked behind this, say): the

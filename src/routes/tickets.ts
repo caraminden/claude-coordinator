@@ -221,9 +221,11 @@ export const ticketRoutes: Route[] = [
       // The view's replies are a list; compare the stored JSON.
       const stored = store.getTicket(id)!;
       for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];
+      let closeCancelled: string | null = null;
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);
         if (fields.state === 'pending-deploy') runner.deployPending(id);
+        if (fields.state) closeCancelled = runner.closeCancelled(id);
         if ('build' in fields) store.props.setBuild(id, fields.build ?? null, session.name);
         const who = caller?.id === id ? 'Claude' : session.name;
         if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });
@@ -242,7 +244,7 @@ export const ticketRoutes: Route[] = [
           app.notify(id, { kind: 'state', state: after.state, note: after.note }, caller ? null : session.name);
         }
       }
-      return json(res, 200, ticketView(app, id));
+      return json(res, 200, { ...ticketView(app, id), ...(closeCancelled && { close_cancelled: closeCancelled }) });
     },
   },
   {

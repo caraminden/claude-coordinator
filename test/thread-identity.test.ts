@@ -140,6 +140,15 @@ test('close_self says when it cleared state ready (#480)', async () => {
   assert.doesNotMatch((await tool('close_self', {})).content[0].text, /cleared/);
 });
 
+test('set_thread_status says when its state cancelled close_self (#604)', async () => {
+  respond = () => [200, { number: 7, title: 'T', status: 'running', state: 'complete', closing: false, close_cancelled: 'its state is complete, which keeps it open for people to read or close' }];
+  const r = await tool('set_thread_status', { state: 'complete', note: 'read: the report' });
+  assert.match(r.content[0].text, /^Updated\. close_self is cancelled: its state is complete.*stays open after this turn/);
+  assert.doesNotMatch(r.content[0].text, /closes after this turn/);
+  respond = () => [200, { number: 7, title: 'T', status: 'running', state: 'parked' }];
+  assert.doesNotMatch((await tool('set_thread_status', { state: 'parked' })).content[0].text, /cancelled/);
+});
+
 test('close_self on a server older than the tool says to wait for the restart', async () => {
   respond = () => [403, { error: 'A thread may only update itself' }];
   const r = await tool('close_self', {});

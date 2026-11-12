@@ -1016,7 +1016,7 @@ const THREAD_TOOLS = [
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open in state complete until someone has read it. It refuses while a question or plan card is open or the state is try or complete; a state ready is cleared.`,
+      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open in state complete until someone has read it. It refuses while a question or plan card is open or the state is try or complete; a state ready is cleared. Setting state complete, try or ready after it cancels the dismissal.`,
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Merged abc1234; live after the restart"' } },
@@ -1343,7 +1343,11 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'set_thread_status':
       if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}${tagNote(args)}`;
+    {
+      const t = await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args));
+      const cancelled = t.close_cancelled ? `close_self is cancelled: ${t.close_cancelled}, so this minion stays open after this turn. If nothing is left for people, set another state and call close_self again. ` : '';
+      return `Updated. ${cancelled}${ticketLine(t)}${tagNote(args)}`;
+    }
     case 'message_coordinator': {
       const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}) });
       if (r.held) return `Held, not delivered: ${HELD}`;

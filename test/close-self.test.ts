@@ -185,6 +185,33 @@ test('a card posted or try/ready set after close_self keeps it open at the turn 
   }
 });
 
+test('a keep-open state set after close_self cancels the close at once, so the view stops saying it closes (#604)', async () => {
+  for (const state of ['complete', 'try', 'ready'] as const) {
+    const id = newTicket();
+    runner.send(id, 'Cara', 'ship it');
+    assert.equal(runner.closeAfterTurn(id, null), true);
+    store.updateTicket(id, { state, note: 'read: the report' });
+    assert.match(runner.closeCancelled(id)!, new RegExp(`state is ${state}`), state);
+    assert.equal(runner.view(store.getTicket(id)!).closing, false, state);
+    // Nothing left to cancel the second time.
+    assert.equal(runner.closeCancelled(id), null);
+    await endTurn(id, 'ok');
+    assert.equal(store.getTicket(id)!.status, 'idle', state);
+    // One note, when it was cancelled; none again at the turn end.
+    assert.equal(notes(id).length, 1, state);
+    assert.match(notes(id)[0], new RegExp(`^Claude's close_self was cancelled: its state is ${state}, .*so it stays open\\.$`), state);
+  }
+  // A state that doesn't keep it open leaves the close armed.
+  const id = newTicket();
+  runner.send(id, 'Cara', 'ship it');
+  runner.closeAfterTurn(id, null);
+  store.updateTicket(id, { state: 'parked' });
+  assert.equal(runner.closeCancelled(id), null);
+  assert.equal(runner.view(store.getTicket(id)!).closing, true);
+  await endTurn(id, 'ok');
+  assert.equal(store.getTicket(id)!.status, 'closed');
+});
+
 test('close() marks a ticket closed, as the coordinator does', () => {
   const id = newTicket();
   runner.close(id, 'Coordinator closed this ticket.');

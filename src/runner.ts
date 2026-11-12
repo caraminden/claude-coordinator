@@ -875,6 +875,23 @@ export class Runner {
   }
 
   /**
+   * A state set after close_self that keeps the minion open (complete, try, ready) cancels the pending close
+   * there and then (#604), so the view and the state tool's reply stop promising a dismissal the turn end
+   * would refuse. Returns why it was cancelled, or null when nothing was.
+   */
+  closeCancelled(ticketId: number): string | null {
+    if (!this.closing.has(ticketId)) return null;
+    const kept = this.keptOpen(ticketId);
+    if (!kept?.startsWith('its state')) return null;
+    this.closing.delete(ticketId);
+    const { closing: _, ...turn } = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? { resumes: 0 };
+    this.store.setSetting(turnKey(ticketId), turn);
+    this.emit(ticketId, 'note', { text: `Claude's close_self was cancelled: ${kept}, so it stays open.` });
+    this.broadcastTicket(ticketId);
+    return kept;
+  }
+
+  /**
    * After a server restart: re-attach to turns still running in their units (or that ended while the
    * server was down), and catch up on their output. Turns whose process died too were cut off: mark
    * them, and resume them a few seconds apart unless they were stopped, set to close, or already

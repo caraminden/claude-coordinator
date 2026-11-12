@@ -9,6 +9,9 @@ const MAX_PAGE_EVENTS = 1000;
 // so an entry never goes stale; replaying a long minion's earlier events costs ~10 ms, and opens repeat.
 const plansByStore = new WeakMap<Store, Map<string, unknown[]>>();
 const PLANS_KEPT = 200;
+// Each chat's replay state at the furthest page start read, so a newer page (a growing chat's newest page starts
+// later each open) replays only the events since, not the whole history: 1.3 s for a Taskmaster on live (#609).
+const replaysByStore = new WeakMap<Store, Map<number, { before: number; p: ReturnType<typeof createProgress> }>>();
 
 /**
  * The newest page before `before` (see Store.eventsPage), with the task list as it stood just before
@@ -32,8 +35,17 @@ function planBefore(store: Store, ticketId: number, eventId: number) {
   const key = `${ticketId}:${eventId}`;
   let tasks = plans.get(key);
   if (!tasks) {
-    const p = createProgress();
-    for (const row of store.planEvents(ticketId, eventId)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
+    const replays = replaysByStore.get(store) ?? new Map();
+    replaysByStore.set(store, replays);
+    const at = replays.get(ticketId);
+    const resume = at && at.before <= eventId;
+    const p = resume ? structuredClone(at.p) : createProgress();
+    for (const row of store.planEvents(ticketId, eventId, resume ? at.before - 1 : 0)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
+    if (!at || resume) {
+      replays.delete(ticketId); // re-added last, so the oldest-used chat goes first
+      replays.set(ticketId, { before: eventId, p: structuredClone(p) });
+      if (replays.size > PLANS_KEPT) replays.delete(replays.keys().next().value!);
+    }
     tasks = p.tasks;
     plans.set(key, tasks);
     if (plans.size > PLANS_KEPT) plans.delete(plans.keys().next().value!);

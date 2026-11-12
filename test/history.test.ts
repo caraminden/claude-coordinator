@@ -247,3 +247,35 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   assert.equal(back.more, false);
   assert.equal((await get(`/api/projects/${p.id}/search?q=pelican`)).length, 2);
 });
+
+test('a newer page carries on from the last replay, with the task list a full replay gives (#609)', () => {
+  const { store, t } = setup('resume');
+  turn(store, t.id, 3);
+  turn(store, t.id, 3);
+  const plan = (id: string, subject: string) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TaskCreate', input: { subject, description: subject } }] } });
+  const made = (id: string, n: number) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully: x` }] } });
+  turn(store, t.id, 3, [plan('c1', 'One'), made('c1', 1)]);
+  turn(store, t.id, 3);
+  const first = historyPage(store, t.id, { limit: 12 });
+  assert.deepEqual(first.tasks.map((x: any) => x.subject), ['One']);
+  turn(store, t.id, 3, [plan('c2', 'Two'), made('c2', 2)]);
+  turn(store, t.id, 3);
+  const reads: number[] = [];
+  const planEvents = store.planEvents.bind(store);
+  store.planEvents = (id, before, after) => {
+    reads.push(after ?? 0);
+    return planEvents(id, before, after);
+  };
+  const later = historyPage(store, t.id, { limit: 12 });
+  assert.ok(later.events[0].id > first.events[0].id);
+  assert.ok(reads[0] > 0, 'it reads on from the last replay, not from the start');
+  const full = createProgress();
+  for (const row of planEvents(t.id, later.events[0].id)) applyEvent(full, row.kind, JSON.parse(row.data), row.created_at);
+  assert.deepEqual(later.tasks, full.tasks);
+  assert.deepEqual(later.tasks.map((x: any) => x.subject), ['One', 'Two']);
+  // Paging back to before the last replay replays from the start, and leaves the furthest one in place.
+  reads.length = 0;
+  const back = historyPage(store, t.id, { before: first.events[0].id, limit: 12 });
+  assert.equal(back.more, true);
+  assert.equal(reads[0], 0);
+});

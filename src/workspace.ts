@@ -120,9 +120,33 @@ export function syncMain(repoDir: string): Promise<void> {
   return next;
 }
 
-/** What a new minion branches from: local main, or origin's if a push put it ahead. Fetches first. */
-export async function ticketBase(repoDir: string): Promise<string> {
+/**
+ * A build's branch (build branches, specs/build-branches.md): `build/<n>` in the scheme repo, or origin's
+ * copy when only a push made it. null when the build has none, which is every build until its build
+ * minion makes the branch, and every scheme that uses the build label without build branches (Delve).
+ * Synchronous: the minion's prompt asks at the start of each turn.
+ */
+export function buildBranch(repoDir: string | null, build: number | null | undefined): string | null {
+  if (!repoDir || !build) return null;
+  for (const [ref, name] of [[`refs/heads/build/${build}`, `build/${build}`], [`refs/remotes/origin/build/${build}`, `origin/build/${build}`]]) {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoDir, stdio: 'ignore', timeout: 10_000 });
+      return name;
+    } catch {
+      // Not this one.
+    }
+  }
+  return null;
+}
+
+/**
+ * What a new minion branches from: its build's branch when it has one, else local main, or origin's if a
+ * push put it ahead. Fetches first.
+ */
+export async function ticketBase(repoDir: string, build: number | null = null): Promise<string> {
   await syncMain(repoDir);
+  const ofBuild = buildBranch(repoDir, build);
+  if (ofBuild) return ofBuild;
   const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
   let base = 'HEAD';
   try {
@@ -162,15 +186,16 @@ async function bornBase(repoDir: string, base: string): Promise<string> {
 
 /**
  * A chained minion starts later than it was created: fast-forward its branch to what a new minion
- * would branch from now, so it builds on the work it waited for. Only a fast-forward: a branch with
+ * would branch from now (its build's branch, for a minion in a build that has one), so it builds on the
+ * work it waited for. Only a fast-forward: a branch with
  * commits of its own, or uncommitted changes to a file the fast-forward would change, leaves it as it is;
  * other uncommitted files don't stop it. So it runs only between turns (src/wake.ts startChained).
  * Returns whether it moved.
  */
-export async function catchUpTicketDir(cwd: string, repoDir: string | null): Promise<boolean> {
+export async function catchUpTicketDir(cwd: string, repoDir: string | null, build: number | null = null): Promise<boolean> {
   if (!repoDir) return false;
   // Resolved in the scheme's repo: "HEAD" in the worktree would be the minion's own branch.
-  const base = await git(['rev-parse', `${await ticketBase(repoDir)}^{commit}`], repoDir);
+  const base = await git(['rev-parse', `${await ticketBase(repoDir, build)}^{commit}`], repoDir);
   const before = await git(['rev-parse', 'HEAD'], cwd);
   try {
     await git(['merge', '--ff-only', '--quiet', base], cwd);
@@ -182,7 +207,7 @@ export async function catchUpTicketDir(cwd: string, repoDir: string | null): Pro
 
 /**
  * Create the working directory for a ticket: a fresh git worktree on its own
- * branch when the project has a repo, otherwise a plain folder.
+ * branch when the project has a repo (from its build's branch when it has one), otherwise a plain folder.
  */
 export async function createTicketDir(
   dataDir: string,
@@ -191,13 +216,14 @@ export async function createTicketDir(
   ticketId: number,
   ticketNumber: number,
   title: string,
+  build: number | null = null,
 ): Promise<{ cwd: string; branch: string | null }> {
   const cwd = join(projectDir(dataDir, projectId), 'tickets', String(ticketId));
   if (!repoDir) {
     await mkdir(cwd, { recursive: true });
     return { cwd, branch: null };
   }
-  const base = await bornBase(repoDir, await ticketBase(repoDir));
+  const base = await bornBase(repoDir, await ticketBase(repoDir, build));
   const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
   // Branches are named by the per-project number; a branch left over from before
   // per-project numbering may already have the name, so add a suffix then.

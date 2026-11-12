@@ -645,14 +645,10 @@ export const projectRoutes: Route[] = [
       // Started from a brief in a file (#129): one minion per brief, so a second start is refused.
       const brief = body.brief == null ? null : { path: str(body.brief.path, 'Brief path', 1000), heading: typeof body.brief.heading === 'string' ? body.brief.heading.trim().slice(0, 500) : '' };
       if (brief && !store.claimBrief(project.id, brief.path, brief.heading, session.name)) throw new HttpError(409, 'That brief has been started already');
-      const { id, notes } = await app.newMinion(project, { title, props, model, effort }, session.name)
+      const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
-      if (build) {
-        store.updateTicket(id, { build });
-        store.props.setBuild(id, build, session.name);
-      }
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.
       const asker = caller && store.turnAsker(caller.id);
       if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);

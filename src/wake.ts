@@ -481,7 +481,7 @@ export async function startChained(c: Chain, why: string, { store, runner, waite
   let failed: { err: unknown } | null = null;
   const sent = runner.onLane(c.ticket, 'chained start', async () => {
     try {
-      await catchUpTicketDir(t.cwd, repo).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
+      await catchUpTicketDir(t.cwd, repo, t.build).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
       if (!waiters.release(c.ticket)) return; // dismissed meanwhile
       try {
         runner.emit(c.ticket, 'note', { text: `${why}, so this minion started.` });

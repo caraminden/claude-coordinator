@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { catchUpMain, catchUpTicketDir, createTicketDir, mainSync, syncMain } from '../src/workspace.ts';
+import { buildBranch, catchUpMain, catchUpTicketDir, createTicketDir, mainSync, syncMain } from '../src/workspace.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'wtbase-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -60,6 +60,44 @@ test('a chained minion catches up to main when it starts, but never past commits
   assert.equal(head(waiting), own);
 });
 
+// Build branches (specs/build-branches.md): the branch existing is the switch.
+test('a minion in a build branches from build/<n> once it exists, and from main before that or without a build', async () => {
+  const inBuild = async (build: number | null) => (await createTicketDir(root, 1, repo, ++n, n, 'x', build)).cwd;
+  assert.equal(head(await inBuild(7)), git(['rev-parse', 'main'], repo), 'no build/7 yet: main');
+  git(['branch', 'build/7', 'main'], repo);
+  const feeder = await inBuild(7);
+  commit(feeder, 'a feeder folds in');
+  git(['update-ref', 'refs/heads/build/7', head(feeder)], repo);
+  commit(repo, 'main moves on');
+  assert.equal(head(await inBuild(7)), git(['rev-parse', 'build/7'], repo), 'the build branch, not main');
+  assert.equal(head(await inBuild(8)), git(['rev-parse', 'main'], repo), 'another build without a branch: main');
+  assert.equal(head(await inBuild(null)), git(['rev-parse', 'main'], repo), 'no build: main');
+  assert.equal(buildBranch(repo, 7), 'build/7');
+  assert.equal(buildBranch(repo, 8), null);
+  assert.equal(buildBranch(null, 7), null);
+});
+
+test("a build branch that only origin has is the base too", async () => {
+  const pushed = join(root, 'pushed-build');
+  git(['clone', '--quiet', remote, pushed], root);
+  commit(pushed, 'on build 9');
+  git(['push', '--quiet', 'origin', 'HEAD:refs/heads/build/9'], pushed);
+  assert.equal(buildBranch(repo, 9), null, 'not fetched yet');
+  const cwd = (await createTicketDir(root, 1, repo, ++n, n, 'x', 9)).cwd;
+  assert.equal(buildBranch(repo, 9), 'origin/build/9');
+  assert.equal(head(cwd), head(pushed));
+});
+
+test('a chained minion in a build catches up to its build branch, not main', async () => {
+  git(['branch', 'build/10', 'main'], repo);
+  const waiting = (await createTicketDir(root, 1, repo, ++n, n, 'x', 10)).cwd;
+  const other = (await createTicketDir(root, 1, repo, ++n, n, 'x', 10)).cwd;
+  commit(other, 'the feeder it waited for');
+  git(['update-ref', 'refs/heads/build/10', head(other)], repo);
+  commit(repo, 'main moves on');
+  assert.equal(await catchUpTicketDir(waiting, repo, 10), true);
+  assert.equal(head(waiting), git(['rev-parse', 'build/10'], repo));
+});
 
 // #208: the scheme checkout's main follows origin's when PRs merge on GitHub, and only then.
 test("main catches up: only a fast-forward, only on a clean main, never when it's level, ahead or diverged", async () => {

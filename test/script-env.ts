@@ -11,9 +11,14 @@
 //   CITADEL_TEST_PROGRESS(_TO)    citadel-heavy and run-tests.sh -> citadel-node -> its reporter: where a run's counts go.
 export const SCRIPT_ENV = ['DEPLOY_LOCKED', 'DEPLOY_TESTED', 'DEPLOY_TIMES', 'DEPLOY_QUEUE_TICKET', 'CITADEL_HEAVY_HELD', 'LAND_REBASED', 'LAND_REDO', 'LAND_FIX', 'CITADEL_TEST_PROGRESS', 'CITADEL_TEST_PROGRESS_TO'] as const;
 
-/** `process.env` without the variables the scripts export, plus `extra` (an undefined value removes a name). */
+/**
+ * `process.env` without the variables the scripts export and without a person's own DEPLOY_*, LAND_* and
+ * CITADEL_HEAVY_* knobs (an exported DEPLOY_BACKUPS would fail a land's suite run), plus `extra`, which a test
+ * uses to set one on purpose (an undefined value removes a name).
+ */
 export function scriptEnv(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const name of SCRIPT_ENV) delete env[name];
+  for (const name of Object.keys(env)) if (/^(DEPLOY|LAND|CITADEL_HEAVY)_/.test(name)) delete env[name];
   return { ...env, ...extra };
 }

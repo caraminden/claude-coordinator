@@ -21,6 +21,21 @@ test('scriptEnv drops every variable the scripts export and keeps the rest', () 
   }
 });
 
+test("scriptEnv drops a person's own DEPLOY_*, LAND_* and CITADEL_HEAVY_* knobs, and extra can still set them", () => {
+  const knobs = { DEPLOY_BACKUPS: '5', LAND_CI_TIMEOUT: '1', CITADEL_HEAVY_SLOTS: '1' };
+  Object.assign(process.env, knobs);
+  try {
+    const env = scriptEnv();
+    for (const name of Object.keys(knobs)) assert.equal(env[name], undefined, `${name} leaked`);
+    const set = scriptEnv({ DEPLOY_BACKUPS: '2', LAND_CI_TIMEOUT: '9' });
+    assert.equal(set.DEPLOY_BACKUPS, '2');
+    assert.equal(set.LAND_CI_TIMEOUT, '9');
+    assert.equal(set.CITADEL_HEAVY_SLOTS, undefined);
+  } finally {
+    for (const name of Object.keys(knobs)) delete process.env[name];
+  }
+});
+
 test('the list covers everything the scripts export or pass to a child by assignment', () => {
   const found = new Set<string>();
   for (const f of readdirSync(tools).filter((n) => n === 'citadel-heavy' || n.endsWith('.sh'))) {

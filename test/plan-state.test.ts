@@ -45,8 +45,9 @@ const HISTORY: object[] = [
 
 const plain = (p: any) => JSON.parse(JSON.stringify({ ...p, pendingCreates: [...p.pendingCreates] }));
 function fullReplay(ticketId: number) {
+  // As the runner replays: timed by the stored events.
   const p = createProgress();
-  for (const row of store.planEvents(ticketId)) applyEvent(p, row.kind, JSON.parse(row.data));
+  for (const row of store.planEvents(ticketId)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
   return p;
 }
 
@@ -117,4 +118,18 @@ test('rewriting the stored events, or deleting the minion, drops the saved state
   store.rewriteClaudeEvents((d) => JSON.parse(JSON.stringify(d).replace('"Build"', '"Rebuild"')));
   assert.equal(store.getSetting(planKey(a.id)), null);
   assert.equal((restart() as any).progressFor(a.id).tasks[1].subject, 'Rebuild');
+});
+
+test("a running minion's row gets its step's start and guess for the list's bar (#573)", () => {
+  const t = newTicket();
+  const live = restart();
+  feed(live, t.id, [init, ...create(1, 'Look'), ...create(2, 'Build'), update(1, { status: 'in_progress', metadata: { estimate: 3 } })]);
+  const started = store.listEvents(t.id).at(-1)!.created_at;
+  store.updateTicket(t.id, { status: 'running' });
+  assert.deepEqual(live.view(store.getTicket(t.id)!).steps, { done: 0, total: 2, since: started, usual: 180 });
+  // A restarted server finds the same start from the stored events.
+  assert.deepEqual(restart().view(store.getTicket(t.id)!).steps, { done: 0, total: 2, since: started, usual: 180 });
+  // Not running: the row's bar counts steps done, so no time goes out.
+  store.updateTicket(t.id, { status: 'idle' });
+  assert.deepEqual(live.view(store.getTicket(t.id)!).steps, { done: 0, total: 2 });
 });

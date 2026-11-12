@@ -27,7 +27,7 @@ import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKe
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
-import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
+import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
@@ -657,11 +657,14 @@ export class Runner {
     const closed = ticket.status === 'closed';
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
-    const { total, done } = closed ? { total: 0, done: 0 } : stepInfo(this.progressFor(ticket.id));
+    const p = closed ? null : this.progressFor(ticket.id);
+    const { total, done } = p ? stepInfo(p) : { total: 0, done: 0 };
+    // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
+    const est = p && ticket.status === 'running' ? planEstimate(p, true) : null;
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     return {
       // A network wait's held messages are queued too: they go first into its resume (takeQueue).
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
       // When it resumes by itself after the usage limit, if it waits for that.
@@ -2332,14 +2335,15 @@ export class Runner {
     const slim = slimEvent(ev);
     if (!slim) return;
     const progress = this.progressFor(ticketId);
-    applyEvent(progress, 'claude', slim);
+    const row = this.emit(ticketId, 'claude', slim);
+    // The stored event's own time, so a step's start matches what a replay of the events (history, the backfill) finds.
+    applyEvent(progress, 'claude', slim, row.created_at);
     const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : describeActivity(ev);
     if (activity && activity !== this.store.getTicket(ticketId)?.last_activity) {
       this.store.updateTicket(ticketId, { last_activity: activity });
       // Keep the board's progress line live, not just on status changes.
       this.broadcastTicket(ticketId);
     }
-    const row = this.emit(ticketId, 'claude', slim);
     if (ev.type === 'result') this.savePlan(ticketId, progress, row.id);
     if (ev.type === 'user' && (ev.message?.content ?? []).some?.((b: any) => typeof b?.text === 'string' && b.text.includes(SENT_BACK))) this.sentBack.add(ticketId);
     // shortcut: a turn stopped, or the server restarted, before the result keeps both versions; rare, so left.
@@ -2462,7 +2466,7 @@ export class Runner {
       const usable = saved?.rules === PLAN_RULES && Number.isInteger(saved.upTo) && Array.isArray(saved.p?.tasks) && Array.isArray(saved.p.pendingCreates);
       p = usable ? { ...saved.p, pendingCreates: new Map(saved.p.pendingCreates) } as ReturnType<typeof createProgress> : createProgress();
       const rows = this.store.planEvents(ticketId, undefined, usable ? saved.upTo : 0);
-      for (const row of rows) applyEvent(p, row.kind, JSON.parse(row.data));
+      for (const row of rows) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
       this.progress.set(ticketId, p);
       // The full replay is paid once: an idle minion would otherwise pay it after every restart.
       if (!usable) this.savePlan(ticketId, p, rows.at(-1)?.id ?? 0);

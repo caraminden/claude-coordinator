@@ -370,6 +370,9 @@ export function threadRow(t, href = threadHref(t)) {
   const wait = !coord && t.status !== 'closed' && t.wait;
   // A wait says more than the ship badge ("restart · 2 turns" over "deploying"), so the row shows one.
   const ship = shipStage?.badge && !wait ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
+  // The chat head's bar (#573): a wait's own estimate, else the running step against its guess, else steps done.
+  const bar = wait && (wait.total || wait.usual) ? waitBar(wait)
+    : t.steps && st.counted ? waitBar(!wait && t.steps.usual ? { since: t.steps.since, usual: t.steps.usual } : t.steps) : '';
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks any settled row that changed since you last opened it.
@@ -384,5 +387,5 @@ export function threadRow(t, href = threadHref(t)) {
       : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
-    wait ? waitBar(wait) : '');
+    bar);
 }

@@ -595,7 +595,7 @@ test("the land alarm joins CI health's one alert under the live scheme, rings wi
 test('a failed scheduled run on main tells its scheme\'s Taskmaster once, failed step and link included; green, push and old runs say nothing (#588)', async () => {
   const w = world();
   const told: [string, string][] = [];
-  const deps = { ...w.deps, tell: (p: { name: string }, text: string) => told.push([p.name, text]) };
+  const deps = { ...w.deps, tell: (p: { name: string }, text: string) => (told.push([p.name, text]), true) };
   const health = new CiHealth(w.store, deps);
   const nightly = (fields: Partial<Run>) => runOf({ name: 'Tests', workflow_id: 9, created_at: iso(2 * HOUR), ...fields });
   const red = nightly({ id: 4242, head_sha: 'abc1234def', conclusion: 'failure' });
@@ -620,11 +620,35 @@ test('a failed scheduled run on main tells its scheme\'s Taskmaster once, failed
   assert.match(told[1][1], /^Peek Auras's scheduled Tests run on main failed on def5678: https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4343\./);
 });
 
-test('a failed scheduled run waits, untold, while nothing can tell the Taskmaster (#588)', async () => {
+test('a failed scheduled run waits, untold, while nothing can tell the Taskmaster: no hook, no Taskmaster, or a send that throws (#588)', async () => {
   const w = world();
-  w.gh.scheduled = [runOf({ id: 4444, name: 'Tests', conclusion: 'failure' })];
+  // Queued for most of a day before it ran: aged by when it ended.
+  w.gh.scheduled = [runOf({ id: 4444, name: 'Tests', conclusion: 'failure', created_at: iso(30 * HOUR), updated_at: iso(HOUR) })];
   await w.health.tick(NOW);
   const told: string[] = [];
-  await new CiHealth(w.store, { ...w.deps, tell: (_p, text) => told.push(text) }).tick(NOW + 5 * MIN);
+  let answer: 'none' | 'throw' | 'ok' = 'none';
+  const health = new CiHealth(w.store, { ...w.deps, tell: (_p, text) => {
+    if (answer === 'throw') throw new Error('send failed');
+    if (answer === 'ok') told.push(text);
+    return answer === 'ok';
+  } });
+  await health.tick(NOW + 5 * MIN);
+  answer = 'throw';
+  await health.tick(NOW + 10 * MIN);
+  assert.deepEqual(told, []);
+  answer = 'ok';
+  await health.tick(NOW + 15 * MIN);
+  await health.tick(NOW + 20 * MIN);
   assert.equal(told.length, 1);
+});
+
+test("a failed scheduled run whose jobs can't be read still tells, without the step (#588)", async () => {
+  const w = world();
+  const told: string[] = [];
+  const health = new CiHealth(w.store, { ...w.deps, tell: (_p, text) => (told.push(text), true) });
+  w.gh.scheduled = [runOf({ id: 4545, name: 'Tests', head_sha: 'feed123abc', conclusion: 'failure' })];
+  w.gh.down = /runs\/4545\/jobs/;
+  await health.tick(NOW);
+  assert.equal(told.length, 1);
+  assert.match(told[0], /^Peek Auras's scheduled Tests run on main failed on feed123: https:/);
 });

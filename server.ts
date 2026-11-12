@@ -514,6 +514,7 @@ const ciHealth = new CiHealth(store, {
   tell: (project, text) => {
     const coordinator = store.getCoordinator(project.id);
     if (coordinator) runner.send(coordinator.id, APP_NAME, text);
+    return !!coordinator;
   },
 });
 if (!BOOT_CHECK) ciHealth.start();

@@ -50,6 +50,7 @@ export interface Run {
   status: string;
   conclusion: string | null;
   created_at: string;
+  updated_at?: string;
   run_attempt?: number;
 }
 export interface Job {
@@ -387,8 +388,8 @@ export interface CiHealthDeps {
   get?: GhGet;
   /** Message a minion (wake_when_runners_back); no message, no wakes. */
   wake?: (ticketId: number, text: string) => void;
-  /** Message a scheme's Taskmaster (a failed scheduled run); without it, those wait untold. */
-  tell?: (project: Project, text: string) => void;
+  /** Message a scheme's Taskmaster (a failed scheduled run); false (no Taskmaster) or none at all, and those wait untold. */
+  tell?: (project: Project, text: string) => boolean;
 }
 
 export class CiHealth {
@@ -569,22 +570,26 @@ export class CiHealth {
     const runs: Run[] = (await this.read(`repos/${slug}/actions/runs?event=schedule&branch=${encodeURIComponent(branch)}&per_page=20`, as))?.workflow_runs ?? [];
     const key = `ci-health:scheduled:${p.id}`;
     const told = this.store.getSetting<number[]>(key) ?? [];
-    const red = runs.filter((r) => r.status === 'completed' && r.conclusion === 'failure' && now - at(r.created_at) <= WINDOW_MS && !told.includes(r.id));
-    const where: string[] = [];
+    // Aged by when it ended, so a run that sat queued for most of a day still counts.
+    const red = runs.filter((r) => r.status === 'completed' && r.conclusion === 'failure' && now - at(r.updated_at ?? r.created_at) <= WINDOW_MS && !told.includes(r.id));
+    const sent: number[] = [];
     for (const r of red) {
-      const job = (await this.jobs(slug, r, as)).find((j) => j.conclusion === 'failure');
-      const step = (job?.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
-      where.push(job ? `, at ${job.name}${step ? ` › ${step}` : ''}` : '');
-    }
-    // Kept before telling, so a send that throws can't tell twice; ids GitHub no longer lists are dropped.
-    this.store.setSetting(key, [...told.filter((id) => runs.some((r) => r.id === id)), ...red.map((r) => r.id)]);
-    red.forEach((r, i) => {
+      let where = '';
       try {
-        this.deps.tell!(p, `${p.name}'s scheduled ${r.name} run on ${branch} failed on ${r.head_sha.slice(0, 7)}${where[i]}: https://github.com/${slug}/actions/runs/${r.id}. It tests ${branch} as it is, so no land saw this break: start a bug minion for it, or ask people if it's CI itself (a runner, GitHub) rather than the code.`);
+        const job = (await this.jobs(slug, r, as)).find((j) => j.conclusion === 'failure');
+        const step = (job?.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
+        if (job) where = `, at ${job.name}${step ? ` › ${step}` : ''}`;
+      } catch (err) {
+        if (err instanceof RateLimited) throw err; // the step is a nicety: any other failure to read it still tells
+      }
+      try {
+        if (this.deps.tell(p, `${p.name}'s scheduled ${r.name} run on ${branch} failed on ${r.head_sha.slice(0, 7)}${where}: https://github.com/${slug}/actions/runs/${r.id}. It tests ${branch} as it is, so no land saw this break: start a bug minion for it, or ask people if it's CI itself (a runner, GitHub) rather than the code.`)) sent.push(r.id);
       } catch (err) {
         console.error(`Telling ${p.name}'s Taskmaster of run ${r.id} failed:`, err);
       }
-    });
+    }
+    // Ids GitHub no longer lists are dropped; one not sent is tried again next poll.
+    if (sent.length || told.some((id) => !runs.some((r) => r.id === id))) this.store.setSetting(key, [...told.filter((id) => runs.some((r) => r.id === id)), ...sent]);
   }
 
   /**

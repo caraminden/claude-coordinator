@@ -134,8 +134,10 @@ export function deadProblem(g: { labels: string; dead: Job[] }, reason: string |
  * Queued land/** runs older than ORPHAN_MS that no landing in the line waits on: not a run id a landing holds, nor a
  * branch of a landing's ticket (land/ticket/551-…), so a landing that hasn't read its run yet keeps it.
  */
-export function orphanRuns(runs: Run[], line: Record<string, { name: string; run?: number | null }>, now: number): Run[] {
+export function orphanRuns(runs: Run[], line: Record<string, { name: string; run?: number | null; ciSince?: number; tests?: boolean; green?: boolean }>, now: number): Run[] {
   const held = Object.values(line);
+  // A landing in its CI wait whose run we haven't read may be about to take any run of its commit (land.sh finds one by SHA, whatever its branch).
+  if (held.some((l) => l.ciSince != null && !l.run && !l.tests && !l.green)) return [];
   return runs.filter((r) => r.status === 'queued' && r.head_branch.startsWith('land/') && now - at(r.created_at) >= ORPHAN_MS
     && !held.some((l) => l.run === r.id || (/^#(\d+)$/.test(l.name) && r.head_branch.includes(`/${l.name.slice(1)}-`))));
 }
@@ -603,6 +605,9 @@ export class CiHealth {
     if (!watch || watch.project !== p.id) return;
     for (const r of orphanRuns(runs, watch.state.lands, now)) {
       if (this.swept.has(r.id)) continue;
+      // A landing may have joined since the list was made (each cancel awaits GitHub): ask again, with the line as it is now.
+      const fresh = this.store.getSetting<LandWatch>(LAND_WATCH);
+      if (!fresh || !orphanRuns([r], fresh.state.lands, now).length) continue;
       this.swept.add(r.id);
       try {
         const a = await (this.deps.post ?? ghPost)(`repos/${slug}/actions/runs/${r.id}/cancel`, as);

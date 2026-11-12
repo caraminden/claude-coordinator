@@ -667,14 +667,18 @@ test('orphanRuns: queued land/** runs over an hour old that no landing holds', (
     old({ id: 6, head_branch: 'land/ticket/5510-z' }), // #5510 is not #551
   ];
   assert.deepEqual(orphanRuns(runs, line, NOW).map((r) => r.id), [1, 6]);
+  const waiting = { ...line, 9: { name: '#552', run: null, ciSince: NOW - MIN } };
+  assert.deepEqual(orphanRuns(runs, waiting, NOW), [], 'a landing in its CI wait with no run read yet may take any run of its commit');
 });
 
 test('the poll cancels an orphan land run once and logs it, and leaves a landing\'s run alone', async () => {
   const w = world();
   const posts: string[] = [];
-  const health = new CiHealth(w.store, { ...w.deps, post: async (path) => (posts.push(path), { status: 202 }) });
+  const line2 = { project: w.peek.id, problems: [], state: { fellBack: [], lands: { 1: { name: '#551', joined: NOW - HOUR }, 2: { name: '#552', joined: NOW, ciSince: NOW, run: 4003 } } } };
+  // A landing takes the second orphan while the first is being cancelled.
+  const health = new CiHealth(w.store, { ...w.deps, post: async (path) => (posts.push(path), w.store.setSetting('ci-health:land', line2), { status: 202 }) });
   const old = (id: number, fields: Partial<Run> = {}) => runOf({ id, status: 'queued', conclusion: null, head_branch: 'land/ticket/550-x', created_at: iso(2 * HOUR), ...fields });
-  w.gh.runs = [old(4001), old(4002, { head_branch: 'land/ticket/551-y' })];
+  w.gh.runs = [old(4001), old(4002, { head_branch: 'land/ticket/551-y' }), old(4003)];
   const line = { project: w.peek.id, problems: [], state: { fellBack: [], lands: { 1: { name: '#551', joined: NOW - HOUR } } } };
   await health.tick(NOW);
   assert.deepEqual(posts, [], 'no land line kept for this scheme: nothing is cancelled');

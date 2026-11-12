@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import {
   CiHealth, OFFLINE_MS, addRunnerWaiter, onlineRunners, runnerWaiters, QUEUED_MS, VERDICT_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, neverStarted, queuedProblems,
   runnerProblems, sharedHost, skippedProblem, verdictPair, verdictProblem, type GhAnswer, type Job, type Run,
-  clock, landProblems, landStep, newLandState, type LandState,
+  clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, type LandState,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
@@ -651,4 +651,35 @@ test("a failed scheduled run whose jobs can't be read still tells, without the s
   await health.tick(NOW);
   assert.equal(told.length, 1);
   assert.match(told[0], /^Peek Auras's scheduled Tests run on main failed on feed123: https:/);
+});
+
+test('orphanRuns: queued land/** runs over an hour old that no landing holds', () => {
+  const old = (f: Partial<Run>) => runOf({ status: 'queued', conclusion: null, head_branch: 'land/ticket/550-x', created_at: iso(ORPHAN_MS + MIN), ...f });
+  const orphan = old({ id: 1 });
+  const line = { 7: { name: '#551', run: 99 }, 8: { name: 'deploy', run: null } };
+  const runs = [
+    orphan,
+    old({ id: 2, created_at: iso(ORPHAN_MS - MIN) }), // young
+    old({ id: 3, head_branch: 'main' }), // not a land branch
+    old({ id: 4, status: 'in_progress' }),
+    old({ id: 99 }), // a landing's run
+    old({ id: 5, head_branch: 'land/ticket/551-y' }), // a landing's ticket, run not read yet
+    old({ id: 6, head_branch: 'land/ticket/5510-z' }), // #5510 is not #551
+  ];
+  assert.deepEqual(orphanRuns(runs, line, NOW).map((r) => r.id), [1, 6]);
+});
+
+test('the poll cancels an orphan land run once and logs it, and leaves a landing\'s run alone', async () => {
+  const w = world();
+  const posts: string[] = [];
+  const health = new CiHealth(w.store, { ...w.deps, post: async (path) => (posts.push(path), { status: 202 }) });
+  const old = (id: number, fields: Partial<Run> = {}) => runOf({ id, status: 'queued', conclusion: null, head_branch: 'land/ticket/550-x', created_at: iso(2 * HOUR), ...fields });
+  w.gh.runs = [old(4001), old(4002, { head_branch: 'land/ticket/551-y' })];
+  const line = { project: w.peek.id, problems: [], state: { fellBack: [], lands: { 1: { name: '#551', joined: NOW - HOUR } } } };
+  await health.tick(NOW);
+  assert.deepEqual(posts, [], 'no land line kept for this scheme: nothing is cancelled');
+  w.store.setSetting('ci-health:land', line);
+  await health.tick(NOW + 10 * MIN);
+  await health.tick(NOW + 20 * MIN);
+  assert.deepEqual(posts, ['repos/caraminden/peek-auras/actions/runs/4001/cancel']);
 });

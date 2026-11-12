@@ -34,6 +34,8 @@ const WINDOW_MS = 24 * 3600_000;
 export const OFFLINE_MS = 15 * 60_000;
 export const QUEUED_MS = 30 * 60_000;
 export const VERDICT_MS = 4 * 3600_000;
+// A land/** run still queued this long has no landing waiting on it (a gate gives up after minutes): GitHub lost it.
+export const ORPHAN_MS = 3600_000;
 // A workflow with no run on main this long is a manual or retired one, never "missing a verdict".
 const ACTIVE_MS = 7 * 24 * 3600_000;
 const VERDICTS = new Set(['success', 'failure']);
@@ -126,6 +128,16 @@ export function deadProblem(g: { labels: string; dead: Job[] }, reason: string |
   const n = g.dead.length;
   const why = reason ? ` GitHub says: "${reason.length > 300 ? `${reason.slice(0, 299)}…` : reason}"` : '';
   return { key: `nostart:${g.labels}`, title: `CI: ${plural(n, 'job')} on ${g.labels} didn't start since ${clock(at(g.dead[0].created_at))}, so ${n === 1 ? "it isn't a test failure" : "they aren't test failures"}.${why}` };
+}
+
+/**
+ * Queued land/** runs older than ORPHAN_MS that no landing in the line waits on: not a run id a landing holds, nor a
+ * branch of a landing's ticket (land/ticket/551-…), so a landing that hasn't read its run yet keeps it.
+ */
+export function orphanRuns(runs: Run[], line: Record<string, { name: string; run?: number | null }>, now: number): Run[] {
+  const held = Object.values(line);
+  return runs.filter((r) => r.status === 'queued' && r.head_branch.startsWith('land/') && now - at(r.created_at) >= ORPHAN_MS
+    && !held.some((l) => l.run === r.id || (/^#(\d+)$/.test(l.name) && r.head_branch.includes(`/${l.name.slice(1)}-`))));
 }
 
 /** Jobs waiting QUEUED_MS or more for a runner, per set of labels. */
@@ -359,6 +371,18 @@ export async function ghGet(path: string, etag: string | null, as: GithubEnv): P
   return { status, etag: /^etag:\s*(.+?)\s*$/im.exec(head)?.[1] ?? null, body };
 }
 
+/** One REST POST through the gh CLI; the status of the answer, 0 when gh printed none. */
+export async function ghPost(path: string, as: GithubEnv): Promise<{ status: number }> {
+  try {
+    const { stdout } = await run('gh', ['api', '-i', '-X', 'POST', path], { env: asEnv(as), timeout: 30_000 });
+    return { status: Number(/^HTTP\/\S+ (\d+)/.exec(stdout)?.[1] ?? 0) };
+  } catch (err: any) {
+    const out = typeof err?.stdout === 'string' ? err.stdout : '';
+    if (!/^HTTP\/\S+ \d+/.test(out)) throw err;
+    return { status: Number(/^HTTP\/\S+ (\d+)/.exec(out)![1]) };
+  }
+}
+
 class RateLimited extends Error {}
 
 // ---------- the poller ----------
@@ -386,6 +410,8 @@ export interface CiHealthDeps {
   /** Put (with `title`) or clear (null) a person's Mandate item from a scheme or CI_SENDER, an alert unless `quiet`; true once Mandate has it settled. */
   mandate: (from: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, quiet?: boolean, link?: string) => Promise<boolean>;
   get?: GhGet;
+  /** A REST POST (the sweep's cancel); the gh CLI by default. */
+  post?: (path: string, as: GithubEnv) => Promise<{ status: number }>;
   /** Message a minion (wake_when_runners_back); no message, no wakes. */
   wake?: (ticketId: number, text: string) => void;
   /** Message a scheme's Taskmaster (a failed scheduled run); false (no Taskmaster) or none at all, and those wait untold. */
@@ -544,6 +570,7 @@ export class CiHealth {
       // A run under QUEUED_MS old can't have a job waiting too long yet, and an unfinished one has none that died.
       if (r.status === 'completed' || now - at(r.created_at) >= QUEUED_MS) jobs.push(...its);
     }
+    await this.sweepOrphans(p, slug, runs, as, now);
     this.recent.set(p.id, all);
     this.store.setSetting(`ci-health:recent:${p.id}`, all.map(({ steps, ...j }) => j));
     for (const g of deadGroups(jobs)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
@@ -562,6 +589,28 @@ export class CiHealth {
     }
     await this.scheduledFailures(p, slug, branch, as, now);
     return out;
+  }
+
+  private swept = new Set<number>();
+
+  /**
+   * Cancel the orphans among `runs` (see orphanRuns), logging each. Only for the scheme whose land line we keep (the
+   * live checkout's): without the line we can't tell an orphan from a landing's run. Each run is tried once per start:
+   * GitHub answers some stuck runs "cannot cancel" (no job, "not queued yet"), and asking again every poll won't change it.
+   */
+  private async sweepOrphans(p: Project, slug: string, runs: Run[], as: GithubEnv, now: number) {
+    const watch = this.store.getSetting<LandWatch>(LAND_WATCH);
+    if (!watch || watch.project !== p.id) return;
+    for (const r of orphanRuns(runs, watch.state.lands, now)) {
+      if (this.swept.has(r.id)) continue;
+      this.swept.add(r.id);
+      try {
+        const a = await (this.deps.post ?? ghPost)(`repos/${slug}/actions/runs/${r.id}/cancel`, as);
+        console.log(`CI sweep: cancelled orphan run ${r.id} (${r.head_branch}, queued since ${r.created_at}) on ${slug}: HTTP ${a.status}${a.status >= 300 ? ' (not cancelled)' : ''}`);
+      } catch (err: any) {
+        console.error(`CI sweep: could not cancel run ${r.id} (${r.head_branch}) on ${slug}: ${err?.message ?? err}`);
+      }
+    }
   }
 
   /** Tell the scheme's Taskmaster, once per run, of each scheduled run on `branch` in the last day that failed. */

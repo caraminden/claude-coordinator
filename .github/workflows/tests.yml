@@ -1,24 +1,35 @@
 # The full suite, on Cara's desktop (the Linux runner in WSL: tools/ci-runner/README.md) instead of perigee (#523).
 # tools/land.sh pushes the rebased commit to land/<branch> and waits for this run on that exact commit; when no
 # runner is online or it doesn't answer in time, land.sh runs the suite on perigee itself.
+# A land that touches no pipeline file leaves out the pipeline's own test files (#581, tools/pipeline-files.txt), so the
+# whole suite also runs on main every night, pipeline tests included.
 name: tests
 on:
   push:
     branches: ['land/**']
+  schedule:
+    - cron: '30 13 * * *' # the quietest hour for lands: no commit reached main at 13:xx UTC in the 14 days to 2026-11-12
   workflow_dispatch:
 
 # One suite at a time on the desktop, however many runners there are: two at once (2026-11-11, load 30-35 on its 32
-# threads) failed in a different file every run. Landings come one at a time anyway.
+# threads) failed in a different file every run. Landings come one at a time anyway. Any other run (the nightly, or one
+# started by hand) has a group of its own: a run waiting in a group cancels the one waiting before it, which would be a
+# landing's. It waits for the lands instead, and yields the CPU to one that starts while it runs (below).
 concurrency:
-  group: citadel-tests
+  group: ${{ startsWith(github.ref, 'refs/heads/land/') && 'citadel-tests' || 'citadel-off-land' }}
   cancel-in-progress: false
+
+# actions: read for the wait for the lands' runs (below).
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   test:
     runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux"]') }}
     # land.sh gives up on the run after 6 minutes (LAND_CI_TIMEOUT); this only stops one nobody waits for. The
-    # suite's own limit is run-tests.sh's 10 minutes.
-    timeout-minutes: 12
+    # suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits up to 30 more for the lands.
+    timeout-minutes: ${{ startsWith(github.ref, 'refs/heads/land/') && 12 || 45 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,6 +106,24 @@ jobs:
             python3 -m zipfile -e "$RUNNER_TEMP/chs.zip" "$dir"
             chmod +x "$dir/chrome-headless-shell-linux64/chrome-headless-shell"
           fi
+      # A run that isn't a land's (the nightly) starts once no land's run is queued or running, or after 30 minutes of them.
+      - name: wait for the lands
+        if: ${{ !startsWith(github.ref, 'refs/heads/land/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 60); do
+            busy=0
+            for status in queued in_progress; do
+              n=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/tests.yml/runs?event=push&status=$status&per_page=1" \
+                | python3 -c 'import json, sys; print(json.load(sys.stdin)["total_count"])') || n=0
+              busy=$((busy + n))
+            done
+            [ "$busy" = 0 ] && { echo "no land's tests are running: starting"; exit 0; }
+            echo "$busy land run(s) queued or running; waiting"
+            sleep 30
+          done
+          echo "lands kept running for 30 minutes: starting anyway, niced"
       # The run land.sh makes on perigee when this can't answer: it always ends (a leaked handle hangs a bare
       # `npm test` here), and labels a file that fails under load. Perigee skips no test, so a skip here means this
       # runner lacks something a test needs, and the gate would be weaker than the one it replaces: that is red too.
@@ -102,8 +131,10 @@ jobs:
         # Files at once on the desktop (#564). run-tests.sh's half-the-cores default ran 8 once #552 capped the VM at 16
         # processors, and the suite went from about 60 s to 150 s with the tests' own time unchanged: they mostly wait
         # on servers and timers. GitHub's 4-core runners keep the default.
+        # A run that isn't a land's runs niced, so a landing that starts beside it gets the CPU first.
         env:
           CITADEL_TEST_CONCURRENCY: ${{ vars.CI_RUNNER != 'github' && '16' || '' }}
+          NICENESS: ${{ !startsWith(github.ref, 'refs/heads/land/') && '10' || '0' }}
         run: |
           rc=0
           echo "nproc $(nproc), $([ -n "$CITADEL_TEST_CONCURRENCY" ] && echo "$CITADEL_TEST_CONCURRENCY" || echo $((($(nproc) + 1) / 2))) test files at once"
@@ -112,7 +143,7 @@ jobs:
           # is the first one with no results.
           : >"$RUNNER_TEMP/tests.log"
           tail -n +1 -f "$RUNNER_TEMP/tests.log" &
-          DEPLOY_TEST_CPU_WEIGHT= tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
+          DEPLOY_TEST_CPU_WEIGHT= nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
           sleep 1; kill $! # tail prints what it has read: a second for the last lines
           [ "$rc" != 0 ] || grep -q '^ℹ skipped 0$' "$RUNNER_TEMP/tests.log" || { echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"; exit 1; }
           exit "$rc"

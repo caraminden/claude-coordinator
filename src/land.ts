@@ -1,7 +1,8 @@
 // The land tool (#213): a minion whose turn runs in its person's container can't run tools/land.sh
 // there (no deploy lock, user bus or GitHub login), so the server runs it on the host, in the minion's
 // worktree, as a host turn would. Its tests and boot check run as the server's user: landing is as
-// trusted as it was before containers.
+// trusted as it was before containers. That holds for every scheme's minions (#574): a container turn
+// that lands runs its worktree's land.sh on the host, with the box's GitHub login.
 //
 // It runs as a host job (src/host-job.ts, #508), in a unit of its own: a restart of
 // the server neither kills it nor waits for it, and its output and exit code go to files under

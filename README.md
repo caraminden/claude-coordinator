@@ -327,7 +327,10 @@ file. Usage is kept per person (`usage:user:<id>`). If Anthropic turns the login
 down mid-turn, the link is marked expired and the turn says so. Unlink signs out,
 stops the container and deletes the volume. A turn in a container lands with the
 `land` tool (mcp__thread), which runs `tools/land.sh` on the host for it, since
-podman and systemd aren't reachable from inside. The tripwire keeps turns away from
+podman and systemd aren't reachable from inside, and a land.sh in the container can't see
+the host's landings in line. That goes for every scheme, so landing is the one thing a
+container turn runs outside its container: its worktree's `tools/land.sh`, as the server's
+user and with the box's GitHub login. The tripwire keeps turns away from
 `citadel-claude-*` containers and podman's storage.
 
 **Codex reviews (#330).** The image also has the Codex CLI, pinned, so self-review

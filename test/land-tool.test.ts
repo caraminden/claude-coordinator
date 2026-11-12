@@ -61,11 +61,12 @@ test("any scheme's minion lands through the tool when its worktree has tools/lan
 });
 
 test("a container turn of any scheme is offered the land tool; a host turn is not", async () => {
-  const tools = (extra: Record<string, string>) => new Promise<string[]>((resolve) => {
+  const tools = (extra: Record<string, string>) => new Promise<string[]>((resolve, reject) => {
     const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
       env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: undefined, COORDINATOR_CONTAINER: undefined, ...extra },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
+    child.once('exit', (code) => reject(new Error(`mcp.ts ended (${code}) before it listed its tools`)));
     createInterface({ input: child.stdout! }).once('line', (l) => { child.kill(); resolve(JSON.parse(l).result.tools.map((t: any) => t.name)); });
     child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
   });

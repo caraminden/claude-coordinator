@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
-import { land, env, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
+import { land, env, git, setup, landAsync, tickets, issued, ci } from './land-fixture.ts';
 
 test('rebases onto main, tests, fast-forwards main, and deploys holding the lock', () => {
   const r = setup();
@@ -142,52 +142,6 @@ test('a test that hangs is stopped at the time limit, says so, and lets go of th
   const lock = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'lock');
   assert.equal(spawnSync('flock', ['-n', lock, 'true']).status, 0, 'the deploy lock is free');
 });
-
-// The CI gate (#523): GitHub is a bare repo as origin and a stand-in gh. The stand-in knows one run, id 7, of whatever
-// commit land/<branch> points at there, in the state FAKE_CI names; FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>",
-// which GitHub still answers with for FAKE_LAG polls after the push; FAKE_STEP is the step a red run failed in.
-function ci(r: ReturnType<typeof setup>) {
-  const hub = join(r.dir, 'hub.git');
-  git(r.dir, 'init', '-q', '--bare', hub);
-  git(r.source, 'remote', 'add', 'origin', hub);
-  const bin = join(r.dir, 'bin');
-  mkdirSync(bin);
-  const calls = join(r.dir, 'gh-calls');
-  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash
-echo "$*" >>"${calls}"
-case "$*" in
-  *"/actions/runs?head_sha="*)
-    sha=\${2#*head_sha=} sha=\${sha%%&*}
-    [ "\${FAKE_CI:-}" != down ] || exit 1
-    [ "\${FAKE_CI:-}" != rate ] || { echo 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)' >&2; exit 1; }
-    [ "\${FAKE_CI:-}" != garbage ] || { echo '<html><body>Bad gateway</body></html>'; exit 0; }
-    lag=0
-    if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
-    if [ "$lag" = 0 ] && [ "$(git -C "${hub}" rev-parse -q --verify "refs/heads/land/ticket/1-x" 2>/dev/null)" = "$sha" ]; then
-      case \${FAKE_CI:-green} in
-        green) printf '7\\tcompleted\\tsuccess\\thttps://ci/7\\n' ;;
-        red) printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n' ;;
-        cancelled) printf '7\\tcompleted\\tcancelled\\thttps://ci/7\\n' ;;
-        queued) printf '7\\tqueued\\t-\\thttps://ci/7\\n' ;;
-        running) printf '7\\tin_progress\\t-\\thttps://ci/7\\n' ;;
-      esac
-    elif [ "\${FAKE_OLD_RUN%% *}" = "$sha" ]; then
-      set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
-    fi ;;
-  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; echo "\${FAKE_RUNNERS:-1}" ;;
-  *"/actions/runs/7/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
-  "run view "*) printf 'test\\tthe full suite\\t2026 run-tests: test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n'; echo "not ok 1 - the red test's output" ;;
-esac
-`);
-  chmodSync(join(bin, 'gh'), 0o755);
-  const testRuns = join(r.dir, 'test-runs');
-  return {
-    run: (extra: Record<string, string> = {}) => r.run({ PATH: `${bin}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', TEST_RUNS: testRuns, ...extra }),
-    calls: () => (existsSync(calls) ? readFileSync(calls, 'utf8') : ''),
-    localRuns: () => (existsSync(testRuns) ? readFileSync(testRuns, 'utf8').trim().split('\n').length : 0),
-    refs: () => git(hub, 'for-each-ref', '--format=%(refname)'),
-  };
-}
 
 test('green CI on the exact rebased commit lands it without a test run here, and the scratch branch goes', () => {
   const r = setup();

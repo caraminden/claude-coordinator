@@ -1,0 +1,231 @@
+// tools/land.sh with build branches (specs/build-branches.md, #593): a feeder merges into build/<n> with --into, the
+// build minion takes main in with --into build/<n> --full and lands the build with --build, and a plain land refuses
+// a branch that carries a build's commits.
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { git, setup, ci } from './land-fixture.ts';
+
+type R = ReturnType<typeof setup>;
+const has = (r: R, ref: string) => git(r.source, 'for-each-ref', '--format=%(refname)', ref) !== '';
+const tipOf = (r: R, ref: string) => git(r.source, 'rev-parse', ref);
+const runs = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').length : 0);
+// A build made from main, and a worktree on a new branch from it (a feeder, or the build minion's).
+function build(r: R) {
+  git(r.source, 'branch', 'build/3', 'main');
+}
+function worktree(r: R, name: string, from = 'build/3') {
+  const wt = join(r.dir, name.replace(/\W/g, '-'));
+  git(r.source, 'worktree', 'add', '-q', '-b', name, wt, from);
+  return wt;
+}
+const into = (r: R, files: string[], extra: Record<string, string> = {}, cwd = r.wt) => r.run({ TEST_RUNS: join(r.dir, 'test-runs'), ...extra }, ['--into', 'build/3', ...files], cwd);
+const OK = 'test/ok.test.mjs';
+const landLog = (shared: string) => readFileSync(join(shared, 'retro-log', readdirSync(join(shared, 'retro-log'))[0], 'land.md'), 'utf8');
+
+test('a feeder merges into its build: the named tests run on the rebased commit, build/<n> moves, and nothing else does', () => {
+  const r = setup();
+  const c = ci(r);
+  build(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const other = worktree(r, 'ticket/2-y');
+  r.commit(other, 'c.txt', 'theirs\n');
+  assert.equal(c.run({}, ['--into', 'build/3', OK], other).status, 0);
+  const main = tipOf(r, 'main');
+  const live = git(r.live, 'rev-parse', 'HEAD');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ COORDINATOR_SHARED_DIR: shared }, ['--into', 'build/3', OK]);
+  assert.equal(res.status, 0, res.stderr);
+  const tip = git(r.wt, 'rev-parse', 'HEAD');
+  assert.equal(tipOf(r, 'build/3'), tip, 'build/3 is the rebased branch');
+  assert.equal(git(r.source, 'log', '--format=%s', 'build/3', '-3'), 'b.txt: mine\nc.txt: theirs\nbase', 'it rebased onto the first feeder');
+  assert.equal(tipOf(r, 'main'), main, 'main is untouched');
+  assert.equal(git(r.live, 'rev-parse', 'HEAD'), live, 'the live checkout is untouched');
+  assert.equal(r.note(), null, 'no deploy');
+  assert.equal(c.calls(), '', 'no CI run');
+  assert.equal(c.localRuns(), 2, 'the named test file ran, once per merge');
+  assert.match(res.stderr, /build\/3 is now at/);
+  assert.match(landLog(shared), /· timing · ticket\/1-x · into build\/3 · line \d+ · rebase \d+ · tests \d+ · merged$/m);
+});
+
+test('a red named test file refuses with the build untouched', () => {
+  const r = setup();
+  build(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const before = tipOf(r, 'build/3');
+  const res = into(r, [OK], { FAIL_TESTS: '1' });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /tests failed.*build\/3 is untouched/s);
+  assert.equal(tipOf(r, 'build/3'), before);
+});
+
+test('with no test files named it refuses, unless the change is docs only', () => {
+  const r = setup();
+  build(r);
+  r.commit(r.wt, 'b.txt', 'code\n');
+  const before = tipOf(r, 'build/3');
+  let res = into(r, []);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /name the test files/);
+  assert.equal(tipOf(r, 'build/3'), before);
+  const docs = worktree(r, 'ticket/2-docs');
+  r.commit(docs, 'README.md', 'words\n');
+  res = into(r, [], {}, docs);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(tipOf(r, 'build/3'), git(docs, 'rev-parse', 'HEAD'));
+  assert.equal(runs(join(r.dir, 'test-runs')), 0, 'no test ran');
+});
+
+test('it refuses a build that does not exist, a bad build name, and test names that are not files', () => {
+  const r = setup();
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  assert.match(into(r, [OK]).stderr, /build\/3 doesn't exist/);
+  assert.match(r.run({}, ['--into', 'main', OK]).stderr, /build\/<n>/);
+  assert.match(r.run({}, ['--into']).stderr, /build\/<n>/);
+  build(r);
+  assert.match(into(r, ['test/nope.test.mjs']).stderr, /test\/nope\.test\.mjs is not a file/);
+  assert.match(into(r, ['--test-only']).stderr, /is not a file/);
+  assert.equal(tipOf(r, 'build/3'), tipOf(r, 'main'));
+});
+
+test('a conflict refuses with the build and the branch untouched', () => {
+  const r = setup();
+  build(r);
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  const other = worktree(r, 'ticket/2-y');
+  r.commit(other, 'a.txt', 'theirs\n');
+  assert.equal(into(r, [OK], {}, other).status, 0);
+  const before = tipOf(r, 'build/3');
+  const head = git(r.wt, 'rev-parse', 'HEAD');
+  const res = into(r, [OK]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /rebase onto build\/3 failed.*conflicted files: a\.txt/s);
+  assert.equal(tipOf(r, 'build/3'), before);
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), head);
+  assert.equal(git(r.wt, 'status', '--porcelain'), '');
+});
+
+// The build minion's daily merge of main: its branch at the build's tip, main merged in, the full suite on CI.
+function takeMain(r: R, bwt: string) {
+  r.commit(r.source, 'm.txt', 'on main\n');
+  git(bwt, 'merge', '--ff-only', 'build/3');
+  git(bwt, 'merge', '-q', '--no-edit', 'main');
+}
+
+test('--full takes main in: it waits for the full suite on CI, keeps the merge commit, and moves only build/<n>', () => {
+  const r = setup();
+  const c = ci(r);
+  build(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  assert.equal(into(r, [OK]).status, 0);
+  const folded = tipOf(r, 'build/3');
+  const bwt = worktree(r, 'ticket/9-build');
+  takeMain(r, bwt);
+  const head = git(bwt, 'rev-parse', 'HEAD');
+  const main = tipOf(r, 'main');
+  const res = c.run({}, ['--into', 'build/3', '--full'], bwt);
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /waiting for CI on .*CI passed on/s);
+  assert.equal(git(bwt, 'rev-parse', 'HEAD'), head, 'no rebase: the merge of main stays as it was');
+  assert.equal(tipOf(r, 'build/3'), head);
+  assert.equal(git(r.source, 'rev-list', '--merges', '--count', 'main..build/3'), '1');
+  assert.equal(git(r.source, 'merge-base', '--is-ancestor', folded, 'build/3') || 'yes', 'yes', "the feeder's commit keeps its hash");
+  assert.match(c.calls(), new RegExp(`head_sha=${head}&`));
+  assert.equal(c.localRuns(), 0);
+  assert.equal(tipOf(r, 'main'), main);
+  assert.equal(r.note(), null, 'no deploy');
+  assert.equal(c.refs(), '', 'the scratch branch goes');
+});
+
+test('--full refuses on red CI, and when build/<n> moved since the merge, with the build untouched', () => {
+  const r = setup();
+  const c = ci(r);
+  build(r);
+  const bwt = worktree(r, 'ticket/9-build');
+  takeMain(r, bwt);
+  let res = c.run({ FAKE_CI: 'red' }, ['--into', 'build/3', '--full'], bwt);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /tests failed .* in CI.*build\/3 is untouched/s);
+  assert.equal(tipOf(r, 'build/3'), tipOf(r, 'main~1'));
+  // A feeder merged in after the build minion took main: a rebase would flatten the merge, so it refuses instead.
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  assert.equal(into(r, [OK]).status, 0);
+  const before = tipOf(r, 'build/3');
+  res = c.run({}, ['--into', 'build/3', '--full'], bwt);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /build\/3 has commits this branch doesn't: run git merge build\/3/);
+  assert.equal(tipOf(r, 'build/3'), before);
+  assert.match(c.run({}, ['--into', 'build/3', '--full', OK], bwt).stderr, /--full runs the whole suite/);
+});
+
+test('--build lands the build by merging main: merge commits intact, feeder hashes unchanged, one deploy, branch deleted', () => {
+  const r = setup();
+  const c = ci(r);
+  build(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  assert.equal(into(r, [OK]).status, 0);
+  const feeder = tipOf(r, 'build/3');
+  const bwt = worktree(r, 'ticket/9-build');
+  takeMain(r, bwt);
+  assert.equal(c.run({}, ['--into', 'build/3', '--full'], bwt).status, 0);
+  r.commit(r.source, 'n.txt', 'main moved again\n');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ COORDINATOR_SHARED_DIR: shared }, ['--build'], bwt);
+  assert.equal(res.status, 0, res.stderr);
+  const head = git(bwt, 'rev-parse', 'HEAD');
+  assert.equal(tipOf(r, 'main'), head, 'main is fast-forwarded to the merged build');
+  assert.equal(git(r.source, 'merge-base', '--is-ancestor', feeder, 'main') || 'yes', 'yes', "the feeder's commit is on main under its own hash");
+  assert.equal(git(r.source, 'rev-list', '--merges', '--count', 'main'), '2', "the build's merge of main and the land's are both there");
+  assert.equal(git(bwt, 'log', '-1', '--format=%s'), "Merge branch 'main' into ticket/9-build");
+  assert.equal(r.note(), 'locked=1 held=yes', 'deployed under the lock');
+  assert.equal(has(r, 'refs/heads/build/3'), false, 'build/3 is deleted');
+  assert.match(landLog(shared), /· timing · ticket\/9-build · lands build\/3 · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy \d+ · live \d+ · landed$/m);
+});
+
+test('--build refuses a merge conflict, and a branch not at a build tip, with main and the build untouched', () => {
+  const r = setup();
+  build(r);
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  assert.equal(into(r, [OK]).status, 0);
+  const bwt = worktree(r, 'ticket/9-build');
+  r.commit(r.source, 'a.txt', 'theirs on main\n');
+  const main = tipOf(r, 'main');
+  const before = tipOf(r, 'build/3');
+  let res = r.run({}, ['--build'], bwt);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /merging main into build\/3 failed.*conflicted files: a\.txt/s);
+  assert.equal(tipOf(r, 'main'), main);
+  assert.equal(tipOf(r, 'build/3'), before);
+  assert.equal(git(bwt, 'rev-parse', 'HEAD'), before, 'the branch is as it was');
+  assert.equal(git(bwt, 'status', '--porcelain'), '');
+  assert.equal(r.note(), null);
+  // Not at the build's tip: a feeder's branch, or a build minion that is behind.
+  r.commit(bwt, 'x.txt', 'not folded\n');
+  res = r.run({}, ['--build'], bwt);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /not at the tip of a build/);
+  assert.equal(tipOf(r, 'main'), main);
+});
+
+test("a plain land refuses a branch that carries a build's commits, and one with no build lands as before", () => {
+  const r = setup();
+  build(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  assert.equal(into(r, [OK]).status, 0);
+  const next = worktree(r, 'ticket/2-y');
+  r.commit(next, 'c.txt', 'more\n');
+  const main = tipOf(r, 'main');
+  let res = r.run({}, [], next);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /carries commits of build\/3 that main doesn't have.*--into build\/3/s);
+  assert.equal(tipOf(r, 'main'), main);
+  assert.equal(r.note(), null);
+  // A branch off main, beside an open build, lands exactly as before.
+  const plain = worktree(r, 'ticket/4-z', 'main');
+  r.commit(plain, 'd.txt', 'unrelated\n');
+  res = r.run({}, [], plain);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(tipOf(r, 'main'), git(plain, 'rev-parse', 'HEAD'));
+  assert.equal(r.note(), 'locked=1 held=yes');
+});

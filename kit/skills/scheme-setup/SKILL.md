@@ -176,7 +176,10 @@ only then moves main. The landed commit's runs there are left to finish (main's 
 what they passed); every other run on the scratch branch is cancelled. The first `CI_STACK` landings in line (3) run CI at once, each built on the
 one ahead, so a landing doesn't wait a whole CI round per place in line. `CI_BATCH` (1, off) lets that many share one
 run on the last one's commit: for a line that often runs deep on slow CI, 3 or 4, with `CI_STACK` set to the runs
-the runners carry at once; the header says how a red batch is bisected. When "every workflow
+the runners carry at once; the header says how a red batch is bisected. A new scheme has no line to measure yet, so
+leave it at 1. In the setup report, name `CI_BATCH` as the knob for a deep line. Raise it once landings come back to back
+for about a CI run each (a line, not a free runner), as in Citadel's `specs/batched-landings.md`. A high share of red
+land runs (over about 15%) argues for 2, not 4. When "every workflow
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
 `CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion

@@ -231,6 +231,11 @@ export CITADEL_HEAVY_HELD=1
 waited=$((SECONDS - since)) ran=$SECONDS
 "$@" 8>&-
 status=$?
+# Free the slot before the history work, so a slow or stuck write can't hold up the line. The holder's files go
+# first: once the lock is free the next holder writes its own, which a later clean-up here would delete.
+rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp" "$progress" "$progress.tmp" 2>/dev/null
+trap - EXIT
+exec 8>&-
 history="$dir/history"
 [ -z "$forced" ] || reason=forced
 line="$(date -d "@$started" +%FT%T%z)	${who//[$'\t\n']/ }	${what//[$'\t\n']/ }	$reason	$waited	$((SECONDS - ran))	$status	${pressure:--}"

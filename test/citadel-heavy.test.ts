@@ -332,3 +332,18 @@ test('nested calls write no line of their own, and a history past its limit keep
   assert.equal(lines.at(-1)!.split('\t')[2], 'echo newest');
   assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('history.')), [], 'no copy left behind');
 });
+
+test('a history write that hangs holds no slot: the next job runs', async () => {
+  const { dir, env } = folder(1);
+  mkdirSync(dir, { recursive: true });
+  assert.equal(spawnSync('mkfifo', [join(dir, 'history')]).status, 0); // no reader: an append to it blocks
+  const a = job(env, 'stuck writer', touch(join(root, 'fifo-a-up')));
+  try {
+    await until('the first job to have run', () => existsSync(join(root, 'fifo-a-up')));
+    const r = spawnSync(heavy, ['echo', 'next'], { env: { ...env, CITADEL_HEAVY_MAX_WAIT: '5' }, encoding: 'utf8', timeout: 4_000 });
+    assert.equal(r.stdout, 'next\n', 'the slot was free while the first job hung on its history');
+  } finally {
+    readFileSync(join(dir, 'history')); // a reader lets the hung write through
+  }
+  assert.equal(await a.done, 0);
+});

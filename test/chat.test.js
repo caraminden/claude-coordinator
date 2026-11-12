@@ -124,10 +124,16 @@ test('stepMark: a spinner while running, else the state\'s mark, each named for 
   // The least document stepMark needs: a template that hands back the HTML it was given to parse.
   globalThis.document = { createElement: () => ({ set innerHTML(html) { this.content = { firstElementChild: html }; } }) };
   t.after(() => { delete globalThis.document; });
-  assert.equal(stepMark('running'), '<span class="cui-spin" role="img" aria-label="Running"></span>');
-  assert.equal(stepMark('done'), '<span class="cui-mark" data-state="done" role="img" aria-label="Done">✓</span>');
-  assert.equal(stepMark('failed'), '<span class="cui-mark" data-state="failed" role="img" aria-label="Failed">✕</span>');
-  assert.equal(stepMark('stopped'), '<span class="cui-mark" data-state="stopped" role="img" aria-label="Stopped">–</span>');
+  // What people and screen readers get from each, not how the HTML is written out.
+  const mark = (state) => {
+    const html = stepMark(state);
+    const attr = (name) => html.match(new RegExp(`${name}="([^"]*)"`))?.[1];
+    return { spin: /class="cui-spin"/.test(html), state: attr('data-state'), role: attr('role'), label: attr('aria-label'), text: html.replace(/<[^>]*>/g, '') };
+  };
+  assert.deepEqual(mark('running'), { spin: true, state: undefined, role: 'img', label: 'Running', text: '' });
+  assert.deepEqual(mark('done'), { spin: false, state: 'done', role: 'img', label: 'Done', text: '✓' });
+  assert.deepEqual(mark('failed'), { spin: false, state: 'failed', role: 'img', label: 'Failed', text: '✕' });
+  assert.deepEqual(mark('stopped'), { spin: false, state: 'stopped', role: 'img', label: 'Stopped', text: '–' });
   // A state the kit doesn't know still draws, escaped.
-  assert.equal(stepMark('<odd>'), '<span class="cui-mark" data-state="&lt;odd&gt;" role="img" aria-label="&lt;odd&gt;">·</span>');
+  assert.deepEqual(mark('<odd>'), { spin: false, state: '&lt;odd&gt;', role: 'img', label: '&lt;odd&gt;', text: '·' });
 });

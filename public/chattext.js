@@ -10,8 +10,9 @@ export function ticketActionRef({ block, result }) {
   if (!result || result.is_error || !block.name.startsWith('mcp__coordinator__')) return null;
   const text = Array.isArray(result.content) ? result.content.map((c) => c?.text ?? '').join('\n') : String(result.content ?? '');
   // message_ticket with start_now says how the start went first (src/mcp.ts).
-  const m = /^(?:Started early, its brief first\. |Not started early: [^\n]*?\. )?(Created|Sent\.|Updated\.) #(\d+)\b/.exec(text);
-  return m ? { verb: { Created: 'Created', 'Sent.': 'Messaged', 'Updated.': 'Updated' }[m[1]], number: Number(m[2]) } : null;
+  // A held message (loop guard, or held mail for a cold minion) names the minion on the next line.
+  const m = /^(?:Started early, its brief first\. |Not started early: [^\n]*?\. )?(?:(Created|Sent\.|Updated\.) |(?:Held, not delivered|Left as held mail): [^\n]*\n)#(\d+)\b/.exec(text);
+  return m ? { verb: { Created: 'Created', 'Sent.': 'Messaged', 'Updated.': 'Updated' }[m[1]] ?? 'Held for', number: Number(m[2]) } : null;
 }
 
 export function firstSentence(text, max = 200) {
@@ -38,9 +39,11 @@ export function shortNote(text) {
   if (/^Restored this thread's Claude session from the app's database/.test(text)) return null;
   // A restart that couldn't resume the turn says why after it (src/runner.ts); the reason stays.
   if ((m = text.match(/^The server restarted during this turn, so it was interrupted\.( .+)?$/s))) return `⚠ Interrupted by a server restart${m[1] ? `.${m[1]}` : ''}`;
-  if ((m = text.match(/^(.+?) renamed this (?:ticket|minion) from ".*" to "(.*)"\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”`;
+  // The build migration's rename (src/db.ts) gives its reason after a colon.
+  if ((m = text.match(/^(.+?) renamed this (?:ticket|minion) from ".*" to "(.*)"(?:: (its build shows in the minions list), so the title no longer carries it)?\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”${m[3] ? ' (its build is in the list now)' : ''}`;
   if ((m = text.match(/^(.+?) set this (?:thread|minion) to (.+?) (from the next turn|from now on)\.$/))) return `⚙ ${m[1]}: ${m[2]}${m[3] === 'from the next turn' ? ' next turn' : ''}`;
   if ((m = text.match(/^(.+?) (updated|cleared) the (?:project|scheme) instructions; they apply from each (?:thread|minion)'s next turn\.$/))) return `📋 ${m[1]} ${m[2]} the scheme instructions`;
+  if ((m = text.match(/^(.+?) (updated|cleared) the (\S+)-wide instructions; they apply from each minion's next turn in every scheme\.$/))) return `📋 ${m[1]} ${m[2]} the ${m[3]}-wide instructions`;
   if ((m = text.match(/^(.+?) set the (approval rules|plugin folders) to: (.*)\. They apply from each (?:thread|minion)'s next turn\.$/s))) return `🔒 ${m[1]} set the ${m[2]}: ${m[3]}`;
   if ((m = text.match(/^(.+?) reopened this (?:ticket|minion)\.$/))) return `↻ ${m[1]} reopened it`;
   return text;

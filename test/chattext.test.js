@@ -35,8 +35,10 @@ test('ticketActionRef links the minion a Taskmaster tool created, messaged or up
     // message_ticket with start_now puts the start first (src/mcp.ts); it was still sent.
     ['mcp__coordinator__message_ticket', text('Started early, its brief first. Sent. #12 Usage bar'), { verb: 'Messaged', number: 12 }],
     ['mcp__coordinator__message_ticket', text('Not started early: it is running. Sent. #12 Usage bar'), { verb: 'Messaged', number: 12 }],
-    // Held or left as held mail: not delivered, so no "Messaged" link.
-    ['mcp__coordinator__message_ticket', text('Held, not delivered: the loop guard.\n#12 Usage bar'), null],
+    // Held by the loop guard or left as held mail: not delivered yet, but it is that minion's (Josh, 2026-11-12).
+    ['mcp__coordinator__message_ticket', text('Held, not delivered: the loop guard.\n#12 Usage bar'), { verb: 'Held for', number: 12 }],
+    ['mcp__coordinator__message_ticket', text('Left as held mail: #12 has been idle over 55 minutes. Do not resend it.\n#12 Usage bar\ntype: bug'), { verb: 'Held for', number: 12 }],
+    ['mcp__coordinator__message_ticket', text('Not started early: it is running. Held, not delivered: the loop guard.\n#12 Usage bar'), { verb: 'Held for', number: 12 }],
   ];
   for (const [name, result, want] of rows) assert.deepEqual(act(name, result), want, `${name}: ${JSON.stringify(result)}`);
 });
@@ -112,6 +114,8 @@ test('shortNote shortens the notes the server writes often and leaves the rest a
     ['Claude renamed this minion from "Usage bar" to "Usage bar: hours".', '✎ Renamed “Usage bar: hours”'],
     // Older threads said "ticket"; a title may span lines.
     ['Cara renamed this ticket from "Old" to "Two\nlines".', '✎ Cara renamed it “Two\nlines”'],
+    // src/db.ts: the build migration's rename keeps its reason, shorter (Josh, 2026-11-12).
+    ['Citadel renamed this minion from "Usage bar (Build 3)" to "Usage bar": its build shows in the minions list, so the title no longer carries it.', '✎ Citadel renamed it “Usage bar” (its build is in the list now)'],
     // src/runner.ts: a restart that couldn't resume the turn says why, and the reason stays.
     ['The server restarted during this turn, so it was interrupted. It was set to be dismissed, so it was not resumed.', '⚠ Interrupted by a server restart. It was set to be dismissed, so it was not resumed.'],
     // Model and effort: "from the next turn" while a turn runs, "from now on" otherwise.
@@ -123,6 +127,8 @@ test('shortNote shortens the notes the server writes often and leaves the rest a
     ["Cara updated the scheme instructions; they apply from each minion's next turn.", '📋 Cara updated the scheme instructions'],
     ["Cara cleared the scheme instructions; they apply from each minion's next turn.", '📋 Cara cleared the scheme instructions'],
     ["Cara updated the project instructions; they apply from each thread's next turn.", '📋 Cara updated the scheme instructions'],
+    ["Josh updated the Citadel-wide instructions; they apply from each minion's next turn in every scheme.", '📋 Josh updated the Citadel-wide instructions'],
+    ["Josh cleared the Citadel-wide instructions; they apply from each minion's next turn in every scheme.", '📋 Josh cleared the Citadel-wide instructions'],
     ["Cara set the approval rules to: Bash(gh pr merge:*), mcp__github__merge_pull_request. They apply from each minion's next turn.", '🔒 Cara set the approval rules: Bash(gh pr merge:*), mcp__github__merge_pull_request'],
     ["Cara set the approval rules to: none. They apply from each minion's next turn.", '🔒 Cara set the approval rules: none'],
     ["Josh set the plugin folders to: /srv/plugins/a, /srv/plugins/b. They apply from each minion's next turn.", '🔒 Josh set the plugin folders: /srv/plugins/a, /srv/plugins/b'],

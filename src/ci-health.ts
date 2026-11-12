@@ -1,5 +1,5 @@
 // CI health (#368; ask C3 of shared/project/specs/native-app-ci-asks-2026-11.md): Citadel watches every scheme's
-// GitHub Actions and tells a person, never a minion, when CI is unwell in a way a red test doesn't show:
+// GitHub Actions and tells a person when CI is unwell in a way a red test doesn't show:
 //   - a runner offline (GitHub's own runner list, so session runners too);
 //   - jobs that never started (0 steps, no runner: a billing block) or sat queued with no runner to take them;
 //   - a green run on main that skipped jobs which ran the time before (a quiet item, not an alert: below);
@@ -13,6 +13,9 @@
 // an alarm on her phone (Mandate #75), so only real trouble is one, and anything informational is quiet. It polls with the scheme
 // owner's linked GitHub (as the PR watcher and runner list do; the box's login without one), every 5 minutes,
 // with ETags so an unchanged answer (a 304) costs no rate limit.
+// One exception tells a Taskmaster, not a person (#588, Josh's pick on #581's card, 2026-11-12: "CI health tells
+// it"): a scheduled run on the default branch that failed. It tests main as it is, so no land saw the break (Citadel's
+// nightly runs the pipeline tests lands leave out); the scheme's Taskmaster hears once per run, to start a bug minion.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { APP_NAME } from './appname.ts';
@@ -384,6 +387,8 @@ export interface CiHealthDeps {
   get?: GhGet;
   /** Message a minion (wake_when_runners_back); no message, no wakes. */
   wake?: (ticketId: number, text: string) => void;
+  /** Message a scheme's Taskmaster (a failed scheduled run); without it, those wait untold. */
+  tell?: (project: Project, text: string) => void;
 }
 
 export class CiHealth {
@@ -554,7 +559,32 @@ export class CiHealth {
         if (s) out.push(s);
       }
     }
+    await this.scheduledFailures(p, slug, branch, as, now);
     return out;
+  }
+
+  /** Tell the scheme's Taskmaster, once per run, of each scheduled run on `branch` in the last day that failed. */
+  private async scheduledFailures(p: Project, slug: string, branch: string, as: GithubEnv, now: number) {
+    if (!this.deps.tell) return;
+    const runs: Run[] = (await this.read(`repos/${slug}/actions/runs?event=schedule&branch=${encodeURIComponent(branch)}&per_page=20`, as))?.workflow_runs ?? [];
+    const key = `ci-health:scheduled:${p.id}`;
+    const told = this.store.getSetting<number[]>(key) ?? [];
+    const red = runs.filter((r) => r.status === 'completed' && r.conclusion === 'failure' && now - at(r.created_at) <= WINDOW_MS && !told.includes(r.id));
+    const where: string[] = [];
+    for (const r of red) {
+      const job = (await this.jobs(slug, r, as)).find((j) => j.conclusion === 'failure');
+      const step = (job?.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
+      where.push(job ? `, at ${job.name}${step ? ` › ${step}` : ''}` : '');
+    }
+    // Kept before telling, so a send that throws can't tell twice; ids GitHub no longer lists are dropped.
+    this.store.setSetting(key, [...told.filter((id) => runs.some((r) => r.id === id)), ...red.map((r) => r.id)]);
+    red.forEach((r, i) => {
+      try {
+        this.deps.tell!(p, `${p.name}'s scheduled ${r.name} run on ${branch} failed on ${r.head_sha.slice(0, 7)}${where[i]}: https://github.com/${slug}/actions/runs/${r.id}. It tests ${branch} as it is, so no land saw this break: start a bug minion for it, or ask people if it's CI itself (a runner, GitHub) rather than the code.`);
+      } catch (err) {
+        console.error(`Telling ${p.name}'s Taskmaster of run ${r.id} failed:`, err);
+      }
+    });
   }
 
   /**

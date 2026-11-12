@@ -170,6 +170,7 @@ function world({ delve = false } = {}) {
     runs: [] as Run[],
     jobs: new Map<number, Job[]>(),
     mainRuns: [] as Run[],
+    scheduled: [] as Run[],
     calls: [] as string[],
     rateLimited: false,
     down: null as RegExp | null,
@@ -186,6 +187,7 @@ function world({ delve = false } = {}) {
     else if (path === 'repos/caraminden/delve/actions/runners?per_page=100') body = { runners: gh.delveRunners };
     else if (path.endsWith('/actions/runners?per_page=100')) body = { runners: gh.runners };
     else if (path.includes('/actions/workflows/7/runs?branch=main')) body = { workflow_runs: gh.mainRuns };
+    else if (path.endsWith('/actions/runs?event=schedule&branch=main&per_page=20')) body = { workflow_runs: gh.scheduled };
     else if (path.endsWith('/actions/runs?per_page=50')) body = { workflow_runs: gh.runs };
     else if (/^repos\/caraminden\/[^/]+$/.test(path)) body = { default_branch: 'main' };
     else if (/\/runs\/\d+\/jobs/.test(path)) body = { jobs: gh.jobs.get(Number(/runs\/(\d+)\//.exec(path)![1])) ?? [] };
@@ -588,4 +590,41 @@ test("the land alarm joins CI health's one alert under the live scheme, rings wi
   for (const [phase, ci, ms] of capHit) { await again.land(w.peek.id, [land(5, '#558', phase, ci)], t); t += ms; }
   await again.land(w.peek.id, [], t);
   assert.match(w.puts.at(-1)![2]!, /2 lands in a row: #557 .*#558/);
+});
+
+test('a failed scheduled run on main tells its scheme\'s Taskmaster once, failed step and link included; green, push and old runs say nothing (#588)', async () => {
+  const w = world();
+  const told: [string, string][] = [];
+  const deps = { ...w.deps, tell: (p: { name: string }, text: string) => told.push([p.name, text]) };
+  const health = new CiHealth(w.store, deps);
+  const nightly = (fields: Partial<Run>) => runOf({ name: 'Tests', workflow_id: 9, created_at: iso(2 * HOUR), ...fields });
+  const red = nightly({ id: 4242, head_sha: 'abc1234def', conclusion: 'failure' });
+  w.gh.jobs.set(4242, [job({ run_id: 4242, name: 'tests', conclusion: 'failure', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run the suite', conclusion: 'failure' }] })]);
+  // GitHub's event=schedule filter keeps push runs out; a green nightly, one still running and a red one from two days ago say nothing.
+  w.gh.scheduled = [nightly({ conclusion: 'success', created_at: iso(HOUR) }), nightly({ status: 'in_progress', conclusion: null }), red, nightly({ conclusion: 'failure', created_at: iso(48 * HOUR) })];
+  await health.tick(NOW);
+  assert.equal(told.length, 1);
+  assert.equal(told[0][0], 'Peek Auras');
+  assert.match(told[0][1], /^Peek Auras's scheduled Tests run on main failed on abc1234, at tests › Run the suite: https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4242\./);
+  assert.deepEqual(w.puts, [], 'not a Mandate alert');
+
+  await health.tick(NOW + 5 * MIN);
+  assert.equal(told.length, 1, 'a second poll does not repeat it');
+  await new CiHealth(w.store, deps).tick(NOW + 10 * MIN);
+  assert.equal(told.length, 1, 'nor does a restart');
+
+  // The next night's red run is a new run, so it tells again; one whose jobs can't say where just leaves that out.
+  w.gh.scheduled = [nightly({ id: 4343, head_sha: 'def5678abc', conclusion: 'failure', created_at: iso(MIN) }), ...w.gh.scheduled];
+  await health.tick(NOW + 15 * MIN);
+  assert.equal(told.length, 2);
+  assert.match(told[1][1], /^Peek Auras's scheduled Tests run on main failed on def5678: https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4343\./);
+});
+
+test('a failed scheduled run waits, untold, while nothing can tell the Taskmaster (#588)', async () => {
+  const w = world();
+  w.gh.scheduled = [runOf({ id: 4444, name: 'Tests', conclusion: 'failure' })];
+  await w.health.tick(NOW);
+  const told: string[] = [];
+  await new CiHealth(w.store, { ...w.deps, tell: (_p, text) => told.push(text) }).tick(NOW + 5 * MIN);
+  assert.equal(told.length, 1);
 });

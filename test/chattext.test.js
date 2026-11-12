@@ -64,6 +64,7 @@ test('firstSentence keeps the first sentence as plain text, cut at a word under 
     ['abcdefghijkl', 5, 'abcd…'],
     // A minion's number keeps its #, and a > in the text stays; only heading and quote marks at a line's start go.
     ['Merged in #473. Next', 200, 'Merged in #473.'],
+    ['#473 is done. Next', 200, '#473 is done.'],
     ['a > b holds. Next', 200, 'a > b holds.'],
     ['## Done\n> Shipped it. Then', 200, 'Done Shipped it.'],
     // The default limit is 200.

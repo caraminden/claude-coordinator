@@ -119,6 +119,19 @@ test('a shell command with no description is put into words from the command its
     ['gh pr create --fill', 'Used GitHub (pr create)'],
     ['curl -s https://example.com/api/x', 'Made a web request to example.com'],
     ['sleep 5', 'Waited'],
+    // sed's and perl's script is not the file they work on.
+    ["sed -i 's/foo/bar/' app.js", 'Edited app.js'],
+    ["sed -n '/start/,/end/p' app.js", 'Looked at app.js'],
+    ["perl -pi -e 's/a/b/' lib/f.js", 'Edited f.js'],
+    // Printing into a file is writing it.
+    ["cat > notes.md <<'EOF'\nhello\nEOF", 'Wrote notes.md'],
+    ['echo hi > out.txt', 'Wrote out.txt'],
+    ['printf x >> log.txt; echo y > b.txt', 'Wrote log.txt and b.txt'],
+    // Wrappers in a row all come off.
+    ['sudo timeout 5 npm test', 'Ran the tests'],
+    ['FOO=1 nice npm test', 'Ran the tests'],
+    // A quoted folder with spaces is still git's -C value.
+    ['git -C "/path with space" commit -m x', 'Committed changes'],
     // Nothing fits: the command itself, quoted.
     ['jj st', 'Ran `jj st`'],
   ];
@@ -172,6 +185,10 @@ test("a shell command's phase comes from the command first, then from its descri
     ['git -C /repo commit -m x', '', 'save'],
     ['git -c user.name=x commit -m x', '', 'save'],
     ['git -C /repo add -A', '', 'change'],
+    ['git -C "/path with space" commit -m x', '', 'save'],
+    ["git -C '/a b' log -5", '', 'explore'],
+    ["perl -pi -e 's/a/b/' f.js", '', 'change'],
+    ["cat > notes.md <<'EOF'\nhi\nEOF", '', 'change'],
     ['grep -rn foo src | head', '', 'explore'],
     // The command says nothing; the description decides.
     ['jj st', 'Deploy the app', 'save'],

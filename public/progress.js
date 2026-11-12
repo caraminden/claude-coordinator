@@ -53,18 +53,24 @@ const GIT_WORDS = {
 };
 
 const TEST_RE = /^(npm|pnpm|yarn|bun) (run )?test|^(pytest|jest|vitest|go test|cargo test|make test|node --test)/;
+// Output sent to a file with an extension (not stderr's 2> or &>): the command changes that file.
+const WRITE_RE = /(?:^|[^2&>])>>?\s*([\w./~-]+\.\w+)/;
+
+/** git with its options before the subcommand (-C <dir>, -c <name=value>, quoted or not) left out. */
+function bareGit(command) {
+  return command.replace(/\bgit((?: -[Cc] (?:"[^"]*"|'[^']*'|\S+)| --(?:git-dir|work-tree)[= ](?:"[^"]*"|'[^']*'|\S+))+)(?= )/g, 'git');
+}
 
 /** A raw shell command in words, for when Claude gave it no description. Null if nothing fits. */
 function describeOne(cmd) {
-  let c = cmd.trim().replace(/^(sudo|timeout \S+|env|time|nice|setsid)\s+/g, '').replace(/^(\w+=\S*\s+)+/, '');
+  const c = cmd.trim().replace(/^((sudo|timeout \S+|env|time|nice|setsid|\w+=\S*)\s+)+/, '');
   const [prog, ...rest] = c.split(/\s+/);
   const args = rest.filter((a) => !a.startsWith('-'));
   const file = args.find((a) => /[./]/.test(a) && !/[|<>$]/.test(a));
   if (!prog || prog === 'cd' || prog === 'true' || prog === 'echo' && /^echo\s*$/.test(c)) return null;
   if (TEST_RE.test(c)) return 'Ran the tests';
   if (prog === 'git') {
-    // Options before the subcommand, with the values of those that take one (-C <dir>, -c <name=value>).
-    const sub = rest.find((a, i) => !a.startsWith('-') && !/^(-C|-c|--git-dir|--work-tree)$/.test(rest[i - 1]));
+    const sub = bareGit(c).split(/\s+/).slice(1).find((a) => !a.startsWith('-'));
     return GIT_WORDS[sub] ?? `Ran git ${sub ?? ''}`.trim();
   }
   if (prog === 'gh') return `Used GitHub (${args.slice(0, 2).join(' ')})`;
@@ -77,8 +83,12 @@ function describeOne(cmd) {
     return `Ran ${basename(file)}`;
   }
   if (/^(ls|tree|find|fd)$/.test(prog)) return 'Listed files';
-  if (/^(cat|head|tail|less|bat)$/.test(prog) || prog === 'sed' && rest.includes('-n')) return file ? `Looked at ${basename(file)}` : 'Looked at a file';
-  if (prog === 'sed' || prog === 'perl' && rest.includes('-i')) return file ? `Edited ${basename(file)}` : 'Edited a file';
+  const written = /^(cat|echo|printf)$/.test(prog) && c.match(WRITE_RE)?.[1];
+  if (written) return `Wrote ${basename(written)}`;
+  // sed's and perl's script comes before the file, and may hold slashes and dots itself.
+  const target = /^(sed|perl)$/.test(prog) && args.length > 1 ? args.at(-1) : file;
+  if (/^(cat|head|tail|less|bat)$/.test(prog) || prog === 'sed' && rest.includes('-n')) return target ? `Looked at ${basename(target)}` : 'Looked at a file';
+  if (prog === 'sed' || prog === 'perl' && rest.some((a) => /^-[a-z]*i/.test(a))) return target ? `Edited ${basename(target)}` : 'Edited a file';
   if (/^(grep|rg|ag)$/.test(prog)) return 'Searched files';
   if (/^(wc|du|df|stat|file)$/.test(prog)) return 'Measured files';
   if (/^(mkdir|touch)$/.test(prog)) return 'Created files';
@@ -105,7 +115,7 @@ function describeCommand(command) {
   for (const seg of String(command ?? '').split(/\n|&&|\|\||;/)) {
     const words = describeOne(seg.split('|')[0]);
     // "Looked at a.ts" then "Looked at b.ts" -> "Looked at a.ts and b.ts".
-    const verb = words?.match(/^(Looked at|Edited|Ran) (\S+\.\w+)$/);
+    const verb = words?.match(/^(Looked at|Edited|Wrote|Ran) (\S+\.\w+)$/);
     const prev = verb && parts.findIndex((t) => t.startsWith(`${verb[1]} `) && /\.\w+$/.test(t));
     if (verb && prev >= 0) parts[prev] = `${parts[prev].replace(' and ', ', ')} and ${verb[2]}`;
     else if (words && !parts.includes(words)) parts.push(words);
@@ -124,10 +134,10 @@ function describeCommand(command) {
  * checking they work, or saving them to git. Uses the command itself, then Claude's description.
  */
 function commandPhase(command, description = '') {
-  // git's options before the subcommand (-C <dir>, -c <name=value>) don't change which subcommand it is.
-  const c = String(command ?? '').replace(/\bgit((?: -[Cc] \S+| --(?:git-dir|work-tree)[= ]\S+)+)(?= )/g, 'git');
+  // git's options before the subcommand don't change which subcommand it is.
+  const c = bareGit(String(command ?? ''));
   if (/\bgit (commit|merge|push|pull|rebase|cherry-pick)\b|\bgh pr\b/.test(c)) return 'save';
-  if (/\bsed -i|\bperl -i|\.write\(|writeFile|\bgit (add|checkout|restore|stash)\b|\b(mv|cp|rm|mkdir|touch|ln)\s|(^|[^2&])>\s*[\w./~-]+\.\w+|\b(npm|pnpm|yarn|pip3?|uv) (i|install|add)\b/.test(c)) return 'change';
+  if (/\bsed -i|\bperl -[a-z]*i|\.write\(|writeFile|\bgit (add|checkout|restore|stash)\b|\b(mv|cp|rm|mkdir|touch|ln)\s|\b(npm|pnpm|yarn|pip3?|uv) (i|install|add)\b/.test(c) || WRITE_RE.test(c)) return 'change';
   if (/(^|\W)(npm|pnpm|yarn|bun) (run )?test|pytest|jest|vitest|go test|cargo test|node --test|--check\b|\btsc\b|eslint|\bcurl\b|\bwget\b|systemctl|journalctl|screenshot|\b(node|python3?|deno|bun) (?!-e)\S+\.(m?js|ts|py)\b/.test(c)) return 'verify';
   if (/^\s*(cd \S+ && )?(git (status|log|diff|show|branch|blame|grep|ls-files|rev-parse|remote)|ls|cat|head|tail|less|grep|rg|find|tree|wc|sed -n|stat|file)\b/.test(c)) return 'explore';
   const d = description.toLowerCase();

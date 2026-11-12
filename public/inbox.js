@@ -119,7 +119,8 @@ export function onSeenItems(projectId) {
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */
 export function renderInbox() {
   if (view?.kind !== 'project' || inbox.projectId !== view.projectId) return;
-  const items = inbox.items.filter((i) => ticketOf(i.ticketId));
+  // A dismissed minion is never in your inbox (#589), even while the server's list still has it: your own dismiss shows at once.
+  const items = inbox.items.filter((i) => ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed');
   const strip = inboxStrip();
   // Minions, not items: one waiting on two things is one to see to (Cara, 2026-11-01).
   const waiting = items.filter((i) => !faded(i));

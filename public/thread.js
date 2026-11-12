@@ -3,6 +3,7 @@ import { ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight
 import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar } from './sidebar.js';
+import { refreshInbox } from './inbox.js';
 import { rowState, SHIP } from './threadstate.js';
 import { waitBar, waitClock, waitNow, waitTrack } from './wait.js';
 import { propertyChip } from './properties.js';
@@ -602,13 +603,14 @@ function setStatus(t, status) {
     renderSidebar();
     if (view?.id === t.id) renderTicketHead();
   };
+  // The server's echo can't move Needs you here, since this page already changed the minion: fetch it once the server has it.
   optimistic({
     sets: `status:${t.id}`,
     apply: () => show(status),
     send: () => api(`api/tickets/${t.id}/status`, { method: 'POST', body: { status } }),
     undo: () => t.status === status && show(was), // unless something else changed it since
     label: `${status === 'closed' ? 'dismiss' : 'reopen'} ${threadLabel(t)}`,
-  });
+  }).then(refreshInbox, () => {});
 }
 
 // ---------- work progress (thread-bar readout) ----------

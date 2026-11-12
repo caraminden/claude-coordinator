@@ -123,3 +123,68 @@ test('a row\'s card badge opens the oldest open card, the rest of the row the ch
   await page.eval(`document.querySelector('[data-id="7"] .name').click()`);
   assert.equal(await page.eval('location.hash'), '#/p/2/t/7', 'the rest of the row opens the chat');
 });
+
+// Needs you (inbox.js) around a dismissal (#589; Josh, 2026-11-12: "It shouldnt require a refresh to drop out, dismissed
+// minions should never be in your inbox"). One complete minion, #12, waits in the strip; `server` is what the server's
+// inbox holds now and `status` how the dismiss or reopen request ends ('hold' keeps it on its way).
+async function inboxPage(status: 'ok' | 'fail' | 'hold', closed = false): Promise<Page> {
+  const page = await open();
+  await page.eval(`(async () => {
+    document.body.insertAdjacentHTML('afterbegin', '<span data-scheme-inbox="2"></span><div id="ticket-head"></div><div id="threads"></div>');
+    localStorage.setItem('cc-inbox-open', '1');
+    const { setView } = await import('/base.js');
+    const { inboxStrip, refreshInbox } = await import('/inbox.js');
+    const { onTicketUpdate } = await import('/core.js');
+    const { renderTicketHead } = await import('/thread.js');
+    const minion = { id: 900, number: 12, project_id: 2, kind: 'ticket', title: 'Report', status: ${closed ? "'closed'" : "'idle'"}, state: 'complete', replies: [], updated_at: Date.now() };
+    window.server = ${closed ? '[]' : "[{ kind: 'state', ticketId: 900, at: Date.now(), key: 'state:900' }]"};
+    window.fetch = async (path, opts) => {
+      const reply = (body, ok = true) => ({ ok, status: ok ? 200 : 500, json: async () => body });
+      if (path === 'api/projects/2/inbox') return reply({ items: window.server });
+      if (path === 'api/tickets/900/status') return ${status === 'ok' ? 'reply({})' : status === 'fail' ? "reply({ error: 'nope' }, false)" : 'new Promise(() => {})'};
+      return reply({});
+    };
+    setView({ kind: 'project', projectId: 2, id: 900, ticket: minion, project: { id: 2 }, projects: [{ id: 2 }],
+      coordinator: { id: 1, kind: 'coordinator', project_id: 2, status: 'idle' }, tickets: new Map([[900, minion]]) });
+    document.body.prepend(inboxStrip());
+    await refreshInbox();
+    renderTicketHead();
+    // What the stream says once the server has it, as another tab hears it too.
+    window.echo = (status) => onTicketUpdate({ ...minion, status });
+    window.needsYou = () => ({ rows: document.querySelectorAll('.inbox-row').length, strip: !document.querySelector('.inbox-strip').hidden,
+      badge: !document.querySelector('[data-scheme-inbox="2"]').hidden });
+  })()`);
+  return page;
+}
+const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+
+test('dismissing a minion takes it out of Needs you and the badge at once, before the server answers', { skip }, async () => {
+  const page = await inboxPage('hold');
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true }, 'waiting on you');
+  await page.eval(`document.querySelector('.act-dismiss').click()`);
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, badge: false });
+});
+
+test('a failed dismissal puts it back in Needs you', { skip }, async () => {
+  const page = await inboxPage('fail');
+  await page.eval(`document.querySelector('.act-dismiss').click()`);
+  await settle(50);
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true });
+});
+
+test('another tab drops a minion dismissed elsewhere from Needs you when the stream says so', { skip }, async () => {
+  const page = await inboxPage('ok');
+  await page.eval(`(server = [], echo('closed'))`);
+  await settle(400); // the inbox's refetch waits out a burst
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, badge: false });
+});
+
+test('reopening a dismissed minion that still waits on you puts it back in Needs you', { skip }, async () => {
+  const page = await inboxPage('ok', true);
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, badge: false });
+  await page.eval(`(server = [{ kind: 'state', ticketId: 900, at: Date.now(), key: 'state:900' }], document.querySelector('.act-reopen').click())`);
+  await settle(50);
+  await page.eval(`echo('idle')`);
+  await settle(400);
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true });
+});

@@ -252,7 +252,8 @@
     "MCP_TOOL_TIMEOUT": "604800000",
     "COORDINATOR_MEMORY": "1",
     "GH_TOKEN": "gh-1",
-    "GIT_AUTHOR_NAME": "Cara"
+    "GIT_AUTHOR_NAME": "Cara",
+    "COORDINATOR_MACHINES": "perigee-godot,caras-laptop"
    }
   },
   "settings": {
@@ -1761,7 +1762,8 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/7/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/8-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_MACHINES": "perigee-godot"
    }
   },
   "settings": {

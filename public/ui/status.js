@@ -140,23 +140,26 @@ function isTyping(el) {
   return tag === 'textarea' || (tag === 'input' && !NO_TEXT.has((el.type || 'text').toLowerCase()));
 }
 
-/** Run `u` unless it already ran; true if it ran now. */
+/** Take `u` off the stack; true if it hasn't run and still makes sense, so it's the caller's to run now. */
 function take(u) {
-  if (u.done) return false;
-  u.done = true;
   const i = undos.indexOf(u);
   if (i >= 0) undos.splice(i, 1);
-  u.run();
-  return true;
+  if (u.done || (u.live && !u.live())) return false;
+  return (u.done = true);
 }
 
 function onUndoKey(e) {
-  if (e.defaultPrevented || e.repeat || !isUndoKey(e) || isTyping(e.target) || isTyping(document.activeElement)) return;
-  for (let u = undos.pop(); u; u = undos.pop()) {
-    if (u.live && !u.live()) continue; // gone stale: passed over and dropped
+  // composedPath()[0]: a field inside a shadow root, where e.target is only its host.
+  if (e.defaultPrevented || e.repeat || !isUndoKey(e) || isTyping(e.composedPath()[0])) return;
+  for (let u = undos.at(-1); u; u = undos.at(-1)) {
+    if (!take(u)) continue; // ran by its button, or gone stale: dropped
     e.preventDefault();
-    u.done = true;
-    u.run();
+    try {
+      u.run();
+    } catch (err) {
+      toast(`Couldn't undo: ${u.text}`, { tone: 'danger' });
+      throw err;
+    }
     // In place of its toast (or the newer one): what the key did, with no Undo left to press twice.
     toast(`Undone: ${u.text}`);
     return;
@@ -190,7 +193,7 @@ export function toast(text, opts = {}) {
     if (undos.length > 50) undos.shift();
     if (!keyed) document.addEventListener('keydown', onUndoKey);
     keyed = true;
-    action = { label: 'Undo', run: () => take(u) };
+    action = { label: 'Undo', run: () => take(u) && u.run() };
   }
   if (!pop?.isConnected) {
     pop = document.createElement('div');

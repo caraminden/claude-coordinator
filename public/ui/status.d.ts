@@ -52,7 +52,7 @@ export function steadyLabelHtml(labels: Record<string, string>, current?: string
  * `onHide` is called once when this toast goes: its time is up, a tap, its action, or a newer toast replacing it.
  * `undo` (instead of `action`, never both: that throws) is an Undo button that Ctrl-Z (Cmd-Z on a Mac) presses too,
  * the newest first, then the one before, even after its toast has gone, never while focus is in a text field
- * (its own undo wins there). `live()`, if given, says it still makes sense; once false, Ctrl-Z passes it over. Each
+ * (its own undo wins there). `live()`, if given, says it still makes sense; once false, key and button skip it. Each
  * Undo runs at most once, by key or button; the key shows "Undone: <text>" in place of the toast. Make `run` show
  * the undone state at once (optimistic() for its request). Returns the toast's `hide()`, which hides it only while
  * it's still the one showing. */

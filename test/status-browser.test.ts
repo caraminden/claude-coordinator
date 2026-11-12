@@ -365,9 +365,29 @@ test("Ctrl-Z in a text field, a textarea or contenteditable is the field's own u
     assert.equal(await page.eval(`document.getElementById('${id}').${prop}`), before, `${id}: its own undo took the typing back`);
     assert.deepEqual(await page.eval('window.ran'), [], `${id}: the toast's Undo didn't run`);
   }
+  // A field inside a shadow root: at the document the event's target is only its host.
+  await page.eval(`(() => { const host = document.createElement('div'); document.body.append(host); host.attachShadow({ mode: 'open' }).append(document.createElement('input')); host.shadowRoot.querySelector('input').focus(); })()`);
+  await page.send('Input.insertText', { text: 'typed' });
+  await undoKey(page);
+  assert.equal(await page.eval(`document.querySelector('body > div:last-child').shadowRoot.querySelector('input').value`), '', 'shadow field: its own undo');
+  assert.deepEqual(await page.eval('window.ran'), [], "shadow field: the toast's Undo didn't run");
   await page.eval(`document.getElementById('tick').focus()`);
   await undoKey(page);
   assert.deepEqual(await page.eval('window.ran'), ['a']);
+});
+
+test("an Undo's button does nothing once live() says it no longer makes sense; one that throws by key says it couldn't", { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  await page.eval(UNDO_PAGE);
+  await page.eval(`offer('stale', { live: () => false })`);
+  await page.eval(`document.querySelector('.cui-toast-action').click()`);
+  assert.deepEqual(await page.eval('window.ran'), []);
+  await page.eval(`toast('Deleted c', { undo: { run: () => { throw new Error('gone') } } })`);
+  await page.eval(`window.addEventListener('error', (e) => e.preventDefault())`);
+  await undoKey(page);
+  assert.equal(await toastText(page), "Couldn't undo: Deleted c");
+  await undoKey(page);
+  assert.equal(await toastText(page), "Couldn't undo: Deleted c", 'and it ran once: the next Ctrl-Z finds nothing');
 });
 
 test("a toast's hide() hides it while it's the one showing, never a newer one; undo with action throws", { skip }, async () => {

@@ -75,7 +75,8 @@ tap opens a cut-off status's tip, as for anything a tap doesn't act on; inside a
     Nor when another listener already took the key (`preventDefault()`), and it takes the key only
     when it undid something.
   - `live()` (optional) says it still makes sense: once false (its view left, the item decided again),
-    the key passes it over and drops it. Give it one whenever `run` closes over something that can go.
+    the key passes it over and drops it, and its button does nothing. Give it one whenever `run` closes
+    over something that can go. A `run` that throws by key shows "Couldn't undo: <text>".
   - `run` shows the undone state at once and sends behind it (`optimistic()`), like any click (rule 23).
   - The button carries `aria-keyshortcuts` and a tip naming the key. `undo` and `action` together throw:
     a toast has one button.

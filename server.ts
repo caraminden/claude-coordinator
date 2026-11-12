@@ -24,10 +24,10 @@ import { MachineRelay } from './src/machines.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
-import { Previews, previewPath } from './src/previews.ts';
+import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { type Chain, githubPrs, LiveWaiters, startChained } from './src/wake.ts';
+import { type Chain, githubPrs, LiveWaiters, runsRepo, startChained } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
@@ -211,6 +211,12 @@ const previews = PREVIEW ? null : new Previews(store, DATA_DIR);
 if (previews) {
   previews.onChange = (ticketId) => runner.broadcastTicket(ticketId);
   runner.onClose = (ticketId) => previews.stop(ticketId, true);
+  // Builds' previews are of this server's own code, so only its own scheme has them; checked again once a deploy moves the live commit.
+  let own: { head: string | null; id: number | null } | null = null;
+  previews.buildScheme = () => {
+    if (own?.head !== waiters.head) own = { head: waiters.head, id: store.listProjects().find((p) => runsRepo(p.repo_dir, waiters.head))?.id ?? null };
+    return own.id === null ? null : store.getProject(own.id) ?? null;
+  };
 }
 if (!BOOT_CHECK) runner.recover();
 if (runner.units && !BOOT_CHECK) {
@@ -679,7 +685,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       if (req.method === 'GET' || req.method === 'HEAD') return void res.writeHead(302, { Location: own.redirect }).end();
     } else if (own) req.url = own.url;
     const url = requestUrl(req);
-    const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
+    // /preview/<ticket id>/ or a build's /preview/build/<n>/: the id is digits only, so "build" never reads as one.
+    const preview = previews && /^\/preview\/(build\/)?(\d+)(\/.*)?$/.exec(url.pathname);
     // The frozen backup chat with the Citadel scheme's (2) Taskmaster, ahead of everything else (src/backup.ts).
     if (isBackupPath(url.pathname)) {
       await serveBackup(app, BACKUP_SCHEME, req, res, url);
@@ -697,18 +704,21 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     } else if (preview) {
       const session = auth.session(req);
       // An HTML page's files under its file token come from a frame that sends no cookies; the preview checks the token.
-      const tokened = /^\/(c\/)?api\/files\//.test(preview[2] ?? '') && (req.method === 'GET' || req.method === 'HEAD');
+      const [, build, id, rest] = preview;
+      const tokened = /^\/(c\/)?api\/files\//.test(rest ?? '') && (req.method === 'GET' || req.method === 'HEAD');
       // People only, signed in to the live app; a page load without a login goes to the login.
       if (!tokened && (!session || session.agent !== undefined)) {
         if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();
         throw new HttpError(401, 'Not logged in');
       }
-      // Only for people in the minion's scheme.
-      const shown = store.getTicket(Number(preview[1]));
-      if (session && session.agent === undefined && (!shown || !store.canSee(session, shown.project_id))) throw new HttpError(404, 'There is no preview for this minion');
+      // Only for people in the minion's scheme, or for a build, the scheme whose code this server runs.
+      const shownIn = build ? previews.buildScheme()?.id : store.getTicket(Number(id))?.project_id;
+      if (session && session.agent === undefined && (shownIn === undefined || !store.canSee(session, shownIn))) throw new HttpError(404, build ? 'There is no preview for this build' : 'There is no preview for this minion');
       // The front end's URLs are relative, so the page itself needs the trailing slash.
-      if (!preview[2]) return void res.writeHead(302, { Location: `/${previewPath(Number(preview[1]))}${url.search}` }).end();
-      await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session?.agent === undefined ? session : null);
+      if (!rest) return void res.writeHead(302, { Location: `/${build ? buildPreviewPath(Number(id)) : previewPath(Number(id))}${url.search}` }).end();
+      const who = session?.agent === undefined ? session : null;
+      if (build) await previews.proxyBuild(req, res, Number(id), rest + url.search, who);
+      else await previews.proxy(req, res, Number(id), rest + url.search, who);
     } else if (SETUP_PATH.test(url.pathname)) {
       await serveRunnerFile(res, url.pathname);
     } else {

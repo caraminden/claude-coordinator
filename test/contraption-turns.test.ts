@@ -346,6 +346,8 @@ test('a name resumes its own Claude session; fresh starts another; other contrap
   const again = (await turn(mandate, { session: 'resume-me' }))[0].data.claudeSession;
   assert.equal(again, first);
   assert.equal(argAfter(lastRun().argv, '--resume'), first);
+  // Claude Code replays a resumed session's first system prompt unless told not to (#618): this turn's own is sent.
+  assert.equal(argAfter(lastRun().argv, '--system-prompt-snapshot'), 'off');
   const fresh = (await turn(mandate, { session: 'resume-me', fresh: true }))[0].data.claudeSession;
   assert.notEqual(fresh, first);
   assert.equal(argAfter(lastRun().argv, '--session-id'), fresh);

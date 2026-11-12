@@ -396,6 +396,9 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     '--verbose',
     '--permission-mode', ticket.permission_mode,
     '--append-system-prompt-file', join(dir, 'system-prompt.md'),
+    // Claude Code otherwise replays a session's first system prompt on every resume, so saved instructions,
+    // lent machines or a build never reached a running minion (#618). Unchanged text still reads from cache.
+    '--system-prompt-snapshot', 'off',
     // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
     // Taskmaster's prompts, so those are denied instead of waiting.
     ...permissionArgs(ticket.kind !== 'coordinator'),

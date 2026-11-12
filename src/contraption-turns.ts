@@ -181,6 +181,8 @@ export function args(req: TurnRequest, dir: string, claudeSession: string, resum
     '--settings', join(dir, 'settings.json'),
     '--permission-mode', 'dontAsk',
     '--disable-slash-commands',
+    // A resumed session gets this turn's system text, not its first one's (#618).
+    '--system-prompt-snapshot', 'off',
   ];
   if (req.system) a.push('--append-system-prompt-file', join(dir, 'system.md'));
   if (req.model) a.push('--model', req.model);

@@ -183,3 +183,16 @@ test('every kind of turn is launched with exactly what the snapshot says', async
   assert.deepEqual(Object.keys(got), Object.keys(want));
   for (const name of Object.keys(want)) assert.deepEqual(got[name], want[name], name);
 });
+
+// Claude Code records a conversation's first system prompt and replays it on every resume unless told not
+// to (--system-prompt-snapshot, on by default since 2.1.319 at the latest), so saved scheme and Citadel-wide
+// instructions never reached a running session (#618). Turns where the text didn't change still read it from cache.
+test("a resumed turn is sent this turn's system prompt, not its session's first one", async () => {
+  const turns: Record<string, Case> = { minion: cases['a resumed session whose transcript is on this login'] as Case, Taskmaster: { kind: 'coordinator', set: { session_id: 'sess-7' } } };
+  for (const [name, c] of Object.entries(turns)) {
+    const args: string[] = ((await launch(c)) as any).spec.args;
+    assert.equal(args[args.indexOf('--system-prompt-snapshot') + 1], 'off', name);
+    assert.ok(args.includes('--append-system-prompt-file'), name);
+    if (name === 'minion') assert.equal(args[args.indexOf('--resume') + 1], 'sess-7');
+  }
+});

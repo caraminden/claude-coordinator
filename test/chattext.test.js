@@ -32,6 +32,11 @@ test('ticketActionRef links the minion a Taskmaster tool created, messaged or up
     ['mcp__coordinator__create_ticket', text('Saved. See Created #15 Fix'), null],
     ['mcp__coordinator__create_ticket', text('Created #15b'), null],
     ['mcp__coordinator__list_tickets', text('#15 Fix the bar'), null],
+    // message_ticket with start_now puts the start first (src/mcp.ts); it was still sent.
+    ['mcp__coordinator__message_ticket', text('Started early, its brief first. Sent. #12 Usage bar'), { verb: 'Messaged', number: 12 }],
+    ['mcp__coordinator__message_ticket', text('Not started early: it is running. Sent. #12 Usage bar'), { verb: 'Messaged', number: 12 }],
+    // Held or left as held mail: not delivered, so no "Messaged" link.
+    ['mcp__coordinator__message_ticket', text('Held, not delivered: the loop guard.\n#12 Usage bar'), null],
   ];
   for (const [name, result, want] of rows) assert.deepEqual(act(name, result), want, `${name}: ${JSON.stringify(result)}`);
 });

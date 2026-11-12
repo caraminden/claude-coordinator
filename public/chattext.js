@@ -9,7 +9,8 @@ import { taskmasterName } from './base.js';
 export function ticketActionRef({ block, result }) {
   if (!result || result.is_error || !block.name.startsWith('mcp__coordinator__')) return null;
   const text = Array.isArray(result.content) ? result.content.map((c) => c?.text ?? '').join('\n') : String(result.content ?? '');
-  const m = /^(Created|Sent\.|Updated\.) #(\d+)\b/.exec(text);
+  // message_ticket with start_now says how the start went first (src/mcp.ts).
+  const m = /^(?:Started early, its brief first\. |Not started early: [^\n]*?\. )?(Created|Sent\.|Updated\.) #(\d+)\b/.exec(text);
   return m ? { verb: { Created: 'Created', 'Sent.': 'Messaged', 'Updated.': 'Updated' }[m[1]], number: Number(m[2]) } : null;
 }
 

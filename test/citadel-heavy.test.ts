@@ -270,3 +270,65 @@ test("a job deletes the wait files of waiters killed long ago, and leaves a live
   assert.ok(!existsSync(old), 'an hour stale: its waiter is long gone');
   assert.ok(existsSync(fresh), 'a fresh one may be a waiter in another container');
 });
+
+// #596: one history line per job, so a week of real waits and runs can be read back.
+const history = (dir: string) => readFileSync(join(dir, 'history'), 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t'));
+
+test('a job that ran appends one line: start, who, what, on what it waited, wait s, run s, status, pressure', () => {
+  const { dir, env } = folder(2, 7);
+  const r = spawnSync(heavy, ['sh', '-c', 'sleep 1; printf "a\tb"; exit 3'], { env: { ...env, CITADEL_HEAVY_WHO: 'TTA #12 (josh)' }, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(r.status, 3);
+  const lines = history(dir);
+  assert.equal(lines.length, 1);
+  const [at, who, what, on, wait, run, status, pressure] = lines[0];
+  assert.ok(Math.abs(Date.parse(at) - Date.now()) < 60_000, `${at} is an ISO time of about now`);
+  assert.equal(who, 'TTA #12 (josh)');
+  assert.equal(what, 'sh -c sleep 1; printf "a b"; exit 3', 'a tab in the command would split its field');
+  assert.deepEqual([on, wait, status, pressure], ['none', '0', '3', '7']);
+  assert.ok(Number(run) >= 1 && Number(run) < 10, `ran ${run} s`);
+  assert.equal(lines[0].length, 8);
+});
+
+test('a job that waited on load says load, with its wait and the pressure it started at; a forced one says forced', async () => {
+  const { dir, env, pressureFile } = folder(2, 72);
+  const a = job(env, 'Peek #9', 'true');
+  try {
+    await until('the job to wait on load', () => /box is busy/.test(a.err()));
+    await new Promise((r) => setTimeout(r, 1100));
+    writeFileSync(pressureFile, psi(12));
+  } finally {
+    writeFileSync(pressureFile, psi(0));
+  }
+  assert.equal(await a.done, 0);
+  const [line] = history(dir);
+  assert.equal(line[3], 'load');
+  assert.ok(Number(line[4]) >= 1, `waited ${line[4]} s`);
+  assert.match(line[7], /^(12|0)$/);
+  writeFileSync(pressureFile, psi(90));
+  assert.equal(spawnSync(heavy, ['true'], { env: { ...env, CITADEL_HEAVY_LOAD_WAIT: '1' }, timeout: 10_000 }).status, 0);
+  assert.deepEqual([history(dir)[1][3], history(dir)[1][7]], ['forced', '90']);
+});
+
+test('a history file that cannot be written changes nothing about the run, its output or its status', () => {
+  const { dir, env } = folder(1);
+  mkdirSync(join(dir, 'history'), { recursive: true }); // a folder where the file goes: every append fails
+  const r = spawnSync(heavy, ['sh', '-c', 'echo ran; exit 7'], { env, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(r.status, 7);
+  assert.equal(r.stdout, 'ran\n');
+  assert.equal(r.stderr, '', 'quietly');
+});
+
+test('nested calls write no line of their own, and a history past its limit keeps its newest half, whole lines only', () => {
+  const { dir, env } = folder(1);
+  assert.equal(spawnSync(heavy, [heavy, 'true'], { env, timeout: 10_000 }).status, 0);
+  assert.equal(history(dir).length, 1, 'one line for the outer call only');
+  writeFileSync(join(dir, 'history'), Array.from({ length: 40 }, (_, i) => `old line ${String(i).padStart(2, '0')}`.padEnd(49, '.')).join('\n') + '\n');
+  assert.equal(spawnSync(heavy, ['echo', 'newest'], { env: { ...env, CITADEL_HEAVY_HISTORY_MAX: '1000' }, stdio: 'ignore', timeout: 10_000 }).status, 0);
+  const text = readFileSync(join(dir, 'history'), 'utf8');
+  assert.ok(text.length <= 500, `${text.length} bytes`);
+  const lines = text.split('\n').filter(Boolean);
+  assert.match(lines[0], /^old line \d\d\.+$/, 'starts on a whole line');
+  assert.match(lines.at(-2)!, /^old line 39/);
+  assert.equal(lines.at(-1)!.split('\t')[2], 'echo newest');
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('history.')), [], 'no copy left behind');
+});

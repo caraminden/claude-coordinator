@@ -21,6 +21,13 @@
 # to 6 to push a stuck landing through: six suites ran at once, the load reached ~100 on 16 cores,
 # every suite slowed down and timing-sensitive tests went red. When jobs queue on a busy box, wait.
 #
+# History (#596): when a job ends it appends one tab-separated line to $CITADEL_HEAVY_DIR/history: when it
+# started (ISO), who, what, what it waited on last (none, line, slots, load or forced), the wait and the run in
+# seconds, the exit status and the CPU pressure it was admitted at (- without one). It answers how long jobs wait,
+# on what, per scheme and command, which nothing else keeps. One short append per line, so jobs in several
+# containers can't interleave; a failed write is ignored. Past about 5 MB the job that notices keeps the newest
+# half, by a rename. Nested calls and runs without a lock folder write nothing.
+#
 # Exits with the command's status. Nested calls (a wrapped script that wraps its own step) run straight
 # away in the outer call's slot. When the lock folder or flock is missing, it warns and runs unlocked.
 set -uo pipefail
@@ -127,7 +134,8 @@ tell() {
 waitfile="$dir/wait-$$-$RANDOM$RANDOM"
 # Those of waiters killed past their trap are never freshened again (#553 M13): ten minutes is thirty missed freshenings.
 find "$dir" -maxdepth 1 -name 'wait-*' -mmin +10 -delete 2>/dev/null || true
-waiting_on() { printf '%s\n' "$who" "$what" "$started" "$1" >"$waitfile.tmp" 2>/dev/null && mv -f "$waitfile.tmp" "$waitfile" 2>/dev/null; }
+reason=none # what it waited on last, for the history line
+waiting_on() { reason=$1; printf '%s\n' "$who" "$what" "$started" "$1" >"$waitfile.tmp" 2>/dev/null && mv -f "$waitfile.tmp" "$waitfile" 2>/dev/null; }
 started=$(date +%s)
 trap 'rm -f "$waitfile" "$waitfile.tmp"' EXIT
 
@@ -220,4 +228,17 @@ export CITADEL_TEST_PROGRESS=$progress
 # The command runs as a child without the lock's fd, so a daemon it leaves behind (sccache, a build
 # server) can't keep the slot; this shell holds it until the command ends.
 export CITADEL_HEAVY_HELD=1
+waited=$((SECONDS - since)) ran=$SECONDS
 "$@" 8>&-
+status=$?
+history="$dir/history"
+[ -z "$forced" ] || reason=forced
+line="$(date -d "@$started" +%FT%T%z)	${who//[$'\t\n']/ }	${what//[$'\t\n']/ }	$reason	$waited	$((SECONDS - ran))	$status	${pressure:--}"
+{ printf '%s\n' "$line" >>"$history"; } 2>/dev/null
+max=${CITADEL_HEAVY_HISTORY_MAX:-5000000}
+if [ "$(stat -c %s "$history" 2>/dev/null || echo 0)" -gt "$max" ]; then
+  # tail -n +2 drops the line the byte cut lands in. shortcut: lines another job appends during the copy are lost, a few at most once per 2.5 MB.
+  cut="$history.$$-$RANDOM"
+  { tail -c "$((max / 2))" "$history" | tail -n +2 >"$cut" && mv -f "$cut" "$history"; } 2>/dev/null || rm -f "$cut" 2>/dev/null
+fi
+exit "$status"

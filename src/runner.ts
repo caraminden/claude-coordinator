@@ -638,16 +638,9 @@ export class Runner {
     return [...this.turns.values()].filter((t) => !t.unit && !t.container).length + (this.hostJobs?.() ?? 0);
   }
 
-  /** Who interruptible() counts, as the minions list names them (#584), for deploy.sh's waiting lines: at most 5 turns, then how many more, then the server jobs. */
-  interruptibleTurns(): string[] {
-    const names = [...this.turns].filter(([, t]) => !t.unit && !t.container).map(([id]) => {
-      const t = this.store.getTicket(id);
-      if (!t) return `turn ${id}`;
-      const scheme = this.store.getProject(t.project_id)?.name ?? '?';
-      return t.kind === 'coordinator' ? `${scheme} Taskmaster` : `${scheme} #${t.number} ${t.title.replace(/\s+/g, ' ').trim().slice(0, 40)}`;
-    });
-    const jobs = this.hostJobs?.() ?? 0;
-    return [...names.slice(0, 5), ...(names.length > 5 ? [`${names.length - 5} more`] : []), ...(jobs ? [`${jobs} server job${jobs === 1 ? '' : 's'}`] : [])];
+  /** The minions whose turns interruptible() counts (#584), by id: deploy.sh names them from the database, since /api/health answers without a login. */
+  interruptibleTurns(): number[] {
+    return [...this.turns].filter(([, t]) => !t.unit && !t.container).map(([id]) => id);
   }
 
   /** Stop following turns, for a server shutting down; they keep running, and the next server re-attaches. */

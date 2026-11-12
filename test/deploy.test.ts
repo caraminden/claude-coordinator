@@ -231,7 +231,8 @@ test('deploy.sh waits only for turns a restart would cut off; a server from befo
 });
 
 // #584: the restart's waiting lines say which turns, so people know whom to ask and what --now would cut off.
-test('/api/health names the turns a restart would cut off, and deploy.sh says them; an older server keeps the count', async () => {
+test('/api/health gives the ids of the turns a restart would cut off, and deploy.sh names them; an older server keeps the count', async () => {
+  // Ids only: /api/health answers without a login, and a minion's title is for its scheme's members.
   assert.deepEqual((await (await fetch(`${base}/api/health`)).json()).interruptibleTurns, []);
   const r = new Runner(store, () => {}, () => ({}));
   const minion = store.createTicket({ project_id: project.id, title: 'Usage bar\nin the top bar', permission_mode: 'default', created_by: 'Cara' });
@@ -240,12 +241,8 @@ test('/api/health names the turns a restart would cut off, and deploy.sh says th
   turns.set(minion.id, { unit: null, container: null });
   turns.set(tm.id, { unit: null, container: null });
   turns.set(-1, { unit: 'citadel-turn-x', container: null }); // in a unit of its own: a restart doesn't cut it off
-  r.hostJobs = () => 2;
-  assert.deepEqual(r.interruptibleTurns(), [`${project.name} #${minion.number} Usage bar in the top bar`, `${project.name} Taskmaster`, '2 server jobs']);
-  for (let i = 0; i < 6; i++) turns.set(-10 - i, { unit: null, container: null }); // gone from the store: still counted, by id
-  r.hostJobs = () => 0;
-  assert.equal(r.interruptibleTurns().length, 6, 'at most 5 named, then how many more');
-  assert.equal(r.interruptibleTurns().at(-1), '3 more');
+  turns.set(-2, { unit: null, container: 'citadel-claude-x' }); // nor in a container
+  assert.deepEqual(r.interruptibleTurns(), [minion.id, tm.id]);
 
   const say = async (body: object) => {
     const srv = createHttpServer((_req, res) => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(body)));
@@ -256,11 +253,14 @@ test('/api/health names the turns a restart would cut off, and deploy.sh says th
       srv.close();
     }
   };
-  assert.equal(await say({ ok: true, interruptible: 3, interruptibleTurns: ['Citadel #412 Usage bar', 'Citadel Taskmaster', '1 server job'] }),
-    '3 running turns (Citadel #412 Usage bar, Citadel Taskmaster, 1 server job)');
-  assert.equal(await say({ ok: true, interruptible: 1, interruptibleTurns: ['Citadel Taskmaster'] }), '1 running turn (Citadel Taskmaster)');
-  assert.equal(await say({ ok: true, interruptible: 2 }), '2 running turns', 'a server from before the names keeps the count');
-  assert.equal(await say({ ok: true, interruptible: 2, interruptibleTurns: [] }), '2 running turns', 'one that names nobody (they ended between reads) too');
+  const named = `Test #${minion.number} Usage bar in the top bar`;
+  assert.equal(await say({ ok: true, interruptible: 4, interruptibleTurns: [minion.id, tm.id] }), `4 running turns (${named}, Test Taskmaster, 2 server jobs)`);
+  assert.equal(await say({ ok: true, interruptible: 1, interruptibleTurns: [tm.id] }), '1 running turn (Test Taskmaster)');
+  const more = Array.from({ length: 6 }, (_, i) => store.createTicket({ project_id: project.id, title: `More ${i}`, permission_mode: 'default', created_by: 'Cara' }).id);
+  assert.equal(await say({ ok: true, interruptible: 8, interruptibleTurns: [minion.id, ...more, 99999] }),
+    `8 running turns (${named}, ${[0, 1, 2, 3].map((i) => `Test #${store.getTicket(more[i])!.number} More ${i}`).join(', ')}, 3 more)`, 'at most 5 named; the rest, and one gone from the database, as how many more');
+  assert.equal(await say({ ok: true, interruptible: 2 }), '2 running turns', 'a server from before the ids keeps the count');
+  assert.equal(await say({ ok: true, interruptible: 2, interruptibleTurns: [] }), '2 running turns (2 server jobs)', 'what the count holds besides turns');
 });
 
 test("deploy.sh names the same turn units as the runner, so a rollback stops only this server's", () => {

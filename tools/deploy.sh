@@ -64,7 +64,7 @@ retro_log() (
 # A field of the running server's /api/health, or nothing if it doesn't answer (or predates it).
 health() {
   curl -fsS --max-time 3 "$URL/api/health" 2>/dev/null |
-    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s)[process.argv[1]];console.log(Array.isArray(v)?v.join(", "):v??"")}catch{}})' "$1" || true
+    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[process.argv[1]]??"")}catch{}})' "$1" || true
 }
 
 # frontend if every file changed between two commits is under public/, none if nothing changed,
@@ -267,12 +267,27 @@ restart_timing() (
   retro_log "restart · ${R_COMMIT:-$(git_live rev-parse --short HEAD)} · idle-wait $(span "$R_START" "$R_LOCK") · backup $(span "$R_LOCK" "$R_BACKUP") · healthy $([ -n "$up" ] && span "$R_RESTART" "$up" || echo -) · settle $([ -n "$settled" ] && span "$up" "$settled" || echo -) · $R_OUT"
 ) >/dev/null 2>&1
 
-# How many running turns a restart would cut off ($1), and which (#584) when the server names them: "2 running turns
-# (Citadel #412 Usage bar, Citadel Taskmaster)". An older server, or one whose turns ended between the reads, gives the count only.
+# How many running turns a restart would cut off ($1), and which (#584): "2 running turns (Citadel #412 Usage bar,
+# Citadel Taskmaster)". The server gives the turns' minion ids, not names (/api/health answers without a login, and the
+# minions list shows a scheme only to its members), so the names come from the database: 5 at most, then how many
+# more, then the server jobs the count holds besides turns. An older server that gives no ids, or a database that
+# can't be read, leaves the count alone.
 turns() {
   local names
   if [ "$1" = 1 ]; then printf '1 running turn'; else printf '%s running turns' "${1:-some}"; fi
-  names=$(health interruptibleTurns)
+  names=$(curl -fsS --max-time 3 "$URL/api/health" 2>/dev/null | (cd /tmp && node -e '
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      const h = JSON.parse(s), ids = h.interruptibleTurns;
+      if (!Array.isArray(ids)) return;
+      const db = new (require("node:sqlite").DatabaseSync)(process.argv[1], { readOnly: true });
+      const q = db.prepare("select t.kind, t.number, t.title, p.name from tickets t left join projects p on p.id = t.project_id where t.id = ?");
+      const named = ids.map((id) => q.get(Number(id))).filter(Boolean)
+        .map((t) => `${t.name ?? "?"} ${t.kind === "coordinator" ? "Taskmaster" : `#${t.number} ${String(t.title).replace(/\s+/g, " ").trim().slice(0, 40)}`}`);
+      const more = ids.length - Math.min(named.length, 5), jobs = (Number(h.interruptible) || 0) - ids.length;
+      const out = [...named.slice(0, 5), ...(more > 0 ? [`${more} more`] : []), ...(jobs > 0 ? [`${jobs} server job${jobs === 1 ? "" : "s"}`] : [])];
+      if (out.length) console.log(out.join(", "));
+    });' "$DB") 2>/dev/null || true)
   if [ -n "$names" ]; then echo " ($names)"; else echo; fi
 }
 

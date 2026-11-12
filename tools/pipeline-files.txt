@@ -1,10 +1,10 @@
 # The land and deploy pipeline's files, and the tests that run only the pipeline's scripts (#581).
 # tools/run-tests.sh reads it: a change that touches none of these paths leaves out the test files listed here (the
 # lines under test/ ending .test.ts), so a flaky or wrong pipeline test can't block a product land. A change to any of
-# them, a run on main itself (the nightly, deploy.sh) and `npm test` run every file. A path ending / covers its folder.
+# them or to this list, a run on main itself (the nightly, deploy.sh) and `npm test` run every file. A path ending /
+# covers its folder.
 # A test file goes here only if it imports nothing from outside test/, directly or through its fixtures, and every
 # tools/ file it reads is listed: test/pipeline-files.test.ts (on every land) checks both.
-tools/pipeline-files.txt
 tools/land.sh
 tools/deploy.sh
 tools/deploy-queue.sh

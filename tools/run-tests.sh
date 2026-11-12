@@ -47,12 +47,53 @@ scope+=(--)
 [ -n "$weight" ] && timeout 20 "${scope[@]}" true >/dev/null 2>&1 || scope=()
 failed=$(mktemp) || { echo "run-tests: could not make a temp file in ${TMPDIR:-/tmp} (full, or not writable), so no test ran" >&2; exit 3; }
 : >"$log" || { rm -f "$failed"; echo "run-tests: could not write the log $log, so no test ran" >&2; exit 3; }
+
+# The pipeline's own tests (#581): tools/pipeline-files.txt lists the pipeline's files and the test files that run only
+# its scripts. A change that touches none of those paths against main (origin/main on CI, which has no local main)
+# runs every test file but those; a run with no main to compare with or nothing changed (main itself: the nightly,
+# deploy.sh in the live checkout) runs them all. With the list in the repo the log's first line says which ran.
+pipeline_tier() {
+  local base changed path entry entries
+  base=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null) || { why="no main to compare with"; return 1; }
+  # --no-renames: a pipeline file renamed away shows under its old name too.
+  changed=$(git diff --no-renames --name-only "$base" HEAD) || { why="git diff against main failed"; return 1; }
+  [ -n "$changed" ] || { why="nothing changed against main"; return 1; }
+  mapfile -t entries < <(sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$/d' "$list")
+  while IFS= read -r path; do
+    for entry in "${entries[@]}"; do
+      if [ "$path" = "$list" ] || [ "$path" = "$entry" ] || [[ $entry == */ && $path == "$entry"* ]]; then
+        why="$path is a pipeline file"
+        return 1
+      fi
+    done
+  done <<<"$changed"
+  gated=()
+  for entry in "${entries[@]}"; do [[ $entry == test/*.test.* ]] && gated+=("$entry"); done
+}
+targets=(test/)
+list=tools/pipeline-files.txt
+if [ -r "$list" ]; then
+  why= gated=()
+  if pipeline_tier; then
+    shopt -s nullglob
+    targets=()
+    for f in test/*.test.{ts,js,mjs,cjs,mts,cts}; do
+      [[ " ${gated[*]} " == *" $f "* ]] || targets+=("$f") # node --test test/ runs these and no other (test/pipeline-files.test.ts)
+    done
+    shopt -u nullglob
+    [ "${#targets[@]}" -gt 0 ] || targets=(test/)
+    echo "run-tests: tier product (the ${#gated[@]} pipeline test files left out): this change touches nothing in $list" >>"$log"
+  else
+    echo "run-tests: tier all (pipeline test files included): $why" >>"$log"
+  fi
+fi
+
 progress=${log%.log}.progress
 unset CITADEL_TEST_PROGRESS # the reruns below count nothing
 rm -f "$progress" "$progress.tmp"
 trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
 CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit "${guard[@]}" --test-reporter=spec --test-reporter-destination=stdout \
-  --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" test/ >"$log" 2>&1
+  --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" "${targets[@]}" >>"$log" 2>&1
 rc=$?
 rm -f "$progress" "$progress.tmp"
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'

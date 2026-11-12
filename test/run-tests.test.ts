@@ -230,3 +230,85 @@ test('leaves a process', () => {
     } catch {} // the guard killed it
   }
 });
+
+// The tiers (#581): a repo whose tools/pipeline-files.txt names test/pipe.test.mjs, on a branch off main. Each test
+// file notes that it ran in a file of its own name, so the test sees which ones the run left out.
+const RAN = (name: string) => `import test from 'node:test';\nimport { writeFileSync } from 'node:fs';\ntest('${name}', () => writeFileSync('ran-${name}', ''));\n`;
+FIXTURES['pipe.test.mjs'] = RAN('pipe');
+FIXTURES['product.test.mjs'] = RAN('product');
+const genv = { ...env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env: genv, encoding: 'utf8' });
+function tierRepo(change?: (dir: string) => void, mainName = 'main') {
+  return (dir: string) => {
+    writeFileSync(join(dir, 'tools', 'pipeline-files.txt'), '# the pipeline\ntools/land.sh\nkit/templates/ # a folder\ntest/pipe.test.mjs\n');
+    writeFileSync(join(dir, 'tools', 'land.sh'), 'v1\n');
+    mkdirSync(join(dir, 'kit', 'templates'), { recursive: true });
+    writeFileSync(join(dir, 'kit', 'templates', 'land.sh'), 'v1\n');
+    mkdirSync(join(dir, 'public'));
+    writeFileSync(join(dir, 'public', 'app.js'), 'v1\n');
+    writeFileSync(join(dir, '.gitignore'), 'ran-*\n*.log\n');
+    git(dir, 'init', '-q', '-b', mainName);
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-qm', 'base');
+    if (!change) return;
+    git(dir, 'checkout', '-qb', 'ticket/1-x');
+    change(dir);
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-qm', 'change');
+  };
+}
+const ran = (dir: string) => ['pipe', 'product'].filter((n) => existsSync(join(dir, `ran-${n}`)));
+
+test('a change that touches only product files leaves out the pipeline test files, and says so (#581)', async () => {
+  const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, tierRepo((dir) => writeFileSync(join(dir, 'public', 'app.js'), 'v2\n')));
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(ran(r.dir), ['product']);
+  assert.match(r.log.split('\n')[0], /^run-tests: tier product \(the 1 pipeline test files left out\): this change touches nothing in tools\/pipeline-files\.txt$/);
+});
+
+test('a red pipeline test file never fails a product change: it does not run (#581)', async () => {
+  const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, (dir) => {
+    writeFileSync(join(dir, 'test', 'pipe.test.mjs'), FIXTURES['always.test.mjs']);
+    tierRepo((d) => writeFileSync(join(d, 'public', 'app.js'), 'v2\n'))(dir);
+  });
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(ran(r.dir), ['product']);
+});
+
+for (const [what, change, why] of [
+  ['tools/land.sh', (dir: string) => writeFileSync(join(dir, 'tools', 'land.sh'), 'v2\n'), 'tools/land.sh is a pipeline file'],
+  ['a file in a listed folder', (dir: string) => writeFileSync(join(dir, 'kit', 'templates', 'land.sh'), 'v2\n'), 'kit/templates/land.sh is a pipeline file'],
+  ['a listed test file', (dir: string) => writeFileSync(join(dir, 'test', 'pipe.test.mjs'), `${FIXTURES['pipe.test.mjs']}// v2\n`), 'test/pipe.test.mjs is a pipeline file'],
+  ['the list itself', (dir: string) => writeFileSync(join(dir, 'tools', 'pipeline-files.txt'), 'test/pipe.test.mjs\n'), 'tools/pipeline-files.txt is a pipeline file'],
+  ['a pipeline file renamed away', (dir: string) => git(dir, 'mv', 'tools/land.sh', 'tools/land2.sh'), 'tools/land.sh is a pipeline file'],
+] as const) {
+  test(`a change to ${what} runs every test file, the pipeline's included (#581)`, async () => {
+    const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, tierRepo(change));
+    assert.equal(r.code, 0, r.log);
+    assert.deepEqual(ran(r.dir), ['pipe', 'product']);
+    assert.equal(r.log.split('\n')[0], `run-tests: tier all (pipeline test files included): ${why}`);
+  });
+}
+
+test('main itself (the nightly, a deploy) and a repo with no main run every test file (#581)', async () => {
+  for (const [prep, why] of [
+    [tierRepo(), 'nothing changed against main'],
+    [tierRepo((dir) => writeFileSync(join(dir, 'public', 'app.js'), 'v2\n'), 'trunk'), 'no main to compare with'],
+  ] as const) {
+    const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, prep);
+    assert.equal(r.code, 0, r.log);
+    assert.deepEqual(ran(r.dir), ['pipe', 'product']);
+    assert.equal(r.log.split('\n')[0], `run-tests: tier all (pipeline test files included): ${why}`);
+  }
+});
+
+test("CI's checkout has origin/main and no main: the tier is decided against origin/main (#581)", async () => {
+  const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, (dir) => {
+    tierRepo((d) => writeFileSync(join(d, 'public', 'app.js'), 'v2\n'))(dir);
+    git(dir, 'update-ref', 'refs/remotes/origin/main', 'main');
+    git(dir, 'branch', '-qD', 'main');
+  });
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(ran(r.dir), ['product']);
+  assert.match(r.log, /^run-tests: tier product/);
+});

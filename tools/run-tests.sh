@@ -58,7 +58,7 @@ pipeline_tier() {
   # --no-renames: a pipeline file renamed away shows under its old name too.
   changed=$(git diff --no-renames --name-only "$base" HEAD) || { why="git diff against main failed"; return 1; }
   [ -n "$changed" ] || { why="nothing changed against main"; return 1; }
-  mapfile -t entries < <(sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$/d' "$list")
+  mapfile -t entries < <(tr -d '\r' <"$list" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d')
   while IFS= read -r path; do
     for entry in "${entries[@]}"; do
       if [ "$path" = "$list" ] || [ "$path" = "$entry" ] || [[ $entry == */ && $path == "$entry"* ]]; then

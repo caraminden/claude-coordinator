@@ -376,11 +376,15 @@ For Linux jobs, `runs-on: [self-hosted, <scheme-slug>-ci-linux]`; they need no `
 
 ## Citadel's own tests (#523)
 
-Citadel's full suite runs on its Linux runners (`citadel-ci-linux`; two of them, but the workflow lets one suite
+Citadel's suite runs on its Linux runners (`citadel-ci-linux`; two of them, but the workflow lets one land's suite
 run at a time: two at once on that PC failed in a different file every run, 2026-11-11).
 `.github/workflows/tests.yml` runs on every push to a `land/**` branch, and `tools/land.sh` is the only
 thing that pushes there: it sends the rebased commit to `land/<branch>`, waits for the run on that exact commit
-while it holds the deploy lock, and deletes the branch again. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
+while it holds the deploy lock, and deletes the branch again. A land that touches no pipeline file leaves out the
+pipeline's own test files (#581, `tools/pipeline-files.txt`), so the whole suite also runs on main every night at
+13:30 UTC. That run and any started by hand are in a concurrency group of their own (a run waiting in the lands' group
+would cancel the land waiting there): they wait for the lands' runs, up to 30 minutes, then run niced beside any
+that start. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
 skipped: perigee skips none, so a skip means the runner lacks something. What the suite needs goes in the runner's
 own home, with no root: Node, `pwsh` with PSScriptAnalyzer for the `.ps1` lint, Chrome's headless shell for the
 browser tests, and `libatomic1` and `sqlite3` unpacked from their `.deb`s. Those last two are tidier installed once

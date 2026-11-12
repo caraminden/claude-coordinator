@@ -231,7 +231,8 @@ test('leaves a process', () => {
   }
 });
 
-// The tiers (#581): a repo whose tools/pipeline-files.txt names test/pipe.test.mjs, on a branch off main. Each test
+// The tiers (#581): a repo whose tools/pipeline-files.txt names test/pipe.test.mjs, on a branch off main (one entry
+// with spaces round it and a CRLF, which count for nothing). Each test
 // file notes that it ran in a file of its own name, so the test sees which ones the run left out.
 const RAN = (name: string) => `import test from 'node:test';\nimport { writeFileSync } from 'node:fs';\ntest('${name}', () => writeFileSync('ran-${name}', ''));\n`;
 FIXTURES['pipe.test.mjs'] = RAN('pipe');
@@ -240,7 +241,7 @@ const genv = { ...env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMIT
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env: genv, encoding: 'utf8' });
 function tierRepo(change?: (dir: string) => void, mainName = 'main') {
   return (dir: string) => {
-    writeFileSync(join(dir, 'tools', 'pipeline-files.txt'), '# the pipeline\ntools/land.sh\nkit/templates/ # a folder\ntest/pipe.test.mjs\n');
+    writeFileSync(join(dir, 'tools', 'pipeline-files.txt'), '# the pipeline\r\n  tools/land.sh \r\nkit/templates/ # a folder\ntest/pipe.test.mjs\n');
     writeFileSync(join(dir, 'tools', 'land.sh'), 'v1\n');
     mkdirSync(join(dir, 'kit', 'templates'), { recursive: true });
     writeFileSync(join(dir, 'kit', 'templates', 'land.sh'), 'v1\n');

@@ -14,6 +14,7 @@ const listed = (path: string) => path === 'tools/pipeline-files.txt' || entries.
 // import … from '…', import '…', import('…'), require('…'): a string after `from` elsewhere (a regex, a message) is not one.
 const IMPORT = /^(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|^import\s*['"]([^'"]+)['"]|\b(?:import|require)\(\s*['"]([^'"]+)['"]/gm;
 const specs = (src: string) => [...src.matchAll(IMPORT)].map((m) => m[1] ?? m[2] ?? m[3]);
+const testFiles = new Set(readdirSync(join(repo, 'test')));
 const toolFiles = new Set(readdirSync(join(repo, 'tools')).filter((f) => statSync(join(repo, 'tools', f)).isFile()));
 
 test('the list names files that exist, and some test files', () => {
@@ -35,9 +36,11 @@ test('a listed test file imports nothing from outside test/, and its fixtures an
       assert.ok(spec.startsWith('.'), `${rel} imports the package ${spec}: the repo has none, so it is from outside test/`);
       walk(resolve(dirname(file), spec), rel);
     }
-    // A tools/ file the test copies or runs is named by its file name ('land.sh', join(tools, 'run-tests.sh')).
+    // A tools/ file the test copies or runs is named by its file name ('land.sh', join(tools, 'run-tests.sh')); so is a
+    // test/ module it loads some other way (join(import.meta.dirname, 'leak-guard.ts') as a run's global setup).
     for (const [, name] of src.matchAll(/['"`]([\w.-]+)['"`]/g)) {
       if (toolFiles.has(name)) assert.ok(listed(`tools/${name}`), `${rel} names tools/${name}, which is not on tools/pipeline-files.txt`);
+      if (testFiles.has(name) && /\.[cm]?[jt]s$/.test(name)) walk(join(repo, 'test', name), rel);
     }
   };
   for (const f of gated) walk(join(repo, f), f);

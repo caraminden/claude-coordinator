@@ -13,7 +13,7 @@
 // counts as work in: it is on main trivially.
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { madeCommits } from './branch.ts';
+import { buildRefOf, madeCommits } from './branch.ts';
 import type { Store } from './db.ts';
 import { githubRepo } from './github.ts';
 import type { Runner } from './runner.ts';
@@ -255,7 +255,7 @@ export class LiveWaiters {
 
   /**
    * Where a chain stands: 'go' once the followed minion's work is in (live: the running server; merged:
-   * its scheme's main), 'unshipped' once it was dismissed with its work in neither, else 'wait'. Work
+   * its scheme's main, or for a feeder its build's branch), 'unshipped' once it was dismissed with its work in neither, else 'wait'. Work
    * means commits it made (since the chain was set, if its tip was on main then), or anything at all once
    * it is dismissed: a dismissed minion that never committed counts as done. A scheme whose
    * code this server doesn't run can't be live, so there live means merged.
@@ -268,7 +268,13 @@ export class LiveWaiters {
     if (!b) return closed ? 'go' : 'wait'; // no repo: dismissed is all there is to wait for
     if (!closed && !(await this.committed(b.repo, b.branch, c.base ? (c.since ?? Infinity) : 0))) return 'wait';
     const landed = await this.landed(b);
-    if (!landed) return closed ? 'unshipped' : 'wait';
+    if (!landed) {
+      // A feeder folded into its build (specs/build-branches.md) has shipped as far as it goes alone, and
+      // closes then: merged means in the build, and live waits for the build to land.
+      const ref = leader.build ? await buildRefOf(b.repo, leader.build) : null;
+      if (ref && (await within(b.repo, ref, b.tip))) return c.when === 'merged' ? 'go' : 'wait';
+      return closed ? 'unshipped' : 'wait';
+    }
     if (c.when === 'merged' || !(await runs(b.repo, this.head))) return 'go';
     return (await this.live({ ticket: c.ticket, commit: landed, reason: '', since: null })) ? 'go' : 'wait';
   }

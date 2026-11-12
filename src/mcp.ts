@@ -285,7 +285,7 @@ const TOOLS = [
           type: 'integer',
           description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. A message to it gets an answer and it stays parked; message_ticket with start_now starts it early.",
         },
-        start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main, for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
+        start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
         parent: {
           type: ['integer', 'null'],
           description: "The minion number (#N, in this scheme) this one is started for: pass it whenever a minion asked for it, in its message or a handoff it wrote. The new minion shows as from #N and gets #N's build unless build is given. Left out, it is the minion whose message you are answering, if any; null for none.",

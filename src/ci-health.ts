@@ -387,6 +387,15 @@ export async function ghPost(path: string, as: GithubEnv): Promise<{ status: num
 
 class RateLimited extends Error {}
 
+/** A status GitHub answered that skips the scheme's round. */
+class GhError extends Error {
+  status: number;
+  constructor(status: number, path: string) {
+    super(`GitHub answered ${status} for ${path}`);
+    this.status = status;
+  }
+}
+
 // ---------- the poller ----------
 
 /** What is kept across restarts, per scheme: runners first seen offline, its open problems, and its own items' titles. */
@@ -541,7 +550,7 @@ export class CiHealth {
 
   async problems(p: Project, slug: string, saved: Saved, now: number): Promise<Problem[]> {
     const as = this.deps.as(p);
-    const workflows = ((await this.read(`repos/${slug}/actions/workflows?per_page=100`, as))?.workflows ?? []).filter((w: any) => w.state === 'active');
+    const workflows = ((await this.listWorkflows(p, slug, as))?.workflows ?? []).filter((w: any) => w.state === 'active');
     // A repo with no CI costs one conditional request a poll.
     if (!workflows.length) {
       saved.offline = {};
@@ -695,6 +704,21 @@ export class CiHealth {
     }
   }
 
+  /**
+   * The scheme's workflows, its first read. A 404 here is the whole repo hidden from the login it reads as (a private
+   * repo whose invite that login hasn't accepted: FuckSpamTexts after its move, #607), so it says that, not a bare path.
+   */
+  private async listWorkflows(p: Project, slug: string, as: GithubEnv): Promise<any> {
+    try {
+      return await this.read(`repos/${slug}/actions/workflows?per_page=100`, as);
+    } catch (err) {
+      if (!(err instanceof GhError) || err.status !== 404) throw err;
+      const owner = as && p.owner_id != null ? this.store.getUser(p.owner_id) : null;
+      const who = !as ? "the box's GitHub login" : `${owner?.name ?? "the scheme owner"}'s linked GitHub`;
+      throw new Error(`${who} can't see ${slug} (GitHub answers 404): it has no access to the repo, or its invite is still waiting to be accepted.`);
+    }
+  }
+
   /** A GitHub answer's body, from cache on a 304; null for a 404 or 403 when `quiet`; anything else throws. */
   private async read(path: string, as: GithubEnv, quiet = false): Promise<any> {
     const had = this.cache.get(path);
@@ -707,7 +731,7 @@ export class CiHealth {
     if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String(r.body?.message ?? '')))) throw new RateLimited();
     if (quiet && (r.status === 403 || r.status === 404)) return null;
     // Anything else skips this scheme's round: an answer GitHub didn't give mustn't read as "all clear" and clear alerts.
-    throw new Error(`GitHub answered ${r.status} for ${path}`);
+    throw new GhError(r.status, path);
   }
 
   private async jobs(slug: string, r: Run, as: GithubEnv): Promise<Job[]> {

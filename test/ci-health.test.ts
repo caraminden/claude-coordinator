@@ -174,11 +174,14 @@ function world({ delve = false } = {}) {
     calls: [] as string[],
     rateLimited: false,
     down: null as RegExp | null,
+    // Paths GitHub answers 404 for: a private repo the reading login can't see (#607).
+    hidden: null as RegExp | null,
   };
   const etagOf = (body: any) => `W/"${JSON.stringify(body).length}-${JSON.stringify(body).split('').reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7)}"`;
   const get = async (path: string, etag: string | null): Promise<GhAnswer> => {
     gh.calls.push(path);
     if (gh.down?.test(path)) return { status: 502, etag: null, body: { message: 'Server Error' } };
+    if (gh.hidden?.test(path)) return { status: 404, etag: null, body: { message: 'Not Found' } };
     if (gh.rateLimited) return { status: 403, etag: null, body: { message: 'API rate limit exceeded for user ID 1.' } };
     let body: any;
     if (path.startsWith('repos/caraminden/notes/')) body = { total_count: 0, workflows: [] };
@@ -329,6 +332,28 @@ test('a GitHub error skips the round: open alerts stay, and a failed jobs read i
     await w.health.tick(t + 2 * MIN);
     assert.equal(w.puts.length, 1, `a 502 on ${down} clears nothing`);
   }
+});
+
+test("a repo the scheme's GitHub login can't see says so, naming whose login it is, not a bare 404 (#607)", async () => {
+  const w = world();
+  // FuckSpamTexts after its move: a private repo whose owner's login has an invite it hasn't accepted.
+  const josh = w.store.listUsers().find((u) => u.name === 'Josh')!;
+  w.store.createProject('FuckSpamTexts', 'https://github.com/caraminden/fuckspamtexts.git', josh.id);
+  w.gh.hidden = /^repos\/caraminden\/fuckspamtexts\//;
+  const said: string[] = [];
+  const warn = console.warn;
+  console.warn = (...a: unknown[]) => void said.push(a.join(' '));
+  try {
+    await new CiHealth(w.store, { ...w.deps, as: (p) => (p.name === 'FuckSpamTexts' ? { GH_TOKEN: 'josh' } : undefined) }).tick(NOW);
+    await new CiHealth(w.store, w.deps).tick(NOW);
+  } finally {
+    console.warn = warn;
+  }
+  const lines = said.filter((l) => l.includes('FuckSpamTexts'));
+  assert.equal(lines.length, 2, said.join('\n'));
+  assert.match(lines[0], /^CI health check of FuckSpamTexts failed \(said once until a restart\): Josh's linked GitHub can't see caraminden\/fuckspamtexts \(GitHub answers 404\): it has no access to the repo, or its invite is still waiting to be accepted\.$/);
+  assert.match(lines[1], /: the box's GitHub login can't see caraminden\/fuckspamtexts \(GitHub answers 404\)/, 'a scheme read as the box says so');
+  assert.equal(w.puts.length, 0, 'an unreadable repo clears and raises nothing');
 });
 
 test('green with skipped jobs goes out quiet, and the alarm item an older build sent for it is cleared (#532)', async () => {

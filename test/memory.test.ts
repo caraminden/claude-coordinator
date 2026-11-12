@@ -219,6 +219,11 @@ test('a search reads the vectors in pages and still finds the best across all of
   assert.deepEqual(hits.map((h) => h.text), ['dentist dentist', 'usage dentist']);
   assert.ok(ticks > 0, 'other work ran between pages');
   assert.deepEqual((await store.memory.search(A.id, 'dentist', embed, 'fake', { ticketId: a2.id, limit: 20 })).map((h) => h.text), ['usage dentist']);
+
+  // A minion deleted between pages, after its chunk was ranked, drops out of the hits rather than leaving a hit with no text.
+  const pending = store.memory.search(A.id, 'dentist', embed, 'fake', { limit: 2 });
+  setImmediate(() => store.deleteTicket(a2.id));
+  assert.deepEqual((await pending).map((h) => h.text), ['dentist dentist']);
   store.db.close();
 });
 

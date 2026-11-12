@@ -1483,6 +1483,7 @@ export class Store {
     this.deleteSetting(planKey(id));
     this.deleteSetting(pagePlanKey(id));
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
+    this.doneCards.clear(); // events.id has no AUTOINCREMENT: a deleted newest card's id can come back as a new card
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);

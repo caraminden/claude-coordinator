@@ -254,7 +254,11 @@ export class Memory {
       await new Promise((r) => setImmediate(r));
     }
     const get = this.db.prepare('SELECT m.ticket_id, t.number, t.title, t.kind, t.status, m.source_kind, m.source_id, m.ts, m.text FROM memory_chunks m JOIN tickets t ON t.id = m.ticket_id WHERE m.id = ?');
-    return top.map(({ id, score }) => ({ ...(get.get(id) as unknown as Omit<MemoryHit, 'score'>), score: Math.round(score * 1000) / 1000 }));
+    // A minion deleted while the search yielded takes its chunks with it.
+    return top.flatMap(({ id, score }) => {
+      const hit = get.get(id) as Omit<MemoryHit, 'score'> | undefined;
+      return hit ? [{ ...hit, score: Math.round(score * 1000) / 1000 }] : [];
+    });
   }
 
   deleteTicket(ticketId: number) {

@@ -131,6 +131,18 @@ test('open cards read again on the same server: an answered card stays gone, new
   store.updateTicket(b, { status: 'idle' });
   assert.deepEqual(ids(), ['p1', 'q2'], "a dismissed minion's card wasn't taken as done");
   assert.ok(store.openCardAt(b));
+
+  // events.id can be reused once the newest rows are deleted: a deleted minion's done card mustn't hide the next card.
+  const c = minion('c');
+  const last = store.addEvent(c, 'question', { id: 'q3', questions: [] });
+  store.addEvent(c, 'user_message', { author: 'Cara', text: 'answers', answer: { questionId: 'q3', answers: [] } });
+  assert.deepEqual(ids(), ['p1', 'q2']);
+  store.deleteTicket(c);
+  const d = minion('d');
+  store.addEvent(d, 'question', { id: 'q4', questions: [] });
+  const q5 = store.addEvent(d, 'question', { id: 'q5', questions: [] });
+  assert.ok(q5.id <= last.id + 1, 'the new cards took the deleted ids');
+  assert.deepEqual(ids(), ['p1', 'q2', 'q4', 'q5']);
 });
 
 test('each item carries the chat event it jumps to: its card\'s for approvals, questions and plans; none for ready and replies (#236)', () => {

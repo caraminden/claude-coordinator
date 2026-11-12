@@ -176,7 +176,8 @@ export function planCard(ticketId, card) {
   const mayApprove = !m || !!account?.admin || (m.owner != null && m.owner === me);
   // Said beside the greyed-out Approve, not only in its tooltip, so a phone or keyboard shows why.
   const hint = mayApprove ? '' : `Only ${m.owner ? `${m.owner} (its owner)` : 'an admin'}${m.owner ? ' or an admin' : ''} can approve`;
-  const status = h('span', { class: 'muted', role: 'status' }, hint);
+  const status = h('span', { class: 'muted', role: 'status' });
+  const why = h('div', { class: 'muted small', hidden: !hint }, hint);
   const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, 'Approve');
   const revise = h('button', { type: 'button', class: 'small secondary' }, m ? 'Reject' : 'Revise');
   const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: m ? 'Why? (optional)' : 'What should change?', hidden: true });
@@ -186,7 +187,7 @@ export function planCard(ticketId, card) {
     h('div', { class: 'who' }, speaker(m ? 'proposes machine notes' : 'proposes a plan')),
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : 'Plan'), card.summary),
     h('div', { class: 'pbody' }, m ? notesBody(card) : markdown(card.plan, ticketId)),
-    notes,
+    notes, why,
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), revise, approve, cancel, sendNotes));
   let rank = 0;
   const editing = (on) => {
@@ -209,6 +210,7 @@ export function planCard(ticketId, card) {
         editing(false);
         approve.hidden = revise.hidden = true;
         el.classList.add('answered');
+        why.hidden = true;
         status.textContent = verdict === 'approve' ? 'Approved' : m ? 'Rejected' : 'Revision sent';
       },
       send: () => api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: text } }),
@@ -217,7 +219,8 @@ export function planCard(ticketId, card) {
         if (rank) return;
         el.classList.remove('answered');
         approve.hidden = revise.hidden = false;
-        status.textContent = hint;
+        why.hidden = !hint;
+        status.textContent = '';
         if (verdict === 'revise') editing(true);
       },
       label: m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
@@ -239,6 +242,7 @@ export function planCard(ticketId, card) {
       rank = PLAN_RANK[r.status];
       editing(false);
       el.classList.add('answered', `p-${r.status}`);
+      why.hidden = true;
       approve.hidden = revise.hidden = true;
       status.textContent = planOutcome(r, m);
     },

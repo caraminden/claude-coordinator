@@ -250,6 +250,20 @@ test('pending-deploy minions whose branch the live commit contains are found, wh
   assert.deepEqual((await waiters(git('rev-parse', 'HEAD')).pendingLive()).sort(), [shipped, unmerged].sort(), 'not the empty branch, nor one with a commit main lacks');
   git('cherry-pick', pick);
   assert.deepEqual((await waiters(git('rev-parse', 'HEAD')).pendingLive()).sort(), [shipped, unmerged, picked].sort());
+  // #590: its only commit dropped by a rebase, as main already had the same change: none of its work is live.
+  git('checkout', '-q', '-b', 'ticket/vanished');
+  writeFileSync(join(repo, 'same.txt'), 'same');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'same, by the minion');
+  git('checkout', '-q', 'main');
+  writeFileSync(join(repo, 'same.txt'), 'same');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'same, by another minion');
+  git('checkout', '-q', 'ticket/vanished');
+  git('rebase', '-q', 'main');
+  git('checkout', '-q', 'main');
+  withBranch('pending-deploy', 'ticket/vanished');
+  assert.deepEqual((await waiters(git('rev-parse', 'HEAD')).pendingLive()).sort(), [shipped, unmerged, picked].sort(), 'not the rebased-away branch');
 });
 
 test('a waiter on a scheme-repo commit that lands rebased wakes once the live checkout runs the landed copy (#468 S04-1)', async () => {

@@ -13,6 +13,7 @@
 // counts as work in: it is on main trivially.
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import { madeCommits } from './branch.ts';
 import type { Store } from './db.ts';
 import { githubRepo } from './github.ts';
 import type { Runner } from './runner.ts';
@@ -244,16 +245,12 @@ export class LiveWaiters {
   }
 
   /**
-   * Did the minion commit on `branch` at or after `since` (unix seconds)? Asks the branch's reflog, since
-   * its tip alone can't tell: a branch caught up to a newer main (a fast-forward) has a new tip that is
-   * on main, but none of its own work. Merge commits don't count; work land.sh rebased still has its commit lines.
+   * Did the minion commit on `branch` at or after `since` (unix seconds), with that work still on it? Its
+   * tip alone can't tell: a branch caught up to a newer main (a fast-forward) has a new tip that is on
+   * main, but none of its own work, and so does one whose commits a rebase dropped (madeCommits).
    */
   private async committed(repo: string, branch: string, since: number): Promise<boolean> {
-    const log = (await git(repo, ['reflog', 'show', '--date=unix', '--format=%gd %gs', `refs/heads/${branch}`])) ?? '';
-    return log.split('\n').some((line) => {
-      const m = line.match(/@\{(\d+)\}\s+(.*)$/);
-      return !!m && Number(m[1]) >= since && /^(commit(?! \(merge\))|cherry-pick|revert)\b/.test(m[2]);
-    });
+    return (await madeCommits(repo, branch, since)) ?? false;
   }
 
   /**

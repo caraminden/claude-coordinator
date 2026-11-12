@@ -97,6 +97,55 @@ test('a branch only fast-forwarded to a newer main has nothing of its own, so it
   assert.equal(shipLine(s, 0, null), null);
 });
 
+/** A commit that writes `text` to g, the same change whichever branch makes it. */
+function same(text: string, by: string): string {
+  writeFileSync(join(repo, 'g'), text);
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', `${text}, by ${by}`); // its own message, so not the very same commit
+  return git(repo, 'rev-parse', 'HEAD');
+}
+
+test("a branch whose commits all vanished in a rebase, as main already had the same change, has nothing of its own, so no live chip (#590)", async () => {
+  git(repo, 'checkout', '-q', '-b', 't/10', 'main');
+  same('ten', 't/10');
+  git(repo, 'checkout', '-q', 'main');
+  same('ten', 'main'); // another minion landed the same change first
+  git(repo, 'checkout', '-q', 't/10');
+  git(repo, 'rebase', '-q', 'main');
+  git(repo, 'checkout', '-q', 'main');
+  assert.equal(git(repo, 'rev-parse', 't/10'), git(repo, 'rev-parse', 'main'), 'the rebase dropped its only commit');
+  pull();
+  const s = await status('t/10', git(live, 'rev-parse', 'HEAD'));
+  assert.equal(s?.empty, true);
+  assert.equal(shipLine(s, 0, null), null);
+  // Committing again after that is work of its own.
+  git(repo, 'checkout', '-q', 't/10');
+  commit(repo);
+  git(repo, 'checkout', '-q', 'main');
+  assert.equal((await status('t/10'))?.empty, false);
+});
+
+test('work a rebase kept, as land.sh does before it fast-forwards main, is still its own and goes live', async () => {
+  git(repo, 'checkout', '-q', '-b', 't/11', 'main');
+  same('eleven', 't/11');
+  git(repo, 'checkout', '-q', 'main');
+  commit(repo); // main moved on meanwhile
+  git(repo, 'checkout', '-q', 't/11');
+  git(repo, 'rebase', '-q', 'main');
+  git(repo, 'checkout', '-q', 'main');
+  merge('t/11');
+  pull();
+  const s = await status('t/11', git(live, 'rev-parse', 'HEAD'));
+  assert.equal(s?.empty, false);
+  assert.equal(shipLine(s, 0, null)?.stage, 'live');
+  // Catching up to a newer main afterwards is a fast-forward rebase: its work is still in there.
+  commit(repo);
+  git(repo, 'checkout', '-q', 't/11');
+  git(repo, 'rebase', '-q', 'main');
+  git(repo, 'checkout', '-q', 'main');
+  assert.equal((await status('t/11'))?.empty, false, 'caught up after landing');
+});
+
 test('the ship line says where the change is, and why it is not moving', () => {
   const base: BranchStatus = { branch: 't/7', tip: 'abcdef0123', base: 'main', ahead: 0, merged: true, empty: false, pr: null, deploy: { pulled: false, live: false } };
   const line = (s: Partial<BranchStatus>, turns = 0, failure: string | null = null) => shipLine({ ...base, ...s }, turns, failure);

@@ -68,15 +68,12 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
   const bases = [];
   if (await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${localDefault}`], repoDir)) bases.push(localDefault);
   if (originHead) bases.push(originHead);
-  // Its reflog says whether the minion committed since it started: a branch only fast-forwarded to a
-  // newer main has a new tip but none of its own work (as `committed` in src/wake.ts). With no reflog
-  // (they expire), a branch whose newest commit predates the ticket is still where it was cut from.
-  const reflog = (await tryGit(['reflog', 'show', '--date=unix', '--format=%gd %gs', `refs/heads/${branch}`], repoDir) ?? '')
-    .split('\n').map((line) => line.match(/@\{(\d+)\}\s+(.*)$/)).filter((m) => !!m);
+  // A branch only fast-forwarded to a newer main has a new tip but none of its own work, so ask its reflog
+  // (madeCommits). With no reflog (they expire), a branch whose newest commit predates the ticket is still
+  // where it was cut from.
+  const made = await madeCommits(repoDir, branch, Math.floor(startedAt / 1000));
   const tipTime = Number(await tryGit(['log', '-1', '--format=%ct', branch], repoDir)) * 1000;
-  const empty = reflog.length
-    ? !reflog.some((m) => Number(m[1]) >= Math.floor(startedAt / 1000) && /^(commit(?! \(merge\))|cherry-pick|revert)\b/.test(m[2]))
-    : !tipTime || tipTime < startedAt;
+  const empty = made === null ? !tipTime || tipTime < startedAt : !made;
   let ahead = 0;
   let merged = false;
   for (const base of bases) {
@@ -95,6 +92,29 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
     pr: withPr ? await findPr(repoDir, branch) : null,
     deploy: merged && live ? await deployed(repoDir, branch, live) : null,
   };
+}
+
+/**
+ * Does `branch` hold commits the minion made at or after `since` (unix seconds)? From the branch's reflog,
+ * newest first: a commit, cherry-pick or revert counts, and so does a rebase that kept some of them (as
+ * land.sh's does). A rebase that finished on the very commit it went onto either fast-forwarded a branch
+ * main already contains (look further back) or dropped all its commits, as main already had the same
+ * change (#590): then the branch has nothing of its own until it commits again. Merge commits and other
+ * fast-forwards don't count. Null when the branch has no reflog.
+ */
+export async function madeCommits(repoDir: string, branch: string, since: number): Promise<boolean | null> {
+  const lines = (await tryGit(['reflog', 'show', '--date=unix', '--format=%H %gd %gs', `refs/heads/${branch}`], repoDir) ?? '')
+    .split('\n').map((line) => line.match(/^(\w+) .*?@\{(\d+)\}\s+(.*)$/)).filter((m) => !!m);
+  if (!lines.length) return null;
+  for (const [i, [, sha, time, what]] of lines.entries()) {
+    if (Number(time) < since) break;
+    if (/^(commit(?! \(merge\))|cherry-pick|revert)\b/.test(what)) return true;
+    if (!/^rebase\b.*\(finish\)/.test(what)) continue;
+    if (!what.endsWith(` onto ${sha}`)) return true;
+    const before = lines[i + 1]?.[1];
+    if (!before || (await contains(repoDir, sha, before)) !== true) return false;
+  }
+  return false;
 }
 
 /** Is `ancestor` contained in `commit`? Null when the repo doesn't know one of them. */

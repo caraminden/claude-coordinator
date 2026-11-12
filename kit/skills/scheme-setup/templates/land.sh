@@ -48,8 +48,9 @@ FACTS=CLAUDE.md
 #   spaces: 'windows.yml' or 'ci.yml android.yml'. Each needs "land/**" among its push branches:
 #     on:
 #       push:
-#         branches: [main, 'land/**']
-#   and a concurrency group per ref (group: <name>-${{ github.ref }}), or the stacked runs below
+#         branches: ['land/**']
+#   with no pull_request or main trigger, which would only run the same check again (#603), and a
+#   concurrency group per ref (group: <name>-${{ github.ref }}), or the stacked runs below
 #   wait for each other. A run that succeeded with a job skipped is not green, and is refused rather than
 #   run again (it would skip again): a workflow whose jobs are skipped on purpose needs CI_STATUS.
 # CI_STATUS: only when "every workflow green" is not the scheme's rule (a workflow that blocks only

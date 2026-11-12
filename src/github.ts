@@ -295,6 +295,7 @@ export function runsOnPullRequest(yaml: string): boolean {
   for (const l of lines.slice(i + 1)) {
     if (/^\S/.test(l)) break; // the next top-level key
     if (/^\s+(-\s*)?["']?pull_request(_target)?["']?\s*(:|$)/.test(l)) return true;
+    if (!l.includes(':') && pr.test(l)) return true; // a flow list carried over lines: `on: [push,` then `pull_request]`
   }
   return false;
 }

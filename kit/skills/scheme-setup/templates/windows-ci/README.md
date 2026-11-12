@@ -15,6 +15,12 @@ file says which of Peek's it came from.
 Swap `<scheme-slug>` for the scheme's label stem (`Peek Auras` → `peek-auras`), and replace each workflow's
 placeholder step, which fails on purpose until it is replaced.
 
+Both workflows run on `land/**` and by hand only (#603): `tools/land.sh` pushes the commit it is about to land there
+and waits for CI on exactly that commit, so a run on the PR or on main would only repeat it. Turn on land.sh's CI gate
+(the scheme-setup skill says how): `windows.yml` in `CI_WORKFLOWS`, and `desktop.yml` through `CI_STATUS`, since a
+locked PC skips its tests and land.sh refuses a `CI_WORKFLOWS` run with skipped jobs. Without the gate, nothing
+would push `land/**`: put `branches: [main]` and `pull_request:` back.
+
 ## What it gets right from day one
 
 - **One workflow and one concurrency group per runner class.** Peek's desktop runner went offline while its jobs

@@ -14,6 +14,8 @@ name: windows
 # commit that lands, and a PR's run tests a commit that is stale once main moves while doubling the runners' work
 # (Peek Auras, 2026-11-12). Not on main either: every commit there already passed here on land/**. Citadel's PR
 # watcher expects no checks on a PR when no workflow runs on pull_request, so it stays quiet.
+# This shape needs land.sh's CI gate. A scheme without it never pushes land/**: give it `branches: [main]` and
+# `pull_request:` instead, or nothing runs.
 on:
   push:
     branches: ['land/**']

@@ -231,7 +231,8 @@ Idle (or its failure is in your done note).
 
 **A Windows app's CI** starts from this skill's `templates/windows-ci/` when the plan gives the
 scheme Windows CI: its `README.md` says where each file goes, and its lint line joins the check
-commands in Project facts. Jobs that open windows need the session runner, which a person adds on
+commands in Project facts. Its workflows run only as a landing lands, so they need land.sh's CI gate
+(above): `windows.yml` in `CI_WORKFLOWS`, `desktop.yml` through `CI_STATUS`. Jobs that open windows need the session runner, which a person adds on
 the PC (`add-runner.ps1 -Session -Visible`, not `ci_runners`): name that step in your done note.
 
 ### 5. Adapt each skill the plan pulls in

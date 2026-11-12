@@ -248,6 +248,7 @@ test('a workflow runs on pull_request only when its on: says so (#603)', () => {
     'on:\n  push:\n    branches: [main]\n  pull_request:\n    types: [opened]\njobs: {}',
     'name: x\non:\n  - push\n  - pull_request\n',
     'on:\n  pull_request_target:\n',
+    'on: [push,\n  pull_request]\njobs: {}',
   ]) assert.equal(runsOnPullRequest(yes), true, yes);
   for (const no of [
     'on:\n  push:\n    branches: [main, \'land/**\']\n  workflow_dispatch:\njobs:\n  t:\n    if: github.event_name == \'pull_request\'\n',

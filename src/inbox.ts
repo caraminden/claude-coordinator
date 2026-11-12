@@ -21,7 +21,11 @@ export interface InboxItem {
  * shouldnt add to the inbox badge count"); only an approval, which a running turn is stuck on, still shows.
  */
 export function inboxItems(store: Store, approvals: Approvals, projectId: number, person: string): InboxItem[] {
-  const assignee = (id: number) => String(store.props.forTarget('minion', id).assigned ?? '').toLowerCase();
+  // A value stored before #582 may name the person by their login or GitHub login.
+  const assignee = (id: number) => {
+    const a = String(store.props.forTarget('minion', id).assigned ?? '');
+    return (a && store.props.personName(a) || a).toLowerCase();
+  };
   const tickets = store.listTickets(projectId).filter((t) => t.status !== 'closed' && ['', person.toLowerCase()].includes(assignee(t.id)));
   const ids = new Set(tickets.map((t) => t.id));
   const awake = new Set(tickets.filter((t) => t.state !== 'parked').map((t) => t.id));

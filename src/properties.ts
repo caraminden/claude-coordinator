@@ -291,6 +291,17 @@ export class Registry {
 
   // ── Setting ────────────────────────────────────────────────────────────
 
+  /**
+   * The Citadel name of the person `raw` names by their name, sign-in login or linked GitHub login, in any case; null for
+   * nobody. The inbox matches assigned against the name (#582: a Taskmaster stored Josh's GitHub login and his cards vanished).
+   */
+  personName(raw: string): string | null {
+    const row = this.db.prepare(`SELECT u.name FROM users u LEFT JOIN credentials c ON c.user_id = u.id AND c.kind = 'github'
+      WHERE lower(u.name) = lower(?1) OR lower(u.login) = lower(?1) OR lower(json_extract(c.meta, '$.login')) = lower(?1)
+      ORDER BY lower(u.name) = lower(?1) DESC, lower(u.login) = lower(?1) DESC LIMIT 1`).get(raw.trim()) as { name: string } | undefined;
+    return row?.name ?? null;
+  }
+
   /** Resolve one written value to what gets stored, or say why it can't be. */
   private resolve(k: KeyRow, raw: unknown): string {
     if (k.value_kind === 'integer') {
@@ -303,6 +314,8 @@ export class Registry {
       const max = k.value_kind === 'user' ? 60 : 200;
       if (raw.trim().length > max) throw new PropertyError(`${code(k.key)} must be at most ${max} characters`);
       if (k.value_kind === 'text') return raw.trim();
+      const person = this.personName(raw);
+      if (person) return person;
       // One person, one spelling: "josh" becomes the "Josh" already in use on any person key, this one first.
       const seen = this.db
         .prepare("SELECT p.value FROM properties p JOIN property_keys k ON k.id = p.key_id WHERE k.value_kind = 'user' AND lower(p.value) = lower(?) ORDER BY p.key_id = ? DESC LIMIT 1")

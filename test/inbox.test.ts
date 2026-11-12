@@ -145,6 +145,27 @@ test('each person\'s inbox holds only their own minions and unassigned ones, car
   assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 3, 'their minion (ready, with a question and an approval), the unassigned one and the Taskmaster: minions, not items (Cara, 2026-11-01)');
 });
 
+test('a minion assigned under a person\'s sign-in or GitHub login is in their inbox, its cards too (#582)', () => {
+  const store = new Store(join(root, 'logins.sqlite'));
+  const approvals = new Approvals(() => {});
+  const p = store.createProject('One', null).id;
+  const josh = store.createUser({ name: 'Josh', login: 'jkatz' });
+  store.putCredential(josh.id, 'github', 'sealed', { login: 'KatzMeIfYouCan', id: 1, name: null });
+  const minion = (title: string, assigned: string) => {
+    const id = store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+    // Written straight to the table, as values stored before #582 were: the registry now resolves them on write.
+    store.db.prepare("INSERT INTO properties (target_type, target_id, key_id, value, set_by, set_at) SELECT 'minion', ?, id, ?, 'Taskmaster', 0 FROM property_keys WHERE key = 'assigned' AND scope IS NULL").run(id, assigned);
+    return id;
+  };
+  const byGithub = minion('github', 'KatzMeIfYouCan'), byLogin = minion('login', 'jkatz'), other = minion('other', 'Cara');
+  store.addEvent(byGithub, 'question', { id: 'q-go', questions: [] });
+  store.updateTicket(byLogin, { state: 'ready' });
+  store.updateTicket(other, { state: 'ready' });
+  const ids = [...new Set(inboxItems(store, approvals, p, 'Josh').map((i) => i.ticketId))].sort();
+  assert.deepEqual(ids, [byGithub, byLogin].sort());
+  assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 2);
+});
+
 test('a parked minion waits on something else by design: out of the inbox and its badge, its open cards and replies too; an approval holding up a running turn still counts (#344)', () => {
   const store = new Store(join(root, 'parked.sqlite'));
   const approvals = new Approvals(() => {});

@@ -72,6 +72,18 @@ test("a person's name matches the spelling already in use, whatever its case", (
   assert.equal(s.props.forTarget('minion', b).assigned, undefined);
 });
 
+test("a person named by their sign-in login or their linked GitHub login is stored under their Citadel name (#582)", () => {
+  const s = freshStore();
+  const josh = s.createUser({ name: 'Josh', login: 'jkatz' });
+  s.putCredential(josh.id, 'github', 'sealed', { login: 'KatzMeIfYouCan', id: 1, name: null });
+  const a = ticket(s, 2);
+  s.props.set('minion', a, 2, { assigned: 'KatzMeIfYouCan', requestedBy: 'JKATZ' }, 'Taskmaster');
+  assert.deepEqual(s.props.forTarget('minion', a), { requestedBy: 'Josh', assigned: 'Josh' });
+  // Nobody's name or login: kept as written.
+  s.props.set('minion', a, 2, { assigned: 'Olive' }, 'Cara');
+  assert.equal(s.props.forTarget('minion', a).assigned, 'Olive');
+});
+
 test('backfills stage from status, once', () => {
   let ids: number[] = [];
   const s = freshStore((st) => {

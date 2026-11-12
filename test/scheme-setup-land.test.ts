@@ -423,3 +423,39 @@ test('giving up names the process at the head of the line, its state and whether
     stuck?.kill('SIGKILL');
   }
 });
+
+// Citadel's drill, F12b (#577): a lock file that can't be opened is named, not left to a shell or flock error.
+test("a land lock that can't be opened gives up at once and says so", async () => {
+  const q = queueSetup(1, 'true');
+  writeFileSync(join(q.state, 'land.lock'), '', { mode: 0o444 });
+  const a = q.land(1);
+  assert.equal(await a.exit, 1, a.stderr());
+  assert.match(a.stderr(), /queue: can't open the land lock \S+\/land\.lock for writing, so nothing landed: a person needs to look at it/);
+  assert.doesNotMatch(a.stderr(), /Bad file descriptor|Permission denied|nothing has moved/);
+  assert.deepEqual(q.tickets(), []);
+  assert.deepEqual(q.landed(), []);
+});
+
+// F12c: junk in land-queue/.seq gave the next landing ticket 1 again, in place of the holder's, and nothing named it.
+test('a land-queue/.seq that holds no number is named, and the next ticket still goes behind the ones in line', async () => {
+  const q = queueSetup(2);
+  const a = q.land(1);
+  let b: ReturnType<typeof q.land> | undefined;
+  try {
+    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+    writeFileSync(join(q.state, 'land-queue', '.seq'), 'junk\n');
+    b = q.land(2);
+    const bs = b.stderr;
+    await until('b to wait', () => /2nd in line/.test(bs()));
+    assert.match(bs(), /queue: \S+\/land-queue\/\.seq held no ticket number \("junk"\); numbering goes on from the newest ticket, 1/);
+    assert.deepEqual(q.tickets(), ['0000000001', '0000000002']);
+    q.open();
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await b.exit, 0, bs());
+    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f2.txt: 2']);
+    assert.equal(q.issued(), 2);
+  } finally {
+    q.open();
+    b?.child.kill('SIGKILL');
+  }
+});

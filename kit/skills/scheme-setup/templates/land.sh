@@ -177,14 +177,26 @@ queue_ordinal() {
 queue_join() {
   Q_DIR=$1/land-queue Q_LABEL=$2
   mkdir -p -m 700 "$Q_DIR"
-  exec 9>"$1/land.lock"
+  # Unopened, it leaves a bare shell error, or a flock one a second (Citadel's drill, F12b).
+  if ! { exec 9>"$1/land.lock"; } 2>/dev/null; then
+    echo "queue: can't open the land lock $1/land.lock for writing, so nothing landed: a person needs to look at it" >&2
+    return 1
+  fi
   Q_ME=$(queue_proc $$)
   # The ticket and its number, under a lock of its own that is only ever held for these few lines: the
   # ticket is in the folder before the next number goes out, so nobody behind it can miss it.
   Q_N=$(
     exec 8>"$Q_DIR/.seq.lock"
     flock 8
-    n=$(printf '%010d' $(($(cat "$Q_DIR/.seq" 2>/dev/null || echo 0) + 1)))
+    n=$(cat "$Q_DIR/.seq" 2>/dev/null) || n=0
+    # Junk in it (F12c) gave out a number already in line: number on from the newest ticket instead (an empty one,
+    # from a write cut off, quietly).
+    if ! [[ $n =~ ^[0-9]{1,10}$ ]]; then
+      t=$(find "$Q_DIR" -maxdepth 1 -regex '.*/[0-9]+' -printf '%f\n' 2>/dev/null | sort | tail -n 1)
+      [ -z "$n" ] || echo "queue: $Q_DIR/.seq held no ticket number (\"$(head -c 40 <<<"$n")\"); numbering goes on from the newest ticket, $((10#${t:-0}))" >&2
+      n=${t:-0}
+    fi
+    n=$(printf '%010d' $((10#$n + 1)))
     queue_write "$Q_DIR/$n" "$Q_ME" 0 "$Q_LABEL" waiting -
     echo "$((10#$n))" >"$Q_DIR/.seq"
     echo "$n"

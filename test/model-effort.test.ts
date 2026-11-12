@@ -181,7 +181,7 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
     assert.ok(!updated.isError, updated.content[0].text);
     const switched = await tool('update_ticket', { ticket_id: 4, workflow: false, plugin_folders: [] });
     assert.ok(!switched.isError, switched.content[0].text);
-    assert.deepEqual(bodies.map((b) => `${b.method} ${b.path}`), ['POST /api/projects/2/tickets', 'GET /api/projects/2', 'PATCH /api/tickets/40', 'GET /api/projects/2', 'PATCH /api/tickets/40']);
+    assert.deepEqual(bodies.map((b) => `${b.method} ${b.path}`), ['POST /api/projects/2/tickets', 'GET /api/projects/2?number=4', 'PATCH /api/tickets/40', 'GET /api/projects/2?number=4', 'PATCH /api/tickets/40']);
     assert.equal(bodies[0].body.model, 'claude-haiku-5-5');
     assert.equal(bodies[0].body.effort, 'low');
     assert.equal(bodies[0].body.workflow, true);

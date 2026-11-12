@@ -173,7 +173,7 @@ test('a feeder folded into its build reads as folded, then live once the build l
   const mine = commit(repo);
   git(repo, 'checkout', '-q', 'main');
   const inBuild = (head: string | null = running) => branchStatus(repo, 'feeder', started, false, { head, checkoutDir: live }, 7);
-  assert.equal(shipLine(await inBuild(), 0, null)?.stage, 'branch', 'not merged in yet');
+  assert.deepEqual(shipLine(await inBuild(), 0, null), { stage: 'branch', text: 'On its branch: 1 commit not in build/7', commit: mine.slice(0, 7) }, 'not merged in yet');
   git(repo, 'update-ref', 'refs/heads/build/7', mine); // tools/land.sh --into build/7
   const folded = shipLine(await inBuild(), 0, null);
   assert.deepEqual([folded?.stage, folded?.text], ['build', 'Folded into Build 7, not live until the build lands']);

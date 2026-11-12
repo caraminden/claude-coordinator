@@ -17,7 +17,7 @@ export interface BranchStatus {
   /** Nothing committed on the branch since the ticket started. */
   empty: boolean;
   /** For a minion in a build whose branch exists: whether build/<n> has all its work (it folded in). */
-  build?: { n: number; merged: boolean } | null;
+  build?: { n: number; merged: boolean; ahead: number } | null;
   pr: { number: number; title: string; state: 'OPEN' | 'CLOSED' | 'MERGED'; url: string; draft: boolean } | null;
   /**
    * For merged work in the repo the server itself runs from: whether the live checkout has pulled it
@@ -88,7 +88,11 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
     ahead,
     merged,
     empty,
-    build: buildRef ? { n: build!, merged: !empty && await contains(repoDir, buildRef, `refs/heads/${branch}`) === true } : null,
+    build: buildRef ? {
+      n: build!,
+      merged: !empty && await contains(repoDir, buildRef, `refs/heads/${branch}`) === true,
+      ahead: Number(await tryGit(['rev-list', '--count', `${buildRef}..refs/heads/${branch}`], repoDir)) || 0,
+    } : null,
     pr: withPr ? await findPr(repoDir, branch) : null,
     deploy: merged && live ? await deployed(repoDir, branch, live) : null,
   };
@@ -178,6 +182,7 @@ export function shipLine(s: BranchStatus | null, interruptible: number, failure:
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
   // A feeder folded into its build: done for now, live when the build lands (main takes it by merge, so its hashes stay).
   if (!s.merged && s.build?.merged) return { stage: 'build', text: `Folded into Build ${s.build.n}, not live until the build lands`, commit };
+  if (!s.merged && s.build) return { stage: 'branch', text: `On its branch: ${plural(s.build.ahead, 'commit')} not in build/${s.build.n}`, commit };
   if (!s.merged) return { stage: 'branch', text: `On its branch: ${plural(s.ahead, 'commit')} not on ${s.base ?? 'main'}`, commit };
   // Another scheme's repo: merged is as far as it goes here.
   if (!s.deploy) return { stage: 'main', text: `Merged into ${s.base ?? 'main'}`, commit };

@@ -12,7 +12,7 @@ import { cleanEntries, injectBridge, linkPageText, LIMITS, writeStore } from '..
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { readRequest, takeWrite, TAG } from '../public/bridge-host.js';
+import { attachBridge, onArtifactData, readRequest, takeWrite, TAG } from '../public/bridge-host.js';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'artifact-bridge-'));
@@ -154,6 +154,45 @@ test('a frame writes in a burst of 40, then 20 a second', () => {
   n = 0;
   while (takeWrite(f, 2000)) n++;
   assert.equal(n, 20);
+});
+
+test('a store changed elsewhere reaches the frames showing it, with what it holds now, and no other frame', async (t) => {
+  // The viewer's window is the boundary: its message listener and each frame's postMessage are stand-ins.
+  let onMessage: any = null;
+  (globalThis as any).addEventListener = (type: string, fn: any) => { if (type === 'message') onMessage = fn; };
+  t.after(() => { delete (globalThis as any).addEventListener; });
+  const held: Record<string, any[]> = { s1: [{ key: 'pick', value: 1 }], s2: [{ key: 'pick', value: 9 }] };
+  const storeOf: Record<string, string> = { pa: 's1', pa2: 's1', pb: 's2' };
+  const calls: any[] = [];
+  const api = async (path: string, { body }: any) => {
+    calls.push([path, body.page, body.op]);
+    return { store: storeOf[body.page], entries: held[storeOf[body.page]] };
+  };
+  const settle = () => new Promise((r) => setImmediate(r));
+  const frame = (page: string) => {
+    const posted: any[] = [];
+    const win = { postMessage: (m: any) => posted.push(m) };
+    const iframe = { isConnected: true, contentWindow: win };
+    attachBridge(iframe, { open: { artifact: 1 }, name: `${page}.html`, owner: 'Cara', api });
+    return { page, win, iframe, posted };
+  };
+  const [a, a2, b, gone, quiet] = [frame('pa'), frame('pa2'), frame('pb'), frame('pa'), frame('pa')];
+  // Each frame's page lists its store once (that's how the viewer learns which store a frame shows), but `quiet`'s never asks.
+  for (const f of [a, a2, b, gone]) onMessage({ source: f.win, origin: 'null', data: { bridge: TAG, id: 1, op: 'list', page: f.page } });
+  await settle();
+  for (const f of [a, a2, b, gone]) f.posted.length = 0;
+  calls.length = 0;
+  gone.iframe.isConnected = false;
+
+  held.s1 = [{ key: 'pick', value: 2 }];
+  onArtifactData('s1');
+  await settle();
+  assert.deepEqual(a.posted, [{ bridge: TAG, op: 'changed', entries: [{ key: 'pick', value: 2 }] }]);
+  assert.deepEqual(a2.posted, [{ bridge: TAG, op: 'changed', entries: [{ key: 'pick', value: 2 }] }], 'another page on the same store');
+  assert.deepEqual(calls, [['api/artifact-data', 'pa', 'list'], ['api/artifact-data', 'pa2', 'list']], 'each read as its own page');
+  assert.deepEqual(b.posted, [], 'a frame on another store');
+  assert.deepEqual(gone.posted, [], 'a frame taken out of the page');
+  assert.deepEqual(quiet.posted, [], 'a frame that never asked');
 });
 
 test('a served page carries the bridge and what it saved', async () => {

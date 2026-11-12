@@ -2,7 +2,7 @@
 // browser (a dev copy's scratch page); the contract test stores a recorded turn's HTML.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chatModel, duration, gruntName, renderChat } from '../public/ui/chat.js';
+import { chatModel, duration, gruntName, renderChat, stepMark } from '../public/ui/chat.js';
 
 const t = (s) => Date.parse(`2026-11-02T12:00:${String(s).padStart(2, '0')}Z`);
 const text = (delta, message = 'm1') => ({ type: 'text', data: { delta, parent: null, message } });
@@ -118,4 +118,16 @@ test('duration reads as seconds or minutes', () => {
   assert.equal(duration(41000), '41s');
   assert.equal(duration(72000), '1m 12s');
   assert.equal(duration(-5), '0s');
+});
+
+test('stepMark: a spinner while running, else the state\'s mark, each named for screen readers', (t) => {
+  // The least document stepMark needs: a template that hands back the HTML it was given to parse.
+  globalThis.document = { createElement: () => ({ set innerHTML(html) { this.content = { firstElementChild: html }; } }) };
+  t.after(() => { delete globalThis.document; });
+  assert.equal(stepMark('running'), '<span class="cui-spin" role="img" aria-label="Running"></span>');
+  assert.equal(stepMark('done'), '<span class="cui-mark" data-state="done" role="img" aria-label="Done">✓</span>');
+  assert.equal(stepMark('failed'), '<span class="cui-mark" data-state="failed" role="img" aria-label="Failed">✕</span>');
+  assert.equal(stepMark('stopped'), '<span class="cui-mark" data-state="stopped" role="img" aria-label="Stopped">–</span>');
+  // A state the kit doesn't know still draws, escaped.
+  assert.equal(stepMark('<odd>'), '<span class="cui-mark" data-state="&lt;odd&gt;" role="img" aria-label="&lt;odd&gt;">·</span>');
 });

@@ -104,3 +104,15 @@ test("the scheme's list counts an open minion's steps and leaves a dismissed one
   assert.equal(by('Sibling').open_cards.length, 1);
   assert.equal(by('Dismissed one').pending_card_at, null);
 });
+
+test('a question card asked with kind merge reads as a merge card on the list; an unknown kind is refused (#575)', async () => {
+  const q = [{ question: 'Merge and ship this high-risk change?', header: 'Land', options: [{ label: 'Merge and ship', recommended: true }, { label: 'Hold' }] }];
+  const asked = await tool('ask_question', { questions: q, kind: 'merge' });
+  assert.equal(asked.error, false, asked.text);
+  const { data: scheme } = await srv.call(`/api/projects/${A.id}`);
+  const cards = scheme.tickets.find((t: any) => t.title === 'Asker').open_cards;
+  assert.deepEqual(cards.map((c: any) => [c.kind, c.what]), [['question', 'merge']]);
+  assert.deepEqual(scheme.tickets.find((t: any) => t.title === 'Sibling').open_cards.map((c: any) => c.what), ['question'], 'a plain question stays a question');
+  const bad = await fetch(`${srv.base}/api/tickets/${M1.id}/questions`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M1.id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ questions: q, kind: 'deploy' }) });
+  assert.equal(bad.status, 400);
+});

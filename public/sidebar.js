@@ -8,7 +8,7 @@ import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
-import { byUrgency, rowBar, rowState, rowUnread, SHIP } from './threadstate.js';
+import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP } from './threadstate.js';
 import { waitBar, waitClock, waitWords } from './wait.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
@@ -409,8 +409,7 @@ function cardBadge(cards) {
   const what = `${cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
   return h('span', {
     class: 'card-badge', role: 'link', tabindex: 0,
-    title: cards.length > 1 ? `${cards.length} questions wait on you: open the oldest, the ${what}` : `Open the ${what}`,
+    title: cards.length > 1 ? `${cards.length} cards wait on you: open the oldest, the ${what}` : `Open the ${what}`,
     onclick: go, onauxclick: (e) => { if (e.button === 1) go(e); }, onkeydown: (e) => { if (e.key === 'Enter') go(e); },
-    // Cara, 2026-11-11: "Lets rename the "card" pill to "question"", plan and approval cards included.
-  }, cards.length > 1 ? `${cards.length} questions` : 'question');
+  }, cardChip(cards));
 }

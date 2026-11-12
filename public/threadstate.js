@@ -82,6 +82,18 @@ export function rowBar(t, st) {
   return !w && t.steps.usual ? { since: t.steps.since, usual: t.steps.usual } : t.steps;
 }
 
+/**
+ * The open-card chip's text for a row's open_cards, oldest first (#575; Cara, 2026-11-11: "lets give them different
+ * ones, question, merge, plan, etc"): the kind of ask (CardLink.what), counted when they're all one kind ("2 plans"),
+ * else the oldest's kind and how many more ("plan +1"), as the chip opens the oldest.
+ */
+export function cardChip(cards) {
+  const word = (c) => c.what ?? c.kind;
+  const first = word(cards[0]);
+  if (cards.length === 1) return first;
+  return cards.every((c) => word(c) === first) ? `${cards.length} ${first}s` : `${first} +${cards.length - 1}`;
+}
+
 /** Where a minion's change is (t.ship, src/branch.ts): its colour family, and its badge in the list (none on its branch). */
 export const SHIP = {
   branch: { fam: 'idle', badge: '' },

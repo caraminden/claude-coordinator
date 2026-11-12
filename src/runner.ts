@@ -11,7 +11,7 @@ import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
 import { KEEP, SENT_BACK } from './link-check.ts';
 import type { SchemeRefs } from './scheme-refs.ts';
-import { cardHref, cardLabel, cardText, settledHow, type CardLink, type SettledCard } from './card-links.ts';
+import { cardHref, cardLabel, cardText, cardWhat, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
@@ -2657,7 +2657,7 @@ export class Runner {
     if (ticket.status === 'closed') return [];
     const minion = ticket.kind === 'coordinator' ? null : ticket.number;
     const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({
-      minion, kind, label: cardLabel(kind, data), href: cardHref(ticket, eventId),
+      minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href: cardHref(ticket, eventId),
       // Only question and plan cards are held under the turn's words (public/thread.js heldCards).
       ...(placed ? { below: kind !== 'approval' && this.store.heldBelow(ticket.id, eventId) } : {}),
     });
@@ -2679,7 +2679,7 @@ export class Runner {
       const data = JSON.parse(r.data);
       const minion = r.tkind === 'coordinator' ? null : r.number;
       const how = settledHow(kind, data, r.reply && JSON.parse(r.reply), r.result && JSON.parse(r.result), r.tstatus === 'closed' ? minion : null, (ms) => clockTime(ms));
-      return [{ minion, kind, label: cardLabel(kind, data), href, how }];
+      return [{ minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href, how }];
     });
   }
 

@@ -114,7 +114,7 @@ test('a row\'s card badge opens the oldest open card, the rest of the row the ch
   await page.eval(`(async () => {
     const { threadRow } = await import('/sidebar.js');
     const row = (id, open_cards) => threadRow({ id, number: id, project_id: 2, kind: 'ticket', title: 'T' + id, status: 'idle', updated_at: Date.now(), open_cards });
-    document.body.prepend(row(7, [{ kind: 'question', label: 'A', href: '#/p/2/t/7?e=11' }, { kind: 'plan', label: 'B', href: '#/p/2/t/7?e=12' }]), row(8, []));
+    document.body.prepend(row(7, [{ kind: 'question', what: 'question', label: 'A', href: '#/p/2/t/7?e=11' }, { kind: 'question', what: 'question', label: 'B', href: '#/p/2/t/7?e=12' }]), row(8, []));
   })()`);
   assert.equal(await page.eval(`document.querySelector('[data-id="7"] .card-badge').textContent`), '2 questions');
   assert.equal(await page.eval(`!!document.querySelector('[data-id="8"] .card-badge')`), false);

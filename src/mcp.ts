@@ -156,6 +156,7 @@ const ASK_QUESTION = {
           required: ['question', 'options'],
         },
       },
+      kind: { type: 'string', enum: ['merge'], description: '"merge" when the card asks people for the go to merge or land a change (the self-review\'s high-risk card): the minions list then labels it "merge". Leave out otherwise.' },
     },
     required: ['questions'],
   },
@@ -1284,7 +1285,7 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}${tagNote(args)}`;
     case 'ask_question': {
-      const { id: questionId, href } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
+      const { id: questionId, href } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}) });
       return `The question card (id ${questionId}) is in the chat${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the card below](${href})` : ''}. End your turn now with a short reply; the answers will come as the next message.`;
     }
     case 'settle_question': {

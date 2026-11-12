@@ -118,7 +118,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything but none is a one-finding `citadel:retro`.
 - **High:** stop before merging. Post the same line, the findings you fixed in one line each,
-  and an `ask_question` card "Merge and ship this high-risk change?" (Merge and ship /
+  and an `ask_question` card with `kind: "merge"`, "Merge and ship this high-risk change?" (Merge and ship /
   Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,
   and end the turn. Merge only on a go.
 

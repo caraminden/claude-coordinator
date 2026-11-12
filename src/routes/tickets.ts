@@ -387,9 +387,12 @@ export const ticketRoutes: Route[] = [
       const { id } = ticket;
       const { runner } = app;
       // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
-      const questions = await cleanQuestions(app, ticket, (await readJson(req)).questions);
+      const body = await readJson(req);
+      const questions = await cleanQuestions(app, ticket, body.questions);
+      // A card asking for the go to merge or land says so, for the minions list's chip (#575).
+      const kind = oneOf(body.kind ?? null, ['merge'], 'kind');
       const questionId = randomBytes(6).toString('hex');
-      const event = runner.emit(id, 'question', { id: questionId, questions });
+      const event = runner.emit(id, 'question', { id: questionId, questions, ...(kind ? { kind } : {}) });
       runner.broadcastTicket(id);
       app.notify(id, { kind: 'question', questions, eventId: event.id });
       return json(res, 201, { id: questionId, href: cardHref(ticket, event.id) });

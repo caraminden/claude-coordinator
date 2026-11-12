@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cardHref, cardLabel, misplacedCards, staleCards, unlinkedCards, type CardLink, type SettledCard } from '../src/card-links.ts';
+import { cardHref, cardLabel, cardWhat, misplacedCards, staleCards, unlinkedCards, type CardLink, type SettledCard } from '../src/card-links.ts';
 import { Store } from '../src/db.ts';
 import { check, SENT_BACK } from '../src/link-check.ts';
 import { clockTime, Runner } from '../src/runner.ts';
@@ -261,4 +261,13 @@ test('a turn\'s snapshot lists the scheme\'s recently settled cards with who set
     [at(b, dropped), 'question', 'Colour', `#${b.number} was dismissed`],
     [at(a, approval), 'approval', 'Bash: List', `allowed by Cara at ${clockTime(allowed.created_at)}`],
   ]);
+});
+
+test('cardWhat: a merge go, a tripwire approval, or the card\'s own kind (#575)', () => {
+  assert.equal(cardWhat('question', { questions: [], kind: 'merge' }), 'merge');
+  assert.equal(cardWhat('approval', { tool: 'Bash', merge: { repo: 'o/r' } }), 'merge');
+  assert.equal(cardWhat('approval', { tool: 'Bash', tripwire: { reason: 'x' } }), 'tripwire');
+  assert.equal(cardWhat('approval', { tool: 'Bash' }), 'approval');
+  assert.equal(cardWhat('question', { questions: [] }), 'question');
+  assert.equal(cardWhat('plan', { summary: 's' }), 'plan');
 });

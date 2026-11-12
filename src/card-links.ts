@@ -10,6 +10,8 @@ export interface CardLink {
   /** The minion's number, or null for the Taskmaster. */
   minion: number | null;
   kind: 'question' | 'plan' | 'approval';
+  /** What it asks for, finer than `kind` (cardWhat): the minions list's chip names it (#575). */
+  what?: CardWhat;
   /** What it asks, short. */
   label: string;
   /** The in-app address: "#/p/2/t/394?e=123". */
@@ -36,6 +38,16 @@ const clip = (s: unknown, n = 80) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
+
+/** What a card asks for: a merge or land go (a question card asked with kind merge, or an approval for a merge), a tripwire approval, or its plain kind. */
+export type CardWhat = 'question' | 'plan' | 'merge' | 'approval' | 'tripwire';
+
+/** What card `kind` posted with chat event data `data` asks for (CardWhat). */
+export function cardWhat(kind: CardLink['kind'], data: any): CardWhat {
+  if (data?.kind === 'merge' || (kind === 'approval' && data?.merge)) return 'merge';
+  if (kind === 'approval' && data?.tripwire) return 'tripwire';
+  return kind;
+}
 
 /** A card's short label from its chat event's data. */
 export function cardLabel(kind: string, data: any): string {

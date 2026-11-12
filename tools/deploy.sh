@@ -64,7 +64,7 @@ retro_log() (
 # A field of the running server's /api/health, or nothing if it doesn't answer (or predates it).
 health() {
   curl -fsS --max-time 3 "$URL/api/health" 2>/dev/null |
-    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[process.argv[1]]??"")}catch{}})' "$1" || true
+    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s)[process.argv[1]];console.log(Array.isArray(v)?v.join(", "):v??"")}catch{}})' "$1" || true
 }
 
 # frontend if every file changed between two commits is under public/, none if nothing changed,
@@ -267,7 +267,14 @@ restart_timing() (
   retro_log "restart · ${R_COMMIT:-$(git_live rev-parse --short HEAD)} · idle-wait $(span "$R_START" "$R_LOCK") · backup $(span "$R_LOCK" "$R_BACKUP") · healthy $([ -n "$up" ] && span "$R_RESTART" "$up" || echo -) · settle $([ -n "$settled" ] && span "$up" "$settled" || echo -) · $R_OUT"
 ) >/dev/null 2>&1
 
-turns() { if [ "$1" = 1 ]; then echo "1 running turn"; else echo "${1:-some} running turns"; fi; }
+# How many running turns a restart would cut off ($1), and which (#584) when the server names them: "2 running turns
+# (Citadel #412 Usage bar, Citadel Taskmaster)". An older server, or one whose turns ended between the reads, gives the count only.
+turns() {
+  local names
+  if [ "$1" = 1 ]; then printf '1 running turn'; else printf '%s running turns' "${1:-some}"; fi
+  names=$(health interruptibleTurns)
+  if [ -n "$names" ]; then echo " ($names)"; else echo; fi
+}
 
 # Queued as the restart unit: restart once no turn would be cut off (at once with --now), roll back if
 # the new code doesn't come up or stay up.
@@ -586,11 +593,12 @@ case "${1:-}" in
   --now) NOW=1 deploy ;;
   restart) restart ;;
   interruptible) interruptible ;;
+  waiting-on) turns "$(interruptible)" ;;
   turn-units) turn_units ;;
   change-kind) change_kind "$2" "$3" "$4" ;;
   push-github) push_github "$2" ;;
   post-report) post_report "$2" "$3" "$4" "$5" "$6" ;;
   backup-db) backup_db "$2" ;;
   rotate-backups) rotate_backups ;;
-  *) echo "usage: $0 [--now | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--now | interruptible | waiting-on | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
 esac

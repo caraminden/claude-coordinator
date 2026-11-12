@@ -69,9 +69,10 @@ export const appRoutes: Route[] = [
     // For tools/deploy.sh, so no login: is this server up, which code it booted from, which front end
     // it serves, and that it reloads public/ on SIGHUP (an older server would exit on one).
     method: 'GET', path: '/api/health', who: 'anyone',
-    // interruptible: running turns a restart would stop (they don't run in a unit of their own). fallbacks: jobs
+    // interruptible: running turns a restart would stop (they don't run in a unit of their own); interruptibleTurns:
+    // which, by scheme, number and title as the minions list shows them (#584), for deploy.sh's waiting lines. fallbacks: jobs
     // systemd-run couldn't put in a unit of their own since the server started, which ran in it instead (#519).
-    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', interruptible: app.runner.interruptible(), fallbacks: fallbacks.count, preview: app.preview }),
+    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', interruptible: app.runner.interruptible(), interruptibleTurns: app.runner.interruptibleTurns(), fallbacks: fallbacks.count, preview: app.preview }),
   },
   {
     method: 'GET', path: '/api/me', who: ['person', 'taskmaster', 'minion'],

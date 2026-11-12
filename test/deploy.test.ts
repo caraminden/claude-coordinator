@@ -230,6 +230,39 @@ test('deploy.sh waits only for turns a restart would cut off; a server from befo
   }
 });
 
+// #584: the restart's waiting lines say which turns, so people know whom to ask and what --now would cut off.
+test('/api/health names the turns a restart would cut off, and deploy.sh says them; an older server keeps the count', async () => {
+  assert.deepEqual((await (await fetch(`${base}/api/health`)).json()).interruptibleTurns, []);
+  const r = new Runner(store, () => {}, () => ({}));
+  const minion = store.createTicket({ project_id: project.id, title: 'Usage bar\nin the top bar', permission_mode: 'default', created_by: 'Cara' });
+  const tm = store.createTicket({ project_id: project.id, title: 'Coordinator', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
+  const turns = (r as any).turns as Map<number, unknown>;
+  turns.set(minion.id, { unit: null, container: null });
+  turns.set(tm.id, { unit: null, container: null });
+  turns.set(-1, { unit: 'citadel-turn-x', container: null }); // in a unit of its own: a restart doesn't cut it off
+  r.hostJobs = () => 2;
+  assert.deepEqual(r.interruptibleTurns(), [`${project.name} #${minion.number} Usage bar in the top bar`, `${project.name} Taskmaster`, '2 server jobs']);
+  for (let i = 0; i < 6; i++) turns.set(-10 - i, { unit: null, container: null }); // gone from the store: still counted, by id
+  r.hostJobs = () => 0;
+  assert.equal(r.interruptibleTurns().length, 6, 'at most 5 named, then how many more');
+  assert.equal(r.interruptibleTurns().at(-1), '3 more');
+
+  const say = async (body: object) => {
+    const srv = createHttpServer((_req, res) => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(body)));
+    await new Promise<void>((res) => srv.listen(0, '127.0.0.1', res));
+    try {
+      return (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'waiting-on'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_URL: `http://127.0.0.1:${(srv.address() as any).port}`, DEPLOY_DB: join(data, 'coordinator.db'), DEPLOY_SERVICE: 'no-such-citadel-unit' } })).stdout.trim();
+    } finally {
+      srv.close();
+    }
+  };
+  assert.equal(await say({ ok: true, interruptible: 3, interruptibleTurns: ['Citadel #412 Usage bar', 'Citadel Taskmaster', '1 server job'] }),
+    '3 running turns (Citadel #412 Usage bar, Citadel Taskmaster, 1 server job)');
+  assert.equal(await say({ ok: true, interruptible: 1, interruptibleTurns: ['Citadel Taskmaster'] }), '1 running turn (Citadel Taskmaster)');
+  assert.equal(await say({ ok: true, interruptible: 2 }), '2 running turns', 'a server from before the names keeps the count');
+  assert.equal(await say({ ok: true, interruptible: 2, interruptibleTurns: [] }), '2 running turns', 'one that names nobody (they ended between reads) too');
+});
+
 test("deploy.sh names the same turn units as the runner, so a rollback stops only this server's", () => {
   const units = execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'turn-units'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_DB: join(data, 'coordinator.db') } }).trim();
   const tag = (new Runner(store, () => {}, () => ({})) as any).unitTag;

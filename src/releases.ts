@@ -182,11 +182,14 @@ export class Releases {
         (own ? own.testCopies : scheme(id).testCopies).push(own ? c : { ...c, target: null });
       }
     }
-    // An upcoming release with nothing of its own to try links its target's test copy, a running one first.
+    // An upcoming release with nothing of its own to try links a test copy of a change it carries, a running one first.
     for (const s of byScheme.values()) {
       for (const tv of s.targets) {
-        const copy = tv.testCopies.find((c) => c.running) ?? tv.testCopies[0];
-        if (tv.next && !tv.next.link && copy) tv.next.link = `/${copy.path}`;
+        if (!tv.next || tv.next.link) continue;
+        const ids = new Set(tv.next.changes.map((c) => c.ticketId));
+        const mine = tv.testCopies.filter((c) => c.ticketId != null && ids.has(c.ticketId));
+        const copy = mine.find((c) => c.running) ?? mine[0];
+        if (copy) tv.next.link = `/${copy.path}`;
       }
     }
     return [...byScheme.values()].sort((a, b) => a.projectId - b.projectId);

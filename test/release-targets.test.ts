@@ -187,6 +187,11 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   assert.deepEqual(v.next?.changes.map((c) => c.title), ['Snooze']);
   assert.ok(Math.abs(v.next!.since - (Date.now() - 3_600_000)) < 2000, 'since the oldest undeployed commit');
 
+  // A first deploy that failed leaves the commit it started from serving, still Release 1.
+  store.addContraptionDeploy({ name: 'mandate', from_sha: base, to_sha: 'bad', by: 'Cara', started_at: now - 9.5e6, finished_at: now - 9.5e6, outcome: 'rolled back', stages: '{}', changes: '[]' });
+  [v] = reader.read();
+  assert.deepEqual([v.current?.number, v.next?.number], [1, 2]);
+
   // Two earlier deploys give the usual times, and six failed ones after them don't hide those.
   for (const s of [{ build: 60, drain: 5, restart: 20 }, { build: 80, drain: 5, restart: 30 }]) {
     store.addContraptionDeploy({ name: 'mandate', from_sha: 'old', to_sha: base, by: 'Cara', started_at: now - 9e6, finished_at: now - 9e6 + 1e5, outcome: 'deployed', stages: JSON.stringify(s), changes: '[]' });
@@ -265,14 +270,18 @@ test('the CI package reader: the newest run whose job passed is the release, a r
     1: [job(1, 'release', 'completed', 'failure', now - 195 * m, now - 190 * m)],
   };
   // Run 3 uploaded its package beside a crash dump; run 2's package expired.
-  const artifacts = { 3: [{ id: 30, name: 'dumps-windows-sha3', expired: false }, { id: 31, name: 'r-sha3', expired: false }], 2: [{ id: 20, name: 'r-sha2', expired: true }] };
+  const artifacts = { 3: [{ id: 30, name: 'dumps-windows-sha3', expired: false }, { id: 31, name: 'r-sha3', expired: false, expires_at: new Date(now + 60 * m).toISOString() }], 2: [{ id: 20, name: 'r-sha2', expired: true }] };
   const { actions, reads } = fakeActions(runs, jobs, artifacts);
-  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => now });
+  let clock = now;
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => clock });
   await reader.refresh();
   const [v] = reader.read();
   assert.deepEqual(v.target, { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null });
   assert.deepEqual([v.current?.number, v.current?.version], [1, 'sha3'], 'run 4 skipped its release job, so run 3 is what people have: release 1, the first counted');
   assert.equal(v.current?.link, 'https://github.com/o/r/actions/runs/3/artifacts/31', 'the package named for the repo, not the dump');
+  clock = now + 61 * m;
+  assert.equal(reader.read()[0].current?.link, 'https://github.com/o/r/actions/runs/3', 'once its file expires, the run page');
+  clock = now;
   assert.deepEqual(v.current?.stages, { ci: 600, package: 600 });
   assert.deepEqual(v.recent.map((r) => [r.number, r.outcome, r.link]), [[null, 'live', 'https://github.com/o/r/actions/runs/2'], [null, 'failed', 'https://github.com/o/r/actions/runs/1']], 'before counting began, and a failed one: no number; no file left: its run page');
   assert.equal(v.next?.number, 2);

@@ -268,10 +268,10 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   assert.deepEqual(d.targets, [], 'a scheme with no target still lists its test copies');
   assert.deepEqual(d.testCopies.map((x) => [x.ticketId, x.target]), [[theirs.id, null]]);
   assert.deepEqual(releases.view((id) => id === delve.id).map((s) => s.projectId), [delve.id]);
-  // A change on its way: the next release links the running test copy, to try it before it's live.
+  // A change on its way: the next release links that change's test copy, not a running one that doesn't carry it (build 7).
   w.ships.set(mine.id, 'main');
   w.waits.poll();
-  assert.equal(releases.read().find((s) => s.projectId === w.citadel.id)!.targets[0].next?.link, '/preview/build/7/');
+  assert.equal(releases.read().find((s) => s.projectId === w.citadel.id)!.targets[0].next?.link, `/preview/${mine.id}/`);
 
   releases.poll();
   assert.deepEqual(sent, [], 'the first poll sends nothing: pages ask when they open');

@@ -623,7 +623,7 @@ export class CiHealth {
   }
 
   /** The files a run uploaded (the release monitor's download links), or null as workflowRuns. */
-  async runArtifacts(p: Project, run: Run, now = Date.now()): Promise<{ id: number; name: string; expired: boolean }[] | null> {
+  async runArtifacts(p: Project, run: Run, now = Date.now()): Promise<{ id: number; name: string; expired: boolean; expires_at?: string | null }[] | null> {
     const slug = repoSlug(p.repo_url);
     if (!slug || now < this.pausedUntil) return null;
     return this.guarded(now, async () => (await this.read(`repos/${slug}/actions/runs/${run.id}/artifacts?per_page=100`, this.deps.as(p), true))?.artifacts ?? null);

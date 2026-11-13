@@ -144,7 +144,7 @@ export class ContraptionReader implements Reader {
       const mine = live.find((r) => r.to_sha === version);
       // The current release is the app as it serves now; an older one can't be opened any more.
       const current: Release | null = mine ? release(mine, t.link)
-        : version ? { version, number: total + 1, link: t.link, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
+        : version ? { version, number: live.length ? total + 1 : Math.max(total, 1), link: t.link, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
       const recent = rows.filter((r) => r.id !== mine?.id).slice(0, RECENT).map((r) => release(r));
 
       let lead: Progress | null = null;
@@ -172,6 +172,7 @@ export interface Artifact {
   id: number;
   name: string;
   expired: boolean;
+  expires_at?: string | null;
 }
 
 /** GitHub Actions as the release monitor reads it: CiHealth's cached reads (src/ci-health.ts). */
@@ -185,12 +186,15 @@ export interface Actions {
  * The download of what a run shipped: its artifact named for the repo ("peek-auras-<sha>", "mandate-release-apk"), or
  * its only one; null when it has none left (they expire), or several and none named so.
  */
-export function shippedFile(slug: string, run: Run, list: Artifact[]): string | null {
+export function shippedFile(slug: string, run: Run, list: Artifact[]): ShippedFile | null {
   const repo = slug.replace(/^.*\//, '').toLowerCase();
   const kept = list.filter((a) => !a.expired);
   const a = kept.find((x) => x.name.toLowerCase().startsWith(repo)) ?? (kept.length === 1 ? kept[0] : undefined);
-  return a ? `https://github.com/${slug}/actions/runs/${run.id}/artifacts/${a.id}` : null;
+  return a ? { url: `https://github.com/${slug}/actions/runs/${run.id}/artifacts/${a.id}`, expires: ms(a.expires_at) } : null;
 }
+
+/** A shipped run's download, and when GitHub drops it (the link is cached, so it goes back to the run page then). */
+export interface ShippedFile { url: string; expires: number | null }
 
 const ms = (s: string | null | undefined) => (s ? Date.parse(s) : null);
 const secs = (from: number | null, to: number | null) => (from != null && to != null ? Math.max(0, Math.round((to - from) / 1000)) : null);
@@ -259,7 +263,11 @@ class RunsCache {
   /** The minions in each run's commits since the shipped run before it, by run id. */
   changes = new Map<number, Release['changes']>();
   /** The download of what each shipped run made (shippedFile), by run id; read once per run. */
-  files = new Map<number, string | null>();
+  file(id: number, now: number): string | null {
+    const f = this.files.get(id);
+    return f && (f.expires == null || f.expires > now) ? f.url : null;
+  }
+  files = new Map<number, ShippedFile | null>();
   constructor(d: ActionsDeps) {
     this.d = d;
   }
@@ -361,7 +369,7 @@ export class CiPackageReader implements Reader {
     return this.d.finder.list('ci').map((t) => {
       const runs = this.cache.runs.get(t.id) ?? [];
       const ch = (r: RunJobs) => this.cache.changes.get(r.run.id) ?? [];
-      const file = (r: RunJobs) => this.cache.files.get(r.run.id) ?? null;
+      const file = (r: RunJobs) => this.cache.file(r.run.id, now);
       const num = this.cache.numbers(t);
       const cur = runs.find(shipped);
       const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
@@ -445,7 +453,7 @@ export class ApkReader implements Reader {
       const usual = (s: string) => (s === 'sign' ? median(signs) : null);
       const feed = this.feeds.get(t.id);
       const main = this.mains.get(t.id);
-      const file = (r: RunJobs) => this.cache.files.get(r.run.id) ?? null;
+      const file = (r: RunJobs) => this.cache.file(r.run.id, now);
       const moving = runs.find((r) => r.run.status !== 'completed');
       /** The run in flight, signing; waiting while no runner has it. */
       const signing = (r: RunJobs): Progress => {

@@ -35,7 +35,7 @@ skill step is skipped or uses its default.
 
 - **Check commands:** `npm test` (`node --test test/` through `tools/citadel-node`, so it escapes ananicy's idle `node` rule: `deploy/priority.md`; failing if it leaves processes running: `test/leak-guard.ts`; it also lints the `.ps1` files with pwsh, `test/ps1-lint.test.ts`). The full suite's home is Cara's desktop, not perigee: `tools/land.sh` waits for
   `.github/workflows/tests.yml` on the commit it lands, and runs the suite on perigee only as a loud fallback (`CI FALLBACK`;
-  `LAND_CI=0` forces it when CI itself is broken). Before landing, a minion runs only the test files its change touches, never the full suite on perigee. No build step. A UI change is
+  `LAND_CI=0` forces it when CI itself is broken). A red CI run: `tools/ci-failures` (on every turn's PATH, `--help`) prints its failing tests. Before landing, a minion runs only the test files its change touches, never the full suite on perigee. No build step. A UI change is
   also checked in a dev copy or preview (scheme instructions, "UI checks"): shoot and drive its pages with
   `node tools/ui-shot.ts <#route>...` (its header: widths, dark, steps, display-mode), under a second a shot
   on the dev copy it starts and keeps, then `citadel-dev-copy stop`. A scratch server takes its port from `freePort()`

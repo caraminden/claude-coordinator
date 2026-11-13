@@ -71,7 +71,8 @@ const mcp = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf
 const heavy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-heavy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
 const wait = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-wait) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
 const devCopy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-dev-copy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, mcp, heavy, wait, devCopy }));
+const ciFailures = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v ci-failures) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, mcp, heavy, wait, devCopy, ciFailures }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
@@ -272,6 +273,7 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   assert.equal(t.heavy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-heavy'), 'utf8'), 'on PATH and executable');
   assert.equal(t.wait, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-wait'), 'utf8'), 'citadel-wait beside it (#481)');
   assert.equal(t.devCopy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-dev-copy'), 'utf8'), 'citadel-dev-copy (#482) too');
+  assert.equal(t.ciFailures, readFileSync(join(import.meta.dirname, '..', 'tools', 'ci-failures'), 'utf8'), 'ci-failures (#644) too');
   assert.ok(!t.env.PATH.startsWith(MCP_DIR) && t.env.PATH.split(':')[0].endsWith('/pin/bin'), "the turn's own pinned copy, which outlives a restart");
   assert.equal(t.env.CITADEL_HEAVY_DIR, join(root, 'projects', '.heavy'), "in the projects folder every container mounts");
   assert.match(t.env.CITADEL_HEAVY_WHO, /^P[\d.]+ #\d+$/);

@@ -1,8 +1,10 @@
 // A reader per kind of found target (#627, src/release-targets.ts finds them), each filling src/releases.ts's shape.
 // read() answers from what refresh() last read (git, files, GitHub), so the 2-second poll costs nothing.
 import type { DeployView } from './app-services.ts';
+import type { Job, Run } from './ci-health.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store } from './db.ts';
-import { git, landedIn, type Change, type Next, type Progress, type Reader, type Release, type TargetView } from './releases.ts';
+import { verdict, type PrSnapshot } from './github.ts';
+import { git, landedIn, releaseOf, type Change, type Next, type Progress, type Reader, type Release, type TargetView } from './releases.ts';
 import type { Found, TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { median } from './waits.ts';
@@ -154,5 +156,355 @@ export class ContraptionReader implements Reader {
       out.push({ target: targetOf(t), current, next: lead ? nextOf(CONTRAPTION_TRACK, usual, lead, changes) : null, line: [], recent });
     }
     return out;
+  }
+}
+
+/** GitHub Actions as the release monitor reads it: CiHealth's cached reads (src/ci-health.ts). */
+export interface Actions {
+  workflowRuns(p: Project, workflow: string, branch: string): Promise<Run[] | null>;
+  runJobs(p: Project, run: Run): Promise<Job[] | null>;
+}
+
+const ms = (s: string | null | undefined) => (s ? Date.parse(s) : null);
+const secs = (from: number | null, to: number | null) => (from != null && to != null ? Math.max(0, Math.round((to - from) / 1000)) : null);
+/** Re-read a workflow that isn't moving this often; one that is, every refresh. */
+const IDLE_MS = 5 * 60_000;
+
+interface RunJobs {
+  run: Run;
+  /** The job that ships (a ci target's), or every job (an apk's). */
+  jobs: Job[];
+}
+
+/** When a run's shipping part started and ended: its job's, or the run's own for a whole-workflow target. */
+function span(r: RunJobs): { start: number | null; started: number | null; end: number | null } {
+  const j = r.jobs[0];
+  return {
+    start: ms(r.run.created_at),
+    started: j ? ms(j.started_at) : ms(r.run.run_started_at ?? r.run.created_at),
+    end: j ? ms(j.completed_at) : r.run.status === 'completed' ? ms(r.run.updated_at) : null,
+  };
+}
+
+/** A run that shipped: completed, and its job (or the run, for a whole-workflow target) succeeded. */
+const shipped = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ? r.jobs[0].conclusion === 'success' : r.run.conclusion === 'success');
+/** A run that tried to ship and didn't: its job ran (not skipped) and failed. */
+const failedShip = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ? r.jobs[0].conclusion === 'failure' : r.run.conclusion === 'failure');
+
+/** A run as a release: "build 41", linked to its run page (its artifacts), with its CI and package times. */
+function runRelease(r: RunJobs, outcome: string, changes: Release['changes'] = []): Release {
+  const s = span(r);
+  const stages: Record<string, number> = {};
+  const ci = secs(s.start, s.started), pkg = secs(s.started, s.end);
+  if (ci != null) stages.ci = ci;
+  if (pkg != null) stages.package = pkg;
+  return { version: `build ${r.run.run_number ?? r.run.id}`, link: r.run.html_url ?? null, changes, started: s.start, live: outcome === 'live' ? s.end : null, outcome, stages };
+}
+
+/** The usual CI and package time of the newest shipped runs. */
+function runUsual(runs: RunJobs[]): (stage: string) => number | null {
+  const ok = runs.filter(shipped).slice(0, RECENT).map((r) => runRelease(r, 'live'));
+  return (stage) => median(ok.flatMap((r) => (typeof r.stages[stage] === 'number' ? [r.stages[stage]] : [])));
+}
+
+/** A run in flight as the lead of a next release: waiting for a runner, in CI, or packaging. */
+function runProgress(r: RunJobs, usual: (stage: string) => number | null, now: number): Progress {
+  const s = span(r);
+  const j = r.jobs[0];
+  if (j?.status === 'in_progress') return { stage: 'package', since: s.started ?? now, usual: usual('package'), waitingOn: null, text: `${j.name} running` };
+  const queued = r.run.status === 'queued' || r.run.status === 'waiting' || r.run.status === 'pending';
+  const text = queued ? 'waiting for a CI runner' : `${r.run.name} running`;
+  return { stage: 'ci', since: s.start ?? now, usual: queued ? null : usual('ci'), waitingOn: queued ? text : null, text };
+}
+
+export interface ActionsDeps {
+  store: Store;
+  finder: Pick<TargetFinder, 'list'>;
+  actions: Actions;
+  now?: () => number;
+}
+
+/** Each workflow target's runs on main, read again every refresh while one runs and every IDLE_MS otherwise. */
+class RunsCache {
+  private d: ActionsDeps;
+  runs = new Map<string, RunJobs[]>();
+  private readAt = new Map<string, number>();
+  /** The minions in each run's commits since the shipped run before it, by run id. */
+  changes = new Map<number, Release['changes']>();
+  constructor(d: ActionsDeps) {
+    this.d = d;
+  }
+
+  async read(t: Found) {
+    const p = this.d.store.getProject(t.projectId);
+    if (!p || !t.workflow) return;
+    const now = (this.d.now ?? Date.now)();
+    const had = this.runs.get(t.id);
+    const moving = had?.some((r) => r.run.status !== 'completed');
+    if (had && !moving && now - (this.readAt.get(t.id) ?? 0) < IDLE_MS) return;
+    const runs = await this.d.actions.workflowRuns(p, t.workflow.replace(/^.*\//, ''), t.branch);
+    if (!runs) return;
+    this.readAt.set(t.id, now);
+    const out: RunJobs[] = [];
+    // The newest few: enough for the current, the usual times and the recent list.
+    for (const run of runs.slice(0, RECENT * 2)) {
+      if (!t.job) {
+        out.push({ run, jobs: [] });
+        continue;
+      }
+      const jobs = await this.d.actions.runJobs(p, run);
+      if (!jobs) return; // a half-read list would drop the current release: keep the last whole one
+      // Matched by its id, its name, or "name (matrix)": a job named in the workflow shows by its name.
+      const job = jobs.find((j) => j.name === t.job || j.name.startsWith(`${t.job} (`)) ?? jobs.find((j) => j.name.toLowerCase().includes(t.job!.toLowerCase()));
+      // A run whose job is missing or skipped (a light lane, a gate that didn't pass) shipped nothing.
+      if (job && job.conclusion !== 'skipped') out.push({ run, jobs: [job] });
+      else if (run.status !== 'completed') out.push({ run, jobs: [] });
+    }
+    this.runs.set(t.id, out);
+    // What each in-flight or newest run carries since the run before it that shipped.
+    if (p.repo_dir) {
+      for (const [i, r] of out.slice(0, 2).entries()) {
+        if (this.changes.has(r.run.id) && r.run.status === 'completed') continue;
+        const prev = out.slice(i + 1).find(shipped);
+        const landed = prev && prev.run.head_sha !== r.run.head_sha ? await landedIn(this.d.store, p, prev.run.head_sha, r.run.head_sha) : null;
+        this.changes.set(r.run.id, (landed?.tickets ?? []).map((x) => ({ ticketId: x.id, number: x.number, title: x.title })));
+      }
+    }
+  }
+}
+
+export const CI_TRACK = ['ci', 'package', 'live'];
+
+/** A CI package (Peek Auras' Windows build): a release is the newest run on main whose shipping job passed; the next is a run in flight. */
+export class CiPackageReader implements Reader {
+  private d: ActionsDeps;
+  private cache: RunsCache;
+  constructor(d: ActionsDeps) {
+    this.d = d;
+    this.cache = new RunsCache(d);
+  }
+
+  async refresh() {
+    for (const t of this.d.finder.list('ci')) await this.cache.read(t);
+  }
+
+  read(): Omit<TargetView, 'testCopies'>[] {
+    const now = (this.d.now ?? Date.now)();
+    return this.d.finder.list('ci').map((t) => {
+      const runs = this.cache.runs.get(t.id) ?? [];
+      const ch = (r: RunJobs) => this.cache.changes.get(r.run.id) ?? [];
+      const cur = runs.find(shipped);
+      const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r)));
+      const usual = runUsual(runs);
+      // The newest run in flight leads; a run older than the current release can't be its next.
+      const moving = runs.find((r) => r.run.status !== 'completed');
+      const lead = moving && (!cur || runs.indexOf(moving) < runs.indexOf(cur)) ? runProgress(moving, usual, now) : null;
+      const changes: Change[] = lead ? ch(moving!).map((c) => ({ ...c, ...lead })) : [];
+      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur)) : null, next: lead ? nextOf(CI_TRACK, usual, lead, changes) : null, line: [], recent };
+    });
+  }
+}
+
+export const APK_TRACK = ['sign', 'publish', 'live'];
+
+/** A release workflow's run as a signed APK: signing is the whole run. */
+function apkRun(r: RunJobs, outcome: string): Release {
+  const s = span(r);
+  const sign = secs(s.start, s.end);
+  return { ...runRelease(r, outcome), live: outcome === 'live' ? s.end : null, stages: sign != null ? { sign } : {} };
+}
+
+/** latest.json, as its app's update banner reads it. */
+interface Feed {
+  versionCode: number;
+  apk?: string;
+  versionName?: string;
+  /** When it was written (ms). */
+  at: number;
+}
+
+export interface ApkDeps extends ActionsDeps {
+  /** The contraption's latest.json, or null when it has none. */
+  feed: (contraption: string) => Promise<Feed | null>;
+}
+
+/** The versionCode and versionName in an app/build.gradle's text. */
+export function gradleVersion(text: string): { code: number; name: string | null } | null {
+  const code = /versionCode\s*=?\s*(\d+)/.exec(text)?.[1];
+  return code ? { code: Number(code), name: /versionName\s*=?\s*["']([^"']+)["']/.exec(text)?.[1] ?? null } : null;
+}
+
+/**
+ * An Android app people install (Mandate's): a release is what its app serves in latest.json. A version bumped on main
+ * is its next release: waiting for someone to start the release workflow, signing on CI, then waiting for someone to
+ * publish the APK (android/README.md, "Publishing an APK"). With no latest.json, its runs stand in for releases.
+ */
+export class ApkReader implements Reader {
+  private d: ApkDeps;
+  private cache: RunsCache;
+  private feeds = new Map<string, Feed | null>();
+  /** The version on main: its gradle file's, read again when main moves. */
+  private mains = new Map<string, { head: string; code: number; name: string | null } | null>();
+  constructor(d: ApkDeps) {
+    this.d = d;
+    this.cache = new RunsCache(d);
+  }
+
+  async refresh() {
+    for (const t of this.d.finder.list('apk')) {
+      await this.cache.read(t);
+      if (t.contraption) this.feeds.set(t.id, await this.d.feed(t.contraption));
+      const p = this.d.store.getProject(t.projectId);
+      if (!p?.repo_dir) continue;
+      const head = (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim();
+      if (!head || this.mains.get(t.id)?.head === head) continue;
+      const files = (await git(['ls-tree', '-r', '--name-only', head], p.repo_dir)) ?? '';
+      const gradle = files.split('\n').find((f) => /(^|\/)app\/build\.gradle(\.kts)?$/.test(f));
+      const v = gradle ? gradleVersion((await git(['show', `${head}:${gradle}`], p.repo_dir)) ?? '') : null;
+      this.mains.set(t.id, v && { head, ...v });
+    }
+  }
+
+  read(): Omit<TargetView, 'testCopies'>[] {
+    const now = (this.d.now ?? Date.now)();
+    return this.d.finder.list('apk').map((t) => {
+      const runs = this.cache.runs.get(t.id) ?? [];
+      const signs = runs.filter(shipped).slice(0, RECENT).flatMap((r) => apkRun(r, 'live').stages.sign ?? []);
+      const usual = (s: string) => (s === 'sign' ? median(signs) : null);
+      const feed = this.feeds.get(t.id);
+      const main = this.mains.get(t.id);
+      const moving = runs.find((r) => r.run.status !== 'completed');
+      /** The run in flight, signing; waiting while no runner has it. */
+      const signing = (r: RunJobs): Progress => {
+        const p = runProgress(r, usual, now);
+        return { ...p, stage: 'sign', usual: p.waitingOn ? null : usual('sign'), text: p.waitingOn ? p.text : 'signing on CI' };
+      };
+      if (!feed) {
+        // No feed to read: the newest signed run is the release, as for a CI package.
+        const cur = runs.find(shipped);
+        const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => apkRun(r, shipped(r) ? 'live' : 'failed'));
+        const lead = moving && (!cur || runs.indexOf(moving) < runs.indexOf(cur)) ? signing(moving) : null;
+        return { target: targetOf(t), current: cur ? apkRun(cur, 'live') : null, next: lead ? nextOf(APK_TRACK, usual, lead, []) : null, line: [], recent };
+      }
+      const version = main?.code === feed.versionCode && main.name ? main.name : `build ${feed.versionCode}`;
+      const link = feed.apk && t.contraption ? `/apps/${t.contraption}/android/${feed.apk}` : t.link;
+      const current: Release = { version, link, changes: [], started: null, live: feed.at, outcome: 'live', stages: {} };
+      // Its signed runs, as the APKs people could have been given.
+      const recent = runs.filter((r) => shipped(r) || failedShip(r)).slice(0, RECENT).map((r) => apkRun(r, shipped(r) ? 'signed' : 'failed'));
+      let lead: Progress | null = null;
+      if (main && main.code > feed.versionCode) {
+        const signed = runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? 0) > feed.at);
+        const name = main.name ?? `build ${main.code}`;
+        if (moving) lead = signing(moving);
+        else if (signed) {
+          const text = `${name} is signed: waiting for someone to publish it`;
+          lead = { stage: 'publish', since: span(signed).end ?? now, usual: null, waitingOn: text, text };
+        } else {
+          const text = `${name} is on main: waiting for someone to start a release run`;
+          lead = { stage: 'sign', since: feed.at, usual: null, waitingOn: text, text };
+        }
+      }
+      return { target: targetOf(t), current, next: lead ? nextOf(APK_TRACK, usual, lead, []) : null, line: [], recent };
+    });
+  }
+}
+
+export const MAIN_TRACK = ['checks', 'merge', 'live'];
+
+export interface MainDeps {
+  store: Store;
+  finder: Pick<TargetFinder, 'list'>;
+  /** A minion's PR as the PR watcher last saw it (src/github.ts), or null. */
+  pr: (ticketId: number) => PrSnapshot | null;
+  /** Its PR's CI in flight (src/ci-wait.ts CiRuns.view): since when, and the usual length. */
+  ci?: (ticketId: number) => { since: number; usual: number | null; text: string } | null;
+  now?: () => number;
+}
+
+/**
+ * Main, for a scheme that ships by merging (Delve, Vexavault) or landing straight on main: a release is main's head,
+ * recorded in the releases table each time it moves, with the minions whose work it took in. Its next release is the
+ * scheme's open PRs: their checks, then a person's go to merge.
+ */
+export class MainReader implements Reader {
+  private d: MainDeps;
+  private heads = new Map<string, string>();
+  /** When each change was first seen at its stage ("<ticket>:<stage>" → ms), so a poll doesn't move it. */
+  private seen = new Map<string, number>();
+  constructor(d: MainDeps) {
+    this.d = d;
+  }
+
+  async refresh() {
+    const { store } = this.d;
+    for (const t of this.d.finder.list('main')) {
+      const p = store.getProject(t.projectId);
+      if (!p?.repo_dir) continue;
+      const head = (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim();
+      if (!head) continue;
+      this.heads.set(`${t.projectId}:${t.id}`, head);
+      const last = store.listReleases(p.id, t.id, 1)[0];
+      if (last?.version === head) continue;
+      const at = Number((await git(['log', '-1', '--format=%ct', head], p.repo_dir))?.trim()) * 1000 || (this.d.now ?? Date.now)();
+      // History rewritten under it (a force push) reads as nothing landed, rather than no row ever again.
+      const landed = last ? await landedIn(store, p, last.version, head) : null;
+      store.addRelease({
+        project_id: p.id, target: t.id, version: head, outcome: 'live', stages: '{}', live_at: at,
+        started_at: landed?.commits.size ? Math.min(...landed.commits.values()) : null,
+        changes: JSON.stringify((landed?.tickets ?? []).map((x) => ({ ticketId: x.id, number: x.number, title: x.title }))),
+      });
+    }
+  }
+
+  private since(id: number, stage: string, now: number): number {
+    const key = `${id}:${stage}`;
+    if (!this.seen.has(key)) this.seen.set(key, now);
+    return this.seen.get(key)!;
+  }
+
+  /** Where one open PR is: its checks running or failed, or waiting for a go to merge. */
+  private progress(id: number, pr: PrSnapshot, now: number): Progress {
+    const v = verdict(pr.checks);
+    if (v === 'pending') {
+      const ci = this.d.ci?.(id);
+      const queued = pr.checks.some((c) => c.status === 'pending' && c.queued);
+      const text = queued ? 'its checks wait for a CI runner' : ci?.text ?? 'checks running';
+      return { stage: 'checks', since: ci?.since ?? this.since(id, 'checks', now), usual: queued ? null : ci?.usual ?? null, waitingOn: queued ? text : null, text };
+    }
+    if (v === 'failed') {
+      const text = 'its checks failed: the minion fixes them';
+      return { stage: 'checks', since: this.since(id, 'failed', now), usual: null, waitingOn: text, text };
+    }
+    const text = `PR #${pr.number} waits for a go to merge`;
+    return { stage: 'merge', since: this.since(id, 'merge', now), usual: null, waitingOn: text, text };
+  }
+
+  read(): Omit<TargetView, 'testCopies'>[] {
+    const { store } = this.d;
+    const now = (this.d.now ?? Date.now)();
+    return this.d.finder.list('main').map((t) => {
+      const p = store.getProject(t.projectId);
+      const slug = repoSlug(p?.repo_url ?? null);
+      const head = this.heads.get(`${t.projectId}:${t.id}`) ?? null;
+      const rows = store.listReleases(t.projectId, t.id, RECENT + 1);
+      const mine = head && rows[0]?.version === head ? rows[0] : null;
+      const current = mine ? releaseOf(mine, commitLink(slug, mine.version))
+        : head ? { version: head, link: commitLink(slug, head), changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
+      const recent = rows.filter((r) => r !== mine).slice(0, RECENT).map((r) => releaseOf(r, commitLink(slug, r.version)));
+      const changes: Change[] = [];
+      for (const x of store.listTickets(t.projectId)) {
+        if (x.kind !== 'ticket' || x.status === 'closed' || !x.branch) continue;
+        const pr = this.d.pr(x.id);
+        if (pr?.state !== 'OPEN' || pr.draft) continue;
+        changes.push({ ticketId: x.id, number: x.number, title: x.title, ...this.progress(x.id, pr, now) });
+      }
+      changes.sort((a, b) => MAIN_TRACK.indexOf(b.stage) - MAIN_TRACK.indexOf(a.stage) || a.since - b.since);
+      let next: Next | null = null;
+      if (changes.length) {
+        const { ticketId: _i, number: _n, title: _t, ...lead } = changes[0];
+        next = nextOf(MAIN_TRACK, (s) => (s === 'checks' ? lead.usual : null), lead, changes);
+      }
+      return { target: targetOf(t), current, next, line: [], recent };
+    });
   }
 }

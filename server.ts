@@ -1,7 +1,7 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -45,7 +45,7 @@ import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
-import { CiHealth } from './src/ci-health.ts';
+import { CiHealth, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
@@ -59,7 +59,8 @@ import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { Waits } from './src/waits.ts';
 import { CitadelServer, previewCopies, Releases } from './src/releases.ts';
-import { ContraptionReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, MainReader } from './src/release-readers.ts';
+import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
@@ -453,8 +454,33 @@ services.onDeploy = (view) => {
   if (view.finished_at === null) return releases.poll();
   contraptionReader.record(view).catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err)).finally(() => void releases.refresh());
 };
+// The workflow readers go through CI health's etag-cached reads (defined below; first called after startup's scan).
+const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r) };
+const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions });
+const apkReader = new ApkReader({
+  store, finder: targetFinder, actions,
+  feed: async (name) => {
+    const file = join(services.opts.home, '.local/share', name, 'android', 'latest.json');
+    try {
+      const [text, st] = await Promise.all([readFile(file, 'utf8'), stat(file)]);
+      const f = JSON.parse(text);
+      return Number.isInteger(f?.versionCode) ? { versionCode: f.versionCode, apk: f.apk, versionName: f.versionName, at: st.mtimeMs } : null;
+    } catch {
+      return null;
+    }
+  },
+});
+// Each minion's PR as the PR watcher last saw it, for Main's next release (#627).
+const prs = new Map<number, PrSnapshot>();
+const mainReader = new MainReader({
+  store, finder: targetFinder, pr: (id) => prs.get(id) ?? null,
+  ci: (id) => {
+    const v = ciRuns.view(id);
+    return v && !v.ended ? { since: v.since, usual: v.usual, text: v.text } : null;
+  },
+});
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader], broadcast, scan: () => targetFinder.scan(),
+  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, mainReader], broadcast, scan: () => targetFinder.scan(),
   testCopies: () => previewCopies(store, { own: ownScheme, running: (key) => previews?.runningAt(key) ?? null, builds: (id) => builds.get(id).map((b) => b.build) }),
 });
 
@@ -535,7 +561,11 @@ if (!BOOT_CHECK || PREVIEW) {
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
 const github = new GithubWatcher(store, (ticketId, text, fyi) => runner.send(ticketId, GITHUB_NAME, text, [], fyi ? { fyi } : {}));
 github.as = githubOf;
-github.onPr = (id, repo, as, pr) => ciRuns.pr(id, repo, as, pr);
+github.onPr = (id, repo, as, pr) => {
+  if (pr) prs.set(id, pr);
+  else prs.delete(id);
+  ciRuns.pr(id, repo, as, pr);
+};
 if (!BOOT_CHECK) github.start();
 /** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log. */
 async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false): Promise<boolean> {

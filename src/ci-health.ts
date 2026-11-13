@@ -54,6 +54,9 @@ export interface Run {
   created_at: string;
   updated_at?: string;
   run_attempt?: number;
+  run_number?: number;
+  run_started_at?: string;
+  html_url?: string;
 }
 export interface Job {
   id: number;
@@ -600,6 +603,32 @@ export class CiHealth {
     }
     await this.scheduledFailures(p, slug, branch, as, now);
     return out;
+  }
+
+  /**
+   * A workflow's runs on `branch`, newest first, through this poller's cache, so the release monitor's reads (#627,
+   * src/release-readers.ts) cost a 304 when nothing moved. Null while rate limited or when GitHub won't answer.
+   */
+  async workflowRuns(p: Project, workflow: string, branch: string, now = Date.now()): Promise<Run[] | null> {
+    const slug = repoSlug(p.repo_url);
+    if (!slug || now < this.pausedUntil) return null;
+    return this.guarded(now, async () => (await this.read(`repos/${slug}/actions/workflows/${encodeURIComponent(workflow)}/runs?branch=${encodeURIComponent(branch)}&per_page=20`, this.deps.as(p), true))?.workflow_runs ?? null);
+  }
+
+  /** A run's jobs (a finished run's are kept), or null as workflowRuns. */
+  async runJobs(p: Project, run: Run, now = Date.now()): Promise<Job[] | null> {
+    const slug = repoSlug(p.repo_url);
+    if (!slug || now < this.pausedUntil) return null;
+    return this.guarded(now, () => this.jobs(slug, run, this.deps.as(p)));
+  }
+
+  private async guarded<T>(now: number, read: () => Promise<T>): Promise<T | null> {
+    try {
+      return await read();
+    } catch (err) {
+      if (err instanceof RateLimited) this.pausedUntil = now + RATE_LIMITED_MS;
+      return null;
+    }
   }
 
   private swept = new Set<number>();

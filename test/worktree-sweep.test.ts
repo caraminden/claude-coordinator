@@ -102,7 +102,7 @@ test('dismissed past the grace: removed with its branch kept, saving uncommitted
   assert.match(notes(dirty.id).at(-1)!, /Removed this dismissed minion's worktree .*a reopen brings the folder back with its uncommitted work/);
   const tm = notes(s.coordinator).at(-1)!;
   assert.match(tm, /Removed 3 worktrees/);
-  assert.match(tm, new RegExp(`#${clean.number} \\(${clean.dir}\\), \\d+ MiB`));
+  assert.match(tm, new RegExp(`#${clean.number} \\(tickets/${clean.id}\\), \\d+ MiB`));
 
   // A second sweep says nothing new about the ones it keeps.
   assert.equal((await runner.sweepWorktrees()).get(s.id), undefined);

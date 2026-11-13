@@ -4,7 +4,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
@@ -847,7 +847,7 @@ export class Runner {
             const now2 = this.store.getTicket(t.id);
             // updated_at only moves on: a reopen and a new dismissal restart the clock.
             if (now2?.status !== 'closed' || this.turns.has(t.id) || now2.updated_at > now - GRACE_MS || !(await ownCheckout(dir))) return;
-            const what = `#${t.number} (${dir})`;
+            const what = `#${t.number} (${relative(projectDir(this.dataDir, p.id), dir)})`;
             try {
               const ref = savedRef(String(t.id));
               const s = await saveWork(dir, ref, t.branch, `Citadel: #${t.number}'s work not on its branch, saved before its worktree was removed`);
@@ -891,7 +891,7 @@ export class Runner {
       const inUse = [...this.turns].some(([id, turn]) => this.store.getTicket(id)?.project_id === p.id && turn.startedAt <= made);
       if (inUse) continue;
       const name = g.path.slice(g.path.lastIndexOf('/') + 1);
-      const what = `Grunt ${name} (${g.path})`;
+      const what = `Grunt ${name} (${relative(projectDir(this.dataDir, p.id), g.path)})`;
       if (g.locked) {
         keep(what, 'locked');
         continue;

@@ -40,6 +40,20 @@ export interface ReleaseRow {
   stages: string;
 }
 
+/** A row of the contraption_deploys table (#627); stages and changes are JSON. */
+export interface ContraptionDeployRow {
+  id: number;
+  name: string;
+  from_sha: string | null;
+  to_sha: string | null;
+  by: string;
+  started_at: number;
+  finished_at: number | null;
+  outcome: string;
+  stages: string;
+  changes: string;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -728,6 +742,22 @@ CREATE TABLE IF NOT EXISTS releases (
   stages TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS releases_target ON releases(project_id, target, id);
+-- One row per contraption deploy (#627, src/release-readers.ts): the commit it ran before and went to, who asked,
+-- when it started and ended, how it ended (deployed, failed, rolled back), each stage's length in s (JSON
+-- { stage: s }) and the minions in it (JSON [{ ticketId, number, title }]). Keyed by name, so it outlives a re-register.
+CREATE TABLE IF NOT EXISTS contraption_deploys (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  from_sha TEXT,
+  to_sha TEXT,
+  by TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  outcome TEXT NOT NULL,
+  stages TEXT NOT NULL DEFAULT '{}',
+  changes TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS contraption_deploys_name ON contraption_deploys(name, id);
 `;
 
 /**
@@ -874,6 +904,7 @@ export const SCHEMA_HISTORY = [
   [40, 'runner_load (#534)'],
   [41, 'step_times (#571)'],
   [42, 'releases (#625)'],
+  [43, 'contraption_deploys (#627)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2279,6 +2310,17 @@ export class Store {
   addRelease(r: Omit<ReleaseRow, 'id'>): number {
     return Number(this.db.prepare('INSERT INTO releases (project_id, target, version, changes, started_at, live_at, outcome, stages) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(r.project_id, r.target, r.version, r.changes, r.started_at, r.live_at, r.outcome, r.stages).lastInsertRowid);
+  }
+
+  /** Record a finished contraption deploy (src/release-readers.ts). */
+  addContraptionDeploy(r: Omit<ContraptionDeployRow, 'id'>): number {
+    return Number(this.db.prepare('INSERT INTO contraption_deploys (name, from_sha, to_sha, by, started_at, finished_at, outcome, stages, changes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(r.name, r.from_sha, r.to_sha, r.by, r.started_at, r.finished_at, r.outcome, r.stages, r.changes).lastInsertRowid);
+  }
+
+  /** A contraption's newest deploys, newest first. */
+  listContraptionDeploys(name: string, limit: number): ContraptionDeployRow[] {
+    return this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? ORDER BY id DESC LIMIT ?').all(name, limit) as unknown as ContraptionDeployRow[];
   }
 
   /** A target's newest releases, newest first. */

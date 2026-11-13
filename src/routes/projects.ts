@@ -365,6 +365,7 @@ export const projectRoutes: Route[] = [
         if (source === 'new') await putOnGithub(app, project.id, dir, slug!, true, as);
       }
       app.store.setProjectSettings(project.id, { onboarding: setup ? 'interview' : 'skipped' });
+      void app.releases.refresh(true); // its targets show up without anyone asking (#627)
       if (setup) {
         const coordinator = await ensureCoordinator(app, app.store.getProject(project.id)!);
         app.runner.send(coordinator.id, APP_NAME, kickoff(name, codeLine(app.store.getProject(project.id)!, source, folder), session.name, about));

@@ -362,6 +362,7 @@ export const contraptionRoutes: Route[] = [
         name, title: f.title!, port: f.port!, icon: f.icon ?? null, home_scheme: f.home_scheme ?? null, open_paths: f.open_paths ?? '[]', relay_paths: f.relay_paths ?? '[]',
         default_model: f.default_model ?? null, turn_cap: f.turn_cap ?? null, repo: f.repo ?? null, branch: f.branch ?? null, folder: f.folder ?? null,
       });
+      void app.releases.refresh(true); // its App row shows up at once (#627)
       return json(res, 201, view(app, c));
     },
   }),
@@ -371,6 +372,7 @@ export const contraptionRoutes: Route[] = [
     async handler({ req, res, app, params }) {
       const c = contraption(app, params.name);
       app.store.updateContraption(c.name, fields(app, await readJson(req), false));
+      void app.releases.refresh(true); // a new home scheme or repo moves its row (#627)
       return json(res, 200, view(app, contraption(app, c.name)));
     },
   }),

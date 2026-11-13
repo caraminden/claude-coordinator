@@ -108,6 +108,8 @@ export interface SchemeReleases {
 /** One kind of target's reader: its targets now (it may find none). */
 export interface Reader {
   read(): Omit<TargetView, 'testCopies'>[];
+  /** Read what read() needs from git, files or GitHub again (read() itself must answer at once). */
+  refresh?(): Promise<void>;
 }
 
 const RECENT = 5;
@@ -127,6 +129,8 @@ export interface ReleasesDeps {
   /** Every scheme's test copies. */
   testCopies: () => Map<number, TestCopy[]>;
   broadcast: (msg: object) => void;
+  /** Find every scheme's targets again (src/release-targets.ts), before the readers read theirs. */
+  scan?: () => Promise<void>;
 }
 
 export class Releases {
@@ -171,6 +175,19 @@ export class Releases {
     this.polled = true;
   }
 
+  private refreshing: Promise<void> | null = null;
+  /** Each reader's slow part read again (one at a time), with every scheme's targets found again first when `scan`, then poll. */
+  refresh(scan = false): Promise<void> {
+    // A scan asked for while a refresh without one runs waits for it, then runs its own.
+    if (this.refreshing && scan) return this.refreshing.then(() => this.refresh(true));
+    this.refreshing ??= (async () => {
+      if (scan) await this.d.scan?.().catch((err) => console.error('Finding release targets failed:', err));
+      for (const r of this.d.readers) await r.refresh?.().catch((err) => console.error('Reading release targets failed:', err));
+      this.poll();
+    })().finally(() => (this.refreshing = null));
+    return this.refreshing;
+  }
+
   /** The schemes `visible` allows (null: all), as the last poll read them, or afresh before the first. */
   view(visible: (projectId: number) => boolean): SchemeReleases[] {
     if (!this.polled) this.last = this.read();
@@ -179,7 +196,8 @@ export class Releases {
 }
 
 const run = promisify(execFile);
-async function git(args: string[], cwd: string): Promise<string | null> {
+/** git's output, or null when it failed. */
+export async function git(args: string[], cwd: string): Promise<string | null> {
   try {
     return (await run('git', args, { cwd, timeout: 15_000, maxBuffer: 16 * 1024 * 1024 })).stdout;
   } catch {
@@ -362,7 +380,7 @@ export class CitadelServer implements Reader {
     const { store } = this.d;
     const last = store.listReleases(p.id, CITADEL_TARGET, 1)[0];
     if (last?.version === head) return;
-    const landed = last ? await this.landed(p, last.version, head) : [];
+    const landed = last ? (await landedIn(store, p, last.version, head))?.tickets : [];
     // git failed: no row, rather than a release with its changes lost; the next head's row takes them in.
     if (!landed) return console.error(`Reading what landed in ${head.slice(0, 7)} failed: no release row for it`);
     const liveAt = this.now();
@@ -385,23 +403,25 @@ export class CitadelServer implements Reader {
     }
   }
 
-  /**
-   * The scheme's minions whose branch tip is a commit in prev..head: land.sh rebases a branch and fast-forwards
-   * main to it, so a landed branch's tip is on main. A tip committed before its minion started is where a new branch
-   * began, not its work.
-   */
-  private async landed(p: Project, prev: string, head: string) {
-    const [log, refs] = await Promise.all([
-      git(['log', '--format=%H %ct', `${prev}..${head}`], p.repo_dir!),
-      git(['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads/'], p.repo_dir!),
-    ]);
-    if (log == null || refs == null) return null;
-    const at = new Map(log.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ct]) => [sha, Number(ct) * 1000]));
-    const tips = new Map(refs.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ref]) => [ref, sha]));
-    return this.d.store.listTickets(p.id)
-      .filter((t) => t.kind === 'ticket' && t.branch && at.has(tips.get(t.branch) ?? '') && at.get(tips.get(t.branch)!)! >= t.created_at - 1000)
-      .sort((a, b) => (a.number ?? a.id) - (b.number ?? b.id));
-  }
+}
+
+/**
+ * The commits in prev..head (sha → commit time, ms), and the scheme's minions whose branch tip is one of them: land.sh
+ * rebases a branch and fast-forwards main to it, so a landed branch's tip is on main. A tip committed before its minion
+ * started is where a new branch began, not its work. Null when git failed.
+ */
+export async function landedIn(store: Store, p: Project, prev: string, head: string) {
+  const [log, refs] = await Promise.all([
+    git(['log', '--format=%H %ct', `${prev}..${head}`], p.repo_dir!),
+    git(['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads/'], p.repo_dir!),
+  ]);
+  if (log == null || refs == null) return null;
+  const commits = new Map(log.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ct]) => [sha, Number(ct) * 1000]));
+  const tips = new Map(refs.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ref]) => [ref, sha]));
+  const tickets = store.listTickets(p.id)
+    .filter((t) => t.kind === 'ticket' && t.branch && commits.has(tips.get(t.branch) ?? '') && commits.get(tips.get(t.branch)!)! >= t.created_at - 1000)
+    .sort((a, b) => (a.number ?? a.id) - (b.number ?? b.id));
+  return { commits, tickets };
 }
 
 /** Every scheme's previews that people were offered, and the builds' previews of the scheme whose code this server runs. */

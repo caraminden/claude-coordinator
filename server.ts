@@ -59,6 +59,8 @@ import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { Waits } from './src/waits.ts';
 import { CitadelServer, previewCopies, Releases } from './src/releases.ts';
+import { ContraptionReader } from './src/release-readers.ts';
+import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
@@ -444,8 +446,15 @@ const citadelServer = new CitadelServer({
   store, scheme: ownScheme, head: () => waiters.head, line: () => waits.line, ticketFor: (label) => waits.ticketFor(label),
   wait: waits.wait, ship: ships.ship, usual: waits.usual, interruptible: () => runner.interruptible(), ciQueued: (id) => ciRuns.view(id)?.stage === 'queued',
 });
+// Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
+const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) => join(services.opts.home, '.local/share', name, 'android', 'latest.json') });
+const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name) });
+services.onDeploy = (view) => {
+  if (view.finished_at === null) return releases.poll();
+  contraptionReader.record(view).catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err)).finally(() => void releases.refresh());
+};
 const releases = new Releases({
-  store, readers: [citadelServer], broadcast,
+  store, readers: [citadelServer, contraptionReader], broadcast, scan: () => targetFinder.scan(),
   testCopies: () => previewCopies(store, { own: ownScheme, running: (key) => previews?.runningAt(key) ?? null, builds: (id) => builds.get(id).map((b) => b.build) }),
 });
 
@@ -516,6 +525,10 @@ if (!BOOT_CHECK || PREVIEW) {
     waits.poll();
     releases.poll();
   }), 2_000).unref();
+  // Release targets' git reads every 15 s, and finding every scheme's targets again every 5 minutes (#627).
+  void safely('release targets', () => releases.refresh(true));
+  setInterval(() => void safely('release reads', () => releases.refresh()), SHIP_POLL_MS).unref();
+  setInterval(() => void safely('release targets', () => releases.refresh(true)), 20 * SHIP_POLL_MS).unref();
   ciRuns.start();
 }
 

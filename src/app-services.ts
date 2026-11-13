@@ -225,6 +225,8 @@ export interface DeployView {
   todo: string[];
   /** Its whole log: git's and the build's output. */
   log: string;
+  /** When each stage began (ms): build (fetch and build steps), drain (its turns), restart (and the health check). */
+  stages: Record<string, number>;
 }
 
 /** What a deploy hands back to its caller once it's deployed (#418). */
@@ -300,6 +302,8 @@ export class AppServices {
    * (ContraptionTurns.drain). Set by server.ts; `release` lets the held turns start.
    */
   drain: (row: ContraptionRow) => Promise<{ said: string | null; release: () => void }> = async () => ({ said: null, release: () => {} });
+  /** A deploy reached a stage, or ended (finished_at set): the release monitor records and shows it (#627). */
+  onDeploy: (view: DeployView) => void = () => {};
 
   constructor(opts: ServiceOptions) {
     this.opts = opts;
@@ -427,7 +431,7 @@ export class AppServices {
   }
 
   /** `holds` (a deploy's) takes the drain's release, for after its health check; otherwise it's released after the restart. */
-  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[] }): Promise<string[]> {
+  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[]; stage?: (stage: string) => void }): Promise<string[]> {
     const folder = this.folder(row);
     const manifest = await this.manifest(row, folder);
     const files = unitFiles(this.inputs(row, manifest, folder));
@@ -453,7 +457,9 @@ export class AppServices {
     if (live.length && !opts.replace) {
       throw new ServiceError(409, `Hand-installed units run ${row.name} already: ${live.map((u) => `${u.unit} (${u.active}, ${u.enabled || 'no file state'}; ${u.why})`).join('; ')}. Install again with replace to stop and disable them first; their files stay.`);
     }
+    opts.stage?.('drain');
     const quiet = await this.drain(row);
+    opts.stage?.('restart');
     if (quiet.said) said.push(quiet.said);
     if (opts.holds) opts.holds.push(quiet.release);
     try {
@@ -515,6 +521,25 @@ export class AppServices {
 
   private deploys = new Map<string, DeployView>();
 
+  /** Its deploy running now, or null. */
+  running(name: string): DeployView | null {
+    const d = this.deploys.get(name);
+    return d && d.finished_at === null ? d : null;
+  }
+
+  private stage(view: DeployView, stage: string) {
+    view.stages[stage] = Date.now();
+    this.safely(view);
+  }
+
+  private safely(view: DeployView) {
+    try {
+      this.onDeploy(view);
+    } catch (err) {
+      console.error(`Recording ${view.name}'s deploy failed:`, err);
+    }
+  }
+
   /** Its last deploy since this server started, with the end of its log; null when none. */
   async lastDeploy(name: string): Promise<(DeployView & { tail: string }) | null> {
     const d = this.deploys.get(name);
@@ -541,7 +566,7 @@ export class AppServices {
     this.busy.add(row.name);
     const started = Date.now();
     const log = join(this.opts.logDir, row.name, `${new Date(started).toISOString().replace(/[:.]/g, '-')}.log`);
-    const view: DeployView = { name: row.name, state: 'running', by, repo: row.repo, branch: row.branch ?? 'main', from: null, to: null, started_at: started, finished_at: null, said: [], todo: [], log };
+    const view: DeployView = { name: row.name, state: 'running', by, repo: row.repo, branch: row.branch ?? 'main', from: null, to: null, started_at: started, finished_at: null, said: [], todo: [], log, stages: { build: started } };
     this.deploys.set(row.name, view);
     void this.deployNow(row, view, all, identity, hooks)
       .catch((err) => {
@@ -552,6 +577,7 @@ export class AppServices {
         await appendFile(log, `== ${view.state} at ${new Date().toISOString()}\n`).catch(() => {});
         this.busy.delete(row.name);
         view.finished_at = Date.now();
+        this.safely(view);
         await this.pruneLogs(row.name).catch(() => {});
       });
     return view;
@@ -641,7 +667,7 @@ export class AppServices {
         if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
         if (code) throw new Error(`Build step failed (exit ${code}): ${step}`);
       }
-      for (const line of await this.installNow(row, { all, holds })) await say(line);
+      for (const line of await this.installNow(row, { all, holds, stage: (s) => this.stage(view, s) })) await say(line);
       await this.healthy(row, m.health);
       await say(`Healthy: ${m.health ? `${m.health} answered` : `port ${row.port} open`}.`);
     };

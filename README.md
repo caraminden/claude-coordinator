@@ -446,6 +446,14 @@ takes the restart lock before it moves `main` or the live checkout, so neither m
 while a restart is still being judged. If the restart is rolled back and its commit
 comes off `main`, the landing behind rebases without it and waits for CI again.
 
+When the deploy's boot check fails, `deploy.sh` leaves `.git/cc-deploy/refusing` in the
+live checkout, and removes it when a boot check next passes. While it is there, each
+landing runs the boot check on its rebased commit before its CI run: a commit that
+fails is refused at once ("deploy has been refusing since ..."), with no CI run spent,
+and one that passes (the fix, say) lands as usual. To turn that off, set
+`LAND_PREFLIGHT=0` for one landing, or `touch ~/claude-coordinator/.git/cc-deploy/preflight-off`
+for all of them.
+
 `tools/deploy.sh` on its own deploys whatever is on `main`. Restarting doesn't
 interrupt turns:
 

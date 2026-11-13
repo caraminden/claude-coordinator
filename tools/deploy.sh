@@ -529,7 +529,12 @@ deploy() {
   version=$(cat "$STATE/boot.out")
   if [ "$boot_rc" != 0 ]; then
     # 124: timeout stopped it. 137 only past the limit (its KILL after a TERM that didn't take): sooner, something else killed it.
-    if [ "$boot_rc" = 124 ] || { [ "$boot_rc" = 137 ] && [ $((SECONDS - boot_since)) -ge "$BOOT_TIMEOUT" ]; }; then
+    # For the landings behind (#646): land.sh runs this check before its CI run while the file is there. The first
+    # failure's time stays.
+    local hung=
+    if [ "$boot_rc" = 124 ] || { [ "$boot_rc" = 137 ] && [ $((SECONDS - boot_since)) -ge "$BOOT_TIMEOUT" ]; }; then hung=1; fi
+    [ -s "$STATE/refusing" ] || echo "$(date +%s) the boot check $([ -n "$hung" ] && echo hung || echo failed) on $(git_live rev-parse --short "$new")" >"$STATE/refusing" || true
+    if [ -n "$hung" ]; then
       say "the boot check hung: stopped after $BOOT_TIMEOUT s, far past its own limit. That is not a verdict on the change (a failed check says what broke): run it again, and if it hangs again, look for a call in the new code that blocks the server's start. Nothing deployed"
     else
       say "boot check failed; nothing deployed"
@@ -537,7 +542,7 @@ deploy() {
     false
   fi
   trap - ERR INT TERM HUP
-  rm -f "$STATE/unchecked"
+  rm -f "$STATE/unchecked" "$STATE/refusing"
   kit_land_drift "$prev" "$new" || true
 
   queue_phase "deploying: going live"

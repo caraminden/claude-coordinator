@@ -293,6 +293,33 @@ bad_check() {
 tip=$(git rev-parse HEAD)
 short=$(git rev-parse --short HEAD)
 
+# The deploy's boot check, before a CI run is spent (#646). Only while <state>/refusing is there: deploy.sh leaves it
+# ("<when> <why>") when its boot check fails and removes it when one passes. On Nov 13 nine landings each waited in
+# line and for CI, to be refused by a boot check that failed on every commit. The fix for such a failure passes here
+# and lands as usual. Off: LAND_PREFLIGHT=0, or for every landing, touch <state>/preflight-off.
+preflight() {
+  local at why since rc=0
+  [ -s "$state/refusing" ] || return 0
+  { [ "${LAND_PREFLIGHT:-1}" != 0 ] && [ ! -e "$state/preflight-off" ]; } || return 0
+  read -r at why <"$state/refusing" || true
+  [[ $at =~ ^[0-9]+$ ]] || return 0
+  since=$(date -d "@$at" '+%b %-d %H:%M %Z')
+  say "deploy has been refusing since $since ($why): running its boot check on $short before a CI run is spent on it"
+  queue_phase "boot check before CI since $(date +%H:%M)"
+  land_mark preflight preflight
+  # As deploy.sh runs it: the commit's own check, a limit from outside, not as `node`, and without the locks' fds.
+  timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-420}" "$here/tools/citadel-node" "$here/tools/boot-check.ts" "$here" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >/dev/null 9>&- 7>&- 6>&- || rc=$?
+  if [ "$rc" = 0 ]; then
+    say "the boot check passes on $short, so this landing goes on"
+    return 0
+  fi
+  retro_log "preflight refusal · $label · refusing since $since ($why)"
+  # 124, or 137 from timeout's KILL: stopped at the limit, which is not a verdict on the change (as deploy.sh says of it).
+  [ "$rc" != 124 ] && [ "$rc" != 137 ] || refuse "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-420} s), so no CI run was spent and $untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
+  refuse "deploy has been refusing since $since: $why, and $short fails the same check here (its output is above), so no CI run was spent and $untouched; $branch keeps the rebased work. If the cause is in your change, fix it and land again. If it isn't, landings are blocked until the fix for it lands (that fix passes this check and lands as usual): tell the Taskmaster, and don't retry until then"
+}
+[ "$mode" = into ] || [ "$mode" = full ] || preflight
+
 # The end of --into: build/<n> moves to what was tested, unless something moved it meanwhile (the compare-and-swap).
 merge_into() {
   git update-ref -m "land.sh --into" "refs/heads/$build" "$tip" "$base" || refuse "$build moved while this ran (not by land.sh, which holds its lock), so nothing merged: run it again"

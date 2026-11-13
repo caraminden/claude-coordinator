@@ -15,7 +15,7 @@ const root = mkdtempSync(join(tmpdir(), 'land-recover-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const env = {
   ...scriptEnv(), COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined,
-  NODE_TEST_CONTEXT: undefined, DEPLOY_TEST_CPU_WEIGHT: '', LAND_CI: '0', LAND_FIX: undefined, DEPLOY_REMOTE: '', DEPLOY_NOW: undefined,
+  NODE_TEST_CONTEXT: undefined, DEPLOY_TEST_CPU_WEIGHT: '', LAND_CI: '0', LAND_FIX: undefined, LAND_PREFLIGHT: undefined, DEPLOY_REMOTE: '', DEPLOY_NOW: undefined,
   DEPLOY_HEALTHY_WAIT: '2', DEPLOY_SETTLE: '1', DEPLOY_QUEUE_STALL: '120', DEPLOY_QUEUE_POLL: '1', DEPLOY_IDLE_TRIES: '30', DEPLOY_TEST_TIMEOUT: '120', DEPLOY_BACKUPS: '3',
   GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null',
 };
@@ -54,7 +54,8 @@ if (mark) {
   writeFileSync(mark, String(readFileSync('/proc/' + parent + '/comm', 'utf8').trim() === 'timeout' ? up(parent) : parent));
   while (gate && !existsSync(gate)) await new Promise((r) => setTimeout(r, 50));
 }
-if (existsSync(join(process.argv[2], 'BOOT_BAD'))) process.exit(1);
+// BOOT_BROKEN: a file outside every checkout, so the check fails whatever the commit (a broken box, not a bad change).
+if (existsSync(join(process.argv[2], 'BOOT_BAD')) || (process.env.BOOT_BROKEN && existsSync(process.env.BOOT_BROKEN))) process.exit(1);
 console.log('v1');
 `);
   writeFileSync(join(source, 'a.txt'), 'one\n');

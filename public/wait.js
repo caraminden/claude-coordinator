@@ -77,7 +77,10 @@ function tick() {
   const now = Date.now();
   for (const el of document.querySelectorAll('.wait-time, .wait-bar[data-since]')) {
     const w = { since: Number(el.dataset.since), usual: Number(el.dataset.usual) || null, ended: Number(el.dataset.ended) || undefined };
-    if (el.classList.contains('wait-time')) el.textContent = waitTime(w, now);
+    if (el.classList.contains('wait-time')) {
+      el.textContent = waitTime(w, now);
+      if (el.closest('.progress-cap')) el.classList.toggle('late', waitLate(w, now)); // the step's own time goes amber with its bar (#630)
+    }
     else {
       el.firstChild.style.width = `${Math.min(Number(el.dataset.cap) || 100, waitPct(w, now))}%`;
       el.classList.toggle('late', waitLate(w, now));

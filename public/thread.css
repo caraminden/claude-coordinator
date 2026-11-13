@@ -408,7 +408,15 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .progress-line .time { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
 .progress .wait-bar.big { width: calc(100% - 0.4rem); margin: 0.25rem 0.2rem 0; }
 /* A phone gives the line to what's happening now: the step is in the opened readout. */
-@media (max-width: 800px) { .progress-line .text:has(.doing) > :is(.stepname, .arrow), .progress-line .left { display: none; } }
+@media (max-width: 800px) { .progress-line .text:has(.doing) > :is(.stepname, .arrow) { display: none; } }
+/* Which time is which (#630): the step's time against its guess on the left, amber with its bar; the whole plan's on the right. */
+.progress-cap { display: flex; justify-content: space-between; gap: 0.6rem; margin: 0.2rem 0.2rem 0; font-size: 0.78em; line-height: 1.35; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.progress-cap > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.progress-cap .cap-step { color: var(--running); }
+.progress-cap .wait-time.late { color: var(--waiting); }
+.progress-cap b { font-weight: 650; color: var(--ink); }
+.progress-cap .narrow { display: none; }
+@media (max-width: 800px) { .progress-cap .wide { display: none; } .progress-cap .narrow { display: inline; } }
 /* The opened readout's wait in full, under a landing's track */
 .wait-line { margin: 0.1rem 0.3rem 0.6rem; }
 .wait-full { margin: 0; font-size: 0.9em; }

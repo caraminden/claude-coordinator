@@ -5,7 +5,7 @@ import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderMode
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
 import { rowState, SHIP } from './threadstate.js';
-import { waitBar, waitClock, waitNow, waitTrack } from './wait.js';
+import { waitBar, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
 import { recapEvent, showRecap } from './recap.js';
@@ -769,11 +769,11 @@ function renderProgress() {
   // The step count sits in its own chip, so a phone's cut-off text never hides it; the turn's action
   // count shows only when no plan is underway.
   const count = stripped !== line ? `${done}/${total}` : !planned && live && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
-  const time = w ? waitClock(w, 'time wait-time') : running && view.ticket.turnStartedAt ? waitClock({ since: view.ticket.turnStartedAt }, 'time wait-time') : '';
-  // The minion's own guesses for its steps (#551, Josh's pick): the bar fills against the step's, and the line
-  // says what's left of the plan's. Only while no wait has a real estimate of its own.
+  // The minion's own guesses for its steps (#551, Josh's pick). Only while no wait has a real estimate of its own.
   const est = !w && live ? planEstimate(p, running, Date.now(), view.ticket.step_ratio) : null;
-  const left = est && h('span', { class: 'time left', title: view.ticket.step_ratio && view.ticket.step_ratio !== 1 ? `The minion's guesses for the steps left, times ${view.ticket.step_ratio.toFixed(2)}: what steps have really taken against their guesses` : "The minion's own guess for the steps left" }, leftText(est));
+  // The turn's clock is neither the step's time nor the plan's, so it gives way to the captions under the bar (#630).
+  const time = w ? waitClock(w, 'time wait-time') : running && !est && view.ticket.turnStartedAt ? waitClock({ since: view.ticket.turnStartedAt }, 'time wait-time') : '';
+  const left = est && h('span', { class: 'left', title: view.ticket.step_ratio && view.ticket.step_ratio !== 1 ? `The minion's guesses for the steps left, times ${view.ticket.step_ratio.toFixed(2)}: what steps have really taken against their guesses` : "The minion's own guess for the steps left" }, leftText(est));
 
   const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {
     view.ui.open = !view.ui.open;
@@ -786,10 +786,15 @@ function renderProgress() {
       now ? h('span', { class: 'doing', 'data-doing': doing }, now) : ''),
     count ? h('span', { class: 'count', title: count.includes('/') ? `${done} of ${total} steps done` : '' }, count) : '',
     time,
-    left || '',
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13).
   const meter = w && (w.total || w.usual) ? waitBar(w, 'wait-bar big') : est ? waitBar(est, 'wait-bar big') : h('progress', { class: total ? 'meter' : 'meter blank', max: total || 1, value: total ? done : 0 });
+  // Which time is which (#630, Cara's pick "1"): the step's against its guess under the bar's left, the whole plan's at its end.
+  const stepClock = est && waitClock({ since: est.since, usual: est.usual }, `wait-time${waitLate(est) ? ' late' : ''}`);
+  const caption = est ? h('div', { class: 'progress-cap' },
+    h('span', { class: 'cap-step' }, 'This step: ', stepClock),
+    h('span', { class: 'cap-plan' }, h('b', {}, h('span', { class: 'wide' }, 'Whole plan:'), h('span', { class: 'narrow' }, 'Plan')), ' ',
+      h('span', { class: 'wide' }, waitClock({ since: est.planSince }), ' in · '), left)) : '';
 
   const prevDetail = progressEl.querySelector('.progress-detail');
   const scrollTop = prevDetail?.scrollTop ?? 0;
@@ -814,7 +819,7 @@ function renderProgress() {
       loose.length ? looseWork(loose, running, !p.tasks.length) : '',
       !p.tasks.length && !loose.length ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '');
   }
-  progressEl.replaceChildren(bar, meter, detail);
+  progressEl.replaceChildren(bar, meter, caption, detail);
   if (detail) detail.scrollTop = scrollTop;
   progressEl.hidden = false;
 }
@@ -1400,7 +1405,7 @@ setInterval(() => {
   const el = view?.progressEl?.querySelector('.progress-line .doing');
   if (el && el.dataset.doing && el.dataset.doing !== nowDoing(view.turnActions, Date.now())) scheduleProgress();
   // What's left of the plan's guesses runs down while a long call runs, with no event to redraw it.
-  const left = view?.progressEl?.querySelector('.progress-line .left');
+  const left = view?.progressEl?.querySelector('.progress-cap .left');
   const est = left && planEstimate(view.progress, view.ticket?.status === 'running', Date.now(), view.ticket?.step_ratio);
   if (left && (!est || left.textContent !== leftText(est))) scheduleProgress();
 }, 1000);

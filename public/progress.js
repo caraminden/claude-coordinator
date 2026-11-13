@@ -428,7 +428,7 @@ function estimateOf(input) {
  * bar, and the minutes left of the plan (what's left of this step's guess plus the steps not started).
  * `ratio` is what steps really took against their guesses (#571, Store.stepRatio), so the guesses are
  * scaled by it. The step's time is its working time: `since` is moved on past the gaps between turns.
- * Null when the step underway has no guess or start.
+ * Null when the step underway has no guess or start. Also the whole plan's start and guessed seconds (#630).
  */
 export function planEstimate(p, running, now = Date.now(), ratio = 1) {
   const { current } = stepInfo(p, running);
@@ -439,8 +439,12 @@ export function planEstimate(p, running, now = Date.now(), ratio = 1) {
   const pending = Math.round(p.tasks.filter((t) => t.status === 'pending').reduce((s, t) => s + (t.estimate ?? 0), 0) * 60 * scale);
   // A step from before working time was counted (no work yet) falls back to its wall clock.
   const since = current.work == null ? current.startedAt : (current.workFrom ?? now) - current.work;
-  const left = (Math.max(0, usual - (now - since) / 1000) + pending) / 60;
-  return { since, usual, left: Math.ceil(left) };
+  const leftS = Math.max(0, usual - (now - since) / 1000) + pending;
+  // The whole plan (#630): its working time so far starts at planSince (the steps done, then this one), and
+  // planUsual is that time plus what's left, so its bar's fill agrees with "~N min left".
+  const doneMs = p.tasks.filter((t) => t.status === 'completed').reduce((s, t) => s + (t.work ?? (t.estimate ?? 0) * 60_000 * scale), 0);
+  const planSince = since - doneMs;
+  return { since, usual, left: Math.ceil(leftS / 60), planSince, planUsual: Math.round((now - planSince) / 1000 + leftS) };
 }
 
 /**

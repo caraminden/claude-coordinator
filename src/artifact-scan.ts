@@ -1,5 +1,6 @@
 // Artifact scanning: which of a minion's files its replies linked, kept in the store and told to open
 // pages. Moved out of server.ts (docs/adr/0002-background-jobs-out-of-server.md); importing it starts nothing.
+import { existsSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
 import { fileType, findArtifacts, findByName, isArtifact, linkedPaths, type FoundArtifact } from './artifacts.ts';
@@ -98,7 +99,8 @@ export class ArtifactScanner {
     while (this.scanning.has(ticketId)) await this.scanning.get(ticketId);
     const job = (async () => {
       const ticket = this.store.getTicket(ticketId);
-      if (!ticket?.cwd) return;
+      // A dismissed minion whose worktree the sweep removed (#660) keeps its rows until a reopen brings the folder back.
+      if (!ticket?.cwd || !existsSync(ticket.cwd)) return;
       const shared = this.sharedDir(ticket);
       const found = [
         ...(await findArtifacts(ticket.cwd, !!ticket.branch)),

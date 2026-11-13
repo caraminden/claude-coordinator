@@ -23,7 +23,7 @@ import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, diskUsage, findBuildOutput, low, size, ticketWorktree } from './build-output.ts';
-import { GRACE_MS, GRUNT_AGE_MS, gruntWorktrees, madeAt, ownCheckout, removeWorktree, saveWork, savedRef } from './worktree-sweep.ts';
+import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
@@ -861,7 +861,12 @@ export class Runner {
           log.removed.push(`${what}, ${size(bytes)}${extra}`);
           log.bytes += bytes;
         };
-        await this.sweepGrunts(p, now, keep, removed);
+        // What a removal cut short by a restart left behind.
+        const trash = (await clearTrash(join(projectDir(this.dataDir, p.id), 'tickets'))) + (await clearTrash(join(p.repo_dir, '.claude', 'worktrees')));
+        if (trash) removed('folders an interrupted removal left', trash);
+        const listed = await worktrees(p.repo_dir).catch(() => null);
+        if (!listed) continue;
+        await this.sweepGrunts(p, now, listed.filter(isGrunt), keep, removed);
         for (const t of this.store.listTickets(p.id)) {
           if (t.kind === 'coordinator' || t.status !== 'closed' || !t.branch || t.updated_at > now - GRACE_MS || this.turns.has(t.id) || this.lanes.busy(t.id)) continue;
           const dir = ticketWorktree(this.dataDir, p.id, t.id);
@@ -869,8 +874,13 @@ export class Runner {
           await this.lanes.run(t.id, 'worktree sweep', async () => {
             const now2 = this.store.getTicket(t.id);
             // updated_at only moves on: a reopen and a new dismissal restart the clock.
-            if (now2?.status !== 'closed' || this.turns.has(t.id) || now2.updated_at > now - GRACE_MS || !(await ownCheckout(dir))) return;
+            if (now2?.status !== 'closed' || this.turns.has(t.id) || now2.updated_at > now - GRACE_MS) return;
             const what = `#${t.number} (${relative(projectDir(this.dataDir, p.id), dir)})`;
+            const entry = listed.find((w) => w.path === dir);
+            // Half a folder that git no longer lists, from a removal by the old code that a restart cut short.
+            if (!entry && !existsSync(join(dir, '.git'))) return removed(what, await removeWorktree(p.repo_dir!, dir), ', left half-removed by a restart');
+            if (!(await ownCheckout(dir))) return;
+            if (entry?.locked) return keep(what, 'locked');
             try {
               const ref = savedRef(String(t.id));
               const s = await saveWork(dir, ref, t.branch, `Citadel: #${t.number}'s work not on its branch, saved before its worktree was removed`);
@@ -905,9 +915,9 @@ export class Runner {
    * The scheme's Grunt worktrees that no turn can be using: made over GRUNT_AGE_MS ago, and every turn of the
    * scheme running now started after it was made (a Grunt lives inside its turn's claude process).
    */
-  private async sweepGrunts(p: Project, now: number, keep: (what: string, why: string) => void, removed: (what: string, bytes: number, extra?: string) => void) {
+  private async sweepGrunts(p: Project, now: number, grunts: Worktree[], keep: (what: string, why: string) => void, removed: (what: string, bytes: number, extra?: string) => void) {
     const top = projectDir(this.dataDir, p.id) + '/';
-    for (const g of await gruntWorktrees(p.repo_dir!).catch(() => [])) {
+    for (const g of grunts) {
       if (!g.path.startsWith(top)) continue;
       const made = await madeAt(g.path);
       if (made === null || made > now - GRUNT_AGE_MS) continue;

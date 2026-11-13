@@ -6,9 +6,9 @@
  * branch; a reopen puts it back. Git-ignored files are not saved: they are build output and caches.
  */
 import { execFileSync } from 'node:child_process';
-import { copyFile, lstat, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
+import { copyFile, lstat, mkdtemp, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { diskUsage, low } from './build-output.ts';
 import { identity } from './scheme-repo.ts';
 
@@ -81,11 +81,32 @@ export async function saveWork(dir: string, ref: string, branch: string | null, 
   }
 }
 
-/** Remove a worktree whatever it holds (save it first) at low priority; returns the bytes it took. Throws if git won't (a locked worktree). */
+/** Where a folder goes while it's deleted: beside it, so the move is one atomic rename. */
+export const trashOf = (dir: string) => join(dirname(dir), `.removing-${basename(dir)}`);
+
+/**
+ * Remove a worktree whatever it holds (save it first, and never a locked one) at low priority; returns the
+ * bytes it took. The folder is renamed aside first, then git forgets it, then it's deleted, so a restart
+ * midway leaves either the whole worktree or a `.removing-*` folder the next sweep deletes, never half a
+ * checkout that a reopen can't recreate.
+ */
 export async function removeWorktree(repoDir: string, dir: string): Promise<number> {
   const bytes = await diskUsage([dir]);
-  await git(['worktree', 'remove', '--force', dir], repoDir);
+  const trash = trashOf(dir);
+  await low(['rm', '-rf', '--one-file-system', '--', trash]);
+  await rename(dir, trash);
+  // Its admin entry now points at a folder that's gone, so prune drops it (a locked one it would keep).
   await git(['worktree', 'prune'], repoDir);
+  await low(['rm', '-rf', '--one-file-system', '--', trash]);
+  return bytes;
+}
+
+/** Delete what an interrupted removal left (`.removing-*` folders in `parent`); returns the bytes freed. */
+export async function clearTrash(parent: string): Promise<number> {
+  const names = (await readdir(parent).catch(() => [] as string[])).filter((n) => n.startsWith('.removing-'));
+  const dirs = names.map((n) => join(parent, n));
+  const bytes = await diskUsage(dirs);
+  for (const d of dirs) await low(['rm', '-rf', '--one-file-system', '--', d]);
   return bytes;
 }
 
@@ -108,20 +129,23 @@ export function restoreSaved(cwd: string, repoDir: string, ref: string, branch: 
   return 'its uncommitted work is back as uncommitted changes';
 }
 
-export type GruntWorktree = { path: string; branch: string | null; locked: boolean };
+export type Worktree = { path: string; branch: string | null; locked: boolean };
 
-/** The repo's Grunt worktrees (`…/.claude/worktrees/agent-*`, under the main checkout or a minion's). */
-export async function gruntWorktrees(repoDir: string): Promise<GruntWorktree[]> {
-  const out: GruntWorktree[] = [];
+/** The repo's worktrees as git lists them, its main checkout first. */
+export async function worktrees(repoDir: string): Promise<Worktree[]> {
+  const out: Worktree[] = [];
   for (const block of (await git(['worktree', 'list', '--porcelain'], repoDir)).split('\n\n')) {
     const lines = block.split('\n');
     const path = lines.find((l) => l.startsWith('worktree '))?.slice(9);
-    if (!path || !/\/\.claude\/worktrees\/agent-[^/]+$/.test(path)) continue;
+    if (!path) continue;
     const branch = lines.find((l) => l.startsWith('branch refs/heads/'))?.slice(18) ?? null;
     out.push({ path, branch, locked: lines.some((l) => l === 'locked' || l.startsWith('locked ')) });
   }
   return out;
 }
+
+/** The Grunt worktrees among them (`…/.claude/worktrees/agent-*`, under the main checkout or a minion's). */
+export const isGrunt = (w: Worktree) => /\/\.claude\/worktrees\/agent-[^/]+$/.test(w.path);
 
 /** When a folder was made: its birth time, else its change time (never earlier than its birth), else null when it's gone. */
 export async function madeAt(dir: string): Promise<number | null> {

@@ -96,7 +96,7 @@ test('dismissed past the grace: removed with its branch kept, saving uncommitted
   assert.equal(git(s.repo, 'rev-parse', `${savedRef(String(dirty.id))}^`), git(s.repo, 'rev-parse', dirty.branch), 'the save sits on the branch tip, which did not move');
 
   assert.equal(done.removed.length, 3);
-  assert.match(done.kept.join('\n'), new RegExp(`#${locked.number} .*could not remove`));
+  assert.match(done.kept.join('\n'), new RegExp(`#${locked.number} .*locked`));
   assert.match(done.kept.join('\n'), new RegExp(`#${big.number} .*too big to save`));
   assert.match(done.kept.join('\n'), new RegExp(`#${nested.number} .*holds another git checkout, clone`));
   assert.match(notes(dirty.id).at(-1)!, /Removed this dismissed minion's worktree .*a reopen brings the folder back with its uncommitted work/);
@@ -142,6 +142,24 @@ test('dismissed past the grace: removed with its branch kept, saving uncommitted
   assert.ok(existsSync(old.dir));
   assert.equal(git(s.repo, 'rev-parse', savedRef(String(old.id))), before);
   assert.match(again.kept.join('\n'), new RegExp(`#${old.number} .*earlier saved work .* isn't restored yet`));
+});
+
+test('a restart mid-removal leaves nothing a reopen trips on: a .removing-* folder or a half folder git no longer lists goes at the next sweep', async () => {
+  const s = scheme('Interrupted');
+  const half = minion(s, 4);
+  // As the old code left #307: git's entry gone, a few files still in the folder.
+  rmSync(join(half.dir, '.git'));
+  git(s.repo, 'worktree', 'prune');
+  const tickets = join(data, 'projects', String(s.id), 'tickets');
+  mkdirSync(join(tickets, '.removing-99', 'deep'), { recursive: true });
+  writeFileSync(join(tickets, '.removing-99', 'deep', 'f'), 'x');
+  const done = (await runner.sweepWorktrees()).get(s.id)!;
+  assert.ok(!existsSync(half.dir) && !existsSync(join(tickets, '.removing-99')));
+  assert.match(done.removed.join('\n'), /folders an interrupted removal left/);
+  assert.match(done.removed.join('\n'), new RegExp(`#${half.number} .*left half-removed by a restart`));
+  store.updateTicket(half.id, { status: 'idle' });
+  await runner.reopened(half.id);
+  assert.equal(git(half.dir, 'branch', '--show-current'), half.branch, 'and a reopen recreates it');
 });
 
 test('a detached HEAD\'s commit is saved in the ref', async () => {

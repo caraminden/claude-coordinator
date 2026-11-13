@@ -411,8 +411,8 @@ No chat text: `line`, `step` and `note` are what the minions list shows every me
 
 Your server can read what your home scheme's CI runs keep in Citadel's CI store (the
 `citadel:ci-store` skill): say the newest Windows build, to update your players' apps from. These
-are the same routes the scheme's members use, called with your key under the rules above, with no
-`person` (tested):
+are the same routes the scheme's members use, called with your key under the rules above, and they
+act for no one, so they take no `person` (tested):
 
 - **`GET /api/projects/<scheme id>/ci-files`** lists the files, newest first, as
   `200 { files: [{ id, workflow, run_id, sha, ref, name, kind, target, size, sha256, created_at, url, … }], usage, rules }`.

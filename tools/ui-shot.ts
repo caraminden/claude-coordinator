@@ -87,7 +87,9 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     else if (a === '--steps') o.steps.push(...parseSteps(readFileSync(val(), 'utf8')));
     else if (a === '--step') o.steps.push(...parseSteps(val()));
     else if (a === '--media') {
-      const [name, value] = val().split('=');
+      const v = val();
+      const eq = v.indexOf('=');
+      const [name, value] = eq > 0 ? [v.slice(0, eq), v.slice(eq + 1)] : ['', ''];
       if (!name || !value) throw new Error('--media takes name=value, like display-mode=standalone');
       o.media.push({ name, value });
     } else if (a === '--titlebar') {

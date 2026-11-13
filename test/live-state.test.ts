@@ -20,11 +20,26 @@ test('a turn stuck in a tool call says which, with its input and how long it has
   const text = liveState(minion, events, T0 + 780_000).join('\n');
   assert.match(text, /^Live state of #291: status running, turn running 13m 0s$/m);
   assert.match(text, /^worktree: \/data\/projects\/3\/tickets\/1405$/m);
-  assert.match(text, /^waiting on: a tool: Bash \(Run the tests: GH_TOKEN=\[GitHub token hidden\] npm test\), running 12m 0s$/m);
+  assert.match(text, /^waiting on: a tool: Bash \(Run the tests: GH_TOKEN=… npm test\), running 12m 0s$/m);
   assert.doesNotMatch(text, /aaaaaaaaaa/);
   assert.match(text, /Read: \/x\/app\.ts → ok after 1s: line one line two/);
   assert.match(text, /Last 2 of this turn's 2 tool call\(s\)/);
   assert.doesNotMatch(text, /earlier turn/);
+});
+
+test('env values, URL passwords and bearer tokens are hidden in inputs and output', () => {
+  const events = [init(0), use(1, 'a', 'Bash', { command: 'PASSWORD=hunter2 curl -H "Authorization: Bearer abcdef123456" https://u:pw@h/x' }), result(2, 'a', 'HOME=/home/x\nDATABASE_URL=postgres://user:secret@db/app')];
+  const text = liveState(minion, events, T0 + 5_000).join('\n');
+  for (const secret of ['hunter2', 'abcdef123456', ':pw@', 'secret', '/home/x']) assert.ok(!text.includes(secret), `${secret} shown in:\n${text}`);
+  assert.match(text, /PASSWORD=… curl -H "Authorization: Bearer …" https:\/\/u:…@h\/x/);
+  assert.match(text, /HOME=… DATABASE_URL=…/);
+});
+
+test("a turn that hasn't sent its init yet doesn't show the last turn's unanswered call as running", () => {
+  const events = [init(0), use(5, 'a', 'Bash', { command: 'sleep 999' }), ev(9, { type: 'result', subtype: 'error' })];
+  const text = liveState({ ...minion, turnStartedAt: T0 + 3_600_000 }, events, T0 + 3_602_000).join('\n');
+  assert.match(text, /^waiting on: the model: no events from this turn yet$/m);
+  assert.doesNotMatch(text, /sleep 999/);
 });
 
 test("an open Grunt call shows the Grunt's own latest call", () => {

@@ -1,12 +1,11 @@
 /* The release monitor (#626, public/releases.js): target rows in the Schemes list, the Releases page (a scheme's cards,
    All's board), the chip beside a minion's PR info, and the stage track they share. Tokens: style.css. */
 
-/* Under a scheme's row: one indented row per target, its stage track under it while a release moves. */
+/* Under a scheme's row: one indented row per target with a release on its way, its stage track under it; none while idle. */
 .rel-rows:empty { display: none; }
 .rel-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; column-gap: 0.5rem; margin-left: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.85em; cursor: pointer; }
 .rel-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .rel-row .rel-name { color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rel-row:not(.moving) .rel-name { color: var(--muted); }
 .rel-row .rel-ver { grid-column: 3; }
 /* The row's text trimmed to its capitals and baseline, so the padding above and below the letters is equal whatever the font
    (Cara, 2026-11-12: "it should be equal padding on the top and bottom"): a line box keeps room for descenders under them. */

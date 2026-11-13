@@ -107,20 +107,24 @@ function opening() {
   if (!/\/releases\//.test(location.hash)) returnTo = location.hash;
 }
 
-/** A scheme's targets, one indented row each, under its row in the Schemes list; empty when it ships nothing. */
+/**
+ * A scheme's targets with something queued or on its way, one indented row each, under its row in the Schemes list;
+ * an idle target shows none (Josh, 2026-11-13: "only show up if there is something in the release queue"). The empty
+ * container stays, hidden by CSS, so redraw() finds it when a change enters the queue.
+ */
 export function releaseRows(projectId) {
   const s = schemes.get(projectId);
-  return h('div', { class: 'rel-rows', 'data-rel-scheme': projectId }, (s?.targets ?? []).map((tv) => {
+  return h('div', { class: 'rel-rows', 'data-rel-scheme': projectId }, (s?.targets ?? []).filter((tv) => tv.next).map((tv) => {
     const href = pageHref(projectId);
     return h('div', {
-      class: `rel-row${tv.next ? ' moving' : ''}`,
+      class: 'rel-row',
       // The whole row opens the scheme's page (Josh: "clicking any of the releases would take you to that schemes detail page"); its release link opens the release.
       onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = href; } },
     },
     h('a', { class: 'rel-name', href, onclick: opening }, tv.target.name),
-    tv.next ? estimate(tv.next) : '',
+    estimate(tv.next),
     tv.current ? versionLink(tv.current, 'rel-ver', true) : '',
-    tv.next ? stageTrack(tv.next.stages, tv.next) : '');
+    stageTrack(tv.next.stages, tv.next));
   }));
 }
 

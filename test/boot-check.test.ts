@@ -103,10 +103,14 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
   const long = store.createTicket({ project_id: p.id, title: 'Long chat', permission_mode: 'default', created_by: 'boot' });
   // Past one page of the chat (#120).
   for (let i = 0; i < 300; i++) store.addEvent(long.id, 'user_message', { author: 'Boot', text: `Message ${i}` });
-  // A git rule per worktree goes in the Taskmaster's settings when its scheme has a repo.
+  // A git rule per open minion's worktree goes in the Taskmaster's settings when its scheme has a repo.
   store.setProjectRepoDir(p.id, join(dir, 'repo'));
   mkdirSync(join(dir, 'repo'));
-  for (let i = 0; i < 70; i++) mkdirSync(join(dir, 'projects', String(p.id), 'tickets', String(i)), { recursive: true });
+  for (let i = 0; i < 70; i++) {
+    const wt = join(dir, 'projects', String(p.id), 'tickets', String(i));
+    mkdirSync(wt, { recursive: true });
+    store.setTicketDir(store.createTicket({ project_id: p.id, title: `Worktree ${i}`, permission_mode: 'default', created_by: 'boot' }).id, wt, null);
+  }
   store.db.close();
 
   /** A copy of this checkout with `file`'s `from` replaced by `to`, the break under test. */
@@ -161,7 +165,7 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
   });
 
   // #92: the Taskmaster's inline --settings held a git rule per worktree and passed Linux's 128 KiB cap at about 90 of
-  // them. Put back inline, the 70 worktrees beside this database take it past the cap in the copy, which mirrors them,
+  // them. Put back inline, the 70 open minions' worktrees in this database take it past the cap in the copy,
   // and its spawn fails as it did live (the test above holds the 100 KiB line; without the mirror this one passes).
   test('a launch argument that grows with the worktrees fails it', { timeout: 200_000 }, async () => {
     const checkout = brokenCheckout('inline-settings', 'src/turn-launch.ts', "  args.push('--settings', join(dir, 'settings.json'));", "  args.push('--settings', JSON.stringify(settings));");

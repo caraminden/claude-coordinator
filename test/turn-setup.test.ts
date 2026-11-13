@@ -259,9 +259,15 @@ test("a minion's thread server may stay silent as long as a card can wait; Claud
 
 test("a Taskmaster's settings travel as a file, so hundreds of worktrees stay under Linux's 128 KiB argument cap", async () => {
   // Citadel's Taskmaster stopped starting (spawn E2BIG) once ~90 worktrees put its inline --settings over 128 KiB.
+  // Open minions' worktrees: only those get git rules (closed ones outgrew the 2 MiB settings cap).
   const scheme = join(root, 'big-scheme');
-  for (let i = 1; i <= 300; i++) mkdirSync(join(scheme, 'tickets', String(i)), { recursive: true });
-  const t = await turn('coordinator', 'connected', {}, join(scheme, 'repo'));
+  const p = store.createProject('Big scheme', null);
+  for (let i = 1; i <= 300; i++) {
+    const wt = join(scheme, 'tickets', String(i));
+    mkdirSync(wt, { recursive: true });
+    store.setTicketDir(store.createTicket({ project_id: p.id, title: `M${i}`, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id, wt, null);
+  }
+  const t = await turn('coordinator', 'connected', {}, join(scheme, 'repo'), p.id);
   assert.deepEqual(t.events, []);
   for (const arg of t.args) assert.ok(Buffer.byteLength(arg) < 32 * 1024, `argument of ${Buffer.byteLength(arg)} bytes`);
   assert.ok(t.settings.permissions.allow.includes(`Bash(git -C ${join(scheme, 'tickets', '300')} log:*)`));

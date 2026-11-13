@@ -38,7 +38,8 @@ test('a listed test file imports nothing from outside test/, and its fixtures an
     }
     // A tools/ file the test copies or runs is named by its file name ('land.sh', join(tools, 'run-tests.sh')); so is a
     // test/ module it loads some other way (join(import.meta.dirname, 'leak-guard.ts') as a run's global setup).
-    for (const [, name] of src.matchAll(/['"`]([\w.-]+)['"`]/g)) {
+    // A systemd name given as a fixture's DEPLOY_SERVICE or DEPLOY_UNIT ('citadel-test') is not tools/citadel-test (#641).
+    for (const [, name] of src.matchAll(/(?<!_(?:SERVICE|UNIT):\s*)['"`]([\w.-]+)['"`]/g)) {
       if (toolFiles.has(name)) assert.ok(listed(`tools/${name}`), `${rel} names tools/${name}, which is not on tools/pipeline-files.txt`);
       if (testFiles.has(name) && /\.[cm]?[jt]s$/.test(name)) walk(join(repo, 'test', name), rel);
     }

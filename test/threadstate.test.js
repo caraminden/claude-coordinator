@@ -159,8 +159,8 @@ test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none
   assert.equal(bar({ status: 'closed', steps: half }), null, 'dismissed');
   assert.equal(bar({ steps: half, state: 'ready', wait: ci }), null, 'a stale wait on a row waiting on you');
   assert.deepEqual(bar({ status: 'running', steps: half }), half, 'working: steps done');
-  const planned = { ...half, since: NOW - MIN, usual: 120, track: [[2, 'c'], [3, 'c'], [2, 'i'], [null, 'p']] };
-  assert.deepEqual(bar({ status: 'running', steps: planned }), planned, "working: the plan's track, its running step against its guess (#630)");
+  const steps = { ...half, since: NOW - MIN, usual: 120 }, track = [[2, 'c'], [3, 'c'], [2, 'i'], [null, 'p']];
+  assert.deepEqual(bar({ status: 'running', steps, step_track: track }), { ...steps, track }, "working: the plan's track, its running step against its guess (#630)");
   assert.equal(bar({ status: 'running', steps: half, wait: ci }), ci, 'a CI wait in the turn');
   assert.equal(bar({ state: 'outside', steps: half, wait: ci }), ci, 'waiting on CI after the turn');
   assert.equal(bar({ state: 'pending-deploy', wait: { kind: 'deploy', stage: 'restart', total: 3, done: 1 } }).total, 3, 'a deploy');

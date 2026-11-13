@@ -569,6 +569,9 @@ test('shared release files are a target per platform; Main goes, a debug build, 
   const found = detect(facts({ project: { id: 8, name: 'FuckSpamTexts', repo_url: 'https://github.com/o/fuckspamtexts.git' }, files }));
   assert.deepEqual(found.map((t) => `${t.kind} ${t.id} ${t.name}`), ['file file:android Android', 'file file:chrome Chrome']);
   assert.deepEqual(found[0].files!.map((b) => b.name), ['FuckSpamTexts-0.4.apk', 'FuckSpamTexts-0.3.apk'], 'one file per version, the APK over the same APK zipped');
+  assert.deepEqual(found[0].shared, ['/s/FuckSpamTexts-0.4.apk', '/s/FuckSpamTexts-0.4.zip', '/s/FuckSpamTexts-0.3.apk'], 'the dropped duplicate is still a release, not a test copy');
+  const tie = detect(facts({ files: [build('mandate-1.0-a.zip', 'Windows', '1.0', 5), build('mandate-1.0-b.zip', 'Windows', '1.0', 5)] }));
+  assert.deepEqual(tie[0].files!.map((b) => b.name), ['mandate-1.0-a.zip'], 'a tie keeps one');
   assert.deepEqual(ids(facts({ project: { id: 1, name: 'Delve', repo_url: 'https://github.com/o/gamedevtest.git' }, files: [build('Delve-main-a0c312c-windows.zip', 'Windows', 'a0c312c', 50)] })), ['file file:windows Windows'], 'named for the scheme, not its repo');
   assert.deepEqual(ids(facts({ files: [build('mandate-3.apk', 'Android', 'mandate-3', 1)], apkFeeds: ['mandate'] })), ['apk apk:mandate Android'], 'an app that serves its APK is the Android target');
   assert.deepEqual(ids(facts({ project: { id: 3, name: 'Peek Auras', repo_url: 'https://github.com/o/peek-auras' }, files: [build('peek-auras-6cda6fa.zip', 'Windows', '6cda6fa', 1)], workflows: [{ path: '.github/workflows/windows.yml', text: WINDOWS }] })), ['ci ci:windows:release Windows']);

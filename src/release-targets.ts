@@ -25,6 +25,8 @@ export interface Found extends Target {
   job?: string;
   /** file: its builds, newest first. */
   files?: BuildFile[];
+  /** file: where every release build of its platform is, a version's duplicates too, so none is listed as a test copy. */
+  shared?: string[];
   /** A ci job's own `name:`, which is what the Actions API calls it; its id when it has none. */
   jobName?: string;
 }
@@ -254,9 +256,12 @@ export function detect(f: SchemeFacts): Found[] {
   const released = (f.files ?? []).filter((b) => b.release && ours.some((k) => key(b.name).startsWith(k)));
   for (const platform of [...new Set(released.map((b) => b.platform))]) {
     if (out.some((t) => t.name === platform || t.name.startsWith(`${platform} (`) || (platform === 'Android' && t.kind === 'apk'))) continue;
-    // One file per version: the APK itself over the same APK zipped.
-    const files = released.filter((b) => b.platform === platform).filter((b, _i, all) => !all.some((o) => o !== b && o.version === b.version && (o.name.endsWith('.apk') ? !b.name.endsWith('.apk') || o.at > b.at : !b.name.endsWith('.apk') && o.at > b.at)));
-    out.push({ ...base, id: `file:${platform.toLowerCase()}`, kind: 'file', name: platform, link: null, files });
+    // One file per version: the APK itself over the same APK zipped, then the newest (a stable sort settles a tie).
+    const all = released.filter((b) => b.platform === platform);
+    const apk = (b: BuildFile) => Number(/\.apk$/i.test(b.name));
+    const first = new Map<string, BuildFile>();
+    for (const b of [...all].sort((x, y) => apk(y) - apk(x) || y.at - x.at)) if (!first.has(b.version)) first.set(b.version, b);
+    out.push({ ...base, id: `file:${platform.toLowerCase()}`, kind: 'file', name: platform, link: null, files: all.filter((b) => first.get(b.version) === b), shared: all.map((b) => b.abs) });
   }
   // Two of one platform keep apart by their job.
   for (const t of out) if (t.kind === 'ci' && out.some((o) => o !== t && o.name === t.name)) t.name = `${t.name} (${t.job})`;
@@ -355,7 +360,7 @@ export class TargetFinder {
 
   /** Every shared build that is a release, by where it is: the test-copy list leaves these out. */
   releaseFiles(): Set<string> {
-    return new Set(this.list('file').flatMap((t) => (t.files ?? []).map((b) => b.abs)));
+    return new Set(this.list('file').flatMap((t) => t.shared ?? []));
   }
 
   private async facts(p: Project, apps: ContraptionRow[]): Promise<SchemeFacts | null> {

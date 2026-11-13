@@ -75,8 +75,8 @@ document.addEventListener('paste', (e) => {
   const el = e.target instanceof Element ? e.target : null;
   if (e.defaultPrevented || !form?.pasteAnywhere || !form.checkVisibility()) return;
   if (el?.closest('input, textarea, select') || el?.isContentEditable) return;
-  const modal = [...document.querySelectorAll('dialog[open]')].find((d) => d.matches(':modal'));
-  if (modal && !modal.contains(form)) return;
+  // Any open modal without the chat (the image viewer over the file viewer that holds it, say) keeps the paste.
+  if ([...document.querySelectorAll('dialog[open]')].some((d) => d.matches(':modal') && !d.contains(form))) return;
   form.pasteAnywhere(e);
 });
 

@@ -122,7 +122,21 @@ test('a paste into Find in chat stays there; a paste in an open dialog without t
   assert.equal(await page.eval('!!document.querySelector(".attachments .thumb")'), false);
   assert.equal(await page.eval(`document.activeElement === document.querySelector('.chat-find')`), true);
 
+  // A modal holding the chat (as the file viewer does, artifacts.js) still pastes into it, until the image viewer
+  // opens over it: then the paste stays out of the box.
+  await page.eval(`(() => { const d = document.createElement('dialog'); d.id = 'holder'; document.body.append(d); d.append(document.querySelector('form.composer')); d.showModal(); document.activeElement?.blur(); })()`);
+  assert.equal(await paste(page, { text: 'in' }), true, 'a dialog with the chat in it');
+  assert.equal(await page.eval(`${box}.value`), 'in');
+  await paste(page, { image: true });
+  await waitFor(page, 'the thumbnail', '!!document.querySelector(".attachments .thumb .zoom")');
+  await page.eval(`document.querySelector('.attachments .thumb .zoom').click()`);
+  await waitFor(page, 'the viewer', '!!document.querySelector("dialog.image-zoom[open]")');
+  assert.equal(await paste(page, { text: 'nope' }), false, 'the image viewer over it keeps the paste');
+  assert.equal(await page.eval(`${box}.value`), 'in');
+  await page.eval(`document.querySelector('dialog.image-zoom').close()`);
+
+  // A dialog without the chat keeps its paste too.
   await page.eval(`(() => { const d = document.createElement('dialog'); d.innerHTML = '<p>other</p>'; document.body.append(d); d.showModal(); document.activeElement?.blur(); })()`);
   assert.equal(await paste(page, { text: 'nope' }), false);
-  assert.equal(await page.eval(`${box}.value`), '');
+  assert.equal(await page.eval(`${box}.value`), 'in');
 });

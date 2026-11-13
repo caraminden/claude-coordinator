@@ -22,8 +22,11 @@ export function changeEta(next, c) {
   return Math.max(next.eta, c.since + (c.usual + after.reduce((sum, s) => sum + s.usual, 0)) * 1000);
 }
 
-/** All's columns (take E): a wait is Waiting, then the first stage, then the first half of the rest is Checks. */
-export const COLUMNS = ['Waiting', 'Checks', 'Shipping', 'Live today'];
+/**
+ * All's columns (take E): a wait is Waiting, then the first stage, then the first half of the rest is Checks. The last
+ * is the target's newest live release only (Cara, 2026-11-12: ""Live today" is gonna get too crazy, how about "Last Release"?").
+ */
+export const COLUMNS = ['Waiting', 'Checks', 'Shipping', 'Last release'];
 export function columnOf(stages, c) {
   if (c.waitingOn) return 0;
   const list = segments(stages);

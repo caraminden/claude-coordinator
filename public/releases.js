@@ -225,7 +225,7 @@ function targetCard(projectId, tv, alone) {
       cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : '',
       recent.length ? h('span', { class: 'muted' }, ' · before: ', recent.flatMap((r, i) => [i ? ', ' : '', versionLink(r, 'rel-ver old'), ` took ${tookText(r)}`])) : ''),
     deployBar(projectId, tv),
-    h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : 'Next release'),
+    h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
       h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', n.waitingOn ? h('span', { class: 'waits' }, n.waitingOn) : n.eta ? etaText(n.eta, ' left') : n.text,
@@ -323,22 +323,23 @@ function copyList(copies) {
 
 function allView(ids) {
   if (!ids.length) return [h('p', { class: 'muted rel-empty' }, 'Nothing ships yet from the schemes you\'re a member of.')];
-  const midnight = new Date().setHours(0, 0, 0, 0);
   const rows = ids.flatMap((id) => schemes.get(id).targets.map((tv) => ({ id, tv })));
   const card = (id, next, c) => h('a', { class: `rel-card-sm${c.ticketId === page?.hl ? ' hl' : ''}`, href: minionHref(id, c) },
     h('span', { class: 'what' }, h('span', { class: 'num' }, `#${c.number ?? c.ticketId}`), ' ', c.title),
     stageTrack(next.stages, c, { mini: true }), h('span', { class: 'where' }, ...changeNow(next, c)));
-  const liveCard = (id, r, c) => h('a', { class: 'rel-card-sm live', href: minionHref(id, c) },
-    h('span', { class: 'what' }, h('span', { class: 'num' }, `#${c.number ?? c.ticketId}`), ' ', c.title), h('span', { class: 'where' }, `live ${ago(r.live)}`));
+  // The newest live release: its number (linked to the release itself), its age and the minions it carried.
+  const lastCard = (id, r) => h('div', { class: 'rel-card-sm live' },
+    h('span', { class: 'what' }, versionLink(r), r.live ? h('span', { class: 'where' }, ` · live ${ago(r.live)}`) : ''),
+    r.changes.length ? h('ul', { class: 'rel-carried' }, r.changes.map((c) => h('li', {}, h('a', { class: 'num', href: minionHref(id, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title))) : '');
   const grid = h('div', { class: 'rel-grid', role: 'table', 'aria-label': 'Releases of every scheme' },
     h('div', { class: 'rel-grid-row head', role: 'row' }, ['Target', ...COLUMNS].map((c) => h('span', { role: 'columnheader' }, c))),
     rows.map(({ id, tv }) => {
       const cells = COLUMNS.map(() => []);
       for (const c of tv.next?.changes ?? []) cells[columnOf(tv.next.stages, c)].push(card(id, tv.next, c));
-      for (const r of [tv.current, ...tv.recent]) if (r?.live >= midnight) for (const c of r.changes) cells[3].push(liveCard(id, r, c));
+      if (tv.current) cells[3].push(lastCard(id, tv.current));
       return h('div', { class: 'rel-grid-row', role: 'row' },
-        h('a', { class: 'rel-target', role: 'rowheader', href: pageHref(id) }, h('b', {}, `${schemeName(id)} ${tv.target.name}`),
-          tv.current ? h('span', { class: 'muted' }, releaseName(tv.current), tv.current.live ? ` · ${ago(tv.current.live).replace(/ ago$/, '')}` : '') : ''),
+        h('div', { class: 'rel-target', role: 'rowheader', onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = pageHref(id); } } },
+          h('a', { href: pageHref(id), onclick: opening }, h('b', {}, `${schemeName(id)} ${tv.target.name}`))),
         cells.map((list) => h('div', { class: 'cell', role: 'cell' }, list)));
     }));
   const copies = ids.flatMap((id) => {
@@ -362,8 +363,11 @@ export function releaseChip(t) {
     const c = tv.next?.changes.find((x) => x.ticketId === t.id);
     if (c) {
       const n = tv.next.number;
-      return h('a', { class: 'rel-chip', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, 'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
-        n != null ? h('span', { class: 'muted' }, releaseName(tv.next, true)) : '', stageTrack(tv.next.stages, c, { mini: true }), ...changeNow(tv.next, c), h('span', { 'aria-hidden': 'true' }, '›'));
+      // Only the number opens the release itself (its test copy); the rest of the chip opens the scheme's page at this change.
+      return h('span', { class: 'rel-chip' },
+        n != null ? versionLink(tv.next, 'rel-ver', true) : '',
+        h('a', { class: 'rel-chip-open', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, 'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
+          stageTrack(tv.next.stages, c, { mini: true }), ...changeNow(tv.next, c), h('span', { 'aria-hidden': 'true' }, '›')));
     }
   }
   if (t.ship?.stage === 'build' && t.build) {

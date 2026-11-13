@@ -48,6 +48,15 @@ test('a live checkout is added read-only, with read-only git, and only when give
   assert.ok(!JSON.stringify(coordinatorAccess(repo, tickets)).includes(live));
 });
 
+test('given the open minions, git rules cover only their worktrees, so closed ones never grow the settings file', () => {
+  mkdirSync(join(tickets, '8'), { recursive: true });
+  const { addDirs, settings } = coordinatorAccess(repo, tickets, null, null, null, [], null, [join(tickets, '8')]) as any;
+  assert.deepEqual(addDirs, [repo, tickets]);
+  assert.ok(settings.permissions.allow.includes(`Bash(git -C ${join(tickets, '8')} status:*)`));
+  assert.ok(settings.permissions.allow.includes(`Bash(git -C ${repo} log:*)`));
+  assert.ok(!settings.permissions.allow.some((r: string) => r.includes(`${join(tickets, '7')} `)));
+});
+
 test('a project with no tickets folder yet still works', () => {
   const { addDirs } = coordinatorAccess(repo, join(root, 'missing'));
   assert.equal(addDirs.length, 2);

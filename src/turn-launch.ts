@@ -319,7 +319,7 @@ const envDenies = (folders: string[]) => folders.flatMap((d) => [`Read(/${d}/**/
  * config dir as sensitive, so neither allow rules nor a hook's allow let it write there (tried with
  * real runs); making that folder its auto-memory does, so its memory is the one minions load too.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null, liveDir: string | null = null, readDirs: string[] = [], everyScheme: EveryScheme | null = null): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null, liveDir: string | null = null, readDirs: string[] = [], everyScheme: EveryScheme | null = null, openTickets: string[] | null = null): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
   const subdirs = (dir: string) => {
     try {
       return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(dir, d.name));
@@ -328,7 +328,10 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
     }
   };
   const roots = [repoDir, ticketsDir, liveDir].filter((d): d is string => !!d);
-  const gitDirs = [repoDir, ...(repoDir ? subdirs(ticketsDir) : []), liveDir].filter((d): d is string => !!d);
+  // Git rules only for open minions' worktrees when the runner names them: one set per folder in tickets/, closed ones
+  // included, outgrew Claude Code's 2 MiB cap on a settings file (Citadel had 661 folders, 10 open). The repo reads every branch.
+  const ticketGit = openTickets ?? subdirs(ticketsDir);
+  const gitDirs = [repoDir, ...(repoDir ? ticketGit : []), liveDir].filter((d): d is string => !!d);
   const writable = [sharedDir, memoryDir].filter((d): d is string => !!d);
   // Other schemes' folders sit in the data folder, already in readDirs; the contraptions' are read here (#656).
   const apps = everyScheme?.apps ?? [];
@@ -374,8 +377,8 @@ export interface TurnFacts {
   pins: TurnPins;
   /** Where it runs: the host, or a person's container (for a Codex turn, their Codex container). */
   place: TurnPlace;
-  /** The folders it may use; null where there is none. `data` is the folder the database is in. */
-  folders: { files: string | null; shared: string | null; memory: string | null; tmp: string | null; tickets: string; data: string };
+  /** The folders it may use; null where there is none. `data` is the folder the database is in; `openTickets`, a Taskmaster's open minions' worktrees. */
+  folders: { files: string | null; shared: string | null; memory: string | null; tmp: string | null; tickets: string; data: string; openTickets?: string[] };
   /** The machines lending it their tools. */
   machines: TurnMachine[];
   model: string | null;
@@ -476,7 +479,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {
-    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')], project.id === GLOBAL_OWNER ? facts.everyScheme ?? null : null);
+    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')], project.id === GLOBAL_OWNER ? facts.everyScheme ?? null : null, facts.folders.openTickets ?? null);
     addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
     const { permissions, ...rest } = access.settings;
     Object.assign(settings, rest);

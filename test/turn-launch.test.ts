@@ -114,14 +114,28 @@ const cases: Record<string, Case | (() => Promise<unknown>)> = {
       runner.memoryScheme = (p) => p === project;
     },
   },
-  'a Taskmaster on the host, with a repo and two minion folders': {
-    kind: 'coordinator',
-    before: (_ticket, project) => {
-      runner.githubFor = undefined;
-      runner.liveHead = () => null;
-      store.setProjectRepoDir(project, join(root, 'repo'));
-      for (const d of ['1', '2']) mkdirSync(join(root, 'projects', String(project), 'tickets', d), { recursive: true });
-    },
+  // Git rules for the open minion's folder only: one per folder in tickets/, closed ones too, outgrew the 2 MiB settings cap.
+  // Its two minions are deleted after, so the cases below keep their ticket ids (no AUTOINCREMENT: the ids come back).
+  'a Taskmaster on the host, with a repo, an open minion and a closed one': async () => {
+    const minions: number[] = [];
+    const launched = await launch({
+      kind: 'coordinator',
+      before: (_ticket, project) => {
+        runner.githubFor = undefined;
+        runner.liveHead = () => null;
+        store.setProjectRepoDir(project, join(root, 'repo'));
+        for (const d of ['1', '2']) {
+          const dir = join(root, 'projects', String(project), 'tickets', d);
+          mkdirSync(dir, { recursive: true });
+          const m = store.createTicket({ project_id: project, title: `M${d}`, permission_mode: 'bypassPermissions', created_by: 'Cara' });
+          store.setTicketDir(m.id, dir, null);
+          if (d === '2') store.updateTicket(m.id, { status: 'closed' });
+          minions.push(m.id);
+        }
+      },
+    });
+    for (const id of minions) store.deleteTicket(id);
+    return launched;
   },
   "the Citadel scheme's Taskmaster": async () => {
     // Its scheme has a fixed id (GLOBAL_OWNER): make schemes until that one exists.

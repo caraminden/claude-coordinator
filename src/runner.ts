@@ -2135,7 +2135,9 @@ export class Runner {
     // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
     const plan = launchPlan({
       project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
-      folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path) },
+      folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
+        // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
+        openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
       codex: codex ? { thread: same || null } : null,
       codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
       env: { server: process.env, coordinator, heavy, github: github?.env ?? null },

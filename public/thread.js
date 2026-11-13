@@ -5,7 +5,7 @@ import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderMode
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
 import { rowState, SHIP } from './threadstate.js';
-import { waitBar, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
+import { stepTrack, waitBar, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
 import { recapEvent, showRecap } from './recap.js';
@@ -788,7 +788,9 @@ function renderProgress() {
     time,
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13).
-  const meter = w && (w.total || w.usual) ? waitBar(w, 'wait-bar big') : est ? waitBar(est, 'wait-bar big') : h('progress', { class: total ? 'meter' : 'meter blank', max: total || 1, value: total ? done : 0 });
+  // The plan as a track of its steps (#630), the one underway filling against its guess; a wait's own bar takes its place.
+  const track = p.tasks.map((t) => [t.estimate ?? null, t.status === 'completed' ? 'c' : t.status === 'in_progress' ? 'i' : 'p']);
+  const meter = w && (w.total || w.usual) ? waitBar(w, 'wait-bar big') : total ? stepTrack({ track, since: est?.since, usual: est?.usual }, 'big') : h('progress', { class: 'meter blank', max: 1, value: 0 });
   // Which time is which (#630, Cara's pick "1"): the step's against its guess under the bar's left, the whole plan's at its end.
   const stepClock = est && waitClock({ since: est.since, usual: est.usual }, `wait-time${waitLate(est) ? ' late' : ''}`);
   const caption = est ? h('div', { class: 'progress-cap' },

@@ -172,6 +172,9 @@
 .wait-bar { grid-column: 1 / -1; display: block; height: 3px; margin: 0.2rem 0 0.1rem 12px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .wait-bar > i { display: block; height: 100%; background: var(--running); }
 .wait-bar.late > i { background: var(--waiting-tint); }
+/* A working row's plan track (#630, style.css .seg-track). */
+.thread-row > .seg-track { grid-column: 1 / -1; margin: 0.25rem 0 0.15rem 12px; }
+.thread-row > .seg-track .wait-bar { height: 3px; }
 /* A CI run that ended (#546): green or red, full width. */
 .wait-bar.f-done > i { background: var(--done); }
 .wait-bar.f-broken > i { background: var(--error); }

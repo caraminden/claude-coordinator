@@ -79,7 +79,7 @@ export function rowBar(t, st) {
   const working = t.status === 'running', w = t.wait;
   if (w && (w.total || w.usual) && (working || t.state === 'outside' || t.state === 'pending-deploy')) return w;
   if (!working || !t.steps) return null;
-  return !w && t.steps.usual ? { since: t.steps.since, usual: t.steps.usual } : t.steps;
+  return t.steps; // the plan's track (#630): sidebar.js draws it with wait.js stepTrack
 }
 
 /**

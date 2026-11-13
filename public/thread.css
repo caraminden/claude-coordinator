@@ -116,7 +116,8 @@ button.secondary.act-reopen { --act: var(--done); }
   .ticket-head .head-line:has(> .progress:not([hidden])) > .head-state { display: none; }
   .ticket-head .head-line > .progress:not([hidden]) { display: contents; }
   .ticket-head .head-line .progress-line { flex: 1 1 0; width: auto; min-width: 0; min-height: var(--control-h); }
-  .ticket-head .head-line :is(.meter, .progress-detail) { order: 1; flex: none; }
+  .ticket-head .head-line :is(.meter, .seg-track, .progress-cap, .progress-detail) { order: 1; flex: none; }
+  .ticket-head .head-line :is(.seg-track, .progress-cap) { width: calc(100% - 0.4rem); }
   .ticket-head .head-line .progress-detail { width: 100%; }
   .ticket-head .head-sub[hidden] { display: none; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */
@@ -407,6 +408,8 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .progress-line .doing b.f-work, .wait-full b.f-work { color: var(--running); }
 .progress-line .time { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
 .progress .wait-bar.big { width: calc(100% - 0.4rem); margin: 0.25rem 0.2rem 0; }
+.progress .seg-track.big { margin: 0.35rem 0.2rem 0; }
+.progress .seg-track.big .wait-bar { height: 5px; }
 /* A phone gives the line to what's happening now: the step is in the opened readout. */
 @media (max-width: 800px) { .progress-line .text:has(.doing) > :is(.stepname, .arrow) { display: none; } }
 /* Which time is which (#630): the step's time against its guess on the left, amber with its bar; the whole plan's on the right. */

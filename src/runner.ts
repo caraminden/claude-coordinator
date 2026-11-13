@@ -675,7 +675,7 @@ export class Runner {
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     return {
       // A network wait's held messages are queued too: they go first into its resume (takeQueue).
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null, closing: this.closing.has(ticket.id),
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }), track: p!.tasks.map((t) => [t.estimate ?? null, t.status === 'completed' ? 'c' : t.status === 'in_progress' ? 'i' : 'p']) } : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
       step_ratio: ratio,

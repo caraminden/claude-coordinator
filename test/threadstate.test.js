@@ -159,7 +159,8 @@ test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none
   assert.equal(bar({ status: 'closed', steps: half }), null, 'dismissed');
   assert.equal(bar({ steps: half, state: 'ready', wait: ci }), null, 'a stale wait on a row waiting on you');
   assert.deepEqual(bar({ status: 'running', steps: half }), half, 'working: steps done');
-  assert.deepEqual(bar({ status: 'running', steps: { ...half, since: NOW - MIN, usual: 120 } }), { since: NOW - MIN, usual: 120 }, 'working: the running step against its guess');
+  const planned = { ...half, since: NOW - MIN, usual: 120, track: [[2, 'c'], [3, 'c'], [2, 'i'], [null, 'p']] };
+  assert.deepEqual(bar({ status: 'running', steps: planned }), planned, "working: the plan's track, its running step against its guess (#630)");
   assert.equal(bar({ status: 'running', steps: half, wait: ci }), ci, 'a CI wait in the turn');
   assert.equal(bar({ state: 'outside', steps: half, wait: ci }), ci, 'waiting on CI after the turn');
   assert.equal(bar({ state: 'pending-deploy', wait: { kind: 'deploy', stage: 'restart', total: 3, done: 1 } }).total, 3, 'a deploy');
@@ -208,4 +209,12 @@ test('cardChip: names the kind of card, counts one kind, and gives the oldest ki
   assert.equal(cardChip([c('question'), c('question')]), '2 questions');
   assert.equal(cardChip([c('plan'), c('question'), c('merge')]), 'plan +2', 'mixed: the oldest, which the chip opens');
   assert.equal(cardChip([{ kind: 'plan' }]), 'plan', 'a card from before `what` falls back to its kind');
+});
+
+test("a segmented track's pieces are as wide as their usual time, the average when unknown, never under 8% (#630)", async () => {
+  const { segSizes } = await import('../public/wait.js');
+  assert.deepEqual(segSizes([2, 9, 5]), [2, 9, 5]);
+  assert.deepEqual(segSizes([4, null, 8]), [4, 6, 8], 'a step with no guess takes the average of the others');
+  assert.deepEqual(segSizes([null, null]), [1, 1], 'none known: equal pieces');
+  assert.deepEqual(segSizes([1, 100]), [8.08, 100], 'a 1-second rebase still shows, at 8% of the whole');
 });

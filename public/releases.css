@@ -17,19 +17,9 @@ a.rel-ver:hover { text-decoration-thickness: 2px; }
 .rel-est.waits, :is(.releases-main, .rel-chip) .waits { color: var(--held); }
 .rel-row > .rel-track { grid-column: 1 / -1; margin: 0.3rem 0 0.15rem; }
 
-/* The stage track: a segment per stage, as wide as its usual time (flex-grow from releases.js). */
-.rel-track { list-style: none; display: flex; gap: 3px; margin: 0.4rem 0 0.2rem; padding: 0; }
-.rel-track > li { flex: 1 1 0; min-width: 6px; display: flex; flex-direction: column; gap: 0.25rem; }
-.rel-track .wait-bar { grid-column: auto; margin: 0; height: 6px; border-radius: 2px; }
-.rel-track .wait-bar > i { width: 0; }
-.rel-track .done .wait-bar > i { width: 100%; background: var(--done); }
-/* Begun with nothing known of how long it takes: a sliver, so it reads as started, never as far along. */
-.rel-track .now .wait-bar > i { width: 8%; } /* waitBar's own width, when it has one, is inline and wins */
-/* A wait outside the pipeline: hatched, never filled, its reason in words beside the bar. */
-.rel-track .now.waits .wait-bar { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--held) 55%, transparent) 0 3px, color-mix(in srgb, var(--held) 15%, transparent) 3px 6px); }
-.rel-track .now.waits .wait-bar > i { width: 0; }
-.rel-track .lbl { font-size: 0.75em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rel-track .now .lbl { color: var(--ink); font-weight: 650; }
+/* The stage track: style.css .seg-track, a little taller here. */
+.rel-track { margin: 0.4rem 0 0.2rem; }
+.rel-track .wait-bar { height: 6px; }
 .rel-track.mini { display: inline-flex; flex: none; width: 4.5rem; gap: 2px; margin: 0; vertical-align: middle; }
 .rel-track.mini .wait-bar { height: 4px; }
 b.work { color: var(--running); }

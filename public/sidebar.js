@@ -9,7 +9,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP } from './threadstate.js';
-import { waitBar, waitClock, waitWords } from './wait.js';
+import { stepTrack, waitBar, waitClock, waitWords } from './wait.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
@@ -383,7 +383,7 @@ export function threadRow(t, href = threadHref(t)) {
   const ship = shipStage?.badge && !wait ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
   // The chat head's bar (#573), only while it works or waits on a land, CI or a deploy (threadstate.js rowBar).
   const barOf = rowBar({ ...t, wait }, st);
-  const bar = barOf ? waitBar(barOf) : '';
+  const bar = !barOf ? '' : barOf.track ? stepTrack(barOf) : waitBar(barOf);
   const card = cardBadge(t.open_cards ?? []);
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.

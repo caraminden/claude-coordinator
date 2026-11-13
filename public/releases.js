@@ -7,7 +7,7 @@
 import { ago, api, fileUrl, h, view } from './base.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
-import { TRACK, waitBar } from './wait.js';
+import { segTrack, TRACK } from './wait.js';
 
 /** projectId → { projectId, targets: TargetView[], testCopies } for every scheme this person can see (src/releases.ts). */
 let schemes = new Map();
@@ -127,24 +127,14 @@ export function releasesLink() {
 
 // ---------- tracks ----------
 
-/**
- * The stage track (takes D, E, F): a segment per stage, as wide as its usual time (with a floor, so a 1-second rebase
- * still shows); done ones full, the current one by elapsed over usual up to 90% or by its count, hatched while it
- * waits; `labels` names them under.
- */
+/** The stage track (takes D, E, F): wait.js segTrack, a segment per stage; `labels` names them under. */
 function stageTrack(stages, p, { mini = false, labels = false } = {}) {
   const list = segments(stages);
   const at = list.findIndex((s) => s.name === p.stage);
-  const total = list.reduce((sum, s) => sum + (s.usual ?? 0), 0);
-  const floor = Math.max(1, total * 0.08);
-  return h('ol', { class: `rel-track${mini ? ' mini' : ''}`, 'aria-label': `${stageName(p.stage)}, stage ${at + 1} of ${list.length}` }, list.map((s, i) => {
-    const now = i === at;
-    const bar = (now && !p.waitingOn && waitBar({ stage: p.stage, since: p.since, usual: p.usual, done: p.done, total: p.total }, 'wait-bar', 90)) || h('span', { class: 'wait-bar' }, h('i'));
-    const li = h('li', { class: i < at ? 'done' : now ? (p.waitingOn ? 'now waits' : 'now') : '' },
-      bar, labels ? h('span', { class: 'lbl' }, stageName(s.name)) : '');
-    li.style.flexGrow = String(Math.max(s.usual ?? floor, floor)); // CSP drops style attributes, not the property
-    return li;
-  }));
+  return segTrack(list.map((s, i) => ({
+    size: s.usual, name: stageName(s.name), state: i < at ? 'done' : i === at ? 'now' : '', waits: !!p.waitingOn,
+    clock: { stage: p.stage, since: p.since, usual: p.usual, done: p.done, total: p.total },
+  })), { cls: `rel-track${mini ? ' mini' : ''}`, labels, label: `${stageName(p.stage)}, stage ${at + 1} of ${list.length}` });
 }
 
 /** A change's stage and its wait or time left: "Deploy ~50s left", "Line 2nd in line, behind #620"; under a card that already says its wait, `said` keeps it from repeating. */

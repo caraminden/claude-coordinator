@@ -42,6 +42,44 @@ export function waitBar(w, cls = 'wait-bar', cap = 100) {
   return h('span', { class: `${cls}${!w.total && waitLate(w, now) ? ' late' : ''}${fam === 'done' || fam === 'broken' ? ` f-${fam}` : ''}`, ...clock, 'aria-hidden': 'true' }, fill);
 }
 
+/** How wide each piece of a segmented track is: its usual time, the others' average when unknown, never under 8% of the whole. */
+export function segSizes(sizes) {
+  const known = sizes.filter((n) => n > 0);
+  const avg = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
+  const full = sizes.map((n) => (n > 0 ? n : avg));
+  const floor = full.reduce((a, b) => a + b, 0) * 0.08;
+  return full.map((n) => Math.max(n, floor));
+}
+
+/**
+ * A segmented track, one logic for the release's stages, the chat readout and the minions list (#630; Cara: "We should
+ * standardize the release, minion list and chat segmented tracks to all use the same logic"). A piece per segment
+ * ({ size, state: 'done' | 'now' | '', clock, waits, name, title }), as wide as its usual time: one with none known
+ * takes the others' average, and none goes under 8% of the whole, so a 1-second rebase still shows. Done pieces are
+ * full; the one underway fills by its `clock` (a waitBar: elapsed over usual, or a count) up to `cap`, going amber past
+ * LATE, or shows a sliver when nothing is known; hatched, never filled, while it `waits`. `labels` names them under.
+ */
+export function segTrack(segs, { cls = '', cap = 90, labels = false, label = '' } = {}) {
+  const grow = segSizes(segs.map((s) => s.size));
+  return h('ol', { class: `seg-track${cls ? ` ${cls}` : ''}`, ...(label ? { 'aria-label': label } : { 'aria-hidden': 'true' }) }, segs.map((s, i) => {
+    const now = s.state === 'now';
+    const bar = (now && !s.waits && s.clock && waitBar(s.clock, 'wait-bar', cap)) || h('span', { class: 'wait-bar' }, h('i'));
+    const li = h('li', { class: `${s.state ?? ''}${now && s.waits ? ' waits' : ''}`, ...(s.title ? { title: s.title } : {}) },
+      bar, labels ? h('span', { class: 'lbl' }, s.name ?? '') : '');
+    li.style.flexGrow = String(grow[i]); // the page's CSP drops style attributes, not the style property
+    return li;
+  }));
+}
+
+/**
+ * The plan as a segmented track (#630, Cara's pick B; the list row too: "Can we just make it the segmented track like
+ * the bar?"). `track` is [guess minutes or null, 'c' done | 'i' underway | 'p' not started] per step; the step underway
+ * fills against `since`/`usual`, its scaled guess.
+ */
+export function stepTrack({ track, since, usual }, cls = '') {
+  return segTrack(track.map(([g, st]) => ({ size: g, state: st === 'c' ? 'done' : st === 'i' ? 'now' : '', clock: st === 'i' && usual ? { since, usual } : null })), { cls });
+}
+
 /** The wait's stage name and where it is on a landing's track. */
 function stageOf(w) {
   const at = TRACK.findIndex(([key]) => key === w.stage);

@@ -15,7 +15,8 @@ for the whole app (`--list` names the screens) and writes shots at 1440 and 390 
 numbers; it reads the live database, which a turn in a container can't see. For the few screens a
 change touches, `node tools/ui-shot.ts <#route>...` shoots them at 1440 and 390 (and dark, or after a
 few clicks with `--steps`) in under a second each on this worktree's dev copy; `ui-measure.mjs` on the
-same URLs gives the numbers. Views are hash routes: `#/p/<scheme>`, `#/p/<scheme>/t/<minion>`,
+same URLs gives the numbers. A state the data lacks (a waiting card, a turn mid-run, a long chat) comes from
+`citadel-dev-copy seed <name>` (`--list`), which prints the route to shoot, on `--data empty` too. Views are hash routes: `#/p/<scheme>`, `#/p/<scheme>/t/<minion>`,
 `#/p/<scheme>/properties` and the rest in `public/core.js`'s router.
 
 ## Blockers

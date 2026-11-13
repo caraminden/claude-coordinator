@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A dev copy of Citadel from the worktree you're in (#482), on every turn's PATH like citadel-heavy:
-#   citadel-dev-copy start [--data copy|empty] | status | stop
+#   citadel-dev-copy start [--data copy|empty|<file.db>] | status [--json] | env | seed <scenario>... | stop
 # It runs that worktree's tools/dev-copy.ts, which says what each does.
 set -uo pipefail
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "citadel-dev-copy: run it inside a worktree of Citadel's repo" >&2; exit 2; }

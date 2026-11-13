@@ -69,6 +69,67 @@ test('start, status, a second start that replaces the first, then stop leaves no
   assert.match(run(['stop']).stdout, /No dev copy was running/);
 });
 
+test('env hands a script the copy\'s URL, cookie and pid; seed adds a state to an empty copy and prints its route (#642)', async () => {
+  const none = spawnSync('bash', ['-c', `eval "$('${cmd}' env)"`], { cwd: repo, env, encoding: 'utf8' });
+  assert.notEqual(none.status, 0, 'with no copy the eval itself fails, so an && chain stops');
+  assert.match(none.stderr, /no dev copy is running/);
+
+  const r = run(['start', '--data', 'empty']);
+  assert.equal(r.status, 0, r.stderr);
+  const s = state();
+  seen.push(s.pid, s.holder);
+  const vars = spawnSync('bash', ['-c', `eval "$('${cmd}' env)" && node -e 'const e = process.env; console.log(JSON.stringify([e.DEV_URL, e.DEV_PORT, e.DEV_COOKIE, e.DEV_PID]))'`], { cwd: repo, env, encoding: 'utf8' });
+  assert.equal(vars.status, 0, vars.stderr);
+  assert.deepEqual(JSON.parse(vars.stdout), [s.url, String(s.port), s.cookie, String(s.pid)], 'exported, so a child like tools/ui-shot.ts sees them');
+  const json = JSON.parse(run(['status', '--json']).stdout);
+  assert.equal(json.running, true);
+  assert.equal(json.pid, s.pid);
+
+  const seeded = run(['seed', 'question-card']);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  const [, route, number, url] = seeded.stdout.match(/^question-card: (#\/p\/\d+\/t\/(\d+)\?e=\d+) +(\S+)$/m) ?? [];
+  assert.ok(route, seeded.stdout);
+  assert.equal(url, s.url + route);
+  const db = new DatabaseSync(join(s.data, 'coordinator.db'), { readOnly: true });
+  const { id } = db.prepare("SELECT t.id FROM tickets t JOIN projects p ON p.id = t.project_id WHERE p.name = 'Seeded' AND t.number = ?").get(Number(number)) as { id: number };
+  db.close();
+  // The running server sees the seeded minion at once, signed in with the cookie env printed.
+  const view = await (await fetch(`${s.url}api/tickets/${id}`, { headers: { cookie: s.cookie } })).json();
+  assert.equal(view.ticket.title, 'Sidebar badge colours');
+  assert.deepEqual(view.ticket.open_cards.map((c: any) => c.kind), ['question', 'question']);
+
+  const bad = run(['seed', 'nonsense']);
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /no scenario nonsense; seed takes one or more of: question-card/);
+  run(['stop']);
+});
+
+test('start --data takes a database file of your own', async () => {
+  const r = run(['start', '--data', join(live, 'coordinator.db')]);
+  assert.equal(r.status, 0, r.stderr);
+  const s = state();
+  seen.push(s.pid, s.holder);
+  assert.match(r.stdout, /on a copy of .*live\/coordinator\.db/);
+  assert.match(r.stdout, /Sign in: login robin,/);
+  assert.equal(run(['start', '--data', join(root, 'none.db')]).status, 2);
+  run(['stop']);
+});
+
+test('every seed scenario applies to a fresh store, twice over', async () => {
+  const { SCENARIOS, seedScheme } = await import('../tools/dev-seeds.ts');
+  const dir = join(root, 'seeds');
+  mkdirSync(dir);
+  const s = new Store(join(dir, 'coordinator.db'));
+  const robin = s.createUser({ name: 'Robin', login: 'robin', admin: true, server_login: true });
+  for (let i = 0; i < 2; i++) {
+    const ctx = seedScheme(s, dir, 'robin');
+    for (const [name, sc] of Object.entries(SCENARIOS)) assert.match(sc.seed(ctx), new RegExp(`^#/p/${ctx.project.id}(/t/\\d+)?`), name);
+  }
+  assert.equal(s.listProjects().length, 1, 'one Seeded scheme, reused');
+  assert.ok(s.listMembers(s.listProjects()[0].id).some((m: any) => m.id === robin.id || m.login === 'robin'));
+  s.db.close();
+});
+
 test('it refuses a folder that would be or hold the live data folder, and a missing $TMPDIR', () => {
   for (const over of [{ CITADEL_LIVE_DATA_DIR: join(tmp, 'dev-copy', 'data') }, { CITADEL_LIVE_DATA_DIR: join(tmp, 'dev-copy') }, { TMPDIR: '' }]) {
     const r = run(['start', '--data', 'empty'], over);

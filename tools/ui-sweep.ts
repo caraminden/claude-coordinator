@@ -4,19 +4,21 @@
 //
 //   node tools/ui-sweep.ts [--out <dir, default $TMPDIR/ui-sweep-out>] [--db <copy>] [--only name,name] [--list] [--keep]
 //
-// It snapshots the live database read-only (VACUUM INTO: `.backup` never finishes while the live
-// server writes), drops what only the live server may act on, and starts this worktree's server.ts
-// in preview mode (no turns, pushes, machines or GitHub) on a free random port. It signs in as the
+// It snapshots the live database read-only and scrubs it as citadel-dev-copy does (src/db-copy.ts,
+// src/previews.ts), and starts this worktree's server.ts in preview mode (no turns, pushes, machines or
+// GitHub) on a free random port. Not on the dev copy itself: the shared folders below go in before boot. It signs in as the
 // first admin with a cookie it issues itself, so no password is needed. --db reuses a copy (it is
 // scrubbed again). --keep leaves the server up and prints its URL and cookie, for poking at by hand.
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
+import { copyDb } from '../src/db-copy.ts';
 import { freePort } from '../src/ports.ts';
+import { previewEnv, scrub } from '../src/previews.ts';
 // @ts-ignore: plain JS from the kit
 import { measure } from '../kit/skills/critique/scripts/ui-measure.mjs';
 
@@ -121,11 +123,10 @@ async function main() {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const db = join(dir, 'coordinator.db');
-  if (o.db) copyFileSync(o.db, db);
-  else execFileSync('sqlite3', ['-readonly', LIVE_DB, `VACUUM INTO '${db}'`]);
-  // As src/previews.ts does, plus an empty scheme for the empty states.
+  await copyDb(o.db ?? LIVE_DB, db);
+  scrub(db);
+  // Plus an empty scheme for the empty states.
   const copy = new DatabaseSync(db);
-  copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%'");
   // The picked minions' own shared folders, so their chats' images load.
   const ownShared = Object.values(T).map((n) => (copy.prepare('SELECT id FROM tickets WHERE project_id = ? AND number = ?').get(S, n) as { id: number } | undefined)?.id).filter(Boolean);
   const admin = copy.prepare('SELECT id, name FROM users WHERE admin = 1 ORDER BY id LIMIT 1').get() as { id: number; name: string };
@@ -144,11 +145,7 @@ async function main() {
   const secret = randomBytes(32).toString('hex');
   const server = spawn(process.execPath, [join(root, 'server.ts')], {
     cwd: root,
-    env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG,
-      HOST: '127.0.0.1', PORT: String(port), DATA_DIR: dir, PREVIEW: '1', BOOT_CHECK: '1', CLAUDE_BIN: '/bin/false', TURN_UNITS: '0',
-      CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: password, SESSION_SECRET: secret,
-    },
+    env: previewEnv(port, dir, password, secret),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';

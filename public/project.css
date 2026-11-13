@@ -354,6 +354,14 @@ body:has(dialog.viewer[open]) { overflow: hidden; }
 .viewer-bar .close-view { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
 .viewer-bar .close-view:hover, .viewer-bar .close-view:focus-visible { background: var(--line); color: var(--ink); }
 /* The stage gives the file every pixel left; images and videos scale to fit it, up or down. */
+/* A question card's picture options (#634): ‹ 1 / 3 › and Pick this. */
+.viewer-bar .gallery-controls { flex: none; display: flex; align-items: center; gap: 0.4rem; }
+.viewer-bar .gallery-controls .step { min-width: 2rem; text-align: center; }
+/* Pick this the size of Open beside it: the same padding, type and border width as a.button. */
+.viewer-bar button.pick { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.viewer-bar button.pick:not(.secondary) { border: 1px solid transparent; }
+.viewer-bar .gallery-controls .count { color: var(--muted); font-size: 0.85em; font-variant-numeric: tabular-nums; }
+.viewer-bar .gallery-controls .picked { color: var(--running); font-weight: 600; font-size: 0.85em; }
 .viewer-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0.75rem; overflow: auto; overscroll-behavior: contain; }
 .viewer-stage > a { display: contents; }
 .viewer-stage .artifact-media { width: 100%; height: 100%; max-height: none; object-fit: contain; border: 0; border-radius: 0; background: none; }

@@ -281,6 +281,16 @@ export function artifactViewer(a) {
 
 // The open full-screen viewer: the chat section lives inside it until it closes.
 let viewer = null; // { dialog, stage, bar, chat, placeholder, ticket, file, inPlace, scrollY }
+// A question card's picture options (#634), set as one is opened: the bar steps between them and picks one.
+let gallery = null; // { ticketId, answered(), options: [{ path, label, picked(), pick() }] }
+
+/** Browse a question card's picture options in the viewer (cards.js), until it closes. */
+export function setViewerGallery(g) {
+  gallery = g;
+  renderViewerBar();
+}
+/** Redraw the bar after a pick changed somewhere else (the card beside it). */
+export const refreshViewerBar = () => renderViewerBar();
 
 /**
  * Show a file a chat linked full screen: the file as big as it fits, and the chat itself (moved,
@@ -314,7 +324,8 @@ function openViewer(ticket, file, inPlace) {
     viewer = { dialog, stage, bar, chat, placeholder, inPlace, scrollY };
     // Keep the clicked embed in sight in the narrower chat, unless you were following the end.
     const link = [...chat.querySelectorAll('#log a[href]')].reverse().find((a) => a.getAttribute('href') === location.hash);
-    if (followChat || !link) scrollToBottom();
+    // A card's picture keeps the card in sight, so its pick shows beside the picture.
+    if ((followChat && !gallery) || !link) scrollToBottom();
     else link.scrollIntoView({ block: 'center' });
   }
   Object.assign(viewer, { ticket, file });
@@ -336,7 +347,7 @@ export function closeViewer() {
   if (!viewer) return null;
   const { dialog, chat, placeholder, ticket, scrollY } = viewer;
   const follow = followChat;
-  viewer = null;
+  viewer = gallery = null;
   placeholder.replaceWith(chat);
   // Gone once its close event has been out on the page, which puts the caret back in the chat's box (ui/composer.js).
   if (dialog.open) {
@@ -360,15 +371,42 @@ function renderViewerBar() {
   // A file that is also an artifact can be pinned; keep its pin state live.
   const a = file.artifact && (view.artifacts.find((x) => x.id === file.artifact.id) ?? file.artifact);
   const src = `${fileUrl(t.id, file.path)}&v=${file.mtime}`;
+  const options = gallery?.ticketId === t.id ? gallery.options : [];
+  const at = options.findIndex((o) => o.path === file.path);
+  const open = file.missing ? '' : openButton(src, file, viewerBridge(t, file));
+  if (open && at >= 0) open.classList.add('wide-only'); // a phone's bar keeps its room for the option's controls
   viewer.bar.replaceChildren(
-    h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
-    h('div', { class: 'name' }, h('h2', { title: file.display_path }, file.name),
+    at >= 0 ? '' : h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
+    h('div', { class: 'name' }, h('h2', { title: file.display_path }, at >= 0 ? options[at].label : file.name),
       h('span', { class: 'meta' }, file.missing ? 'not found' : `${formatSize(file.size)} · updated ${ago(file.mtime)}`)),
+    at >= 0 ? galleryControls(t, options, at) : '',
     a ? pinButton(a) : '',
     file.missing || file.kind !== 'html' ? '' : fullScreenButton(() => viewer?.stage),
-    file.missing ? '' : openButton(src, file, viewerBridge(t, file)),
+    open,
     file.missing ? '' : h('a', { class: 'button secondary wide-only', href: `${src}&download` }, 'Download'),
     h('button', { type: 'button', class: 'close-view', title: 'Back to the chat', 'aria-label': 'Back to the chat', onclick: leaveViewer }, icon('close')));
+}
+
+/**
+ * A picture option's controls in the bar: ‹ › to the card's other pictures (swapped in place, as a link
+ * from the chat is) and Pick this, which only picks: the card's Send still sends. Read-only once answered.
+ */
+function galleryControls(t, options, at) {
+  const o = options[at];
+  const step = (by, label, text) => options.length < 2 ? '' :
+    h('a', { class: 'button secondary step', href: fileHref(t.id, options[(at + by + options.length) % options.length].path), 'aria-label': label }, text);
+  const picked = o.picked();
+  const pick = gallery.answered()
+    ? (picked ? h('span', { class: 'picked' }, '✓ Picked') : '')
+    : h('button', {
+      type: 'button', class: `small pick${picked ? ' secondary' : ''}`, 'aria-pressed': String(picked),
+      onclick: () => {
+        o.pick();
+        viewer?.bar.querySelector('.pick')?.focus(); // the pick redrew the bar
+      },
+    }, picked ? '✓ Picked' : 'Pick this');
+  return h('div', { class: 'gallery-controls' },
+    step(-1, 'Previous option', '‹'), options.length < 2 ? '' : h('span', { class: 'count' }, `${at + 1} / ${options.length}`), step(1, 'Next option', '›'), pick);
 }
 
 /**

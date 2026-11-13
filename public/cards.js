@@ -4,6 +4,7 @@ import { account, api, fileHref, fileKind, fileUrl, h, isCoordinator, me, taskma
 import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 import { adoptTicket } from './thread.js';
+import { refreshViewerBar, setViewerGallery } from './artifacts.js';
 
 /**
  * Who Claude speaks as in this chat: the scheme's Taskmaster in its own chat ("The Delve Taskmaster
@@ -302,7 +303,9 @@ export function answerRef(cardEl, data) {
 
 /**
  * A card of multiple-choice questions from Claude. Click options to pick (several when the question
- * allows), or type an answer under Other; a single one-pick question sends on the first click.
+ * allows), or type an answer under Other; a single one-pick question sends on the first click, unless the
+ * card has pictures (#634; Cara, 2026-11-12: "Cards with images should never autosend, and clicking it anywhere
+ * should show the image to you"): a click there opens the picture, and only Send sends.
  */
 // Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
 const cardPicks = new Map();
@@ -311,6 +314,7 @@ export function questionCard(ticketId, card) {
   if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
   const picks = cardPicks.get(card.id);
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
+  const pictures = card.questions.some((q) => q.options.some((o) => o.image));
   const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });
   const el = h('div', { class: 'qcard' });
@@ -322,13 +326,14 @@ export function questionCard(ticketId, card) {
       for (const btn of el.querySelectorAll(`[data-q="${i}"] .opt`)) btn.classList.toggle('picked', picks[i].selected.has(btn.dataset.label));
     }
     sendBtn.disabled = answered || !ready();
+    if (pictures) refreshViewerBar();
   };
   // Shown as answered at once; the server's echo (markAnswered) confirms it, and a refusal opens the card again with the picks kept.
   let confirmed = false; // answered or settled by the server, so a failed send leaves it shut
   const lock = (on) => {
     answered = on;
     el.classList.toggle('answered', on);
-    for (const input of el.querySelectorAll('.opt, .other')) input.disabled = on;
+    for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = on;
     sendBtn.hidden = on;
   };
   const send = () => {
@@ -365,31 +370,42 @@ export function questionCard(ticketId, card) {
       other.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); }
       });
-      const pickBtn = (o) => h('button', {
-        type: 'button', class: 'opt', 'data-label': o.label,
-        onclick: () => {
-          if (answered) return;
-          const sel = picks[i].selected;
-          if (q.multiSelect) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
-          else {
-            sel.clear();
-            sel.add(o.label);
-            other.value = '';
-            picks[i].other = '';
-          }
-          refresh();
-          if (single) send();
-        },
+      const choose = (o) => {
+        if (answered) return;
+        const sel = picks[i].selected;
+        if (q.multiSelect) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
+        else {
+          sel.clear();
+          sel.add(o.label);
+          other.value = '';
+          picks[i].other = '';
+        }
+        refresh();
+        if (single && !pictures) send();
+      };
+      // Opening a picture hands the viewer this question's pictures, to step through and pick from.
+      const browse = () => setViewerGallery({
+        ticketId, answered: () => answered,
+        options: q.options.filter((o) => o.image).map((o) => ({
+          path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => choose(o),
+        })),
+      });
+      // A picture option's button opens its picture, as its thumbnail does; the rest pick.
+      const pickBtn = (o, thumb) => h('button', {
+        type: 'button', class: `opt${thumb ? ' pic' : ''}`, 'data-label': o.label,
+        onclick: () => (thumb ? thumb.click() : choose(o)),
       }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, o.description) : '');
-      // With pictures, the options are a gallery: each thumbnail opens the full view, its button picks it.
+      // With pictures, the options are a gallery of tiles, each a thumbnail over its label.
       const gallery = q.options.some((o) => o.image);
       return h('div', { class: 'q', 'data-q': i },
         h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', q.question,
           q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
         gallery
-          ? h('div', { class: 'opts gallery' }, q.options.map((o) => h('div', { class: 'tile' },
-            o.image ? optionThumb(ticketId, o) : h('div', { class: 'thumb none' }, 'No picture'), pickBtn(o))))
-          : h('div', { class: 'opts' }, q.options.map(pickBtn)),
+          ? h('div', { class: 'opts gallery' }, q.options.map((o) => {
+            const thumb = o.image && optionThumb(ticketId, o, browse);
+            return h('div', { class: 'tile' }, thumb || h('div', { class: 'thumb none' }, 'No picture'), pickBtn(o, thumb));
+          }))
+          : h('div', { class: 'opts' }, q.options.map((o) => pickBtn(o))),
         other);
     }),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), sendBtn));
@@ -407,7 +423,7 @@ export function questionCard(ticketId, card) {
         other.hidden = !a.other;
         other.disabled = true;
       });
-      for (const btn of el.querySelectorAll('.opt')) btn.disabled = true;
+      for (const btn of el.querySelectorAll('.opt:not(.pic)')) btn.disabled = true;
       sendBtn.hidden = true;
       status.textContent = `Answered by ${author}`;
       refresh();
@@ -416,7 +432,7 @@ export function questionCard(ticketId, card) {
     markSettled() {
       answered = confirmed = true;
       el.classList.add('answered');
-      for (const input of el.querySelectorAll('.opt, .other')) input.disabled = true;
+      for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = true;
       for (const other of el.querySelectorAll('.other')) other.hidden = true;
       sendBtn.hidden = true;
       status.textContent = 'Answered in the chat';
@@ -427,12 +443,12 @@ export function questionCard(ticketId, card) {
 }
 
 /** A question option's picture: a thumbnail (muted and looping for video) that opens the file's full view. */
-function optionThumb(ticketId, o) {
+function optionThumb(ticketId, o, onclick) {
   const src = fileUrl(ticketId, o.image);
   let media = h('img', { src, alt: o.label, loading: 'lazy' });
   if (fileKind(o.image) === 'video') {
     media = h('video', { src, muted: true, autoplay: true, loop: true, playsinline: true, preload: 'metadata' });
     media.muted = true; // the attribute alone doesn't let it autoplay in every browser
   }
-  return h('a', { class: 'thumb', href: fileHref(ticketId, o.image), title: `Open “${o.label}” full size` }, media);
+  return h('a', { class: 'thumb', href: fileHref(ticketId, o.image), title: `Open “${o.label}” full size`, onclick }, media);
 }

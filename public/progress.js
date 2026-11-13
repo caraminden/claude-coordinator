@@ -369,6 +369,8 @@ export function applyEvent(p, kind, data, at = null) {
           if (input.status === 'completed' && task.status === 'in_progress' && task.startedAt != null && at != null) {
             p.finished?.push({ id: task.id, subject: input.subject || task.subject, estimate: task.estimate ?? null, startedAt: task.startedAt, finishedAt: at, work: task.work ?? 0, model: p.model });
           }
+          // The order steps finished in, so the plan's track fills left to right (#630).
+          if (input.status === 'completed' && task.status !== 'completed') task.doneN = (p.doneCount = (p.doneCount ?? 0) + 1);
           task.status = input.status;
         }
         if (input.subject) task.subject = input.subject;
@@ -421,6 +423,17 @@ function settle(task, at) {
 function estimateOf(input) {
   const n = Number(input.metadata?.estimate);
   return Number.isFinite(n) && n > 0 && n <= 24 * 60 ? n : undefined;
+}
+
+/**
+ * The plan's segmented track (#630): [estimate, 'c' | 'i' | 'p'] per step, the done ones first in the order they
+ * finished, then the one underway, then the rest in plan order, so a step added late and done early can't sit
+ * green after an unfinished one.
+ */
+export function planTrack(p) {
+  const rank = { completed: 0, in_progress: 1 };
+  return [...p.tasks].sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0))
+    .map((t) => [t.estimate ?? null, t.status === 'completed' ? 'c' : t.status === 'in_progress' ? 'i' : 'p']);
 }
 
 /**

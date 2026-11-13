@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyEvent, createProgress, describeAction, nowDoing, planEstimate, stepName, progressLine, THINKING_AFTER, withoutCount } from '../public/progress.js';
+import { applyEvent, createProgress, describeAction, nowDoing, planEstimate, planTrack, stepName, progressLine, THINKING_AFTER, withoutCount } from '../public/progress.js';
 
 // A plan of six steps with the given statuses: c(ompleted), i(n progress), p(ending).
 const plan = (statuses) => ({
@@ -243,4 +243,22 @@ test('a finished step is collected with its working time across turns, once, and
   const plain = createProgress();
   replay(plain);
   assert.equal(plain.finished, null, 'the readout collects nothing');
+});
+
+test("the plan's track fills left to right: done steps in the order they finished, then the one underway, then the rest (#630)", () => {
+  const p = createProgress();
+  const ev = (data) => applyEvent(p, 'claude', data, 1_000_000);
+  const call = (id, name, input) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
+  const made = (id, n) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully` }] } });
+  ev({ type: 'system', subtype: 'init' });
+  for (const n of [1, 2, 3]) { call(`c${n}`, 'TaskCreate', { subject: `Step ${n}`, description: 'x', metadata: { estimate: n } }); made(`c${n}`, n); }
+  call('u1', 'TaskUpdate', { taskId: '1', status: 'completed' });
+  call('u2', 'TaskUpdate', { taskId: '2', status: 'in_progress' });
+  // A step added late and finished before step 2.
+  call('c4', 'TaskCreate', { subject: 'Late step', description: 'x', metadata: { estimate: 4 } }); made('c4', 4);
+  call('u3', 'TaskUpdate', { taskId: '4', status: 'completed' });
+  assert.deepEqual(planTrack(p), [[1, 'c'], [4, 'c'], [2, 'i'], [3, 'p']], 'the late step sits with the done ones, before the step underway');
+  call('u4', 'TaskUpdate', { taskId: '2', status: 'completed' });
+  call('u5', 'TaskUpdate', { taskId: '3', status: 'in_progress' });
+  assert.deepEqual(planTrack(p), [[1, 'c'], [4, 'c'], [2, 'c'], [3, 'i']], 'done steps keep the order they finished in');
 });

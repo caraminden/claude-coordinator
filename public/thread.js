@@ -23,7 +23,7 @@ import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerChip, payerLine } from './payer.js';
 import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
-import { actionLabel, applyEvent, createProgress, nowDoing, planEstimate, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
+import { actionLabel, applyEvent, createProgress, nowDoing, planEstimate, planTrack, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, speaker } from './cards.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -789,7 +789,7 @@ function renderProgress() {
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13).
   // The plan as a track of its steps (#630), the one underway filling against its guess; a wait's own bar takes its place.
-  const track = p.tasks.map((t) => [t.estimate ?? null, t.status === 'completed' ? 'c' : t.status === 'in_progress' ? 'i' : 'p']);
+  const track = planTrack(p);
   const meter = w && (w.total || w.usual) ? waitBar(w, 'wait-bar big') : total ? stepTrack({ track, since: est?.since, usual: est?.usual }, 'big') : h('progress', { class: 'meter blank', max: 1, value: 0 });
   // Which time is which (#630, Cara's pick "1"): the step's against its guess under the bar's left, the whole plan's at its end.
   const stepClock = est && waitClock({ since: est.since, usual: est.usual }, `wait-time${waitLate(est) ? ' late' : ''}`);

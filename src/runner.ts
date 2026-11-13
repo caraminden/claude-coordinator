@@ -28,7 +28,7 @@ import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_C
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
-import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, progressLine, stepInfo } from '../public/progress.js';
+import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -677,7 +677,7 @@ export class Runner {
       // A network wait's held messages are queued too: they go first into its resume (takeQueue).
       ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
-      step_track: total ? p!.tasks.map((t) => [t.estimate ?? null, t.status === 'completed' ? 'c' : t.status === 'in_progress' ? 'i' : 'p']) : null, closing: this.closing.has(ticket.id),
+      step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
       step_ratio: ratio,

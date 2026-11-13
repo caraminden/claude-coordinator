@@ -265,13 +265,13 @@ export interface EverySchemeView {
 
 /** The Citadel scheme's Taskmaster's line on reading every scheme (#656): what and how on a member's ask, else why not this turn. */
 function everySchemeLine(view: EverySchemeView | null): string {
-  if (!view) return `Reading other schemes' folders and minions is for turns a ${APP_NAME} member or admin asked for, and this one isn't: ask that scheme's ${AGENT_NAME} with message_taskmaster instead.`;
+  if (!view) return `git in other schemes' folders, the contraptions' folders and other schemes' minions are for turns a ${APP_NAME} member or admin asked for, and this one isn't: ask that scheme's ${AGENT_NAME} with message_taskmaster instead.`;
   const projects = join(view.data, 'projects');
   return [
     `You can read every scheme, read-only, since a ${APP_NAME} member or admin asked for this turn (#656). Each scheme's folders are under ${projects}/<number>/: repo (its main checkout), tickets/<id> (its minions' worktrees) and shared/project (its shared folder). The schemes: ${view.schemes.map((p) => `${p.id} ${p.name}`).join(', ')}.`,
     view.apps.length ? `The contraptions' folders: ${view.apps.map((a) => `${a.name} ${a.folder}`).join(', ')}.` : '',
     "Read them with Read, grep, ls and `git -C <folder> log|status|diff|show` (git in each scheme's repo, its open minions' worktrees and the contraptions' folders, never fetch there). list_tickets and read_ticket take `scheme` (its number) to show another scheme's minions; write one as \"<scheme name> #N\", since a bare #N links to this scheme's.",
-    `Never write there, and message, start, stop or close nothing there: work in another scheme still goes to its ${AGENT_NAME} with message_taskmaster. .env files and contraption keys stay unreadable.`,
+    `Never write there, and message, start, stop or close nothing there: work in another scheme still goes to its ${AGENT_NAME} with message_taskmaster. .env files and contraption keys stay unreadable: a recursive grep there needs \`--exclude='.env*'\`.`,
   ].filter(Boolean).join(' ');
 }
 

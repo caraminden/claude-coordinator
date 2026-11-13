@@ -120,8 +120,8 @@ export const TURN_BUILD_JOBS = '4';
 export const TURN_SLICE = 'citadel-turns.slice';
 
 /** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
-export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean, readOnly: string[] = []): TripwireConfig {
-  return { home: homedir(), data: turnPins().dataDir, checkout: CHECKOUT, project: projectId, claudeConfig, ask, ...(readOnly.length ? { readOnly } : {}) };
+export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean, readOnly: string[] = [], envFiles: string[] = []): TripwireConfig {
+  return { home: homedir(), data: turnPins().dataDir, checkout: CHECKOUT, project: projectId, claudeConfig, ask, ...(readOnly.length ? { readOnly } : {}), ...(envFiles.length ? { envFiles } : {}) };
 }
 
 /**
@@ -129,8 +129,8 @@ export function tripwireConfig(projectId: number, claudeConfig: string, ask: boo
  * this server's data and checkout, and in a minion's turn sends the ones a person may allow to a card.
  * Its config travels as one JSON argument; no quoting needed, as these paths and JSON carry no single quotes.
  */
-export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = turnPins().TRIPWIRE, readOnly: string[] = []) {
-  const config = tripwireConfig(projectId, claudeConfig, ask, readOnly);
+export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = turnPins().TRIPWIRE, readOnly: string[] = [], envFiles: string[] = []) {
+  const config = tripwireConfig(projectId, claudeConfig, ask, readOnly, envFiles);
   const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
   return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
@@ -298,17 +298,14 @@ export interface EveryScheme {
   gitDirs: string[];
   /** Each contraption's folder (~/apps/<name>): readable, not added (so nothing writes there), read-only `git -C`. */
   apps: string[];
-  /** The live data folder: .env files in its schemes' folders stay denied. */
+  /** The live data folder, where every scheme's folders are (projects/<id>). */
   data: string;
   /** The contraptions' key folders (src/contraptions.ts), whose keys stay denied. */
   keysDir: string;
 }
 
-/** Secrets in the folders EveryScheme opens: .env files, and the contraptions' bearer keys (outside them, denied anyway). */
-function everySchemeDenies(e: EveryScheme): string[] {
-  return [...e.apps, join(e.data, 'projects')].flatMap((d) => [`${d}/**/.env`, `${d}/**/.env.*`])
-    .concat(join(e.keysDir, '*/contraption.key')).map((f) => `Read(/${f})`);
-}
+/** .env files under the folders a Taskmaster reads (its own scheme's, other schemes', the contraptions'): denied to every Taskmaster (#656). */
+const envDenies = (folders: string[]) => folders.flatMap((d) => [`Read(/${d}/**/.env)`, `Read(/${d}/**/.env.*)`]);
 
 /**
  * How the coordinator may look at the project's code: its main checkout and every ticket folder,
@@ -342,7 +339,8 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
     settings: {
       permissions: {
         // `//` makes the path absolute. Edit rules also cover Write, NotebookEdit and Bash commands that write there.
-        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)', ...READ_ONLY_EXCEPTIONS, ...(everyScheme ? everySchemeDenies(everyScheme) : [])],
+        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)', ...READ_ONLY_EXCEPTIONS, ...envDenies([...readDirs, ...apps]),
+          ...(everyScheme ? [`Read(/${join(everyScheme.keysDir, '*/contraption.key')})`] : [])],
         // The web tools ask by default, and nobody can answer a Taskmaster's prompts, so they were denied (#210).
         // readDirs (the live data folder, mise's installs) and the contraptions' folders are readable but not added, so acceptEdits can't write there.
         allow: ['WebSearch', 'WebFetch', ...[...readDirs, ...apps].map((d) => `${d}/**`).concat(HEALTH_FILES).map((p) => `Read(/${p})`), ...READ_ONLY_COMMANDS,
@@ -463,14 +461,16 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: servers }) });
   // The contraptions' folders the Citadel scheme's Taskmaster reads this turn (#656) stay unwritable to it.
   const readOnly = ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER ? facts.everyScheme?.apps ?? [] : [];
-  const tripwire = tripwireHooks(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', pinned(pins.TRIPWIRE), readOnly);
+  // A Taskmaster reads the whole data folder (and the contraptions'), never a .env file in it.
+  const envFiles = ticket.kind === 'coordinator' ? [facts.folders.data, ...readOnly] : [];
+  const tripwire = tripwireHooks(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', pinned(pins.TRIPWIRE), readOnly, envFiles);
   // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
   // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
   // A host turn has no hook, so the server login's Codex reviews run in its Codex container (#398): named here, where
   // the turn can't change it.
   const container = facts.codexReview ? { container: { name: facts.codexReview.container, turnsDir: facts.codexReview.turnsDir, env: facts.codexReview.env } } : {};
   const codexTripwire = join(dir, 'codex-tripwire.json');
-  files.push({ name: 'codex-tripwire.json', text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), mode: 0o444 });
+  files.push({ name: 'codex-tripwire.json', text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly, envFiles), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), mode: 0o444 });
   const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
     hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(pins.WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(pins.SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
   };

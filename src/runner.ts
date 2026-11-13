@@ -601,7 +601,8 @@ export class Runner {
 
   /**
    * What the Citadel scheme's Taskmaster may read in every scheme (#656): only on a turn a Citadel member or admin
-   * asked for (isAdmin, as host_check's database read), so a non-member's relay never reaches schemes they aren't in.
+   * asked for (isAdmin, as host_check's database read): git in other schemes' folders, the contraptions' folders and
+   * other schemes' minions. The data folder's files (every scheme's) are readable on any Taskmaster turn, as before.
    * Other schemes' worktrees get git rules only for open minions: all of them would be ~30k rules.
    */
   everySchemeFor(project: Project, ticket: Ticket, asker: number | null): EveryScheme | null {

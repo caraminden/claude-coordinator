@@ -2,7 +2,7 @@
 // to all schemes"), read-only and only on a Citadel member's or admin's ask; other Taskmasters and writes stay as they were.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -92,7 +92,23 @@ test('its launch reads the contraption folders and other repos, never writes or 
     assert.ok(!allow.some((r) => r.startsWith(`Bash(git -C ${d} fetch`)), `${d} never fetches`);
   }
   assert.ok(allow.includes(`Bash(git -C ${citadel.repo_dir} fetch)`), 'its own repo still fetches');
-  for (const f of [`${appDir}/**/.env`, `${appDir}/**/.env.*`, `${data}/projects/**/.env`, `${data}/contraptions/*/contraption.key`]) assert.ok(deny.includes(`Read(/${f})`), f);
+  for (const f of [`${appDir}/**/.env`, `${appDir}/**/.env.*`, `${data}/**/.env`, `${data}/contraptions/*/contraption.key`]) assert.ok(deny.includes(`Read(/${f})`), f);
+  assert.ok(plain.settings.permissions.deny.includes(`Read(/${data}/**/.env)`), 'every Taskmaster, not only this one, is kept from the data folder\'s .env files');
+});
+
+test('the tripwire keeps a Taskmaster from .env files, named or found by a recursive search, and lets other searches through', () => {
+  mkdirSync(join(data, 'projects/3/repo/sub'), { recursive: true });
+  writeFileSync(join(data, 'projects/3/repo/sub/.env'), 'SECRET=x');
+  const cfg: TripwireConfig = { home: root, data, checkout: join(root, 'live'), project: 2, claudeConfig: join(root, '.claude'), deployScript: true, envFiles: [data, appDir] };
+  const bash = (command: string, c = cfg) => tripwire({ tool_name: 'Bash', tool_input: { command, description: 'read another scheme' }, cwd: join(data, 'projects/2/coordinator') }, c)?.reason ?? null;
+  const repo = join(data, 'projects/3/repo');
+  for (const cmd of [`cat ${repo}/sub/.env`, `head ${repo}/*/.env`, `cat ${appDir}/.env.local`, `grep -rn SECRET ${repo}`, `grep -rn SECRET ${data}/projects`, `grep -rn SECRET --exclude=.env ${repo}`, `rg --hidden SECRET ${repo}`, `rg -uu SECRET ${repo}`, `cd ${repo} && grep -r SECRET .`]) assert.match(bash(cmd) ?? '', /\.env/, cmd);
+  for (const cmd of [`grep -rn SECRET --exclude='.env*' ${repo}`, `grep -rn SECRET --include='*.ts' ${repo}`, `rg SECRET ${repo}`, `rg --hidden -g '!.env*' SECRET ${repo}`, `cat ${repo}/sub/notes.txt`, `grep -rn SECRET ${join(root, 'elsewhere')}`]) assert.equal(bash(cmd), null, cmd);
+  assert.equal(bash(`grep -rn SECRET ${repo}`, { ...cfg, envFiles: undefined }), null, 'minions are as before');
+  const grepTool = (input: object) => tripwire({ tool_name: 'Grep', tool_input: { pattern: 'SECRET', ...input }, cwd: data }, cfg)?.reason ?? null;
+  assert.match(grepTool({ path: repo }) ?? '', /\.env/);
+  assert.equal(grepTool({ path: repo, glob: '*.ts' }), null);
+  assert.match(grepTool({ path: repo, glob: '.env*' }) ?? '', /\.env/);
 });
 
 test('the tripwire refuses its writes into a contraption folder, and lets it read there', () => {

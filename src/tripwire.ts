@@ -50,6 +50,8 @@ export interface TripwireConfig {
   turnDir?: string;
   /** Contraptions' folders this turn reads but never writes: the Citadel scheme's Taskmaster's (#656). */
   readOnly?: string[];
+  /** Folders whose .env files this turn never reads, directly or by a recursive search: a Taskmaster's, other schemes' and contraptions' (#656). */
+  envFiles?: string[];
 }
 
 /** Why a call is stopped, and whether a person may approve it once on a card instead. */
@@ -100,6 +102,7 @@ function readReason(p: string, cfg: TripwireConfig): string | null {
   if (p === join(cfg.home, CODEX_LOGIN)) return "That file is this person's Codex login (ChatGPT); codex uses it on its own, and nothing here needs to read it.";
   if (under(p, join(cfg.home, '.config/claude-coordinator'))) return `${join(cfg.home, '.config/claude-coordinator')} holds the live service's password and session secret, which let anyone act as a person. To try the API, log in to a dev copy or a preview with its own password; ask Cara to change the env file.`;
   if (ENVIRON.test(p)) return ENVIRON_WHY;
+  if (ENV_FILE.test(basename(p)) && cfg.envFiles?.some((r) => under(p, r))) return ENV_FILE_WHY;
   if (p === join(cfg.home, '.config/gh/hosts.yml')) return GH_TOKEN_WHY;
   return runnerReason(p, cfg);
 }
@@ -137,6 +140,33 @@ const GH_VARS = /^(GH_TOKEN|GITHUB_TOKEN|GH_CONFIG_DIR|GH_ENTERPRISE_TOKEN|GITHU
 const GH_ENV_WHY = "Each turn's GitHub login is set for the person it runs for (GH_TOKEN, with an empty GH_CONFIG_DIR so no other login is in reach), so pushes and pull requests go out under their name. Leave it as it is: if this turn's person hasn't linked GitHub, commit on your branch and tell them they can link it in Settings → Your account.";
 // The same read with the pid in a variable or a $(…), where the lexer leaves an unknown `/proc//environ`.
 const ENVIRON_HIDDEN = /^\/proc\/[^/]*(\/task\/[^/]*)?\/environ$/;
+
+const ENV_FILE = /^\.env(\..+)?$/;
+const ENV_FILE_WHY = "A scheme's or contraption's .env file holds its secrets (keys, passwords); a Taskmaster reads code and notes, never those.";
+/** Whether a glob from an exclude option covers both `.env` and `.env.<x>`. */
+const globCovers = (globs: string[], name: string) => globs.some((g) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`).test(name));
+const coversEnv = (globs: string[]) => globCovers(globs, '.env') && globCovers(globs, '.env.local');
+
+/**
+ * Whether a recursive search would open .env files: grep does unless an --exclude covers them or its --include can't match them; rg and ag
+ * skip dotfiles unless told to search hidden files, and rg's `-g '!…'` can leave them out again.
+ */
+function searchesEnv(name: string, args: Word[]): boolean {
+  const values = (opt: RegExp) => args.flatMap((w, k) => {
+    const m = /^(--?[\w-]+)=(.*)$/.exec(w.text);
+    if (m && opt.test(m[1])) return [m[2]];
+    return opt.test(w.text) && args[k + 1] ? [args[k + 1].text] : [];
+  });
+  if (name === 'rg') {
+    const hidden = args.some((w) => /^(--hidden|-\.|--no-ignore-hidden)$/.test(w.text)) || args.filter((w) => /^-[a-zA-Z.]+$/.test(w.text)).reduce((n, w) => n + (w.text.match(/u/g)?.length ?? 0), 0) >= 2;
+    return hidden && !coversEnv(values(/^(-g|--glob|--iglob)$/).filter((g) => g.startsWith('!')).map((g) => g.slice(1)));
+  }
+  if (name === 'ag') return args.some((w) => /^(--hidden|-u|--unrestricted)$/.test(w.text)) && !coversEnv(values(/^--ignore$/));
+  const only = values(/^--include$/);
+  return !coversEnv(values(/^--exclude$/)) && !(only.length && !globCovers(only, '.env') && !globCovers(only, '.env.local'));
+}
+/** Where a recursive search over root meets a folder whose .env files stay closed, or null. */
+const envRootMet = (root: string, cfg: TripwireConfig) => cfg.envFiles?.find((r) => under(root, r) || under(r, root)) ?? null;
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
 function secretInside(root: string, cfg: TripwireConfig): string | null {
@@ -1230,6 +1260,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     for (const p of roots.length ? roots.flatMap((w) => pathsOf(w, st, cfg)) : st.cwd ? [st.cwd] : []) {
       const secret = secretInside(p, cfg);
       if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
+      if (envRootMet(p, cfg) && searchesEnv(name, args)) return hard(`Searching ${p} could print .env files. ${ENV_FILE_WHY} Leave them out: \`--exclude='.env*'\` for grep, or let rg skip hidden files.`);
     }
   }
   const text = textOperands(name, args);
@@ -1589,6 +1620,8 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
   if (read) return hard(`${tool} of ${p} is blocked. ${read}`);
   const secret = tool === 'Grep' ? secretInside(p, cfg) : null;
   if (secret) return hard(`Grep of ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
+  // The Grep tool searches hidden files; a `glob` that can't match .env keeps them out.
+  if (tool === 'Grep' && envRootMet(p, cfg) && (typeof ti.glob !== 'string' || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env') || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env.local'))) return hard(`Grep of ${p} could print .env files. ${ENV_FILE_WHY} Give it a \`glob\` such as "*.ts", or use grep with \`--exclude='.env*'\`.`);
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
     const why = writeReason(p, cfg);
     if (why) return hard(`${tool} of ${p} is blocked. ${why}`);

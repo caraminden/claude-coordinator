@@ -506,7 +506,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":3,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false}'",
+        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":3,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]}'",
         "timeout": 10
        }
       ]
@@ -619,6 +619,10 @@
      "Bash(gh workflow view --w*)",
      "Bash(gh workflow view * --w*)",
      "Bash(uniq * *)",
+     "Read(/<ROOT>/**/.env)",
+     "Read(/<ROOT>/**/.env.*)",
+     "Read(/<ROOT>/home/.local/share/mise/installs/**/.env)",
+     "Read(/<ROOT>/home/.local/share/mise/installs/**/.env.*)",
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
@@ -811,7 +815,10 @@
     "checkout": "<CHECKOUT>",
     "project": 3,
     "claudeConfig": "<ROOT>/host-claude",
-    "ask": false
+    "ask": false,
+    "envFiles": [
+     "<ROOT>"
+    ]
    }
   },
   "files": [
@@ -929,7 +936,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false}'",
+        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]}'",
         "timeout": 10
        }
       ]
@@ -1042,6 +1049,10 @@
      "Bash(gh workflow view --w*)",
      "Bash(gh workflow view * --w*)",
      "Bash(uniq * *)",
+     "Read(/<ROOT>/**/.env)",
+     "Read(/<ROOT>/**/.env.*)",
+     "Read(/<ROOT>/home/.local/share/mise/installs/**/.env)",
+     "Read(/<ROOT>/home/.local/share/mise/installs/**/.env.*)",
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
@@ -1160,7 +1171,10 @@
     "checkout": "<CHECKOUT>",
     "project": 2,
     "claudeConfig": "<ROOT>/host-claude",
-    "ask": false
+    "ask": false,
+    "envFiles": [
+     "<ROOT>"
+    ]
    }
   },
   "files": [

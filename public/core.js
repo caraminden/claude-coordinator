@@ -4,7 +4,7 @@ import { ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPat
 import { onAppInstructionsUpdate, onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { costChip, renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
-import { forgetSchemes, showProject, showTicket } from './project.js';
+import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { onArtifactData, tabBridgeOpen } from './bridge-host.js';
 import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
@@ -13,6 +13,7 @@ import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems, refreshInbox, refreshSchemeCounts } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
+import { loadReleases, onReleases } from './releases.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { renderModelPicker, uploadsRunning } from './composer.js';
 import { linkifyHtml, markdownElement } from './ui/markdown.js';
@@ -292,6 +293,8 @@ function connectStream(catchUp = false) {
         reloadWhenIdle();
       }
       assetVersion ??= msg.version;
+      // Each connect's own hello (it carries usage; a deploy's broadcast one doesn't), so a reconnect catches up (#626).
+      if ('usage' in msg) loadReleases();
     }
     if (msg.type === 'hello' || msg.type === 'codex') {
       // The broadcast hello of a front-end-only deploy carries only `version`: it leaves Codex as it was.
@@ -320,6 +323,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
+    if (msg.type === 'releases') onReleases(msg);
     if (msg.type === 'seen-items' && msg.name === me) onSeenItems(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) { view.builds = msg.builds; renderSidebar(); }
@@ -790,6 +794,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/(members|people|contraptions|account)$/))) await showProject(Number(m[1]), { kind: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'sharedList' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/releases\/(all|\d+)(?:\/(\d+))?$/))) await showReleases(Number(m[1]), m[2] === 'all' ? 'all' : Number(m[2]), m[3] ? Number(m[3]) : null);
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/s\/(\d+)\/(.+)$/))) await showSharedFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));

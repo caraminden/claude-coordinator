@@ -14,7 +14,30 @@ import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
 import { contraptionsPage } from './contraptions.js';
+import { releasesPage, setReleasesPage } from './releases.js';
 import { toast } from './ui/status.js';
+
+/**
+ * The Releases page (#626) on `scope` ('all' or a scheme's id), `hl` a change to highlight. On the scheme already on
+ * screen it swaps the main panel at once, the lists staying (its data is on the page already); else the scheme loads.
+ */
+export async function showReleases(projectId, scope, hl) {
+  setReleasesPage(scope, hl);
+  if (!(view?.kind === 'project' && view.projectId === projectId && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
+  const { kind, project, coordinator, tickets, dismissedLoad, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
+  setView({
+    kind, main: 'releases', projectId, project, coordinator, tickets, dismissedLoad, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects,
+    artifactId: null, file: null, ...chatView(null, null),
+  });
+  renderCrumbs({ kind: 'releases' });
+  document.querySelector('#app .split').lastElementChild.replaceWith(releasesPage());
+  // On phones the panels sit above the page; collapse them away as switchChat does.
+  if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.citadel-drawer)')) el.open = false;
+  renderShelf();
+  renderSidebar();
+  renderSchemesShelf();
+  window.scrollTo(0, 0);
+}
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
@@ -45,6 +68,7 @@ function renderCrumbs(main) {
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
+      : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
       : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]));
@@ -177,6 +201,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'sharedList' ? sharedList()
+    : main.kind === 'releases' ? releasesPage()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket);

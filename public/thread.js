@@ -16,6 +16,7 @@ import { stepMark } from './ui/chat.js';
 import { optimistic } from './ui/optimistic.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
+import { releaseChip } from './releases.js';
 import { askHeader } from './askcard.js';
 import { firstSentence, GITHUB_NAME, machineAuthor, shortDuration, shortNote, ticketActionRef } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
@@ -357,8 +358,10 @@ export function renderBranch(status) {
       ? h('span', { class: 'state merged', title: `Merged into ${status.base}` }, 'merged')
       : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} unmerged`));
   }
-  el.replaceChildren(...parts);
-  el.hidden = !parts.length;
+  // Where its change is on the way to release (#626, take F); releases.js redraws the slot as that moves.
+  const chip = releaseChip(view.ticket);
+  el.replaceChildren(...parts, h('span', { class: 'rel-chip-slot' }, chip ?? ''));
+  el.hidden = !parts.length && !chip;
 }
 
 /** Fill the Taskmaster's waiting-cards strip over its composer (public/waiting.js); a minion's chat has none. */

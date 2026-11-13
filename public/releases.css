@@ -1,0 +1,103 @@
+/* The release monitor (#626, public/releases.js): target rows in the Schemes list, the Releases page (a scheme's cards,
+   All's board), the chip beside a minion's PR info, and the stage track they share. Tokens: style.css. */
+
+/* Under a scheme's row: one indented row per target, its stage dots under it while a release moves. */
+.rel-rows:empty { display: none; }
+.rel-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; column-gap: 0.5rem; margin-left: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.85em; cursor: pointer; }
+.rel-row:hover { background: var(--panel); }
+.rel-row .rel-name { color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-row:not(.moving) .rel-name { color: var(--muted); }
+.rel-row .rel-ver { grid-column: 3; }
+.rel-ver { font-family: var(--mono); font-size: 0.85em; color: var(--accent); text-decoration: none; }
+a.rel-ver:hover { text-decoration: underline; }
+.rel-ver.old { color: var(--muted); }
+.rel-est { font-weight: 600; color: var(--running); font-variant-numeric: tabular-nums; }
+.rel-est.waits, :is(.releases-main, .rel-tip, .rel-chip) .waits { color: var(--held); }
+.rel-dots { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.6rem; padding: 0.25rem 0 0.1rem; }
+.rel-dots i { position: relative; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--control-line); }
+.rel-dots i + i::before { content: ''; position: absolute; right: calc(100% + 2px); top: calc(50% - 0.5px); width: calc(0.6rem - 4px); border-top: 1px solid var(--control-line); }
+.rel-dots i.done { background: var(--done); border-color: var(--done); }
+.rel-dots i.now { background: var(--running); border-color: var(--running); box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--running) 28%, transparent); }
+.rel-dots i.now.waits { background: var(--held); border-color: var(--held); box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--held) 28%, transparent); }
+/* The hover's detail (ui/tip.js). */
+.rel-tip { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.9em; max-width: 22rem; }
+.rel-tip a:not(.rel-ver) { color: var(--accent); }
+
+/* The stage track: a segment per stage, as wide as its usual time (flex-grow from releases.js). */
+.rel-track { list-style: none; display: flex; gap: 3px; margin: 0.4rem 0 0.2rem; padding: 0; }
+.rel-track > li { flex: 1 1 0; min-width: 6px; display: flex; flex-direction: column; gap: 0.25rem; }
+.rel-track .wait-bar { grid-column: auto; margin: 0; height: 6px; border-radius: 2px; }
+.rel-track .wait-bar > i { width: 0; }
+.rel-track .done .wait-bar > i { width: 100%; background: var(--done); }
+/* Begun with nothing known of how long it takes: a sliver, so it reads as started, never as far along. */
+.rel-track .now .wait-bar > i { width: 8%; } /* waitBar's own width, when it has one, is inline and wins */
+/* A wait outside the pipeline: hatched, never filled, its reason in words beside the bar. */
+.rel-track .now.waits .wait-bar { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--held) 55%, transparent) 0 3px, color-mix(in srgb, var(--held) 15%, transparent) 3px 6px); }
+.rel-track .now.waits .wait-bar > i { width: 0; }
+.rel-track .lbl { font-size: 0.75em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rel-track .now .lbl { color: var(--ink); font-weight: 650; }
+.rel-track.mini { display: inline-flex; flex: none; width: 4.5rem; gap: 2px; margin: 0; vertical-align: middle; }
+.rel-track.mini .wait-bar { height: 4px; }
+b.work { color: var(--running); }
+b.waits { color: var(--held); }
+
+/* The page: over the chat column on desktop, the whole screen on a phone (the panels collapse above it). */
+.releases-main { min-width: 0; padding-bottom: 2rem; }
+.rel-head .row { display: flex; align-items: center; gap: 0.5rem; }
+.rel-head h2 { margin: 0; }
+.rel-head .close-view { font-size: 1.3rem; line-height: 1; cursor: pointer; }
+@media (min-width: 801px) { .rel-head .close-view.narrow-only { display: none; } }
+.rel-chips { margin: 0 0 0.9rem; }
+.rel-chips .chip { padding: 0.25rem 0.75rem; text-decoration: none; }
+.rel-body { display: flex; flex-direction: column; gap: 0.75rem; }
+.rel-empty { margin: 0.5rem 0; }
+.rel-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.75rem 0.9rem; }
+.rel-card.hl { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rel-card > header { display: flex; align-items: center; gap: 0.5rem; }
+.rel-card h3 { margin: 0; flex: 1; font-size: 1.05em; }
+.rel-card .tag { flex: none; padding: 0.15rem 0.45rem; border: 1px solid var(--line); border-radius: 4px; font-size: 0.75em; color: var(--muted); }
+.rel-card h4, .rel-all-wide > h4 { margin: 0.9rem 0 0.2rem; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.rel-current { margin: 0.35rem 0 0; font-size: 0.92em; }
+.rel-now { margin: 0.3rem 0; font-size: 0.92em; }
+.rel-changes, .rel-list { list-style: none; margin: 0.2rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 0.92em; }
+.rel-change { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; padding: 0.3rem 0.4rem; border-radius: 6px; }
+.rel-change.hl { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.rel-change .what { flex: 1 1 14rem; min-width: 0; }
+.rel-change .where { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.92em; }
+.rel-change a, .rel-list a, .rel-card-sm .num { color: var(--accent); text-decoration: none; }
+.rel-change a:hover, .rel-list a:hover { text-decoration: underline; }
+.rel-list li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.3rem 0.4rem; }
+
+/* All on desktop (take E): a lane per target across Waiting, Checks, Shipping and Live today. */
+.rel-grid { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.rel-grid-row { display: grid; grid-template-columns: minmax(9rem, 1.2fr) repeat(4, minmax(7rem, 1fr)); }
+.rel-grid-row + .rel-grid-row { border-top: 1px solid var(--line); }
+.rel-grid-row > * { padding: 0.5rem; min-width: 0; }
+.rel-grid-row > * + * { border-left: 1px solid var(--line); }
+.rel-grid-row.head { background: var(--bg); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.rel-grid-row.head > * { padding-block: 0.45rem; }
+.rel-target { display: flex; flex-direction: column; gap: 0.15rem; color: var(--ink); text-decoration: none; font-size: 0.9em; background: var(--bg); }
+.rel-target:hover b { color: var(--accent); }
+.rel-target .muted { font-family: var(--mono); font-size: 0.85em; }
+.rel-grid .cell { display: flex; flex-direction: column; gap: 0.4rem; }
+.rel-card-sm { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); text-decoration: none; font-size: 0.85em; }
+.rel-card-sm:hover { border-color: var(--control-line); }
+.rel-card-sm.hl { border-color: var(--accent); }
+.rel-card-sm.live .where { color: var(--done); }
+.rel-card-sm .where { font-size: 0.92em; }
+.rel-card-sm .rel-track.mini { width: 100%; }
+.rel-all-narrow { display: none; flex-direction: column; gap: 0.75rem; }
+@media (max-width: 800px) {
+  .rel-head .close-view.wide-only { display: none; }
+  .ticket-head.rel-head > .row > h2, .ticket-head.rel-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex: 1 1 0; font-size: 1.15rem; }
+  .rel-all-wide { display: none; }
+  .rel-all-narrow { display: flex; }
+  .rel-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .rel-chips .chip { flex: none; }
+}
+
+/* Beside the PR info on a minion's newest turn-end line (take F). */
+.rel-chip, .turn-end .branch-status a.rel-chip { font-weight: normal; }
+.rel-chip { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.4rem; padding: 0.15rem 0.6rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--muted); text-decoration: none; white-space: nowrap; }
+.rel-chip:hover { border-color: var(--control-line); }
+.rel-chip .rel-track.mini { width: 3.2rem; }

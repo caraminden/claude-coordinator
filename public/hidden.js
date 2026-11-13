@@ -4,6 +4,7 @@ import { api, h, me, schemeIcon, view } from './base.js';
 import { schemeCount } from './inbox.js';
 import { openNewScheme } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
+import { releaseRows, releasesLink } from './releases.js';
 
 let hiddenOpen = false; // whether the shelf's Hidden section is unfolded, kept across redraws
 
@@ -69,11 +70,12 @@ export function renderSchemesShelf() {
     h('summary', {}, `Hidden (${hidden.length})`),
     hidden.map((p) => row(p, h('button', { type: 'button', class: 'scheme-hide', title: `Show ${p.name} in your lists again`, onclick: () => setHidden(p, false) }, 'Unhide')))) : null;
   folded?.addEventListener('toggle', () => (hiddenOpen = folded.open));
-  el.replaceChildren(h('h3', {}, 'Schemes'),
-    ...shown.map((p) => row(p, h('button', {
+  el.replaceChildren(h('h3', {}, 'Schemes', h('span', { class: 'spacer' }), releasesLink()),
+    // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
+    ...shown.flatMap((p) => [row(p, h('button', {
       type: 'button', class: 'scheme-hide', 'aria-label': `Hide ${p.name}`,
       title: `Hide ${p.name} from your lists, badges and notifications. Only for you; you stay in it.`, onclick: () => setHidden(p, true),
-    }, 'Hide'))),
+    }, 'Hide')), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),
     ...(folded ? [folded] : []));
 }

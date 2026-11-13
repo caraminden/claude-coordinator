@@ -6,7 +6,7 @@ import { h } from './base.js';
 export const TRACK = [['line', 'Land line', 'Line'], ['rebase', 'Rebase'], ['test', 'Test'], ['deploy', 'Deploy'], ['restart', 'Restart'], ['live', 'Live']];
 const OWN = { slot: 'Heavy slot', run: 'Heavy run' };
 /** Running over the usual by more than this turns the bar amber. */
-const LATE = 1.15;
+export const LATE = 1.15;
 
 /** Doing (blue) while its own landing or run is under way, waiting (violet) in a line, a CI queue or on the restart; a CI run that ended green or red, or grey with every job skipped (#558). */
 export const waitFam = (w) => (w.stage === 'passed' ? 'done' : w.stage === 'failed' || w.stage === 'cancelled' ? 'broken' : w.stage === 'skipped' ? 'idle'
@@ -28,14 +28,17 @@ export function waitTime(w, now = Date.now()) {
   return w.usual ? `${elapsedText(took(w, now))} of ~${elapsedText(w.usual * 1000)}` : elapsedText(took(w, now));
 }
 
-/** A thin bar: tests or jobs done of all of them, or elapsed against usual, which the ticker below moves on; none with neither. */
-export function waitBar(w, cls = 'wait-bar') {
+/**
+ * A thin bar: tests or jobs done of all of them, or elapsed against usual, which the ticker below moves on; none with neither.
+ * `cap`: the fill stops there (a release's stage track stops at 90% until the stage really ends, #626).
+ */
+export function waitBar(w, cls = 'wait-bar', cap = 100) {
   if (!w.usual && !w.total) return '';
   const now = Date.now(), fam = waitFam(w);
   // A counted bar moves when the wait is sent again with new counts, not on the ticker.
-  const clock = w.total ? {} : { 'data-since': w.since, 'data-usual': w.usual, 'data-ended': w.ended ?? '' };
+  const clock = w.total ? {} : { 'data-since': w.since, 'data-usual': w.usual, 'data-ended': w.ended ?? '', ...(cap < 100 ? { 'data-cap': cap } : {}) };
   const fill = h('i');
-  fill.style.width = `${waitPct(w, now)}%`; // the page's CSP drops style attributes, not the style property
+  fill.style.width = `${Math.min(cap, waitPct(w, now))}%`; // the page's CSP drops style attributes, not the style property
   return h('span', { class: `${cls}${!w.total && waitLate(w, now) ? ' late' : ''}${fam === 'done' || fam === 'broken' ? ` f-${fam}` : ''}`, ...clock, 'aria-hidden': 'true' }, fill);
 }
 
@@ -76,7 +79,7 @@ function tick() {
     const w = { since: Number(el.dataset.since), usual: Number(el.dataset.usual) || null, ended: Number(el.dataset.ended) || undefined };
     if (el.classList.contains('wait-time')) el.textContent = waitTime(w, now);
     else {
-      el.firstChild.style.width = `${waitPct(w, now)}%`;
+      el.firstChild.style.width = `${Math.min(Number(el.dataset.cap) || 100, waitPct(w, now))}%`;
       el.classList.toggle('late', waitLate(w, now));
     }
   }

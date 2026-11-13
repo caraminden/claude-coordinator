@@ -68,6 +68,18 @@ export function outbox(chatId) {
 const onTheWay = new Map(); // chatId → sends started and not yet answered, for "Claude is thinking…"
 const chatOpen = (chatId) => view?.kind === 'project' && view.id === chatId;
 
+// Ctrl+V with no field focused pastes into the open chat's box (#654). A field keeps its own paste (Find in
+// chat, a note, a card's box, a rename), and so does a dialog the chat isn't in.
+document.addEventListener('paste', (e) => {
+  const form = document.querySelector('form.composer');
+  const el = e.target instanceof Element ? e.target : null;
+  if (e.defaultPrevented || !form?.pasteAnywhere || !form.checkVisibility()) return;
+  if (el?.closest('input, textarea, select') || el?.isContentEditable) return;
+  const modal = [...document.querySelectorAll('dialog[open]')].find((d) => d.matches(':modal'));
+  if (modal && !modal.contains(form)) return;
+  form.pasteAnywhere(e);
+});
+
 /** Mark a message that didn't reach the server: "not sent", with Retry and a ✎ to take it back into the box. */
 function notSent(chatId, entry) {
   entry.state = 'failed';
@@ -165,12 +177,30 @@ export function composer(chatId, ticket) {
       h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
     h('span', { class: 'spacer' }),
     modelPicker(chatId), sendGroup);
-  textarea.addEventListener('paste', (e) => {
+  const pasteFiles = (e) => {
     const files = pastedFiles(e.clipboardData);
-    if (!files.length) return;
+    if (!files.length) return false;
     e.preventDefault();
     attachments.add(files);
-  });
+    return true;
+  };
+  textarea.addEventListener('paste', pasteFiles);
+  // A paste in the chat with no field focused (the document listener below, #654): files attach as above,
+  // text goes in at the end of the draft.
+  form.pasteAnywhere = (e) => {
+    textarea.focus();
+    if (pasteFiles(e)) return;
+    const text = e.clipboardData?.getData('text/plain');
+    if (!text) return;
+    e.preventDefault();
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
+    // insertText keeps Ctrl+Z working and fires input, which saves the draft and resizes the box.
+    if (!document.execCommand('insertText', false, text)) {
+      textarea.setRangeText(text, end, end, 'end');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  };
   form.addEventListener('dragover', (e) => {
     if (e.dataTransfer.types.includes('Files')) e.preventDefault();
   });
@@ -315,14 +345,16 @@ function createAttachments(chatId, onChange) {
     el, items: [], busy: 0,
     get uploading() { return state.items.some((i) => i.upload && !i.upload.name); },
   };
-  const removeButton = (item) => h('button', { type: 'button', title: 'Remove', 'aria-label': 'Remove', onclick: () => state.remove([item]) }, '×');
+  const removeButton = (item) => h('button', { type: 'button', class: 'remove', title: 'Remove', 'aria-label': 'Remove', onclick: () => state.remove([item]) }, '×');
   const render = () => {
     onChange(state.items.filter((i) => i.data || i.upload?.name).map(({ mediaType, data, upload }) => (upload ? { upload } : { mediaType, data })));
     el.hidden = !state.items.length;
     el.replaceChildren(...state.items.map((item) => item.upload
       ? h('div', { class: 'file-chip' }, h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'name' }, item.upload.label ?? item.file?.name ?? item.upload.name),
         h('span', { class: 'size' }, item.upload.name ? formatSize(item.upload.size) : `${Math.round((item.progress ?? 0) * 100)}%`), removeButton(item))
-      : h('div', { class: 'thumb' }, h('img', { src: item.url, alt: 'Image to send' }), removeButton(item))));
+      : h('div', { class: 'thumb' },
+        h('button', { type: 'button', class: 'zoom', title: 'View larger', onclick: () => zoomImage(item.url) }, h('img', { src: item.url, alt: 'Image to send' })),
+        removeButton(item))));
   };
   const addFile = async (file, label) => {
     if (state.items.filter((i) => i.upload).length >= MAX_FILES) return alertNote(`At most ${MAX_FILES} files per message.`);
@@ -396,6 +428,17 @@ function createAttachments(chatId, onChange) {
     return restored;
   };
   return state;
+}
+
+/** An image waiting to send, full size (#654), until Esc, its ✕ or a click off the picture. */
+function zoomImage(src) {
+  const dialog = h('dialog', { class: 'image-zoom', 'aria-label': 'Image to send' },
+    h('img', { src, alt: 'Image to send, full size' }),
+    h('button', { type: 'button', class: 'close', title: 'Close', 'aria-label': 'Close' }, '✕'));
+  dialog.addEventListener('click', (e) => e.target.tagName !== 'IMG' && dialog.close());
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
 }
 
 /** PUT a file into the thread's uploads folder, streamed, with progress (fetch can't report upload progress). */

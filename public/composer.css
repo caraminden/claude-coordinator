@@ -26,8 +26,14 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 .attachments { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
 .attachments .thumb { position: relative; }
 .attachments img { display: block; height: 4.5rem; max-width: 9rem; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
-.attachments .thumb button { position: absolute; top: -0.4rem; right: -0.4rem; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
+.attachments .thumb button.remove { position: absolute; top: -0.4rem; right: -0.4rem; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
 .attachments { align-items: center; }
+/* Clicking a thumbnail shows it full size (#654). */
+.attachments .thumb button.zoom { display: block; padding: 0; border: 0; border-radius: 6px; background: none; cursor: zoom-in; }
+dialog.image-zoom[open] { box-sizing: border-box; display: flex; align-items: center; justify-content: center; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 3rem 1rem 1rem; border: 0; background: transparent; cursor: zoom-out; }
+dialog.image-zoom::backdrop { background: rgb(0 0 0 / 0.8); }
+dialog.image-zoom img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; cursor: default; }
+dialog.image-zoom .close { position: absolute; top: 0.5rem; right: 0.5rem; width: 2.5rem; height: 2.5rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--panel); color: var(--ink); }
 .attachments .file-chip { max-width: min(100%, 22rem); }
 .attachments .file-chip button { flex: none; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
 

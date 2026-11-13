@@ -252,8 +252,7 @@ function lineList(projectId, line) {
     h('span', {}, e.holds ? 'Holds the lock' : 'Waiting'), h('span', { class: 'muted' }, who(e), ' · ', e.holds ? stageName(e.stage) : `since ${ago(e.since).replace(/ ago$/, '')}`))));
 }
 
-/** Previews and builds' previews: open in a new tab; a stopped one starts again when opened. */
-/** Each kind of test copy: where it opens, what it's called and the line beside it (#627 adds all but the previews). */
+/** Each kind of test copy: where it opens, what it's called and the line beside it. Previews open in a new tab (a stopped one starts again when opened); a download saves. */
 function copyLink(c) {
   const state = c.running ? (c.commit ? `running ${c.commit.slice(0, 7)}` : 'running') : 'stopped';
   const made = [c.commit?.slice(0, 7), c.at ? ago(c.at) : ''].filter(Boolean).join(' · ');

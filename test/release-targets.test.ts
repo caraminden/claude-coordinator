@@ -462,7 +462,7 @@ test('the test-copy reader: builds open minions left in their files, a preview s
   const closed = store.createTicket({ project_id: p.id, title: 'Old build', permission_mode: 'default', created_by: 'Josh' });
   store.updateTicket(closed.id, { status: 'closed' });
   const dir = (id: number) => join(root, `shared-${n}`, String(id));
-  for (const [id, names] of [[open.id, ['Delve-ticket-70-exe-e889baa9-windows.zip', 'notes.md', 'art-pack.zip', 'Game.exe']], [closed.id, ['Delve-old-1234567-windows.zip']]] as const) {
+  for (const [id, names] of [[open.id, ['Delve-ticket-70-exe-e889baa9-windows.zip', 'notes.md', 'art-pack.zip', 'Game.exe', 'Delve-debug.apk']], [closed.id, ['Delve-old-1234567-windows.zip']]] as const) {
     mkdirSync(dir(id), { recursive: true });
     for (const name of names) writeFileSync(join(dir(id), name), 'x');
   }
@@ -475,7 +475,7 @@ test('the test-copy reader: builds open minions left in their files, a preview s
   });
   await reader.scan();
   const copies = reader.list().get(p.id)!;
-  assert.deepEqual(copies.filter((c) => c.kind === 'download').map((c) => [c.name, c.commit, c.number]).sort(), [['Delve-ticket-70-exe-e889baa9-windows.zip', 'e889baa9', open.number], ['Game.exe', null, open.number]], "a closed minion's files and a zip not named like a build don't count");
+  assert.deepEqual(copies.filter((c) => c.kind === 'download').map((c) => [c.name, c.commit, c.number]).sort(), [['Delve-debug.apk', null, open.number], ['Delve-ticket-70-exe-e889baa9-windows.zip', 'e889baa9', open.number]], "a closed minion's files, a zip not named like a build and a type the file route won't serve (.exe) don't count");
   assert.deepEqual(copies.filter((c) => c.kind === 'site').map((c) => [c.port, c.running]), [[8116, true], [9000, false]]);
   assert.deepEqual(copies.filter((c) => c.kind === 'debug-apk').map((c) => [c.target, c.name, c.commit, c.link]), [['apk:android-release', 'build 8', 'sha8', 'https://github.com/o/r/actions/runs/8']], 'the newest run that passed, not the one running');
 });

@@ -521,9 +521,9 @@ export class MainReader implements Reader {
   }
 }
 
-/** A file a minion left in its files folder that people run: an installer or app, or a zip named like a build. */
-// shortcut: a zip counts by its name (a platform, "build", or a commit sha in it); a zip of anything else named so shows too, until builds say what they are.
-const DOWNLOAD = /\.(apk|aab|exe|msi|dmg|appimage)$|(windows|win64|macos|linux|android|build|-[0-9a-f]{7,40})[^/]*\.zip$/i;
+/** A file a minion left in its files folder that people run: an APK, or an archive named like a build. Only types the file route serves (src/artifacts.ts FILE_TYPES). */
+// shortcut: an archive counts by its name (a platform, "build", or a commit sha in it); one of anything else named so shows too, until builds say what they are.
+const DOWNLOAD = /\.apk$|(windows|win64|macos|linux|android|build|-[0-9a-f]{7,40})[^/]*\.(zip|7z|tgz|tar\.gz)$/i;
 /** A scheme's downloads shown at most, newest first. */
 const DOWNLOADS = 8;
 

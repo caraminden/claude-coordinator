@@ -118,6 +118,11 @@ export class AutoDeploy {
     if (head) this.mark(keyOf(projectId, target), head);
   }
 
+  /** The commit auto-deploy or the button last started a deploy for, or null. */
+  triedAt(projectId: number, target: string): string | null {
+    return this.saved().tried[keyOf(projectId, target)] ?? null;
+  }
+
   private mark(key: string, head: string) {
     const s = this.saved();
     s.tried[key] = head;

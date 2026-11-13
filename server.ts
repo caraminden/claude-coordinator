@@ -457,6 +457,10 @@ services.onDeploy = (view) => {
   // Nobody watches an auto-deploy (#629), so one that didn't go live is told to the app's home Taskmaster.
   const row = view.by === AUTO_BY && view.state !== 'deployed' ? store.getContraption(view.name) : undefined;
   if (row?.home_scheme != null) tellHome(row.home_scheme, `Auto-deploy of ${row.title} (${row.name}) to ${view.to?.slice(0, 9) ?? 'its main'}: ${view.state}. ${view.said.at(-1) ?? ''}\n\nIt won't try that commit again by itself: the next landing on main, or Deploy on its card on the Releases page, deploys again. deploy_contraption's status has the whole log.`);
+  // The debounce watches the scheme's clone, the deploy fetches GitHub: a main not pushed yet ships the older commit, and auto-deploy won't try again at that head.
+  const shipped = view.by === AUTO_BY && view.state === 'deployed' ? store.getContraption(view.name) : undefined;
+  const meant = shipped?.home_scheme != null ? autoDeploy.triedAt(shipped.home_scheme, `app:${shipped.name}`) : null;
+  if (shipped?.home_scheme != null && meant && view.to && meant !== view.to) tellHome(shipped.home_scheme, `Auto-deploy of ${shipped.title} (${shipped.name}) went live at ${view.to.slice(0, 9)}, but your clone's ${view.branch} is at ${meant.slice(0, 9)}: GitHub didn't have it yet. Push ${view.branch}, then press Deploy on its card on the Releases page (or call deploy_contraption).`);
 };
 /** A message from Citadel to a scheme's Taskmaster, if it has one. */
 const tellHome = (projectId: number, text: string) => {

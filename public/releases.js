@@ -25,6 +25,7 @@ export async function loadReleases() {
   const got = await Promise.all([api('api/releases'), api('api/releases?scope=member')]).catch(() => null);
   if (!got) return; // an older server, or a restart's gap: the next hello asks again
   schemes = new Map(got[0].schemes.map((s) => [s.projectId, s]));
+  for (const s of schemes.values()) settleDeploys(s);
   member = new Set(got[1].schemes.map((s) => s.projectId));
   loaded = true;
   redraw();
@@ -35,8 +36,7 @@ export function onReleases(msg) {
   if (!loaded) return;
   const s = msg.releases;
   const had = schemes.has(msg.projectId);
-  // A deploy pressed here shows as one until the server's own view stops offering it (it's running, or done).
-  for (const tv of s.targets) if (!tv.deploy?.can) deploying.delete(`${msg.projectId}/${tv.target.id}`);
+  settleDeploys(s);
   if (s.targets.length || s.testCopies.length) schemes.set(msg.projectId, s);
   else schemes.delete(msg.projectId);
   if (!had && schemes.has(msg.projectId)) return loadReleases();
@@ -254,6 +254,14 @@ function targetCard(projectId, tv) {
 /** Targets whose Deploy was pressed here and whose deploy the server hasn't shown yet: "projectId/target". */
 const deploying = new Set();
 
+/** A deploy pressed here shows as one until the server's own view stops offering it (it's running, or done). */
+function settleDeploys(s) {
+  for (const tv of s.targets) if (!tv.deploy?.can) deploying.delete(`${s.projectId}/${tv.target.id}`);
+}
+
+/** A target's deploy as last drawn: events replace the objects, so actions look it up again rather than keep one. */
+const deployOf = (projectId, id) => schemes.get(projectId)?.targets.find((t) => t.target.id === id)?.deploy;
+
 /**
  * A deployable target's Deploy button and auto-deploy switch (Cara, 2026-11-12: "Yes, on any target that can deploy").
  * The button shows while a next release waits and no deploy runs; pressing it shows "Deploying…" at once and sends
@@ -271,11 +279,16 @@ function deployBar(projectId, tv) {
     undo: () => { deploying.delete(key); redraw(); },
     label: `deploy ${schemeName(projectId)} ${tv.target.name}`,
   });
+  const show = (on) => {
+    const cur = deployOf(projectId, tv.target.id);
+    if (cur) cur.auto = on;
+    redraw();
+  };
   const flip = (on) => optimistic({
     sets: `auto-deploy:${key}`,
-    apply: () => { d.auto = on; redraw(); },
+    apply: () => show(on),
     send: () => api('api/releases/auto-deploy', { method: 'PUT', body: { ...body, on } }),
-    undo: () => { d.auto = !on; redraw(); },
+    undo: () => show(!on),
     label: `turn ${on ? 'on' : 'off'} auto-deploy for ${schemeName(projectId)} ${tv.target.name}`,
   });
   const busy = deploying.has(key) && d.can;

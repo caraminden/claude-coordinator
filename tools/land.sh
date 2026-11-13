@@ -253,7 +253,10 @@ case $mode in
     # The same commit under a build sits below its merges of main and can't be left behind, so it is reverted by hand.
     while read -r t b; do
       git merge-base --is-ancestor "$t" HEAD 2>/dev/null && ! git merge-base --is-ancestor "$t" main 2>/dev/null || continue
-      ! git log --format=%B main..HEAD | grep -qF "This reverts commit $t" || continue
+      # Not `git log | grep -q` (#646): grep stops reading at its match, git log dies of SIGPIPE on the rest, and
+      # pipefail turns the match into "not there".
+      said=$(git log --format=%B main..HEAD)
+      ! grep -qF "This reverts commit $t" <<<"$said" || continue
       refuse "$build carries $(git log -1 --format='%h "%s"' "$t"), which came off main when its deploy was rolled back, so landing it would put that back live. Nothing landed: on your branch, revert what it brought (git revert --no-edit main..$(git rev-parse --short "$t")), run tools/land.sh --into $build --full, then this again"
     done < <(cat "$state/taken-back" 2>/dev/null || true)
     if git merge-base --is-ancestor main HEAD; then
@@ -278,7 +281,7 @@ bad_check() {
   read -r bad good rest <"$state/bad" || true
   git -C "$SOURCE" merge-base --is-ancestor "$bad" main 2>/dev/null || { rm -f "$state/bad"; return 0; }
   [ -z "${LAND_FIX:-}" ] || return 0
-  ! comm -12 <(git diff --name-only "$good" "$bad" | sort) <(git diff --name-only main HEAD | sort) | grep -q . || return 0
+  [ -z "$(comm -12 <(git diff --name-only "$good" "$bad" | sort) <(git diff --name-only main HEAD | sort))" ] || return 0 # not `| grep -q`, as above
   refuse "main holds $(git log -1 --format='%h "%s"' "$bad"), whose deploy was rolled back (the restart on it failed: its report is in the chat of the minion that deployed it), and $branch changes none of the files that deploy changed, so its deploy would be rolled back too. Nothing landed. Land the fix for it first (or its revert); if $branch is that fix, run LAND_FIX=1 tools/land.sh (from a turn in a container: the land tool with fix: true)"
 }
 [ "$mode" = into ] || [ "$mode" = full ] || bad_check

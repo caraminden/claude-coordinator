@@ -296,6 +296,10 @@ test('--build refuses a build that carries a commit that came off main, and land
   let res = r.run({}, ['--build'], bwt);
   assert.equal(res.status, 1);
   assert.match(res.stderr, new RegExp(`build/3 carries ${x.slice(0, 7)} .*came off main.*git revert --no-edit main\\.\\.${x.slice(0, 7)}`, 's'));
+  // A long message under the revert (#646): the search for the revert stopped reading at its match, git log died of
+  // SIGPIPE on what was left to write, and pipefail turned the match into "not reverted". Seen in CI as a flake.
+  writeFileSync(join(r.dir, 'long-message'), `long\n\n${'a line of a long message\n'.repeat(20_000)}`);
+  git(bwt, 'commit', '-q', '--allow-empty', '-F', join(r.dir, 'long-message'));
   git(bwt, 'revert', '--no-edit', `main..${x}`);
   assert.equal(r.run({}, ['--into', 'build/3', '--full'], bwt).status, 0);
   res = r.run({}, ['--build'], bwt);

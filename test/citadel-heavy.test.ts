@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -11,11 +11,17 @@ const root = mkdtempSync(join(tmpdir(), 'heavy-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 let n = 0;
 // A fake /proc/pressure/cpu, so no test reads (or depends on) the real box's load.
+// Swapped in whole, as the kernel's file reads: a plain write empties the file first, and a job that polled it just
+// then read no pressure and started at once, with "-" in its history line (a flake in CI, #646).
+const setPressure = (file: string, text: string) => {
+  writeFileSync(`${file}.tmp`, text);
+  renameSync(`${file}.tmp`, file);
+};
 const psi = (some60: number) => `some avg10=${some60}.12 avg60=${some60}.34 avg300=1.00 total=123\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n`;
 function folder(slots?: number, pressure = 5) {
   const dir = join(root, `locks-${n++}`);
   const pressureFile = `${dir}-pressure`;
-  writeFileSync(pressureFile, psi(pressure));
+  setPressure(pressureFile, psi(pressure));
   const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots), CITADEL_HEAVY_PRESSURE: pressureFile, CITADEL_HEAVY_POLL: '0.1', CITADEL_HEAVY_MAX_PRESSURE: undefined, CITADEL_HEAVY_LOAD_WAIT: undefined };
   return { dir, env, pressureFile };
 }
@@ -132,10 +138,10 @@ test('with a slot free but the box busy, the job waits, says the pressure, and s
     assert.equal(byWho['Peek #5'][3], 'line');
     assert.match(byWho['Peek #4'][1], /^sh -c/);
     assert.ok(Math.abs(Number(byWho['Peek #4'][2]) - Date.now() / 1000) < 60, 'since is now, in seconds');
-    writeFileSync(pressureFile, psi(49));
+    setPressure(pressureFile, psi(49));
     assert.equal(await b.done, 0);
   } finally {
-    writeFileSync(pressureFile, psi(0));
+    setPressure(pressureFile, psi(0));
   }
   assert.equal(await a.done, 0);
   assert.ok(existsSync(join(root, 'load-up')));
@@ -236,7 +242,7 @@ test('a job that waits while no slot changes hands gives up at the limit, loudly
 
 test('jobs going past a stopped head still start one at a time on a busy box, each after its own wait on the load', async () => {
   const { env, pressureFile } = folder(2);
-  writeFileSync(pressureFile, psi(90));
+  setPressure(pressureFile, psi(90));
   const head = job({ ...env, CITADEL_HEAVY_LOAD_WAIT: '600' }, 'Peek #2', 'true');
   await until('the head to wait on the load', () => /the box is busy/.test(head.err()));
   process.kill(head.child.pid!, 'SIGSTOP');
@@ -251,7 +257,7 @@ test('jobs going past a stopped head still start one at a time on a busy box, ea
     await until('the other to start', () => n() === 2);
     assert.ok(performance.now() - first >= 1500, `the second waited its own 2 s on the load: ${Math.round(performance.now() - first)} ms apart`);
   } finally {
-    writeFileSync(pressureFile, psi(5));
+    setPressure(pressureFile, psi(5));
     process.kill(head.child.pid!, 'SIGCONT');
     for (const j of [...jobs, head]) assert.equal(await j.done, 0);
   }
@@ -295,16 +301,16 @@ test('a job that waited on load says load, with its wait and the pressure it sta
   try {
     await until('the job to wait on load', () => /box is busy/.test(a.err()));
     await new Promise((r) => setTimeout(r, 1100));
-    writeFileSync(pressureFile, psi(12));
+    setPressure(pressureFile, psi(12));
   } finally {
-    writeFileSync(pressureFile, psi(0));
+    setPressure(pressureFile, psi(0));
   }
   assert.equal(await a.done, 0);
   const [line] = history(dir);
   assert.equal(line[3], 'load');
   assert.ok(Number(line[4]) >= 1, `waited ${line[4]} s`);
   assert.match(line[7], /^(12|0)$/);
-  writeFileSync(pressureFile, psi(90));
+  setPressure(pressureFile, psi(90));
   assert.equal(spawnSync(heavy, ['true'], { env: { ...env, CITADEL_HEAVY_LOAD_WAIT: '1' }, timeout: 10_000 }).status, 0);
   assert.deepEqual([history(dir)[1][3], history(dir)[1][7]], ['forced', '90']);
 });

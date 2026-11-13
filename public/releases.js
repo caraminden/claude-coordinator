@@ -216,7 +216,9 @@ function fillPage() {
         h('span', { class: 'spacer' }), close('wide-only', 'Close', '×'))),
     h('nav', { class: 'chips rel-chips', 'aria-label': 'Schemes' }, chip('all', 'All'), chipIds.map((id) => chip(id, schemeName(id)))),
     h('div', { class: 'rel-body' }, body));
-  pageEl.querySelector('.rel-card.hl, .rel-change.hl')?.scrollIntoView({ block: 'nearest' });
+  // Brings the highlighted change into view once, so a later update doesn't pull back someone who scrolled away.
+  const hl = page?.hl != null && !page.shown && pageEl.querySelector('.rel-card.hl, .rel-change.hl');
+  if (hl) { page.shown = true; hl.scrollIntoView({ block: 'nearest' }); }
 }
 
 /** A scheme's cards (take D): one per target, then its test copies of no target. */

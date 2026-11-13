@@ -225,7 +225,9 @@ test('message_taskmaster: a Taskmaster reaches another scheme\'s Taskmaster, and
   await assert.rejects(send('Cara', 'Theirs'), /403/);
   // Still no reach into the other scheme's minions or its listing.
   await assert.rejects(call(tm, `/api/tickets/${theirMinion.id}/messages`, { method: 'POST', body: { text: 'hi' } }), /403/);
-  await assert.rejects(call(tm, `/api/tickets/${theirMinion.id}`), /403/);
-  await assert.rejects(call(tm, `/api/projects/${theirs.id}`), /403/);
+  // Reads too, from an ordinary scheme's Taskmaster: Mine is scheme 2, the Citadel scheme, whose Taskmaster reads every scheme (#656, test/every-scheme.test.ts).
+  assert.equal(mine.id, 2);
+  await assert.rejects(call(`agent:${tmTheirs.id}`, `/api/tickets/${minion.id}`), /403/);
+  await assert.rejects(call(`agent:${tmTheirs.id}`, `/api/projects/${mine.id}`), /403/);
   await assert.rejects(call(tm, `/api/tickets/${tmTheirs.id}/messages`, { method: 'POST', body: { text: 'hi' } }), /403/);
 });

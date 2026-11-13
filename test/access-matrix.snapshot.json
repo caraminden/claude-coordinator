@@ -803,6 +803,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "PUT /api/me/order/apps": {
+  "anon": "401 Not logged in",
+  "person": "400 keys must be a list of app names, each once",
+  "member": "400 keys must be a list of app names, each once",
+  "outsider": "400 keys must be a list of app names, each once",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "PUT /api/me/password": {
   "anon": "401 Not logged in",
   "person": "403 Your current password is wrong",

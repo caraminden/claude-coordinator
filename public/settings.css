@@ -1,8 +1,10 @@
 /* Settings: its tabs, the instructions editor, Machines, Members and People, accounts. */
 /* Settings: the link beside Sign out (with how many properties wait for review), and the page's tabs */
 .shelf .account .settings-link { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.6rem; }
-.shelf .account > .row:first-child { flex-wrap: nowrap; gap: 0.4rem; }
-.shelf .account > .row:first-child > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The overview fits its scheme rows; give the account name its own line so its controls never squeeze it. */
+.shelf .account > .row:first-child { flex-wrap: wrap; gap: 0.4rem; }
+.shelf .account > .row:first-child > strong { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+.shelf .account > .row:first-child > .spacer { display: none; }
 .shelf .account > .row:first-child > :is(a, button) { flex: none; }
 .settings-link .count, .settings-tabs a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
 .settings-link .count[hidden], .settings-tabs a .count[hidden] { display: none; }

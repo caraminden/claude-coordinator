@@ -23,13 +23,14 @@ export function changeEta(next, c) {
 }
 
 /**
- * All's columns (take E): a wait is Waiting, then the first stage, then the first half of the rest is Checks. The last
+ * All's columns (take E): a wait is Waiting (a change with waitingOn, Citadel's land line, a contraption's call), then
+ * the first half of the track is Checks and the rest Shipping, so a PR whose checks run sits in Checks (#659). The last
  * is the target's newest live release only (Cara, 2026-11-12: ""Live today" is gonna get too crazy, how about "Last Release"?").
  */
 export const COLUMNS = ['Waiting', 'Checks', 'Shipping', 'Last release'];
 export function columnOf(stages, c) {
-  if (c.waitingOn) return 0;
+  if (c.waitingOn || c.stage === 'line' || c.stage === 'call') return 0;
   const list = segments(stages);
   const at = list.findIndex((s) => s.name === c.stage);
-  return at <= 0 ? 0 : at <= Math.floor((list.length - 1) / 2) ? 1 : 2;
+  return at < 0 ? 0 : at <= Math.floor((list.length - 1) / 2) ? 1 : 2;
 }

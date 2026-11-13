@@ -13,7 +13,7 @@ test('shortSpan rounds to the unit people read, carrying minutes into hours', ()
   assert.equal(shortSpan(3900_000), '1h 5m');
 });
 
-test('columnOf: a wait is Waiting, the first stage too, then Checks for the first half of the rest, Shipping after', () => {
+test('columnOf: a wait is Waiting, the land line too, then Checks for the first half of the rest, Shipping after', () => {
   assert.equal(columnOf(citadel, { stage: 'deploy', waitingOn: 'a runner' }), 0);
   assert.equal(columnOf(citadel, { stage: 'line', waitingOn: null }), 0);
   assert.equal(columnOf(citadel, { stage: 'rebase', waitingOn: null }), 1);
@@ -21,6 +21,29 @@ test('columnOf: a wait is Waiting, the first stage too, then Checks for the firs
   assert.equal(columnOf(citadel, { stage: 'deploy', waitingOn: null }), 2);
   assert.equal(columnOf(citadel, { stage: 'restart', waitingOn: null }), 2);
   assert.equal(columnOf(citadel, { stage: 'unknown', waitingOn: null }), 0);
+});
+
+const track = (...names) => [...names, 'live'].map((name) => ({ name, usual: null }));
+
+test('columnOf: a contraption\'s call is Waiting, its build Checks, the drain and restart Shipping, as before #659', () => {
+  const contraption = track('call', 'build', 'drain', 'restart');
+  assert.equal(columnOf(contraption, { stage: 'call', waitingOn: 'a deploy' }), 0);
+  assert.equal(columnOf(contraption, { stage: 'call', waitingOn: null }), 0);
+  assert.equal(columnOf(contraption, { stage: 'build', waitingOn: null }), 1);
+  assert.equal(columnOf(contraption, { stage: 'drain', waitingOn: 'its running agent turns to end' }), 0);
+  assert.equal(columnOf(contraption, { stage: 'drain', waitingOn: null }), 2);
+  assert.equal(columnOf(contraption, { stage: 'restart', waitingOn: null }), 2);
+});
+
+test('columnOf: a PR whose checks run is in Checks; queued, failed or waiting for a merge go, Waiting (#659)', () => {
+  for (const stages of [track('checks', 'merge'), track('checks', 'merge', 'call', 'build', 'drain', 'restart')]) {
+    assert.equal(columnOf(stages, { stage: 'checks', waitingOn: null }), 1);
+    assert.equal(columnOf(stages, { stage: 'checks', waitingOn: 'its checks wait for a CI runner' }), 0);
+    assert.equal(columnOf(stages, { stage: 'checks', waitingOn: 'its checks failed: the minion fixes them' }), 0);
+    assert.equal(columnOf(stages, { stage: 'merge', waitingOn: 'PR #12 waits for a go to merge' }), 0);
+  }
+  // Behind PRs, a contraption's call still waits.
+  assert.equal(columnOf(track('checks', 'merge', 'call', 'build'), { stage: 'call', waitingOn: null }), 0);
 });
 
 test('changeEta: the later of the release estimate and this change\'s own stages; none while anything is unknown', () => {

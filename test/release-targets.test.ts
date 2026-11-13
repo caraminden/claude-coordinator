@@ -180,7 +180,7 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   await reader.refresh();
   [v] = reader.read();
   assert.equal(v.next?.stage, 'call');
-  assert.equal(v.next?.waitingOn, "2 changes on main aren't live yet: nobody has deployed Mandate since. The scheme's Taskmaster or a minion deploys it; ask the Taskmaster if it should go out");
+  assert.equal(v.next?.waitingOn, "2 changes on main aren't live yet: they go out with the next deploy, from the Deploy button or by auto-deploy once main sits still for 5 minutes");
   assert.equal(v.next?.number, 2);
   assert.equal(v.next?.eta, null);
   assert.deepEqual(v.next?.stages.map((s) => s.name), ['call', 'build', 'drain', 'restart', 'live']);

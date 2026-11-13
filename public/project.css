@@ -98,6 +98,11 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
    page end. Keep the side panels short enough (1rem top gap + 3rem) that the chat reaching the bottom
    never drags them up, and keep wheel/touch scrolls inside them from chaining to the page. */
 .sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - var(--banner-h, 0px) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
+/* In a desktop app with the title bar in the page (#637), they stick below its strip. */
+@media (display-mode: window-controls-overlay) {
+  .panels:not(:has(> details[open])), .sidebar, .shelf { top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + var(--top-inset) + 1rem); }
+  .sidebar, .shelf { max-height: calc(100dvh - var(--topbar-h, 3rem) - var(--banner-h, 0px) - var(--top-inset) - 4rem); }
+}
 /* Panel headers double as collapse toggles: a row with ‹ when open, a slim vertical tab with › when closed. */
 .sidebar > summary, .shelf > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; list-style: none; display: flex; align-items: center; gap: 0.4rem; user-select: none; }
 .sidebar > summary::-webkit-details-marker, .shelf > summary::-webkit-details-marker { display: none; }

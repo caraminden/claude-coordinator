@@ -163,7 +163,7 @@ html { --top-inset: env(safe-area-inset-top, 0px); }
   .topbar {
     box-sizing: border-box; min-height: env(titlebar-area-height, 0px); padding-block: 0.25rem; background: var(--bg);
     padding-left: calc(1rem + env(titlebar-area-x, 0px));
-    padding-right: calc(1rem + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+    padding-right: calc(1rem + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); /* vw, not %: the app rail narrows the body */
     app-region: drag;
   }
   .topbar > :not(#crumbs), #crumbs a { app-region: no-drag; }

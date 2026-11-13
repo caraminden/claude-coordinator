@@ -81,6 +81,12 @@ export class ContraptionReader implements Reader {
     for (const t of this.d.finder.list('contraption')) {
       const row = this.d.store.getContraption(t.contraption!);
       if (!row) continue;
+      // A deploy fast-forwards the folder before it builds: until it ends, what was read before it started stands.
+      const kept = this.state.get(t.id);
+      if (kept && this.d.running(row.name)) {
+        next.set(t.id, kept);
+        continue;
+      }
       const deployed = (await git(['rev-parse', 'HEAD'], this.d.folder(row)))?.trim() || null;
       const s: AppState = { deployed, ahead: null, oldest: null, changes: [] };
       const p = this.scheme(t, row);
@@ -119,24 +125,27 @@ export class ContraptionReader implements Reader {
       if (!row) continue;
       const s = this.state.get(t.id);
       const rows = this.d.store.listContraptionDeploys(row.name, RECENT + 1);
-      const live = rows.filter((r) => r.outcome === 'deployed');
+      const live = this.d.store.listContraptionDeploys(row.name, RECENT, 'deployed');
       const usual = usualOf(live);
+      const run = this.d.running(row.name);
       const slug = row.repo;
       const release = (r: ContraptionDeployRow): Release => ({
         version: r.to_sha ?? r.from_sha ?? '', link: r.to_sha ? commitLink(slug, r.to_sha) : null, changes: JSON.parse(r.changes),
         started: r.started_at, live: r.outcome === 'deployed' ? r.finished_at : null, outcome: r.outcome === 'deployed' ? 'live' : r.outcome, stages: JSON.parse(r.stages),
       });
-      const version = s?.deployed ?? live[0]?.to_sha ?? null;
-      const mine = rows.find((r) => r.outcome === 'deployed' && r.to_sha === version);
+      // While a deploy runs, the commit it started from still serves.
+      const version = (run ? run.from : null) ?? s?.deployed ?? live[0]?.to_sha ?? null;
+      const mine = live.find((r) => r.to_sha === version);
       const current: Release | null = mine ? release(mine)
         : version ? { version, link: commitLink(slug, version), changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
-      const recent = rows.filter((r) => r !== mine).slice(0, RECENT).map(release);
+      const recent = rows.filter((r) => r.id !== mine?.id).slice(0, RECENT).map(release);
 
       let lead: Progress | null = null;
-      const run = this.d.running(row.name);
       if (run) {
         const [stage, since] = Object.entries(run.stages).sort((a, b) => b[1] - a[1])[0] ?? ['build', run.started_at];
-        lead = { stage, since, usual: usual(stage), waitingOn: null, text: run.said.at(-1) ?? 'deploying' };
+        // The drain waits for the app's running agent turns (up to 3 min): outside the pipeline, so no estimate.
+        const waits = stage === 'drain' ? 'its running agent turns to end' : null;
+        lead = { stage, since, usual: waits ? null : usual(stage), waitingOn: waits, text: waits ?? run.said.at(-1) ?? 'deploying' };
       } else if (s?.ahead) {
         const text = `main is ${plural(s.ahead, 'commit')} ahead, waiting for a deploy call`;
         lead = { stage: 'call', since: s.oldest ?? (this.d.now ?? Date.now)(), usual: null, waitingOn: text, text };

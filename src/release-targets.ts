@@ -52,13 +52,15 @@ function block(text: string, key: string): { inline: string; body: string } | nu
   return { inline: lines[i].replace(/^[^:]+:/, '').replace(/#.*/, '').trim(), body: lines.slice(i + 1, j).join('\n') };
 }
 
-/** The keys one level in (`  push:`, `  release:`), each with its lines. */
+/** The keys one level in (`  push:`, `  release:`), each with its lines; the level is the first key's indent, whatever its width. */
 function children(body: string): Map<string, string> {
   const out = new Map<string, string>();
   let key: string | null = null;
   let lines: string[] = [];
+  const indent = /^( +)["']?[\w-]+["']?:/m.exec(body)?.[1].length ?? 2;
+  const at = new RegExp(`^ {${indent}}["']?([\\w-]+)["']?:`);
   for (const l of body.split('\n')) {
-    const m = /^ {2}["']?([\w-]+)["']?:/.exec(l);
+    const m = at.exec(l);
     if (m) {
       if (key) out.set(key, lines.join('\n'));
       key = m[1];
@@ -77,9 +79,11 @@ export function shipsOn(text: string, branch: string): 'push' | 'dispatch' | nul
   if (events.has('release')) return 'push';
   const push = events.get('push');
   if (push != null) {
-    const branches = /branches:([^\n]*(?:\n\s+-[^\n]*)*)/.exec(push)?.[1];
+    const branches = /\bbranches:([^\n]*(?:\n\s+-[^\n]*)*)/.exec(push)?.[1];
+    const ignored = /\bbranches-ignore:([^\n]*(?:\n\s+-[^\n]*)*)/.exec(push)?.[1];
+    const names = (list: string) => new RegExp(`(^|[\\s'",[-])(${branch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|\\*\\*?)(?=$|[\\s'",\\]])`, 'm').test(list);
     // No branch filter (or only tags) runs on every push, the default branch's too.
-    if (branches == null || /tags:/.test(push) || new RegExp(`(^|[\\s'",[-])(${branch}|\\*\\*?)(?=$|[\\s'",\\]])`, 'm').test(branches)) return 'push';
+    if (/\btags:/.test(push) || (branches != null ? names(branches) : ignored == null || !names(ignored))) return 'push';
   }
   return events.has('workflow_dispatch') ? 'dispatch' : null;
 }

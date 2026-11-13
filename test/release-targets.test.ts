@@ -104,6 +104,13 @@ test('shipsOn: a push to the default branch, a tag or a release ships; another b
   assert.equal(on('  workflow_dispatch:'), 'dispatch');
   assert.equal(shipsOn('on: [push, pull_request]\njobs: {}\n', 'main'), 'push');
   assert.equal(shipsOn('on: pull_request\n', 'main'), null);
+  assert.equal(on('  push:\n    branches-ignore: [main]'), null);
+  assert.equal(on('  push:\n    branches-ignore: [dev]'), 'push');
+  assert.equal(shipsOn('on:\n  push:\n    branches: [v2x]\n', 'v2.x'), null, 'the branch is a name, not a pattern');
+  // Any indent width, the way some editors write YAML.
+  const wide = 'on:\n    push:\n        branches: [main]\njobs:\n    release:\n        runs-on: windows-latest\n        steps:\n            - run: gh release create v1\n';
+  assert.equal(shipsOn(wide, 'main'), 'push');
+  assert.deepEqual(ids(facts({ workflows: [{ path: '.github/workflows/ship.yml', text: wide }] })), ['ci ci:ship:release Windows']);
 });
 
 test('the finder reads a scheme clone: a new scheme whose repo has a release workflow gets its row with no other step', async () => {
@@ -176,27 +183,36 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   assert.deepEqual(v.next?.changes.map((c) => c.title), ['Snooze']);
   assert.ok(Math.abs(v.next!.since - (Date.now() - 3_600_000)) < 2000, 'since the oldest undeployed commit');
 
-  // Two earlier deploys give the usual times; the running one is at its drain, so the estimate shows.
+  // Two earlier deploys give the usual times, and six failed ones after them don't hide those.
   for (const s of [{ build: 60, drain: 5, restart: 20 }, { build: 80, drain: 5, restart: 30 }]) {
     store.addContraptionDeploy({ name: 'mandate', from_sha: 'old', to_sha: base, by: 'Cara', started_at: now - 9e6, finished_at: now - 9e6 + 1e5, outcome: 'deployed', stages: JSON.stringify(s), changes: '[]' });
   }
-  running = { name: 'mandate', state: 'running', by: '#12', repo: 'o/mandate', branch: 'main', from: base, to: tip, started_at: now - 70_000, finished_at: null, said: ['Build: npm ci'], todo: [], log: '', stages: { build: now - 70_000, drain: now - 2_000 } };
+  for (let i = 0; i < 6; i++) store.addContraptionDeploy({ name: 'mandate', from_sha: base, to_sha: 'bad', by: 'Cara', started_at: now - 8e6, finished_at: now - 8e6, outcome: 'rolled back', stages: '{}', changes: '[]' });
+  // A deploy starts and fast-forwards the folder before it builds: the old commit still serves, and main's changes stay its.
+  running = { name: 'mandate', state: 'running', by: '#12', repo: 'o/mandate', branch: 'main', from: base, to: tip, started_at: now - 70_000, finished_at: null, said: ['Build: npm ci'], todo: [], log: '', stages: { build: now - 70_000 } };
+  git(folder, ['pull', '-q', '--ff-only']);
+  await reader.refresh();
   [v] = reader.read();
-  assert.equal(v.next?.stage, 'drain');
-  assert.equal(v.next?.usual, 5);
-  assert.equal(v.next?.waitingOn, null);
-  assert.equal(v.next?.eta, now - 2_000 + (5 + 25) * 1000, 'drain, then the median restart');
   assert.equal(v.current?.version, base);
   assert.equal(v.current?.live, now - 9e6 + 1e5, 'the newest deployed row of that commit');
+  assert.equal(v.next?.stage, 'build');
+  assert.equal(v.next?.usual, 70, 'the median build');
+  assert.deepEqual(v.next?.changes.map((c) => c.title), ['Snooze']);
+  // Its drain waits for the app's agent turns: no estimate.
+  running.stages.drain = now - 2_000;
+  [v] = reader.read();
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta], ['drain', 'its running agent turns to end', null]);
+  running.stages.restart = now - 1_000;
+  [v] = reader.read();
+  assert.equal(v.next?.eta, now - 1_000 + 25 * 1000, 'the median restart, then live');
 
   // It ends: its row has the stage lengths and the minion whose work went live.
-  git(folder, ['pull', '-q', '--ff-only']);
-  const done = { ...running, state: 'deployed' as const, finished_at: now + 25_000, stages: { ...running.stages, restart: now } };
+  const done = { ...running, state: 'deployed' as const, finished_at: now + 25_000 };
   running = null;
   await reader.record(done);
   const row = store.listContraptionDeploys('mandate', 1)[0];
   assert.deepEqual([row.from_sha, row.to_sha, row.by, row.outcome], [base, tip, '#12', 'deployed']);
-  assert.deepEqual(JSON.parse(row.stages), { build: 68, drain: 2, restart: 25 });
+  assert.deepEqual(JSON.parse(row.stages), { build: 68, drain: 1, restart: 26 });
   assert.deepEqual(JSON.parse(row.changes).map((c: { title: string }) => c.title), ['Snooze']);
   await reader.refresh();
   [v] = reader.read();
@@ -204,5 +220,6 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   assert.equal(v.current?.version, tip);
   assert.deepEqual(v.current?.changes.map((c) => c.title), ['Snooze']);
   assert.equal(v.current?.link, `https://github.com/o/mandate/commit/${tip}`);
-  assert.equal(v.recent.length, 2);
+  assert.equal(v.recent.length, 5);
+  assert.equal(v.recent[0].outcome, 'rolled back');
 });

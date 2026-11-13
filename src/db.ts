@@ -2318,9 +2318,11 @@ export class Store {
       .run(r.name, r.from_sha, r.to_sha, r.by, r.started_at, r.finished_at, r.outcome, r.stages, r.changes).lastInsertRowid);
   }
 
-  /** A contraption's newest deploys, newest first. */
-  listContraptionDeploys(name: string, limit: number): ContraptionDeployRow[] {
-    return this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? ORDER BY id DESC LIMIT ?').all(name, limit) as unknown as ContraptionDeployRow[];
+  /** A contraption's newest deploys (only those that ended as `outcome`, when given), newest first. */
+  listContraptionDeploys(name: string, limit: number, outcome?: string): ContraptionDeployRow[] {
+    return (outcome
+      ? this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? AND outcome = ? ORDER BY id DESC LIMIT ?').all(name, outcome, limit)
+      : this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? ORDER BY id DESC LIMIT ?').all(name, limit)) as unknown as ContraptionDeployRow[];
   }
 
   /** A target's newest releases, newest first. */

@@ -18,6 +18,7 @@ import type { RepoAccess } from './repo-access.ts';
 import type { CiLoad } from './ci-load.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { Previews } from './previews.ts';
+import type { Releases } from './releases.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
 import type { Schedule } from './schedules.ts';

@@ -25,12 +25,13 @@ function world() {
   mkdirSync(heavy, { recursive: true });
   const ships = new Map<number, Ship['stage']>();
   let turns = 0;
+  const queued = new Set<number>();
   const ship = (id: number): Ship | null => (ships.has(id) ? { stage: ships.get(id)!, text: `ship ${ships.get(id)}`, commit: 'abc1234' } : null);
   const waits = new Waits({ store, deployState: state, heavyDir: heavy, interruptible: () => turns, changed: () => {}, now: () => now, ship, alive: () => true, held: () => true });
   let head: string | null = 'live1';
   const server = new CitadelServer({
     store, scheme: () => store.getProject(citadel.id) ?? null, head: () => head, line: () => waits.line, ticketFor: (l) => waits.ticketFor(l),
-    wait: waits.wait, ship, usual: waits.usual, interruptible: () => turns, now: () => now,
+    wait: waits.wait, ship, usual: waits.usual, interruptible: () => turns, ciQueued: (id) => queued.has(id), now: () => now,
   });
   const minion = (title = 'T') => {
     const t = store.createTicket({ project_id: citadel.id, title, permission_mode: 'default', created_by: 'Cara' });
@@ -45,7 +46,7 @@ function world() {
   };
   const clearLine = () => rmSync(join(state, 'queue'), { recursive: true, force: true }) ?? mkdirSync(join(state, 'queue'));
   return {
-    store, citadel, waits, server, ships, minion, land, clearLine,
+    store, citadel, waits, server, ships, queued, minion, land, clearLine,
     setTurns: (n: number) => (turns = n), setHead: (h: string | null) => (head = h),
   };
 }
@@ -90,6 +91,22 @@ test('the estimate: only when the current stage and every one after it have a us
   assert.equal(n.stage, 'deploy');
   assert.equal(n.usual, 10);
   assert.equal(n.eta, now - 4000 + (10 + 40 + 0) * 1000, 'deploy, then restart, then live');
+
+  // CI waiting for a runner to take the run: a wait, no estimate.
+  w.land(1, a.branch, now / 1000 - 10, 'waiting for CI since 14:02', 4);
+  w.waits.poll();
+  w.queued.add(a.id);
+  n = w.server.read()[0].next!;
+  assert.equal(n.stage, 'test');
+  assert.equal(n.usual, null);
+  assert.match(n.waitingOn!, /CI/);
+  assert.equal(n.eta, null);
+  w.queued.clear();
+  assert.notEqual(w.server.read()[0].next!.eta, null, 'once a runner has it, the estimate is back');
+  // Turns running that the restart ahead will wait for: no time promised.
+  w.setTurns(1);
+  assert.equal(w.server.read()[0].next!.eta, null);
+  w.setTurns(0);
 
   // Merged, pulled, waiting on the idle restart behind running turns: hatched, no estimate.
   w.clearLine();
@@ -215,6 +232,17 @@ test('live writes one row per new head, with the minions whose branch tips lande
   assert.deepEqual(t.current!.changes, [{ ticketId: a.id, number: a.number, title: 'Feature A' }]);
   assert.deepEqual(t.recent.map((r) => r.version), [base]);
   assert.equal(t.next, null);
+
+  // git can't say what landed (the last row's commit is gone): no row, rather than one with its changes lost.
+  w.store.addRelease({ project_id: w.citadel.id, target: CITADEL_TARGET, version: '0'.repeat(40), changes: '[]', started_at: null, live_at: 1, outcome: 'live', stages: '{}' });
+  const error = console.error;
+  console.error = () => {};
+  try {
+    await again.live(head);
+  } finally {
+    console.error = error;
+  }
+  assert.equal(w.store.listReleases(w.citadel.id, CITADEL_TARGET, 1)[0].version, '0'.repeat(40));
 });
 
 test('Releases: test copies go to the target whose code they run, else to the scheme; a change is sent once, per scheme', () => {
@@ -249,6 +277,9 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   w.store.deleteSetting(`preview:${theirs.id}`);
   releases.poll();
   assert.deepEqual(sent.at(-1), { type: 'releases', projectId: delve.id, releases: { projectId: delve.id, targets: [], testCopies: [] } }, 'a scheme left with nothing is sent empty');
+  w.store.setSetting(`preview:${theirs.id}`, { at: now });
+  releases.poll();
+  assert.equal(sent.at(-1).releases.testCopies.length, 1, 'a scheme that gets something after the first poll is sent too');
 });
 
 test('memberSchemes: the schemes a person owns or is in, admin or not', () => {

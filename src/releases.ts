@@ -132,6 +132,7 @@ export interface ReleasesDeps {
 export class Releases {
   private d: ReleasesDeps;
   private shown = new Map<number, string>();
+  private polled = false;
   private last: SchemeReleases[] = [];
   constructor(d: ReleasesDeps) {
     this.d = d;
@@ -162,17 +163,17 @@ export class Releases {
       const s = now.get(id) ?? { projectId: id, targets: [], testCopies: [] };
       const json = JSON.stringify(s);
       if (this.shown.get(id) === json) continue;
-      const first = !this.shown.has(id);
       if (now.has(id)) this.shown.set(id, json);
       else this.shown.delete(id);
       // The first poll sends nothing: a page asks GET /api/releases when it opens.
-      if (!first || !now.has(id)) this.d.broadcast({ type: 'releases', projectId: id, releases: s });
+      if (this.polled) this.d.broadcast({ type: 'releases', projectId: id, releases: s });
     }
+    this.polled = true;
   }
 
   /** The schemes `visible` allows (null: all), as the last poll read them, or afresh before the first. */
   view(visible: (projectId: number) => boolean): SchemeReleases[] {
-    if (!this.shown.size) this.last = this.read();
+    if (!this.polled) this.last = this.read();
     return this.last.filter((s) => visible(s.projectId));
   }
 }
@@ -207,6 +208,8 @@ export interface CitadelDeps {
   usual: (key: string) => number | null;
   /** Running turns the restart waits for. */
   interruptible: () => number;
+  /** Whether a minion's landing waits for a CI runner to take its run. */
+  ciQueued?: (ticketId: number) => boolean;
   now?: () => number;
 }
 
@@ -249,7 +252,7 @@ export class CitadelServer implements Reader {
   private progress(id: number, ship: Ship | null, loneDeploy: LandTicket | undefined): Progress | null {
     const w = this.d.wait(id);
     if (w?.kind === 'land') {
-      const waits = w.stage === 'line';
+      const waits = w.stage === 'line' || (w.stage === 'test' && !!this.d.ciQueued?.(id));
       const p: Progress = { stage: w.stage, since: w.since, usual: waits ? null : w.usual, waitingOn: waits ? w.text : null, text: w.text };
       if (w.total) Object.assign(p, { done: w.done, total: w.total });
       return p;
@@ -322,6 +325,7 @@ export class CitadelServer implements Reader {
     const inLine = new Set(line.flatMap((e) => (e.ticketId != null ? [e.ticketId] : [])));
     for (const t of store.listTickets(p.id)) {
       // A dismissed minion's ship stage isn't looked at again (ShipStatus.poll), so only open ones and the land line count.
+      // shortcut: a minion dismissed after landing but before live drops out of next; read its stage afresh if that starts to happen.
       if (t.kind !== 'ticket' || !t.branch || (t.status === 'closed' && !inLine.has(t.id))) continue;
       const ship = this.d.ship(t.id);
       if (!inLine.has(t.id) && !ship) continue;
@@ -336,7 +340,9 @@ export class CitadelServer implements Reader {
       const lead = changes[0];
       const stages = TRACK.map((name) => ({ name, usual: this.stageUsual(name) }));
       const after = stages.slice(TRACK.indexOf(lead.stage) + 1);
-      const eta = lead.waitingOn || lead.usual == null || after.some((s) => s.usual == null)
+      // The idle restart waits on running turns, so with any running no time is promised for a release before it.
+      const restartWaits = this.d.interruptible() > 0 && after.some((s) => s.name === 'restart');
+      const eta = lead.waitingOn || restartWaits || lead.usual == null || after.some((s) => s.usual == null)
         ? null : lead.since + (lead.usual + after.reduce((sum, s) => sum + s.usual!, 0)) * 1000;
       const { ticketId: _i, number: _n, title: _t, ...at } = lead;
       next = { ...at, stages, eta, changes };
@@ -357,6 +363,8 @@ export class CitadelServer implements Reader {
     const last = store.listReleases(p.id, CITADEL_TARGET, 1)[0];
     if (last?.version === head) return;
     const landed = last ? await this.landed(p, last.version, head) : [];
+    // git failed: no row, rather than a release with its changes lost; the next head's row takes them in.
+    if (!landed) return console.error(`Reading what landed in ${head.slice(0, 7)} failed: no release row for it`);
     const liveAt = this.now();
     const changes = landed.map((t) => ({ ticketId: t.id, number: t.number, title: t.title, stages: this.tracking[t.id] ?? {} }));
     // The stage lengths of the change whose deploy carried the release live: the latest to start deploying.
@@ -387,7 +395,7 @@ export class CitadelServer implements Reader {
       git(['log', '--format=%H %ct', `${prev}..${head}`], p.repo_dir!),
       git(['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads/'], p.repo_dir!),
     ]);
-    if (log == null || refs == null) return [];
+    if (log == null || refs == null) return null;
     const at = new Map(log.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ct]) => [sha, Number(ct) * 1000]));
     const tips = new Map(refs.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ref]) => [ref, sha]));
     return this.d.store.listTickets(p.id)

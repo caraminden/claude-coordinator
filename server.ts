@@ -442,7 +442,7 @@ runner.wait = waits.wait;
 // The release monitor's data (#625, src/releases.ts): Citadel's own server as a target, every scheme's test copies.
 const citadelServer = new CitadelServer({
   store, scheme: ownScheme, head: () => waiters.head, line: () => waits.line, ticketFor: (label) => waits.ticketFor(label),
-  wait: waits.wait, ship: ships.ship, usual: waits.usual, interruptible: () => runner.interruptible(),
+  wait: waits.wait, ship: ships.ship, usual: waits.usual, interruptible: () => runner.interruptible(), ciQueued: (id) => ciRuns.view(id)?.stage === 'queued',
 });
 const releases = new Releases({
   store, readers: [citadelServer], broadcast,

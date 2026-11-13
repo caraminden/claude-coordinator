@@ -879,9 +879,10 @@ export class Runner {
   /**
    * A state set after close_self that keeps the minion open (complete, try, ready) cancels the pending close
    * there and then (#604), so the view and the state tool's reply stop promising a dismissal the turn end
-   * would refuse. Returns why it was cancelled, or null when nothing was.
+   * would refuse. Returns why it was cancelled, or null when nothing was. `byOther`: a person (not the
+   * minion's own state call, whose reply says so) set it, so the next turn is told (#619).
    */
-  closeCancelled(ticketId: number): string | null {
+  closeCancelled(ticketId: number, byOther = false): string | null {
     if (!this.closing.has(ticketId)) return null;
     const kept = this.keptOpen(ticketId);
     if (!kept?.startsWith('its state')) return null;
@@ -889,6 +890,7 @@ export class Runner {
     const { closing: _, ...turn } = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? { resumes: 0 };
     this.store.setSetting(turnKey(ticketId), turn);
     this.emit(ticketId, 'note', { text: `Claude's close_self was cancelled: ${kept}, so it stays open.` });
+    if (byOther) this.store.setSetting(closeCancelledKey(ticketId), kept);
     this.broadcastTicket(ticketId);
     return kept;
   }
@@ -1932,7 +1934,7 @@ export class Runner {
     const handoff = !step && !ticket.session_id ? this.store.getSetting<string>(handoffKey(ticket.id)) : null;
     const cancelled = !step && this.store.getSetting<string>(closeCancelledKey(ticket.id));
     if (cancelled) this.store.deleteSetting(closeCancelledKey(ticket.id));
-    const cancelledLine = cancelled ? [{ author: 'System', text: `Your close_self at the end of your last turn was cancelled: ${cancelled}, so this minion is still open. Once nothing is left for people, call close_self again.`, images: [] }] : [];
+    const cancelledLine = cancelled ? [{ author: 'System', text: `Your close_self in your last turn was cancelled: ${cancelled}, so this minion is still open. Once nothing is left for people, call close_self again.`, images: [] }] : [];
     const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
       : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...handBack, ...cancelledLine, ...batch]);
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));

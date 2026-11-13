@@ -138,7 +138,7 @@ test('a GitHub notice that needs action, or a person beside a no-action one, sti
       if (Date.now() > end) break;
       await new Promise((r) => setTimeout(r, 20));
     }
-    assert.match(prompts(), /close_self at the end of your last turn was cancelled: a new message arrived/);
+    assert.match(prompts(), /close_self in your last turn was cancelled: a new message arrived/);
     await endTurn(id, 'ok');
     assert.equal(store.getTicket(id)!.status, 'idle');
   }
@@ -249,6 +249,23 @@ test('a keep-open state set after close_self cancels the close at once, so the v
   assert.equal(runner.view(store.getTicket(id)!).closing, true);
   await endTurn(id, 'ok');
   assert.equal(store.getTicket(id)!.status, 'closed');
+});
+
+test("a person's keep-open state cancels the close and the next turn is told; the minion's own state call isn't repeated (#619)", async () => {
+  for (const byOther of [true, false]) {
+    const id = newTicket();
+    runner.send(id, 'Cara', 'ship it');
+    runner.closeAfterTurn(id, null);
+    store.updateTicket(id, { state: 'ready' });
+    runner.closeCancelled(id, byOther);
+    await endTurn(id, 'ok');
+    rmSync(join(root, 'prompts.log'), { force: true });
+    runner.send(id, 'Cara', 'next');
+    while (!readFileSync(join(root, 'prompts.log'), { encoding: 'utf8', flag: 'a+' }).includes('next')) await new Promise((r) => setTimeout(r, 20));
+    const told = /close_self in your last turn was cancelled: its state is ready/.test(readFileSync(join(root, 'prompts.log'), 'utf8'));
+    assert.equal(told, byOther, String(byOther));
+    await endTurn(id, 'ok');
+  }
 });
 
 test('close() marks a ticket closed, as the coordinator does', () => {

@@ -247,7 +247,7 @@ export const ticketRoutes: Route[] = [
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);
         if (fields.state === 'pending-deploy') runner.deployPending(id);
-        if (fields.state) closeCancelled = runner.closeCancelled(id);
+        if (fields.state) closeCancelled = runner.closeCancelled(id, caller?.id !== id);
         if ('build' in fields) store.props.setBuild(id, fields.build ?? null, session.name);
         const who = caller?.id === id ? 'Claude' : session.name;
         if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });

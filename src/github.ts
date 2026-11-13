@@ -87,7 +87,7 @@ export interface Decision {
   messages: string[];
   /** Keys to record as handled, whether sent or skipped. */
   handled: string[];
-  /** Every message is news that needs no action (merged, closed, CI passed), so it leaves a pending close_self be (#619). */
+  /** Every message is news that needs no action (merged, CI passed), so it leaves a pending close_self be (#619). */
   fyi: boolean;
 }
 
@@ -202,7 +202,7 @@ export function decide(
       if (own(pr.closedBy, pr.closedAt)) return null;
       const by = pr.closedBy ? ` by ${pr.closedBy}` : '';
       return pr.state === 'MERGED' ? `PR #${pr.number} was merged${by}.` : `PR #${pr.number} was closed${by} without merging.`;
-    }, true);
+    }, pr.state === 'MERGED');
   }
   return { messages, handled, fyi: fyi && messages.length > 0 };
 }

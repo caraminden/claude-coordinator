@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+// ci-failures (#644): what failed in a GitHub Actions run, in one command, on every turn's PATH like citadel-wait.
+//   ci-failures [<run id> | <sha> | <branch>] [-R owner/repo] [--full]
+//   ci-failures --list [-n 20] [<branch>] [-R owner/repo]
+// No argument: the newest run for this worktree's branch or its land/<branch> twin (what tools/land.sh pushes).
+// It prints the run in one line, then each failed job and step, then node's failing tests (name, message, diff),
+// with timestamps, colour codes and Node's own stack frames taken out. A run that failed some other way shows the
+// end of its failed step. The cleaned log goes to $TMPDIR/ci-<run>.log; --full prints all of it.
+// --list: one line per recent run (branch, conclusion, sha, when, queued and run seconds).
+// Exit: 0 green, 1 red (or cancelled, timed out), 2 no run or gh failed, 3 not finished yet.
+// Plain JavaScript in one file, so the copy on a turn's PATH runs without the repo; ESM by syntax, wherever it sits.
+import { execFileSync, execFile } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+const PER_FAILURE = 40; // lines of one failed test
+const MAX_FAILURES = 15; // shown in full; the rest by name
+const TAIL = 30; // lines of a failed step with no failing tests in it
+
+const usage = `usage: ci-failures [<run id> | <sha> | <branch>] [-R owner/repo] [--full]
+       ci-failures --list [-n 20] [<branch>] [-R owner/repo]`;
+
+function die(msg, code = 2) {
+  process.stderr.write(`ci-failures: ${msg}\n`);
+  process.exit(code);
+}
+
+// --- arguments -----------------------------------------------------------------------------------------------------
+let repo = process.env.GH_REPO || '';
+let full = false;
+let list = false;
+let count = 20;
+let target = '';
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '-R' || a === '--repo') repo = argv[++i] ?? die(usage);
+  else if (a.startsWith('--repo=')) repo = a.slice(7);
+  else if (a === '--full') full = true;
+  else if (a === '--list') list = true;
+  else if (a === '-n') count = Number(argv[++i]);
+  else if (a === '-h' || a === '--help') { console.log(usage); process.exit(0); }
+  else if (a.startsWith('-')) die(`unknown option ${a}\n${usage}`);
+  else if (target) die(`one run at a time\n${usage}`);
+  else target = a;
+}
+if (!(count > 0 && count <= 100)) die('-n takes 1 to 100');
+
+function git(...args) {
+  try { return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; }
+}
+if (!repo) {
+  const url = git('remote', 'get-url', 'origin');
+  const m = url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  if (!m) die('no GitHub remote named origin here: say which repo with -R owner/repo');
+  repo = m[1];
+}
+
+// --- GitHub --------------------------------------------------------------------------------------------------------
+function gh(args) {
+  try {
+    return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    die(`gh ${args.join(' ')} failed: ${String(e.stderr || e.message).trim().split('\n')[0]}`);
+  }
+}
+const api = (path) => JSON.parse(gh(['api', `repos/${repo}/${path}`]));
+const apiLater = (path) =>
+  new Promise((resolve) =>
+    execFile('gh', ['api', `repos/${repo}/${path}`], { encoding: 'utf8', maxBuffer: 16 << 20 }, (err, out) => resolve(err ? null : JSON.parse(out))),
+  );
+
+const runsFor = (query) => api(`actions/runs?per_page=${list ? count : 5}${query}`).workflow_runs;
+const newest = (runs) => runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+function branchRuns(branch) {
+  const twin = branch.startsWith('land/') ? branch.slice(5) : `land/${branch}`;
+  return newest([...runsFor(`&branch=${encodeURIComponent(branch)}`), ...runsFor(`&branch=${encodeURIComponent(twin)}`)]);
+}
+
+function findRun() {
+  if (/^\d+$/.test(target)) return api(`actions/runs/${target}`);
+  if (/^[0-9a-f]{7,40}$/.test(target)) {
+    const sha = target.length === 40 ? target : git('rev-parse', '--verify', '--quiet', `${target}^{commit}`);
+    const runs = sha
+      ? runsFor(`&head_sha=${sha}`)
+      : api('actions/runs?per_page=100').workflow_runs.filter((r) => r.head_sha.startsWith(target));
+    if (runs.length) return newest(runs)[0];
+    if (sha || !git('rev-parse', '--verify', '--quiet', `refs/heads/${target}`)) die(`no run on commit ${target} in ${repo}`);
+  }
+  const branch = target || git('rev-parse', '--abbrev-ref', 'HEAD');
+  if (!branch || branch === 'HEAD') die(`not on a branch here: name a run id, sha or branch\n${usage}`);
+  const runs = branchRuns(branch);
+  if (!runs.length) die(`no run for ${branch} or its land/ twin in ${repo}`);
+  return runs[0];
+}
+
+// --- times ---------------------------------------------------------------------------------------------------------
+const ms = (t) => (t ? Date.parse(t) : NaN);
+function span(sec) {
+  if (!Number.isFinite(sec) || sec < 0) return '?';
+  sec = Math.round(sec);
+  return sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m${String(sec % 60).padStart(2, '0')}s` : `${Math.floor(sec / 3600)}h${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')}m`;
+}
+const pacific = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
+const when = (t) => pacific.format(new Date(t)).replace(',', '');
+
+/** Queued: the run's creation to its first job's start. Ran: first job's start to last job's end (or now). */
+function timing(run, jobs) {
+  const starts = jobs.map((j) => ms(j.started_at)).filter(Number.isFinite);
+  const ends = jobs.map((j) => ms(j.completed_at)).filter(Number.isFinite);
+  const first = starts.length ? Math.min(...starts) : NaN;
+  const last = run.status === 'completed' ? (ends.length ? Math.max(...ends) : ms(run.updated_at)) : Date.now();
+  return { queued: (first - ms(run.created_at)) / 1000, ran: (last - first) / 1000 };
+}
+
+function runLine(run, jobs) {
+  const { queued, ran } = timing(run, jobs);
+  const verdict = run.status === 'completed' ? run.conclusion : run.status;
+  const mark = verdict === 'success' ? '✔' : run.status === 'completed' ? '✖' : '…';
+  const attempt = run.run_attempt > 1 ? ` (attempt ${run.run_attempt})` : '';
+  return `${mark} run ${run.id}${attempt} ${verdict} · ${run.name} · ${run.head_branch} ${run.head_sha.slice(0, 8)} · ${when(run.created_at)} · queued ${span(queued)}, ran ${span(ran)} · ${run.html_url}`;
+}
+
+// --- the log -------------------------------------------------------------------------------------------------------
+const ESC = /(?:\x1b|\^\[)\[[0-9;?]*[A-Za-z]/g; // gh writes the escape byte as a literal ^[ unless told otherwise
+const STAMP = /^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/;
+const WORKDIR = /(?:file:\/\/)?\/[^\s()]*?\/_work\/[^/\s]+\/[^/\s]+\//g; // a runner's checkout, so paths read as the repo's
+
+/** gh's --log-failed lines (job, step, timestamped text) as { job, step, text }, cleaned. */
+function parseLog(raw) {
+  return raw.split('\n').filter((l) => l !== '').map((l) => {
+    const [job, step, ...rest] = l.split('\t');
+    if (!rest.length) return { job: '', step: '', text: l.replace(ESC, '') };
+    return { job, step, text: rest.join('\t').replace(STAMP, '').replace(ESC, '').replace(WORKDIR, '').trimEnd() };
+  });
+}
+
+/** One failed test's lines, without Node's internal frames or an assertion's property dump. */
+function trimFailure(lines) {
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^\s+at .* \{$/.test(l)) {
+      let end = i + 1;
+      while (end < lines.length && !/^\s*\}$/.test(lines[end])) end++;
+      const props = lines.slice(i + 1, end);
+      if (props.some((p) => /code: 'ERR_ASSERTION'/.test(p))) {
+        if (!/node:internal|processTicksAndRejections/.test(l)) out.push(l.slice(0, -2));
+        i = end;
+        continue;
+      }
+    }
+    if (/^\s+at (?:async )?.*(?:node:internal\/|processTicksAndRejections)/.test(l)) continue;
+    out.push(l);
+  }
+  while (out.length && !out.at(-1).trim()) out.pop();
+  return out.length > PER_FAILURE ? [...out.slice(0, PER_FAILURE - 1), `  … ${out.length - PER_FAILURE + 1} more lines in the saved log`] : out;
+}
+
+/** What to print for one job's failed log: node's failing tests when it has them, else the end of the step. */
+function summarize(texts) {
+  // gh often can't tell the steps apart ("UNKNOWN STEP") and hands over the whole job: the job's cleanup follows its last error.
+  const error = texts.findLastIndex((t) => t.startsWith('##[error]'));
+  if (error >= 0) texts = texts.slice(0, error + 1);
+  const at = texts.findLastIndex((t) => /^✖ failing tests:\s*$/.test(t));
+  if (at < 0) {
+    const body = texts.filter((t) => !/^(?:##\[(?:group|endgroup)\]|✔ )/.test(t) && !/^##\[error\]Process completed/.test(t));
+    return { tests: 0, lines: body.slice(-TAIL) };
+  }
+  // Blocks: an optional "test at file:line" and the "✖ name" line, then indented or blank lines.
+  const blocks = [];
+  const after = [];
+  let cur = null;
+  for (const t of texts.slice(at + 1)) {
+    if (/^test at /.test(t)) { cur = { head: [t], body: [] }; blocks.push(cur); continue; }
+    if (/^✖ /.test(t)) {
+      if (cur && cur.head.length === 1 && /^test at /.test(cur.head[0]) && !cur.body.length) cur.head.push(t);
+      else { cur = { head: [t], body: [] }; blocks.push(cur); }
+      continue;
+    }
+    if (cur && (t.trim() === '' || /^\s/.test(t))) { cur.body.push(t); continue; }
+    cur = null;
+    if (t.trim() && !/^##\[(?:error\]Process completed|group|endgroup)/.test(t)) after.push(t);
+  }
+  const lines = [];
+  blocks.forEach((b, i) => {
+    if (i < MAX_FAILURES) lines.push(...b.head, ...trimFailure(b.body), '');
+    else if (i === MAX_FAILURES) lines.push(`… and ${blocks.length - MAX_FAILURES} more:`, ...blocks.slice(MAX_FAILURES).map((x) => `  ${x.head.find((h) => h.startsWith('✖')) ?? x.head[0]}`), '');
+  });
+  lines.push(...after.slice(-10));
+  return { tests: blocks.length, lines };
+}
+
+// --- modes ---------------------------------------------------------------------------------------------------------
+async function listRuns() {
+  const runs = target ? branchRuns(target).slice(0, count) : runsFor('');
+  const jobs = await Promise.all(runs.map((r) => apiLater(`actions/runs/${r.id}/jobs`)));
+  for (const [i, r] of runs.entries()) {
+    const { queued, ran } = timing(r, jobs[i]?.jobs ?? []);
+    const verdict = r.status === 'completed' ? r.conclusion : r.status;
+    console.log([r.id, verdict.padEnd(9), r.head_sha.slice(0, 8), when(r.created_at), `queued ${span(queued).padStart(5)}`, `ran ${span(ran).padStart(6)}`, r.head_branch].join('  '));
+  }
+}
+
+function show() {
+  const run = findRun();
+  const jobs = api(`actions/runs/${run.id}/jobs?per_page=100`).jobs;
+  console.log(runLine(run, jobs));
+  if (run.status !== 'completed') process.exit(3);
+  if (run.conclusion === 'success') process.exit(0);
+
+  const failed = jobs.filter((j) => j.conclusion && !['success', 'skipped', 'neutral'].includes(j.conclusion));
+  for (const j of failed) {
+    const steps = (j.steps ?? []).filter((s) => ['failure', 'cancelled', 'timed_out'].includes(s.conclusion)).map((s) => `"${s.name}" ${s.conclusion}`);
+    console.log(`✖ job ${j.name} ${j.conclusion}${steps.length ? `, step ${steps.join(', step ')}` : ''}`);
+  }
+  const raw = gh(['run', 'view', String(run.id), '-R', repo, '--log-failed']);
+  const parsed = parseLog(raw);
+  if (!parsed.length) { console.log('(GitHub kept no log for the failed steps)'); process.exit(1); }
+  const names = [...new Set(parsed.map((p) => p.job))];
+  const file = join(process.env.TMPDIR || tmpdir(), `ci-${run.id}.log`);
+  writeFileSync(file, parsed.map((p) => (names.length > 1 ? `[${p.job}] ${p.text}` : p.text)).join('\n') + '\n');
+  if (full) {
+    console.log(parsed.map((p) => (names.length > 1 ? `[${p.job}] ${p.text}` : p.text)).join('\n'));
+  } else {
+    for (const name of names) {
+      const { tests, lines } = summarize(parsed.filter((p) => p.job === name).map((p) => p.text));
+      console.log('');
+      console.log(tests ? `${tests} failing test${tests === 1 ? '' : 's'}${names.length > 1 ? ` in ${name}` : ''}:` : `no failing tests named; the end of ${names.length > 1 ? `${name}'s` : 'the'} failed step:`);
+      console.log(lines.join('\n').replace(/\n+$/, ''));
+    }
+  }
+  console.log(`\nfull log: ${file}`);
+  process.exit(1);
+}
+
+if (list) await listRuns();
+else show();

@@ -1,0 +1,63 @@
+test	UNKNOWN STEP	﻿2026-11-13T07:45:27.6451563Z Current runner version: '2.338.2'
+test	UNKNOWN STEP	2026-11-13T07:45:27.6455985Z Runner name: 'DESKTOP-G248IJ8-linux'
+test	UNKNOWN STEP	2026-11-13T07:45:27.6456537Z Runner group name: 'Default'
+test	UNKNOWN STEP	2026-11-13T07:45:32.5798689Z run-tests: tier product (the 14 pipeline test files left out): this change touches nothing in tools/pipeline-files.txt
+test	UNKNOWN STEP	2026-11-13T07:45:55.2661232Z ✖ a feeder folded into its build and dismissed is merged for a chain, and live once the build lands (160.007195ms)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2690722Z ℹ fail 5
+test	UNKNOWN STEP	2026-11-13T07:46:36.2690774Z ℹ cancelled 0
+test	UNKNOWN STEP	2026-11-13T07:46:36.2690822Z ℹ skipped 0
+test	UNKNOWN STEP	2026-11-13T07:46:36.2690875Z ℹ todo 0
+test	UNKNOWN STEP	2026-11-13T07:46:36.2690945Z ℹ duration_ms 63479.923993
+test	UNKNOWN STEP	2026-11-13T07:46:36.2690953Z 
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691005Z ✖ failing tests:
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691010Z 
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691100Z test at test/chained-minions.test.ts:207:1
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691335Z ✖ a feeder folded into its build and dismissed is merged for a chain, and live once the build lands (160.007195ms)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691509Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691557Z   
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691597Z   0 !== 1
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691638Z   
+test	UNKNOWN STEP	2026-11-13T07:46:36.2691913Z       at TestContext.<anonymous> (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/chained-minions.test.ts:222:10)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692042Z       at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692136Z       at async Test.run (node:internal/test_runner/test:1409:7)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692265Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692320Z     generatedMessage: true,
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692374Z     code: 'ERR_ASSERTION',
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692423Z     actual: 0,
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692465Z     expected: 1,
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692520Z     operator: 'strictEqual',
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692570Z     diff: 'simple'
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692614Z   }
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692618Z 
+test	UNKNOWN STEP	2026-11-13T07:46:36.2692706Z test at test/chained-minions.test.ts:382:1
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693036Z ✖ a chained minion's brief stays held until its start sends it: a start that never gets there isn't repeated, and runs again after a restart (#468 S04-5) (185.243483ms)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693128Z   AssertionError [ERR_ASSERTION]: the brief is still stored
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693178Z   + actual - expected
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693213Z   
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693258Z     [
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693307Z       'build part two',
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693351Z   +   'build part two',
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693398Z   +   'build part two'
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693435Z     ]
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693478Z   
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693763Z       at TestContext.<anonymous> (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/chained-minions.test.ts:390:10)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2693948Z       at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694038Z       at async Test.run (node:internal/test_runner/test:1409:7)
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694169Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694220Z     generatedMessage: false,
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694272Z     code: 'ERR_ASSERTION',
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694374Z     actual: [ 'build part two', 'build part two', 'build part two' ],
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694434Z     expected: [ 'build part two' ],
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694497Z     operator: 'deepStrictEqual',
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694546Z     diff: 'simple'
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694582Z   }
+test	UNKNOWN STEP	2026-11-13T07:46:36.2694586Z 
+test	UNKNOWN STEP	2026-11-13T07:46:36.2829580Z run-tests: 1 test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /opt/actions-runner-claude-coordinator/_work/_temp/tests-rerun.log)
+test	UNKNOWN STEP	2026-11-13T07:46:41.8775079Z run-tests: test/chained-minions.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 5.90)
+test	UNKNOWN STEP	2026-11-13T07:46:41.8781539Z run-tests: the run still fails: a rerun only labels flakes, it never turns a red run green
+test	UNKNOWN STEP	2026-11-13T07:46:42.8821651Z ##[error]Process completed with exit code 1.
+test	UNKNOWN STEP	2026-11-13T07:46:42.8855532Z ##[group]Run ps -u "$(id -u)" -o pid,ppid,etimes,stat,args --forest | cut -c1-400
+test	UNKNOWN STEP	2026-11-13T07:46:42.8855803Z ^[[36;1mps -u "$(id -u)" -o pid,ppid,etimes,stat,args --forest | cut -c1-400^[[0m
+test	UNKNOWN STEP	2026-11-13T07:46:42.8866188Z shell: /usr/bin/bash -e {0}
+test	UNKNOWN STEP	2026-11-13T07:46:42.8866317Z env:
+test	UNKNOWN STEP	2026-11-13T07:46:42.8866421Z   XDG_RUNTIME_DIR: /run/user/997

@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
-import { claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
+import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
 import { claudeConfigDir, transcriptPath, validSessionId } from './sessions.ts';
 
@@ -102,6 +102,8 @@ export interface Usage {
 export type Emit = (event: string, data: object) => void;
 
 export const DEFAULT_COMPACT_WINDOW = 40_000;
+/** How much of a failed tool call's error text its tool_result event carries. */
+export const TOOL_ERROR_MAX = 2_000;
 export const DEFAULT_TIMEOUT_SEC = 180;
 /** How long a restart of a contraption waits for its running turns (#319): about a turn's default timeout. */
 export const DRAIN_MS = 3 * 60_000;
@@ -585,7 +587,12 @@ export class ContraptionTurns {
       } else if (ev.type === 'user' && ev.isReplay && !parent && live.steers.delete(ev.uuid)) {
         emit('taken', { id: ev.uuid });
       } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
-        for (const b of ev.message.content) if (b?.type === 'tool_result') emit('tool_result', { id: b.tool_use_id, ok: !b.is_error, parent });
+        for (const b of ev.message.content) {
+          if (b?.type !== 'tool_result') continue;
+          // A failed call carries the error the agent saw (a refusal before the tool ran has no other trace, #624); output never goes out.
+          if (b.is_error) emit('tool_result', { id: b.tool_use_id, ok: false, parent, error: blockText(b.content).slice(0, TOOL_ERROR_MAX) });
+          else emit('tool_result', { id: b.tool_use_id, ok: true, parent });
+        }
       } else if (ev.type === 'result') {
         result = ev;
         if (ev.usage) metered = true;

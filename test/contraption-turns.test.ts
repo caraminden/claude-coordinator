@@ -21,7 +21,7 @@ after(async () => {
 const data = join(root, 'data');
 process.env.DATA_DIR = data;
 testPins(data);
-const { ContraptionTurns, parseTurn, TurnError } = await import('../src/contraption-turns.ts');
+const { ContraptionTurns, parseTurn, TOOL_ERROR_MAX, TurnError } = await import('../src/contraption-turns.ts');
 
 // A stand-in for claude: logs what it was started with (argv, cwd, env, and the settings and MCP config
 // files it was pointed at, read while it runs), keeps a transcript file like claude does, and replies
@@ -87,6 +87,14 @@ take().then((m) => {
   if (prompt.includes('plan limit')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   if (prompt.includes('expired')) { out({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 authentication_error OAuth token has expired' }); process.exit(1); }
   if (prompt.includes('crash')) { process.stderr.write('boom\\n'); process.exit(3); }
+  if (prompt.includes('refused')) {
+    // A call refused before it reached the app (#624): the error the agent saw, as a string or as text blocks.
+    out({ type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', id: 'r1', name: 'mcp__mandate__list', input: {} }, { type: 'tool_use', id: 'r2', name: 'mcp__mandate__list', input: {} }] } });
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'r1', is_error: true, content: 'MCP error -32001: Request timed out' + 'y'.repeat(5000) }] } });
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'r2', is_error: true, content: [{ type: 'text', text: 'No such tool available: mcp__mandate__list' }] }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: '', usage: {} });
+    return;
+  }
   if (prompt.includes('grunts')) {
     // As Claude Code 2.1.316 streams it: a Grunt's events carry its Agent call's id; one it starts shows only as its Agent call.
     const g = 'ag1', p = { parent_tool_use_id: g };
@@ -283,13 +291,23 @@ test('webSearch: true adds WebSearch and WebFetch to the tools and the allow lis
   assert.equal(argAfter(lastRun().argv, '--tools'), '', 'false is the default: no built-in tools');
 });
 
+test('a failed tool call\'s result carries the error the agent saw, cut to TOOL_ERROR_MAX (#624)', async () => {
+  const evs = await turn(mandate, { session: 'refused', prompt: 'Get refused.', mcp: [{ name: 'mandate', path: '/mcp' }] });
+  const results = evs.filter((e) => e.event === 'tool_result').map((e) => e.data);
+  assert.equal(results.length, 2);
+  assert.deepEqual({ ...results[0], error: undefined }, { id: 'r1', ok: false, parent: null, error: undefined });
+  assert.equal(results[0].error.length, TOOL_ERROR_MAX);
+  assert.ok(results[0].error.startsWith('MCP error -32001: Request timed out'));
+  assert.deepEqual(results[1], { id: 'r2', ok: false, parent: null, error: 'No such tool available: mcp__mandate__list' });
+});
+
 test('a Grunt\'s tool calls and results carry its Agent call\'s id, the top level\'s carry null, and its words never stream', async () => {
   const evs = await turn(mandate, { session: 'grunts', prompt: 'Use grunts.', agents: { max: 2 }, mcp: [{ name: 'mandate', path: '/mcp' }] });
   assert.deepEqual(evs.filter((e) => e.event === 'tool' || e.event === 'tool_result' || e.event === 'text'), [
     { event: 'text', data: { delta: 'Asking. ', parent: null, message: 'm1' } },
     { event: 'tool', data: { id: 'ag1', name: 'Agent', input: { prompt: 'look' }, parent: null } },
     { event: 'tool', data: { id: 'gt1', name: 'mcp__mandate__list', input: {}, parent: 'ag1' } },
-    { event: 'tool_result', data: { id: 'gt1', ok: false, parent: 'ag1' } },
+    { event: 'tool_result', data: { id: 'gt1', ok: false, parent: 'ag1', error: 'x' } },
     { event: 'tool', data: { id: 'ag2', name: 'Agent', input: { prompt: 'deeper' }, parent: 'ag1' } },
     { event: 'tool_result', data: { id: 'ag2', ok: true, parent: 'ag1' } },
     { event: 'tool_result', data: { id: 'ag1', ok: true, parent: null } },

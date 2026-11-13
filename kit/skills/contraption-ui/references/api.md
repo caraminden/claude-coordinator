@@ -262,7 +262,7 @@ last event is always `end` or `error`, then the stream closes.
 | `start` | `{ turn, session, claudeSession, provider, model }`. `turn` is the id for cancel and messages. `provider` is `claude` or `codex`, and `model` the one that runs, after any fallback or override: as you asked (`haiku`), or `null` for Claude Code's default |
 | `text` | `{ delta, parent: null, message }`: the top-level agent's words, streamed. A new `message` id is a new model message (a new paragraph either side of a tool call); never glue two messages' deltas. Grunts' words are never streamed |
 | `tool` | `{ id, name, input, parent }`: `parent` is `null` at the top level, or the `id` of the Agent call whose Grunt made this call |
-| `tool_result` | `{ id, ok, parent }`, no content (your tool produced it) |
+| `tool_result` | `{ id, ok, parent }`, never the tool's output (your tool produced it). A failed call (`ok: false`) adds `error`: the error text the agent saw, up to 2000 characters, so a call refused before it reached your tool (a timeout or refusal in the agent's MCP client or Citadel's relay) still says why |
 | `compacted` | `{}`: the conversation was compacted |
 | `taken` | `{ id }`: the agent read a mid-turn message, `id` as its send returned |
 | `end` | `{ stop, usage: { input, output, cacheRead, cacheWrite }, provider, model }`; usage adds up every reply in the turn, and `model` is the full name the agent reported (`claude-haiku-…`), else as in `start` |
@@ -578,6 +578,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-13:** A failed call's `tool_result` event carries `error`, the error text the agent saw
+  (up to 2000 characters).
 - **2026-11-10:** `POST /api/contraptions/embed` turns texts into vectors with Citadel's local
   embedding model, for search by meaning over your own data.
 - **2026-11-09:** `GET /api/contraptions/home` says whether a person is a member of your home

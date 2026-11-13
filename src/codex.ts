@@ -53,7 +53,7 @@ export function fitLog(parts: Part[], max = HANDOVER_MAX): string {
     .join('\n');
 }
 
-const blockText = (c: any): string =>
+export const blockText = (c: any): string =>
   typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b?.type === 'text' ? String(b.text ?? '') : b?.type === 'image' ? '[image]' : `[${b?.type ?? 'block'}]`)).join('\n') : '';
 
 /** A tool call as one log line: a Bash command as it is, anything else as its JSON input. */

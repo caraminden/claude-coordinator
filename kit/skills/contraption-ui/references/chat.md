@@ -38,8 +38,8 @@ only live region, so a screen reader hears progress without the whole log.
 - `block(name, input, result)`: draw a top-level call as your own card (Theory of Crafting's
   viability card). Called when the call starts (`result` undefined) and once when its result comes;
   return an element for a card, null to leave it a step. Agent calls are always Grunt rows. `result`
-  is the tool_result event's `data` as it came, with `id` (the call's) and `ok` (a boolean): fields
-  your server attaches to the tool_result events it stores and relays (the tool's output) reach your card.
+  is the tool_result event's `data` as it came, with `id` (the call's), `ok` (a boolean) and, when
+  it failed, `error` (the text the agent saw): fields your server attaches to the tool_result events it stores and relays (the tool's output) reach your card.
 - `markdown: { text, link, image }`: your markdown hooks (as in [markdown.md](markdown.md)) for every reply,
   history included, and for `renderChat`. Each one you give replaces the kit's for that hook only; line
   breaks and streaming stay the kit's. The kit leaves a link to your own paths (`/apps/<you>/...`) an

@@ -772,7 +772,7 @@ function renderProgress() {
   // The minion's own guesses for its steps (#551, Josh's pick). Only while no wait has a real estimate of its own.
   const est = !w && live ? planEstimate(p, running, Date.now(), view.ticket.step_ratio) : null;
   // The turn's clock is neither the step's time nor the plan's, so it gives way to the captions under the bar (#630).
-  const time = w ? waitClock(w, 'time wait-time') : running && !est && view.ticket.turnStartedAt ? waitClock({ since: view.ticket.turnStartedAt }, 'time wait-time') : '';
+  const time = w ? waitClock(w, 'time wait-time of-wait') : running && !est && view.ticket.turnStartedAt ? waitClock({ since: view.ticket.turnStartedAt }, 'time wait-time') : '';
   const left = est && h('span', { class: 'left', title: view.ticket.step_ratio && view.ticket.step_ratio !== 1 ? `The minion's guesses for the steps left, times ${view.ticket.step_ratio.toFixed(2)}: what steps have really taken against their guesses` : "The minion's own guess for the steps left" }, leftText(est));
 
   const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {

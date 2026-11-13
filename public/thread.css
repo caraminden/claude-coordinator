@@ -429,3 +429,5 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .wait-track .done i { background: var(--done); }
 .wait-track .now i { background: var(--running); }
 .wait-track .now { color: var(--ink); font-weight: 650; }
+/* A phone's line keeps a wait's words ("Test 3/6 · CI: the full suite"); its Test piece already fills by the time (#630). */
+@media (max-width: 800px) { .progress-line .time.of-wait { display: none; } }

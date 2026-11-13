@@ -676,6 +676,19 @@ const CONTRAPTION_TOOLS = [
   },
 ];
 
+/** Publishing a home contraption's Android release into its feed (#663): a scheme that has home contraptions. */
+const PUBLISH_RELEASE = {
+  name: 'publish_release',
+  description: `Publish a contraption's Android release, as the Deploy button on its card on the Releases page does, on the ${APP_NAME} server (so it works from a container turn too). It takes the newest signed release APK newer than the published build (from the CI store, or the run's GitHub artifact), checks it is signed with the same key as the published APK (refused if not: phones won't update across keys), copies it into the contraption's android/ feed and points latest.json at it, so installed phones see the update. With no such APK yet but a version bumped on main, it starts the release workflow instead; call it again once that run has signed. Who published which build from which run is kept and told to the scheme's Taskmaster.${HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      contraption: { type: 'string', ...(HOME_CONTRAPTIONS.length ? { enum: HOME_CONTRAPTIONS } : {}) },
+    },
+    required: ['contraption'],
+  },
+};
+
 /** Deploying a contraption from its repo: for Citadel's Taskmaster on an admin's turn, and a contraption's home scheme. */
 const DEPLOY_CONTRAPTION = {
   name: 'deploy_contraption',
@@ -1326,6 +1339,8 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
       return readText(args.app, args.command, r);
     }
+    case 'publish_release':
+      return (await call('POST', `/api/projects/${PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {
       const path = `${contraptionPath(args)}/deploy`;
       if (args.follow !== true) await call('POST', path, {});
@@ -1568,10 +1583,10 @@ const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ti
 
 function toolList() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
-  const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
+  const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
-  return [...THREAD_TOOLS, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

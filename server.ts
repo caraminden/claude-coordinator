@@ -63,7 +63,7 @@ import { Builds } from './src/builds.ts';
 import { Waits } from './src/waits.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
-import { dispatch, OldApk, publish } from './src/apk-release.ts';
+import { dispatch, OldApk, OtherKey, publish } from './src/apk-release.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
@@ -552,25 +552,34 @@ const autoDeploy = new AutoDeploy({
         const w = apkReader.pending(t);
         return !w ? null : w.step === 'dispatch' ? `dispatch:${w.head}` : `publish:${w.run.id}`;
       },
-      start: async (t) => {
+      start: async (t, by, uid) => {
         const w = apkReader.pending(t);
         const p = store.getProject(t.projectId);
         const slug = p && repoSlug(p.repo_url);
-        if (!w || !p?.repo_dir || !slug || !t.workflow || !t.contraption) throw new HttpError(409, `${t.name} has nothing to release`);
+        if (!w || !p?.repo_dir || !slug || !t.workflow || !t.contraption) throw new HttpError(409, `${t.name} has nothing to release: no signed APK newer than the published build is waiting, or a release run is still going. The Releases page reads CI every few minutes, so a run that just finished shows a little later.`);
         const as = githubOf(p.repo_dir);
         const release = async () => {
           await dispatch(slug, t.workflow!.replace(/^.*\//, ''), t.branch, as);
           apkReader.started(t);
         };
+        const started = `No signed APK newer than the published build yet: started a release run of ${t.branch} (${t.workflow}). Once it has signed one, publish again.`;
+        let said = started;
         if (w.step === 'dispatch') await release();
         else {
           const feedFile = join(services.opts.home, '.local/share', t.contraption, 'android', 'latest.json');
           try {
             // The signed APK the run put in the CI store (#658), when it did; else its GitHub artifact.
             const stored = ciStore.releaseApk(p.id, w.run.id);
-            await publish({ slug, runId: w.run.id, feedFile, current: w.current, main: w.main, as, stored: (stored && (await ciStore.plain(stored))) ?? undefined });
+            const code = await publish({ slug, runId: w.run.id, feedFile, current: w.current, main: w.main, as, stored: (stored && (await ciStore.plain(stored))) ?? undefined });
             if (stored) store.publishCiFile(stored.id, `${t.contraption}/android`);
+            // Who published what (#663): kept, and told to the scheme's Taskmaster.
+            store.recordApkPublish({ projectId: p.id, contraption: t.contraption, versionCode: code, runId: w.run.id, by, uid });
+            const who = uid != null && by.startsWith('#') ? `${by} (for ${store.getUser(uid)?.name ?? 'someone'})` : by;
+            said = `Published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${w.run.id}: installed phones see the update now.`;
+            tellHome(p.id, `${who} published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${w.run.id}.`);
           } catch (err) {
+            // A key the published APK wasn't signed with: refused, with nothing changed.
+            if (err instanceof OtherKey) throw new HttpError(409, err.message);
             if (!(err instanceof OldApk)) throw err;
             // Signed before main's version bump: sign main instead.
             apkReader.tooOld(w.run.id);
@@ -578,6 +587,7 @@ const autoDeploy = new AutoDeploy({
           }
         }
         void releases.refresh();
+        return said;
       },
     },
   },

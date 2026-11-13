@@ -127,6 +127,27 @@ export const appRoutes: Route[] = [
     releases.poll();
     return json(res, 202, { ok: true });
   } },
+  // publish_release (#663; Josh, 2026-11-13: "We should fix things so that any scheme member can publish"): a scheme's
+  // Taskmaster or minion releases the Android app of a contraption its scheme owns, on the server, so a container turn can
+  // too. The same step as the card's Deploy button (src/auto-deploy.ts), signing-key check and record included.
+  { method: 'POST', path: '/api/projects/:project/releases/publish', who: ['taskmaster', 'minion'], handler: async ({ req, res, app: { store, autoDeploy, releases }, caller, params }) => {
+    const projectId = Number(params.project);
+    const name = str((await readJson(req))?.contraption, 'contraption', 100);
+    const c = store.getContraption(name);
+    if (!c || c.home_scheme !== projectId) throw new HttpError(403, `${name} isn't one of this scheme's contraptions`);
+    const t = autoDeploy.apkOf(projectId, name);
+    if (!t) throw new HttpError(404, `${name} has no Android release Citadel can publish: it needs a release workflow and an android/latest.json feed`);
+    const by = caller!.kind === 'coordinator' ? `${store.getProject(projectId)?.name ?? 'the'} Taskmaster` : `#${caller!.number}`;
+    let said: string | undefined;
+    try {
+      said = await autoDeploy.deployNow(projectId, t.id, by, store.turnAsker(caller!.id));
+    } catch (err) {
+      if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
+      throw err;
+    }
+    releases.poll();
+    return json(res, 200, { said: said ?? `Started ${t.name}'s release.` });
+  } },
   // A target's auto-deploy on or off (#629: "A scheme can turn it off"), from its card, by any member of its scheme.
   { method: 'PUT', path: '/api/releases/auto-deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {
     const body = await readJson(req);

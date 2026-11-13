@@ -491,6 +491,19 @@ CREATE TABLE IF NOT EXISTS ci_files (
   published_at INTEGER,
   UNIQUE (project_id, workflow, run_id, run_attempt, name)
 );
+-- Who published which Android build of a contraption, from which run, and when (#663): the Releases page's Deploy
+-- button, auto-deploy and publish_release all write it. published_by is a person's name, '#N' for a minion, or 'auto-deploy';
+-- uid the person it was for (a minion's turn: whoever asked for it), or null.
+CREATE TABLE IF NOT EXISTS apk_publishes (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  contraption TEXT NOT NULL,
+  version_code INTEGER NOT NULL,
+  run_id INTEGER NOT NULL,
+  published_by TEXT NOT NULL,
+  uid INTEGER,
+  at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ticket_seen (
   name TEXT NOT NULL,
   ticket_id INTEGER NOT NULL REFERENCES tickets(id),
@@ -574,7 +587,7 @@ CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
 CREATE TABLE IF NOT EXISTS instruction_history (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
-  by TEXT NOT NULL,
+  published_by TEXT NOT NULL,
   at INTEGER NOT NULL,
   old_text TEXT NOT NULL,
   new_text TEXT NOT NULL
@@ -583,7 +596,7 @@ CREATE INDEX IF NOT EXISTS instruction_history_project ON instruction_history(pr
 -- Saves of the Citadel-wide instructions (#148), whose text is in settings under app_instructions.
 CREATE TABLE IF NOT EXISTS app_instruction_history (
   id INTEGER PRIMARY KEY,
-  by TEXT NOT NULL,
+  published_by TEXT NOT NULL,
   at INTEGER NOT NULL,
   old_text TEXT NOT NULL,
   new_text TEXT NOT NULL
@@ -694,7 +707,7 @@ CREATE TABLE IF NOT EXISTS artifact_data (
   file TEXT NOT NULL,
   key TEXT NOT NULL,
   value TEXT NOT NULL,
-  by TEXT NOT NULL,
+  published_by TEXT NOT NULL,
   at INTEGER NOT NULL,
   PRIMARY KEY (project_id, file, key)
 );
@@ -800,7 +813,7 @@ CREATE TABLE IF NOT EXISTS contraption_deploys (
   name TEXT NOT NULL,
   from_sha TEXT,
   to_sha TEXT,
-  by TEXT NOT NULL,
+  published_by TEXT NOT NULL,
   started_at INTEGER NOT NULL,
   finished_at INTEGER,
   outcome TEXT NOT NULL,
@@ -1773,6 +1786,11 @@ export class Store {
   /** A file was copied to `to` (a contraption's feed): the newest one published there is never swept. */
   publishCiFile(id: number, to: string) {
     this.db.prepare('UPDATE ci_files SET published_to = ?, published_at = ? WHERE id = ?').run(to, Date.now(), id);
+  }
+
+  /** A contraption's Android build was published into its feed (#663). */
+  recordApkPublish(r: { projectId: number; contraption: string; versionCode: number; runId: number; by: string; uid: number | null }) {
+    this.db.prepare('INSERT INTO apk_publishes (project_id, contraption, version_code, run_id, published_by, uid, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(r.projectId, r.contraption, r.versionCode, r.runId, r.by, r.uid, Date.now());
   }
 
   /** Pins on files of a project's shared folder, by path relative to it. Kept while the file is gone, like an artifact's. */

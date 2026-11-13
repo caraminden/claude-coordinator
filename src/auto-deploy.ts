@@ -22,8 +22,11 @@ export interface Deployer {
   waits(t: Found, tv: Omit<TargetView, 'testCopies'>): boolean;
   /** The commit a deploy would ship now (its branch's head), or null when it can't tell. */
   head(t: Found): Promise<string | null>;
-  /** Start a deploy, by a person's name or AUTO_BY; throws or rejects (an HttpError, a ServiceError) when it can't start. */
-  start(t: Found, by: string, uid: number | null): void | Promise<void>;
+  /**
+   * Start a deploy, by a person's name, a minion's '#N' or AUTO_BY; throws or rejects (an HttpError, a ServiceError) when it
+   * can't start. May answer with a line on what it did.
+   */
+  start(t: Found, by: string, uid: number | null): void | string | Promise<void | string>;
 }
 
 /** What a target's card shows of its deploy: whether the button shows, auto-deploy on or off, and when it's due. */
@@ -110,8 +113,8 @@ export class AutoDeploy {
     return { can, auto, due };
   }
 
-  /** Deploy a target now (the card's button), as a person. Throws what the deploy refused with. */
-  async deployNow(projectId: number, target: string, by: string, uid: number | null) {
+  /** Deploy a target now (the card's button, publish_release), as a person or a minion. Throws what the deploy refused with; answers what start said. */
+  async deployNow(projectId: number, target: string, by: string, uid: number | null): Promise<string | undefined> {
     const t = this.found(projectId, target);
     const deployer = t && this.d.deployers[t.kind];
     if (!t || !deployer) throw new HttpError(404, `${target} has no release step Citadel can start`);
@@ -123,10 +126,15 @@ export class AutoDeploy {
       const head = await deployer.head(t);
       // A person's deploy counts as this commit's try: if it rolls back, auto-deploy waits for main to move.
       if (head) this.mark(key, head);
-      await deployer.start(t, by, uid);
+      return (await deployer.start(t, by, uid)) ?? undefined;
     } finally {
       this.starting.delete(key);
     }
+  }
+
+  /** A scheme's Android target whose feed is contraption `name`'s, if it has one Citadel can release (publish_release). */
+  apkOf(projectId: number, name: string): Found | undefined {
+    return this.d.targets().find((t) => t.projectId === projectId && t.kind === 'apk' && t.contraption === name && !!this.d.deployers.apk);
   }
 
   /** The commit auto-deploy or the button last started a deploy for, or null. */

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { apkCode, dispatch, nextFeed, OldApk, publish } from '../src/apk-release.ts';
+import { apkCode, certDigests, dispatch, nextFeed, OldApk, OtherKey, publish } from '../src/apk-release.ts';
 
 // src/apk-release.ts (#629): an APK target's release step, as Mandate's android/README.md does it by hand. A fake gh on
 // PATH stands in for GitHub: `run download` writes the artifact named by APK_NAME, and every call is logged.
@@ -51,6 +51,42 @@ test('publish copies the run\'s APK in, then points latest.json at it; an APK no
   assert.equal(readFileSync(join(dir, 'mandate-6.apk'), 'utf8'), 'apk');
   assert.ok(!existsSync(`${feedFile}.tmp`));
   assert.match(readFileSync(log, 'utf8'), /^run download 8 --repo o\/mandate --dir \S+$/m);
+});
+
+test('certDigests reads apksigner\'s SHA-256 lines, sorted, and nothing else', () => {
+  const out = `Signer #1 certificate DN: CN=Mandate, O=Citadel
+Signer #1 certificate SHA-256 digest: c85e60a2
+Signer #1 certificate SHA-1 digest: 407455f0
+Signer #2 certificate SHA-256 digest: 0badf00d
+`;
+  assert.deepEqual(certDigests(out), ['0badf00d', 'c85e60a2']);
+  assert.deepEqual(certDigests('WARNING: META-INF/x not protected\n'), []);
+});
+
+test('publish refuses an APK signed with another key than the published one, changing nothing; the same key goes through (#663)', async () => {
+  const dir = join(root, 'keys');
+  mkdirSync(dir);
+  const feedFile = join(dir, 'latest.json');
+  writeFileSync(feedFile, JSON.stringify({ versionCode: 6, apk: 'mandate-6.apk' }));
+  writeFileSync(join(dir, 'mandate-6.apk'), 'old');
+  const stored = join(root, 'mandate-7.apk');
+  writeFileSync(stored, 'new');
+  // The fake reads the "key" from the file's contents: the published APK's is 'old'.
+  let key = 'other';
+  const read: string[] = [];
+  const certs = async (apk: string) => (read.push(apk), [readFileSync(apk, 'utf8') === 'old' ? 'aaa' : key === 'same' ? 'aaa' : 'bbb']);
+  const go = () => publish({ slug: 'o/mandate', runId: 9, feedFile, current: 6, main: { code: 7, name: '1.7' }, as: undefined, stored, certs });
+  await assert.rejects(go(), (err: any) => err instanceof OtherKey && /another key \(certificate SHA-256 bbb\) than the published mandate-6\.apk \(aaa\)/.test(err.message));
+  assert.deepEqual(read.sort(), [join(dir, 'mandate-6.apk'), stored].sort(), 'both APKs were read');
+  assert.equal(JSON.parse(readFileSync(feedFile, 'utf8')).versionCode, 6, 'the feed is untouched');
+  assert.ok(!existsSync(join(dir, 'mandate-7.apk')), 'and the APK not copied in');
+
+  // An APK apksigner finds no certificate in counts as another key.
+  await assert.rejects(publish({ slug: 'o/mandate', runId: 9, feedFile, current: 6, main: { code: 7, name: '1.7' }, as: undefined, stored, certs: async (a) => (a === stored ? [] : ['aaa']) }), OtherKey);
+
+  key = 'same';
+  assert.equal(await go(), 7);
+  assert.deepEqual(JSON.parse(readFileSync(feedFile, 'utf8')), { versionCode: 7, apk: 'mandate-7.apk', versionName: '1.7' });
 });
 
 test('dispatch starts the release workflow on the branch', async () => {

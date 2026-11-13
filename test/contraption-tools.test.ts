@@ -274,3 +274,23 @@ test('deploy_contraption: its home scheme\'s Taskmaster and minions, and Citadel
   }
   assert.equal((await srv.call('/api/contraptions/twin/deploy')).status, 200, 'an admin reads the last deploy');
 });
+
+test('publish_release: offered to a home scheme\'s Taskmaster and minions; the server refuses another scheme\'s contraption and one with no Android feed (#663)', async () => {
+  const DelveMinion = thread(Delve.id, 'ticket');
+  turnFor(DelveMinion, olive.id);
+  store.updateContraption('twin', { home_scheme: Delve.id });
+  const role = (t: any) => (t.kind === 'ticket' ? 'thread' : 'coordinator');
+  const offered = async (t: any, home?: string) => (await mcp(t, 'tools/list', {}, false, home, role(t))).tools.some((x: any) => x.name === 'publish_release');
+  assert.equal(await offered(DelveTM, 'twin'), true, 'home Taskmaster');
+  assert.equal(await offered(DelveMinion, 'twin'), true, 'home minion');
+  assert.equal(await offered(DelveMinion), false, 'a scheme home to none');
+  assert.equal(await offered(CitadelTM), false, 'Citadel\'s Taskmaster is not offered another scheme\'s');
+
+  const call = async (t: any) => (await mcp(t, 'tools/call', { name: 'publish_release', arguments: { contraption: 'twin' } }, false, 'twin', role(t))).content[0].text as string;
+  // Through to the release step: twin has no android/latest.json feed, so nothing Citadel can publish.
+  for (const t of [DelveTM, DelveMinion]) assert.match(await call(t), /twin has no Android release Citadel can publish/);
+  // Refused: a minion of a scheme twin isn't home to, even naming it.
+  assert.match(await call(Minion), /twin isn't one of this scheme's contraptions/);
+  // A person goes through the Releases page's Deploy button, not this route.
+  assert.equal((await srv.call(`/api/projects/${Delve.id}/releases/publish`, { contraption: 'twin' })).status, 403);
+});

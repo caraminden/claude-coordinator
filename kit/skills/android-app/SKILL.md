@@ -64,6 +64,9 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   without Citadel's cookie. The tailnet keeps them private.
 - A signed APK built in CI reaches perigee through Citadel's CI store, not a GitHub artifact: the
   release workflow uploads it as kind `release` (the `citadel:ci-store` skill).
+- Publish it into the contraption's feed with the `publish_release` tool (from any turn, container
+  ones too) or the Deploy button on its card on the Releases page, not by copying files. Both refuse
+  an APK signed with a different key from the published one, and record who published it.
 - The web layer compares `App.getInfo().build` with `latest.json`. When it's behind, it shows
   "Update the app", which opens the APK URL in the system browser, and Android's installer takes
   it from there. A web-only change needs no new APK.

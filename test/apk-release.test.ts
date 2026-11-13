@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { Store } from '../src/db.ts';
 import { apkCode, certDigests, dispatch, nextFeed, OldApk, OtherKey, publish } from '../src/apk-release.ts';
 
 // src/apk-release.ts (#629): an APK target's release step, as Mandate's android/README.md does it by hand. A fake gh on
@@ -87,6 +88,15 @@ test('publish refuses an APK signed with another key than the published one, cha
   key = 'same';
   assert.equal(await go(), 7);
   assert.deepEqual(JSON.parse(readFileSync(feedFile, 'utf8')), { versionCode: 7, apk: 'mandate-7.apk', versionName: '1.7' });
+});
+
+test('a publish is kept: who, which build, which run and when, by scheme (#663)', () => {
+  const store = new Store(join(root, 'publishes.db'));
+  const p = store.createProject('Mandate', null);
+  store.recordApkPublish({ projectId: p.id, contraption: 'mandate', versionCode: 7, runId: 43502731900, by: '#112', uid: null });
+  const rows = store.db.prepare('SELECT project_id, contraption, version_code, run_id, published_by, uid FROM apk_publishes').all();
+  assert.deepEqual(rows.map((r) => ({ ...r })), [{ project_id: p.id, contraption: 'mandate', version_code: 7, run_id: 43502731900, published_by: '#112', uid: null }]);
+  store.db.close();
 });
 
 test('dispatch starts the release workflow on the branch', async () => {

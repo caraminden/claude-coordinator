@@ -587,7 +587,7 @@ CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
 CREATE TABLE IF NOT EXISTS instruction_history (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
-  published_by TEXT NOT NULL,
+  by TEXT NOT NULL,
   at INTEGER NOT NULL,
   old_text TEXT NOT NULL,
   new_text TEXT NOT NULL
@@ -596,7 +596,7 @@ CREATE INDEX IF NOT EXISTS instruction_history_project ON instruction_history(pr
 -- Saves of the Citadel-wide instructions (#148), whose text is in settings under app_instructions.
 CREATE TABLE IF NOT EXISTS app_instruction_history (
   id INTEGER PRIMARY KEY,
-  published_by TEXT NOT NULL,
+  by TEXT NOT NULL,
   at INTEGER NOT NULL,
   old_text TEXT NOT NULL,
   new_text TEXT NOT NULL
@@ -707,7 +707,7 @@ CREATE TABLE IF NOT EXISTS artifact_data (
   file TEXT NOT NULL,
   key TEXT NOT NULL,
   value TEXT NOT NULL,
-  published_by TEXT NOT NULL,
+  by TEXT NOT NULL,
   at INTEGER NOT NULL,
   PRIMARY KEY (project_id, file, key)
 );
@@ -813,7 +813,7 @@ CREATE TABLE IF NOT EXISTS contraption_deploys (
   name TEXT NOT NULL,
   from_sha TEXT,
   to_sha TEXT,
-  published_by TEXT NOT NULL,
+  by TEXT NOT NULL,
   started_at INTEGER NOT NULL,
   finished_at INTEGER,
   outcome TEXT NOT NULL,

@@ -3,7 +3,7 @@
 // android/ folder and point latest.json at it, so installed phones see the update banner. GitHub calls go through the
 // gh CLI as the scheme owner's linked login, as CI health's reads do.
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { copyFile, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -27,7 +27,11 @@ export function certDigests(out: string): string[] {
 /** An APK's signing certificates (SHA-256), by apksigner from the shared Android toolchain (#379); throws when it doesn't verify. */
 export async function signers(apk: string): Promise<string[]> {
   const env = { ...process.env, ...androidEnv(homedir(), process.env.PATH) };
-  const tool = join(env.ANDROID_HOME ?? join(homedir(), ANDROID_SDK), 'build-tools', '36.1.0', 'apksigner');
+  const tools = join(env.ANDROID_HOME ?? join(homedir(), ANDROID_SDK), 'build-tools');
+  // The newest build-tools installed, so a toolchain upgrade doesn't break publishing.
+  const newest = (existsSync(tools) ? readdirSync(tools) : []).sort((a, b) => a.localeCompare(b, 'en', { numeric: true })).at(-1);
+  if (!newest) throw new Error(`apksigner isn't installed (no ${tools}), so ${basename(apk)}'s signing key can't be checked: install the Android toolchain (tools/android/install-sdk.sh)`);
+  const tool = join(tools, newest, 'apksigner');
   try {
     return certDigests((await run(tool, ['verify', '--print-certs', apk], { env, timeout: 2 * 60_000 })).stdout);
   } catch (err: any) {

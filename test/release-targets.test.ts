@@ -271,11 +271,11 @@ test('the CI package reader: the newest run whose job passed is the release, a r
   await reader.refresh();
   const [v] = reader.read();
   assert.deepEqual(v.target, { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null });
-  assert.deepEqual([v.current?.number, v.current?.version], [3, 'sha3'], 'run 4 skipped its release job, so run 3 is what people have');
+  assert.deepEqual([v.current?.number, v.current?.version], [1, 'sha3'], 'run 4 skipped its release job, so run 3 is what people have: release 1, the first counted');
   assert.equal(v.current?.link, 'https://github.com/o/r/actions/runs/3/artifacts/31', 'the package named for the repo, not the dump');
   assert.deepEqual(v.current?.stages, { ci: 600, package: 600 });
-  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome, r.link]), [[2, 'live', 'https://github.com/o/r/actions/runs/2'], [1, 'failed', 'https://github.com/o/r/actions/runs/1']], 'no file left: its run page');
-  assert.equal(v.next?.number, 5);
+  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome, r.link]), [[null, 'live', 'https://github.com/o/r/actions/runs/2'], [null, 'failed', 'https://github.com/o/r/actions/runs/1']], 'before counting began, and a failed one: no number; no file left: its run page');
+  assert.equal(v.next?.number, 2);
   assert.equal(v.next?.stage, 'package');
   assert.equal(v.next?.usual, 600, 'the median package time of the shipped runs');
   assert.equal(v.next?.eta, now - 2 * m + 600_000);
@@ -291,7 +291,10 @@ test('the CI package reader: the newest run whose job passed is the release, a r
   await reader.refresh();
   assert.equal(reads.runs, 3, 'nothing moving: no read until the idle interval passes');
   const [done] = reader.read();
-  assert.equal(done.current?.number, 5);
+  assert.equal(done.current?.number, 2, 'counted on with no gap for the runs that shipped nothing');
+  assert.deepEqual(done.recent.map((r) => r.number), [1, null, null]);
+  await reader.refresh();
+  assert.equal(store.countReleases(p.id, t.id), 2, 'each run is counted once');
   assert.equal(done.next, null);
 });
 
@@ -372,8 +375,8 @@ test('the APK reader with no latest.json: the newest signed run is the release',
   const reader = new ApkReader({ store, finder: finderOf([t]), actions, now: () => now, feed: async () => null });
   await reader.refresh();
   const [v] = reader.read();
-  assert.deepEqual([v.current?.number, v.current?.outcome, v.current?.stages.sign], [2, 'live', 300]);
-  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome]), [[3, 'failed']]);
+  assert.deepEqual([v.current?.number, v.current?.outcome, v.current?.stages.sign], [1, 'live', 300]);
+  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome]), [[null, 'failed']]);
 });
 
 test('the Main reader: each head of main is a release with the minions it took in; open PRs are the next, by checks then a go to merge', async () => {
@@ -447,7 +450,7 @@ test("a job's own name, not a step's or an input's, is what its runs are matched
   function job_(name: string) { return job(2, name, 'completed', 'success', now - 300_000, now); }
   const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => now });
   await reader.refresh();
-  assert.equal(reader.read()[0].current?.number, 2);
+  assert.equal(reader.read()[0].current?.number, 1);
 });
 
 // Shaped like poe2's deploy/preview.sh.

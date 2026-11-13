@@ -5,7 +5,6 @@
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
 import { ago, api, fileUrl, h, view } from './base.js';
-import { mountTips } from './ui/tip.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
 import { TRACK, waitBar } from './wait.js';
@@ -51,7 +50,6 @@ function redraw() {
     slot.replaceChildren(releaseChip(view.ticket) ?? '');
     view.branchEl.hidden = !view.branchEl.querySelector(':scope > :not(.rel-chip-slot)') && !slot.firstChild;
   }
-  tips?.refresh();
 }
 
 // ---------- words and numbers ----------
@@ -82,15 +80,14 @@ const etaWords = (eta, suffix) => (eta > Date.now() ? `~${shortSpan(eta - Date.n
  * What people call a release (Cara, 2026-11-12: "a numbered build/release system instead of commit hashes"): "Release 14",
  * "#14" where space is short; a try that never went live has no number, so it's "a failed try".
  */
-const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : `Release ${r.number}`) : 'a failed try');
-/** The commit or version name behind it, for whoever wants it. */
+const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : `Release ${r.number}`) : r.outcome === 'signed' ? 'a signed build' : r.outcome === 'live' ? 'an earlier release' : 'a failed try');
+/** The commit or version name behind it, shown small on its card for whoever wants it (no hover: Cara, 2026-11-12, "if you want more info, click"). */
 const releaseDetail = (r) => (r.version ? (isSha(r.version) ? `commit ${r.version.slice(0, 7)}` : `version ${r.version}`) : '');
 
 /** A release by its number, linked to the release itself (the live site, its file) when it has one: a new tab, as it may leave Citadel. */
 function versionLink(r, cls = 'rel-ver', short = false) {
-  const title = [releaseName(r), releaseDetail(r)].filter(Boolean).join(', ');
-  return r.link ? h('a', { class: cls, href: r.link, target: '_blank', rel: 'noopener', title, onclick: (e) => e.stopPropagation() }, releaseName(r, short))
-    : h('span', { class: cls, title }, releaseName(r, short));
+  return r.link ? h('a', { class: cls, href: r.link, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, releaseName(r, short))
+    : h('span', { class: cls }, releaseName(r, short));
 }
 
 // ---------- the Schemes list ----------
@@ -112,7 +109,7 @@ export function releaseRows(projectId) {
   return h('div', { class: 'rel-rows', 'data-rel-scheme': projectId }, (s?.targets ?? []).map((tv) => {
     const href = pageHref(projectId);
     return h('div', {
-      class: `rel-row${tv.next ? ' moving' : ''}`, 'data-rel-tip': `${projectId}/${tv.target.id}`,
+      class: `rel-row${tv.next ? ' moving' : ''}`,
       // The whole row opens the scheme's page (Josh: "clicking any of the releases would take you to that schemes detail page"); its release link opens the release.
       onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = href; } },
     },
@@ -126,29 +123,6 @@ export function releaseRows(projectId) {
 /** The Releases link beside the Schemes heading, styled as Browse beside Artifacts: opens All. */
 export function releasesLink() {
   return h('a', { class: `browse${view?.main === 'releases' && page?.scope === 'all' ? ' active' : ''}`, href: pageHref('all'), onclick: opening, title: 'Releases of every scheme you\'re a member of' }, 'Releases');
-}
-
-/** The hover's detail for a target: next release, its stage n/N with time or what it waits on, the estimate, the changes, the current release. */
-function tipBody(key) {
-  const [pid, ...rest] = key.split('/');
-  const projectId = Number(pid);
-  const tv = schemes.get(projectId)?.targets.find((t) => t.target.id === rest.join('/'));
-  if (!tv) return null;
-  const n = tv.next;
-  const line = (label, ...v) => h('div', {}, h('span', { class: 'muted' }, label, ' '), ...v);
-  const out = [h('div', {}, h('b', {}, `${schemeName(projectId)} ${tv.target.name}`))];
-  if (n) {
-    if (n.number != null) out.push(line('Next', h('b', {}, releaseName(n))));
-    const list = segments(n.stages);
-    const at = list.findIndex((s) => s.name === n.stage);
-    const elapsed = shortSpan(Date.now() - n.since);
-    out.push(line('Stage', h('b', {}, stageName(n.stage)), at >= 0 ? ` ${at + 1}/${list.length}` : '', ' · ',
-      n.waitingOn ? h('span', { class: 'waits' }, n.waitingOn) : n.usual ? `${elapsed} of ~${shortSpan(n.usual * 1000)}` : `${elapsed}, ${n.text}`));
-    out.push(line('Whole release', n.eta ? etaText(n.eta, ' left') : n.waitingOn ? 'no estimate while it waits' : 'no estimate yet'));
-    out.push(line('In it', ...n.changes.flatMap((c, i) => [i ? ', ' : '', h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ` ${c.title}`])));
-  } else out.push(h('div', { class: 'muted' }, 'Nothing on its way.'));
-  if (tv.current) out.push(line('Current', versionLink(tv.current), tv.current.live ? `, live ${ago(tv.current.live)}` : ''));
-  return h('div', { class: 'rel-tip' }, out);
 }
 
 // ---------- tracks ----------
@@ -166,18 +140,18 @@ function stageTrack(stages, p, { mini = false, labels = false } = {}) {
   return h('ol', { class: `rel-track${mini ? ' mini' : ''}`, 'aria-label': `${stageName(p.stage)}, stage ${at + 1} of ${list.length}` }, list.map((s, i) => {
     const now = i === at;
     const bar = (now && !p.waitingOn && waitBar({ stage: p.stage, since: p.since, usual: p.usual, done: p.done, total: p.total }, 'wait-bar', 90)) || h('span', { class: 'wait-bar' }, h('i'));
-    const li = h('li', { class: i < at ? 'done' : now ? (p.waitingOn ? 'now waits' : 'now') : '', title: s.usual ? `${stageName(s.name)}: usually ~${shortSpan(s.usual * 1000)}` : stageName(s.name) },
+    const li = h('li', { class: i < at ? 'done' : now ? (p.waitingOn ? 'now waits' : 'now') : '' },
       bar, labels ? h('span', { class: 'lbl' }, stageName(s.name)) : '');
     li.style.flexGrow = String(Math.max(s.usual ?? floor, floor)); // CSP drops style attributes, not the property
     return li;
   }));
 }
 
-/** A change's stage and its wait or time left: "Deploy ~50s left", "Line 2nd in line, behind #620". */
-function changeNow(next, c) {
+/** A change's stage and its wait or time left: "Deploy ~50s left", "Line 2nd in line, behind #620"; under a card that already says its wait, `said` keeps it from repeating. */
+function changeNow(next, c, said = false) {
   const eta = changeEta(next, c);
   return [h('b', { class: c.waitingOn ? 'waits' : 'work' }, stageName(c.stage)), ' ',
-    h('span', { class: 'muted' }, c.waitingOn ? c.waitingOn : eta ? etaText(eta, ' left') : c.text)];
+    h('span', { class: 'muted' }, c.waitingOn ? (said && c.waitingOn === next.waitingOn ? 'waits with the release, as above' : c.waitingOn) : eta ? etaText(eta, ' left') : c.text)];
 }
 
 // ---------- the page ----------
@@ -242,21 +216,23 @@ function schemeCards(projectId, alone) {
 
 function targetCard(projectId, tv, alone) {
   const n = tv.next, cur = tv.current, hl = page?.hl;
-  const recent = tv.recent.slice(0, 3).filter(tookText);
+  // Only numbered ones: a run from before counting began has no name to give it.
+  const recent = tv.recent.filter((r) => r.number != null && tookText(r)).slice(0, 3);
   const curTook = cur && tookText(cur);
   return h('article', { class: `rel-card${hl && n?.changes.some((c) => c.ticketId === hl) ? ' hl' : ''}` },
     h('header', {}, h('h3', {}, alone ? tv.target.name : `${schemeName(projectId)} ${tv.target.name}`)),
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
+      cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : '',
       recent.length ? h('span', { class: 'muted' }, ' · before: ', recent.flatMap((r, i) => [i ? ', ' : '', versionLink(r, 'rel-ver old'), ` took ${tookText(r)}`])) : ''),
     deployBar(projectId, tv),
-    h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { href: n.link, target: '_blank', rel: 'noopener', title: 'Try it before it goes live' }, releaseName(n)) : releaseName(n)] : 'Next release'),
+    h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
       h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', n.waitingOn ? h('span', { class: 'waits' }, n.waitingOn) : n.eta ? etaText(n.eta, ' left') : n.text,
         n.changes.length > 1 ? h('span', { class: 'muted' }, ` · +${n.changes.length - 1} more`) : ''),
       h('ul', { class: 'rel-changes' }, n.changes.map((c) => h('li', { class: `rel-change${c.ticketId === hl ? ' hl' : ''}` },
         h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
-        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...changeNow(n, c))))),
+        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...changeNow(n, c, true))))),
     ] : h('p', { class: 'muted' }, 'Nothing on its way.'),
     tv.line.length ? [h('h4', {}, 'Land line'), lineList(projectId, tv.line)] : '',
     tv.testCopies.length ? [h('h4', {}, 'Test copies'), copyList(tv.testCopies)] : '');
@@ -362,7 +338,7 @@ function allView(ids) {
       for (const r of [tv.current, ...tv.recent]) if (r?.live >= midnight) for (const c of r.changes) cells[3].push(liveCard(id, r, c));
       return h('div', { class: 'rel-grid-row', role: 'row' },
         h('a', { class: 'rel-target', role: 'rowheader', href: pageHref(id) }, h('b', {}, `${schemeName(id)} ${tv.target.name}`),
-          tv.current ? h('span', { class: 'muted', title: releaseDetail(tv.current) }, releaseName(tv.current), tv.current.live ? ` · ${ago(tv.current.live).replace(/ ago$/, '')}` : '') : ''),
+          tv.current ? h('span', { class: 'muted' }, releaseName(tv.current), tv.current.live ? ` · ${ago(tv.current.live).replace(/ ago$/, '')}` : '') : ''),
         cells.map((list) => h('div', { class: 'cell', role: 'cell' }, list)));
     }));
   const copies = ids.flatMap((id) => {
@@ -386,12 +362,12 @@ export function releaseChip(t) {
     const c = tv.next?.changes.find((x) => x.ticketId === t.id);
     if (c) {
       const n = tv.next.number;
-      return h('a', { class: 'rel-chip', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, title: `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
+      return h('a', { class: 'rel-chip', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, 'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
         n != null ? h('span', { class: 'muted' }, releaseName(tv.next, true)) : '', stageTrack(tv.next.stages, c, { mini: true }), ...changeNow(tv.next, c), h('span', { 'aria-hidden': 'true' }, '›'));
     }
   }
   if (t.ship?.stage === 'build' && t.build) {
-    return h('a', { class: 'rel-chip', href: pageHref(t.project_id), onclick: (e) => { e.stopPropagation(); opening(); }, title: t.ship.text },
+    return h('a', { class: 'rel-chip', href: pageHref(t.project_id), onclick: (e) => { e.stopPropagation(); opening(); } },
       h('span', { class: 'muted' }, `folded into Build ${t.build}`), h('span', { 'aria-hidden': 'true' }, '›'));
   }
   return null;
@@ -399,9 +375,7 @@ export function releaseChip(t) {
 
 // ---------- live ----------
 
-let tips = null;
 if (typeof document !== 'undefined') {
-  tips = mountTips(document.body, { selector: '[data-rel-tip]', role: 'dialog', label: 'Release', className: 'rel-tipbox', acts: '.rel-row', body: (el) => tipBody(el.dataset.relTip) });
   setInterval(() => {
     for (const el of document.querySelectorAll('.rel-eta[data-eta]')) el.textContent = etaWords(Number(el.dataset.eta), el.dataset.suffix);
   }, 1000);

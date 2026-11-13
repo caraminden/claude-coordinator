@@ -218,17 +218,14 @@ const shipped = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ?
 /** A run that tried to ship and didn't: its job ran (not skipped) and failed. */
 const failedShip = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ? r.jobs[0].conclusion === 'failure' : r.run.conclusion === 'failure');
 
-/**
- * A run as a release: numbered by the workflow's run number (GitHub's own counter, so it skips the runs that shipped
- * nothing), linked to the file it shipped or else its run page (where its files are), with its CI and package times.
- */
-function runRelease(r: RunJobs, outcome: string, changes: Release['changes'] = [], file: string | null = null): Release {
+/** A run as a release: linked to the file it shipped or else its run page (where its files are), with its CI and package times. */
+function runRelease(r: RunJobs, outcome: string, changes: Release['changes'] = [], file: string | null = null, number: number | null = null): Release {
   const s = span(r);
   const stages: Record<string, number> = {};
   const ci = secs(s.start, s.started), pkg = secs(s.started, s.end);
   if (ci != null) stages.ci = ci;
   if (pkg != null) stages.package = pkg;
-  return { version: r.run.head_sha, number: r.run.run_number ?? null, link: file ?? r.run.html_url ?? null, changes, started: s.start, live: outcome === 'live' ? s.end : null, outcome, stages };
+  return { version: r.run.head_sha, number, link: file ?? r.run.html_url ?? null, changes, started: s.start, live: outcome === 'live' ? s.end : null, outcome, stages };
 }
 
 /** The usual CI and package time of the newest shipped runs. */
@@ -315,6 +312,30 @@ class RunsCache {
       }
     }
   }
+
+  /**
+   * Write a releases row for each shipped run newer than the last one written (only the newest, the first time), so a
+   * target counts its releases from 1 with no gaps, rather than by GitHub's run number, which counts every run.
+   */
+  record(t: Found) {
+    const { store } = this.d;
+    const key = (r: RunJobs) => r.run.run_number ?? r.run.id;
+    const last = store.listReleases(t.projectId, t.id, 1)[0];
+    const done = last ? Number(last.version.replace(/^run:/, '')) : null;
+    const fresh = (this.runs.get(t.id) ?? []).filter((r) => shipped(r) && (done == null || key(r) > done));
+    for (const r of (done == null ? fresh.slice(0, 1) : fresh).reverse()) {
+      const s = span(r);
+      store.addRelease({ project_id: t.projectId, target: t.id, version: `run:${key(r)}`, changes: '[]', started_at: s.start, live_at: s.end, outcome: 'live', stages: '{}' });
+    }
+  }
+
+  /** The release number of each recorded run (by run number), and how many there are: the newest's number. */
+  numbers(t: Found): { of: (r: RunJobs) => number | null; total: number } {
+    const total = this.d.store.countReleases(t.projectId, t.id);
+    const rows = this.d.store.listReleases(t.projectId, t.id, RECENT * 2 + 1);
+    const by = new Map(rows.map((row, i) => [row.version, total - i]));
+    return { of: (r) => by.get(`run:${r.run.run_number ?? r.run.id}`) ?? null, total };
+  }
 }
 
 export const CI_TRACK = ['ci', 'package', 'live'];
@@ -329,7 +350,10 @@ export class CiPackageReader implements Reader {
   }
 
   async refresh() {
-    for (const t of this.d.finder.list('ci')) await this.cache.read(t);
+    for (const t of this.d.finder.list('ci')) {
+      await this.cache.read(t);
+      this.cache.record(t);
+    }
   }
 
   read(): Omit<TargetView, 'testCopies'>[] {
@@ -338,14 +362,15 @@ export class CiPackageReader implements Reader {
       const runs = this.cache.runs.get(t.id) ?? [];
       const ch = (r: RunJobs) => this.cache.changes.get(r.run.id) ?? [];
       const file = (r: RunJobs) => this.cache.files.get(r.run.id) ?? null;
+      const num = this.cache.numbers(t);
       const cur = runs.find(shipped);
-      const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r), file(r)));
+      const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
       const usual = runUsual(runs);
       // The newest run in flight leads; a run older than the current release can't be its next.
       const moving = runs.find((r) => r.run.status !== 'completed');
       const lead = moving && (!cur || runs.indexOf(moving) < runs.indexOf(cur)) ? runProgress(moving, usual, now) : null;
       const changes: Change[] = lead ? ch(moving!).map((c) => ({ ...c, ...lead })) : [];
-      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), file(cur)) : null, next: lead ? nextOf(CI_TRACK, usual, lead, changes, moving!.run.run_number ?? null) : null, line: [], recent };
+      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), file(cur), num.of(cur)) : null, next: lead ? nextOf(CI_TRACK, usual, lead, changes, num.total + 1) : null, line: [], recent };
     });
   }
 }
@@ -353,10 +378,10 @@ export class CiPackageReader implements Reader {
 export const APK_TRACK = ['sign', 'publish', 'live'];
 
 /** A release workflow's run as a signed APK: signing is the whole run. */
-function apkRun(r: RunJobs, outcome: string, file: string | null = null): Release {
+function apkRun(r: RunJobs, outcome: string, file: string | null = null, number: number | null = null): Release {
   const s = span(r);
   const sign = secs(s.start, s.end);
-  return { ...runRelease(r, outcome, [], file), live: outcome === 'live' ? s.end : null, stages: sign != null ? { sign } : {} };
+  return { ...runRelease(r, outcome, [], file, number), live: outcome === 'live' ? s.end : null, stages: sign != null ? { sign } : {} };
 }
 
 /** latest.json, as its app's update banner reads it. */
@@ -399,6 +424,8 @@ export class ApkReader implements Reader {
     for (const t of this.d.finder.list('apk')) {
       await this.cache.read(t);
       if (t.contraption) this.feeds.set(t.id, await this.d.feed(t.contraption));
+      // With no latest.json its signed runs are its releases, numbered as a CI package's.
+      if (!this.feeds.get(t.id)) this.cache.record(t);
       const p = this.d.store.getProject(t.projectId);
       if (!p?.repo_dir) continue;
       const head = (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim();
@@ -427,17 +454,18 @@ export class ApkReader implements Reader {
       };
       if (!feed) {
         // No feed to read: the newest signed run is the release, as for a CI package.
+        const num = this.cache.numbers(t);
         const cur = runs.find(shipped);
-        const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => apkRun(r, shipped(r) ? 'live' : 'failed', file(r)));
+        const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => apkRun(r, shipped(r) ? 'live' : 'failed', file(r), num.of(r)));
         const lead = moving && (!cur || runs.indexOf(moving) < runs.indexOf(cur)) ? signing(moving) : null;
-        return { target: targetOf(t), current: cur ? apkRun(cur, 'live', file(cur)) : null, next: lead ? nextOf(APK_TRACK, usual, lead, [], moving!.run.run_number ?? null) : null, line: [], recent };
+        return { target: targetOf(t), current: cur ? apkRun(cur, 'live', file(cur), num.of(cur)) : null, next: lead ? nextOf(APK_TRACK, usual, lead, [], num.total + 1) : null, line: [], recent };
       }
       // Numbered by its versionCode, the counter its app's update banner reads; the versionName stays as the detail.
       const version = main?.code === feed.versionCode && main.name ? main.name : feed.versionName ?? String(feed.versionCode);
       const link = feed.apk && t.contraption ? `/apps/${t.contraption}/android/${feed.apk}` : t.link;
       const current: Release = { version, number: feed.versionCode, link, changes: [], started: null, live: feed.at, outcome: 'live', stages: {} };
-      // Its signed runs, as the APKs people could have been given: numbered by run, a different counter, so not shown as releases.
-      const recent = runs.filter((r) => shipped(r) || failedShip(r)).slice(0, RECENT).map((r) => ({ ...apkRun(r, shipped(r) ? 'signed' : 'failed', file(r)), number: null }));
+      // Its signed runs, as the APKs people could have been given: not releases, so no release number.
+      const recent = runs.filter((r) => shipped(r) || failedShip(r)).slice(0, RECENT).map((r) => apkRun(r, shipped(r) ? 'signed' : 'failed', file(r)));
       let lead: Progress | null = null;
       let tryIt: string | null = null;
       if (main && main.code > feed.versionCode) {

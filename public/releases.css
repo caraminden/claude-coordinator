@@ -4,19 +4,16 @@
 /* Under a scheme's row: one indented row per target, its stage track under it while a release moves. */
 .rel-rows:empty { display: none; }
 .rel-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; column-gap: 0.5rem; margin-left: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.85em; cursor: pointer; }
-.rel-row:hover { background: var(--panel); }
+.rel-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .rel-row .rel-name { color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rel-row:not(.moving) .rel-name { color: var(--muted); }
 .rel-row .rel-ver { grid-column: 3; }
-.rel-ver { font-family: var(--mono); font-size: 0.85em; color: var(--accent); text-decoration: none; }
+.rel-ver { font-variant-numeric: tabular-nums; color: var(--accent); text-decoration: none; }
 a.rel-ver:hover { text-decoration: underline; }
 .rel-ver.old { color: var(--muted); }
 .rel-est { font-weight: 600; color: var(--running); font-variant-numeric: tabular-nums; }
-.rel-est.waits, :is(.releases-main, .rel-tip, .rel-chip) .waits { color: var(--held); }
+.rel-est.waits, :is(.releases-main, .rel-chip) .waits { color: var(--held); }
 .rel-row > .rel-track { grid-column: 1 / -1; margin: 0.3rem 0 0.15rem; }
-/* The hover's detail (ui/tip.js). */
-.rel-tip { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.9em; max-width: 22rem; }
-.rel-tip a:not(.rel-ver) { color: var(--accent); }
 
 /* The stage track: a segment per stage, as wide as its usual time (flex-grow from releases.js). */
 .rel-track { list-style: none; display: flex; gap: 3px; margin: 0.4rem 0 0.2rem; padding: 0; }
@@ -104,3 +101,7 @@ b.waits { color: var(--held); }
 .rel-chip { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.4rem; padding: 0.15rem 0.6rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--muted); text-decoration: none; white-space: nowrap; }
 .rel-chip:hover { border-color: var(--control-line); }
 .rel-chip .rel-track.mini { width: 3.2rem; }
+/* A long wait shortens to fit beside the PR info; the whole of it is a click away on the page. */
+.rel-chip { max-width: 100%; min-width: 0; overflow: hidden; }
+.rel-chip > span.muted:not(:first-child) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.turn-end .branch-status .rel-chip-slot { display: flex; min-width: 0; }

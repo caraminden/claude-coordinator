@@ -80,6 +80,11 @@ b.waits { color: var(--held); }
 .rel-carried { display: flex; flex-direction: column; gap: 0.2rem; margin: 0; padding: 0; list-style: none; }
 .rel-card-sm .where { font-size: 0.92em; }
 .rel-card-sm .rel-track.mini { width: 100%; }
+/* Colour (Cara, 2026-11-12: "Tint per scheme, but drop the dots, just the light tint"): each row washed in its scheme's
+   colour (releases.js tint(), from its icon), its target cell a little deeper with a stripe, its cards edged in it. */
+.rel-grid-row:not(.head) { background: color-mix(in srgb, var(--tint, transparent) 7%, var(--panel)); }
+.rel-grid-row:not(.head) > .rel-target { background: color-mix(in srgb, var(--tint, transparent) 22%, var(--panel)); box-shadow: inset 5px 0 var(--tint, transparent); padding-left: 0.85rem; }
+.rel-grid .rel-card-sm { background: var(--panel); border-color: color-mix(in srgb, var(--tint, var(--line)) 40%, var(--line)); }
 .rel-all-narrow { display: none; flex-direction: column; gap: 0.75rem; }
 @media (max-width: 800px) {
   .rel-head .close-view.wide-only { display: none; }

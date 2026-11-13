@@ -5,6 +5,7 @@
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
 import { ago, api, fileUrl, h, schemeIcon, view } from './base.js';
+import { iconSrc } from './schemes.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
 import { segTrack, TRACK } from './wait.js';
@@ -354,10 +355,10 @@ function allView(ids) {
       const cells = COLUMNS.map(() => []);
       for (const c of tv.next?.changes ?? []) cells[columnOf(tv.next.stages, c)].push(card(id, tv.next, c));
       if (tv.current) cells[3].push(lastCard(id, tv.current));
-      return h('div', { class: 'rel-grid-row', role: 'row' },
+      return tint(h('div', { class: 'rel-grid-row', role: 'row', 'data-scheme': id },
         h('div', { class: 'rel-target', role: 'rowheader', onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = pageHref(id); } } },
           h('a', { href: pageHref(id), onclick: opening }, iconOf(id), h('b', {}, `${schemeName(id)} ${tv.target.name}`))),
-        cells.map((list) => h('div', { class: 'cell', role: 'cell' }, list)));
+        cells.map((list) => h('div', { class: 'cell', role: 'cell' }, list))), id);
     }));
   const copies = ids.flatMap((id) => {
     const s = schemes.get(id);
@@ -369,6 +370,37 @@ function allView(ids) {
       copies.length ? [h('h4', {}, 'Test copies'), h('ul', { class: 'rel-list' }, copies.map(({ id, c }) => h('li', {}, copyList([c]).firstChild.firstChild, h('span', { class: 'muted' }, schemeName(id)))))] : ''),
     h('div', { class: 'rel-all-narrow' }, ids.flatMap((id) => schemeCards(id, false))),
   ];
+}
+
+/** Each scheme's colour for its All grid row: its icon's coloured pixels, averaged; grey for an icon without colour (null: none, or still reading). */
+const tints = new Map();
+
+/** Give `row` its scheme's tint (Cara, 2026-11-12: "Tint per scheme"), reading the icon once. */
+function tint(row, id) {
+  if (tints.get(id)) row.style.setProperty('--tint', tints.get(id));
+  const src = !tints.has(id) && schemeOf(id) && iconSrc(schemeOf(id));
+  if (!src) return row;
+  tints.set(id, null);
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const g = Object.assign(document.createElement('canvas'), { width: 24, height: 24 }).getContext('2d');
+      g.drawImage(img, 0, 0, 24, 24);
+      const px = g.getImageData(0, 0, 24, 24).data;
+      const sum = [0, 0, 0];
+      let n = 0;
+      for (let i = 0; i < px.length; i += 4) {
+        // Only opaque, coloured pixels: an icon's white or black outline would grey it out.
+        if (px[i + 3] < 128 || Math.max(px[i], px[i + 1], px[i + 2]) - Math.min(px[i], px[i + 1], px[i + 2]) < 40) continue;
+        for (let k = 0; k < 3; k++) sum[k] += px[i + k];
+        n++;
+      }
+      tints.set(id, n ? `rgb(${sum.map((v) => Math.round(v / n)).join(' ')})` : 'var(--muted)');
+      for (const el of document.querySelectorAll(`.rel-grid-row[data-scheme="${id}"]`)) el.style.setProperty('--tint', tints.get(id));
+    } catch { /* an icon the canvas can't read leaves its row plain */ }
+  };
+  img.src = src;
+  return row;
 }
 
 // ---------- the chip beside the PR info (take F) ----------

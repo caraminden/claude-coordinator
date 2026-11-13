@@ -2325,6 +2325,20 @@ export class Store {
       : this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? ORDER BY id DESC LIMIT ?').all(name, limit)) as unknown as ContraptionDeployRow[];
   }
 
+  /**
+   * How many releases a contraption has had, its newest deploy's number: its deploys that went live, plus the one it
+   * served before its first recorded deploy (that deploy started from a commit), so numbers don't move once recording began.
+   */
+  contraptionReleases(name: string): number {
+    return (this.db.prepare(`SELECT (SELECT COUNT(*) FROM contraption_deploys WHERE name = ? AND outcome = 'deployed')
+      + COALESCE((SELECT from_sha IS NOT NULL FROM contraption_deploys WHERE name = ? ORDER BY id LIMIT 1), 0) AS n`).get(name, name) as { n: number }).n;
+  }
+
+  /** How many releases a target has recorded: its newest one's release number. */
+  countReleases(projectId: number, target: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM releases WHERE project_id = ? AND target = ?').get(projectId, target) as { n: number }).n;
+  }
+
   /** A target's newest releases, newest first. */
   listReleases(projectId: number, target: string, limit: number): ReleaseRow[] {
     return this.db.prepare('SELECT * FROM releases WHERE project_id = ? AND target = ? ORDER BY id DESC LIMIT ?').all(projectId, target, limit) as unknown as ReleaseRow[];

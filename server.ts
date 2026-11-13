@@ -468,7 +468,7 @@ const tellHome = (projectId: number, text: string) => {
   if (tm) runner.send(tm.id, APP_NAME, text);
 };
 // The workflow readers go through CI health's etag-cached reads (defined below; first called after startup's scan).
-const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r) };
+const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r), runArtifacts: (p: Project, r: Run) => ciHealth.runArtifacts(p, r) };
 const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions });
 const apkReader = new ApkReader({
   store, finder: targetFinder, actions,

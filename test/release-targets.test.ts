@@ -8,7 +8,7 @@ import type { DeployView } from '../src/app-services.ts';
 import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, gradleVersion, lengths, MainReader, TestCopyReader, type Actions } from '../src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, gradleVersion, lengths, MainReader, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { copySources, detect, jobName, shipsOn, TargetFinder, type Found, type SchemeFacts } from '../src/release-targets.ts';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
@@ -73,7 +73,7 @@ test('a contraption, an APK workflow and a Windows release job are three targets
     contraptions: [{ name: 'mandate', title: 'Mandate' }], apkFeeds: ['mandate'],
     workflows: [{ path: '.github/workflows/android-release.yml', text: APK }, { path: '.github/workflows/windows.yml', text: WINDOWS }, { path: '.github/workflows/android.yml', text: DEBUG }],
   }));
-  assert.deepEqual(found.map((t) => `${t.kind} ${t.id} ${t.name}`), ['contraption app:mandate App', 'apk apk:android-release Android', 'ci ci:windows:release Windows']);
+  assert.deepEqual(found.map((t) => `${t.kind} ${t.id} ${t.name}`), ['contraption app:mandate Contraption', 'apk apk:android-release Android', 'ci ci:windows:release Windows']);
   assert.equal(found[1].link, '/apps/mandate/android/', 'the APK the app serves');
   assert.equal(found[1].contraption, 'mandate');
   assert.equal(found[2].link, 'https://github.com/o/mandate/actions/workflows/windows.yml');
@@ -165,8 +165,9 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
 
   await reader.refresh();
   let [v] = reader.read();
-  assert.deepEqual(v.target, { id: 'app:mandate', projectId: p.id, name: 'App', kind: 'contraption', link: '/apps/mandate/' });
+  assert.deepEqual(v.target, { id: 'app:mandate', projectId: p.id, name: 'Contraption', kind: 'contraption', link: '/apps/mandate/' });
   assert.equal(v.current?.version, base, 'what the folder has checked out, with no deploy recorded yet');
+  assert.deepEqual([v.current?.number, v.current?.link], [1, '/apps/mandate/'], 'release 1, linked to the app itself');
   assert.equal(v.next, null, 'main is where it is: nothing on its way');
 
   // A minion lands two commits; its branch tip is main's.
@@ -179,7 +180,8 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   await reader.refresh();
   [v] = reader.read();
   assert.equal(v.next?.stage, 'call');
-  assert.equal(v.next?.waitingOn, 'main is 2 commits ahead, waiting for a deploy call');
+  assert.equal(v.next?.waitingOn, "2 changes on main aren't live yet: nobody has deployed Mandate since. The scheme's Taskmaster or a minion deploys it; ask the Taskmaster if it should go out");
+  assert.equal(v.next?.number, 2);
   assert.equal(v.next?.eta, null);
   assert.deepEqual(v.next?.stages.map((s) => s.name), ['call', 'build', 'drain', 'restart', 'live']);
   assert.deepEqual(v.next?.changes.map((c) => c.title), ['Snooze']);
@@ -196,6 +198,7 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   await reader.refresh();
   [v] = reader.read();
   assert.equal(v.current?.version, base);
+  assert.equal(v.current?.number, 3, 'two deploys, after the commit it served before its first');
   assert.equal(v.current?.live, now - 9e6 + 1e5, 'the newest deployed row of that commit');
   assert.equal(v.next?.stage, 'build');
   assert.equal(v.next?.usual, 70, 'the median build');
@@ -221,18 +224,19 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   assert.equal(v.next, null);
   assert.equal(v.current?.version, tip);
   assert.deepEqual(v.current?.changes.map((c) => c.title), ['Snooze']);
-  assert.equal(v.current?.link, `https://github.com/o/mandate/commit/${tip}`);
+  assert.deepEqual([v.current?.number, v.current?.link], [4, '/apps/mandate/'], 'numbered on from the deploys before it, linked to the app');
   assert.equal(v.recent.length, 5);
-  assert.equal(v.recent[0].outcome, 'rolled back');
+  assert.deepEqual([v.recent[0].outcome, v.recent[0].number, v.recent[0].link], ['rolled back', null, null], "a try that didn't go live has no number, and nothing to open");
 });
 
 // A workflow's runs and jobs as GitHub's API gives them, newest first, counting the reads.
 const iso = (ms: number) => new Date(ms).toISOString();
-function fakeActions(runs: Run[], jobs: Record<number, Job[]>) {
-  const reads = { runs: 0, jobs: 0 };
+function fakeActions(runs: Run[], jobs: Record<number, Job[]>, artifacts: Record<number, Artifact[]> = {}) {
+  const reads = { runs: 0, jobs: 0, artifacts: 0 };
   const actions: Actions = {
     async workflowRuns() { reads.runs++; return runs; },
     async runJobs(_p, run) { reads.jobs++; return jobs[run.id] ?? []; },
+    async runArtifacts(_p, run) { reads.artifacts++; return artifacts[run.id] ?? []; },
   };
   return { actions, reads };
 }
@@ -260,15 +264,18 @@ test('the CI package reader: the newest run whose job passed is the release, a r
     2: [job(2, 'Release (windows-latest)', 'completed', 'success', now - 110 * m, now - 100 * m)],
     1: [job(1, 'release', 'completed', 'failure', now - 195 * m, now - 190 * m)],
   };
-  const { actions, reads } = fakeActions(runs, jobs);
+  // Run 3 uploaded its package beside a crash dump; run 2's package expired.
+  const artifacts = { 3: [{ id: 30, name: 'dumps-windows-sha3', expired: false }, { id: 31, name: 'r-sha3', expired: false }], 2: [{ id: 20, name: 'r-sha2', expired: true }] };
+  const { actions, reads } = fakeActions(runs, jobs, artifacts);
   const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => now });
   await reader.refresh();
   const [v] = reader.read();
   assert.deepEqual(v.target, { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null });
-  assert.equal(v.current?.version, 'build 3', 'run 4 skipped its release job, so run 3 is what people have');
-  assert.equal(v.current?.link, 'https://github.com/o/r/actions/runs/3');
+  assert.deepEqual([v.current?.number, v.current?.version], [3, 'sha3'], 'run 4 skipped its release job, so run 3 is what people have');
+  assert.equal(v.current?.link, 'https://github.com/o/r/actions/runs/3/artifacts/31', 'the package named for the repo, not the dump');
   assert.deepEqual(v.current?.stages, { ci: 600, package: 600 });
-  assert.deepEqual(v.recent.map((r) => [r.version, r.outcome]), [['build 2', 'live'], ['build 1', 'failed']]);
+  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome, r.link]), [[2, 'live', 'https://github.com/o/r/actions/runs/2'], [1, 'failed', 'https://github.com/o/r/actions/runs/1']], 'no file left: its run page');
+  assert.equal(v.next?.number, 5);
   assert.equal(v.next?.stage, 'package');
   assert.equal(v.next?.usual, 600, 'the median package time of the shipped runs');
   assert.equal(v.next?.eta, now - 2 * m + 600_000);
@@ -277,13 +284,14 @@ test('the CI package reader: the newest run whose job passed is the release, a r
   // While a run moves, every refresh reads again; once all are done, the next read waits for the idle interval.
   await reader.refresh();
   assert.equal(reads.runs, 2);
+  assert.equal(reads.artifacts, 2, "each shipped run's files are read once");
   runs[0] = run(5, 'completed', 'success', now - 6 * m, now);
   jobs[5][1] = job(5, 'release', 'completed', 'success', now - 2 * m, now);
   await reader.refresh();
   await reader.refresh();
   assert.equal(reads.runs, 3, 'nothing moving: no read until the idle interval passes');
   const [done] = reader.read();
-  assert.equal(done.current?.version, 'build 5');
+  assert.equal(done.current?.number, 5);
   assert.equal(done.next, null);
 });
 
@@ -325,22 +333,23 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   const reader = new ApkReader({ store, finder: finderOf([t]), actions, now: () => clock, feed: async () => ({ versionCode: 5, apk: 'mandate-5.apk', at: feedAt }) });
   await reader.refresh();
   let [v] = reader.read();
-  assert.deepEqual([v.current?.version, v.current?.link, v.current?.live], ['1.4', '/apps/mandate/android/mandate-5.apk', feedAt], "main's versionName names the build it serves");
+  assert.deepEqual([v.current?.number, v.current?.version, v.current?.link, v.current?.live], [5, '1.4', '/apps/mandate/android/mandate-5.apk', feedAt], "numbered by its versionCode; main's versionName names it");
   assert.equal(v.next, null);
-  assert.deepEqual(v.recent.map((r) => [r.version, r.outcome, r.stages.sign]), [['build 7', 'signed', 480], ['build 6', 'signed', 600]]);
+  assert.deepEqual(v.recent.map((r) => [r.number, r.version, r.outcome, r.stages.sign]), [[null, 'sha7', 'signed', 480], [null, 'sha6', 'signed', 600]], 'signed runs count by run, not versionCode: no release number');
 
   // A minion bumps the version on main: nobody has started a release run yet.
   writeFileSync(join(repo, 'android/app/build.gradle'), 'defaultConfig {\n  versionCode 6\n  versionName "1.5"\n}\n');
   git(repo, ['commit', '-q', '-am', 'v6']);
   await reader.refresh();
   [v] = reader.read();
-  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta], ['sign', '1.5 is on main: waiting for someone to start a release run', null]);
+  const notStarted = "1.5 is on main, but nobody has started its release run yet: ask the scheme's Taskmaster to start it";
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta, v.next?.number], ['sign', notStarted, null, 6]);
 
   // Someone starts one: with nothing moving, the runs are read again once the idle interval has passed; it signs on CI.
   runs.unshift(run(8, 'in_progress', null, now - 2 * m));
   await reader.refresh();
   [v] = reader.read();
-  assert.equal(v.next?.waitingOn, '1.5 is on main: waiting for someone to start a release run', 'not read again yet');
+  assert.equal(v.next?.waitingOn, notStarted, 'not read again yet');
   clock += 5 * m;
   await reader.refresh();
   [v] = reader.read();
@@ -351,7 +360,7 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   runs[0] = run(8, 'completed', 'success', now - 2 * m, now);
   await reader.refresh();
   [v] = reader.read();
-  assert.deepEqual([v.next?.stage, v.next?.waitingOn], ['publish', '1.5 is signed: waiting for someone to publish it']);
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn], ['publish', "1.5 is signed, but nobody has published it yet: ask the scheme's Taskmaster to publish it"]);
 });
 
 test('the APK reader with no latest.json: the newest signed run is the release', async () => {
@@ -363,8 +372,8 @@ test('the APK reader with no latest.json: the newest signed run is the release',
   const reader = new ApkReader({ store, finder: finderOf([t]), actions, now: () => now, feed: async () => null });
   await reader.refresh();
   const [v] = reader.read();
-  assert.deepEqual([v.current?.version, v.current?.outcome, v.current?.stages.sign], ['build 2', 'live', 300]);
-  assert.deepEqual(v.recent.map((r) => [r.version, r.outcome]), [['build 3', 'failed']]);
+  assert.deepEqual([v.current?.number, v.current?.outcome, v.current?.stages.sign], [2, 'live', 300]);
+  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome]), [[3, 'failed']]);
 });
 
 test('the Main reader: each head of main is a release with the minions it took in; open PRs are the next, by checks then a go to merge', async () => {
@@ -384,7 +393,7 @@ test('the Main reader: each head of main is a release with the minions it took i
   await reader.refresh();
   let [v] = reader.read();
   assert.equal(v.current?.version, base);
-  assert.equal(v.current?.link, `https://github.com/o/delve/commit/${base}`);
+  assert.deepEqual([v.current?.number, v.current?.link], [1, null], 'release 1, with no commit link');
   assert.equal(v.next, null);
   await reader.refresh();
   assert.equal(store.listReleases(p.id, 'main', 10).length, 1, 'the same head writes no second row');
@@ -400,7 +409,7 @@ test('the Main reader: each head of main is a release with the minions it took i
   ci.set(a.id, { since: now - 60_000, usual: 300, text: 'test step 3 of 8' });
   [v] = reader.read();
   assert.deepEqual(v.next?.changes.map((c) => [c.title, c.stage]), [['Torches', 'merge'], ['Fog of war', 'checks']], 'the one furthest along leads');
-  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta], ['merge', 'PR #12 waits for a go to merge', null]);
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta, v.next?.number], ['merge', 'PR #12 waits for a go to merge', null, 2]);
   assert.deepEqual(v.next?.stages.map((s) => [s.name, s.usual]), [['checks', null], ['merge', null], ['live', 0]]);
 
   // Torches merges: main moves, and its row takes in the minion whose tip is on it.
@@ -412,7 +421,8 @@ test('the Main reader: each head of main is a release with the minions it took i
   [v] = reader.read();
   assert.equal(v.current?.version, tip);
   assert.deepEqual(v.current?.changes.map((c) => c.title), ['Torches']);
-  assert.deepEqual(v.recent.map((r) => r.version), [base]);
+  assert.deepEqual(v.recent.map((r) => [r.version, r.number]), [[base, 1]]);
+  assert.equal(v.current?.number, 2);
   assert.deepEqual([v.next?.stage, v.next?.text, v.next?.usual], ['checks', 'test step 3 of 8', 300]);
   assert.equal(v.next?.eta, null, 'merge waits on a person, so no estimate');
 });
@@ -437,7 +447,7 @@ test("a job's own name, not a step's or an input's, is what its runs are matched
   function job_(name: string) { return job(2, name, 'completed', 'success', now - 300_000, now); }
   const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => now });
   await reader.refresh();
-  assert.equal(reader.read()[0].current?.version, 'build 2');
+  assert.equal(reader.read()[0].current?.number, 2);
 });
 
 // Shaped like poe2's deploy/preview.sh.

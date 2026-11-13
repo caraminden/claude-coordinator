@@ -154,7 +154,7 @@ export function detect(f: SchemeFacts): Found[] {
   const out: Found[] = [];
   const base = { projectId: pid, branch: f.branch };
   for (const c of f.contraptions) {
-    out.push({ ...base, id: `app:${c.name}`, kind: 'contraption', name: f.contraptions.length > 1 ? c.title : 'App', link: `/apps/${c.name}/`, contraption: c.name });
+    out.push({ ...base, id: `app:${c.name}`, kind: 'contraption', name: f.contraptions.length > 1 ? c.title : 'Contraption', link: `/apps/${c.name}/`, contraption: c.name });
   }
   const feeds = [...f.apkFeeds];
   for (const w of f.workflows) {

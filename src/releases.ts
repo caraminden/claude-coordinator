@@ -10,7 +10,6 @@ import { promisify } from 'node:util';
 import type { DeployInfo } from './auto-deploy.ts';
 import type { Ship } from './branch.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
-import { repoSlug } from './prlinks.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
 import { landPhase, TRACK, type LandTicket, type Wait } from './waits.ts';
 
@@ -25,8 +24,12 @@ export interface Target {
 }
 
 export interface Release {
-  /** A commit (sha) or a version number. */
+  /** A commit (sha) or a version name, shown as a secondary detail. */
   version: string;
+  /** What people call it ("Release 14"): its place in its target's releases that went live, counting from 1, or the
+   * number the target's own tooling gives it (a CI run's, an APK's versionCode); null for a try that didn't go live. */
+  number: number | null;
+  /** The release itself: the live site, the file to download; null when there's nothing to open (never a commit). */
   link: string | null;
   changes: { ticketId: number; number: number | null; title: string }[];
   /** When its first change started on its way (ms), and when it went live; null when not known. */
@@ -57,6 +60,10 @@ export interface Change extends Progress {
 }
 
 export interface Next extends Progress {
+  /** The number it will have once live, when known. */
+  number: number | null;
+  /** Something to try it on before it's live (a preview, a signed build), or null. */
+  link: string | null;
   /** The kind's stages in order, each with its usual length in s (null: not known, or a wait): the bar's segments. */
   stages: { name: string; usual: number | null }[];
   /** When the whole release should be live (ms), only when the current stage and every one after it have a usual time and none waits. */
@@ -129,10 +136,10 @@ export interface Reader {
 const RECENT = 5;
 
 /** A releases row as a Release. */
-export function releaseOf(row: ReleaseRow, link: string | null): Release {
+export function releaseOf(row: ReleaseRow, link: string | null, number: number | null): Release {
   const changes = JSON.parse(row.changes) as (Release['changes'][number] & { stages?: unknown })[];
   return {
-    version: row.version, link, outcome: row.outcome, started: row.started_at, live: row.live_at, stages: JSON.parse(row.stages),
+    version: row.version, number, link, outcome: row.outcome, started: row.started_at, live: row.live_at, stages: JSON.parse(row.stages),
     changes: changes.map(({ ticketId, number, title }) => ({ ticketId, number, title })),
   };
 }
@@ -173,6 +180,13 @@ export class Releases {
       for (const c of list) {
         const own = c.target ? byScheme.get(id)?.targets.find((t) => t.target.id === c.target) : undefined;
         (own ? own.testCopies : scheme(id).testCopies).push(own ? c : { ...c, target: null });
+      }
+    }
+    // An upcoming release with nothing of its own to try links its target's test copy, a running one first.
+    for (const s of byScheme.values()) {
+      for (const tv of s.targets) {
+        const copy = tv.testCopies.find((c) => c.running) ?? tv.testCopies[0];
+        if (tv.next && !tv.next.link && copy) tv.next.link = `/${copy.path}`;
       }
     }
     return [...byScheme.values()].sort((a, b) => a.projectId - b.projectId);
@@ -267,11 +281,6 @@ export class CitadelServer implements Reader {
 
   private now = () => (this.d.now ?? Date.now)();
 
-  private link(p: Project, sha: string): string | null {
-    const slug = repoSlug(p.repo_url);
-    return slug ? `https://github.com/${slug}/commit/${sha}` : null;
-  }
-
   /** The usual length of each stage of the track, s; the line is a wait, so it has none. */
   private stageUsual(stage: string): number | null {
     const { usual } = this.d;
@@ -309,7 +318,8 @@ export class CitadelServer implements Reader {
       const ph = landPhase(loneDeploy.phase);
       return { stage: ph.stage, since: loneDeploy.mtime, usual: this.stageUsual(ph.stage), waitingOn: null, text: ph.text };
     }
-    return { stage: 'deploy', since: since('deploy'), usual: null, waitingOn: 'on main, waiting for a deploy', text: ship.text };
+    const text = 'on main, not deployed yet: the next land takes it live, or the Taskmaster can run a deploy';
+    return { stage: 'deploy', since: since('deploy'), usual: null, waitingOn: text, text: ship.text };
   }
 
   /** Note when each change first reached each stage, for the release's stage times; a change that went back starts afresh. */
@@ -341,10 +351,13 @@ export class CitadelServer implements Reader {
     const { store } = this.d;
     const head = this.d.head();
     const rows = store.listReleases(p.id, CITADEL_TARGET, RECENT + 1);
+    const total = store.countReleases(p.id, CITADEL_TARGET);
     const currentRow = head && rows[0]?.version === head ? rows[0] : null;
-    const current = currentRow ? releaseOf(currentRow, this.link(p, currentRow.version))
-      : head ? { version: head, link: this.link(p, head), changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
-    const recent = rows.slice(currentRow ? 1 : 0, (currentRow ? 1 : 0) + RECENT).map((r) => releaseOf(r, this.link(p, r.version)));
+    // The current release is this site; an older one can't be opened any more.
+    const current = currentRow ? releaseOf(currentRow, '/', total)
+      : head ? { version: head, number: total + 1, link: '/', changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
+    const skip = currentRow ? 1 : 0;
+    const recent = rows.slice(skip, skip + RECENT).map((r, i) => releaseOf(r, null, total - skip - i));
 
     const lineTickets = this.d.line();
     const line: LineEntry[] = lineTickets.map((t) => {
@@ -382,7 +395,7 @@ export class CitadelServer implements Reader {
       const eta = lead.waitingOn || restartWaits || lead.usual == null || after.some((s) => s.usual == null)
         ? null : lead.since + (lead.usual + after.reduce((sum, s) => sum + s.usual!, 0)) * 1000;
       const { ticketId: _i, number: _n, title: _t, ...at } = lead;
-      next = { ...at, stages, eta, changes };
+      next = { ...at, number: Math.max(total, current?.number ?? 0) + 1, link: null, stages, eta, changes };
     }
     return [{ target: { id: CITADEL_TARGET, projectId: p.id, name: 'Server', kind: CITADEL_TARGET, link: null }, current, next, line, recent }];
   }

@@ -64,7 +64,7 @@ test('the next release: the furthest-along change leads, with its stage, usual, 
   assert.equal(t.target.id, CITADEL_TARGET);
   assert.equal(t.target.projectId, w.citadel.id);
   assert.equal(t.target.name, 'Server');
-  assert.deepEqual(t.current, { version: 'live1', link: 'https://github.com/o/citadel/commit/live1', changes: [], started: null, live: null, outcome: 'live', stages: {} }, 'no row yet: the live head alone');
+  assert.deepEqual(t.current, { version: 'live1', number: 1, link: '/', changes: [], started: null, live: null, outcome: 'live', stages: {} }, 'no row yet: the live head alone, numbered as its row will be, linked to the site');
   assert.deepEqual(t.line.map((e) => [e.name, e.holds, e.stage]), [[`#${a.number}`, true, 'test'], [`#${b.number}`, false, 'line']]);
   const n = t.next!;
   assert.deepEqual(n.stages, [
@@ -139,7 +139,7 @@ test('on main with no deploy coming waits for one; a failed deploy says why; a b
   w.ships.set(c.id, 'branch');
   w.waits.poll();
   const n = w.server.read()[0].next!;
-  assert.deepEqual(n.changes.map((x) => [x.ticketId, x.stage, x.waitingOn]).sort(), [[a.id, 'deploy', 'on main, waiting for a deploy'], [b.id, 'deploy', 'ship failed']].sort());
+  assert.deepEqual(n.changes.map((x) => [x.ticketId, x.stage, x.waitingOn]).sort(), [[a.id, 'deploy', 'on main, not deployed yet: the next land takes it live, or the Taskmaster can run a deploy'], [b.id, 'deploy', 'ship failed']].sort());
   const since = n.since;
   now += 5000;
   assert.equal(w.server.read()[0].next!.since, since, "a stage's start stays put between polls, so the event isn't re-sent every poll");
@@ -229,8 +229,9 @@ test('live writes one row per new head, with the minions whose branch tips lande
   w.waits.poll();
   const [t] = w.server.read();
   assert.equal(t.current!.version, head);
+  assert.deepEqual([t.current!.number, t.current!.link], [2, '/'], 'the second row, linked to the site');
   assert.deepEqual(t.current!.changes, [{ ticketId: a.id, number: a.number, title: 'Feature A' }]);
-  assert.deepEqual(t.recent.map((r) => r.version), [base]);
+  assert.deepEqual(t.recent.map((r) => [r.version, r.number, r.link]), [[base, 1, null]], 'an older release has nothing left to open');
   assert.equal(t.next, null);
 
   // git can't say what landed (the last row's commit is gone): no row, rather than one with its changes lost.
@@ -262,10 +263,15 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   const c = all.find((s) => s.projectId === w.citadel.id)!;
   assert.deepEqual(c.targets[0].testCopies.map((x) => [x.kind, x.path, x.running, x.commit]), [['preview', `preview/${mine.id}/`, false, null], ['build-preview', 'preview/build/7/', true, 'b7']]);
   assert.deepEqual(c.testCopies, []);
+  assert.equal(c.targets[0].next, null);
   const d = all.find((s) => s.projectId === delve.id)!;
   assert.deepEqual(d.targets, [], 'a scheme with no target still lists its test copies');
   assert.deepEqual(d.testCopies.map((x) => [x.ticketId, x.target]), [[theirs.id, null]]);
   assert.deepEqual(releases.view((id) => id === delve.id).map((s) => s.projectId), [delve.id]);
+  // A change on its way: the next release links the running test copy, to try it before it's live.
+  w.ships.set(mine.id, 'main');
+  w.waits.poll();
+  assert.equal(releases.read().find((s) => s.projectId === w.citadel.id)!.targets[0].next?.link, '/preview/build/7/');
 
   releases.poll();
   assert.deepEqual(sent, [], 'the first poll sends nothing: pages ask when they open');

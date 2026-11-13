@@ -8,7 +8,8 @@ import type { DeployView } from '../src/app-services.ts';
 import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, lengths, MainReader, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { CITADEL_TARGET, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, shipsOn, TargetFinder, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
@@ -461,6 +462,55 @@ test('the Main reader: each head of main is a release with the minions it took i
   assert.equal(v.current?.number, 2);
   assert.deepEqual([v.next?.stage, v.next?.text, v.next?.usual], ['checks', 'test step 3 of 8', 300]);
   assert.equal(v.next?.eta, null, 'merge waits on a person, so no estimate');
+});
+
+test('a scheme with a contraption and an APK shows its open PRs on its contraption, ahead of its own stages, once (#655)', () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const mandate = store.createProject('Mandate', 'https://github.com/o/mandate');
+  const delve = store.createProject('Delve', 'https://github.com/o/delve');
+  const citadel = store.createProject('Citadel', 'https://github.com/o/citadel');
+  const now = Date.now();
+  const prs = new Map<number, PrSnapshot>();
+  const pr = (number: number, status: 'pending' | 'passed', draft = false): PrSnapshot => ({ number, url: '', state: 'OPEN', draft, headSha: 'x', closedAt: null, closedBy: null, checks: [{ name: 'test', status, url: null }], remarks: [] });
+  const minion = (projectId: number, title: string, p: PrSnapshot) => {
+    const t = store.createTicket({ project_id: projectId, title, permission_mode: 'default', created_by: 'Josh' });
+    store.setTicketDir(t.id, root, `ticket/${t.number}-x`);
+    prs.set(t.id, p);
+    return t.id;
+  };
+  const stale = minion(mandate.id, 'Stale Today page', pr(85, 'pending'));
+  const widget = minion(mandate.id, 'Widget alert', pr(84, 'passed'));
+  minion(mandate.id, 'A draft', pr(83, 'pending', true));
+  minion(delve.id, 'Torches', pr(12, 'pending'));
+  minion(citadel.id, 'Citadel fix', pr(9, 'pending'));
+  const view = (projectId: number, id: string, kind: string, number: number | null, next: TargetView['next'] = null): Omit<TargetView, 'testCopies'> => ({
+    target: { id, projectId, name: id, kind, link: null }, current: number == null ? null : { version: 'v', number, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} }, next, line: [], recent: [],
+  });
+  let views = [
+    view(mandate.id, 'app:mandate', 'contraption', 3), view(mandate.id, 'apk:android-release', 'apk', 7),
+    view(delve.id, 'main', 'main', 5), view(citadel.id, CITADEL_TARGET, CITADEL_TARGET, 40),
+  ];
+  const inFlight = new PrsInFlight({ store, pr: (id) => prs.get(id) ?? null, now: () => now });
+  const releases = new Releases({ store, readers: [{ read: () => views }], testCopies: () => new Map(), broadcast: () => {}, inFlight: (v) => inFlight.attach(v) });
+  const target = (projectId: number, id: string) => releases.read().find((s) => s.projectId === projectId)!.targets.find((t) => t.target.id === id)!;
+
+  let app = target(mandate.id, 'app:mandate');
+  assert.deepEqual(app.next?.changes.map((c) => [c.title, c.stage]), [['Widget alert', 'merge'], ['Stale Today page', 'checks']], 'its open PRs, the furthest along first, no draft');
+  assert.deepEqual([app.next?.stage, app.next?.waitingOn, app.next?.number, app.next?.eta], ['merge', 'PR #84 waits for a go to merge', 4, null]);
+  assert.deepEqual(app.next?.stages.map((s) => s.name), ['checks', 'merge', 'call', 'build', 'drain', 'restart', 'live'], "the PR's stages come before the contraption's own");
+  assert.equal(target(mandate.id, 'apk:android-release').next, null, 'one target takes them, so All shows each PR once');
+  assert.equal(target(delve.id, 'main').next, null, 'Main reads its own PRs (MainReader), so none are added twice');
+  assert.equal(target(citadel.id, CITADEL_TARGET).next, null, "Citadel's server keeps its land line");
+
+  // A deploy in flight still leads; the PRs follow it, and its estimate stands.
+  const deploying = { stage: 'build', since: now - 30_000, usual: 60, waitingOn: null, text: 'building', number: 4, link: null, eta: now + 90_000,
+    stages: ['call', 'build', 'drain', 'restart', 'live'].map((name) => ({ name, usual: name === 'call' ? null : 30 })),
+    changes: [{ ticketId: widget, number: 2, title: 'Widget alert', stage: 'build', since: now - 30_000, usual: 60, waitingOn: null, text: 'building' }] };
+  views = [view(mandate.id, 'app:mandate', 'contraption', 3, deploying)];
+  app = target(mandate.id, 'app:mandate');
+  assert.deepEqual([app.next?.stage, app.next?.eta, app.next?.number], ['build', now + 90_000, 4]);
+  assert.deepEqual(app.next?.changes.map((c) => [c.ticketId, c.stage]), [[widget, 'build'], [stale, 'checks']], 'a minion already in the deploy is not listed again for its PR');
+  assert.deepEqual(app.next?.stages.map((s) => s.name), ['checks', 'merge', 'call', 'build', 'drain', 'restart', 'live']);
 });
 
 test("a job's own name, not a step's or an input's, is what its runs are matched by", async () => {

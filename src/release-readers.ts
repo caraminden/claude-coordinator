@@ -6,7 +6,7 @@ import type { DeployView } from './app-services.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
-import { git, landedIn, releaseOf, type Change, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
+import { CITADEL_TARGET, git, landedIn, releaseOf, type Change, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
 import type { BuildFile, Found, TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { median } from './waits.ts';
@@ -542,10 +542,13 @@ export class ApkReader implements Reader {
 }
 
 export const MAIN_TRACK = ['checks', 'merge', 'live'];
+/** The stages a change goes through before it is on main: an open PR's checks, then a person's go to merge. */
+const PR_STAGES = ['checks', 'merge'];
+/** Each kind's own stages, after a PR's, for a target whose next release is only PRs. */
+const TRACKS: Record<string, string[]> = { contraption: CONTRAPTION_TRACK, ci: CI_TRACK, apk: APK_TRACK };
 
-export interface MainDeps {
+export interface PrDeps {
   store: Store;
-  finder: Pick<TargetFinder, 'list'>;
   /** A minion's PR as the PR watcher last saw it (src/github.ts), or null. */
   pr: (ticketId: number) => PrSnapshot | null;
   /** Its PR's CI in flight (src/ci-wait.ts CiRuns.view): since when, and the usual length. */
@@ -553,39 +556,21 @@ export interface MainDeps {
   now?: () => number;
 }
 
+export interface MainDeps extends PrDeps {
+  finder: Pick<TargetFinder, 'list'>;
+}
+
 /**
- * Main, for a scheme that ships by merging (Delve, Vexavault) or landing straight on main: a release is main's head,
- * recorded in the releases table each time it moves, with the minions whose work it took in. Its next release is the
- * scheme's open PRs: their checks, then a person's go to merge.
+ * A scheme's changes on their way to main: its minions' open PRs, their checks running or failed, then waiting for a
+ * go to merge. Main shows them as its next release; any other scheme's first target takes them in ahead of its own
+ * stages (attach), since what merges is what it ships next (#655).
  */
-export class MainReader implements Reader {
-  private d: MainDeps;
-  private heads = new Map<string, string>();
+export class PrsInFlight {
+  private d: PrDeps;
   /** When each change was first seen at its stage ("<ticket>:<stage>" → ms), so a poll doesn't move it. */
   private seen = new Map<string, number>();
-  constructor(d: MainDeps) {
+  constructor(d: PrDeps) {
     this.d = d;
-  }
-
-  async refresh() {
-    const { store } = this.d;
-    for (const t of this.d.finder.list('main')) {
-      const p = store.getProject(t.projectId);
-      if (!p?.repo_dir) continue;
-      const head = (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim();
-      if (!head) continue;
-      this.heads.set(`${t.projectId}:${t.id}`, head);
-      const last = store.listReleases(p.id, t.id, 1)[0];
-      if (last?.version === head) continue;
-      const at = Number((await git(['log', '-1', '--format=%ct', head], p.repo_dir))?.trim()) * 1000 || (this.d.now ?? Date.now)();
-      // History rewritten under it (a force push) reads as nothing landed, rather than no row ever again.
-      const landed = last ? await landedIn(store, p, last.version, head) : null;
-      store.addRelease({
-        project_id: p.id, target: t.id, version: head, outcome: 'live', stages: '{}', live_at: at,
-        started_at: landed?.commits.size ? Math.min(...landed.commits.values()) : null,
-        changes: JSON.stringify((landed?.tickets ?? []).map((x) => ({ ticketId: x.id, number: x.number, title: x.title }))),
-      });
-    }
   }
 
   private since(id: number, stage: string, now: number): number {
@@ -613,11 +598,86 @@ export class MainReader implements Reader {
     return { stage: 'merge', since: this.since(id, 'merge', now), usual: null, waitingOn: text, text };
   }
 
+  /** A scheme's open PRs (not drafts) of minions still open, the furthest along first. */
+  changes(projectId: number): Change[] {
+    const now = (this.d.now ?? Date.now)();
+    const changes: Change[] = [];
+    for (const x of this.d.store.listTickets(projectId)) {
+      const pr = x.kind === 'ticket' && x.status !== 'closed' && x.branch ? this.d.pr(x.id) : null;
+      if (pr?.state !== 'OPEN' || pr.draft) {
+        for (const s of ['checks', 'failed', 'merge']) this.seen.delete(`${x.id}:${s}`);
+        continue;
+      }
+      changes.push({ ticketId: x.id, number: x.number, title: x.title, ...this.progress(x.id, pr, now) });
+    }
+    return changes.sort((a, b) => MAIN_TRACK.indexOf(b.stage) - MAIN_TRACK.indexOf(a.stage) || a.since - b.since);
+  }
+
+  /**
+   * Each scheme's open PRs, on the first of its targets as the readers list them (its contraption, else its CI
+   * package, else its APK; a file target only when it has nothing else), so All shows each PR once (#655). Main reads
+   * its own, and Citadel's server its land line.
+   */
+  attach(views: Omit<TargetView, 'testCopies'>[]) {
+    const schemes = new Map<number, Omit<TargetView, 'testCopies'>[]>();
+    for (const v of views) (schemes.get(v.target.projectId) ?? schemes.set(v.target.projectId, []).get(v.target.projectId)!).push(v);
+    for (const [projectId, list] of schemes) {
+      if (list.some((v) => v.target.kind === 'main' || v.target.id === CITADEL_TARGET)) continue;
+      const tv = list.find((v) => v.target.kind !== 'file') ?? list[0];
+      const has = new Set(tv.next?.changes.map((c) => c.ticketId));
+      const prs = this.changes(projectId).filter((c) => !has.has(c.ticketId));
+      if (!prs.length) continue;
+      const checks = { name: 'checks', usual: prs.find((c) => c.stage === 'checks')?.usual ?? null };
+      if (tv.next) {
+        // Its own release leads: it is further along than anything not yet on main.
+        tv.next = { ...tv.next, stages: [checks, { name: 'merge', usual: null }, ...tv.next.stages], changes: [...tv.next.changes, ...prs] };
+        continue;
+      }
+      const { ticketId: _i, number: _n, title: _t, ...lead } = prs[0];
+      const number = tv.target.kind === 'apk' || tv.current?.number == null ? null : tv.current.number + 1; // an APK's is its versionCode, not known before the bump
+      tv.next = nextOf([...PR_STAGES, ...(TRACKS[tv.target.kind] ?? ['live'])], (s) => (s === 'checks' ? checks.usual : null), lead, prs, number);
+    }
+  }
+}
+
+/**
+ * Main, for a scheme that ships by merging (Delve, Vexavault) or landing straight on main: a release is main's head,
+ * recorded in the releases table each time it moves, with the minions whose work it took in. Its next release is the
+ * scheme's open PRs: their checks, then a person's go to merge.
+ */
+export class MainReader implements Reader {
+  private d: MainDeps;
+  private heads = new Map<string, string>();
+  private prs: PrsInFlight;
+  constructor(d: MainDeps) {
+    this.d = d;
+    this.prs = new PrsInFlight(d);
+  }
+
+  async refresh() {
+    const { store } = this.d;
+    for (const t of this.d.finder.list('main')) {
+      const p = store.getProject(t.projectId);
+      if (!p?.repo_dir) continue;
+      const head = (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim();
+      if (!head) continue;
+      this.heads.set(`${t.projectId}:${t.id}`, head);
+      const last = store.listReleases(p.id, t.id, 1)[0];
+      if (last?.version === head) continue;
+      const at = Number((await git(['log', '-1', '--format=%ct', head], p.repo_dir))?.trim()) * 1000 || (this.d.now ?? Date.now)();
+      // History rewritten under it (a force push) reads as nothing landed, rather than no row ever again.
+      const landed = last ? await landedIn(store, p, last.version, head) : null;
+      store.addRelease({
+        project_id: p.id, target: t.id, version: head, outcome: 'live', stages: '{}', live_at: at,
+        started_at: landed?.commits.size ? Math.min(...landed.commits.values()) : null,
+        changes: JSON.stringify((landed?.tickets ?? []).map((x) => ({ ticketId: x.id, number: x.number, title: x.title }))),
+      });
+    }
+  }
+
   read(): Omit<TargetView, 'testCopies'>[] {
     const { store } = this.d;
-    const now = (this.d.now ?? Date.now)();
-    const open = new Set<number>();
-    const out = this.d.finder.list('main').map((t) => {
+    return this.d.finder.list('main').map((t) => {
       const head = this.heads.get(`${t.projectId}:${t.id}`) ?? null;
       const rows = store.listReleases(t.projectId, t.id, PREVIOUS + 1);
       const total = store.countReleases(t.projectId, t.id);
@@ -627,15 +687,7 @@ export class MainReader implements Reader {
         : head ? { version: head, number: total + 1, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
       const skip = mine ? 1 : 0;
       const recent = rows.slice(skip, skip + PREVIOUS).map((r, i) => releaseOf(r, null, total - skip - i));
-      const changes: Change[] = [];
-      for (const x of store.listTickets(t.projectId)) {
-        if (x.kind !== 'ticket' || x.status === 'closed' || !x.branch) continue;
-        const pr = this.d.pr(x.id);
-        if (pr?.state !== 'OPEN' || pr.draft) continue;
-        open.add(x.id);
-        changes.push({ ticketId: x.id, number: x.number, title: x.title, ...this.progress(x.id, pr, now) });
-      }
-      changes.sort((a, b) => MAIN_TRACK.indexOf(b.stage) - MAIN_TRACK.indexOf(a.stage) || a.since - b.since);
+      const changes = this.prs.changes(t.projectId);
       let next: Next | null = null;
       if (changes.length) {
         const { ticketId: _i, number: _n, title: _t, ...lead } = changes[0];
@@ -643,8 +695,6 @@ export class MainReader implements Reader {
       }
       return { target: targetOf(t), current, next, line: [], recent };
     });
-    for (const k of this.seen.keys()) if (!open.has(Number(k.split(':')[0]))) this.seen.delete(k);
-    return out;
   }
 }
 

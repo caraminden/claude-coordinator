@@ -61,7 +61,7 @@ import { Waits } from './src/waits.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { dispatch, OldApk, publish } from './src/apk-release.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, MainReader, TestCopyReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
@@ -486,13 +486,16 @@ const apkReader = new ApkReader({
 });
 // Each minion's PR as the PR watcher last saw it, for Main's next release (#627).
 const prs = new Map<number, PrSnapshot>();
-const mainReader = new MainReader({
-  store, finder: targetFinder, pr: (id) => prs.get(id) ?? null,
-  ci: (id) => {
+const prDeps = {
+  store, pr: (id: number) => prs.get(id) ?? null,
+  ci: (id: number) => {
     const v = ciRuns.view(id);
     return v && !v.ended ? { since: v.since, usual: v.usual, text: v.text } : null;
   },
-});
+};
+const mainReader = new MainReader({ ...prDeps, finder: targetFinder });
+// Every other scheme's open PRs, on its first target (#655).
+const prsInFlight = new PrsInFlight(prDeps);
 // The other test copies (#627): minions' downloads, preview sites and debug APKs, read with the targets on the slow poll.
 const testCopyReader = new TestCopyReader({
   store, finder: targetFinder, actions, sharedDir,
@@ -502,7 +505,7 @@ const testCopyReader = new TestCopyReader({
   }),
 });
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
+  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv), inFlight: (views) => prsInFlight.attach(views),
   scan: async () => {
     await targetFinder.scan();
     await testCopyReader.scan();

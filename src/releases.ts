@@ -162,6 +162,8 @@ export interface ReleasesDeps {
   scan?: () => Promise<void>;
   /** A target's deploy button and auto-deploy (src/auto-deploy.ts), or null when it has no release step. */
   deploy?: (tv: Omit<TargetView, 'testCopies'>) => DeployInfo | null;
+  /** Put each scheme's changes still on their way to main (open PRs) on its targets (PrsInFlight.attach, #655). */
+  inFlight?: (views: Omit<TargetView, 'testCopies'>[]) => void;
 }
 
 export class Releases {
@@ -178,11 +180,11 @@ export class Releases {
     const copies = this.d.testCopies();
     const byScheme = new Map<number, SchemeReleases>();
     const scheme = (id: number) => byScheme.get(id) ?? byScheme.set(id, { projectId: id, targets: [], testCopies: [] }).get(id)!;
-    for (const reader of this.d.readers) {
-      for (const t of reader.read()) {
-        const deploy = this.d.deploy?.(t);
-        scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}) });
-      }
+    const views = this.d.readers.flatMap((r) => r.read());
+    this.d.inFlight?.(views);
+    for (const t of views) {
+      const deploy = this.d.deploy?.(t);
+      scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}) });
     }
     for (const [id, list] of copies) {
       for (const c of list) {

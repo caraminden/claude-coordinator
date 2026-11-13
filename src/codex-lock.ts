@@ -1,8 +1,19 @@
-// One Codex app-server at a time per person: their ChatGPT login's refresh token is single-use, and two
-// app-servers refreshing at once sign them out. Taken by a Codex turn (src/codex-turn.ts) and by
-// citadel-codex-review (src/codex-review.ts); no local imports, so it pins on its own.
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+// A person's Codex runs share one ChatGPT login, whose refresh token is single-use: two app-servers that
+// refresh the same token at once sign the person out (#636 proved it on codex 0.166.0: of eight started
+// together on a stale login, seven were refused as reused). Codex refreshes only within 5 minutes of the
+// access token's expiry or after a 401, and reloads the login from disk first. So a run holds the person's
+// lock just long enough to check the token, refreshing it early while it holds the lock, and then runs
+// beside the others; it keeps the lock for the whole run only when that can't be made safe (`serial`).
+// Taken by a Codex turn (src/codex-turn.ts) and citadel-codex-review (src/codex-review.ts); no local
+// imports, so it pins on its own.
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+/** A run starts with at least this much life in the access token (seconds), far from Codex's own 5-minute refresh. */
+export const MARGIN_S = 24 * 3600;
+/** In CODEX_HOME (or CITADEL_CODEX_SERIAL=1): this person's Codex runs go one at a time again, as before #636. */
+export const SERIAL_FILE = 'citadel-serial';
 
 /** Set in a Codex turn's app-server, so its shell's commands, a review among them, know the lock is their own turn's: what the lock's pid file says. */
 export const LOCK_ENV = 'CITADEL_CODEX_LOCK';
@@ -19,27 +30,105 @@ export function startTime(pid: number): string | null {
 }
 
 /**
- * Take the person's Codex lock in `home` (CODEX_HOME), waiting while another live process holds it
- * (`onWait` once); resolves with the release. When `env[LOCK_ENV]` names the holder, the caller runs
- * inside that holder's turn (a review from a Codex turn's shell): it goes ahead, and the lock stays the
- * turn's, since waiting would wait on itself (#468 S04-6).
+ * The login's access token in `home`: seconds left and its whole lifetime. 'none' without ChatGPT tokens
+ * (not signed in, or an API key: nothing refreshes), 'unknown' when they can't be read. Only the two
+ * times leave this function.
  */
-export async function codexLock(home: string, onWait: () => void, env: Record<string, string | undefined> = process.env): Promise<() => void> {
+export function tokenLife(home: string, now = Date.now()): { left: number; life: number } | 'none' | 'unknown' {
+  let auth: any;
+  try {
+    auth = JSON.parse(readFileSync(join(home, 'auth.json'), 'utf8'));
+  } catch (err: any) {
+    return err.code === 'ENOENT' ? 'none' : 'unknown';
+  }
+  const token = auth?.tokens?.access_token;
+  if (!token) return 'none';
+  try {
+    const { exp, iat } = JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url').toString());
+    if (typeof exp !== 'number') return 'unknown';
+    return { left: exp - now / 1000, life: typeof iat === 'number' && exp > iat ? exp - iat : Infinity };
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Have a short `codex app-server` refresh the login now (account/read with refreshToken); resolves when it answered, ended or `timeoutMs` passed. */
+function refresh(bin: string, env: Record<string, string | undefined>, timeoutMs = 30_000): Promise<void> {
+  return new Promise((resolve) => {
+    const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"'], { env: env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'ignore'] });
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      child.stdin.end();
+      if (child.exitCode !== null || child.signalCode !== null) return resolve();
+      // Wait for it to go: a refresh still on its way must not outlive the lock.
+      const kill = setTimeout(() => child.kill('SIGKILL'), 3000);
+      child.once('exit', () => (clearTimeout(kill), resolve()));
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    const send = (m: object) => child.stdin.write(JSON.stringify(m) + '\n');
+    child.stdin.on('error', finish);
+    child.on('error', () => ((done = true), clearTimeout(timer), resolve()));
+    child.on('exit', finish);
+    let buf = '';
+    child.stdout.on('data', (chunk) => {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        let m: any;
+        try {
+          m = JSON.parse(buf.slice(0, nl));
+        } catch {}
+        buf = buf.slice(nl + 1);
+        if (m?.id === 1) send({ method: 'initialized' }), send({ id: 2, method: 'account/read', params: { refreshToken: true } });
+        else if (m?.id === 2) finish();
+      }
+    });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'citadel-codex-login', version: '1' }, capabilities: { experimentalApi: false, requestAttestation: false } } });
+  });
+}
+
+export interface CodexLock {
+  /** Let go of the lock, if this run still holds it (a serial run); safe to call twice. */
+  unlock: () => void;
+  /** How long it waited for the lock. */
+  waitedMs: number;
+  /** It refreshed the login while it held the lock. */
+  refreshed: boolean;
+  /** It keeps the lock for the whole run: the person's other Codex runs wait for `unlock`. */
+  serial: boolean;
+}
+
+/**
+ * Check the person's Codex login in `home` (CODEX_HOME) under their lock, waiting while another live
+ * process holds it (`onWait` once, after `noteMs`), and refresh it with `bin` when the access token has
+ * under MARGIN_S (or half its lifetime) left. The lock is then let go, unless the run must be serial: the
+ * switch (SERIAL_FILE) is on, or the token can't be read or still has under MARGIN_S left (a short-lived
+ * token, a refresh that failed), where a long run could refresh beside another. When `inTurn` and
+ * `env[LOCK_ENV]` names the holder, the caller runs inside that holder's serial turn (a review from a
+ * Codex turn's shell): it goes ahead, since waiting would wait on itself (#468 S04-6).
+ */
+export async function codexLock(home: string, onWait: () => void, opts: { env?: Record<string, string | undefined>; bin?: string; inTurn?: boolean; noteMs?: number } = {}): Promise<CodexLock> {
+  const env = opts.env ?? process.env;
+  const noteMs = opts.noteMs ?? (Number(env.CITADEL_CODEX_WAIT_NOTE_MS) || 3000);
+  const began = Date.now();
   mkdirSync(home, { recursive: true });
   const dir = join(home, 'citadel-turn.lock');
-  for (let waited = false; ; ) {
+  for (let said = false; ; ) {
     try {
       mkdirSync(dir);
       // With its start time: a pid alone can be reused by an unrelated process once the holder died without unlocking (#468 S04-7).
       writeFileSync(join(dir, 'pid'), `${process.pid} ${startTime(process.pid) ?? ''}`.trim());
-      return () => rmSync(dir, { recursive: true, force: true });
+      break;
     } catch (err: any) {
       if (err.code !== 'EEXIST') throw err;
       let held = '';
       try {
         held = readFileSync(join(dir, 'pid'), 'utf8').trim();
       } catch {}
-      if (held && held === env[LOCK_ENV]) return () => {};
+      if (opts.inTurn && held && held === env[LOCK_ENV]) return { unlock: () => {}, waitedMs: 0, refreshed: false, serial: false };
       const [p, started] = held.split(/\s+/);
       const pid = Number(p) || 0;
       let alive = false;
@@ -58,9 +147,27 @@ export async function codexLock(home: string, onWait: () => void, env: Record<st
       // No pid yet: its holder is between mkdir and write, unless that was a while ago.
       if (!alive && (pid || age > 10_000)) rmSync(dir, { recursive: true, force: true });
       else {
-        if (!waited) (waited = true), onWait();
-        await new Promise((r) => setTimeout(r, 1000));
+        // A login check takes a second or so: only a longer wait is worth a line in the chat.
+        if (!said && Date.now() - began >= noteMs) (said = true), onWait();
+        await new Promise((r) => setTimeout(r, said ? 1000 : 200));
       }
     }
+  }
+  const unlock = () => rmSync(dir, { recursive: true, force: true });
+  const waitedMs = Date.now() - began;
+  try {
+    let life = tokenLife(home);
+    const before = life;
+    if (life !== 'none' && life !== 'unknown' && life.left < Math.min(MARGIN_S, life.life / 2)) {
+      await refresh(opts.bin ?? 'codex', env);
+      life = tokenLife(home);
+    }
+    const refreshed = life !== 'none' && life !== 'unknown' && before !== 'none' && before !== 'unknown' && life.left > before.left + 60;
+    const serial = env.CITADEL_CODEX_SERIAL === '1' || existsSync(join(home, SERIAL_FILE)) || life === 'unknown' || (life !== 'none' && life.left < MARGIN_S);
+    if (!serial) unlock();
+    return { unlock: serial ? unlock : () => {}, waitedMs, refreshed, serial };
+  } catch (err) {
+    unlock();
+    throw err;
   }
 }

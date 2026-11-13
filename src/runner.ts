@@ -2402,6 +2402,7 @@ export class Runner {
     if (!ev || typeof ev !== 'object') return;
     if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info, ticketId);
     if (ev.type === 'codex_waiting') return this.emit(ticketId, 'note', { text: CODEX_WAITING });
+    if (ev.type === 'codex_gate') return console.log(`[codex] minion ${ticketId}: login check waited ${Number(ev.waited_ms) || 0} ms${ev.refreshed ? ', refreshed the login' : ''}${ev.serial ? ', runs serial' : ''}`);
     if (ev.type === 'codex_rate_limits') return this.updateCodexUsage(ev.rate_limits, this.store.getSetting<TurnState>(turnKey(ticketId))?.person ?? null);
     if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
       const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));

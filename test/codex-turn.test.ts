@@ -262,8 +262,8 @@ test('a Codex turn that goes quiet is stopped with an error', async () => {
   assert.equal(r.code, 1);
 });
 
-test("a person's second Codex turn says it waits for their first, then runs", async () => {
-  const r = await run(['-p', '--output-format', 'stream-json', '--input-format', 'stream-json'], { lockedMs: 1500 });
+test("a Codex turn that waits a while for the person's Codex lock says so, then runs", async () => {
+  const r = await run(['-p', '--output-format', 'stream-json', '--input-format', 'stream-json'], { lockedMs: 1500, env: { CITADEL_CODEX_WAIT_NOTE_MS: '200' } });
   assert.equal(r.events[0].type, 'codex_waiting');
   assert.equal(r.events.filter((e) => e.type === 'codex_waiting').length, 1, 'said once');
   assert.equal(r.events.at(-1).type, 'result');

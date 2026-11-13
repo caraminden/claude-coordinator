@@ -251,18 +251,18 @@ test('a review starts a read-only, ephemeral thread with no approvals, declines 
   assert.deepEqual(msgs.find((m) => m.id === 900).result, { decision: 'decline' });
 });
 
-test("a review waits behind the person's other Codex turn, but not behind the turn it runs inside (#468 S04-6)", async () => {
+test("a review waits behind the person's Codex turn that holds their lock, but not behind the turn it runs inside (#468 S04-6)", async () => {
   const codexHome = join(root, 'lock-home');
   const lock = join(codexHome, 'citadel-turn.lock');
   const holder = `${process.pid} ${startTime(process.pid)}`;
   mkdirSync(lock, { recursive: true });
   writeFileSync(join(lock, 'pid'), holder);
-  const env = { ...process.env, CODEX_HOME: codexHome, FAKE_CODEX: 'ok' };
-  // A review run by the Codex turn holding the lock passes, and leaves the lock to that turn.
+  const env = { ...process.env, CODEX_HOME: codexHome, FAKE_CODEX: 'ok', CITADEL_CODEX_WAIT_NOTE_MS: '100' };
+  // A review run by the Codex turn holding the lock (a serial turn: src/codex-lock.ts) passes, and leaves the lock to that turn.
   const own = await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...env, CITADEL_CODEX_LOCK: holder } });
   assert.equal(own.code, 0);
   assert.equal(readFileSync(join(lock, 'pid'), 'utf8'), holder, "its turn's lock stays");
-  // Any other review waits for that turn to end before it starts Codex.
+  // Any other review waits for the lock before it starts Codex.
   rmSync(fakeLog, { force: true });
   let waited = false;
   const other = review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env, onWait: () => (waited = true) });

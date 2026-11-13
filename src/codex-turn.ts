@@ -141,8 +141,11 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const timeoutSec = Math.ceil(Number(env.MCP_TOOL_TIMEOUT || 600_000) / 1000);
   const mcp = mcpServers(mcpFile && existsSync(mcpFile) ? JSON.parse(readFileSync(mcpFile, 'utf8')) : {}, env, timeoutSec);
 
-  const unlock = await codexLock(home, () => out({ type: 'codex_waiting' }), {});
+  const gate = await codexLock(home, () => out({ type: 'codex_waiting' }), { env, bin: env.CITADEL_CODEX_BIN });
+  const unlock = gate.unlock;
   process.on('exit', unlock);
+  // For the journal: what the login check cost this turn (#636).
+  if (gate.waitedMs >= 1000 || gate.refreshed || gate.serial) out({ type: 'codex_gate', waited_ms: gate.waitedMs, refreshed: gate.refreshed, serial: gate.serial });
   pruneRollouts(join(home, 'sessions'));
   // The kit pins beside this file in a turn's folder, and sits one up in the repo.
   const here = dirname(fileURLToPath(import.meta.url));
@@ -161,7 +164,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
       : [...c('features.shell_tool', false), ...c('features.view_image', false), ...c('project_doc_max_bytes', 0)]),
     ...JSON.parse(env.CITADEL_CODEX_EXTRA_ARGS || '[]'),
   ];
-  // Its shell's citadel-codex-review runs inside this turn, under this lock (#468 S04-6).
+  // Its shell's citadel-codex-review runs inside this turn: under this lock, when the turn keeps it (#468 S04-6).
   const lockEnv = { [LOCK_ENV]: `${process.pid} ${startTime(process.pid) ?? ''}`.trim() };
   const child = spawn(env.CITADEL_CODEX_BIN || 'codex', codexArgs, { cwd, env: { ...env, ...mcp.env, ...lockEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stderr!.on('data', (b) => process.stderr.write(b));

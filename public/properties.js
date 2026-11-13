@@ -11,7 +11,7 @@ import { optimistic } from './ui/optimistic.js';
 /** A property as people read it: always with its key, since one word can be a value of two keys. */
 const propertyValue = (v) => (Array.isArray(v) ? v.join(', ') : String(v));
 
-/** The "🏷 N" chip in a minion's header; it opens to the minion's properties. */
+/** The "tag N" chip in a minion's header; it opens to the minion's properties. */
 export function propertyChip(t) {
   const entries = Object.entries(t.properties ?? {});
   const body = h('div', {});

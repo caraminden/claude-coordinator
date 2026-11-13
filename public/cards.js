@@ -305,7 +305,8 @@ export function answerRef(cardEl, data) {
  * A card of multiple-choice questions from Claude. Click options to pick (several when the question
  * allows), or type an answer under Other; a single one-pick question sends on the first click, unless the
  * card has pictures (#634; Cara, 2026-11-12: "Cards with images should never autosend, and clicking it anywhere
- * should show the image to you"): a click there opens the picture, and only Send sends.
+ * should show the image to you"; Josh, 2026-11-13: "clicking should still select them"): a click there selects
+ * the option and opens its picture, and only Send sends.
  */
 // Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
 const cardPicks = new Map();
@@ -387,13 +388,18 @@ export function questionCard(ticketId, card) {
       // Opening a picture hands the viewer this question's pictures, to step through and pick from; a
       // click that opens it in a new tab instead leaves the viewer as it is.
       const pictured = q.options.filter((o) => o.image);
-      const browse = (o) => (e) => !e.button && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && setViewerGallery({
-        ticketId, at: pictured.indexOf(o), answered: () => answered,
-        options: pictured.map((o) => ({
-          path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => choose(o),
-        })),
-      });
-      // A picture option's button opens its picture, as its thumbnail does; the rest pick.
+      const browse = (o) => (e) => {
+        if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        // Selects, never unselects: a second look at a picked option on a pick-any question keeps it.
+        if (!picks[i].selected.has(o.label)) choose(o);
+        setViewerGallery({
+          ticketId, at: pictured.indexOf(o), answered: () => answered,
+          options: pictured.map((o) => ({
+            path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => choose(o),
+          })),
+        });
+      };
+      // A picture option's button selects it and opens its picture, as its thumbnail does; the rest only pick.
       const pickBtn = (o, thumb) => h('button', {
         type: 'button', class: `opt${thumb ? ' pic' : ''}`, 'data-label': o.label,
         onclick: () => (thumb ? thumb.click() : choose(o)),

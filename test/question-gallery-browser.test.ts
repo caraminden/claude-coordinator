@@ -1,6 +1,7 @@
 // Question cards with pictures (#634; Cara, 2026-11-12: "Cards with images should never autosend, and clicking
 // it anywhere should show the image to you"). Citadel's real front end (public/index.html) in headless Chromium
-// (test/browser.ts), the API answered in the page: a click anywhere on a picture tile opens the file viewer,
+// (test/browser.ts), the API answered in the page. Josh, 2026-11-13: "clicking should still select them". A click
+// anywhere on a picture tile selects it and opens the file viewer,
 // whose bar steps between the card's pictures and picks one, and only the card's Send sends.
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -22,6 +23,7 @@ const CARDS: Record<number, { questions: unknown[]; answered?: string[] }> = {
   9: { questions: [{ header: 'Layout', question: 'Tabs or list?', options: [{ label: 'Tabs', recommended: true }, { label: 'List' }] }] },
   10: { questions: [{ header: 'Palette', question: 'Which direction?', options: opts(2) }, { header: 'Size', question: 'How big?', options: [{ label: 'Small', recommended: true }, { label: 'Large' }] }] },
   11: { questions: [{ header: 'Palette', question: 'Which direction?', options: [...opts(2), { label: 'Garden, darker', image: 'takes/garden.svg' }] }] },
+  12: { questions: [{ header: 'Palette', question: 'Which ones?', multiSelect: true, options: opts(2) }] },
 };
 
 // Runs before app.js: a fake server for the API. Answers are recorded in `sent` and never answered, as a
@@ -121,14 +123,14 @@ async function closeViewer(page: Page) {
   await waitFor(page, 'the viewer to close', `!document.querySelector('dialog.viewer')`);
 }
 
-test('a click anywhere on a picture tile opens it in the viewer and sends nothing', { skip }, async () => {
+test('a click anywhere on a picture tile selects it, opens it in the viewer and sends nothing', { skip }, async () => {
   const page = await chat(7);
   for (const part of ['.tile .thumb', '.tile .opt .label', '.tile .opt .desc', '.tile .opt']) {
     await click(page, part);
     await waitFor(page, `the viewer from ${part}`, viewerOpen);
     assert.equal(await page.eval(title), 'Garden', part);
     assert.equal(await page.eval('sent.length'), 0, part);
-    assert.deepEqual(await page.eval(picked), [], `${part} picks nothing`);
+    assert.deepEqual(await page.eval(picked), ['Garden'], `${part} selects it`);
     await closeViewer(page);
   }
 });
@@ -212,6 +214,23 @@ test('a card settled while its picture is open turns the viewer read-only', { sk
   // What a question_result event does: thread.js calls the card's markSettled.
   await page.eval(`import('/base.js').then((b) => void b.view.cards.get('q7').markSettled())`);
   assert.equal(await page.eval(`!!document.querySelector('.gallery-controls .pick')`), false);
+});
+
+test('on a pick-any question a tile click adds the option, a second look keeps it, and the viewer\'s button takes it off', { skip }, async () => {
+  const page = await chat(12);
+  await click(page, '.tile:nth-child(1) .opt');
+  await waitFor(page, 'the viewer', viewerOpen);
+  await closeViewer(page);
+  await click(page, '.tile:nth-child(2) .thumb');
+  await waitFor(page, 'the viewer', viewerOpen);
+  await closeViewer(page);
+  assert.deepEqual(await page.eval(picked), ['Garden', 'Forest']);
+  await click(page, '.tile:nth-child(1) .opt .label');
+  await waitFor(page, 'the viewer', viewerOpen);
+  assert.deepEqual(await page.eval(picked), ['Garden', 'Forest'], 'a second look keeps it');
+  await click(page, '.gallery-controls .pick');
+  assert.deepEqual(await page.eval(picked), ['Forest']);
+  assert.equal(await page.eval('sent.length'), 0);
 });
 
 // The three states Cara asked to see, at desktop and phone widths: nothing picked, one picked waiting for Send,

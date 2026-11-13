@@ -149,7 +149,7 @@ test("a contraption's ask is its person's, and a held relay keeps the asker it h
   store.deleteSetting(askerKey(ObsidianTM.id));
 });
 
-test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one run as an admin', async () => {
+test('admin-only routes refuse a Taskmaster turn asked for by someone outside the Citadel scheme, even one run as an admin (#621)', async () => {
   const tokens = new Auth(PASSWORD, SECRET);
   const srv = await bootServer({ root });
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
@@ -165,11 +165,14 @@ test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one
     ['PUT', '/api/app/instructions', { text: 'Be nice.' }],
     ['PATCH', `/api/projects/${Citadel.id}`, { plugin_dirs: ['tools/mods/sneaky'] }],
     ['PATCH', `/api/projects/${Citadel.id}`, { optional_plugin_dirs: ['tools/mods/sneaky'] }],
+    // The live database holds every scheme's chat (#621).
+    ['POST', '/api/host-check', { what: 'db', sql: 'SELECT 1' }],
   ] as const;
   // Every turn runs as Cara here; only who asked changes.
   store.updateTicket(CitadelTM.id, { person_id: Cara.id });
 
-  for (const [who, name] of [[Rachel, 'Rachel'], [Josh, 'Josh']] as const) {
+  // Rachel is neither an admin nor a Citadel member.
+  for (const [who, name] of [[Rachel, 'Rachel']] as const) {
     askedBy(who);
     for (const [method, path, body] of admin) {
       const r = await as(method, path, body);
@@ -178,18 +181,23 @@ test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one
     }
     // Rachel isn't in Delve: her ask reaches Citadel's schemes no further than she could.
     if (who === Rachel) assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', text: 'hi' })).status, 404);
+    // Service status isn't anyone's chat: any turn reads it.
+    assert.equal((await as('POST', '/api/host-check', { what: 'units', unit: 'citadel-*' })).status, 200, `units for ${name}`);
   }
-  // A minion made on Josh's ask is Josh's ask too, so its messages back can't stand in for Cara's.
+  // A minion made on Rachel's ask is Rachel's ask too, so its messages back can't stand in for an admin's.
   const made = await as('POST', `/api/projects/${Citadel.id}/tickets`, { message: 'look into it', properties: { type: 'bug' } });
   assert.equal(made.status, 201, JSON.stringify(made.body));
-  assert.equal(store.turnAsker(made.body.id), Josh.id);
+  assert.equal(store.turnAsker(made.body.id), Rachel.id);
   assert.equal(store.appInstructions().text, '');
   assert.equal(store.getProject(Citadel.id)!.plugin_dirs ?? '', '');
   assert.equal(store.getProject(Citadel.id)!.optional_plugin_dirs ?? '', '');
 
-  // Cara asked: unchanged.
-  askedBy(Cara);
-  for (const [method, path, body] of admin) assert.equal((await as(method, path, body)).status, 200, `${method} ${path} for Cara`);
+  // Josh, a Citadel member without the admin flag, asks as Cara does (Cara 2026-11-12: "any scheme member should have
+  // access to everything they need").
+  for (const who of [Josh, Cara]) {
+    askedBy(who);
+    for (const [method, path, body] of admin) assert.equal((await as(method, path, body)).status, 200, `${method} ${path} for ${who.name}`);
+  }
   assert.equal(store.appInstructions().text, 'Be nice.');
   assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', text: 'hi' })).status, 202);
 });

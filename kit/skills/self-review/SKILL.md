@@ -71,7 +71,9 @@ through "Receiving review" in `references/lenses.md` part 2. On a UI change, als
 desktop and phone screenshots for what the Grunt can't see: equal top and bottom padding,
 nothing clipped or scrolling sideways, phone tap targets `--citadel-control-h` tall.
 `node <kit>/skills/critique/scripts/ui-measure.mjs <url> --shots <dir>` takes both shots and
-measures those for you (its `--help` says how), with or without a rubric. When the
+measures those for you (its `--help` says how), with or without a rubric. To check behaviour
+(click, type, see what appears), use the page driver Project facts' check commands name, when there
+is one, rather than writing a browser script. When the
 change draws data (names, counts, lists), take those screenshots again with worst-case data in
 a dev copy (`citadel:contraption-ui`, `references/worst-case-data.md`) and fix what it breaks; a
 new page, view or flow also gets that skill's dogfood pass (`references/dogfood.md`).

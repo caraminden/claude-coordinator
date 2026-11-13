@@ -31,7 +31,9 @@ bug classes of its own; read them before step 1.
    bug. Write the assertion for the *correct* behaviour and watch it go red. If you cannot
    make it fail, check the wiring next; if the logic test passes and the wiring is right,
    it is a presentation or expectation problem: say so with the passing test as evidence.
-   For a presentation bug, trace the view against the data it reads. For a tooling bug,
+   For a presentation bug, trace the view against the data it reads; a bug in a page is
+   reproduced with the page driver Project facts' check commands name, when there is one,
+   not a scratch browser script. For a tooling bug,
    reproduce the command. If none of these reproduces it, switch to the
    citadel:diagnosing-bugs skill. Reproduce and fix within one turn.
 3. **Find the cause.** Walk from the symptom back to the line that is wrong and say why

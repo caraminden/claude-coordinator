@@ -29,11 +29,12 @@ b.waits { color: var(--held); }
 
 /* The page: over the chat column on desktop, the whole screen on a phone (the panels collapse above it). */
 .releases-main { min-width: 0; padding-bottom: 2rem; }
-.rel-head .row { display: flex; align-items: center; gap: 0.5rem; }
-.rel-head h2 { margin: 0; }
-.rel-head .close-view { font-size: 1.3rem; line-height: 1; cursor: pointer; }
+/* The head matches a chat's (thread.css): the title's line, then the pills where a chat has its state, ‹ › × at the end. */
 @media (min-width: 801px) { .rel-head .close-view.narrow-only { display: none; } }
-.rel-chips { margin: 0 0 0.9rem; }
+.rel-head .rel-sub { flex-wrap: nowrap; }
+.rel-chips { flex: 0 1 auto; min-width: 0; margin: 0; }
+/* Pills that wrap to a second line keep ‹ › × on the first. */
+.rel-sub > .head-nav { align-self: flex-start; }
 .rel-chips .chip { padding: 0.25rem 0.75rem; text-decoration: none; }
 .rel-body { display: flex; flex-direction: column; gap: 0.75rem; }
 .rel-empty { margin: 0.5rem 0; }
@@ -101,7 +102,7 @@ b.waits { color: var(--held); }
 .rel-all-narrow { display: none; flex-direction: column; gap: 0.75rem; }
 @media (max-width: 800px) {
   .rel-head .close-view.wide-only { display: none; }
-  .ticket-head.rel-head > .row > h2, .ticket-head.rel-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex: 1 1 0; font-size: 1.15rem; }
+  .ticket-head.rel-head > .row > h2 { flex: 1 1 0; }
   .rel-all-wide { display: none; }
   .rel-all-narrow { display: flex; }
   .rel-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }

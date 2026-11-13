@@ -4,7 +4,8 @@
 // desktop and every member scheme's cards on a phone) and the chip beside a minion's PR info (take F).
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
-import { ago, api, fileUrl, h, schemeIcon, view } from './base.js';
+import { ago, api, fileUrl, h, icon, schemeIcon, view } from './base.js';
+import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { iconSrc } from './schemes.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
@@ -189,15 +190,21 @@ function fillPage() {
   const ids = allSchemes();
   const chipIds = scope !== 'all' && !ids.includes(scope) ? [...ids, scope] : ids;
   const chip = (s, label) => h('a', { class: `chip${scope === s ? ' on' : ''}`, href: pageHref(s), 'aria-current': scope === s ? 'page' : undefined }, label);
-  const close = (cls, label, text) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': label, title: label, onclick: closePage }, text);
+  // The chat header's ‹ › × (thread.js renderTicketHead): its buttons, icons and history, at the end of the pills' line.
+  const close = (cls, name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closePage }, icon(name));
   const body = !loaded ? [h('p', { class: 'muted' }, 'Loading releases…')]
     : scope === 'all' ? allView(ids)
       : schemeCards(scope, true);
   pageEl.replaceChildren(
     h('div', { class: 'ticket-head rel-head' },
-      h('div', { class: 'row' }, close('narrow-only', 'Back', '‹'), h('h2', {}, `Releases · ${scope === 'all' ? 'All' : schemeName(scope)}`),
-        h('span', { class: 'spacer' }), close('wide-only', 'Close', '×'))),
-    h('nav', { class: 'chips rel-chips', 'aria-label': 'Schemes' }, chip('all', 'All'), chipIds.map((id) => chip(id, schemeName(id)))),
+      h('div', { class: 'row' }, close('narrow-only', 'back'), h('h2', {}, `Releases · ${scope === 'all' ? 'All' : schemeName(scope)}`)),
+      h('div', { class: 'head-sub rel-sub' },
+        h('nav', { class: 'chips rel-chips', 'aria-label': 'Schemes' }, chip('all', 'All'), chipIds.map((id) => chip(id, schemeName(id)))),
+        h('span', { class: 'spacer' }),
+        h('span', { class: 'head-nav' },
+          h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
+          h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
+          close('wide-only', 'close')))),
     h('div', { class: 'rel-body' }, body));
   // Brings the highlighted change into view once, so a later update doesn't pull back someone who scrolled away.
   const hl = page?.hl != null && !page.shown && pageEl.querySelector('.rel-card.hl, .rel-change.hl');

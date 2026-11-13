@@ -27,8 +27,12 @@ import { GRACE_MS, GRUNT_AGE_MS, gruntWorktrees, madeAt, ownCheckout, removeWork
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
-import { alive, launchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
+import { alive, launchPlan, type EveryScheme, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
+import { appFolder } from './app-services.ts';
+import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
+import { GLOBAL_OWNER } from './properties.ts';
+import { homedir } from 'node:os';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 
@@ -592,6 +596,24 @@ export class Runner {
   personOf?: (author: string, from?: number) => number | null;
   /** A turn's GitHub env and prompt line for its person (src/github-link.ts forTurn); null with linking not set up. */
   githubFor?: (person: number | null, turnDir: string) => TurnGithub | null;
+  /** The contraptions' key folders (server.ts sets the live one's). */
+  contraptionKeys = DEFAULT_CONTRAPTIONS_DIR;
+
+  /**
+   * What the Citadel scheme's Taskmaster may read in every scheme (#656): only on a turn a Citadel member or admin
+   * asked for (isAdmin, as host_check's database read), so a non-member's relay never reaches schemes they aren't in.
+   * Other schemes' worktrees get git rules only for open minions: all of them would be ~30k rules.
+   */
+  everySchemeFor(project: Project, ticket: Ticket, asker: number | null): EveryScheme | null {
+    if (ticket.kind !== 'coordinator' || project.id !== GLOBAL_OWNER || asker === null || !this.store.isAdmin(this.store.getUser(asker))) return null;
+    const others = this.store.listProjects().filter((p) => p.id !== project.id && p.repo_dir);
+    return {
+      gitDirs: [...new Set(others.flatMap((p) => [p.repo_dir!, ...this.store.listTickets(p.id).filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))],
+      apps: this.store.listContraptions().map((c) => appFolder(c, homedir())),
+      data: dirname(this.store.path),
+      keysDir: this.contraptionKeys,
+    };
+  }
   /** Called when a turn fails (not when someone stops it), with the error shown in the chat and its event, if it has one. */
   onTurnError: (ticketId: number, text: string, eventId?: number) => void = () => {};
 
@@ -2065,7 +2087,10 @@ export class Runner {
         preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
       }
       : null;
-    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds));
+    // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
+    const everyScheme = this.everySchemeFor(project, ticket, asker);
+    const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
+    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView));
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
     // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
     let tmp: string | null = null;
@@ -2116,6 +2141,7 @@ export class Runner {
       memory: this.memoryScheme(project.id),
       typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
       homeContraptions: homeOf,
+      everyScheme,
       claudeBin: this.claudeBin,
     });
     // Written before anything of the minion's changes below, so a launch that can't be written leaves who it runs for as it was.

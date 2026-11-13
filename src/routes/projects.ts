@@ -410,7 +410,7 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
+    method: 'GET', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, everyScheme: true,
     // ?tickets=open leaves the dismissed minions out (`dismissed` counts them), and ?tickets=closed sends only them: the page
     // draws the scheme from the open ones and fetches the dismissed behind it, 80% of Citadel's payload (#538).
     async handler({ res, url, app, session, caller, project }) {
@@ -441,7 +441,7 @@ export const projectRoutes: Route[] = [
     // The scheme's minions as list_tickets prints them, for its minions too: read-only, and only the
     // line's fields, the latest activity line and waiting cards' labels and links among them (no card
     // contents, costs or paths). checkRole keeps a minion to its own scheme.
-    method: 'GET', path: '/api/projects/:project/tickets', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET', path: '/api/projects/:project/tickets', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
     handler({ res, url, app, project }) {
       const closed = url.searchParams.get('include_closed') === '1';
       const tickets = app.store
@@ -451,7 +451,7 @@ export const projectRoutes: Route[] = [
           const v = app.runner.view(t);
           return Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]]));
         });
-      return json(res, 200, { tickets });
+      return json(res, 200, { tickets, scheme: project.name });
     },
   },
   {

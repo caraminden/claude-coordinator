@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
+import { appFolder } from './app-services.ts';
 import { Containers, specHash, type ContainerSpec, type Mount } from './containers.ts';
 import type { Credentials } from './credentials.ts';
 import type { Store } from './db.ts';
@@ -223,6 +224,14 @@ export class ClaudeLink {
     // The code this server runs, read-only, so a member's turn checks the live checkout as a host turn does (#621). A dev
     // copy runs from a worktree, already mounted writable under projects/.
     if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push(...checkoutMounts(LIVE_CHECKOUT) ?? []);
+    // The contraptions' folders, read-only, for a Citadel member or admin: their Citadel Taskmaster turns read every scheme (#656).
+    const user = this.store.getUser(uid);
+    if (this.store.isAdmin(user)) {
+      for (const c of this.store.listContraptions()) {
+        const dir = appFolder(c, this.home);
+        if (existsSync(dir)) mounts.push({ src: dir, dst: dir, ro: true });
+      }
+    }
     // Each scheme's Claude Code memory, shared with the host's turns: the server's copy, at the path claude looks in.
     for (const p of this.store.listProjects()) {
       if (!p.repo_dir) continue;

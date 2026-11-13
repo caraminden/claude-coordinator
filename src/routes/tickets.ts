@@ -206,7 +206,7 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET', path: '/api/tickets/:ticket', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
     async handler(ctx) {
       const { res, ticket, app } = ctx;
       const { store } = app;
@@ -325,7 +325,7 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket/events', who: ['person', 'taskmaster'],
+    method: 'GET', path: '/api/tickets/:ticket/events', who: ['person', 'taskmaster'], everyScheme: true,
     async handler(ctx) {
       const { res, url, app, ticket } = ctx;
       const { id } = ticket;

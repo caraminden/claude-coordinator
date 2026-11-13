@@ -100,6 +100,8 @@ const quote = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').r
 /** An ExecStart line: the program bare (it is checked), each argument quoted; ${VAR} still expands from the unit's environment. */
 const execLine = (argv: string[], home: string) => [argv[0], ...argv.slice(1).map((a) => quote(tilde(a, home)))].join(' ');
 const tilde = (s: string, home: string) => (s.startsWith('~/') ? join(home, s.slice(2)) : s);
+/** A contraption's folder: where its repo is checked out; default ~/apps/<name>. */
+export const appFolder = (row: Pick<ContraptionRow, 'name' | 'folder'>, home: string) => (row.folder ? tilde(row.folder, home) : join(home, 'apps', row.name));
 
 export interface UnitInputs {
   row: Pick<ContraptionRow, 'name' | 'title' | 'port'>;
@@ -311,7 +313,7 @@ export class AppServices {
 
   /** The app's folder: where its repo is checked out; default ~/apps/<name>. */
   folder(row: Pick<ContraptionRow, 'name' | 'folder'>): string {
-    return row.folder ? tilde(row.folder, this.opts.home) : join(this.opts.home, 'apps', row.name);
+    return appFolder(row, this.opts.home);
   }
 
   unitOf(row: Pick<ContraptionRow, 'name'>): string {

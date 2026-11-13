@@ -216,6 +216,7 @@ const runner = new Runner(
 // restart doesn't stop them; TURN_UNITS=0 or 1 overrides that.
 runner.units = process.env.TURN_UNITS ? process.env.TURN_UNITS === '1' : !!process.env.INVOCATION_ID;
 runner.noTurns = PREVIEW;
+runner.contraptionKeys = contraptions.dir;
 // Minions' branches served for people to try (src/previews.ts); a preview serves none of its own.
 const previews = PREVIEW ? null : new Previews(store, DATA_DIR);
 if (previews) {

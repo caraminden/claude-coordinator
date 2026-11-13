@@ -929,7 +929,7 @@
   "member": "200",
   "outsider": "404 No such scheme",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -1319,7 +1319,7 @@
   "member": "200",
   "outsider": "404 No such scheme",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "200",
   "m2": "200"
  },
@@ -1339,7 +1339,7 @@
   "member": "200",
   "outsider": "404 No such scheme",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "200",
   "m2": "200"
  },
@@ -1528,7 +1528,7 @@
   "member": "200",
   "outsider": "404 No such minion",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "200",
   "m2": "403 A minion may only update itself"
  },
@@ -1658,7 +1658,7 @@
   "member": "200",
   "outsider": "404 No such minion",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -1668,7 +1668,7 @@
   "member": "200",
   "outsider": "404 No such minion",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -1678,7 +1678,7 @@
   "member": "200",
   "outsider": "404 No such minion",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -1998,7 +1998,7 @@
   "member": "200",
   "outsider": "404 No such minion",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -2128,7 +2128,7 @@
   "member": "200",
   "outsider": "404 No such minion",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -2138,7 +2138,7 @@
   "member": "200",
   "outsider": "404 No such minion",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -2148,7 +2148,7 @@
   "member": "200",
   "outsider": "404 No such minion",
   "tmA": "200",
-  "tmB": "403 Outside this Taskmaster's scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

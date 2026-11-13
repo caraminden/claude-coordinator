@@ -48,6 +48,8 @@ export interface TripwireConfig {
   env?: Record<string, string | undefined>;
   /** The turn's own folder (its pinned tripwire and hook config), read-only to the turn; Codex turns set it (#337). */
   turnDir?: string;
+  /** Contraptions' folders this turn reads but never writes: the Citadel scheme's Taskmaster's (#656). */
+  readOnly?: string[];
 }
 
 /** Why a call is stopped, and whether a person may approve it once on a card instead. */
@@ -74,6 +76,8 @@ function hasDeployScript(cfg: TripwireConfig): boolean {
 function writeReason(p: string, cfg: TripwireConfig): string | null {
   const configDir = join(cfg.home, '.config');
   if (cfg.turnDir && under(p, cfg.turnDir)) return `${cfg.turnDir} is this turn's own folder: its pinned tripwire and the config its hooks read. Nothing in a turn changes it.`;
+  const app = cfg.readOnly?.find((d) => under(p, d));
+  if (app) return `${app} is a contraption's folder, which you may read but not change: work there goes to its scheme's Taskmaster with message_taskmaster.`;
   if (under(p, cfg.checkout)) return `${cfg.checkout} is the live checkout the service runs from. Change code in your own worktree and merge to main. ${deployNote(cfg)}`;
   const projects = join(cfg.data, 'projects');
   if (under(p, projects) && p !== projects) {

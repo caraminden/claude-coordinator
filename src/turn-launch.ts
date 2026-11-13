@@ -120,8 +120,8 @@ export const TURN_BUILD_JOBS = '4';
 export const TURN_SLICE = 'citadel-turns.slice';
 
 /** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
-export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean): TripwireConfig {
-  return { home: homedir(), data: turnPins().dataDir, checkout: CHECKOUT, project: projectId, claudeConfig, ask };
+export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean, readOnly: string[] = []): TripwireConfig {
+  return { home: homedir(), data: turnPins().dataDir, checkout: CHECKOUT, project: projectId, claudeConfig, ask, ...(readOnly.length ? { readOnly } : {}) };
 }
 
 /**
@@ -129,8 +129,8 @@ export function tripwireConfig(projectId: number, claudeConfig: string, ask: boo
  * this server's data and checkout, and in a minion's turn sends the ones a person may allow to a card.
  * Its config travels as one JSON argument; no quoting needed, as these paths and JSON carry no single quotes.
  */
-export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = turnPins().TRIPWIRE) {
-  const config = tripwireConfig(projectId, claudeConfig, ask);
+export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = turnPins().TRIPWIRE, readOnly: string[] = []) {
+  const config = tripwireConfig(projectId, claudeConfig, ask, readOnly);
   const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
   return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
@@ -290,6 +290,27 @@ const READ_ONLY_EXCEPTIONS = [
 const HEALTH_FILES = ['/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/pressure/**'];
 
 /**
+ * What the Citadel scheme's Taskmaster may read beyond its own scheme (#656, Josh: "the Citadel taskmaster should
+ * have full read access to all schemes"), on a turn a Citadel member or admin asked for: runner.ts everySchemeFor.
+ */
+export interface EveryScheme {
+  /** Every other scheme's main checkout and its open minions' worktrees: read-only `git -C` there, never fetch. */
+  gitDirs: string[];
+  /** Each contraption's folder (~/apps/<name>): readable, not added (so nothing writes there), read-only `git -C`. */
+  apps: string[];
+  /** The live data folder: .env files in its schemes' folders stay denied. */
+  data: string;
+  /** The contraptions' key folders (src/contraptions.ts), whose keys stay denied. */
+  keysDir: string;
+}
+
+/** Secrets in the folders EveryScheme opens: .env files, and the contraptions' bearer keys (outside them, denied anyway). */
+function everySchemeDenies(e: EveryScheme): string[] {
+  return [...e.apps, join(e.data, 'projects')].flatMap((d) => [`${d}/**/.env`, `${d}/**/.env.*`])
+    .concat(join(e.keysDir, '*/contraption.key')).map((f) => `Read(/${f})`);
+}
+
+/**
  * How the coordinator may look at the project's code: its main checkout and every ticket folder,
  * readable but not writable. Bash runs only read-only commands (READ_ONLY_COMMANDS), on those folders,
  * readDirs and the box-health files: Claude Code still refuses a read command's path outside them.
@@ -301,7 +322,7 @@ const HEALTH_FILES = ['/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/p
  * config dir as sensitive, so neither allow rules nor a hook's allow let it write there (tried with
  * real runs); making that folder its auto-memory does, so its memory is the one minions load too.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null, liveDir: string | null = null, readDirs: string[] = []): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null, liveDir: string | null = null, readDirs: string[] = [], everyScheme: EveryScheme | null = null): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
   const subdirs = (dir: string) => {
     try {
       return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(dir, d.name));
@@ -312,17 +333,20 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
   const roots = [repoDir, ticketsDir, liveDir].filter((d): d is string => !!d);
   const gitDirs = [repoDir, ...(repoDir ? subdirs(ticketsDir) : []), liveDir].filter((d): d is string => !!d);
   const writable = [sharedDir, memoryDir].filter((d): d is string => !!d);
+  // Other schemes' folders sit in the data folder, already in readDirs; the contraptions' are read here (#656).
+  const apps = everyScheme?.apps ?? [];
+  const readGit = [...gitDirs, ...(everyScheme?.gitDirs ?? []), ...apps];
   return {
     // Adding the parent tickets/ folder also covers worktrees made after the turn starts.
     addDirs: [...roots, ...writable],
     settings: {
       permissions: {
         // `//` makes the path absolute. Edit rules also cover Write, NotebookEdit and Bash commands that write there.
-        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)', ...READ_ONLY_EXCEPTIONS],
+        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)', ...READ_ONLY_EXCEPTIONS, ...(everyScheme ? everySchemeDenies(everyScheme) : [])],
         // The web tools ask by default, and nobody can answer a Taskmaster's prompts, so they were denied (#210).
-        // readDirs (the live data folder, mise's installs) are readable but not added, so acceptEdits can't write there.
-        allow: ['WebSearch', 'WebFetch', ...[...readDirs.map((d) => `${d}/**`), ...HEALTH_FILES].map((p) => `Read(/${p})`), ...READ_ONLY_COMMANDS,
-          ...gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
+        // readDirs (the live data folder, mise's installs) and the contraptions' folders are readable but not added, so acceptEdits can't write there.
+        allow: ['WebSearch', 'WebFetch', ...[...readDirs, ...apps].map((d) => `${d}/**`).concat(HEALTH_FILES).map((p) => `Read(/${p})`), ...READ_ONLY_COMMANDS,
+          ...readGit.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
           ...gitDirs.filter((d) => d !== liveDir).flatMap((d) => GIT_FETCH.map((c) => `Bash(git -C ${d} ${c})`))],
       },
       ...(memoryDir ? { autoMemoryDirectory: memoryDir } : {}),
@@ -372,6 +396,8 @@ export interface TurnFacts {
   typer: { id: number; login: string } | null;
   /** The contraptions its scheme is home to (#266). */
   homeContraptions: string[];
+  /** For the Citadel scheme's Taskmaster on a Citadel member's ask, what it may read in every scheme (#656); else null. */
+  everyScheme?: EveryScheme | null;
   claudeBin: string;
   /** The systemd unit it runs in, or null for a plain child (and in a container). */
   unit: string | null;
@@ -435,20 +461,22 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const files: LaunchPlan['files'] = [];
   // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
   files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: servers }) });
-  const tripwire = tripwireHooks(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', pinned(pins.TRIPWIRE));
+  // The contraptions' folders the Citadel scheme's Taskmaster reads this turn (#656) stay unwritable to it.
+  const readOnly = ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER ? facts.everyScheme?.apps ?? [] : [];
+  const tripwire = tripwireHooks(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', pinned(pins.TRIPWIRE), readOnly);
   // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
   // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
   // A host turn has no hook, so the server login's Codex reviews run in its Codex container (#398): named here, where
   // the turn can't change it.
   const container = facts.codexReview ? { container: { name: facts.codexReview.container, turnsDir: facts.codexReview.turnsDir, env: facts.codexReview.env } } : {};
   const codexTripwire = join(dir, 'codex-tripwire.json');
-  files.push({ name: 'codex-tripwire.json', text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), mode: 0o444 });
+  files.push({ name: 'codex-tripwire.json', text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), mode: 0o444 });
   const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
     hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(pins.WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(pins.SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {
-    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')]);
+    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')], project.id === GLOBAL_OWNER ? facts.everyScheme ?? null : null);
     addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
     const { permissions, ...rest } = access.settings;
     Object.assign(settings, rest);

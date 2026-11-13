@@ -297,6 +297,8 @@ export interface Route {
    * scheme's owner (and admins). Threads keep to `who`.
    */
   access?: 'admin' | 'owner';
+  /** A GET the Citadel scheme's Taskmaster may make in any scheme, on a turn a Citadel member or admin asked for (#656). */
+  everyScheme?: true;
   handler(ctx: Ctx): unknown;
 }
 
@@ -361,10 +363,17 @@ function checkRole(route: Route, caller: Ticket | null, params: Record<string, s
   if (!who.includes('minion') || !own) throw new HttpError(403, 'A minion may only update itself');
 }
 
-/** Once its rows are loaded: a Taskmaster stays in its own scheme, and only reads itself, GET or HEAD (its 'self' routes aside). */
-function checkScope(route: Route, caller: Ticket, method: string, project: number | undefined, ticket: number | undefined) {
+/**
+ * Once its rows are loaded: a Taskmaster stays in its own scheme, and only reads itself, GET or HEAD (its 'self' routes aside).
+ * The Citadel scheme's reads other schemes' minions through `everyScheme` routes (#656, Josh: "the Citadel taskmaster should
+ * have full read access to all schemes"), on a Citadel member's or admin's ask (as access.ts adminAskRefusal), never writes.
+ */
+function checkScope(store: Store, route: Route, caller: Ticket, method: string, project: number | undefined, ticket: number | undefined) {
   if (caller.kind !== 'coordinator' || (ticket === caller.id && (route.who as readonly Who[]).includes('self'))) return;
-  if (project !== undefined && project !== caller.project_id) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
+  const reads = route.everyScheme && method === 'GET' && store.readsEveryScheme(caller);
+  if (project !== undefined && project !== caller.project_id && !reads) {
+    throw new HttpError(403, `Outside this Taskmaster's scheme${route.everyScheme && method === 'GET' ? ": only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for" : ''}`);
+  }
   if (ticket === caller.id && method !== 'GET' && method !== 'HEAD') throw new HttpError(403, 'The Taskmaster cannot act on itself');
 }
 
@@ -421,7 +430,7 @@ export function router(routes: Route[]) {
       // A scheme someone isn't in answers as if it didn't exist.
       if (!ctx.caller && project !== undefined && !app.store.canSee(session, project)) throw new HttpError(404, GONE[name]);
     }
-    if (ctx.caller) checkScope(route, ctx.caller, method, project, ctx.ticket?.id);
+    if (ctx.caller) checkScope(app.store, route, ctx.caller, method, project, ctx.ticket?.id);
     else if (route.access === 'owner' && !session.admin && app.store.getProject(project!)?.owner_id !== session.uid) throw new HttpError(403, 'Only the scheme\'s owner can do that');
     return route.handler(ctx);
   };

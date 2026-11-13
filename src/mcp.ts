@@ -965,14 +965,25 @@ function transcript(events: any[]): string[] {
 }
 
 /** Tickets are numbered per project; the API addresses them by their global id. */
-async function id(args: any): Promise<number> {
+async function id(args: any, scheme = PROJECT): Promise<number> {
   const n = Number(args.ticket_id);
   if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
-  const { tickets } = await call('GET', `/api/projects/${PROJECT}?number=${n}`); // one minion's view, not the whole scheme's (#609)
+  const { tickets } = await call('GET', `/api/projects/${scheme}?number=${n}`); // one minion's view, not the whole scheme's (#609)
   const ticket = tickets.find((t: any) => t.number === n);
-  if (!ticket) throw new Error(`There is no minion #${n} in this scheme`);
+  if (!ticket) throw new Error(`There is no minion #${n} in ${scheme === PROJECT ? 'this' : 'that'} scheme`);
   return ticket.id;
 }
+
+/** The scheme list_tickets or read_ticket reads: this one, or for the Citadel scheme's Taskmaster another (#656). */
+function schemeOf(args: any): number {
+  if (args.scheme == null) return PROJECT;
+  const n = Number(args.scheme);
+  if (!APP_INSTRUCTIONS) throw new Error(`Only the ${APP_NAME} scheme's Taskmaster reads other schemes' minions: ask that scheme's Taskmaster with message_taskmaster`);
+  if (!Number.isInteger(n) || n <= 0) throw new Error('scheme must be a scheme number, as your instructions list them');
+  return n;
+}
+/** The first line of another scheme's minions, so its numbers aren't taken for this scheme's (the chat links a bare #N here). */
+const otherScheme = (name: string) => `Scheme ${name}: these are its minions, not this scheme's; write each as "${name} #N".`;
 
 /** The label fields a call sets; ones left out stay as they are. A retired `tag` still goes along: the server makes it the type. */
 function labelFields(args: any) {
@@ -1165,18 +1176,22 @@ async function runTool(name: string, args: any): Promise<string> {
   for (const [k, v] of Object.entries(args)) if (v === 'null' && [tool.inputSchema?.properties?.[k]?.type].flat().includes('null')) args[k] = null;
   switch (name) {
     case 'list_tickets': {
-      const { tickets } = await call('GET', `/api/projects/${PROJECT}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
-      return tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.';
+      const at = schemeOf(args);
+      const { tickets, scheme } = await call('GET', `/api/projects/${at}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
+      const head = at === PROJECT ? [] : [otherScheme(scheme)];
+      return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.'].join('\n');
     }
     case 'read_ticket': {
-      const n = await id(args);
+      const at = schemeOf(args);
+      const n = await id(args, at);
       const last = Math.min(Math.max(Number(args.last) || 10, 1), 50);
       // The whole history (?after=0), not a chat page: the skipped count needs every entry.
-      const [{ ticket }, events] = await Promise.all([call('GET', `/api/tickets/${n}`), call('GET', `/api/tickets/${n}/events?after=0`)]);
-      if (args.live === true) return [ticketLine(ticket), ...liveState(ticket, events)].join('\n');
+      const [{ ticket, project }, events] = await Promise.all([call('GET', `/api/tickets/${n}`), call('GET', `/api/tickets/${n}/events?after=0`)]);
+      const head = at === PROJECT ? [] : [otherScheme(project.name)];
+      if (args.live === true) return [...head, ticketLine(ticket), ...liveState(ticket, events)].join('\n');
       const lines = transcript(events);
       const skipped = Math.max(lines.length - last, 0);
-      return [ticketLine(ticket), ticket.cwd ? `worktree: ${ticket.cwd}` : '', skipped ? `(${skipped} earlier entries omitted)` : '', ...lines.slice(-last)].filter(Boolean).join('\n\n');
+      return [...head, ticketLine(ticket), ticket.cwd ? `worktree: ${ticket.cwd}` : '', skipped ? `(${skipped} earlier entries omitted)` : '', ...lines.slice(-last)].filter(Boolean).join('\n\n');
     }
     case 'create_ticket': {
       // A session that loaded an older schema may leave out properties (or its type); a missing type
@@ -1547,11 +1562,15 @@ function scheduleLine(s: any): string {
   return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}; ${next}; ${last}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
+/** list_tickets and read_ticket with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */
+const SCHEME_ARG = { scheme: { type: 'integer', description: "Another scheme's number (as your instructions list them), to read its minions instead of this scheme's. Read-only, and only on a turn a Citadel member or admin asked for; leave it out for this scheme." } };
+const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ticket' ? { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, ...SCHEME_ARG } } } : t);
+
 function toolList() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
   return [...THREAD_TOOLS, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 

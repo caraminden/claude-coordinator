@@ -167,8 +167,8 @@ export function buildLines(b: BuildRole | null): string[] {
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir, builds), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null): string {
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir, builds, everyScheme), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this minion.';
@@ -255,7 +255,27 @@ function machineTools(machines: TurnMachine[]): string[] {
 /** The Taskmaster's test for suggesting a build (specs/build-branches.md, section 4), once the scheme's land.sh can merge into one. */
 export const BUILDS_LINE = 'Builds: a big feature can run as a build, a branch `build/<n>` that its minions (feeders) merge into and that lands on main once, with one go card. Suggest one with an ask_question card when all three hold: three or more minions build one feature (or two that run for more than a day); half of it live is worse than none (people would meet two versions of one thing, a page moved without its parts, a format only one side reads); and it can\'t just stay dark (an unlinked route or an unused table ships straight to live). Never for bug fixes, the land pipeline, process and kit docs, refactors, or a batch of independent jobs; when in doubt, no build. On a yes, start its build minion with create_ticket: build the scheme\'s highest build number plus one, build_owner: true, type chore, title "Build <n>: <feature>". It makes the branch first; feeders created in that build start from it. A feeder that closed as "folded into Build <n>" is done: its work waits in the build, not live yet.';
 
-function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null, builds = false): string {
+/** What the Citadel scheme's Taskmaster may read in every scheme this turn (#656; runner.ts everySchemeFor), for its prompt. */
+export interface EverySchemeView {
+  /** The live data folder: each scheme's folders are under its projects/<number>/. */
+  data: string;
+  schemes: { id: number; name: string }[];
+  apps: { name: string; folder: string }[];
+}
+
+/** The Citadel scheme's Taskmaster's line on reading every scheme (#656): what and how on a member's ask, else why not this turn. */
+function everySchemeLine(view: EverySchemeView | null): string {
+  if (!view) return `Reading other schemes' folders and minions is for turns a ${APP_NAME} member or admin asked for, and this one isn't: ask that scheme's ${AGENT_NAME} with message_taskmaster instead.`;
+  const projects = join(view.data, 'projects');
+  return [
+    `You can read every scheme, read-only, since a ${APP_NAME} member or admin asked for this turn (#656). Each scheme's folders are under ${projects}/<number>/: repo (its main checkout), tickets/<id> (its minions' worktrees) and shared/project (its shared folder). The schemes: ${view.schemes.map((p) => `${p.id} ${p.name}`).join(', ')}.`,
+    view.apps.length ? `The contraptions' folders: ${view.apps.map((a) => `${a.name} ${a.folder}`).join(', ')}.` : '',
+    "Read them with Read, grep, ls and `git -C <folder> log|status|diff|show` (git in each scheme's repo, its open minions' worktrees and the contraptions' folders, never fetch there). list_tickets and read_ticket take `scheme` (its number) to show another scheme's minions; write one as \"<scheme name> #N\", since a bare #N links to this scheme's.",
+    `Never write there, and message, start, stop or close nothing there: work in another scheme still goes to its ${AGENT_NAME} with message_taskmaster. .env files and contraption keys stay unreadable.`,
+  ].filter(Boolean).join(' ');
+}
+
+function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null, builds = false, everyScheme: EverySchemeView | null = null): string {
   return [
     `You are the Taskmaster for scheme "${project.name}" in ${APP_NAME}, a shared web app where several people chat with Claude Code sessions called minions.`,
     ROLE_FRAMING,
@@ -274,6 +294,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       ? `The scheme's main checkout is at ${project.repo_dir} and minion worktrees are under ${ticketsDir}, one folder per minion, named by an internal id, not its number: read_ticket shows each one's worktree. You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`.`
       : `This scheme has no git repo; each minion gets a plain folder under ${ticketsDir}. You may read them for context, but do not edit them: edits there are denied.`,
     project.id === GLOBAL_OWNER ? `The live checkout, the code this server runs right now, is at ${CHECKOUT}: read it the same way (Read, ls, grep, git -C), never edit it.` : '',
+    project.id === GLOBAL_OWNER ? everySchemeLine(everyScheme) : '',
     "To see what a running minion is doing (hung or busy, and on what), call read_ticket with live: true; minions' session transcripts aren't readable here. A turn run for a person who has their own Claude login runs in their container: there the host_check tool reads the live database (secrets masked), the journal and service status, and the live checkout is mounted read-only at its own path.",
     'Read-only shell commands (grep, ls, find, cat, head, wc, `git -C <folder> log|status|diff|show`, `git -C <folder> fetch` in the scheme repo and worktrees, `sqlite3 -readonly -safe`, gh reads, `curl -s http://127.0.0.1:8573/api/health`, uptime, ps, free, df, `ss -ltn`, `systemctl --user status`, `journalctl --user`) run here and in the data folder with absolute paths, piped as you like; `cd <folder> && …`, a shell loop or a path in a variable is denied, since their insides can\'t be checked: run one command per folder instead.',
     memoryDir

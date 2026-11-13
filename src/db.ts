@@ -1625,6 +1625,11 @@ export class Store {
     return this.getSetting<number>(askerKey(ticketId)) ?? this.getTicket(ticketId)?.person_id ?? null;
   }
 
+  /** Whether a Taskmaster's turn may read every scheme (#656): the Citadel scheme's, on a Citadel member's or admin's ask. */
+  readsEveryScheme(caller: Pick<Ticket, 'id' | 'kind' | 'project_id'>): boolean {
+    return caller.kind === 'coordinator' && caller.project_id === GLOBAL_OWNER && this.isAdmin(this.getUser(this.turnAsker(caller.id) ?? -1));
+  }
+
   deleteTicket(id: number) {
     this.deleteSetting(askerKey(id));
     this.deleteSetting(planKey(id));

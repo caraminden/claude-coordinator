@@ -317,7 +317,7 @@ class RunsCache {
     for (const id of this.files.keys()) if (!kept.has(id)) this.files.delete(id);
     const slug = repoSlug(p.repo_url);
     // The runs a page can show a download for: the newest few that shipped.
-    for (const r of out.filter(shipped).slice(0, PREVIOUS)) {
+    for (const r of out.filter(shipped).slice(0, PREVIOUS + 1)) { // the current and its Previous releases
       if (this.files.has(r.run.id) || !slug || !this.d.actions.runArtifacts) continue;
       const list = await this.d.actions.runArtifacts(p, r.run);
       if (list) this.files.set(r.run.id, shippedFile(slug, r.run, list));

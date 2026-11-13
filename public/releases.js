@@ -242,7 +242,7 @@ function previousList(projectId, tv) {
     h('summary', {}, `Previous releases (${tv.recent.length})`),
     h('ul', { class: 'rel-prev-list' }, tv.recent.map((r) => {
       const failed = r.outcome !== 'live' && r.outcome !== 'signed';
-      const took = tookText(r);
+      const took = tookText(r) ?? (r.stages?.sign != null ? shortSpan(r.stages.sign * 1000) : null); // a signed APK never goes live: its signing is the whole run
       const when = r.live ? `live ${ago(r.live)}` : r.started ? `${failed ? 'tried' : 'built'} ${ago(r.started)}` : '';
       return h('li', {},
         r.link ? h('a', { class: 'rel-ver', href: r.link, target: '_blank', rel: 'noopener' }, label(r)) : h('span', { class: 'rel-prev-name' }, label(r)),

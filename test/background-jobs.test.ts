@@ -287,6 +287,7 @@ function ships() {
   const t = minion(s.store, s.project.id);
   s.store.setTicketDir(t.id, '/repo/wt', 'ticket/1-x');
   const lookups: boolean[] = [];
+  const worktrees: (string | null | undefined)[] = [];
   const rows: number[] = [];
   let next: BranchStatus = { ...merged(false), merged: false, ahead: 2, deploy: null };
   const ship = new ShipStatus({
@@ -295,13 +296,14 @@ function ships() {
     broadcast: s.broadcast,
     liveHead: () => 'head1',
     checkoutDir: '/checkout',
-    status: async (_repo, _branch, _at, withPr) => {
+    status: async (_repo, _branch, _at, withPr, _live, _build, worktree) => {
       lookups.push(withPr);
+      worktrees.push(worktree);
       return structuredClone(next);
     },
     delayMs: 0,
   });
-  return { ...s, t, ship, lookups, rows, set: (b: BranchStatus) => (next = b) };
+  return { ...s, t, ship, lookups, worktrees, rows, set: (b: BranchStatus) => (next = b) };
 }
 
 test('ship status re-sends a minion only when its line changes, and looks up the PR at most once a minute', async () => {
@@ -321,6 +323,19 @@ test('ship status re-sends a minion only when its line changes, and looks up the
   assert.equal(rows.length, 2);
   assert.equal(sent.filter((m: any) => m.type === 'branch').length, 1, 'a changed status is broadcast');
   assert.ok(PR_TTL_MS >= 60_000);
+});
+
+// #632: uncommitted work in its worktree takes a live minion back to its branch, so the read looks there.
+test("ship status reads the minion's worktree, and a live line goes back to its branch while it has uncommitted work", async () => {
+  const { t, ship, worktrees, rows, set } = ships();
+  set(merged(true));
+  await ship.branch(t.id);
+  assert.deepEqual(worktrees, ['/repo/wt']);
+  assert.equal(ship.ship(t.id)?.stage, 'live');
+  set({ ...merged(true), uncommitted: 2 });
+  await ship.branch(t.id);
+  assert.equal(ship.ship(t.id)?.stage, 'branch');
+  assert.equal(rows.length, 2, 'the row is re-sent');
 });
 
 test('the poll re-reads only merged work that is not live, and a failed deploy shows while the server runs its head', async () => {

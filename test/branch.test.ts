@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -191,4 +191,59 @@ test('a feeder folded into its build reads as folded, then live once the build l
   const after = await inBuild(git(repo, 'rev-parse', 'main'));
   assert.equal(after?.tip, mine, 'the feeder commit keeps its hash');
   assert.equal(shipLine(after, 0, null)?.stage, 'live');
+});
+
+// #632, Cara: "It should refresh if there is new work it is doing that isnt live". Edits in a minion's worktree
+// that aren't committed are new work; a new top-level file or folder is its scratch (screenshots, notes), not work.
+test("uncommitted edits in the minion's worktree count as new work, its top-level scratch does not", async () => {
+  git(repo, 'branch', 't/12', 'main');
+  const wt = join(root, 'wt12');
+  git(repo, 'worktree', 'add', '-q', wt, 't/12');
+  mkdirSync(join(wt, 'src'));
+  writeFileSync(join(wt, 'src', 'a.ts'), '1');
+  git(wt, 'add', '-A');
+  git(wt, 'commit', '-q', '-m', 'src');
+  merge('t/12');
+  pull();
+  const head = git(live, 'rev-parse', 'HEAD');
+  const ws = (dir: string | null = wt) => branchStatus(repo, 't/12', started, false, { head, checkoutDir: live }, null, dir);
+  assert.equal((await ws())?.uncommitted, 0);
+  assert.equal(shipLine(await ws(), 0, null)?.stage, 'live');
+
+  mkdirSync(join(wt, 'shots'));
+  writeFileSync(join(wt, 'shots', 'row.png'), 'x');
+  writeFileSync(join(wt, 'notes.md'), 'x');
+  assert.equal((await ws())?.uncommitted, 0, 'top-level scratch is not work');
+  assert.equal(shipLine(await ws(), 0, null)?.stage, 'live');
+
+  writeFileSync(join(wt, 'src', 'b.ts'), 'new');
+  assert.equal((await ws())?.uncommitted, 1, 'a new file in a folder the repo tracks');
+  assert.deepEqual(shipLine(await ws(), 0, null), { stage: 'branch', text: 'On its branch: changes not committed yet', commit: head.slice(0, 7) });
+  writeFileSync(join(wt, 'src', 'a.ts'), '2');
+  assert.equal((await ws())?.uncommitted, 2, 'an edited tracked file');
+  git(wt, 'add', 'src');
+  assert.equal((await ws())?.uncommitted, 2, 'staged still counts');
+
+  git(wt, 'commit', '-q', '-m', 'more');
+  assert.equal((await ws())?.uncommitted, 0);
+  assert.equal(shipLine(await ws(), 0, null)?.text, 'On its branch: 1 commit not on main');
+  assert.equal((await ws(null))?.uncommitted, 0, 'no worktree to look at');
+  assert.equal((await ws(join(root, 'gone')))?.uncommitted, 0, 'a worktree that is gone');
+});
+
+test('uncommitted work takes a finished line back to its branch, rides along with unlanded commits, and leaves a land in flight alone', () => {
+  const base: BranchStatus = { branch: 't/7', tip: 'abcdef0123', base: 'main', ahead: 0, merged: true, empty: false, pr: null, deploy: { pulled: true, live: true }, uncommitted: 1 };
+  const line = (s: Partial<BranchStatus>) => shipLine({ ...base, ...s }, 0, null);
+  const edits = { stage: 'branch', text: 'On its branch: changes not committed yet', commit: 'abcdef0' };
+  assert.deepEqual(line({}), edits, 'live, then edits');
+  assert.deepEqual(line({ deploy: null }), edits, "another scheme's merged work, then edits");
+  assert.deepEqual(line({ merged: false, deploy: null, build: { n: 7, merged: true, ahead: 0 } }), edits, 'folded into its build, then edits');
+  assert.deepEqual(line({ empty: true, merged: false, deploy: null }), edits, 'edits before the first commit');
+  assert.equal(line({ empty: true, merged: false, deploy: null, uncommitted: 0 }), null);
+  assert.equal(line({ merged: false, ahead: 2, deploy: null })?.text, 'On its branch: 2 commits not on main, and changes not committed yet');
+  assert.equal(line({ merged: false, deploy: null, build: { n: 7, merged: false, ahead: 1 } })?.text, 'On its branch: 1 commit not in build/7, and changes not committed yet');
+  // Landed and on its way: those stages already say it isn't live, and the release track follows them.
+  assert.equal(line({ deploy: { pulled: true, live: false } })?.stage, 'deploying');
+  assert.equal(line({ deploy: { pulled: false, live: false } })?.stage, 'main');
+  assert.equal(shipLine({ ...base, deploy: { pulled: true, live: false } }, 0, 'Deploy failed.')?.stage, 'failed');
 });

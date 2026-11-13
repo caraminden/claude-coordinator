@@ -24,6 +24,8 @@ export interface BranchStatus {
    * (a deploy is under way) and whether the running server contains it. Null otherwise.
    */
   deploy: { pulled: boolean; live: boolean } | null;
+  /** Files changed in the minion's worktree and not committed (uncommittedFiles); 0 when it wasn't looked at. */
+  uncommitted?: number;
 }
 
 /** The commit the server runs and its live checkout, to place merged work in a deploy. */
@@ -62,7 +64,7 @@ async function findPr(repoDir: string, branch: string): Promise<BranchStatus['pr
  * Status of a ticket's branch in the project's checkout. Merged means its commits are all in the
  * local default branch or origin's (tickets here are often merged locally rather than through a PR).
  */
-export async function branchStatus(repoDir: string, branch: string, startedAt: number, withPr: boolean, live: Live | null = null, build: number | null = null): Promise<BranchStatus | null> {
+export async function branchStatus(repoDir: string, branch: string, startedAt: number, withPr: boolean, live: Live | null = null, build: number | null = null, worktree: string | null = null): Promise<BranchStatus | null> {
   const tip = await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir);
   if (!tip) return null;
   const originHead = await tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir);
@@ -95,7 +97,23 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
     } : null,
     pr: withPr ? await findPr(repoDir, branch) : null,
     deploy: merged && live ? await deployed(repoDir, branch, live) : null,
+    uncommitted: worktree ? await uncommittedFiles(worktree) : 0,
   };
+}
+
+/**
+ * How many files in a minion's worktree hold work not committed yet: edited, staged or deleted tracked files,
+ * and new files inside folders the repo already tracks. A new top-level file or folder (`?? shots/`, `?? notes.md`)
+ * is the minion's scratch, not work. 0 when git can't tell (the worktree is gone).
+ */
+export async function uncommittedFiles(worktree: string): Promise<number> {
+  try {
+    // --no-optional-locks: never take index.lock, which would make the minion's own `git commit` fail meanwhile.
+    const { stdout } = await run('git', ['--no-optional-locks', 'status', '--porcelain'], { cwd: worktree, timeout: 15_000 });
+    return stdout.split('\n').filter((l) => l && !(l.startsWith('?? ') && !l.slice(3).replace(/\/"?$/, '').includes('/'))).length;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -164,8 +182,8 @@ async function deployed(repoDir: string, branch: string, live: Live): Promise<Br
 /**
  * Where a minion's change is, as one line for its bar and a stage for its row's badge: on its branch,
  * folded into its build, on main, deploying, live, or not live because the last deploy failed. Live is by ancestry: the
- * running server contains the branch, whichever minion's deploy carried it there. Null before the
- * minion has committed anything.
+ * running server contains the branch, whichever minion's deploy carried it there; changes in its worktree not
+ * committed yet take it back to its branch. Null before the minion has committed or changed anything.
  */
 export interface Ship {
   stage: 'branch' | 'build' | 'main' | 'deploying' | 'live' | 'failed';
@@ -177,13 +195,20 @@ export interface Ship {
 }
 
 export function shipLine(s: BranchStatus | null, interruptible: number, failure: string | null): Ship | null {
-  if (!s || s.empty) return null;
+  if (!s || (s.empty && !s.uncommitted)) return null;
   const commit = s.tip.slice(0, 7);
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  // New work in its worktree (#632) isn't live, nor in its build, nor merged: back on its branch until it lands.
+  // A land already in flight (on main, deploying, failed) keeps its stage, which says it isn't live either.
+  const edits = s.uncommitted ? 'changes not committed yet' : null;
+  if (edits && (s.empty || s.deploy?.live || (s.merged && !s.deploy) || (!s.merged && s.build?.merged))) {
+    return { stage: 'branch', text: `On its branch: ${edits}`, commit };
+  }
+  const and = edits ? `, and ${edits}` : '';
   // A feeder folded into its build: done for now, live when the build lands (main takes it by merge, so its hashes stay).
   if (!s.merged && s.build?.merged) return { stage: 'build', text: `Folded into Build ${s.build.n}, not live until the build lands`, commit };
-  if (!s.merged && s.build) return { stage: 'branch', text: `On its branch: ${plural(s.build.ahead, 'commit')} not in build/${s.build.n}`, commit };
-  if (!s.merged) return { stage: 'branch', text: `On its branch: ${plural(s.ahead, 'commit')} not on ${s.base ?? 'main'}`, commit };
+  if (!s.merged && s.build) return { stage: 'branch', text: `On its branch: ${plural(s.build.ahead, 'commit')} not in build/${s.build.n}${and}`, commit };
+  if (!s.merged) return { stage: 'branch', text: `On its branch: ${plural(s.ahead, 'commit')} not on ${s.base ?? 'main'}${and}`, commit };
   // Another scheme's repo: merged is as far as it goes here.
   if (!s.deploy) return { stage: 'main', text: `Merged into ${s.base ?? 'main'}`, commit };
   if (s.deploy.live) return { stage: 'live', text: 'Live', commit };

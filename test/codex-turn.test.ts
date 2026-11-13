@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { claudeLog, codexModelFor, fitLog } from '../src/codex.ts';
-import { codexInput, limitWords, mcpServers, parseArgs } from '../src/codex-turn.ts';
+import { codexInput, installSkills, limitWords, mcpServers, parseArgs } from '../src/codex-turn.ts';
 import { jsonLines } from './helpers.ts';
 
 // Codex turns (#337): src/codex-turn.ts drives `codex app-server` and speaks Claude's stream-json both
@@ -299,4 +299,30 @@ test("a contraption's Codex turn has no shell, no patches, no kit and no Codex n
   assert.doesNotMatch(r.calls.find((c) => c.method === 'thread/start').params.developerInstructions, /Running on Codex/);
   const web = await run(['--codex-mode', 'contraption', '--tools', 'WebSearch,WebFetch']);
   assert.match(web.calls[0].argv.join(' '), /web_search="live"/);
+});
+
+test("the kit's skills install once: a turn starting beside another leaves an installed kit alone, and a new kit replaces it (#636)", () => {
+  const kit = join(root, 'kit-skills');
+  const home = join(root, 'skills-home');
+  for (const name of ['alpha', 'beta']) {
+    mkdirSync(join(kit, 'skills', name, 'refs'), { recursive: true });
+    writeFileSync(join(kit, 'skills', name, 'SKILL.md'), `# ${name}`);
+    writeFileSync(join(kit, 'skills', name, 'refs', 'a.md'), 'v1');
+  }
+  mkdirSync(join(kit, 'skills', 'not-a-skill'), { recursive: true });
+  installSkills(kit, home);
+  const skills = join(home, 'skills');
+  assert.deepEqual(readdirSync(skills).sort(), ['.citadel-kit', 'citadel-alpha', 'citadel-beta']);
+  assert.equal(readFileSync(join(skills, 'citadel-alpha', 'refs', 'a.md'), 'utf8'), 'v1');
+  // The same kit again: nothing is touched under a turn that is reading it.
+  writeFileSync(join(skills, 'citadel-alpha', 'in-use'), '');
+  installSkills(kit, home);
+  assert.ok(existsSync(join(skills, 'citadel-alpha', 'in-use')), 'left alone');
+  // A new kit (a deploy): changed files replaced, a dropped skill removed, nothing left over.
+  writeFileSync(join(kit, 'skills', 'alpha', 'refs', 'a.md'), 'v2');
+  rmSync(join(kit, 'skills', 'beta'), { recursive: true });
+  installSkills(kit, home);
+  assert.deepEqual(readdirSync(skills).sort(), ['.citadel-kit', 'citadel-alpha']);
+  assert.equal(readFileSync(join(skills, 'citadel-alpha', 'refs', 'a.md'), 'utf8'), 'v2');
+  assert.equal(existsSync(join(skills, 'citadel-alpha', 'in-use')), false);
 });

@@ -13,7 +13,8 @@
 // stays the minion's), and `{ type: 'codex_rate_limits', rate_limits }` lines carry Codex's usage.
 // Stopping it (SIGTERM) interrupts the turn. 30 minutes with no word from Codex ends it with an error.
 import { spawn } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,14 +108,45 @@ function pruneRollouts(dir: string, now = Date.now()) {
   }
 }
 
-/** The kit's skills as Codex skills (CODEX_HOME/skills/citadel-<name>), replacing an older copy. */
-function installSkills(kit: string, home: string) {
+/**
+ * The kit's skills as Codex skills (CODEX_HOME/skills/citadel-<name>), replacing an older copy. The
+ * person's other Codex turns may be starting or reading them (#636), so a kit already installed is left
+ * alone (`.citadel-kit` holds its hash), and a new one goes in a skill at a time: copied aside, then renamed into place.
+ */
+export function installSkills(kit: string, home: string) {
   const skills = join(home, 'skills');
   mkdirSync(skills, { recursive: true });
-  for (const name of readdirSync(skills)) if (name.startsWith('citadel-')) rmSync(join(skills, name), { recursive: true, force: true });
   const src = join(kit, 'skills');
-  if (!existsSync(src)) return;
-  for (const name of readdirSync(src)) if (existsSync(join(src, name, 'SKILL.md'))) cpSync(join(src, name), join(skills, `citadel-${name}`), { recursive: true });
+  const names = existsSync(src) ? readdirSync(src).filter((name) => existsSync(join(src, name, 'SKILL.md'))) : [];
+  const hash = createHash('sha256');
+  for (const name of names) {
+    for (const f of (readdirSync(join(src, name), { recursive: true }) as string[]).sort()) {
+      const p = join(src, name, f);
+      hash.update(`${name}/${f}\0`);
+      if (statSync(p).isFile()) hash.update(readFileSync(p));
+    }
+  }
+  const stamp = join(skills, '.citadel-kit');
+  const digest = hash.digest('hex');
+  try {
+    if (readFileSync(stamp, 'utf8') === digest) return;
+  } catch {}
+  for (const name of readdirSync(skills)) if (name.startsWith('citadel-') && !names.includes(name.slice('citadel-'.length))) rmSync(join(skills, name), { recursive: true, force: true });
+  for (const name of names) {
+    const dest = join(skills, `citadel-${name}`);
+    const [fresh, old] = [join(skills, `.new-${process.pid}-${name}`), join(skills, `.old-${process.pid}-${name}`)];
+    cpSync(join(src, name), fresh, { recursive: true });
+    try {
+      renameSync(dest, old);
+    } catch {}
+    try {
+      renameSync(fresh, dest);
+    } catch {
+      rmSync(fresh, { recursive: true, force: true }); // another turn's copy of it got there first
+    }
+    rmSync(old, { recursive: true, force: true });
+  }
+  writeFileSync(stamp, digest);
 }
 
 export async function main(argv: string[], env: Record<string, string | undefined> = process.env) {

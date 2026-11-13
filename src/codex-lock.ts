@@ -52,7 +52,15 @@ export function tokenLife(home: string, now = Date.now()): { left: number; life:
   }
 }
 
-/** Have a short `codex app-server` refresh the login now (account/read with refreshToken); resolves when it answered, ended or `timeoutMs` passed. */
+/** A refresh is over, or its codex killed, within this of its start (refresh's two limits and some slack). */
+const REFRESH_MAX_MS = 70_000;
+
+/**
+ * Have a short `codex app-server` refresh the login now (account/read with refreshToken); resolves once it
+ * is gone. codex finishes a refresh it began after its stdin closes, so one that didn't answer within
+ * `timeoutMs` gets as long again to end before it is killed: killing it sooner could lose a new token the
+ * server already gave out.
+ */
 function refresh(bin: string, env: Record<string, string | undefined>, timeoutMs = 30_000): Promise<void> {
   return new Promise((resolve) => {
     const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"'], { env: env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'ignore'] });
@@ -64,7 +72,7 @@ function refresh(bin: string, env: Record<string, string | undefined>, timeoutMs
       child.stdin.end();
       if (child.exitCode !== null || child.signalCode !== null) return resolve();
       // Wait for it to go: a refresh still on its way must not outlive the lock.
-      const kill = setTimeout(() => child.kill('SIGKILL'), 3000);
+      const kill = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
       child.once('exit', () => (clearTimeout(kill), resolve()));
     };
     const timer = setTimeout(finish, timeoutMs);
@@ -144,8 +152,10 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
       } catch {
         continue; // its holder just unlocked: try again
       }
-      // No pid yet: its holder is between mkdir and write, unless that was a while ago.
-      if (!alive && (pid || age > 10_000)) rmSync(dir, { recursive: true, force: true });
+      // No pid yet: its holder is between mkdir and write, unless that was a while ago. A holder that died
+      // refreshing (a stopped turn, a review's timeout) left its codex to finish: the lock waits that out,
+      // or the next run would send the same refresh token.
+      if (!alive && (existsSync(join(dir, 'refreshing')) ? age > REFRESH_MAX_MS : pid || age > 10_000)) rmSync(dir, { recursive: true, force: true });
       else {
         // A login check takes a second or so: only a longer wait is worth a line in the chat.
         if (!said && Date.now() - began >= noteMs) (said = true), onWait();
@@ -159,7 +169,9 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
     let life = tokenLife(home);
     const before = life;
     if (life !== 'none' && life !== 'unknown' && life.left < Math.min(MARGIN_S, life.life / 2)) {
+      writeFileSync(join(dir, 'refreshing'), ''); // also restarts the lock's age
       await refresh(opts.bin ?? 'codex', env);
+      rmSync(join(dir, 'refreshing'), { force: true });
       life = tokenLife(home);
     }
     const refreshed = life !== 'none' && life !== 'unknown' && before !== 'none' && before !== 'unknown' && life.left > before.left + 60;

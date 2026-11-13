@@ -90,7 +90,7 @@ test('a token inside the margin is refreshed under the lock: three runs at once 
 test('a refresh is over before the lock is let go', async () => {
   const dir = home(600);
   const first = codexLock(dir, () => {}, opts(dir, { FAKE_MS: '500' }));
-  await new Promise((r) => setTimeout(r, 250));
+  while (!refreshes(dir).length) await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(refreshes(dir), ['start']);
   assert.ok(locked(dir), 'held while it refreshes');
   await first;
@@ -131,7 +131,12 @@ test('the switch brings back one at a time: the file in CODEX_HOME or CITADEL_CO
   const review = await codexLock(dir, () => assert.fail('waited on its own turn'), { ...opts(dir, own), inTurn: true });
   review.unlock();
   assert.ok(locked(dir), "its turn's lock stays");
+  let turn: unknown = null;
+  const second = codexLock(dir, () => {}, opts(dir, own)).then((l) => (turn = l));
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(turn, null, 'a turn with the same name in its environment still waits');
   a.unlock();
+  (await second).unlock();
   a.unlock();
   assert.equal(locked(dir), false);
   rmSync(join(dir, SERIAL_FILE));
@@ -153,4 +158,22 @@ test('a short wait says nothing; a wait past noteMs says so once', async () => {
   let said = 0;
   await codexLock(dir, () => said++, { ...opts(dir), noteMs: 200 });
   assert.equal(said, 1);
+});
+
+test("a holder that died while refreshing keeps its lock until its codex is done: the next run doesn't refresh beside it", async () => {
+  const dir = home(600);
+  const lock = join(dir, 'citadel-turn.lock');
+  mkdirSync(lock);
+  writeFileSync(join(lock, 'pid'), '999999999 1'); // nobody: a stopped turn
+  writeFileSync(join(lock, 'refreshing'), '');
+  let next: unknown = null;
+  const run = codexLock(dir, () => {}, opts(dir)).then((l) => (next = l));
+  await new Promise((r) => setTimeout(r, 700));
+  assert.equal(next, null, 'it waits');
+  assert.deepEqual(refreshes(dir), [], 'and starts no refresh of its own');
+  // Without the mark (a holder that died doing anything else) the lock is taken over at once.
+  rmSync(join(lock, 'refreshing'));
+  await run;
+  assert.deepEqual(refreshes(dir), ['start', 'end']);
+  assert.equal(locked(dir), false);
 });

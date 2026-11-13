@@ -21,6 +21,8 @@ test('arguments: defaults, the front door, and refusals', () => {
   assert.deepEqual([parseArgs([], env).url, parseArgs([], env).cookie], ['http://127.0.0.1:2000/', 'cc_session=x']);
   assert.equal(parseArgs(['--url', 'http://127.0.0.1:3000'], env).url, 'http://127.0.0.1:3000/');
   assert.throws(() => parseArgs(['--cookie', 'x'], {}), /name=value/);
+  assert.equal(parseArgs(['--timeout', '2.5']).timeout, 2500);
+  assert.throws(() => parseArgs(['--timeout', 'soon']), /seconds/);
 });
 
 test('steps: one a line, comments skipped, type splits at " | "', () => {
@@ -36,6 +38,14 @@ test('steps: one a line, comments skipped, type splits at " | "', () => {
     { verb: 'wait', arg: '.msg:last-child' },
     { verb: 'shot', arg: 'sent' },
   ]);
+  // fill and wait take text the same way; a bare trailing | is an empty fill, and wait's text is optional.
+  assert.deepEqual(parseSteps('fill #name |\nwait .toast | Saved | done\nwait .toast\nhover .tip'), [
+    { verb: 'fill', arg: '#name', text: '' },
+    { verb: 'wait', arg: '.toast', text: 'Saved | done' },
+    { verb: 'wait', arg: '.toast' },
+    { verb: 'hover', arg: '.tip' },
+  ]);
+  assert.throws(() => parseSteps('fill #name'), /fill <selector> \| <text>/);
   assert.throws(() => parseSteps('press Enter'), /the verbs are/);
   assert.throws(() => parseSteps('type textarea hello'), /type <selector> \| <text>/);
   assert.throws(() => parseSteps('shot a/b'), /a shot's name/);

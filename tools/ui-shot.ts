@@ -3,7 +3,7 @@
 //
 //   node tools/ui-shot.ts [<route>...] [--widths 1440,390] [--themes light,dark] [--steps <file>] [--step <line>]
 //                         [--media <name=value>] [--titlebar <l,r,h>] [--safe-area <top,bottom>] [--before <js>]
-//                         [--wait <selector>] [--anon] [--url <url> --cookie <name=value>] [--out <dir>]
+//                         [--wait <selector>] [--timeout <s>] [--anon] [--url <url> --cookie <name=value>] [--out <dir>]
 //
 // A route is the hash after the URL ('#/p/2/t/639', '#/p/2/settings'); none, or '/', is the front door. Each
 // route is shot at each width and theme, as <out>/<route>-<width>[-dark].png (out: $TMPDIR/ui-shot).
@@ -17,15 +17,27 @@
 // EventSource open). A load or step that hangs fails alone, naming it; the rest go on.
 //
 // Steps drive the page after it is ready, one a line (# starts a comment); with steps, only `shot` lines shoot,
-// or the end if there are none. Selectors are CSS; clicks and keys are real input events.
+// or the end if there are none. Selectors are CSS; clicks and keys are real input events. Each `text` and `eval`
+// prints one line, `  <route> at <width>: eval: <JSON>`, for grep. A step that fails prints FAILED with its
+// number, verb and selector, saves <route>-<width>-failed.png of the page as it was, and exits 1.
 //   click <selector>            scroll it into view and click its centre
-//   type <selector> | <text>    focus it and type the text
+//   hover <selector>            move the mouse onto its centre
+//   type <selector> | <text>    focus it and type the text after what is there
+//   fill <selector> | <text>    focus it and replace what is there with the text (nothing after | empties it)
 //   key <Enter|Escape|Tab|...>  press one key
-//   wait <selector>             until it exists (20 s)
+//   wait <selector>             until it exists (20 s, or --timeout's; click, fill and the rest wait so too)
+//   wait <selector> | <text>    until its text holds <text>
 //   text <selector>             print its text
 //   sleep <ms>
-//   eval <js>                   run it in the page (async; may await) and print what it returns
+//   eval <js>                   run it in the page (async; may await) and print what it returns as JSON
 //   shot <name>                 save <route>-<width>[-dark]-<name>.png
+//
+//   node tools/ui-shot.ts '#/p/2/t/12' --step 'fill .composer textarea | hello' --step 'key Enter' \
+//     --step 'wait .msg:last-of-type | hello' --step 'shot sent'
+//
+// For what steps can't say, a script: `const page = await open('#/p/2', { width: 390 })` from this file gives
+// a page signed in to the dev copy, with page.do('<step>'), page.evaluate(js), page.shot(name), page.s(DevTools
+// method, params) and page.close().
 //
 // Emulation:
 //   --media prefers-reduced-motion=reduce          any CSS media feature (repeatable). Chromium ignores
@@ -44,12 +56,12 @@ import { findChrome, launch, openPage, shot } from '../kit/skills/critique/scrip
 
 const root = resolve(import.meta.dirname, '..');
 const TIMEOUT_MS = 20_000;
-const VERBS = ['click', 'type', 'key', 'wait', 'text', 'sleep', 'eval', 'shot'];
+const VERBS = ['click', 'hover', 'type', 'fill', 'key', 'wait', 'text', 'sleep', 'eval', 'shot'];
 
 type Step = { verb: string; arg: string; text?: string };
 interface Opts {
   routes: string[]; widths: number[]; themes: string[]; steps: Step[]; media: { name: string; value: string }[];
-  titlebar?: [number, number, number]; safeArea?: [number, number]; before?: string; wait?: string; anon: boolean;
+  titlebar?: [number, number, number]; safeArea?: [number, number]; before?: string; wait?: string; timeout: number; anon: boolean;
   url?: string; cookie?: string; out: string;
 }
 
@@ -63,11 +75,10 @@ export function parseSteps(src: string): Step[] {
     const arg = line.slice(verb.length).trim();
     if (!VERBS.includes(verb)) throw new Error(`step "${line}": the verbs are ${VERBS.join(', ')}`);
     if (!arg) throw new Error(`step "${line}" needs ${verb === 'shot' ? 'a name' : 'an argument'}`);
-    if (verb === 'type') {
-      const bar = arg.indexOf(' | ');
-      if (bar < 0) throw new Error(`step "${line}": type <selector> | <text>`);
-      steps.push({ verb, arg: arg.slice(0, bar).trim(), text: arg.slice(bar + 3) });
-    } else if (verb === 'sleep' && !(Number(arg) >= 0)) throw new Error(`step "${line}": sleep takes ms`);
+    // The text after ' | ' is kept as written; a trailing ' |' (trimmed to ' |') is an empty fill.
+    const bar = arg.includes(' | ') ? arg.indexOf(' | ') : arg.endsWith(' |') ? arg.length - 2 : -1;
+    if ((verb === 'type' || verb === 'fill') && bar < 0) throw new Error(`step "${line}": ${verb} <selector> | <text>`);
+    if ((verb === 'type' || verb === 'fill' || verb === 'wait') && bar >= 0) steps.push({ verb, arg: arg.slice(0, bar).trim(), text: arg.slice(bar + 3) }); else if (verb === 'sleep' && !(Number(arg) >= 0)) throw new Error(`step "${line}": sleep takes ms`);
     else if (verb === 'shot' && !/^[\w-]+$/.test(arg)) throw new Error(`step "${line}": a shot's name is letters, digits, - and _`);
     else steps.push({ verb, arg });
   }
@@ -75,7 +86,7 @@ export function parseSteps(src: string): Step[] {
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): Opts {
-  const o: Opts = { routes: [], widths: [1440, 390], themes: ['light'], steps: [], media: [], anon: false, url: env.DEV_URL || undefined, cookie: env.DEV_COOKIE || undefined, out: join(env.TMPDIR || tmpdir(), 'ui-shot') };
+  const o: Opts = { routes: [], widths: [1440, 390], themes: ['light'], steps: [], media: [], timeout: TIMEOUT_MS, anon: false, url: env.DEV_URL || undefined, cookie: env.DEV_COOKIE || undefined, out: join(env.TMPDIR || tmpdir(), 'ui-shot') };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = () => {
@@ -102,6 +113,10 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       o.safeArea = [top, bottom];
     } else if (a === '--before') o.before = val();
     else if (a === '--wait') o.wait = val();
+    else if (a === '--timeout') {
+      o.timeout = Number(val()) * 1000;
+      if (!(o.timeout > 0)) throw new Error('--timeout takes seconds, like 5');
+    }
     else if (a === '--anon') o.anon = true;
     else if (a === '--url') o.url = val();
     else if (a === '--cookie') o.cookie = val();
@@ -195,23 +210,33 @@ const FRAME = 'await new Promise((r) => requestAnimationFrame(() => requestAnima
 const KEYS: Record<string, [string, number, string?]> = { Enter: ['Enter', 13, '\r'], Escape: ['Escape', 27], Tab: ['Tab', 9], Backspace: ['Backspace', 8], ArrowDown: ['ArrowDown', 40], ArrowUp: ['ArrowUp', 38], ArrowLeft: ['ArrowLeft', 37], ArrowRight: ['ArrowRight', 39], ' ': ['Space', 32, ' '] };
 
 /** Run one step on an open page; a shot's file name comes back through `shoot`. */
-async function step(page: any, st: Step, shoot: (name: string) => Promise<void>, say: (s: string) => void) {
+async function step(page: any, st: Step, ms: number, shoot: (name: string) => Promise<void>, say: (s: string) => void) {
   const q = JSON.stringify(st.arg);
-  const until = (sel: string) => page.evaluate(`(async () => { for (const end = Date.now() + ${TIMEOUT_MS}; !document.querySelector(${JSON.stringify(sel)}); await new Promise((r) => setTimeout(r, 50))) if (Date.now() > end) throw new Error(${JSON.stringify(`${sel} never came`)}); })()`);
-  if (st.verb === 'wait') await until(st.arg);
-  else if (st.verb === 'click') {
-    await until(st.arg);
-    const { x, y } = await page.evaluate(`(() => { const e = document.querySelector(${q}); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await page.s('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
-  } else if (st.verb === 'type') {
-    await until(st.arg);
-    await page.evaluate(`document.querySelector(${q}).focus()`);
-    await page.s('Input.insertText', { text: st.text });
+  const until = (cond: string, what: string) => page.evaluate(`(async () => { for (const end = Date.now() + ${ms}; !(${cond}); await new Promise((r) => setTimeout(r, 50))) if (Date.now() > end) throw new Error(${JSON.stringify(`${what} never came`)}); })()`);
+  const there = () => until(`document.querySelector(${q})`, st.arg);
+  const centre = async () => {
+    await there();
+    return page.evaluate(`(() => { const e = document.querySelector(${q}); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  };
+  const mouse = async (types: string[], { x, y }: { x: number; y: number }) => {
+    for (const type of types) await page.s('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
+  };
+  if (st.verb === 'wait') {
+    if (st.text === undefined) await there();
+    else await until(`document.querySelector(${q})?.innerText.includes(${JSON.stringify(st.text)})`, `${JSON.stringify(st.text)} in ${st.arg}`);
+  } else if (st.verb === 'click') await mouse(['mouseMoved', 'mousePressed', 'mouseReleased'], await centre());
+  else if (st.verb === 'hover') await mouse(['mouseMoved'], await centre());
+  else if (st.verb === 'type' || st.verb === 'fill') {
+    await there();
+    // fill selects what is there, so the typed text (or a delete, for none) replaces it with real input events; type goes to the end.
+    await page.evaluate(`(() => { const e = document.querySelector(${q}); e.focus(); if (${st.verb === 'fill'}) { if (typeof e.select === 'function') e.select(); else getSelection().selectAllChildren(e); } else if (typeof e.setSelectionRange === 'function') { try { e.setSelectionRange(e.value.length, e.value.length); } catch {} } else if (e.isContentEditable) getSelection().selectAllChildren(e), getSelection().collapseToEnd(); })()`);
+    if (st.text) await page.s('Input.insertText', { text: st.text });
+    else if (st.verb === 'fill') await page.evaluate(`document.execCommand('delete')`);
   } else if (st.verb === 'key') {
     const [code, vk, text] = KEYS[st.arg] ?? [st.arg, 0];
     for (const type of ['keyDown', 'keyUp']) await page.s('Input.dispatchKeyEvent', { type: type === 'keyDown' && !text ? 'rawKeyDown' : type, key: st.arg, code, windowsVirtualKeyCode: vk, ...(type === 'keyDown' && text ? { text } : {}) });
   } else if (st.verb === 'text') {
-    await until(st.arg);
+    await there();
     say(`text ${st.arg}: ${JSON.stringify(await page.evaluate(`document.querySelector(${q}).innerText`))}`);
   } else if (st.verb === 'sleep') await sleep(Number(st.arg));
   else if (st.verb === 'eval') say(`eval: ${JSON.stringify(await page.evaluate(`(async () => { ${/\breturn\b|;/.test(st.arg) ? st.arg : `return (${st.arg})`} })()`)) ?? 'undefined'}`);
@@ -221,8 +246,8 @@ async function step(page: any, st: Step, shoot: (name: string) => Promise<void>,
   }
 }
 
-async function main() {
-  const o = parseArgs(process.argv.slice(2));
+/** The server to shoot: --url's, or this worktree's dev copy with public/ re-read; and what to say about it. */
+async function serverFor(o: Opts): Promise<{ server: Server; note: string }> {
   const t0 = Date.now();
   // $DEV_URL from `citadel-dev-copy env` is this worktree's own copy: keep the reload.
   const own = (() => {
@@ -234,13 +259,79 @@ async function main() {
   })();
   const server: Server = o.url && o.url !== own ? { url: o.url, cookie: o.cookie } : devCopy();
   const version = server.pid ? await freshAssets(server) : null;
+  return { server, note: version ? `Serving public/ as it is now (front end ${version}) at ${server.url}; ready in ${Date.now() - t0} ms` : `Shooting ${server.url} as it is (not this worktree's dev copy, so nothing is reloaded)` };
+}
+
+function browserFor(): { send: any; close: () => Promise<void> } {
   const bin = process.env.CHROME || findChrome();
   if (!bin) throw new Error("no browser: install Playwright's chrome-headless-shell (npx playwright install chromium-headless-shell)");
-  mkdirSync(o.out, { recursive: true });
-  console.log(version ? `Serving public/ as it is now (front end ${version}) at ${server.url}; ready in ${Date.now() - t0} ms` : `Shooting ${server.url} as it is (not this worktree's dev copy, so nothing is reloaded)`);
+  return launch(bin);
+}
+
+/** Open one route at one width and theme, ready to drive; `onPage` gets it even when the load then hangs. */
+async function openRoute(browser: { send: any }, server: Server, o: Opts, route: string, width: number, theme: string, onPage: (p: any) => void) {
   const mode = o.media.find((m) => m.name === 'display-mode')?.value;
   const emulate = !!(mode || o.titlebar);
-  const browser = launch(bin);
+  const opening = openPage(browser.send, server.url + route, width, {
+    init: emulate ? emulation(mode, o.titlebar) : undefined,
+    cookies: o.anon || !server.cookie ? [] : [server.cookie], headers: [], dark: theme === 'dark', media: o.media.filter((m) => m.name !== 'display-mode'), settle: 0,
+    wait: o.wait ?? (o.anon ? 'body > *' : '#app > *'), before: `${READY}\n${emulate ? 'window.__uiShotEmulate();' : ''}\n${o.before ?? ''}\n${FRAME}`,
+  });
+  opening.then(onPage, () => {});
+  const page = await within(opening, TIMEOUT_MS * 2);
+  if (o.safeArea) {
+    const [top, bottom] = o.safeArea;
+    await page.s('Emulation.setSafeAreaInsetsOverride', { insets: { top, topMax: top, bottom, bottomMax: bottom } });
+    await page.evaluate(`(async () => { ${FRAME} })()`);
+  }
+  return page;
+}
+
+const stepTime = (st: Step, ms: number) => ms + 5000 + (st.verb === 'sleep' ? Number(st.arg) : 0);
+
+/**
+ * A page of this worktree's dev copy (or $DEV_URL), signed in and ready, for a script that needs more than
+ * steps. `args` are ui-shot's own options (`['--themes', 'dark']`, `['--anon']`); close() ends its browser.
+ */
+export async function open(route = '/', { width = 1440, args = [] as string[] } = {}) {
+  const o = parseArgs([route, ...args]);
+  const { server } = await serverFor(o);
+  mkdirSync(o.out, { recursive: true });
+  const browser = browserFor();
+  try {
+    const page = await openRoute(browser, server, o, o.routes[0], width, o.themes[0], () => {});
+    const shoot = async (name: string) => {
+      const file = join(o.out, shotName(o.routes[0], width, o.themes[0], o.media, name));
+      await shot(page, file);
+      return file;
+    };
+    const closePage = page.close;
+    return Object.assign(page, {
+      /** Run step lines, as --step takes them; what text and eval print comes back. */
+      async do(lines: string) {
+        const said: string[] = [];
+        for (const st of parseSteps(lines)) await within(step(page, st, o.timeout, async (n) => void (await shoot(n)), (l) => said.push(l)), stepTime(st, o.timeout));
+        return said;
+      },
+      shot: shoot,
+      close: async () => {
+        await closePage().catch(() => {});
+        await browser.close();
+      },
+    });
+  } catch (e) {
+    await browser.close();
+    throw e;
+  }
+}
+
+async function main() {
+  const o = parseArgs(process.argv.slice(2));
+  const t0 = Date.now();
+  const { server, note } = await serverFor(o);
+  mkdirSync(o.out, { recursive: true });
+  const browser = browserFor();
+  console.log(note);
   let failed = 0;
   try {
     for (const route of o.routes) {
@@ -250,36 +341,23 @@ async function main() {
           const t = Date.now();
           let page: any;
           let at = 'loading';
+          const shoot = async (name = '') => {
+            const file = join(o.out, shotName(route, width, theme, o.media, name));
+            await shot(page, file);
+            console.log(`${file}  (${Date.now() - t} ms)`);
+          };
           try {
-            const opts = {
-              init: emulate ? emulation(mode, o.titlebar) : undefined,
-              cookies: o.anon || !server.cookie ? [] : [server.cookie], headers: [], dark: theme === 'dark', media: o.media.filter((m) => m.name !== 'display-mode'), settle: 0,
-              wait: o.wait ?? (o.anon ? 'body > *' : '#app > *'), before: `${READY}\n${emulate ? 'window.__uiShotEmulate();' : ''}\n${o.before ?? ''}\n${FRAME}`,
-            };
-            const shoot = async (name = '') => {
-              const file = join(o.out, shotName(route, width, theme, o.media, name));
-              await shot(page, file);
-              console.log(`${file}  (${Date.now() - t} ms)`);
-            };
-            const run = async () => {
-              const opening = openPage(browser.send, server.url + route, width, opts);
-              opening.then((p: any) => (page = p), () => {});
-              page = await within(opening, TIMEOUT_MS * 2);
-              if (o.safeArea) {
-                const [top, bottom] = o.safeArea;
-                await page.s('Emulation.setSafeAreaInsetsOverride', { insets: { top, topMax: top, bottom, bottomMax: bottom } });
-                await page.evaluate(`(async () => { ${FRAME} })()`);
-              }
-              for (const st of o.steps) {
-                at = `${st.verb} ${st.arg}`;
-                await within(step(page, st, shoot, (s) => console.log(`  ${label}: ${s}`)), TIMEOUT_MS + 5000 + (st.verb === 'sleep' ? Number(st.arg) : 0));
-              }
-              if (!o.steps.some((s) => s.verb === 'shot')) await shoot();
-            };
-            await run();
+            page = await openRoute(browser, server, o, route, width, theme, (p) => (page = p));
+            for (const [i, st] of o.steps.entries()) {
+              at = `step ${i + 1}, ${st.verb} ${st.arg}${st.text === undefined ? '' : ` | ${st.text}`}`;
+              await within(step(page, st, o.timeout, shoot, (s) => console.log(`  ${label}: ${s}`)), stepTime(st, o.timeout));
+            }
+            if (!o.steps.some((s) => s.verb === 'shot')) await shoot();
           } catch (e) {
             failed++;
-            console.log(`FAILED ${label}, at ${at}: ${(e as Error).message.split('\n')[0]}`);
+            console.log(`FAILED ${label}, at ${at}: ${(e as Error).message.split('\n')[0].replace(/^Error: /, '')}`);
+            // The page as it was when the step failed: what was there instead of the selector.
+            if (page) await within(shoot('failed'), 5000).catch((err) => console.log(`  (no screenshot of the failure: ${err.message})`));
           } finally {
             await page?.close().catch(() => {});
           }

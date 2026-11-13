@@ -12,20 +12,11 @@ Citadel's rubric for front-end changes, on top of the kit starter (`citadel:crit
 
 **The dev copy for the checks.** `node tools/ui-sweep.ts [--only <screens>] [--keep]` does all of this
 for the whole app (`--list` names the screens) and writes shots at 1440 and 390 with ui-measure's
-numbers. By hand: back the database up into your temp folder and start `server.ts`
-with `BOOT_CHECK=1`, so it starts no turns and leaves the live turns alone (without it, the copy
-re-attaches to every running turn), on a free random port:
-
-```
-rm -f "$TMPDIR"/dev/coordinator.db* && mkdir -p "$TMPDIR/dev" && \
-  sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "VACUUM INTO '$TMPDIR/dev/coordinator.db'" && \
-BOOT_CHECK=1 HOST=127.0.0.1 PORT=<free port> DATA_DIR=$TMPDIR/dev TURN_UNITS=0 CLAUDE_BIN=/bin/false \
-  COORDINATOR_PASSWORD=<random> SESSION_SECRET=<random 32+> node server.ts
-```
-
-Sign in with `POST /api/login` (`{"login":"cara","password":"<random>"}`) and pass the cookie from its
-`Set-Cookie` to the script's `--cookie`. Views are hash routes: `/#/p/<scheme>`, `/#/t/<minion>`,
-`/#/p/<scheme>/properties` and the rest in `public/core.js`'s router. Stop the server by its pid.
+numbers; it reads the live database, which a turn in a container can't see. For the few screens a
+change touches, `node tools/ui-shot.ts <#route>...` shoots them at 1440 and 390 (and dark, or after a
+few clicks with `--steps`) in under a second each on this worktree's dev copy; `ui-measure.mjs` on the
+same URLs gives the numbers. Views are hash routes: `#/p/<scheme>`, `#/p/<scheme>/t/<minion>`,
+`#/p/<scheme>/properties` and the rest in `public/core.js`'s router.
 
 ## Blockers
 

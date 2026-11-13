@@ -83,9 +83,9 @@ export function findChrome() {
 
 // --- the browser, over --remote-debugging-pipe -------------------------------------------------------
 
-function launch(bin) {
+export function launch(bin) {
   const dir = mkdtempSync(join(tmpdir(), 'ui-measure-'));
-  const chrome = spawn(bin, ['--headless', '--remote-debugging-pipe', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
+  const chrome = spawn(bin, ['--headless', '--remote-debugging-pipe', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--disable-dev-shm-usage', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   let log = '';
   chrome.stderr.on('data', (d) => (log += d));
   const [input, output] = [chrome.stdio[3], chrome.stdio[4]];
@@ -126,7 +126,7 @@ function launch(bin) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function openPage(send, url, width, o) {
+export async function openPage(send, url, width, o) {
   const phone = width <= 800;
   const height = phone ? 844 : 900;
   const { browserContextId } = await send('Target.createBrowserContext');
@@ -138,7 +138,7 @@ async function openPage(send, url, width, o) {
   await s('Network.enable');
   await s('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: phone ? 2 : 1, mobile: phone });
   if (phone) await s('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
-  await s('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: o.dark ? 'dark' : 'light' }] });
+  await s('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: o.dark ? 'dark' : 'light' }, ...(o.media ?? [])] });
   if (o.headers.length) {
     const headers = Object.fromEntries(o.headers.map((h) => [h.slice(0, h.indexOf(':')).trim(), h.slice(h.indexOf(':') + 1).trim()]));
     await s('Network.setExtraHTTPHeaders', { headers });
@@ -152,6 +152,7 @@ async function openPage(send, url, width, o) {
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
     return r.result.value;
   };
+  if (o.init) await s('Page.addScriptToEvaluateOnNewDocument', { source: o.init });
   const nav = await s('Page.navigate', { url });
   if (nav.errorText) throw new Error(`${url}: ${nav.errorText}`);
   const until = async (expr, what) => {
@@ -170,7 +171,7 @@ async function openPage(send, url, width, o) {
 
 // What a person sees first, at the window's size: a full-page capture misplaces fixed bars and makes a
 // phone shot thousands of pixels tall. Scroll with --before to shoot further down.
-async function shot(page, file) {
+export async function shot(page, file) {
   const { data } = await page.s('Page.captureScreenshot', { format: 'png' });
   writeFileSync(file, Buffer.from(data, 'base64'));
   return file;

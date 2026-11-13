@@ -206,14 +206,11 @@ function schemeCards(projectId, alone) {
 
 function targetCard(projectId, tv, alone) {
   const n = tv.next, cur = tv.current, hl = page?.hl;
-  // Only numbered ones: a run from before counting began has no name to give it.
-  const recent = tv.recent.filter((r) => r.number != null && tookText(r)).slice(0, 3);
   const curTook = cur && tookText(cur);
   return h('article', { class: `rel-card${hl && n?.changes.some((c) => c.ticketId === hl) ? ' hl' : ''}` },
     h('header', {}, h('h3', {}, alone ? tv.target.name : `${schemeName(projectId)} ${tv.target.name}`)),
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
-      cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : '',
-      recent.length ? h('span', { class: 'muted' }, ' · before: ', recent.flatMap((r, i) => [i ? ', ' : '', versionLink(r, 'rel-ver old'), ` took ${tookText(r)}`])) : ''),
+      cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
     deployBar(projectId, tv),
     h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : 'Next release'),
     n ? [
@@ -225,7 +222,34 @@ function targetCard(projectId, tv, alone) {
         h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...changeNow(n, c, true))))),
     ] : h('p', { class: 'muted' }, 'Nothing on its way.'),
     tv.line.length ? [h('h4', {}, 'Land line'), lineList(projectId, tv.line)] : '',
+    previousList(projectId, tv),
     tv.testCopies.length ? [h('h4', {}, 'Test copies'), copyList(tv.testCopies)] : '');
+}
+
+/** The cards whose Previous releases are open ("projectId/target"): every event redraws the cards, so it's kept here. */
+const openPrevious = new Set();
+
+/**
+ * A target's earlier releases, collapsed until clicked (Cara, 2026-11-12: "maybe we have a "Previous Releases" tab ...
+ * Previous releases could have links to old builds and how long the build took to deploy"): each one's number (linked
+ * to its file or site while one still exists), when it went live, how long it took and the minions it carried.
+ */
+function previousList(projectId, tv) {
+  if (!tv.recent.length) return '';
+  const key = `${projectId}/${tv.target.id}`;
+  const label = (r) => (r.number != null ? releaseName(r) : { live: 'Earlier release', signed: 'Signed build' }[r.outcome] ?? 'Failed try');
+  return h('details', { class: 'rel-prev', open: openPrevious.has(key), ontoggle: (e) => (e.target.open ? openPrevious.add(key) : openPrevious.delete(key)) },
+    h('summary', {}, `Previous releases (${tv.recent.length})`),
+    h('ul', { class: 'rel-prev-list' }, tv.recent.map((r) => {
+      const failed = r.outcome !== 'live' && r.outcome !== 'signed';
+      const took = tookText(r);
+      const when = r.live ? `live ${ago(r.live)}` : r.started ? `${failed ? 'tried' : 'built'} ${ago(r.started)}` : '';
+      return h('li', {},
+        r.link ? h('a', { class: 'rel-ver', href: r.link, target: '_blank', rel: 'noopener' }, label(r)) : h('span', { class: 'rel-prev-name' }, label(r)),
+        failed ? h('span', { class: 'rel-failed' }, r.outcome) : '',
+        h('span', { class: 'muted' }, [when, took ? `took ${took}` : '', releaseDetail(r)].filter(Boolean).join(' · ')),
+        r.changes.length ? h('span', { class: 'rel-prev-changes' }, r.changes.flatMap((c, i) => [i ? ', ' : '', h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title])) : '');
+    })));
 }
 
 // ---------- deploying (#629) ----------

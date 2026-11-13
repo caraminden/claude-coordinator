@@ -12,7 +12,6 @@
 .rel-ver { font-variant-numeric: tabular-nums; color: var(--muted); }
 a.rel-ver { color: var(--accent); text-decoration: underline; text-underline-offset: 0.15em; }
 a.rel-ver:hover { text-decoration-thickness: 2px; }
-.rel-ver.old { color: var(--muted); }
 .rel-est { font-weight: 600; color: var(--running); font-variant-numeric: tabular-nums; }
 .rel-est.waits, :is(.releases-main, .rel-chip) .waits { color: var(--held); }
 .rel-row > .rel-track { grid-column: 1 / -1; margin: 0.3rem 0 0.15rem; }
@@ -106,3 +105,14 @@ b.waits { color: var(--held); }
 .rel-chip-open > .rel-track.mini { flex: 0 1 auto; min-width: 1.6rem; }
 .rel-chip:has(.rel-chip-open:hover) { border-color: var(--control-line); }
 .turn-end .branch-status .rel-chip-slot { display: flex; min-width: 0; }
+/* Previous releases (Cara, 2026-11-12): collapsed under the card's next release and land line. */
+.rel-prev { margin-top: 0.7rem; }
+.rel-prev > summary { cursor: pointer; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.rel-prev-list { list-style: none; margin: 0.2rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 0.92em; }
+.rel-prev-list li { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.6rem; row-gap: 0.15rem; padding: 0.3rem 0.4rem; }
+.rel-prev-list li + li { border-top: 1px solid var(--line); }
+.rel-prev-name { font-variant-numeric: tabular-nums; }
+.rel-failed { color: var(--error); }
+.rel-prev-changes { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+.rel-prev-changes a { color: var(--accent); text-decoration: none; }
+.rel-prev-changes a:hover { text-decoration: underline; }

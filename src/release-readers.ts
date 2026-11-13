@@ -12,6 +12,8 @@ import { repoSlug } from './prlinks.ts';
 import { median } from './waits.ts';
 
 const RECENT = 5;
+/** How many earlier releases a card lists under Previous releases (Cara, 2026-11-12: "Previous releases could have links to old builds"). */
+const PREVIOUS = 10;
 
 /** A whole next release from its lead's progress: the track's stages with their usual times, and when it should be live. */
 export function nextOf(track: string[], usual: (stage: string) => number | null, lead: Progress, changes: Change[], number: number | null, link: string | null = null): Next {
@@ -125,7 +127,7 @@ export class ContraptionReader implements Reader {
       const row = this.d.store.getContraption(t.contraption!);
       if (!row) continue;
       const s = this.state.get(t.id);
-      const rows = this.d.store.listContraptionDeploys(row.name, RECENT + 1);
+      const rows = this.d.store.listContraptionDeploys(row.name, PREVIOUS + 1);
       const live = this.d.store.listContraptionDeploys(row.name, RECENT, 'deployed');
       const total = this.d.store.contraptionReleases(row.name);
       const usual = usualOf(live);
@@ -145,7 +147,7 @@ export class ContraptionReader implements Reader {
       // The current release is the app as it serves now; an older one can't be opened any more.
       const current: Release | null = mine ? release(mine, t.link)
         : version ? { version, number: live.length ? total + 1 : Math.max(total, 1), link: t.link, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
-      const recent = rows.filter((r) => r.id !== mine?.id).slice(0, RECENT).map((r) => release(r));
+      const recent = rows.filter((r) => r.id !== mine?.id).slice(0, PREVIOUS).map((r) => release(r));
 
       let lead: Progress | null = null;
       if (run) {
@@ -293,8 +295,8 @@ class RunsCache {
     if (!runs) return;
     this.readAt.set(tkey(t), now);
     const out: RunJobs[] = [];
-    // The newest few: enough for the current, the usual times and the recent list.
-    for (const run of runs.slice(0, RECENT * 2)) {
+    // The newest page of runs: enough for the current, the usual times and Previous releases.
+    for (const run of runs) {
       if (!t.job) {
         out.push({ run, jobs: [] });
         continue;
@@ -315,14 +317,14 @@ class RunsCache {
     for (const id of this.files.keys()) if (!kept.has(id)) this.files.delete(id);
     const slug = repoSlug(p.repo_url);
     // The runs a page can show a download for: the newest few that shipped.
-    for (const r of out.filter(shipped).slice(0, RECENT)) {
+    for (const r of out.filter(shipped).slice(0, PREVIOUS)) {
       if (this.files.has(r.run.id) || !slug || !this.d.actions.runArtifacts) continue;
       const list = await this.d.actions.runArtifacts(p, r.run);
       if (list) this.files.set(r.run.id, shippedFile(slug, r.run, list));
     }
-    // What each in-flight or newest run carries since the run before it that shipped.
+    // What each run carries since the run before it that shipped (read once a run is done).
     if (p.repo_dir) {
-      for (const [i, r] of out.slice(0, 2).entries()) {
+      for (const [i, r] of out.entries()) {
         if (this.changes.has(r.run.id) && r.run.status === 'completed') continue;
         const prev = out.slice(i + 1).find(shipped);
         const landed = prev && prev.run.head_sha !== r.run.head_sha ? await landedIn(this.d.store, p, prev.run.head_sha, r.run.head_sha) : null;
@@ -350,7 +352,7 @@ class RunsCache {
   /** The release number of each recorded run (by run number), and how many there are: the newest's number. */
   numbers(t: Found): { of: (r: RunJobs) => number | null; total: number } {
     const total = this.d.store.countReleases(t.projectId, t.id);
-    const rows = this.d.store.listReleases(t.projectId, t.id, RECENT * 2 + 1);
+    const rows = this.d.store.listReleases(t.projectId, t.id, PREVIOUS * 2 + 1);
     const by = new Map(rows.map((row, i) => [row.version, total - i]));
     return { of: (r) => by.get(`run:${r.run.run_number ?? r.run.id}`) ?? null, total };
   }
@@ -382,7 +384,7 @@ export class CiPackageReader implements Reader {
       const file = (r: RunJobs) => this.cache.file(r.run.id, now);
       const num = this.cache.numbers(t);
       const cur = runs.find(shipped);
-      const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
+      const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
       const usual = runUsual(runs);
       // The newest run in flight leads; a run older than the current release can't be its next.
       const moving = runs.find((r) => r.run.status !== 'completed');
@@ -504,7 +506,7 @@ export class ApkReader implements Reader {
         // No feed to read: the newest signed run is the release, as for a CI package.
         const num = this.cache.numbers(t);
         const cur = runs.find(shipped);
-        const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, RECENT).map((r) => apkRun(r, shipped(r) ? 'live' : 'failed', file(r), num.of(r)));
+        const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => apkRun(r, shipped(r) ? 'live' : 'failed', file(r), num.of(r)));
         const lead = moving && (!cur || runs.indexOf(moving) < runs.indexOf(cur)) ? signing(moving) : null;
         return { target: targetOf(t), current: cur ? apkRun(cur, 'live', file(cur), num.of(cur)) : null, next: lead ? nextOf(APK_TRACK, usual, lead, [], num.total + 1) : null, line: [], recent };
       }
@@ -513,7 +515,7 @@ export class ApkReader implements Reader {
       const link = feed.apk && t.contraption ? `/apps/${t.contraption}/android/${feed.apk}` : t.link;
       const current: Release = { version, number: feed.versionCode, link, changes: [], started: null, live: feed.at, outcome: 'live', stages: {} };
       // Its signed runs, as the APKs people could have been given: not releases, so no release number.
-      const recent = runs.filter((r) => shipped(r) || failedShip(r)).slice(0, RECENT).map((r) => apkRun(r, shipped(r) ? 'signed' : 'failed', file(r)));
+      const recent = runs.filter((r) => shipped(r) || failedShip(r)).slice(0, PREVIOUS).map((r) => apkRun(r, shipped(r) ? 'signed' : 'failed', file(r)));
       let lead: Progress | null = null;
       let tryIt: string | null = null;
       if (main && main.code > feed.versionCode) {
@@ -612,14 +614,14 @@ export class MainReader implements Reader {
     const open = new Set<number>();
     const out = this.d.finder.list('main').map((t) => {
       const head = this.heads.get(`${t.projectId}:${t.id}`) ?? null;
-      const rows = store.listReleases(t.projectId, t.id, RECENT + 1);
+      const rows = store.listReleases(t.projectId, t.id, PREVIOUS + 1);
       const total = store.countReleases(t.projectId, t.id);
       const mine = head && rows[0]?.version === head ? rows[0] : null;
       // Main is the release: there's no site or file of it to open, so no link (never a commit, Cara 2026-11-12).
       const current = mine ? releaseOf(mine, null, total)
         : head ? { version: head, number: total + 1, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
       const skip = mine ? 1 : 0;
-      const recent = rows.slice(skip, skip + RECENT).map((r, i) => releaseOf(r, null, total - skip - i));
+      const recent = rows.slice(skip, skip + PREVIOUS).map((r, i) => releaseOf(r, null, total - skip - i));
       const changes: Change[] = [];
       for (const x of store.listTickets(t.projectId)) {
         if (x.kind !== 'ticket' || x.status === 'closed' || !x.branch) continue;

@@ -230,7 +230,7 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   assert.equal(v.current?.version, tip);
   assert.deepEqual(v.current?.changes.map((c) => c.title), ['Snooze']);
   assert.deepEqual([v.current?.number, v.current?.link], [4, '/apps/mandate/'], 'numbered on from the deploys before it, linked to the app');
-  assert.equal(v.recent.length, 5);
+  assert.equal(v.recent.length, 9, 'every earlier deploy, failed tries too (up to 10), for Previous releases');
   assert.deepEqual([v.recent[0].outcome, v.recent[0].number, v.recent[0].link], ['rolled back', null, null], "a try that didn't go live has no number, and nothing to open");
 });
 

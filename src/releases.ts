@@ -133,7 +133,8 @@ export interface Reader {
   refresh?(): Promise<void>;
 }
 
-const RECENT = 5;
+/** How many earlier releases a card lists under Previous releases. */
+const PREVIOUS = 10;
 
 /** A releases row as a Release. */
 export function releaseOf(row: ReleaseRow, link: string | null, number: number | null): Release {
@@ -353,14 +354,14 @@ export class CitadelServer implements Reader {
     if (!p) return [];
     const { store } = this.d;
     const head = this.d.head();
-    const rows = store.listReleases(p.id, CITADEL_TARGET, RECENT + 1);
+    const rows = store.listReleases(p.id, CITADEL_TARGET, PREVIOUS + 1);
     const total = store.countReleases(p.id, CITADEL_TARGET);
     const currentRow = head && rows[0]?.version === head ? rows[0] : null;
     // The current release is this site; an older one can't be opened any more.
     const current = currentRow ? releaseOf(currentRow, '/', total)
       : head ? { version: head, number: total + 1, link: '/', changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
     const skip = currentRow ? 1 : 0;
-    const recent = rows.slice(skip, skip + RECENT).map((r, i) => releaseOf(r, null, total - skip - i));
+    const recent = rows.slice(skip, skip + PREVIOUS).map((r, i) => releaseOf(r, null, total - skip - i));
 
     const lineTickets = this.d.line();
     const line: LineEntry[] = lineTickets.map((t) => {

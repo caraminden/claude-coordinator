@@ -8,8 +8,8 @@ import type { DeployView } from '../src/app-services.ts';
 import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, gradleVersion, lengths, MainReader, type Actions } from '../src/release-readers.ts';
-import { detect, jobName, shipsOn, TargetFinder, type Found, type SchemeFacts } from '../src/release-targets.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, gradleVersion, lengths, MainReader, TestCopyReader, type Actions } from '../src/release-readers.ts';
+import { copySources, detect, jobName, shipsOn, TargetFinder, type Found, type SchemeFacts } from '../src/release-targets.ts';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
 const root = mkdtempSync(join(tmpdir(), 'release-targets-'));
@@ -438,4 +438,44 @@ test("a job's own name, not a step's or an input's, is what its runs are matched
   const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => now });
   await reader.refresh();
   assert.equal(reader.read()[0].current?.version, 'build 2');
+});
+
+// Shaped like poe2's deploy/preview.sh.
+const PREVIEW = 'RUN=${RUN:-$HOME/.local/share/x}\nPORT=${PORT:-8116}\n';
+
+test('test-copy sources: a debug APK workflow sits under the Android target, and a preview script is a site on its port', () => {
+  const f = facts({ workflows: [{ path: '.github/workflows/android-release.yml', text: APK }, { path: '.github/workflows/android.yml', text: DEBUG }], scripts: [{ path: 'deploy/preview.sh', text: PREVIEW }, { path: 'tools/preview-notes.sh', text: 'echo hi' }] });
+  const found = detect(f);
+  const src = copySources(f, found);
+  assert.deepEqual(src.map((s) => (s.kind === 'site' ? [s.kind, s.port] : [s.kind, s.target, s.run.id, s.run.workflow])), [
+    ['debug-apk', 'apk:android-release', 'debug:android', '.github/workflows/android.yml'],
+    ['site', 8116],
+  ]);
+  assert.ok(!found.some((t) => t.id.startsWith('debug')), 'a debug build is no target');
+  assert.deepEqual(copySources(facts({ workflows: [{ path: '.github/workflows/android.yml', text: DEBUG }] }), []).map((s) => s.kind === 'debug-apk' && s.target), [null], 'with no Android target it sits in the scheme\'s list');
+});
+
+test('the test-copy reader: builds open minions left in their files, a preview site up or down, and CI\'s newest debug APK', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Delve', 'https://github.com/o/delve');
+  const open = store.createTicket({ project_id: p.id, title: 'Windows exe', permission_mode: 'default', created_by: 'Josh' });
+  const closed = store.createTicket({ project_id: p.id, title: 'Old build', permission_mode: 'default', created_by: 'Josh' });
+  store.updateTicket(closed.id, { status: 'closed' });
+  const dir = (id: number) => join(root, `shared-${n}`, String(id));
+  for (const [id, names] of [[open.id, ['Delve-ticket-70-exe-e889baa9-windows.zip', 'notes.md', 'art-pack.zip', 'Game.exe']], [closed.id, ['Delve-old-1234567-windows.zip']]] as const) {
+    mkdirSync(dir(id), { recursive: true });
+    for (const name of names) writeFileSync(join(dir(id), name), 'x');
+  }
+  const now = Date.now();
+  const debugRun: Found = { id: 'debug:android', projectId: p.id, name: 'Debug APK', kind: 'apk', link: null, branch: 'main', workflow: '.github/workflows/android.yml' };
+  const { actions } = fakeActions([run(9, 'in_progress', null, now - 60_000), run(8, 'completed', 'success', now - 600_000, now - 300_000)], {});
+  const reader = new TestCopyReader({
+    store, actions, now: () => now, sharedDir: (t) => dir(t.id), listening: async (port) => port === 8116,
+    finder: { list: () => [], copySources: () => [{ kind: 'site', projectId: p.id, name: 'Preview site', port: 8116 }, { kind: 'site', projectId: p.id, name: 'Preview site', port: 9000 }, { kind: 'debug-apk', projectId: p.id, target: 'apk:android-release', run: debugRun }] },
+  });
+  await reader.scan();
+  const copies = reader.list().get(p.id)!;
+  assert.deepEqual(copies.filter((c) => c.kind === 'download').map((c) => [c.name, c.commit, c.number]).sort(), [['Delve-ticket-70-exe-e889baa9-windows.zip', 'e889baa9', open.number], ['Game.exe', null, open.number]], "a closed minion's files and a zip not named like a build don't count");
+  assert.deepEqual(copies.filter((c) => c.kind === 'site').map((c) => [c.port, c.running]), [[8116, true], [9000, false]]);
+  assert.deepEqual(copies.filter((c) => c.kind === 'debug-apk').map((c) => [c.target, c.name, c.commit, c.link]), [['apk:android-release', 'build 8', 'sha8', 'https://github.com/o/r/actions/runs/8']], 'the newest run that passed, not the one running');
 });

@@ -75,13 +75,24 @@ export interface LineEntry {
 }
 
 export interface TestCopy {
-  kind: 'preview' | 'build-preview';
+  /** preview, build-preview: Citadel's; download: a build a minion left in its files; site: a preview site on a port; debug-apk: CI's newest debug APK. */
+  kind: 'preview' | 'build-preview' | 'download' | 'site' | 'debug-apk';
   /** The target whose code it runs, or null for the scheme's own list. */
   target: string | null;
   name: string;
-  /** Relative to the app's root, as previewPath gives it. */
-  path: string;
+  /** preview, build-preview: relative to the app's root, as previewPath gives it. */
+  path?: string;
+  /** download: the file, absolute, in its minion's files folder (opened as the minion's file). */
+  file?: string;
+  /** site: its port on this host. */
+  port?: number;
+  /** debug-apk: its run's page, with the APK among its artifacts. */
+  link?: string;
+  /** download, debug-apk: when it was made (ms). */
+  at?: number;
   ticketId?: number;
+  /** download: its minion's number. */
+  number?: number;
   build?: number;
   running: boolean;
   /** The commit it runs, while it runs. */

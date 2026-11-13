@@ -3,7 +3,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createConnection, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { extname, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -59,7 +59,7 @@ import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { Waits } from './src/waits.ts';
 import { CitadelServer, previewCopies, Releases } from './src/releases.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, MainReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, MainReader, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
@@ -479,9 +479,25 @@ const mainReader = new MainReader({
     return v && !v.ended ? { since: v.since, usual: v.usual, text: v.text } : null;
   },
 });
+// The other test copies (#627): minions' downloads, preview sites and debug APKs, read with the targets on the slow poll.
+const testCopyReader = new TestCopyReader({
+  store, finder: targetFinder, actions, sharedDir,
+  listening: (port) => new Promise((done) => {
+    const s = createConnection({ host: '127.0.0.1', port, timeout: 500 }, () => (s.destroy(), done(true)));
+    s.on('error', () => done(false)).on('timeout', () => (s.destroy(), done(false)));
+  }),
+});
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, mainReader], broadcast, scan: () => targetFinder.scan(),
-  testCopies: () => previewCopies(store, { own: ownScheme, running: (key) => previews?.runningAt(key) ?? null, builds: (id) => builds.get(id).map((b) => b.build) }),
+  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, mainReader], broadcast,
+  scan: async () => {
+    await targetFinder.scan();
+    await testCopyReader.scan();
+  },
+  testCopies: () => {
+    const all = previewCopies(store, { own: ownScheme, running: (key) => previews?.runningAt(key) ?? null, builds: (id) => builds.get(id).map((b) => b.build) });
+    for (const [id, copies] of testCopyReader.list()) all.set(id, [...(all.get(id) ?? []), ...copies]);
+    return all;
+  },
 });
 
 runner.onFilesMayChange = (ticketId) => {

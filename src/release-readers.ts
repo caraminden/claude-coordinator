@@ -1,10 +1,12 @@
 // A reader per kind of found target (#627, src/release-targets.ts finds them), each filling src/releases.ts's shape.
 // read() answers from what refresh() last read (git, files, GitHub), so the 2-second poll costs nothing.
+import { readdir, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { DeployView } from './app-services.ts';
 import type { Job, Run } from './ci-health.ts';
-import type { ContraptionDeployRow, ContraptionRow, Project, Store } from './db.ts';
+import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
-import { git, landedIn, releaseOf, type Change, type Next, type Progress, type Reader, type Release, type TargetView } from './releases.ts';
+import { git, landedIn, releaseOf, type Change, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
 import type { Found, TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { median } from './waits.ts';
@@ -516,5 +518,71 @@ export class MainReader implements Reader {
     });
     for (const k of this.seen.keys()) if (!open.has(Number(k.split(':')[0]))) this.seen.delete(k);
     return out;
+  }
+}
+
+/** A file a minion left in its files folder that people run: an installer or app, or a zip named like a build. */
+// shortcut: a zip counts by its name (a platform, "build", or a commit sha in it); a zip of anything else named so shows too, until builds say what they are.
+const DOWNLOAD = /\.(apk|aab|exe|msi|dmg|appimage)$|(windows|win64|macos|linux|android|build|-[0-9a-f]{7,40})[^/]*\.zip$/i;
+/** A scheme's downloads shown at most, newest first. */
+const DOWNLOADS = 8;
+
+export interface CopyDeps extends ActionsDeps {
+  finder: Pick<TargetFinder, 'list' | 'copySources'>;
+  /** A minion's files folder. */
+  sharedDir: (t: Ticket) => string | null;
+  /** Whether something listens on this host's port. */
+  listening: (port: number) => Promise<boolean>;
+}
+
+/**
+ * Every scheme's test copies besides Citadel's previews, read on the slow poll: the builds open minions left in their
+ * files folders (Delve's Windows zips), a repo's preview site (poe2's deploy/preview.sh) and up or not, and CI's newest
+ * debug APK, under its scheme's Android target.
+ */
+export class TestCopyReader {
+  private d: CopyDeps;
+  private cache: RunsCache;
+  private copies = new Map<number, TestCopy[]>();
+  constructor(d: CopyDeps) {
+    this.d = d;
+    this.cache = new RunsCache(d);
+  }
+
+  list(): Map<number, TestCopy[]> {
+    return this.copies;
+  }
+
+  async scan() {
+    const { store } = this.d;
+    const out = new Map<number, TestCopy[]>();
+    const add = (id: number, c: TestCopy) => (out.get(id) ?? out.set(id, []).get(id)!).push(c);
+    for (const p of store.listProjects()) {
+      const files: TestCopy[] = [];
+      for (const t of store.listTickets(p.id)) {
+        if (t.kind !== 'ticket' || t.status === 'closed') continue;
+        const dir = this.d.sharedDir(t);
+        if (!dir) continue;
+        const names = await readdir(dir).catch(() => [] as string[]);
+        for (const name of names.filter((n) => DOWNLOAD.test(n))) {
+          const file = join(dir, name);
+          const st = await stat(file).catch(() => null);
+          if (!st?.isFile()) continue;
+          const sha = /-([0-9a-f]{7,40})(?=[-.])/.exec(name)?.[1] ?? null;
+          files.push({ kind: 'download', target: null, name, file, ticketId: t.id, number: t.number ?? t.id, running: false, commit: sha, at: st.mtimeMs });
+        }
+      }
+      for (const c of files.sort((a, b) => b.at! - a.at!).slice(0, DOWNLOADS)) add(p.id, c);
+    }
+    for (const s of this.d.finder.copySources()) {
+      if (s.kind === 'site') {
+        add(s.projectId, { kind: 'site', target: null, name: s.name, port: s.port, running: await this.d.listening(s.port), commit: null });
+        continue;
+      }
+      await this.cache.read(s.run);
+      const r = (this.cache.runs.get(s.run.id) ?? []).find(shipped);
+      if (r) add(s.projectId, { kind: 'debug-apk', target: s.target, name: `build ${r.run.run_number ?? r.run.id}`, link: r.run.html_url ?? s.run.link ?? undefined, running: false, commit: r.run.head_sha, at: span(r).end ?? undefined });
+    }
+    this.copies = out;
   }
 }

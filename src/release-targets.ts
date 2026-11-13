@@ -42,6 +42,31 @@ export interface SchemeFacts {
   apkFeeds: string[];
   workflows: { path: string; text: string }[];
   overrides: Override[];
+  /** Scripts that run a preview site (poe2's deploy/preview.sh). */
+  scripts?: { path: string; text: string }[];
+}
+
+/** Where a scheme's test copies come from, besides Citadel's previews (src/releases.ts previewCopies). */
+export type CopySource =
+  | { kind: 'site'; projectId: number; name: string; port: number }
+  /** A workflow that builds a debug APK on main; `run` is it as a whole-run target, for src/release-readers.ts's run reads. */
+  | { kind: 'debug-apk'; projectId: number; target: string | null; run: Found };
+
+/** A scheme's test-copy sources, beside its targets `found`: a debug APK workflow, and a script that runs a preview site on a port. */
+export function copySources(f: SchemeFacts, found: Found[]): CopySource[] {
+  const out: CopySource[] = [];
+  const slug = repoSlug(f.project.repo_url);
+  for (const w of f.workflows) {
+    if (!/assembleDebug|bundleDebug/.test(w.text) || /assembleRelease|bundleRelease/.test(w.text) || shipsOn(w.text, f.branch) !== 'push') continue;
+    const file = w.path.replace(/^.*\//, '');
+    const run: Found = { projectId: f.project.id, branch: f.branch, id: `debug:${file.replace(/\.ya?ml$/, '')}`, kind: 'apk', name: 'Debug APK', link: slug ? `https://github.com/${slug}/actions/workflows/${file}` : null, workflow: w.path };
+    out.push({ kind: 'debug-apk', projectId: f.project.id, target: found.find((t) => t.kind === 'apk')?.id ?? null, run });
+  }
+  for (const s of f.scripts ?? []) {
+    const port = Number(/\bPORT=\$\{PORT:-(\d+)\}/.exec(s.text)?.[1] ?? /^\s*(?:export\s+)?PORT=(\d+)\s*$/m.exec(s.text)?.[1]);
+    if (port > 0 && port < 65536) out.push({ kind: 'site', projectId: f.project.id, name: 'Preview site', port });
+  }
+  return out;
 }
 
 /** A top-level YAML key's block (`on:`, `jobs:`): its first line's rest, and the lines under it. */
@@ -185,8 +210,14 @@ export interface FinderDeps {
 export class TargetFinder {
   private d: FinderDeps;
   private found = new Map<number, Found[]>();
+  private sources = new Map<number, CopySource[]>();
   constructor(d: FinderDeps) {
     this.d = d;
+  }
+
+  /** Every scheme's test-copy sources, as last found. */
+  copySources(): CopySource[] {
+    return [...this.sources.values()].flat();
   }
 
   list(kind?: Kind): Found[] {
@@ -202,10 +233,17 @@ export class TargetFinder {
       seen.add(p.id);
       const facts = await this.facts(p, apps.filter((c) => c.home_scheme === p.id));
       // A clone git can't read keeps what was found before, rather than its targets blinking out.
-      if (facts) this.found.set(p.id, detect(facts));
-      else if (!p.repo_dir) this.found.delete(p.id);
+      if (facts) {
+        const found = detect(facts);
+        this.found.set(p.id, found);
+        this.sources.set(p.id, copySources(facts, found));
+      } else if (!p.repo_dir) {
+        this.found.delete(p.id);
+        this.sources.delete(p.id);
+      }
     }
     for (const id of this.found.keys()) if (!seen.has(id)) this.found.delete(id);
+    for (const id of this.sources.keys()) if (!seen.has(id)) this.sources.delete(id);
   }
 
   private async facts(p: Project, apps: ContraptionRow[]): Promise<SchemeFacts | null> {
@@ -220,7 +258,12 @@ export class TargetFinder {
       const text = await git(['show', `${branch}:.github/workflows/${name}`], dir);
       if (text != null) workflows.push({ path: `.github/workflows/${name}`, text });
     }
-    return { ...base, branch: branch.replace(/^origin\//, ''), workflows, overrides: overridesOf(await git(['show', `${branch}:citadel-app.json`], dir)) };
+    const scripts = [];
+    for (const path of ((await git(['ls-tree', '-r', '--name-only', branch], dir)) ?? '').split('\n').filter((n) => /(^|\/)[^/]*preview[^/]*\.sh$/i.test(n))) {
+      const text = await git(['show', `${branch}:${path}`], dir);
+      if (text != null) scripts.push({ path, text });
+    }
+    return { ...base, branch: branch.replace(/^origin\//, ''), workflows, scripts, overrides: overridesOf(await git(['show', `${branch}:citadel-app.json`], dir)) };
   }
 }
 

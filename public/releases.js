@@ -4,7 +4,7 @@
 // desktop and every member scheme's cards on a phone) and the chip beside a minion's PR info (take F).
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
-import { ago, api, h, view } from './base.js';
+import { ago, api, fileUrl, h, view } from './base.js';
 import { mountTips } from './ui/tip.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
 import { TRACK, waitBar } from './wait.js';
@@ -253,10 +253,27 @@ function lineList(projectId, line) {
 }
 
 /** Previews and builds' previews: open in a new tab; a stopped one starts again when opened. */
+/** Each kind of test copy: where it opens, what it's called and the line beside it (#627 adds all but the previews). */
+function copyLink(c) {
+  const state = c.running ? (c.commit ? `running ${c.commit.slice(0, 7)}` : 'running') : 'stopped';
+  const made = [c.commit?.slice(0, 7), c.at ? ago(c.at) : ''].filter(Boolean).join(' · ');
+  const tab = { target: '_blank', rel: 'noopener' };
+  switch (c.kind) {
+    // Its name carries its commit; the line says whose it is.
+    case 'download': return [h('a', { href: `${fileUrl(c.ticketId, c.file)}&download`, download: '' }, c.name), [h('a', { href: minionHref(null, { ticketId: c.ticketId }) }, `#${c.number}`), ` · ${ago(c.at)}`]];
+    // The host people reached Citadel on, which reaches the site too (both on the tailnet).
+    case 'site': return [h('a', { href: `${location.protocol}//${location.hostname}:${c.port}/`, ...tab }, `${c.name} (port ${c.port})`), c.running ? 'up' : 'down'];
+    case 'debug-apk': return [h('a', { href: c.link, ...tab }, `Debug APK, ${c.name}`), made];
+    case 'build-preview': return [h('a', { href: `../${c.path}`, ...tab }, `${c.name} standing preview`), state];
+    default: return [h('a', { href: `../${c.path}`, ...tab }, `Preview of ${c.name}`), state];
+  }
+}
+
 function copyList(copies) {
-  return h('ul', { class: 'rel-list' }, copies.map((c) => h('li', {},
-    h('a', { href: `../${c.path}`, target: '_blank', rel: 'noopener' }, c.kind === 'build-preview' ? `${c.name} standing preview` : `Preview of ${c.name}`),
-    h('span', { class: 'muted' }, c.running ? (c.commit ? `running ${c.commit.slice(0, 7)}` : 'running') : 'stopped'))));
+  return h('ul', { class: 'rel-list' }, copies.map((c) => {
+    const [link, line] = copyLink(c);
+    return h('li', {}, link, h('span', { class: 'muted' }, ...[line].flat()));
+  }));
 }
 
 // ---------- All (take E) ----------

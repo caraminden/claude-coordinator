@@ -61,7 +61,9 @@ b.waits { color: var(--held); }
 .rel-change .where { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.92em; }
 .rel-change a, .rel-list a, .rel-card-sm .num { color: var(--accent); text-decoration: none; }
 .rel-change a:hover, .rel-list a:hover { text-decoration: underline; }
-.rel-list li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.3rem 0.4rem; }
+.rel-list li { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.3rem 0.4rem; }
+.rel-list li > a { min-width: 0; overflow-wrap: anywhere; padding-block: 2px; }
+.rel-list li .muted { flex: none; }
 
 /* All on desktop (take E): a lane per target across Waiting, Checks, Shipping and Live today. */
 .rel-grid { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
@@ -89,6 +91,8 @@ b.waits { color: var(--held); }
   .rel-all-narrow { display: flex; }
   .rel-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .rel-chips .chip { flex: none; }
+  .rel-list li { align-items: center; }
+  .rel-list li > a { display: flex; align-items: center; min-height: var(--control-h); padding-block: 0; }
 }
 
 /* Beside the PR info on a minion's newest turn-end line (take F). */

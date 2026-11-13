@@ -399,10 +399,14 @@ if (!BOOT_CHECK) setInterval(() => void safely('schedules', () => scheduledRuns.
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fresh sessions', () => runner.freshSweep()), 60_000).unref();
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('cold mail', () => runner.coldSweep()), 60_000).unref();
-// Dismissed minions' build output (#336): those dismissed before clearing on dismissal, or whose clearing
+// Dismissed minions' build output (#336) and worktrees (#660): those dismissed before clearing on dismissal, or whose clearing
 // failed. Off the boot's hot path, then daily. A preview's rows point at the live worktrees, so never there.
 if (!BOOT_CHECK && !PREVIEW) {
-  const sweepBuild = () => void safely('build output sweep', () => runner.sweepBuildOutput());
+  // Then dismissed minions' whole worktrees past their grace, and leftover Grunt worktrees (#660).
+  const sweepBuild = () => void safely('build output sweep', async () => {
+    await runner.sweepBuildOutput();
+    await runner.sweepWorktrees();
+  });
   setTimeout(sweepBuild, 10 * 60_000).unref();
   setInterval(sweepBuild, 24 * 60 * 60_000).unref();
 }

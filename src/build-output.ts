@@ -59,8 +59,9 @@ export async function clearBuildOutput(worktree: string): Promise<{ dirs: number
   return { dirs: dirs.length, bytes };
 }
 
-async function low(cmd: string[]) {
-  const opts = { timeout: 60 * 60_000, maxBuffer: 64 * 1024 * 1024 };
+/** Run `cmd` at low IO and CPU priority. */
+export async function low(cmd: string[], extra: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
+  const opts = { timeout: 60 * 60_000, maxBuffer: 64 * 1024 * 1024, ...extra };
   try {
     return await run(LOW[0], [...LOW.slice(1), ...cmd], opts);
   } catch (err: any) {

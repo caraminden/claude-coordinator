@@ -22,7 +22,8 @@ import { isAuthFailure, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
-import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
+import { clearBuildOutput, diskUsage, findBuildOutput, low, size, ticketWorktree } from './build-output.ts';
+import { GRACE_MS, GRUNT_AGE_MS, gruntWorktrees, madeAt, ownCheckout, removeWorktree, saveWork, savedRef } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
@@ -788,6 +789,150 @@ export class Runner {
     }
     if (freed.worktrees) console.log(`Cleared ${size(freed.bytes)} of build output from ${freed.worktrees} dismissed minion${freed.worktrees === 1 ? "'s worktree" : "s' worktrees"}.`);
     return freed;
+  }
+
+  /** Recreate a minion's worktree from its branch if the sweep removed it, with the work it saved (#660). */
+  private restoreDir(ticket: Ticket, project: Project) {
+    try {
+      const note = restoreTicketDir(ticket.cwd, project.repo_dir, ticket.branch, savedRef(String(ticket.id)));
+      if (note) this.emit(ticket.id, 'note', { text: note });
+    } catch (err: any) {
+      this.emit(ticket.id, 'note', { text: `Could not recreate the worktree: ${err.message}` });
+    }
+  }
+
+  /** A reopened minion gets its worktree back now, not at its next turn, so its files and preview are there (#660). */
+  reopened(ticketId: number): Promise<void> {
+    return this.lanes.run(ticketId, 'worktree restore', () => {
+      const ticket = this.store.getTicket(ticketId);
+      const project = ticket && this.store.getProject(ticket.project_id);
+      if (ticket && ticket.status !== 'closed' && project) this.restoreDir(ticket, project);
+    });
+  }
+
+  private sweepingWorktrees = false;
+
+  /**
+   * Remove dismissed minions' worktrees once their latest dismissal is GRACE_MS old, and Grunt worktrees no
+   * running turn can be using (src/worktree-sweep.ts), in every scheme: at boot and daily, with the build
+   * output sweep. Branches stay; work not on them is saved to a ref first. Each removal is a note in the
+   * minion's chat, and each scheme's Taskmaster gets one note listing them. Returns what it did per scheme.
+   */
+  async sweepWorktrees(now = Date.now()): Promise<Map<number, { removed: string[]; kept: string[]; bytes: number }>> {
+    const done = new Map<number, { removed: string[]; kept: string[]; bytes: number }>();
+    if (this.sweepingWorktrees) return done;
+    this.sweepingWorktrees = true;
+    try {
+      await this.oneOffTargets();
+      for (const p of this.store.listProjects()) {
+        // Only a repo in this data folder: a dev copy's rows point at the live repos, whose turns it can't see.
+        if (!p.repo_dir || resolve(p.repo_dir) !== join(projectDir(this.dataDir, p.id), 'repo') || !existsSync(p.repo_dir)) continue;
+        const log = { removed: [] as string[], kept: [] as string[], bytes: 0 };
+        const keep = (what: string, why: string) => {
+          const key = `worktree-kept:${what}`;
+          if (this.store.getSetting<string>(key) !== why) log.kept.push(`${what} (${why})`);
+          this.store.setSetting(key, why);
+        };
+        const removed = (what: string, bytes: number, extra = '') => {
+          this.store.deleteSetting(`worktree-kept:${what}`);
+          log.removed.push(`${what}, ${size(bytes)}${extra}`);
+          log.bytes += bytes;
+        };
+        await this.sweepGrunts(p, now, keep, removed);
+        for (const t of this.store.listTickets(p.id)) {
+          if (t.kind === 'coordinator' || t.status !== 'closed' || !t.branch || t.updated_at > now - GRACE_MS || this.turns.has(t.id) || this.lanes.busy(t.id)) continue;
+          const dir = ticketWorktree(this.dataDir, p.id, t.id);
+          if (resolve(t.cwd) !== dir || !existsSync(dir)) continue;
+          await this.lanes.run(t.id, 'worktree sweep', async () => {
+            const now2 = this.store.getTicket(t.id);
+            // updated_at only moves on: a reopen and a new dismissal restart the clock.
+            if (now2?.status !== 'closed' || this.turns.has(t.id) || now2.updated_at > now - GRACE_MS || !(await ownCheckout(dir))) return;
+            const what = `#${t.number} (${dir})`;
+            try {
+              const ref = savedRef(String(t.id));
+              const s = await saveWork(dir, ref, t.branch, `Citadel: #${t.number}'s work not on its branch, saved before its worktree was removed`);
+              if ('kept' in s) return keep(what, s.kept);
+              const bytes = await removeWorktree(p.repo_dir!, dir);
+              removed(what, bytes, s.saved ? `, its uncommitted work saved in ${ref}` : '');
+              this.emit(t.id, 'note', { text: `Removed this dismissed minion's worktree (${size(bytes)}). Its branch ${t.branch} stays, and a reopen brings the folder back${s.saved ? ` with its uncommitted work, saved meanwhile in ${ref}` : ''}.` });
+            } catch (err: any) {
+              keep(what, `could not remove: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+            }
+          });
+        }
+        if (!log.removed.length && !log.kept.length) continue;
+        done.set(p.id, log);
+        const text = [
+          log.removed.length ? `Removed ${log.removed.length} worktree${log.removed.length === 1 ? '' : 's'} of dismissed minions and leftover Grunts, ${size(log.bytes)} freed (branches kept; a reopen brings a minion's back):` : '',
+          ...log.removed.map((r) => `- ${r}`),
+          log.kept.length ? 'Kept:' : '',
+          ...log.kept.map((k) => `- ${k}`),
+        ].filter(Boolean).join('\n');
+        console.log(`${p.name}: ${text}`);
+        const coordinator = this.store.getCoordinator(p.id);
+        if (coordinator) this.emit(coordinator.id, 'note', { text });
+      }
+    } finally {
+      this.sweepingWorktrees = false;
+    }
+    return done;
+  }
+
+  /**
+   * The scheme's Grunt worktrees that no turn can be using: made over GRUNT_AGE_MS ago, and every turn of the
+   * scheme running now started after it was made (a Grunt lives inside its turn's claude process).
+   */
+  private async sweepGrunts(p: Project, now: number, keep: (what: string, why: string) => void, removed: (what: string, bytes: number, extra?: string) => void) {
+    const top = projectDir(this.dataDir, p.id) + '/';
+    for (const g of await gruntWorktrees(p.repo_dir!).catch(() => [])) {
+      if (!g.path.startsWith(top) || g.locked) continue;
+      const made = await madeAt(g.path);
+      if (made === null || made > now - GRUNT_AGE_MS) continue;
+      const inUse = [...this.turns].some(([id, turn]) => this.store.getTicket(id)?.project_id === p.id && turn.startedAt <= made);
+      if (inUse) continue;
+      const name = g.path.slice(g.path.lastIndexOf('/') + 1);
+      const what = `Grunt ${name} (${g.path})`;
+      try {
+        const ref = savedRef(`grunt/${name}`);
+        const s = await saveWork(g.path, ref, g.branch, `Citadel: Grunt ${name}'s work not on its branch, saved before its worktree was removed`);
+        if ('kept' in s) {
+          keep(what, s.kept);
+          continue;
+        }
+        removed(what, await removeWorktree(p.repo_dir!, g.path), s.saved ? `, its uncommitted work saved in ${ref}` : '');
+      } catch (err: any) {
+        keep(what, `could not remove: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+      }
+    }
+  }
+
+  /**
+   * Josh's go (2026-11-13, #660): three Peek Auras minions still open kept a target/ from before Peek's
+   * shared build cache, 14 GB. Their target/ only, once, if still a wholly ignored folder and idle.
+   * shortcut: a one-off by id, a no-op once its setting is set; delete it with any later edit here.
+   */
+  private async oneOffTargets() {
+    const key = 'oneoff:660-peek-targets';
+    if (this.store.getSetting(key)) return;
+    const peek = this.store.getProject(3);
+    if (peek?.name !== 'Peek Auras') return this.store.setSetting(key, 'not this data');
+    for (const id of [833, 807, 1195]) {
+      const t = this.store.getTicket(id);
+      const dir = ticketWorktree(this.dataDir, 3, id);
+      if (t?.project_id !== 3 || resolve(t.cwd) !== dir || this.turns.has(id) || this.lanes.busy(id)) continue;
+      await this.lanes.run(id, 'one-off target/ clear', async () => {
+        const target = (await findBuildOutput(dir).catch(() => [])).find((d) => d === join(dir, 'target'));
+        if (!target || this.turns.has(id)) return;
+        const bytes = await diskUsage([target]);
+        await low(['rm', '-rf', '--one-file-system', '--', target]);
+        const text = `Removed this minion's old target/ build folder (${size(bytes)}), from before the shared build cache (Josh's go, #660).`;
+        console.log(`Peek Auras #${t.number}: ${text}`);
+        this.emit(id, 'note', { text });
+        const coordinator = this.store.getCoordinator(3);
+        if (coordinator) this.emit(coordinator.id, 'note', { text: `#${t.number}: ${text}` });
+      });
+    }
+    this.store.setSetting(key, new Date(Date.now()).toISOString());
   }
 
   /**
@@ -1844,12 +1989,8 @@ export class Runner {
       this.emit(ticket.id, 'note', { text: claudePlace.refused });
       return this.broadcastTicket(ticket.id);
     }
-    // deploy/prune.sh removes worktrees of long-closed minions; a reopened one gets its back.
-    try {
-      if (restoreTicketDir(ticket.cwd, project.repo_dir, ticket.branch)) this.emit(ticket.id, 'note', { text: `Recreated this minion's worktree from its branch ${ticket.branch}.` });
-    } catch (err: any) {
-      this.emit(ticket.id, 'note', { text: `Could not recreate the worktree: ${err.message}` });
-    }
+    // The worktree sweep removes dismissed minions' worktrees; a reopened one gets its back.
+    this.restoreDir(ticket, project);
     let filesDir = this.filesDir(ticket);
     try {
       if (filesDir) mkdirSync(filesDir, { recursive: true });

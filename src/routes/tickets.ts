@@ -706,6 +706,8 @@ export const ticketRoutes: Route[] = [
         store.updateTicket(id, { status: body.status });
         runner.emit(id, 'note', { text: `${session.name} reopened this minion.` });
         runner.broadcastTicket(id);
+        // Its worktree back now if the sweep removed it (#660), behind any dismissal cleanup on its lane.
+        void runner.reopened(id);
       }
       return json(res, 200, ticketView(app, id));
     },

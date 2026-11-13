@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { restoreTicketDir } from '../src/workspace.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'prune-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -50,28 +49,18 @@ test('a dry run lists what it would prune and changes nothing', () => {
   assert.match(out, new RegExp(`Would delete: Demo #${old.number}, 1 files`));
   assert.match(out, new RegExp(`Would delete: Demo #${mid.number}, 1 files`));
   assert.doesNotMatch(out, new RegExp(`#${fresh.number},`));
-  assert.match(out, new RegExp(`Would delete: Demo #${old.number}, ${old.cwd}`));
-  assert.match(out, new RegExp(`Skipping \\(uncommitted changes\\): Demo #${dirty.number}`));
+  assert.doesNotMatch(out, /Worktrees/, "worktrees are the server's (src/worktree-sweep.ts)");
   assert.ok(existsSync(old.cwd));
   assert.equal(stateOf(old.id), 1);
 });
 
-test('--apply drops old session state and old clean worktrees, keeping branches', () => {
+test('--apply drops old session state and leaves every worktree', () => {
   run(prune, '--apply');
   assert.equal(stateOf(old.id), 0);
   assert.equal(stateOf(mid.id), 0);
   assert.equal(stateOf(fresh.id), 1);
   assert.equal(stateOf(open.id), 1);
-  assert.ok(!existsSync(old.cwd));
-  assert.ok(existsSync(mid.cwd) && existsSync(dirty.cwd) && existsSync(fresh.cwd));
-  assert.ok(git(['branch', '--list', old.branch], repo).includes(old.branch));
-});
-
-test('a reopened minion gets its worktree back from its branch', () => {
-  assert.equal(restoreTicketDir(old.cwd, repo, old.branch), true);
-  assert.equal(git(['branch', '--show-current'], old.cwd), old.branch);
-  assert.equal(restoreTicketDir(old.cwd, repo, old.branch), false);
-  assert.equal(restoreTicketDir(join(root, 'nowhere'), null, null), false);
+  assert.ok(existsSync(old.cwd) && existsSync(mid.cwd) && existsSync(dirty.cwd) && existsSync(fresh.cwd));
 });
 
 test('ad-hoc copies go at 7 days old, only while a recent nightly backup restores, and the backup is private', () => {
@@ -166,23 +155,4 @@ test('a scheme name with a space is listed, counted and deleted like any other (
   assert.equal(res.status, 0, res.stderr);
   assert.equal(s.db.listClaudeState(spaced.project_id, spaced.id).length, 0);
   assert.equal(s.db.listClaudeState(plain.project_id, plain.id).length, 0);
-});
-
-test('a worktree git will not remove is reported, and the rest of the prune still runs, then exits non-zero (#468 S10-4)', () => {
-  const s = scratch('Demo');
-  const locked = s.closed(0, 'locked');
-  const orphan = s.closed(0, 'orphan');
-  const after = s.closed(0, 'after');
-  git(['worktree', 'lock', locked.cwd], locked.repo);
-  // Its admin entry gone, as after a moved repo or hand damage: git status itself fails there.
-  rmSync(git(['rev-parse', '--absolute-git-dir'], orphan.cwd), { recursive: true });
-  const res = s.exec('--apply', '--stale-backups');
-  assert.equal(res.status, 1, res.stdout + res.stderr);
-  assert.match(res.stdout, new RegExp(`Could not remove \\(git's reason above\\): Demo #${locked.number}, ${locked.cwd}`));
-  assert.match(res.stdout, new RegExp(`Skipping \\(git status failed there\\): Demo #${orphan.number}, ${orphan.cwd}`));
-  assert.ok(existsSync(locked.cwd) && existsSync(orphan.cwd), 'neither is touched');
-  assert.ok(!existsSync(after.cwd), 'the worktree after them is still pruned');
-  assert.match(res.stdout, /== Ad-hoc database copies/, 'the backups section still runs');
-  assert.match(res.stderr, /2 worktree\(s\) could not be pruned/);
-  git(['worktree', 'unlock', locked.cwd], locked.repo);
 });

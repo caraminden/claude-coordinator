@@ -5,6 +5,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { asEnv, identity, type GithubEnv } from './scheme-repo.ts';
+import { restoreSaved } from './worktree-sweep.ts';
 
 const run = promisify(execFile);
 const GIT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -252,13 +253,14 @@ export async function createTicketDir(
 }
 
 /**
- * Put back a ticket's worktree from its branch if the folder is gone (deploy/prune.sh removes
- * worktrees of long-closed tickets but keeps their branches). Synchronous: it runs just before a
- * turn starts. Returns true if it recreated the folder.
+ * Put back a ticket's worktree from its branch if the folder is gone (the worktree sweep, src/worktree-sweep.ts,
+ * removes dismissed minions' worktrees but keeps their branches), with any work it saved in `saved` (a ref).
+ * Synchronous: it runs just before a turn starts. Returns the note to show if it recreated the folder, else null.
  */
-export function restoreTicketDir(cwd: string, repoDir: string | null, branch: string | null): boolean {
-  if (!cwd || existsSync(cwd) || !repoDir || !branch) return false;
+export function restoreTicketDir(cwd: string, repoDir: string | null, branch: string | null, saved: string | null = null): string | null {
+  if (!cwd || existsSync(cwd) || !repoDir || !branch) return null;
   execFileSync('git', ['worktree', 'prune'], { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
   execFileSync('git', ['worktree', 'add', '--quiet', cwd, branch], { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
-  return true;
+  const back = saved ? restoreSaved(cwd, repoDir, saved, branch) : null;
+  return `Recreated this minion's worktree from its branch ${branch}${back ? `; ${back}` : ''}.`;
 }

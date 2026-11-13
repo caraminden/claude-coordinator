@@ -253,10 +253,12 @@ linked-account secrets stripped, plus the newest `state-*`); setup is in
 `-wal`/`-shm`.
 
 **Pruning.** `deploy/prune.sh` lists, and with `--apply` deletes, the session
-state (`claude_state`) of minions closed over 14 days ago and the worktrees of
-minions closed over 30 days ago. Branches are kept, worktrees with uncommitted
-changes are skipped, and a reopened minion gets its worktree back from its
-branch. `--stale-backups` also removes the ad-hoc `coordinator.db.backup-*` and
+state (`claude_state`) of minions closed over 14 days ago. Worktrees are the
+server's: daily, it removes a dismissed minion's worktree 3 days after its latest
+dismissal, and Grunt worktrees (`.claude/worktrees/agent-*`) no running turn can
+be using, keeping branches and saving work not on them to `refs/citadel/saved/`
+first; a reopen brings the folder and that work back (`src/worktree-sweep.ts`).
+`--stale-backups` also removes the ad-hoc `coordinator.db.backup-*` and
 `.bak-*` copies once they are 7 days old, while the newest nightly backup is
 under 2 days old and passes its check; the nightly timer runs `--apply
 --stale-backups`. Always read a dry run before the first `--apply`. The units are

@@ -125,3 +125,23 @@ test('an auto-deploy that can\'t start is told, and not retried at that commit',
   await w.auto.tick();
   assert.deepEqual(w.failed, ['app:peek: peek is being installed or deployed already']);
 });
+
+test('a deploy still starting (an APK downloading) is not started twice, and its card hides the button meanwhile', async () => {
+  const store = new Store(join(root, `t-${++dbs}.db`));
+  const apk: Found = { projectId: 3, id: 'apk:release', kind: 'apk', name: 'Android', link: null, branch: 'main', workflow: 'r.yml', contraption: 'm' };
+  const tv: Omit<TargetView, 'testCopies'> = { target: { id: apk.id, projectId: 3, name: apk.name, kind: 'apk', link: null }, current: null, next: null, line: [], recent: [] };
+  let finish!: () => void;
+  let starts = 0;
+  const auto = new AutoDeploy({
+    store, targets: () => [apk], view: () => [{ projectId: 3, targets: [{ ...tv, testCopies: [] }], testCopies: [] }], failed: () => {},
+    deployers: { apk: { waits: () => true, head: async () => 'publish:8', start: () => (starts++, new Promise<void>((done) => (finish = done))) } },
+  });
+  const first = auto.deployNow(3, apk.id, 'Cara', 1);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(auto.info(tv)?.can, false);
+  await assert.rejects(auto.deployNow(3, apk.id, 'Josh', 2), /being deployed already/);
+  finish();
+  await first;
+  assert.equal(starts, 1);
+  assert.equal(auto.info(tv)?.can, true, 'settled: the reader decides again');
+});

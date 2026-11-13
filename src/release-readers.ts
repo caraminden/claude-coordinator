@@ -272,6 +272,11 @@ class RunsCache {
     this.d = d;
   }
 
+  /** Read a target's runs again on the next refresh, moving or not (a run was just started for it). */
+  forget(id: string) {
+    this.readAt.delete(id);
+  }
+
   async read(t: Found) {
     const p = this.d.store.getProject(t.projectId);
     if (!p || !t.workflow) return;
@@ -423,6 +428,8 @@ export class ApkReader implements Reader {
   private feeds = new Map<string, Feed | null>();
   /** The version on main: its gradle file's, read again when main moves. */
   private mains = new Map<string, { head: string; code: number; name: string | null } | null>();
+  /** Signed runs whose APK turned out no newer than the published one: not a release to publish (#629). */
+  private old = new Set<number>();
   constructor(d: ApkDeps) {
     this.d = d;
     this.cache = new RunsCache(d);
@@ -443,6 +450,30 @@ export class ApkReader implements Reader {
       const v = gradle ? gradleVersion((await git(['show', `${head}:${gradle}`], p.repo_dir)) ?? '') : null;
       this.mains.set(t.id, v && { head, ...v });
     }
+  }
+
+  /**
+   * What its next release waits on that Citadel can do itself (#629): a version bumped on main with no signed APK of
+   * it yet waits for a release run (`dispatch`, at main's head); a signed one waits to be published (`publish`, the
+   * newest signed run). Null while a run is moving, with nothing waiting, or with no latest.json to publish into.
+   */
+  pending(t: Found): { step: 'dispatch'; head: string } | { step: 'publish'; run: Run; current: number; main: { code: number; name: string | null } } | null {
+    const feed = this.feeds.get(t.id);
+    const main = this.mains.get(t.id);
+    const runs = this.cache.runs.get(t.id) ?? [];
+    if (!feed || !main || main.code <= feed.versionCode || runs.some((r) => r.run.status !== 'completed')) return null;
+    const signed = runs.find((r) => shipped(r) && !this.old.has(r.run.id) && (ms(r.run.created_at) ?? 0) > feed.at);
+    return signed ? { step: 'publish', run: signed.run, current: feed.versionCode, main: { code: main.code, name: main.name } } : { step: 'dispatch', head: main.head };
+  }
+
+  /** A release run was just started for it: read its runs again on the next refresh. */
+  started(id: string) {
+    this.cache.forget(id);
+  }
+
+  /** Run `runId` signed an APK no newer than the published one (built before the bump): it waits for a new run instead. */
+  tooOld(runId: number) {
+    this.old.add(runId);
   }
 
   read(): Omit<TargetView, 'testCopies'>[] {

@@ -60,6 +60,7 @@ import { Builds } from './src/builds.ts';
 import { Waits } from './src/waits.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
+import { dispatch, OldApk, publish } from './src/apk-release.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, MainReader, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
@@ -520,7 +521,7 @@ const autoDeploy = new AutoDeploy({
   deployers: {
     contraption: {
       // The reader's next release waits at its deploy call while main is ahead and no deploy runs.
-      waits: (tv) => tv.next?.stage === 'call',
+      waits: (_t, tv) => tv.next?.stage === 'call',
       head: async (t) => {
         const row = store.getContraption(t.contraption!);
         const p = store.getProject(t.projectId);
@@ -530,6 +531,38 @@ const autoDeploy = new AutoDeploy({
         const row = store.getContraption(t.contraption!);
         if (!row) throw new HttpError(404, `No contraption ${t.contraption}`);
         startDeploy(app, row, by, null, uid);
+      },
+    },
+    // An Android app (src/apk-release.ts): a bumped version starts its release workflow, and a signed run is published.
+    apk: {
+      waits: (t) => !!apkReader.pending(t),
+      head: async (t) => {
+        const w = apkReader.pending(t);
+        return !w ? null : w.step === 'dispatch' ? `dispatch:${w.head}` : `publish:${w.run.id}`;
+      },
+      start: async (t) => {
+        const w = apkReader.pending(t);
+        const p = store.getProject(t.projectId);
+        const slug = p && repoSlug(p.repo_url);
+        if (!w || !p?.repo_dir || !slug || !t.workflow || !t.contraption) throw new HttpError(409, `${t.name} has nothing to release`);
+        const as = githubOf(p.repo_dir);
+        const release = async () => {
+          await dispatch(slug, t.workflow!.replace(/^.*\//, ''), t.branch, as);
+          apkReader.started(t.id);
+        };
+        if (w.step === 'dispatch') await release();
+        else {
+          const feedFile = join(services.opts.home, '.local/share', t.contraption, 'android', 'latest.json');
+          try {
+            await publish({ slug, runId: w.run.id, feedFile, current: w.current, main: w.main, as });
+          } catch (err) {
+            if (!(err instanceof OldApk)) throw err;
+            // Signed before main's version bump: sign main instead.
+            apkReader.tooOld(w.run.id);
+            await release();
+          }
+        }
+        void releases.refresh();
       },
     },
   },

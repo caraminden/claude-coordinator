@@ -19,11 +19,11 @@ export const AUTO_BY = 'auto-deploy';
 /** One kind of target's release step. */
 export interface Deployer {
   /** Whether its next release waits on a deploy (and nothing is deploying it). */
-  waits(tv: Omit<TargetView, 'testCopies'>): boolean;
+  waits(t: Found, tv: Omit<TargetView, 'testCopies'>): boolean;
   /** The commit a deploy would ship now (its branch's head), or null when it can't tell. */
   head(t: Found): Promise<string | null>;
-  /** Start a deploy, by a person's name or AUTO_BY; throws (an HttpError or ServiceError) when it can't start. */
-  start(t: Found, by: string, uid: number | null): void;
+  /** Start a deploy, by a person's name or AUTO_BY; throws or rejects (an HttpError, a ServiceError) when it can't start. */
+  start(t: Found, by: string, uid: number | null): void | Promise<void>;
 }
 
 /** What a target's card shows of its deploy: whether the button shows, auto-deploy on or off, and when it's due. */
@@ -60,6 +60,8 @@ export class AutoDeploy {
   private d: AutoDeployDeps;
   /** Each waiting target's branch head, and when it was first seen there: the quiet time counts from that. */
   private moved = new Map<string, { head: string; at: number }>();
+  /** Targets whose start() hasn't settled (an APK downloading, say), so nothing starts them twice. */
+  private starting = new Set<string>();
   constructor(d: AutoDeployDeps) {
     this.d = d;
   }
@@ -97,10 +99,11 @@ export class AutoDeploy {
 
   /** A target's deploy as its card shows it, or null when its kind has no release step Citadel can start. */
   info(tv: Omit<TargetView, 'testCopies'>): DeployInfo | null {
-    const deployer = this.d.deployers[tv.target.kind as Kind];
-    if (!deployer) return null;
-    const key = keyOf(tv.target.projectId, tv.target.id);
-    const can = deployer.waits(tv);
+    const t = this.found(tv.target.projectId, tv.target.id);
+    const deployer = t && this.d.deployers[t.kind];
+    if (!t || !deployer) return null;
+    const key = keyOf(t.projectId, t.id);
+    const can = deployer.waits(t, tv) && !this.starting.has(key);
     const auto = this.isOn(tv.target.projectId, tv.target.id);
     const m = this.moved.get(key);
     const due = can && auto && m && this.saved().tried[key] !== m.head ? m.at + QUIET_MS : null;
@@ -112,10 +115,21 @@ export class AutoDeploy {
     const t = this.found(projectId, target);
     const deployer = t && this.d.deployers[t.kind];
     if (!t || !deployer) throw new HttpError(404, `${target} has no release step Citadel can start`);
+    const key = keyOf(projectId, target);
+    if (this.starting.has(key)) throw new HttpError(409, `${t.name} is being deployed already`);
     const head = await deployer.head(t);
-    deployer.start(t, by, uid);
     // A person's deploy counts as this commit's try: if it rolls back, auto-deploy waits for main to move.
-    if (head) this.mark(keyOf(projectId, target), head);
+    if (head) this.mark(key, head);
+    await this.start(key, () => deployer.start(t, by, uid));
+  }
+
+  private async start(key: string, go: () => void | Promise<void>) {
+    this.starting.add(key);
+    try {
+      await go();
+    } finally {
+      this.starting.delete(key);
+    }
   }
 
   /** The commit auto-deploy or the button last started a deploy for, or null. */
@@ -142,7 +156,7 @@ export class AutoDeploy {
       for (const tv of s.targets) {
         const t = all.find((x) => x.projectId === tv.target.projectId && x.id === tv.target.id);
         const deployer = t && this.d.deployers[t.kind];
-        if (!t || !deployer || !deployer.waits(tv)) continue;
+        if (!t || !deployer || !deployer.waits(t, tv)) continue;
         const key = keyOf(t.projectId, t.id);
         const head = await deployer.head(t);
         if (!head) continue;
@@ -152,10 +166,10 @@ export class AutoDeploy {
           this.moved.set(key, { head, at: now });
           continue;
         }
-        if (now - m.at < QUIET_MS || !this.isOn(t.projectId, t.id) || this.saved().tried[key] === head) continue;
+        if (now - m.at < QUIET_MS || !this.isOn(t.projectId, t.id) || this.saved().tried[key] === head || this.starting.has(key)) continue;
         this.mark(key, head);
         try {
-          deployer.start(t, AUTO_BY, null);
+          await this.start(key, () => deployer.start(t, AUTO_BY, null));
         } catch (err: any) {
           this.d.failed(t, err?.message ?? String(err));
         }

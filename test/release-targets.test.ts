@@ -348,6 +348,7 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   assert.deepEqual([v.current?.number, v.current?.version, v.current?.link, v.current?.live], [5, '1.4', '/apps/mandate/android/mandate-5.apk', feedAt], "numbered by its versionCode; main's versionName names it");
   assert.equal(v.next, null);
   assert.deepEqual(v.recent.map((r) => [r.number, r.version, r.outcome, r.stages.sign]), [[null, 'sha7', 'signed', 480], [null, 'sha6', 'signed', 600]], 'signed runs count by run, not versionCode: no release number');
+  assert.equal(reader.pending(t), null, 'nothing for auto-deploy to do');
 
   // A minion bumps the version on main: nobody has started a release run yet.
   writeFileSync(join(repo, 'android/app/build.gradle'), 'defaultConfig {\n  versionCode 6\n  versionName "1.5"\n}\n');
@@ -356,6 +357,8 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   [v] = reader.read();
   const notStarted = "1.5 is on main, but nobody has started its release run yet: ask the scheme's Taskmaster to start it";
   assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta, v.next?.number], ['sign', notStarted, null, 6]);
+  const bumped = git(repo, ['rev-parse', 'HEAD']).toString().trim();
+  assert.deepEqual(reader.pending(t), { step: 'dispatch', head: bumped }, 'runs signed before latest.json was written are not this release');
 
   // Someone starts one: with nothing moving, the runs are read again once the idle interval has passed; it signs on CI.
   runs.unshift(run(8, 'in_progress', null, now - 2 * m));
@@ -366,6 +369,7 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   await reader.refresh();
   [v] = reader.read();
   assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.usual], ['sign', null, 540]);
+  assert.equal(reader.pending(t), null, 'a run is moving: nothing to start');
   assert.equal(v.next?.eta, null, 'publishing is a person\'s step, so no estimate');
 
   // Signed: waiting for someone to publish it.
@@ -373,6 +377,9 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   await reader.refresh();
   [v] = reader.read();
   assert.deepEqual([v.next?.stage, v.next?.waitingOn], ['publish', "1.5 is signed, but nobody has published it yet: ask the scheme's Taskmaster to publish it"]);
+  assert.deepEqual(reader.pending(t), { step: 'publish', run: runs[0], current: 5, main: { code: 6, name: '1.5' } });
+  reader.tooOld(8);
+  assert.deepEqual(reader.pending(t), { step: 'dispatch', head: bumped }, 'a run signed before the bump waits for a new run');
 });
 
 test('the APK reader with no latest.json: the newest signed run is the release', async () => {

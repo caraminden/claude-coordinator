@@ -84,7 +84,8 @@ b.waits { color: var(--held); }
    colour (releases.js tint(), from its icon), its target cell a little deeper with a stripe, its cards edged in it. */
 .rel-grid-row:not(.head) { background: color-mix(in srgb, var(--tint, transparent) 7%, var(--panel)); }
 .rel-grid-row:not(.head) > .rel-target { background: color-mix(in srgb, var(--tint, transparent) 22%, var(--panel)); box-shadow: inset 5px 0 var(--tint, transparent); padding-left: 0.85rem; }
-.rel-grid .rel-card-sm { background: var(--panel); border-color: color-mix(in srgb, var(--tint, var(--line)) 40%, var(--line)); }
+.rel-grid .rel-card-sm { background: var(--panel); }
+.rel-grid .rel-card-sm:not(:hover, .hl) { border-color: color-mix(in srgb, var(--tint, var(--line)) 40%, var(--line)); }
 .rel-all-narrow { display: none; flex-direction: column; gap: 0.75rem; }
 @media (max-width: 800px) {
   .rel-head .close-view.wide-only { display: none; }

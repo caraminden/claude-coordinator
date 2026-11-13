@@ -372,16 +372,19 @@ function allView(ids) {
   ];
 }
 
-/** Each scheme's colour for its All grid row: its icon's coloured pixels, averaged; grey for an icon without colour (null: none, or still reading). */
+/** Each icon's colour for its scheme's All grid row, keyed by icon URL (it carries the icon's version, so a new icon is read again):
+ *  its coloured pixels, averaged; grey for an icon without colour; null while reading or unreadable. */
 const tints = new Map();
 
-/** Give `row` its scheme's tint (Cara, 2026-11-12: "Tint per scheme"), reading the icon once. */
+/** Give `row` its scheme's tint (Cara, 2026-11-12: "Tint per scheme"), reading each icon once. */
 function tint(row, id) {
-  if (tints.get(id)) row.style.setProperty('--tint', tints.get(id));
-  const src = !tints.has(id) && schemeOf(id) && iconSrc(schemeOf(id));
+  const src = schemeOf(id) && iconSrc(schemeOf(id));
   if (!src) return row;
-  tints.set(id, null);
+  if (tints.get(src)) row.style.setProperty('--tint', tints.get(src));
+  if (tints.has(src)) return row;
+  tints.set(src, null);
   const img = new Image();
+  img.onerror = () => tints.delete(src); // a failed load is tried again on the next render
   img.onload = () => {
     try {
       const g = Object.assign(document.createElement('canvas'), { width: 24, height: 24 }).getContext('2d');
@@ -395,8 +398,8 @@ function tint(row, id) {
         for (let k = 0; k < 3; k++) sum[k] += px[i + k];
         n++;
       }
-      tints.set(id, n ? `rgb(${sum.map((v) => Math.round(v / n)).join(' ')})` : 'var(--muted)');
-      for (const el of document.querySelectorAll(`.rel-grid-row[data-scheme="${id}"]`)) el.style.setProperty('--tint', tints.get(id));
+      tints.set(src, n ? `rgb(${sum.map((v) => Math.round(v / n)).join(' ')})` : 'var(--muted)');
+      for (const el of document.querySelectorAll(`.rel-grid-row[data-scheme="${CSS.escape(String(id))}"]`)) el.style.setProperty('--tint', tints.get(src));
     } catch { /* an icon the canvas can't read leaves its row plain */ }
   };
   img.src = src;

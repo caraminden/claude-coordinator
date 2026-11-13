@@ -7,7 +7,6 @@ import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 
 /** Whether you may change this scheme's members and settings: its owner, or an admin. */
-export const ownsScheme = (project) => !!account && (account.admin || project.owner_id === account.id);
 
 function head(title, meta) {
   return h('div', { class: 'ticket-head' },
@@ -33,10 +32,10 @@ function githubLine(m) {
   return h('span', { class: 'meta' }, ...line, g.error ? h('span', { class: 'error' }, ` · ${g.error}`) : '');
 }
 
-/** Main panel: who is in this scheme. Its owner (or an admin) adds and removes people. */
+/** Main panel: who is in this scheme. Anyone in it (or an admin) adds and removes people (#621). */
 export function membersPage() {
   const p = view.project;
-  const owns = ownsScheme(p);
+  const owns = !!account;
   const list = h('div', { class: 'people-list' });
   const pick = h('select', { 'aria-label': 'Person to add' });
   const add = h('form', { class: 'row people-add' }, pick, h('button', { type: 'submit' }, 'Add'));
@@ -85,9 +84,7 @@ export function membersPage() {
   };
   Promise.all([api(`api/projects/${p.id}/members`), api('api/people')]).then(([members, people]) => render(members, people)).catch(fail);
   return page(
-    head('Members', owns
-      ? 'Only the people here see this scheme, its minions and its files. Anyone in it can add minions and chat; only the owner changes its members and settings.'
-      : 'Only the people here see this scheme, its minions and its files. Its owner adds and removes people.'),
+    head('Members', 'Only the people here see this scheme, its minions and its files. Anyone in it adds minions, chats, and changes its members and settings.'),
     list, add,
     h('h3', { class: 'settings-label' }, 'Just for you'),
     h('p', { class: 'muted small' }, 'Hiding takes the scheme out of your scheme lists, Needs-you badges and notifications. You stay in it, and its link still opens it.'),

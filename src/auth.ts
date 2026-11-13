@@ -244,6 +244,6 @@ export class Auth {
     // Name and rights come from the person's row, so a rename, a demotion or disabling them takes at once;
     // a cookie from the shared-password days names its person.
     const user = typeof s.uid === 'number' ? this.users.getUser(s.uid) : this.users.findUser('name', s.name);
-    return user && !user.disabled_at ? { name: user.name, uid: user.id, admin: !!user.admin, exp: s.exp } : null;
+    return user && !user.disabled_at ? { name: user.name, uid: user.id, admin: this.users.isAdmin(user), exp: s.exp } : null;
   }
 }

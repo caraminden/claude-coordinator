@@ -1871,7 +1871,7 @@ export class Runner {
     // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
     const before = this.store.turnAsker(ticket.id);
     const askers = [...(resumes || limitTries || netTries ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
-    const asker = askers.find((a) => !this.store.getUser(a)?.admin) ?? askers[0] ?? before ?? person;
+    const asker = askers.find((a) => !this.store.isAdmin(this.store.getUser(a))) ?? askers[0] ?? before ?? person;
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
     // a turn no one asked for gets none, and a ride-along message doesn't bring its sender's machines.

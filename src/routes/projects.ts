@@ -322,7 +322,8 @@ export const projectRoutes: Route[] = [
         if (!repoUrl) throw new HttpError(400, 'Repo URL is required');
         if (!/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
         upstream = repoUrl;
-        if (!session.admin) {
+        // Whose GitHub, not who may (#621): the flag, so a Citadel member still clones with their own token.
+        if (!user?.admin) {
           // The box's SSH key and gh login are Cara's: anyone else clones with their own token, or none.
           if (!repoUrl.startsWith('https://')) throw new HttpError(400, 'Use the repo\'s https:// URL: a git@ URL would clone with the server\'s own SSH key');
           if (!user) throw new HttpError(403, 'Sign in with your own login to clone a repo');
@@ -333,7 +334,7 @@ export const projectRoutes: Route[] = [
         if ('error' in checked) throw new HttpError(400, checked.error);
         folder = checked.path;
       } else if (source === 'new') {
-        ({ slug, as } = await newRepoSlug(app, name, !!session.admin, user));
+        ({ slug, as } = await newRepoSlug(app, name, !!user?.admin, user));
         // Refused before anything exists, with the name shown so the person can pick another.
         if (await githubRepoExists(slug, as) === true) throw new HttpError(409, `GitHub repo ${slug} already exists; pick another scheme name`);
       }
@@ -449,7 +450,8 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, access: 'owner',
+    // Any member changes its settings (#621, Cara 2026-11-12), plugin folders still an admin's (below).
+    method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode and list_groups; what is left out stays.

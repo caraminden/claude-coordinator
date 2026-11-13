@@ -74,7 +74,7 @@ export function claudeRefusal(who: User, linked: ClaudeLinked, asOwner = false):
 
 /** Whether an admin owns this scheme: its Taskmaster may then register plugin folders for an admin's ask. */
 export function adminOwned(store: Store, project: Project): boolean {
-  return !!store.getUser(project.owner_id ?? -1)?.admin;
+  return store.isAdmin(store.getUser(project.owner_id ?? -1));
 }
 
 /** Who may see and change a machine on the Machines page: its owner, and admins (all of them, ownerless ones too). */
@@ -105,7 +105,7 @@ export function lendsMachine(store: Store, machine: Machine, project: Project, a
  */
 export function taskmasterSeesMachine(store: Store, machine: Machine, project: Project, askerId: number | null): boolean {
   const asker = askerId === null ? undefined : store.getUser(askerId);
-  if (asker?.admin && !asker.disabled_at) return true;
+  if (store.isAdmin(asker)) return true;
   return lendsMachine(store, machine, project, askerId === null ? [] : [askerId]);
 }
 
@@ -129,7 +129,7 @@ export const askedCitadelKey = (projectId: number) => `taskmaster-asked:${projec
  */
 export function taskmasterTargets(store: Store, from: number, personId: number | null, now: number): Project[] {
   const user = personId === null ? undefined : store.getUser(personId);
-  const who = { uid: user?.id, admin: !!user?.admin };
+  const who = { uid: user?.id, admin: store.isAdmin(user) };
   const inFrom = store.canSee(who, from);
   return store.listProjects().filter((p) => p.id !== from && (p.id === GLOBAL_OWNER
     || (inFrom && store.canSee(who, p.id))
@@ -143,8 +143,8 @@ export function taskmasterTargets(store: Store, from: number, personId: number |
 export function adminAskRefusal(store: Store, ticketId: number): string | null {
   const id = store.turnAsker(ticketId);
   const user = id === null ? undefined : store.getUser(id);
-  if (user?.admin && !user.disabled_at) return null;
-  return `Only a turn a ${APP_NAME} admin asked for may do this, and this one is ${user ? `${user.name}'s` : "no one's"} ask. Ask a ${APP_NAME} admin to send the request in this chat.`;
+  if (store.isAdmin(user)) return null;
+  return `Only a turn a ${APP_NAME} admin asked for may do this, and this one is ${user ? `${user.name}'s` : "no one's"} ask. Ask a ${APP_NAME} admin or a member of the ${APP_NAME} scheme to send the request in this chat.`;
 }
 
 /** Whose ask a message is (src/runner.ts personOf): a person by name, or for a relay the asker of the turn that sent it. */

@@ -218,7 +218,8 @@ export const peopleRoutes: Route[] = [
   },
   { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, members(app, project.id)) },
   {
-    method: 'POST', path: '/api/projects/:project/members', who: ['person'], access: 'owner',
+    method: 'POST', path: '/api/projects/:project/members', who: ['person'],
+    // Any member, not only the owner (#621): reaching here means the person is in the scheme (http.ts canSee).
     async handler({ req, res, app, project }) {
       const user = person(app, String((await readJson(req)).person));
       if (user.disabled_at) throw new HttpError(400, `${user.name} is disabled`);
@@ -230,7 +231,7 @@ export const peopleRoutes: Route[] = [
     },
   },
   {
-    method: 'DELETE', path: '/api/projects/:project/members/:person', who: ['person'], access: 'owner',
+    method: 'DELETE', path: '/api/projects/:project/members/:person', who: ['person'],
     async handler({ res, app, project, params }) {
       app.store.removeMember(project.id, Number(params.person));
       // Only a collaborator Citadel added comes off the repo; the refusal is said, and the next boot tries again.

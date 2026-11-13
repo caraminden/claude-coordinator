@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
-import { Registry } from './properties.ts';
+import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 import { Memory } from './memory.ts';
 
@@ -997,7 +997,7 @@ export class Store {
           ? schemes.filter((p) => p.machine_tools && owner && this.canSee({ uid: owner.id, admin: !!owner.admin }, p.id)).map((p) => p.id)
           : m.scoped
             ? rows.filter((id) => schemes.find((p) => p.id === id)?.machine_tools)
-            : schemes.filter((p) => p.machine_tools && this.getUser(p.owner_id ?? -1)?.admin).map((p) => p.id);
+            : schemes.filter((p) => p.machine_tools && this.isAdmin(this.getUser(p.owner_id ?? -1))).map((p) => p.id);
         this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(m.id);
         const add = this.db.prepare('INSERT INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
         for (const id of ids) add.run(m.id, id);
@@ -1305,18 +1305,32 @@ export class Store {
     this.db.prepare('DELETE FROM repo_collaborators WHERE project_id = ? AND user_id = ?').run(projectId, userId);
   }
 
-  /** The schemes a person is in, as owner or member; null for an admin, who is in all of them. */
+  /**
+   * Whether a person counts as a Citadel admin: the admin flag, or being in the Citadel scheme (#621, Cara 2026-11-12:
+   * "any scheme member should have access to everything they need"). Admin gates, sessions and canSee read this; the
+   * bare flag is left for whose GitHub owns new schemes' repos and who gets admins' push alerts.
+   */
+  isAdmin(user: Pick<User, 'id' | 'admin' | 'disabled_at'> | undefined | null): boolean {
+    return !!user && !user.disabled_at && (!!user.admin || this.inScheme(user.id, GLOBAL_OWNER));
+  }
+
+  /** Whether a person owns or is a member of a scheme (no admin shortcut). */
+  private inScheme(uid: number | undefined, projectId: number): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM projects WHERE id = ?1 AND owner_id = ?2
+      UNION SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2`).get(projectId, uid ?? -1);
+  }
+
+  /** The schemes a person is in, as owner or member; null for an admin (isAdmin's sense), who is in all of them. */
   visibleProjects(who: { uid?: number; admin?: boolean }): Set<number> | null {
-    if (who.admin) return null;
+    if (who.admin || this.inScheme(who.uid, GLOBAL_OWNER)) return null;
     const rows = this.db.prepare(`SELECT id FROM projects WHERE owner_id = ?1
       UNION SELECT project_id FROM project_members WHERE user_id = ?1`).all(who.uid ?? -1) as { id: number }[];
     return new Set(rows.map((r) => r.id));
   }
 
-  /** Whether a person may see a scheme: an admin, its owner, or a member. */
+  /** Whether a person may see a scheme: an admin (a Citadel member too: isAdmin), its owner, or a member. */
   canSee(who: { uid?: number; admin?: boolean }, projectId: number): boolean {
-    return !!who.admin || !!this.db.prepare(`SELECT 1 FROM projects WHERE id = ?1 AND owner_id = ?2
-      UNION SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2`).get(projectId, who.uid ?? -1);
+    return !!who.admin || this.inScheme(who.uid, projectId) || this.inScheme(who.uid, GLOBAL_OWNER);
   }
 
   listContraptions(): ContraptionRow[] {

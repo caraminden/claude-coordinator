@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
+import { liveState } from './live-state.ts';
 import { instructionCost } from './prompt-cost.ts';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
@@ -280,10 +281,14 @@ const TOOLS = [
   LIST_TICKETS,
   {
     name: 'read_ticket',
-    description: "Read a minion's details, the link to each of its cards waiting on people (link a card wherever you mention it) and the most recent messages in its conversation.",
+    description: "Read a minion's details, its worktree, the link to each of its cards waiting on people (link a card wherever you mention it) and the most recent messages in its conversation. With live: true, read what its turn is doing now instead: the tool call it waits on and for how long, or that it waits on the model, a person's card, the usage limit or the land line, its queued messages, and its last few tool calls with their output trimmed. Use it to tell a hung minion from a busy one; its session transcript isn't readable from here.",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, last: { type: 'integer', description: 'How many recent entries to return (default 10, max 50)' } },
+      properties: {
+        ticket_id: TICKET_ID,
+        last: { type: 'integer', description: 'How many recent entries to return (default 10, max 50)' },
+        live: { type: 'boolean', description: "Show what the minion's turn is doing right now instead of its conversation" },
+      },
       required: ['ticket_id'],
     },
   },
@@ -1130,9 +1135,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const last = Math.min(Math.max(Number(args.last) || 10, 1), 50);
       // The whole history (?after=0), not a chat page: the skipped count needs every entry.
       const [{ ticket }, events] = await Promise.all([call('GET', `/api/tickets/${n}`), call('GET', `/api/tickets/${n}/events?after=0`)]);
+      if (args.live === true) return [ticketLine(ticket), ...liveState(ticket, events)].join('\n');
       const lines = transcript(events);
       const skipped = Math.max(lines.length - last, 0);
-      return [ticketLine(ticket), skipped ? `(${skipped} earlier entries omitted)` : '', ...lines.slice(-last)].filter(Boolean).join('\n\n');
+      return [ticketLine(ticket), ticket.cwd ? `worktree: ${ticket.cwd}` : '', skipped ? `(${skipped} earlier entries omitted)` : '', ...lines.slice(-last)].filter(Boolean).join('\n\n');
     }
     case 'create_ticket': {
       // A session that loaded an older schema may leave out properties (or its type); a missing type

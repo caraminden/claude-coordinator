@@ -8,7 +8,8 @@ import { Store } from '../src/db.ts';
 import { GithubLink, personGithub } from '../src/github-link.ts';
 import { asEnv } from '../src/scheme-repo.ts';
 import { newToken } from '../src/machines.ts';
-import { hideTokens, pushKind, Runner, slimEvent } from '../src/runner.ts';
+import { hideTokens } from '../src/hide-tokens.ts';
+import { pushKind, Runner, slimEvent } from '../src/runner.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
 testPins();
 

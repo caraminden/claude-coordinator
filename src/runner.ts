@@ -27,6 +27,7 @@ import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKe
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
+import { hideTokens } from './hide-tokens.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 
@@ -396,18 +397,6 @@ export async function apiReachable(): Promise<boolean> {
 
 /** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
 export const MAX_RESUMES = 2;
-// A turn's GitHub token is in its env (#182), so `env` or `echo $GH_TOKEN` would print it into the
-// chat, which everyone in the scheme reads. These shapes are distinctive enough to hide (#481 added
-// Citadel's machine tokens from machines.ts, Anthropic and AWS keys, and PEM private keys).
-const TOKENS: [RegExp, string][] = [
-  [/\b(gh[opsur]_[A-Za-z0-9]{30,}|github_pat_\w{40,})\b/g, '[GitHub token hidden]'],
-  [/\bccm_\d+_[\w-]{43}/g, '[Citadel machine token hidden]'],
-  [/\bsk-ant-[\w-]{20,}/g, '[Anthropic key hidden]'],
-  [/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, '[AWS key hidden]'],
-  // To its END line, or to the end of the text when the output was cut off inside it.
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[private key hidden]'],
-];
-export const hideTokens = (s: string) => TOKENS.reduce((out, [shape, hidden]) => out.replace(shape, hidden), s);
 
 function truncate(s: string): string {
   return s.length > MAX_TOOL_OUTPUT ? s.slice(0, MAX_TOOL_OUTPUT) + `\n… [truncated ${s.length - MAX_TOOL_OUTPUT} chars]` : s;

@@ -75,3 +75,20 @@ test("read_ticket collapses a Grunt's report to its first line and keeps the min
   assert.doesNotMatch(text, /reads well/);
   assert.match(text, /\[Claude\]: All takes are drawn\./);
 });
+
+test('read_ticket shows the worktree, and live: true shows what the turn is doing instead of the chat', async () => {
+  const L = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'Busy one', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(L.id, '/w/busy', null);
+  store.addEvent(L.id, 'user_message', { author: 'Josh', text: 'is it hung?' });
+  store.addEvent(L.id, 'claude', { type: 'system', subtype: 'init' });
+  store.addEvent(L.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'cargo test', description: 'Run the tests' } }] } });
+  const n = store.getTicket(L.id)!.number;
+  const plain = await readTicket({ ticket_id: n });
+  assert.match(plain.text, /^worktree: \/w\/busy$/m);
+  assert.match(plain.text, /\[Josh\]: is it hung\?/);
+  const live = await readTicket({ ticket_id: n, live: true });
+  assert.equal(live.error, false, live.text);
+  assert.match(live.text, /Live state of #\d+: status/);
+  assert.match(live.text, /Bash: Run the tests: cargo test/);
+  assert.doesNotMatch(live.text, /is it hung/);
+});

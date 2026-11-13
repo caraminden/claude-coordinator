@@ -4,7 +4,7 @@
 // desktop and every member scheme's cards on a phone) and the chip beside a minion's PR info (take F).
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
-import { ago, api, fileUrl, h, view } from './base.js';
+import { ago, api, fileUrl, h, schemeIcon, view } from './base.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
 import { segTrack, TRACK } from './wait.js';
@@ -54,7 +54,10 @@ function redraw() {
 
 // ---------- words and numbers ----------
 
-const schemeName = (id) => view?.projects?.find((p) => p.id === id)?.name ?? (view?.project?.id === id ? view.project.name : `Scheme ${id}`);
+const schemeOf = (id) => view?.projects?.find((p) => p.id === id) ?? (view?.project?.id === id ? view.project : null);
+const schemeName = (id) => schemeOf(id)?.name ?? `Scheme ${id}`;
+/** The scheme's icon as the sidebar shows it, beside its targets' names (Cara, 2026-11-12: "maybe also the scheme icons?"). */
+const iconOf = (id) => (schemeOf(id) ? schemeIcon(schemeOf(id)) : '');
 /** Stages whose key reads wrong to a person: a contraption's wait for someone to start its deploy. */
 const STAGE_NAMES = { call: 'Start' };
 /** A stage's name as the land track says it, else the stage itself, capitalised. */
@@ -200,7 +203,7 @@ function schemeCards(projectId, alone) {
     ...s.targets.map((tv) => targetCard(projectId, tv, alone)),
     // On its own page the scheme's name is in the heading; among every scheme's cards, it leads each card's title.
     s.testCopies.length ? h('article', { class: 'rel-card' },
-      h('header', {}, h('h3', {}, alone ? 'Test copies' : `${schemeName(projectId)} test copies`)), copyList(s.testCopies)) : '',
+      h('header', {}, h('h3', {}, iconOf(projectId), alone ? 'Test copies' : `${schemeName(projectId)} test copies`)), copyList(s.testCopies)) : '',
   ];
 }
 
@@ -208,7 +211,7 @@ function targetCard(projectId, tv, alone) {
   const n = tv.next, cur = tv.current, hl = page?.hl;
   const curTook = cur && tookText(cur);
   return h('article', { class: `rel-card${hl && n?.changes.some((c) => c.ticketId === hl) ? ' hl' : ''}` },
-    h('header', {}, h('h3', {}, alone ? tv.target.name : `${schemeName(projectId)} ${tv.target.name}`)),
+    h('header', {}, h('h3', {}, iconOf(projectId), alone ? tv.target.name : `${schemeName(projectId)} ${tv.target.name}`)),
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
       cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
     deployBar(projectId, tv),
@@ -353,7 +356,7 @@ function allView(ids) {
       if (tv.current) cells[3].push(lastCard(id, tv.current));
       return h('div', { class: 'rel-grid-row', role: 'row' },
         h('div', { class: 'rel-target', role: 'rowheader', onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = pageHref(id); } } },
-          h('a', { href: pageHref(id), onclick: opening }, h('b', {}, `${schemeName(id)} ${tv.target.name}`))),
+          h('a', { href: pageHref(id), onclick: opening }, iconOf(id), h('b', {}, `${schemeName(id)} ${tv.target.name}`))),
         cells.map((list) => h('div', { class: 'cell', role: 'cell' }, list)));
     }));
   const copies = ids.flatMap((id) => {

@@ -69,7 +69,6 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .scheme-row > a.nav-item > .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .scheme-hide { flex: none; min-height: 24px; padding: 0.2rem 0.45rem; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 0.8em; font-weight: normal; line-height: 1.3; cursor: pointer; }
 .scheme-hide:hover, .scheme-hide:focus-visible { background: var(--panel); color: var(--ink); }
-@media (hover: hover) { #schemes-shelf > .scheme-row:not(:hover, :focus-within) > .scheme-hide { opacity: 0; } }
 .hidden-schemes { margin-top: 0.25rem; }
 .hidden-schemes > summary { cursor: pointer; padding: max(0.3rem, var(--tap-pad)) 0.5rem; color: var(--muted); font-size: 0.85em; }
 .hidden-schemes .nav-item { color: var(--muted); }

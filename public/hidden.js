@@ -1,5 +1,7 @@
 // Schemes a person hid for themselves (#226): out of the shelf's list, the switcher and the badges,
-// collapsed under "Hidden (N)" with Unhide, and a note inside one opened by its link. Only ever your own.
+// collapsed under "Hidden (N)" with Unhide, and a note inside one opened by its link. Only ever your own. Hiding
+// lives on the scheme's Members tab, not on the list's rows (Cara, 2026-11-12: "Lets move the hide button to just
+// a setting, its not worth the cost of making the scheme button look weird and short").
 import { api, h, me, schemeIcon, view } from './base.js';
 import { schemeCount } from './inbox.js';
 import { openNewScheme } from './sidebar.js';
@@ -55,7 +57,7 @@ function redrawHidden() {
   document.getElementById('hide-scheme')?.replaceWith(hideButton(view.project));
 }
 
-const row = (p, button) => h('div', { class: 'scheme-row' },
+const row = (p, button = null) => h('div', { class: 'scheme-row' },
   h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, title: p.name },
     schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), p.hidden ? null : schemeCount(p)),
   button);
@@ -72,10 +74,7 @@ export function renderSchemesShelf() {
   folded?.addEventListener('toggle', () => (hiddenOpen = folded.open));
   el.replaceChildren(h('h3', {}, 'Schemes', h('span', { class: 'spacer' }), releasesLink()),
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
-    ...shown.flatMap((p) => [row(p, h('button', {
-      type: 'button', class: 'scheme-hide', 'aria-label': `Hide ${p.name}`,
-      title: `Hide ${p.name} from your lists, badges and notifications. Only for you; you stay in it.`, onclick: () => setHidden(p, true),
-    }, 'Hide')), releaseRows(p.id)]),
+    ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),
     ...(folded ? [folded] : []));
 }

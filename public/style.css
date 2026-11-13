@@ -277,11 +277,19 @@ body:has(.split)::before { content: ''; position: fixed; top: 0; left: 0; right:
 body:has(.split) main { padding-top: calc(1.25rem + var(--top-inset)); }
 body:has(.split) .ticket-head { top: max(0px, calc(var(--top-inset) + var(--banner-h, 0px) - 1px)); }
 body:has(.split) .update-banner { top: var(--top-inset); }
-/* In a desktop app, the strip over the window controls drags the window, and the page starts closer under it
-   than under a notch: the strip already keeps it clear of the edge. */
+/* In a desktop app (#637, Josh: "lets try moving stuff up into that space"), the columns' header rows sit in the
+   title bar strip, centred on it: the side panels' headers, and the main panel's first row, which keeps clear of the
+   window controls on the right (Windows, Linux) or on the left (a Mac). The strip behind them
+   drags the window; everything clickable in it opts out. */
 @media (display-mode: window-controls-overlay) {
-  body:has(.split)::before { app-region: drag; }
-  body:has(.split) main { padding-top: calc(0.5rem + var(--top-inset)); }
+  body:has(.split) { --strip-pad: max(0px, (var(--top-inset) - 1.9rem) / 2); }
+  body:has(.split)::before { z-index: -1; background: none; app-region: drag; }
+  .split :is(a, button, input, select, textarea, summary, label, [tabindex]) { app-region: no-drag; }
+  body:has(.split) main { padding-top: var(--strip-pad); padding-left: max(1rem, calc(env(titlebar-area-x, 0px) + 0.5rem - var(--citadel-rail, 0px))); }
+  body:has(.split) .update-banner { top: 0; }
+  body:has(.split) .ticket-head { top: calc(var(--banner-h, 0px) + var(--strip-pad) - 0.6rem); }
+  .split .ticket-head > .row:first-child { padding-right: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) - 0.5rem)); }
+  :is(.sidebar, .shelf)[open] > summary { box-sizing: border-box; min-height: 1.9rem; }
 }
 
 /* A contraption inside Citadel's window (frames.js): over the page, right of the rail, under the switcher. */

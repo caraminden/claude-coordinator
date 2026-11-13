@@ -84,6 +84,19 @@ test('the next release: the furthest-along change leads, with its stage, usual, 
   assert.deepEqual(t.line.map((e) => e.place), ['next', '2nd']);
 });
 
+test('a change offers a preview while its minion is open with a worktree, not once dismissed (#638)', () => {
+  const w = world();
+  const a = w.minion('Open'), b = w.minion('Dismissed');
+  w.land(1, a.branch, 0, 'waiting', 20);
+  w.land(2, b.branch, 0, 'waiting', 10);
+  w.store.updateTicket(b.id, { status: 'closed' });
+  w.waits.poll();
+  const by = new Map(w.server.read()[0].next!.changes.map((c) => [c.ticketId, c.canPreview]));
+  assert.equal(by.get(a.id), true);
+  assert.equal(by.has(b.id), true, 'a dismissed minion still in the line is listed');
+  assert.equal(by.get(b.id), undefined, '...but its preview can\'t start');
+});
+
 test('the estimate: only when the current stage and every one after it have a usual time and nothing waits', () => {
   const w = world();
   w.store.setSetting('wait-usual', usuals);

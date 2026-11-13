@@ -311,6 +311,9 @@ function deployBar(projectId, tv) {
  * The changes on their way and the land line as one list (Josh, 2026-11-13: "this feels like we wrote the same UI twice?
  * can we consolidate into one list?"): those past the line first, then the line in its order, the lock's holder at its
  * head. A line entry that isn't one of the changes (a deploy run alone, another branch) gets a row of its own.
+ * Each row is numbered from the front (Josh, 2026-11-13: "the far left could just number the line"), the front one
+ * coloured, the rest shaded in turn; a place in the line then just says "waiting", and each change offers what it can
+ * be tried on (tryIt).
  */
 function changeList(projectId, tv) {
   const n = tv.next, hl = page?.hl;
@@ -321,15 +324,54 @@ function changeList(projectId, tv) {
     ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i }])),
   ].sort((a, b) => a.i - b.i); // stable: the changes past the line (-1) keep their furthest-along-first order
   if (!rows.length) return '';
-  return h('ul', { class: 'rel-changes' }, rows.map(({ c, e }) => (c
-    ? h('li', { class: `rel-change${c.ticketId === hl ? ' hl' : ''}` },
-      h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
-      h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...changeNow(n, c)))
-    : h('li', { class: 'rel-change' },
+  const waiting = () => h('b', { class: 'waits' }, 'waiting');
+  return h('ol', { class: 'rel-changes' }, rows.map(({ c, e }, i) => {
+    const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}`;
+    const pos = h('span', { class: 'rel-pos', 'aria-hidden': 'true' }, String(i + 1));
+    if (c) {
+      return h('li', { class: cls }, pos, h('div', { class: 'body' },
+        h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
+        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...(i > 0 && c.stage === 'line' ? [waiting()] : changeNow(n, c))),
+        tryIt(projectId, tv, c)));
+    }
+    return h('li', { class: cls }, pos, h('div', { class: 'body' },
       h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
       h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
-        h('b', { class: e.holds ? 'work' : 'waits' }, e.holds ? stageName(e.stage) : 'Line'), ' ',
-        h('span', { class: 'muted' }, e.holds ? 'holds the lock' : e.place))))));
+        e.holds ? [h('b', { class: 'work' }, stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
+          : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)])));
+  }));
+}
+
+/** Citadel changes whose preview was requested here and isn't in the server's test copies yet: their ticket ids. */
+const requested = new Set();
+
+/**
+ * What a change can be tried on before it's live (Josh, 2026-11-13: "a link to the file for and build/preview that might
+ * exist"): its preview or a build its minion left in its files, linked to itself. A Citadel change without one offers
+ * Request preview: it shows "Starting preview…" at once, POSTs start_preview's route behind it, and turns into the
+ * link once the server lists the preview. Other kinds have nothing per change to start yet (#638's notes).
+ */
+function tryIt(projectId, tv, c) {
+  const copies = [...tv.testCopies, ...(schemes.get(projectId)?.testCopies ?? [])].filter((x) => x.ticketId === c.ticketId);
+  const preview = copies.find((x) => x.kind === 'preview');
+  if (preview) {
+    requested.delete(c.ticketId);
+    return h('span', { class: 'try' }, h('a', { href: `../${preview.path}`, target: '_blank', rel: 'noopener' }, 'Try the preview'),
+      h('span', { class: 'muted' }, preview.running ? ' · stops after an hour unused' : ' · stopped, starts when opened'));
+  }
+  const file = copies.find((x) => x.kind === 'download');
+  if (file) return h('span', { class: 'try' }, h('a', { href: `${fileUrl(file.ticketId, file.file)}&download`, download: '' }, `Download ${file.name}`));
+  if (!c.canPreview) return '';
+  if (requested.has(c.ticketId)) return h('span', { class: 'try muted', role: 'status' }, 'Starting preview…');
+  const ask = () => optimistic({
+    key: `preview:${c.ticketId}`,
+    apply: () => { requested.add(c.ticketId); redraw(); },
+    // The server lists the preview once it's up; ask again rather than wait for the next poll's event.
+    send: () => api(`api/tickets/${c.ticketId}/preview`, { method: 'POST' }).then(() => loadReleases()),
+    undo: () => { requested.delete(c.ticketId); redraw(); },
+    label: `start #${c.number ?? c.ticketId}'s preview`,
+  });
+  return h('span', { class: 'try' }, h('button', { type: 'button', class: 'secondary', onclick: ask }, 'Request preview'));
 }
 
 /** Each kind of test copy: where it opens, what it's called and the line beside it. Previews open in a new tab (a stopped one starts again when opened); a download saves. */

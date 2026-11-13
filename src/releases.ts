@@ -60,6 +60,8 @@ export interface Change extends Progress {
   ticketId: number;
   number: number | null;
   title: string;
+  /** Citadel's own changes: its minion is open with a worktree, so a person can start its preview from the list (#638). */
+  canPreview?: boolean;
 }
 
 export interface Next extends Progress {
@@ -391,7 +393,7 @@ export class CitadelServer implements Reader {
       const pr = this.progress(t.id, ship, loneDeploy);
       const at = line.find((e) => e.ticketId === t.id);
       if (pr?.stage === 'line' && at) pr.brief = at.place;
-      if (pr) changes.push({ ticketId: t.id, number: t.number, title: t.title, ...pr });
+      if (pr) changes.push({ ticketId: t.id, number: t.number, title: t.title, ...pr, ...(t.status !== 'closed' && t.cwd ? { canPreview: true } : {}) });
     }
     changes.sort((a, b) => TRACK.indexOf(b.stage) - TRACK.indexOf(a.stage) || a.since - b.since);
     this.track(changes);

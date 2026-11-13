@@ -4,12 +4,15 @@
 // scheme's clone, so finding costs no GitHub call). A scheme's citadel-app.json may carry `targets` to rename, hide
 // or relink a found one: [{ "id": "main", "hidden": true }]. src/release-readers.ts reads each kind's releases.
 import { existsSync } from 'node:fs';
+import { open, stat } from 'node:fs/promises';
+import { basename, isAbsolute, join } from 'node:path';
 import type { ContraptionRow, Project, Store } from './db.ts';
 import { repoSlug } from './prlinks.ts';
 import { git, type Target } from './releases.ts';
 
-/** contraption: an app at /apps/<name>/; apk: an Android app people install; ci: a package a workflow builds; main: the branch itself. */
-export type Kind = 'contraption' | 'apk' | 'ci' | 'main';
+/** contraption: an app at /apps/<name>/; apk: an Android app people install; ci: a package a workflow builds; file: builds minions
+ * handed people as files (no CI makes them); main: the branch itself. */
+export type Kind = 'contraption' | 'apk' | 'ci' | 'file' | 'main';
 
 export interface Found extends Target {
   kind: Kind;
@@ -20,6 +23,8 @@ export interface Found extends Target {
   /** apk and ci: the workflow file (.github/workflows/x.yml) that builds it, and for ci the job. */
   workflow?: string;
   job?: string;
+  /** file: its builds, newest first. */
+  files?: BuildFile[];
   /** A ci job's own `name:`, which is what the Actions API calls it; its id when it has none. */
   jobName?: string;
 }
@@ -31,9 +36,74 @@ export interface Override {
   link?: string;
 }
 
+/** A build a minion shared (the artifacts table): a file people install or run, and what it is for. */
+export interface BuildFile {
+  ticketId: number;
+  /** Its minion's number. */
+  number: number;
+  /** As the minion linked it, for the file route; `abs` is where it is. */
+  path: string;
+  abs: string;
+  name: string;
+  /** When it was shared (ms). */
+  at: number;
+  platform: string;
+  /** A release people were handed, or a test copy: a debug build, or one built from a minion's branch. */
+  release: boolean;
+  /** Its version from its name ("0.4"), or the commit in it. */
+  version: string;
+}
+
+/** What a build file is, from its name and (for an archive) the names inside it; null for anything else. */
+export function buildOf(name: string, inside: string[] | null): { platform: string; release: boolean; version: string } | null {
+  const lower = name.toLowerCase();
+  const has = (re: RegExp) => !!inside?.some((n) => re.test(n));
+  // A Chrome extension zip has its manifest at the root (or in one folder); a Windows build, an .exe; an APK may come zipped.
+  const platform = /\.(apk|aab)$/.test(lower) ? 'Android'
+    : !/\.zip$/.test(lower) ? null
+    : has(/^([^/]+\/)?manifest\.json$/) ? 'Chrome'
+    : has(/\.exe$/i) ? 'Windows'
+    : has(/\.apk$/i) ? 'Android'
+    : has(/\.app\//) ? 'macOS'
+    : null;
+  if (!platform) return null;
+  const version = /[-_ ]v?(\d+\.\d+(?:\.\d+)*)(?=[-_. ])/.exec(name)?.[1] ?? /-([0-9a-f]{7,40})(?=[-.])/.exec(name)?.[1] ?? name.replace(/\.[a-z0-9]+$/i, '');
+  // Delve's windows-build.sh names a branch's build Delve-ticket-<n>-…-<sha>-windows.zip; a build's or main's isn't a minion's branch.
+  return { platform, release: !/debug|(^|[-_])ticket-\d+/i.test(lower), version };
+}
+
+/** The names of the files in a zip, from its central directory; null when it isn't one we can read. */
+// shortcut: no Zip64 (an archive over 4 GB or 65,535 files reads as null), until a build that big ships.
+export async function zipNames(file: string): Promise<string[] | null> {
+  const fh = await open(file).catch(() => null);
+  if (!fh) return null;
+  try {
+    const { size } = await fh.stat();
+    const tail = Buffer.alloc(Math.min(size, 65_557));
+    await fh.read(tail, 0, tail.length, size - tail.length);
+    const end = tail.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    if (end < 0 || end + 22 > tail.length) return null;
+    const count = tail.readUInt16LE(end + 10), dirSize = tail.readUInt32LE(end + 12), dirAt = tail.readUInt32LE(end + 16);
+    if (dirSize > 8_000_000 || dirAt + dirSize > size) return null;
+    const dir = Buffer.alloc(dirSize);
+    await fh.read(dir, 0, dirSize, dirAt);
+    const names: string[] = [];
+    for (let i = 0, p = 0; i < count && p + 46 <= dir.length && dir.readUInt32LE(p) === 0x02014b50; i++) {
+      const n = dir.readUInt16LE(p + 28);
+      names.push(dir.toString('utf8', p + 46, p + 46 + n));
+      p += 46 + n + dir.readUInt16LE(p + 30) + dir.readUInt16LE(p + 32);
+    }
+    return names;
+  } catch {
+    return null;
+  } finally {
+    await fh.close();
+  }
+}
+
 /** What detection reads of one scheme. */
 export interface SchemeFacts {
-  project: Pick<Project, 'id' | 'repo_url'>;
+  project: Pick<Project, 'id' | 'name' | 'repo_url'>;
   /** The scheme whose code this server runs: its server is its target (CitadelServer), so it gets no Main. */
   own: boolean;
   branch: string;
@@ -44,6 +114,8 @@ export interface SchemeFacts {
   overrides: Override[];
   /** Scripts that run a preview site (poe2's deploy/preview.sh). */
   scripts?: { path: string; text: string }[];
+  /** Builds its minions shared, newest first. */
+  files?: BuildFile[];
 }
 
 /** Where a scheme's test copies come from, besides Citadel's previews (src/releases.ts previewCopies). */
@@ -174,6 +246,18 @@ export function detect(f: SchemeFacts): Found[] {
     }
   }
   for (const feed of feeds) out.push({ ...base, id: `apk:${feed}`, kind: 'apk', name: 'Android', link: `/apps/${feed}/android/`, contraption: feed });
+  // A platform no workflow or feed ships, whose builds minions hand people as files (FuckSpamTexts' APK and Chrome
+  // extension, Delve's Windows zip): its releases are those files. Only files named for the scheme or its repo, so
+  // another scheme's build a minion shared here (a Delve zip in Citadel) isn't taken for this one's.
+  const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const ours = [f.project.name, slug?.split('/')[1]].map((s) => key(s ?? '')).filter(Boolean);
+  const released = (f.files ?? []).filter((b) => b.release && ours.some((k) => key(b.name).startsWith(k)));
+  for (const platform of [...new Set(released.map((b) => b.platform))]) {
+    if (out.some((t) => t.name === platform || t.name.startsWith(`${platform} (`) || (platform === 'Android' && t.kind === 'apk'))) continue;
+    // One file per version: the APK itself over the same APK zipped.
+    const files = released.filter((b) => b.platform === platform).filter((b, _i, all) => !all.some((o) => o !== b && o.version === b.version && (o.name.endsWith('.apk') ? !b.name.endsWith('.apk') || o.at > b.at : !b.name.endsWith('.apk') && o.at > b.at)));
+    out.push({ ...base, id: `file:${platform.toLowerCase()}`, kind: 'file', name: platform, link: null, files });
+  }
   // Two of one platform keep apart by their job.
   for (const t of out) if (t.kind === 'ci' && out.some((o) => o !== t && o.name === t.name)) t.name = `${t.name} (${t.job})`;
   // Main only where nothing else ships what lands there (Josh's "everything": every scheme's work reaches people somehow).
@@ -211,6 +295,9 @@ export class TargetFinder {
   private d: FinderDeps;
   private found = new Map<number, Found[]>();
   private sources = new Map<number, CopySource[]>();
+  /** Each shared file's build, by its path and mtime, so a scan doesn't open a zip twice. */
+  private builds = new Map<string, ReturnType<typeof buildOf>>();
+  private seenBuilds = new Set<string>();
   constructor(d: FinderDeps) {
     this.d = d;
   }
@@ -229,6 +316,7 @@ export class TargetFinder {
     const { store } = this.d;
     const apps = store.listContraptions();
     const seen = new Set<number>();
+    this.seenBuilds.clear();
     for (const p of store.listProjects()) {
       seen.add(p.id);
       const facts = await this.facts(p, apps.filter((c) => c.home_scheme === p.id));
@@ -244,11 +332,35 @@ export class TargetFinder {
     }
     for (const id of this.found.keys()) if (!seen.has(id)) this.found.delete(id);
     for (const id of this.sources.keys()) if (!seen.has(id)) this.sources.delete(id);
+    for (const key of this.builds.keys()) if (!this.seenBuilds.has(key)) this.builds.delete(key);
+  }
+
+  /** The builds a scheme's minions shared that are still there, newest first. */
+  private async files(p: Project): Promise<BuildFile[]> {
+    const out: BuildFile[] = [];
+    for (const a of this.d.store.listArtifacts(p.id)) {
+      if (a.missing || !/\.(apk|aab|zip)$/i.test(a.path)) continue;
+      const t = this.d.store.getTicket(a.ticket_id);
+      const abs = isAbsolute(a.path) ? a.path : t?.cwd ? join(t.cwd, a.path) : null;
+      const st = abs ? await stat(abs).catch(() => null) : null;
+      if (!t || !abs || !st?.isFile()) continue;
+      const key = `${abs}:${st.mtimeMs}`;
+      this.seenBuilds.add(key);
+      if (!this.builds.has(key)) this.builds.set(key, buildOf(basename(abs), /\.zip$/i.test(abs) ? await zipNames(abs) : null));
+      const b = this.builds.get(key);
+      if (b) out.push({ ticketId: t.id, number: t.number ?? t.id, path: a.path, abs, name: basename(abs), at: a.created_at, ...b });
+    }
+    return out.sort((x, y) => y.at - x.at);
+  }
+
+  /** Every shared build that is a release, by where it is: the test-copy list leaves these out. */
+  releaseFiles(): Set<string> {
+    return new Set(this.list('file').flatMap((t) => (t.files ?? []).map((b) => b.abs)));
   }
 
   private async facts(p: Project, apps: ContraptionRow[]): Promise<SchemeFacts | null> {
-    const base = { project: p, own: this.d.own()?.id === p.id, contraptions: apps, apkFeeds: apps.filter((c) => existsSync(this.d.apkFeed(c.name))).map((c) => c.name) };
-    if (!p.repo_dir) return apps.length ? { ...base, branch: 'main', workflows: [], overrides: [] } : null;
+    const base = { project: p, own: this.d.own()?.id === p.id, contraptions: apps, apkFeeds: apps.filter((c) => existsSync(this.d.apkFeed(c.name))).map((c) => c.name), files: await this.files(p) };
+    if (!p.repo_dir) return apps.length || base.files.length ? { ...base, branch: 'main', workflows: [], overrides: [] } : null;
     const dir = p.repo_dir;
     const branch = await defaultBranch(dir);
     if (!branch) return null;

@@ -61,7 +61,7 @@ import { Waits } from './src/waits.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { dispatch, OldApk, publish } from './src/apk-release.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, MainReader, TestCopyReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, MainReader, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
@@ -502,7 +502,7 @@ const testCopyReader = new TestCopyReader({
   }),
 });
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
+  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
   scan: async () => {
     await targetFinder.scan();
     await testCopyReader.scan();

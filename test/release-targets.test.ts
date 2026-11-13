@@ -8,8 +8,8 @@ import type { DeployView } from '../src/app-services.ts';
 import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, gradleVersion, lengths, MainReader, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
-import { copySources, detect, jobName, shipsOn, TargetFinder, type Found, type SchemeFacts } from '../src/release-targets.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, lengths, MainReader, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { buildOf, copySources, detect, jobName, shipsOn, TargetFinder, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
 const root = mkdtempSync(join(tmpdir(), 'release-targets-'));
@@ -64,7 +64,7 @@ jobs:
 `;
 
 const facts = (over: Partial<SchemeFacts> = {}): SchemeFacts => ({
-  project: { id: 5, repo_url: 'https://github.com/o/mandate' }, own: false, branch: 'main', contraptions: [], apkFeeds: [], workflows: [], overrides: [], ...over,
+  project: { id: 5, name: 'Mandate', repo_url: 'https://github.com/o/mandate' }, own: false, branch: 'main', contraptions: [], apkFeeds: [], workflows: [], overrides: [], ...over,
 });
 const ids = (f: SchemeFacts) => detect(f).map((t) => `${t.kind} ${t.id} ${t.name}`);
 
@@ -500,7 +500,7 @@ test('the test-copy reader: builds open minions left in their files, a preview s
   const { actions } = fakeActions([run(9, 'in_progress', null, now - 60_000), run(8, 'completed', 'success', now - 600_000, now - 300_000)], {});
   const reader = new TestCopyReader({
     store, actions, now: () => now, sharedDir: (t) => dir(t.id), listening: async (port) => port === 8116,
-    finder: { list: () => [], copySources: () => [{ kind: 'site', projectId: p.id, name: 'Preview site', port: 8116 }, { kind: 'site', projectId: p.id, name: 'Preview site', port: 9000 }, { kind: 'debug-apk', projectId: p.id, target: 'apk:android-release', run: debugRun }] },
+    finder: { list: () => [], releaseFiles: () => new Set<string>(), copySources: () => [{ kind: 'site', projectId: p.id, name: 'Preview site', port: 8116 }, { kind: 'site', projectId: p.id, name: 'Preview site', port: 9000 }, { kind: 'debug-apk', projectId: p.id, target: 'apk:android-release', run: debugRun }] },
   });
   await reader.scan();
   const copies = reader.list().get(p.id)!;
@@ -532,4 +532,70 @@ test('the APK reader keeps each scheme\'s target apart, and holds off a second r
   assert.equal(reader.pending(ta), null, 'just started: not listed yet, but not started again');
   clock += 3 * 60_000;
   assert.equal(reader.pending(ta)?.step, 'dispatch', 'a dispatch GitHub never listed can be tried again');
+});
+
+// A zip holding these names, made by Python's zipfile so the reader meets a real central directory.
+const zipOf = (file: string, names: string[]) => execFileSync('python3', ['-I', '-c', 'import sys, zipfile\nwith zipfile.ZipFile(sys.argv[1], "w") as z:\n  [z.writestr(n, "x") for n in sys.argv[2:]]', file, ...names]);
+
+test('buildOf: an APK, a Chrome extension, a Windows build and a zipped APK by what is inside; a debug or branch build is no release', () => {
+  assert.deepEqual(buildOf('FuckSpamTexts-0.4.apk', null), { platform: 'Android', release: true, version: '0.4' });
+  assert.deepEqual(buildOf('FuckSpamTexts-debug.apk', null), { platform: 'Android', release: false, version: 'FuckSpamTexts-debug' });
+  assert.deepEqual(buildOf('fuckspamtexts-messages-web-0.2.0.zip', ['manifest.json', 'popup.js']), { platform: 'Chrome', release: true, version: '0.2.0' });
+  assert.deepEqual(buildOf('ext.zip', ['ext/manifest.json']), { platform: 'Chrome', release: true, version: 'ext' }, 'a manifest one folder in');
+  assert.deepEqual(buildOf('Delve-b7-final-4336e0a8-windows.zip', ['Delve/Delve.exe', 'Delve/Delve.pck']), { platform: 'Windows', release: true, version: '4336e0a8' });
+  assert.equal(buildOf('Delve-ticket-70-exe-e889baa9-windows.zip', ['Delve.exe'])?.release, false, "a minion's branch build is a test copy");
+  assert.equal(buildOf('FuckSpamTexts-0.4.zip', ['FuckSpamTexts-0.4.apk'])?.platform, 'Android');
+  assert.equal(buildOf('art-pack.zip', ['a.png', 'deep/x/manifest.json']), null, 'a zip of anything else, or a manifest buried deeper, is no build');
+  assert.equal(buildOf('notes.md', null), null);
+});
+
+test('zipNames reads a real zip\'s file list; a file that is no zip reads as null', async () => {
+  const z = join(root, `names-${++n}.zip`);
+  zipOf(z, ['manifest.json', 'icons/16.png']);
+  assert.deepEqual(await zipNames(z), ['manifest.json', 'icons/16.png']);
+  writeFileSync(join(root, 'not.zip'), 'not a zip at all');
+  assert.equal(await zipNames(join(root, 'not.zip')), null);
+  assert.equal(await zipNames(join(root, 'missing.zip')), null);
+});
+
+const build = (name: string, platform: string, version: string, at: number, release = true): BuildFile => ({ ticketId: 1, number: 1, path: `/s/${name}`, abs: `/s/${name}`, name, at, platform, release, version });
+
+test('shared release files are a target per platform; Main goes, a debug build, another scheme\'s build and a platform CI ships add none', () => {
+  const files = [
+    build('FuckSpamTexts-0.4.apk', 'Android', '0.4', 30), build('FuckSpamTexts-0.4.zip', 'Android', '0.4', 31),
+    build('FuckSpamTexts-0.3.apk', 'Android', '0.3', 20), build('FuckSpamTexts-debug.apk', 'Android', 'x', 40, false),
+    build('fuckspamtexts-messages-web-0.2.0.zip', 'Chrome', '0.2.0', 10), build('Delve-main-a0c312c-windows.zip', 'Windows', 'a0c312c', 50),
+  ];
+  const found = detect(facts({ project: { id: 8, name: 'FuckSpamTexts', repo_url: 'https://github.com/o/fuckspamtexts.git' }, files }));
+  assert.deepEqual(found.map((t) => `${t.kind} ${t.id} ${t.name}`), ['file file:android Android', 'file file:chrome Chrome']);
+  assert.deepEqual(found[0].files!.map((b) => b.name), ['FuckSpamTexts-0.4.apk', 'FuckSpamTexts-0.3.apk'], 'one file per version, the APK over the same APK zipped');
+  assert.deepEqual(ids(facts({ project: { id: 1, name: 'Delve', repo_url: 'https://github.com/o/gamedevtest.git' }, files: [build('Delve-main-a0c312c-windows.zip', 'Windows', 'a0c312c', 50)] })), ['file file:windows Windows'], 'named for the scheme, not its repo');
+  assert.deepEqual(ids(facts({ files: [build('mandate-3.apk', 'Android', 'mandate-3', 1)], apkFeeds: ['mandate'] })), ['apk apk:mandate Android'], 'an app that serves its APK is the Android target');
+  assert.deepEqual(ids(facts({ project: { id: 3, name: 'Peek Auras', repo_url: 'https://github.com/o/peek-auras' }, files: [build('peek-auras-6cda6fa.zip', 'Windows', '6cda6fa', 1)], workflows: [{ path: '.github/workflows/windows.yml', text: WINDOWS }] })), ['ci ci:windows:release Windows']);
+});
+
+test('the file reader: each shared release file is a release, numbered from the first, linked to download; the test copies leave it out', async () => {
+  const store = new Store(join(root, `f-${++n}.db`));
+  const p = store.createProject('FuckSpamTexts', null);
+  const t = store.createTicket({ project_id: p.id, title: 'Release 0.4', permission_mode: 'default', created_by: 'Cara' });
+  const dir = join(root, `fst-${n}`);
+  mkdirSync(dir, { recursive: true });
+  for (const name of ['FuckSpamTexts-0.3.apk', 'FuckSpamTexts-0.4.apk', 'FuckSpamTexts-debug.apk']) writeFileSync(join(dir, name), 'x');
+  zipOf(join(dir, 'fst-web-0.2.0.zip'), ['manifest.json']);
+  let at = 1000;
+  for (const name of ['FuckSpamTexts-0.3.apk', 'FuckSpamTexts-0.4.apk', 'FuckSpamTexts-debug.apk', 'fst-web-0.2.0.zip']) {
+    store.syncArtifacts(t, [...(store.listArtifacts(p.id).map((a) => ({ path: a.path, size: a.size, mtime: a.mtime }))), { path: join(dir, name), size: 1, mtime: 1 }]);
+    (store as unknown as { db: { prepare(s: string): { run(...a: unknown[]): void } } }).db.prepare('UPDATE artifacts SET created_at = ? WHERE path = ?').run(at += 1000, join(dir, name));
+  }
+  const finder = new TargetFinder({ store, own: () => null, apkFeed: () => join(root, 'none.json') });
+  await finder.scan();
+  assert.deepEqual(finder.list().map((x) => x.id), ['file:android'], "a Chrome zip not named for the scheme isn't its build");
+  const [view] = new FileReader({ finder }).read();
+  assert.deepEqual([view.current?.number, view.current?.version, view.current?.live], [2, '0.4', 3000]);
+  assert.equal(view.current?.link, `/api/tickets/${t.id}/file?path=${encodeURIComponent(join(dir, 'FuckSpamTexts-0.4.apk'))}&download`);
+  assert.deepEqual(view.recent.map((r) => [r.number, r.version]), [[1, '0.3']]);
+  assert.deepEqual([...finder.releaseFiles()].sort(), [join(dir, 'FuckSpamTexts-0.3.apk'), join(dir, 'FuckSpamTexts-0.4.apk')]);
+  const copies = new TestCopyReader({ store, actions: fakeActions([], {}).actions, now: () => 0, sharedDir: () => dir, listening: async () => false, finder });
+  await copies.scan();
+  assert.deepEqual((copies.list().get(p.id) ?? []).map((c) => c.name), ['FuckSpamTexts-debug.apk'], 'a release is no test copy; the debug build still is');
 });

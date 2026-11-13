@@ -7,7 +7,7 @@ import type { Job, Run } from './ci-health.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
 import { git, landedIn, releaseOf, type Change, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
-import type { Found, TargetFinder } from './release-targets.ts';
+import type { BuildFile, Found, TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { median } from './waits.ts';
 
@@ -650,7 +650,7 @@ const DOWNLOAD = /\.apk$|(windows|win64|macos|linux|android|build|-[0-9a-f]{7,40
 const DOWNLOADS = 8;
 
 export interface CopyDeps extends ActionsDeps {
-  finder: Pick<TargetFinder, 'list' | 'copySources'>;
+  finder: Pick<TargetFinder, 'list' | 'copySources' | 'releaseFiles'>;
   /** A minion's files folder. */
   sharedDir: (t: Ticket) => string | null;
   /** Whether something listens on this host's port. */
@@ -679,6 +679,8 @@ export class TestCopyReader {
     const { store } = this.d;
     const out = new Map<number, TestCopy[]>();
     const add = (id: number, c: TestCopy) => (out.get(id) ?? out.set(id, []).get(id)!).push(c);
+    // A build that is a file target's release shows there, not again as a test copy.
+    const released = this.d.finder.releaseFiles();
     for (const p of store.listProjects()) {
       const files: TestCopy[] = [];
       for (const t of store.listTickets(p.id)) {
@@ -689,7 +691,7 @@ export class TestCopyReader {
         for (const name of names.filter((n) => DOWNLOAD.test(n))) {
           const file = join(dir, name);
           const st = await stat(file).catch(() => null);
-          if (!st?.isFile()) continue;
+          if (!st?.isFile() || released.has(file)) continue;
           const sha = /-([0-9a-f]{7,40})(?=[-.])/.exec(name)?.[1] ?? null;
           files.push({ kind: 'download', target: null, name, file, ticketId: t.id, number: t.number ?? t.id, running: false, commit: sha, at: st.mtimeMs });
         }
@@ -706,5 +708,28 @@ export class TestCopyReader {
       if (r) add(s.projectId, { kind: 'debug-apk', target: s.target, name: `build ${r.run.run_number ?? r.run.id}`, link: r.run.html_url ?? s.run.link ?? undefined, running: false, commit: r.run.head_sha, at: span(r).end ?? undefined });
     }
     this.copies = out;
+  }
+}
+
+/** Where a shared file downloads from: the minion file route, which serves a closed minion's files too. */
+export const fileLink = (b: BuildFile) => `/api/tickets/${b.ticketId}/file?path=${encodeURIComponent(b.path)}&download`;
+
+/**
+ * Builds minions handed people as files, for a platform nothing else ships (FuckSpamTexts' APK and Chrome extension,
+ * Delve's Windows zip): each file is a release, numbered from the oldest, linked to its download. With no pipeline to
+ * watch, there is no next release.
+ */
+export class FileReader implements Reader {
+  private d: { finder: Pick<TargetFinder, 'list'> };
+  constructor(d: { finder: Pick<TargetFinder, 'list'> }) {
+    this.d = d;
+  }
+
+  read(): Omit<TargetView, 'testCopies'>[] {
+    return this.d.finder.list('file').map((t) => {
+      const files = t.files ?? [];
+      const releases: Release[] = files.map((b, i) => ({ version: b.version, number: files.length - i, link: fileLink(b), changes: [], started: null, live: b.at, outcome: 'live', stages: {} }));
+      return { target: targetOf(t), current: releases[0] ?? null, next: null, line: [], recent: releases.slice(1, PREVIOUS + 1) };
+    });
   }
 }

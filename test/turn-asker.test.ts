@@ -174,7 +174,7 @@ test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one
     for (const [method, path, body] of admin) {
       const r = await as(method, path, body);
       assert.equal(r.status, 403, `${method} ${path} for ${name}`);
-      assert.match(r.body.error, new RegExp(`^Only a turn a Citadel admin asked for may do this, and this one is ${name}'s ask\\. Ask a Citadel admin to send the request in this chat\\.$`));
+      assert.match(r.body.error, new RegExp(`^Only a turn a Citadel admin asked for may do this, and this one is ${name}'s ask\\. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat\\.$`));
     }
     // Rachel isn't in Delve: her ask reaches Citadel's schemes no further than she could.
     if (who === Rachel) assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', text: 'hi' })).status, 404);

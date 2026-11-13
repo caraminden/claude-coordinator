@@ -5,7 +5,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only people and the Citadel scheme's Taskmaster use this. The Citadel-wide instructions are already in your prompt; to propose a change, message that Taskmaster with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -15,7 +15,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only people and the Citadel scheme's Taskmaster use this. The Citadel-wide instructions are already in your prompt; to propose a change, message that Taskmaster with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -145,7 +145,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -155,7 +155,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -225,7 +225,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -235,7 +235,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption",
   "m2": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption"
  },
@@ -245,7 +245,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption",
   "m2": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption"
  },
@@ -255,7 +255,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -265,7 +265,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -275,7 +275,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -285,7 +285,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -295,7 +295,7 @@
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
   "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
-  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -448,6 +448,16 @@
   "tmB": "200",
   "m1": "200",
   "m2": "200"
+ },
+ "POST /api/host-check": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a turn can run host checks",
+  "member": "403 Only a turn can run host checks",
+  "outsider": "403 Only a turn can run host checks",
+  "tmA": "400 what must be db, journal, status or units",
+  "tmB": "400 what must be db, journal, status or units",
+  "m1": "400 what must be db, journal, status or units",
+  "m2": "400 what must be db, journal, status or units"
  },
  "GET /api/invite/not-a-token": {
   "anon": "404 This link has expired or was already used. Ask for a new one.",
@@ -906,7 +916,7 @@
  "PATCH /api/projects/:p": {
   "anon": "401 Not logged in",
   "person": "400 Nothing to change",
-  "member": "403 Only the scheme's owner can do that",
+  "member": "400 Nothing to change",
   "outsider": "404 No such scheme",
   "tmA": "400 Nothing to change",
   "tmB": "403 Outside this Taskmaster's scheme",
@@ -1066,7 +1076,7 @@
  "POST /api/projects/:p/members": {
   "anon": "401 Not logged in",
   "person": "404 No such person",
-  "member": "403 Only the scheme's owner can do that",
+  "member": "404 No such person",
   "outsider": "404 No such scheme",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
@@ -1076,7 +1086,7 @@
  "DELETE /api/projects/:p/members/999": {
   "anon": "401 Not logged in",
   "person": "200",
-  "member": "403 Only the scheme's owner can do that",
+  "member": "200",
   "outsider": "404 No such scheme",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",

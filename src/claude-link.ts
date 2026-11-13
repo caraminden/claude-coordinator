@@ -15,6 +15,8 @@ import type { Store } from './db.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
 
 const IMAGE_REPO = 'localhost/citadel-claude';
+/** The checkout this server runs from (prompts.ts CHECKOUT). */
+const LIVE_CHECKOUT = join(import.meta.dirname, '..');
 const CONTAINERFILE_DIR = join(import.meta.dirname, '..', 'deploy', 'claude-container');
 /**
  * Host tool folders a turn may need, mounted read-only where they exist: Delve's dotnet and Godot, mise and its
@@ -199,6 +201,9 @@ export class ClaudeLink {
       { src: dirname(resolveClaude(this.claudeBin)), dst: dirname(resolveClaude(this.claudeBin)), ro: true },
     ];
     for (const d of TOOL_DIRS) if (existsSync(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
+    // The code this server runs, read-only, so a member's turn checks the live checkout as a host turn does (#621). A dev
+    // copy runs from a worktree, already mounted writable under projects/.
+    if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push({ src: LIVE_CHECKOUT, dst: LIVE_CHECKOUT, ro: true });
     // Each scheme's Claude Code memory, shared with the host's turns: the server's copy, at the path claude looks in.
     for (const p of this.store.listProjects()) {
       if (!p.repo_dir) continue;

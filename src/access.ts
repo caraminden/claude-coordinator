@@ -74,7 +74,7 @@ export function claudeRefusal(who: User, linked: ClaudeLinked, asOwner = false):
 
 /** Whether an admin owns this scheme: its Taskmaster may then register plugin folders for an admin's ask. */
 export function adminOwned(store: Store, project: Project): boolean {
-  return store.isAdmin(store.getUser(project.owner_id ?? -1));
+  return !!store.getUser(project.owner_id ?? -1)?.admin;
 }
 
 /** Who may see and change a machine on the Machines page: its owner, and admins (all of them, ownerless ones too). */

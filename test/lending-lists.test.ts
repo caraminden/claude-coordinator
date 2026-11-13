@@ -18,8 +18,9 @@ function before33(name: string) {
   const store = new Store(path);
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
-  const on = store.createProject('Admin on', null, cara.id);
+  // 'Admin on' is id 2, GLOBAL_OWNER: Josh is in neither it nor Citadel, whose members count as admins (#621).
   const off = store.createProject('Admin off', null, cara.id);
+  const on = store.createProject('Admin on', null, cara.id);
   const joshOn = store.createProject('Josh on', null, josh.id);
   const joshOff = store.createProject('Josh off', null, josh.id);
   const both = store.createProject('Member on', null, cara.id);
@@ -68,7 +69,7 @@ test('opening an older database gives every machine a list that lends it exactly
     const ci = !!was.last_check?.includes('"runners":true');
     // A CI runner host is left alone: its token rule still reads scoped and its rows.
     assert.equal(m.scoped, ci ? was.scoped : 1, `${m.name} reads the same to an older release`);
-    if (ci) assert.deepEqual(store.machineProjects(m.id), was.scoped ? old.rows.filter((r) => r.machine_id === m.id).map((r) => r.project_id) : [], `${m.name}'s rows: kept if they were read`);
+    if (ci) assert.deepEqual(store.machineProjects(m.id), was.scoped ? old.rows.filter((r) => r.machine_id === m.id).map((r) => r.project_id).sort((a, b) => a - b) : [], `${m.name}'s rows: kept if they were read`);
     for (const p of old.schemes) {
       const project = store.getProject(p.id)!;
       for (const askers of [[], [cara.id], [josh.id], [cara.id, josh.id]]) {

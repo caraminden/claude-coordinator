@@ -14,7 +14,8 @@ export interface HostCheckOptions {
 
 /** What one check prints, at most: the tail is kept. */
 export const MAX_OUTPUT = 60_000;
-const UNIT = /^[\w@.:-]{1,120}$/;
+/** A unit name or a glob of them (`citadel-*`); no shell runs, and it always comes after `--` or `-u`. */
+const UNIT = /^[\w@.:*-]{1,120}$/;
 const SINCE = /^[\w :+.-]{1,40}$/;
 
 const run = (bin: string, args: string[], input: string | null = null, timeout = 30_000) => new Promise<string>((ok) => {

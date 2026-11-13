@@ -159,7 +159,7 @@ test('a turn someone who isn\'t an admin asked for is refused, and changes nothi
     ] as const) {
       const r = await tool(CitadelTM, name, args);
       assert.equal(r.isError, true, name);
-      assert.match(r.text, /Only a turn a Citadel admin asked for may do this, and this one is Olive's ask\. Ask a Citadel admin to send the request in this chat\./, name);
+      assert.match(r.text, /Only a turn a Citadel admin asked for may do this, and this one is Olive's ask\. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat\./, name);
     }
     assert.equal(existsSync(keysDir('sneaky')), false);
     assert.equal(store.getContraption('sneaky'), undefined);

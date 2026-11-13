@@ -997,7 +997,7 @@ export class Store {
           ? schemes.filter((p) => p.machine_tools && owner && this.canSee({ uid: owner.id, admin: !!owner.admin }, p.id)).map((p) => p.id)
           : m.scoped
             ? rows.filter((id) => schemes.find((p) => p.id === id)?.machine_tools)
-            : schemes.filter((p) => p.machine_tools && this.isAdmin(this.getUser(p.owner_id ?? -1))).map((p) => p.id);
+            : schemes.filter((p) => p.machine_tools && this.getUser(p.owner_id ?? -1)?.admin).map((p) => p.id);
         this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(m.id);
         const add = this.db.prepare('INSERT INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
         for (const id of ids) add.run(m.id, id);

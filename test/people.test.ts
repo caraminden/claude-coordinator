@@ -23,7 +23,8 @@ function world() {
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const olive = store.createUser({ name: 'Olive', login: 'olive' });
-  const citadel = store.createProject('Citadel', null, cara.id);
+  store.createProject('Delve', null, cara.id);
+  const citadel = store.createProject('Citadel', null, cara.id); // id 2, GLOBAL_OWNER, as on the server
   const games = store.createProject('Games', null, josh.id);
   return { store, auth, cara, josh, olive, citadel, games };
 }
@@ -201,6 +202,9 @@ before(async () => {
     // The link is used up.
     assert.equal((await fetch(`${srv.base}/api/invite/${made.data.token}`)).status, 404);
   }
+  // The Citadel scheme is id 2 (GLOBAL_OWNER), as on the server: its members count as admins (#621).
+  await as('Cara', '/api/projects', { name: 'Delve' });
+  assert.equal((await as('Cara', '/api/projects', { name: 'Citadel' })).data.id, 2);
 });
 after(() => srv?.stop());
 
@@ -224,16 +228,37 @@ test('people make their own schemes, add others to them, and see nothing else', 
   assert.equal((await as('Cara', `/api/projects/${josh.data.id}`, { optional_plugin_dirs: 'tools/plugins/devtools' }, 'PATCH')).status, 200);
   assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { optional_plugin_dirs: 'tools/plugins/devtools' }, 'PATCH')).status, 200, 'unchanged is not a change');
 
-  // Josh adds Olive: she sees it, but only its owner changes its settings or members.
+  // Josh adds Olive: she sees it, and as a member changes its settings and members like its owner (#621).
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}/members`, { person: people.Josh.id })).status, 404);
   assert.deepEqual((await as('Josh', `/api/projects/${josh.data.id}/members`, { person: people.Olive.id })).data.map((m: any) => m.name), ['Josh', 'Olive']);
   assert.deepEqual((await as('Olive', '/api/projects')).data.map((p: any) => p.name), ['Joshs']);
-  assert.equal((await as('Olive', `/api/projects/${josh.data.id}`, { instructions: 'x' }, 'PATCH')).status, 403);
+  assert.equal((await as('Olive', `/api/projects/${josh.data.id}`, { instructions: 'x' }, 'PATCH')).status, 200);
+  assert.equal((await as('Olive', `/api/projects/${josh.data.id}`, { plugin_dirs: '/home' }, 'PATCH')).status, 403, 'plugin folders stay an admin\'s');
+  assert.equal((await as('Olive', `/api/projects/${josh.data.id}/members/${people.Olive.id}`, undefined, 'DELETE')).status, 200);
+  assert.equal((await as('Josh', `/api/projects/${josh.data.id}/members`, { person: people.Olive.id })).status, 200);
   assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { instructions: 'Be kind' }, 'PATCH')).status, 200);
   // Admin-only: People, the Citadel-wide instructions. Machines show each person their own (#306).
   assert.equal((await as('Josh', '/api/people', { name: 'Eve' })).status, 403);
   assert.deepEqual((await as('Josh', '/api/machines')).data, []);
   assert.equal((await as('Josh', '/api/app/instructions')).status, 403);
+});
+
+test('a member of the Citadel scheme can do anything an admin can, without the flag (#621)', async () => {
+  const me = async (who: string) => (await as(who, '/api/me')).data;
+  assert.equal((await me('Josh')).admin, false);
+  assert.equal((await as('Cara', '/api/projects/2/members', { person: people.Josh.id })).status, 200);
+  try {
+    assert.equal((await me('Josh')).admin, true, '/api/me says admin, so the settings tabs show');
+    assert.equal((await as('Josh', '/api/app/instructions')).status, 200);
+    assert.equal((await as('Josh', '/api/people')).data.find((u: any) => u.name === 'Olive')?.login, 'olive');
+    const caras = (await as('Cara', '/api/projects')).data.find((x: any) => x.name === 'Caras');
+    assert.equal((await as('Josh', `/api/projects/${caras.id}`)).status, 200, 'and sees every scheme');
+    // Making a repo goes on the person's own GitHub still: the box's login is Cara's (the flag, not membership).
+    assert.equal((await as('Josh', '/api/projects', { name: 'Repo', source: 'new' })).status, 403);
+  } finally {
+    await as('Cara', `/api/projects/2/members/${people.Josh.id}`, undefined, 'DELETE');
+  }
+  assert.equal((await me('Josh')).admin, false);
 });
 
 test('schema 17 leaves the server login to its owner, the first admin, once (#213)', () => {

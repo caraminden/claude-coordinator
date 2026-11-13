@@ -70,7 +70,7 @@ test('an agent token lives for its turn: the next turn or closing the minion kil
 test('a session over 7 days old is renewed on use; a newer one, a disabled person\'s, an agent\'s or a preview\'s is not', (t) => {
   const DAY = 86400_000;
   const people = new Map<number, any>([[1, { id: 1, name: 'Cara', disabled_at: null }], [2, { id: 2, name: 'Olive', disabled_at: Date.now() }]]);
-  const users = { getUser: (id: number) => people.get(id), findUser: () => undefined } as any;
+  const users = { getUser: (id: number) => people.get(id), findUser: () => undefined, isAdmin: (u: any) => !!u?.admin && !u.disabled_at } as any;
   const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, users);
   const now = Date.now();
   /** A request carrying a cookie issued `days` ago. */

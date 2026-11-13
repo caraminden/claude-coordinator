@@ -296,6 +296,9 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
     assert.ok(m.volume || m.src === m.dst, `${m.src} sits at its own path`);
   }
   assert.ok(!spec.mounts.some((m) => !m.volume && m.src === join(home, '.claude')), "the server's own Claude folder stays out");
+  // The code the server runs is readable, never writable (#621).
+  const checkout = join(import.meta.dirname, '..');
+  assert.deepEqual(spec.mounts.filter((m) => m.src === checkout), [{ src: checkout, dst: checkout, ro: true }]);
   assert.equal(link.place(josh.id), null);
   assert.equal(link.linked(josh.id), null);
   // A fresh server has no run/turns yet; podman refuses a bind mount whose folder is missing.

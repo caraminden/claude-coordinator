@@ -243,6 +243,12 @@ const READ_ONLY_GIT = [
   ...['log', 'show', 'status', 'diff', 'blame', 'ls-files', 'ls-tree', 'rev-parse', 'rev-list', 'merge-base', 'cat-file', 'describe', 'for-each-ref', 'shortlog', 'worktree list'].map((c) => `${c}:*`),
   ...['branch', 'branch -a', 'branch -r', 'branch -v', 'branch -vv', 'branch -av', 'branch --list', 'branch -a -vv', 'branch --show-current', 'remote', 'remote -v'],
 ];
+/**
+ * Fetches a Taskmaster may run in its scheme's repo and worktrees (#621), exact: they only move remote-tracking refs.
+ * Any other form could name a refspec that moves a local branch (`origin main:main`) or a command (--upload-pack).
+ * Not in the live checkout, which only deploy.sh changes.
+ */
+const GIT_FETCH = ['fetch', 'fetch -q', 'fetch origin', 'fetch -q origin', 'fetch --all', 'fetch --prune', 'fetch origin --prune'];
 
 /**
  * Shell commands a Taskmaster may run on any path (#483): they read and print. The tripwire still
@@ -256,7 +262,9 @@ const READ_ONLY_COMMANDS = [
     'ss -ltn', 'ss -tln', 'ss -lnt', 'ss -ltnp', 'ss -tlnp', 'ss -lntp',
     'systemctl --user status', 'systemctl --user is-active', 'systemctl --user show', 'systemctl --user list-units', 'systemctl --user list-timers',
     'sqlite3 -readonly -safe', 'sqlite3 -safe -readonly',
-    'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
+    'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh pr status', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
+    // #621: more reads a Taskmaster reached for. sed only sandboxed, which refuses its e, r and w commands.
+    'file', 'sed --sandbox', 'gh repo view', 'gh release list', 'gh release view', 'gh workflow list', 'gh workflow view', 'gh label list',
   ].map((c) => `Bash(${c}:*)`),
   ...['-s', '-sS', '-s -m 5'].flatMap((f) => ['127.0.0.1', 'localhost'].map((host) => `Bash(curl ${f} http://${host}:8573/api/health)`)),
 ];
@@ -273,6 +281,11 @@ const READ_ONLY_EXCEPTIONS = [
   ['journalctl', '--vac', '--rot', '--fl', '--syn', '--rel', '--sm', '--se', '--up', '--cursor-f'],
   ['sqlite3', '-nonce', '--nonce', '-unsafe', '--unsafe'],
   ['gh api', '-X', '--method', '-f', '-F', '--field', '--raw-field', '--input'],
+  // file compiling a magic file; sed in place, alone or bundled after its other short flags.
+  ['file', '-C', '--c'],
+  ['sed', '-i', '--i', '-ni', '-Ei', '-ri', '-si', '-zi', '-ui'],
+  // A file it saves, or a browser it opens.
+  ['gh release view', '-w', '--w'], ['gh repo view', '-w', '--w'], ['gh workflow view', '-w', '--w'],
 ].flatMap(([cmd, ...flags]) => flags.flatMap((f) => [`Bash(${cmd} ${f}*)`, `Bash(${cmd} * ${f}*)`]))
   // uniq's second operand is a file it writes.
   .concat('Bash(uniq * *)');
@@ -312,7 +325,8 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
         // The web tools ask by default, and nobody can answer a Taskmaster's prompts, so they were denied (#210).
         // readDirs (the live data folder, mise's installs) are readable but not added, so acceptEdits can't write there.
         allow: ['WebSearch', 'WebFetch', ...[...readDirs.map((d) => `${d}/**`), ...HEALTH_FILES].map((p) => `Read(/${p})`), ...READ_ONLY_COMMANDS,
-          ...gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`))],
+          ...gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
+          ...gitDirs.filter((d) => d !== liveDir).flatMap((d) => GIT_FETCH.map((c) => `Bash(git -C ${d} ${c})`))],
       },
       ...(memoryDir ? { autoMemoryDirectory: memoryDir } : {}),
     },

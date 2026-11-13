@@ -214,7 +214,7 @@ test("only Citadel's own Taskmaster may read the live checkout, never write it, 
     assert.ok(!JSON.stringify(other.settings.permissions).includes(checkout));
     assert.doesNotMatch(other.system, /The live checkout, the code this server runs/);
   }
-  for (const tm of [own, await turn('coordinator', 'connected')]) assert.match(tm.system, /Read-only shell commands [^\n]*`git -C <folder> [^\n]*`cd <folder> && …` or a path in a variable is denied/);
+  for (const tm of [own, await turn('coordinator', 'connected')]) assert.match(tm.system, /Read-only shell commands [^\n]*`git -C <folder> [^\n]*`cd <folder> && …`, a shell loop or a path in a variable is denied/);
 });
 
 test("minion and Taskmaster turns both keep the Read tool out of the logins and state.db by file; keys and the env file's folder are the tripwire's (#185, #485)", async () => {

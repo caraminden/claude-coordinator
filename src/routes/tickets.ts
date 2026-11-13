@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { isAbsolute, join, sep } from 'node:path';
 import { cleanPluginPicks, lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
-import { lendsMachine, managesMachine } from '../access.ts';
+import { adminAskRefusal, lendsMachine, managesMachine } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
 import { cardHref } from '../card-links.ts';
@@ -14,6 +14,7 @@ import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type Tick
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
+import { hostCheck } from '../host-check.ts';
 import { landArgs } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
@@ -745,6 +746,18 @@ export const ticketRoutes: Route[] = [
       // A failed deploy leaves the minion in pending-deploy, so the error stays in view.
       const dismissed = !failed && runner.deployLive(id);
       return json(res, 201, { dismissed });
+    },
+  },
+  {
+    // The host_check tool (#621): the host's read-only checks (masked database, a user unit's journal and status) for a turn in a container.
+    method: 'POST', path: '/api/host-check', who: ['minion', 'taskmaster'], refuse: 'Only a turn can run host checks',
+    async handler({ req, res, app, caller }) {
+      const body = await readJson(req);
+      // The database holds every scheme's chat, so only a turn whose person sees every scheme reads it (db.ts canSee).
+      const refused = body?.what === 'db' && caller ? adminAskRefusal(app.store, caller.id) : null;
+      if (refused) throw new HttpError(403, refused);
+      const { systemctl, journalctl } = app.services.opts;
+      return json(res, 200, { output: await hostCheck({ db: join(app.dataDir, 'coordinator.db'), systemctl, journalctl }, body) });
     },
   },
   {

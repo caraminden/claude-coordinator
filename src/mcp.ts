@@ -262,6 +262,25 @@ const LIST_TICKETS = {
 };
 
 /** A scheme's CI runners on Cara's desktop (#328), through the runner agent there. */
+/** The host's read-only checks (#621), for a turn in a container: it has no live database or systemd user bus of its own. */
+const HOST_CHECK = {
+  name: 'host_check',
+  description:
+    `The host's read-only checks, since this turn runs in a container that can't reach them itself: wherever instructions or habits say \`sqlite3 -readonly …/coordinator.db\`, \`journalctl --user\`, \`systemctl --user status\` or \`list-units\`, call this instead. what: "db" runs one SQL statement on ${APP_NAME}'s live database, read-only, with login secrets shown as [hidden] (at most 1,000 rows; it holds every scheme's chat, so only a turn a ${APP_NAME} admin or ${APP_NAME} scheme member asked for may run it); "journal" prints a user unit's journal (unit, lines, since, grep); "status" is \`systemctl --user status <unit>\`; "units" lists user units (unit as a pattern). A turn's chat, tool calls and output are in the events table (ticket_id is the minion's internal id, which read_ticket shows). The live checkout (the code ${APP_NAME} runs) is mounted read-only at its own path, so read it with Read, grep and git as usual.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      what: { type: 'string', enum: ['db', 'journal', 'status', 'units'], description: 'Which check' },
+      sql: { type: 'string', maxLength: 20000, description: 'For db: one SQL statement, e.g. "SELECT id, number, title FROM tickets WHERE project_id = 3 ORDER BY id DESC LIMIT 5"' },
+      unit: { type: 'string', maxLength: 120, description: 'For journal and status: a user unit, like claude-coordinator.service (journal without one reads every user unit); for units, a pattern like "citadel-*"' },
+      lines: { type: 'integer', minimum: 1, maximum: 5000, description: 'For journal: how many of the last lines (default 100)' },
+      since: { type: 'string', maxLength: 40, description: 'For journal: a time journalctl reads, like "1 hour ago" or "2026-11-12 18:00"' },
+      grep: { type: 'string', maxLength: 200, description: 'For journal: only lines matching this pattern (journalctl -g)' },
+    },
+    required: ['what'],
+  },
+};
+
 const CI_RUNNERS = {
   name: 'ci_runners',
   description:
@@ -1383,6 +1402,11 @@ async function runTool(name: string, args: any): Promise<string> {
       const { url } = await call('POST', `/api/tickets/${TICKET}/preview`, {});
       return `The preview is up at ${url}. Post that link in your reply (the minion's view also shows an Open preview button) and set state try.`;
     }
+    case 'host_check': {
+      const body: Record<string, unknown> = {};
+      for (const k of ['what', 'sql', 'unit', 'lines', 'since', 'grep'] as const) if (args[k] !== undefined) body[k] = args[k];
+      return (await call('POST', '/api/host-check', body)).output;
+    }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).
       const body: Record<string, unknown> = {};
@@ -1496,10 +1520,11 @@ function scheduleLine(s: any): string {
 }
 
 function toolList() {
+  const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, CI_RUNNERS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory] : [...TOOLS, CI_RUNNERS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory];
-  return [...THREAD_TOOLS, CI_RUNNERS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, CI_RUNNERS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, CI_RUNNERS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
+  return [...THREAD_TOOLS, CI_RUNNERS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

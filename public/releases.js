@@ -141,11 +141,15 @@ function stageTrack(stages, p, { mini = false, labels = false } = {}) {
   })), { cls: `rel-track${mini ? ' mini' : ''}`, labels, label: `${stageName(p.stage)}, stage ${at + 1} of ${list.length}` });
 }
 
-/** A change's stage and its wait or time left: "Deploy ~50s left", "Line 2nd in line, behind #620"; under a card that already says its wait, `said` keeps it from repeating. */
-function changeNow(next, c, said = false) {
-  const eta = changeEta(next, c);
-  return [h('b', { class: c.waitingOn ? 'waits' : 'work' }, stageName(c.stage)), ' ',
-    h('span', { class: 'muted' }, c.waitingOn ? (said && c.waitingOn === next.waitingOn ? 'waits with the release, as above' : c.waitingOn) : eta ? etaText(eta, ' left') : c.text)];
+/**
+ * Where a change or release is, in a few words: its short ones first (Josh, 2026-11-13: "the line should be apparent
+ * from the list you are looking at"): "Line · 2nd", "Test · CI: the full suite" (#630's), then its wait, time left or text.
+ */
+const nowWords = (p, eta) => p.brief ?? p.waitingOn ?? (eta ? etaText(eta, ' left') : p.text);
+
+/** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
+function changeNow(next, c) {
+  return [h('b', { class: c.waitingOn ? 'waits' : 'work' }, stageName(c.stage)), ' ', h('span', { class: 'muted' }, nowWords(c, changeEta(next, c)))];
 }
 
 // ---------- the page ----------
@@ -219,13 +223,9 @@ function targetCard(projectId, tv, alone) {
     h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
-      h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', n.waitingOn ? h('span', { class: 'waits' }, n.waitingOn) : n.eta ? etaText(n.eta, ' left') : n.text,
-        n.changes.length > 1 ? h('span', { class: 'muted' }, ` · +${n.changes.length - 1} more`) : ''),
-      h('ul', { class: 'rel-changes' }, n.changes.map((c) => h('li', { class: `rel-change${c.ticketId === hl ? ' hl' : ''}` },
-        h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
-        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...changeNow(n, c, true))))),
+      h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta))),
     ] : h('p', { class: 'muted' }, 'Nothing on its way.'),
-    tv.line.length ? [h('h4', {}, 'Land line'), lineList(projectId, tv.line)] : '',
+    changeList(projectId, tv),
     previousList(projectId, tv),
     tv.testCopies.length ? [h('h4', {}, 'Test copies'), copyList(tv.testCopies)] : '');
 }
@@ -307,11 +307,29 @@ function deployBar(projectId, tv) {
     d.due && !busy ? h('span', { class: 'muted' }, 'deploys by itself ', etaText(d.due)) : '');
 }
 
-/** Who holds the land line and who waits behind it. */
-function lineList(projectId, line) {
-  const who = (e) => (e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name);
-  return h('ul', { class: 'rel-list' }, line.map((e) => h('li', {},
-    h('span', {}, e.holds ? 'Holds the lock' : 'Waiting'), h('span', { class: 'muted' }, who(e), ' · ', e.holds ? stageName(e.stage) : `since ${ago(e.since).replace(/ ago$/, '')}`))));
+/**
+ * The changes on their way and the land line as one list (Josh, 2026-11-13: "this feels like we wrote the same UI twice?
+ * can we consolidate into one list?"): those past the line first, then the line in its order, the lock's holder at its
+ * head. A line entry that isn't one of the changes (a deploy run alone, another branch) gets a row of its own.
+ */
+function changeList(projectId, tv) {
+  const n = tv.next, hl = page?.hl;
+  const changes = n?.changes ?? [];
+  const at = (id) => tv.line.findIndex((e) => e.ticketId === id);
+  const rows = [
+    ...changes.map((c) => ({ c, i: at(c.ticketId) })),
+    ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i }])),
+  ].sort((a, b) => a.i - b.i); // stable: the changes past the line (-1) keep their furthest-along-first order
+  if (!rows.length) return '';
+  return h('ul', { class: 'rel-changes' }, rows.map(({ c, e }) => (c
+    ? h('li', { class: `rel-change${c.ticketId === hl ? ' hl' : ''}` },
+      h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
+      h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...changeNow(n, c)))
+    : h('li', { class: 'rel-change' },
+      h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
+      h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
+        h('b', { class: e.holds ? 'work' : 'waits' }, e.holds ? stageName(e.stage) : 'Line'), ' ',
+        h('span', { class: 'muted' }, e.holds ? 'holds the lock' : e.place))))));
 }
 
 /** Each kind of test copy: where it opens, what it's called and the line beside it. Previews open in a new tab (a stopped one starts again when opened); a download saves. */

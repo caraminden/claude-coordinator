@@ -79,6 +79,9 @@ test('the next release: the furthest-along change leads, with its stage, usual, 
   assert.deepEqual(n.changes.map((c) => [c.ticketId, c.stage]), [[a.id, 'test'], [b.id, 'line']]);
   assert.equal(n.changes[1].waitingOn, `2nd in line, behind #${a.number} (waiting for CI)`, 'the line is a wait: it says what it waits on');
   assert.equal(n.changes[1].usual, null);
+  // One list on the card (Josh, 2026-11-13): its order says the line, so a waiting change's short words are its place alone.
+  assert.equal(n.changes[1].brief, '2nd');
+  assert.deepEqual(t.line.map((e) => e.place), ['next', '2nd']);
 });
 
 test('the estimate: only when the current stage and every one after it have a usual time and nothing waits', () => {
@@ -100,6 +103,7 @@ test('the estimate: only when the current stage and every one after it have a us
   assert.equal(n.stage, 'test');
   assert.equal(n.usual, null);
   assert.match(n.waitingOn!, /CI/);
+  assert.match(n.brief!, /^CI: /, "the landing's short words, as the chat's readout says them (#630)");
   assert.equal(n.eta, null);
   w.queued.clear();
   assert.notEqual(w.server.read()[0].next!.eta, null, 'once a runner has it, the estimate is back');

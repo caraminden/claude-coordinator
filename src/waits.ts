@@ -42,7 +42,7 @@ export const median = (xs: number[]): number | null => {
   return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 };
 
-const ordinal = (n: number) => (n === 1 ? 'next' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
+export const ordinal = (n: number) => (n === 1 ? 'next' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
 const read = (f: string) => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
 const mtime = (f: string) => { try { return statSync(f).mtimeMs; } catch { return null; } };
 const files = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };

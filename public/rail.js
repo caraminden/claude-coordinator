@@ -8,7 +8,11 @@
 // Citadel imports this; a contraption's page loads it as /apps/_citadel/rail.js, which draws the rail
 // by itself. Every contraption opens inside Citadel's window (#/apps/<name>, frames.js; #274): there a
 // contraption's rail.js draws nothing and lends Citadel's rail instead. What a contraption includes and leaves free: kit/skills/contraption-ui/rail-and-drawers.md.
-// Standalone on purpose (its own styles, and no imports but appswitch.js beside it), since contraptions load it from outside Citadel's pages.
+// Standalone on purpose (its own styles, and no imports but the files beside it: appswitch.js, reorder.js and
+// Citadel UI's ui/), since contraptions load it from outside Citadel's pages.
+
+import { dragReorder, inOrder, moved } from './reorder.js';
+import { optimistic } from './ui/optimistic.js';
 
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
@@ -324,7 +328,9 @@ const fetchItems = async () => {
   try {
     const res = await fetch(new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
     if (res.status >= 500) return null;
-    return railItems(res.ok ? await res.json() : [], showing(), root.pathname, !inContraption);
+    const mine = res.ok ? await res.json() : [];
+    // A drop still saving: the rail keeps it, though this answer may predate it.
+    return railItems(dragged ? inOrder(mine, (c) => c.name, dragged) : mine, showing(), root.pathname, !inContraption);
   } catch {
     return null;
   }
@@ -438,6 +444,8 @@ function drawRail(items) {
     nav.append(a);
   });
   nav.append(installButton());
+  // Press and hold an app (or drag it with a mouse) to move it; Citadel stays first (#649).
+  dragReorder(nav, { items: appLinks, onDrop: reorderApps });
   syncRail();
   syncInstall();
   if (slot) {
@@ -449,6 +457,34 @@ function drawRail(items) {
   document.documentElement.classList.add('has-citadel-rail');
   addHandle();
   return true;
+}
+
+const appLinks = () => [...nav.querySelectorAll('a[data-app]:not([data-app=""])')];
+let dragged = null; // the app names of a drop not yet saved
+
+/** Put the apps in a new order, on the rail at once and on the server behind; a failed save puts them back. */
+function reorderApps(from, to) {
+  const before = appLinks().map((a) => a.dataset.app);
+  const keys = moved(before, from, to);
+  const show = (order) => {
+    if (!nav) return;
+    const end = nav.querySelector('button.install');
+    for (const a of inOrder(appLinks(), (a) => a.dataset.app, order)) nav.insertBefore(a, end);
+    drawn = entries(inOrder(JSON.parse(drawn), (i) => i.name ?? '', ['', ...order]));
+  };
+  optimistic({
+    sets: 'order:apps',
+    apply: () => show(dragged = keys),
+    send: async () => {
+      const res = await fetch(new URL('api/me/order/apps', root), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys }) });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
+    },
+    undo: () => {
+      dragged = null;
+      show(before);
+    },
+    label: 'save the order of your apps',
+  }).then(() => dragged === keys && (dragged = null), () => {});
 }
 
 // Closing: Escape, a swipe back left across it, or a new view in Citadel.
@@ -526,6 +562,8 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 .citadel-rail .tile { display: flex; align-items: center; justify-content: center; background: #5a534c; font-weight: 650; }
 .citadel-rail a:is(.current, :hover, :focus-visible) :is(img, .tile) { opacity: 1; }
 .citadel-rail a.down .tile { opacity: 0.35; }
+.citadel-rail a.reorder-dragging { background: #3a3530; }
+.citadel-rail a.reorder-dragging :is(img, .tile) { opacity: 1; }
 .citadel-rail .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .citadel-rail :is(a, button)[hidden] { display: none; }
 .citadel-rail button.install { margin-top: auto; border: 0; background: none; font: inherit; text-align: start; cursor: pointer; }

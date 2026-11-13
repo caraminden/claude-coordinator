@@ -4,6 +4,7 @@ import type { User } from '../db.ts';
 import type { IncomingMessage } from 'node:http';
 import { clientIp, HttpError, isSecure, json, readJson, type App, type Route } from '../http.ts';
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
+import { CONTRAPTION_NAME } from '../contraptions.ts';
 
 /** A person as Settings → People shows them: never a hash or a token. */
 function personView(app: App, u: User) {
@@ -117,6 +118,19 @@ export const peopleRoutes: Route[] = [
       if ((await auth.signIn(ip, me.login, String(body.current ?? '').slice(0, 1000)))?.id !== me.id) throw new HttpError(403, 'Your current password is wrong');
       store.updateUser(me.id, { password_hash: await newPasswordHash(body.password) });
       return json(res, 200, {});
+    },
+  },
+  {
+    // Your own order of the schemes shelf or the app rail, from a drag (#649): GET /api/projects and /api/contraptions/mine follow it.
+    method: 'PUT', path: '/api/me/order/:list', who: ['person'],
+    async handler({ req, res, app, session, params }) {
+      const list = params.list;
+      if (list !== 'schemes' && list !== 'apps') throw new HttpError(404, 'No such list');
+      const { keys } = await readJson(req);
+      const ok = list === 'schemes' ? (k: unknown) => Number.isSafeInteger(k) && (k as number) > 0 : (k: unknown) => typeof k === 'string' && CONTRAPTION_NAME.test(k);
+      if (!Array.isArray(keys) || keys.length > 1000 || !keys.every(ok) || new Set(keys).size !== keys.length) throw new HttpError(400, `keys must be a list of ${list === 'schemes' ? 'scheme ids' : 'app names'}, each once`);
+      app.store.setListOrder(uidOf(session), list, keys);
+      return json(res, 200, { keys });
     },
   },
   // Linking your own GitHub (src/github-link.ts): its state, GitHub's authorize page and back, and unlinking.

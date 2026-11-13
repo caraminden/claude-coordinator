@@ -10,6 +10,7 @@ import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, askFiles, askLine, askMessage, askSummary, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
+import { inOrder } from '../../public/reorder.js';
 import { ServiceError } from '../app-services.ts';
 import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
@@ -361,10 +362,10 @@ export const contraptionRoutes: Route[] = [
     return json(res, 200, { ok: true });
   }),
   {
-    // The rail's list: the contraptions enabled for you, and whether each is up. Empty for most people.
+    // The rail's list: the contraptions enabled for you, in the order you dragged them into (#649), and whether each is up. Empty for most people.
     method: 'GET', path: '/api/contraptions/mine', who: ['person'],
     handler: async ({ res, app, session }) => json(res, 200, typeof session.uid !== 'number' ? [] : await Promise.all(
-      app.store.contraptionsFor(session.uid).map(async (c) => ({ name: c.name, title: c.title, icon: c.icon, up: await app.contraptions.up(c) })))),
+      inOrder(app.store.contraptionsFor(session.uid), (c) => c.name, app.store.listOrder(session.uid, 'apps')).map(async (c) => ({ name: c.name, title: c.title, icon: c.icon, up: await app.contraptions.up(c) })))),
   },
   admin({ method: 'GET', path: '/api/contraptions', handler: ({ res, app }) => json(res, 200, app.store.listContraptions().map((c) => view(app, c))) }),
   admin({

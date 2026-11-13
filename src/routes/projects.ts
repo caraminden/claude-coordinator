@@ -10,6 +10,7 @@ import { askerKey, buildOwnerKey, EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING,
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
+import { inOrder } from '../../public/reorder.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
@@ -232,7 +233,9 @@ export const projectRoutes: Route[] = [
       const hidden = store.hiddenProjects(session.uid ?? -1);
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id) });
       const seenItems = store.seenItems(session.name);
-      json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => {
+      // In the order they dragged the shelf into (#649); one they haven't placed goes at the end.
+      const schemes = inOrder(visibleSchemes(store, session), (p) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));
+      json(res, 200, await Promise.all(schemes.map(async (p) => {
         const tickets = store.listTickets(p.id);
         const waiting = hidden.has(p.id) ? [] : inboxWaiting(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id));
         const seen = seenItems.get(p.id);

@@ -6,6 +6,7 @@ import { api, h, me, schemeIcon, view } from './base.js';
 import { schemeCount } from './inbox.js';
 import { openNewScheme } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
+import { dragReorder, inOrder, moved } from './reorder.js';
 import { releaseRows, releasesLink } from './releases.js';
 
 let hiddenOpen = false; // whether the shelf's Hidden section is unfolded, kept across redraws
@@ -46,7 +47,8 @@ export async function refreshSchemes() {
     return;
   }
   retries = 0;
-  view.projects = projects;
+  // A drop still saving: the list keeps it, though this answer may predate it.
+  view.projects = dragged ? inOrder(projects, (p) => p.id, dragged) : projects;
   redrawHidden();
 }
 
@@ -62,10 +64,40 @@ const row = (p, button = null) => h('div', { class: 'scheme-row' },
     schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), p.hidden ? null : schemeCount(p)),
   button);
 
+let dragged = null; // the scheme ids of a drop not yet saved
+
+/** Put the schemes in `keys`' order, here and on the server, at once; a failed save puts them back (#649). */
+function reorderSchemes(from, to) {
+  const before = view.projects.map((p) => p.id);
+  const shown = view.projects.filter((p) => !p.hidden).map((p) => p.id);
+  // Hidden ones keep their place after the shown, so Unhide brings one back where it was among them.
+  const keys = [...moved(shown, from, to), ...view.projects.filter((p) => p.hidden).map((p) => p.id)];
+  const show = (order) => {
+    view.projects = inOrder(view.projects, (p) => p.id, order);
+    renderSchemesShelf();
+  };
+  optimistic({
+    sets: 'order:schemes',
+    apply: () => show(dragged = keys),
+    send: () => api('api/me/order/schemes', { method: 'PUT', body: { keys } }),
+    undo: () => {
+      dragged = null;
+      show(before);
+    },
+    label: 'save the order of your schemes',
+  }).then(() => dragged === keys && (dragged = null), () => {});
+}
+
 /** The shelf's Schemes column: the ones you haven't hidden, + New scheme, then the hidden ones collapsed away. */
 export function renderSchemesShelf() {
   const el = document.getElementById('schemes-shelf');
   if (!el) return;
+  // Press and hold (or drag with a mouse) a scheme to move it; its release lines move with it.
+  dragReorder(el, {
+    items: () => [...el.querySelectorAll(':scope > .scheme-row')],
+    carry: (row) => (row.nextElementSibling?.classList.contains('rel-rows') ? [row.nextElementSibling] : []),
+    onDrop: reorderSchemes,
+  });
   const shown = view.projects.filter((p) => !p.hidden);
   const hidden = view.projects.filter((p) => p.hidden);
   const folded = hidden.length ? h('details', { class: 'hidden-schemes', open: hiddenOpen },

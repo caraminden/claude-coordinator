@@ -604,6 +604,15 @@ CREATE TABLE IF NOT EXISTS project_hides (
   hidden_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, project_id)
 );
+-- Each person's own order of a list they dragged into shape (#649): 'schemes' (scheme ids) or 'apps'
+-- (contraption names), as a JSON array. Anything it doesn't name sorts after, in the list's usual order.
+CREATE TABLE IF NOT EXISTS list_orders (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  list TEXT NOT NULL,
+  keys TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, list)
+);
 -- The Needs-you count each person last saw on a scheme's badge (#498). Unused since #539 (project_seen_items
 -- replaced it); kept so a rollback to #498's release still finds it.
 CREATE TABLE IF NOT EXISTS project_seen_counts (
@@ -905,6 +914,7 @@ export const SCHEMA_HISTORY = [
   [41, 'step_times (#571)'],
   [42, 'releases (#625)'],
   [43, 'contraption_deploys (#627)'],
+  [44, 'list_orders (#649)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1496,6 +1506,17 @@ export class Store {
   setProjectHidden(uid: number, projectId: number, hidden: boolean) {
     if (hidden) this.db.prepare('INSERT INTO project_hides (user_id, project_id, hidden_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid, projectId, Date.now());
     else this.db.prepare('DELETE FROM project_hides WHERE user_id = ? AND project_id = ?').run(uid, projectId);
+  }
+
+  /** The order this person dragged a list into (#649): scheme ids or contraption names; [] when they never did. */
+  listOrder(uid: number, list: 'schemes' | 'apps'): (number | string)[] {
+    const row = this.db.prepare('SELECT keys FROM list_orders WHERE user_id = ? AND list = ?').get(uid, list) as { keys: string } | undefined;
+    return row ? JSON.parse(row.keys) : [];
+  }
+
+  setListOrder(uid: number, list: 'schemes' | 'apps', keys: (number | string)[]) {
+    this.db.prepare(`INSERT INTO list_orders (user_id, list, keys, updated_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, list) DO UPDATE SET keys = excluded.keys, updated_at = excluded.updated_at`).run(uid, list, JSON.stringify(keys), Date.now());
   }
 
   /** The Needs-you items `name` last saw waiting in each scheme (#539): project id -> their keys. */

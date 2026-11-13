@@ -287,6 +287,10 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   const sw = await get('/apps/_citadel/appswitch.js');
   assert.equal(sw.status, 200);
   assert.match(await sw.text(), /export function initAppSwitch/);
+  // And drag to reorder, which the rail imports from beside it (#649).
+  const reorder = await get('/apps/_citadel/reorder.js');
+  assert.equal(reorder.status, 200);
+  assert.match(await reorder.text(), /export function dragReorder/);
   // With their types beside them (#286).
   for (const f of ['rail', 'drawers']) {
     const types = await get(`/apps/_citadel/${f}.d.ts`);

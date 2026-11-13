@@ -162,6 +162,19 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return `#/p/${c.project.id}`;
     },
   },
+  schemes: {
+    about: 'five more schemes you are in, one of them hidden, for the schemes shelf and dragging it into order (#649)',
+    seed(c) {
+      const user = c.store.listUsers().find((u) => u.name === c.who);
+      for (const name of ['Bramble', 'Cinder', 'Ember', 'Juniper', 'Quarry']) {
+        const p = c.store.listProjects().find((x) => x.name === name) ?? c.store.createProject(name, null, user?.id ?? null);
+        c.store.setProjectSettings(p.id, { onboarding: 'skipped' });
+        if (user) c.store.addMember(p.id, user.id);
+        if (user && name === 'Quarry') c.store.setProjectHidden(user.id, p.id, true);
+      }
+      return `#/p/${c.project.id}`;
+    },
+  },
   'taskmaster-chat': {
     about: 'the scheme page with a long Taskmaster chat and 30 minions, for scrolling every column',
     seed(c) {

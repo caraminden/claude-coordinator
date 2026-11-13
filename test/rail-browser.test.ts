@@ -31,6 +31,8 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 
 // What the fake Citadel answers: toc up or down, its icon broken, or no answer at all.
 const state = { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false };
+// The orders the rail saved (#649), and how the next saves go: failing, or answered late.
+const orders = { saved: [] as string[][], fail: false, delay: 0 };
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#f93"/></svg>';
 let server: Server;
 let browser: Browser;
@@ -47,6 +49,19 @@ before(async () => {
     }
     if (path === '/c/api/me') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"name":"josh"}');
     if (path === '/apps/_citadel/rail.js') return res.writeHead(200, { 'content-type': 'text/javascript' }).end(rail);
+    // What the rail imports beside it (#649): drag to reorder and Citadel UI's optimistic save.
+    const beside = path.match(/^\/(?:c|apps\/_citadel)\/(reorder\.js|ui\/(?:optimistic|status)\.js)$/)?.[1];
+    if (beside) return res.writeHead(200, { 'content-type': 'text/javascript' }).end(readFileSync(join(pub, beside)));
+    if (path === '/c/api/me/order/apps' && req.method === 'PUT') {
+      let body = '';
+      req.on('data', (d) => (body += d));
+      req.on('end', () => setTimeout(() => {
+        if (orders.fail) return res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"disk full"}');
+        orders.saved.push(JSON.parse(body).keys);
+        res.writeHead(200, { 'content-type': 'application/json' }).end(body);
+      }, orders.delay));
+      return;
+    }
     if (path === '/c/api/contraptions/mine') {
       if (state.citadelDown) return req.socket.destroy();
       if (state.citadel502) return res.writeHead(502).end();
@@ -190,4 +205,74 @@ test("Alt+\` switches apps on a contraption's own page too", { skip }, async () 
   // Citadel (no hash yet: its first view) or ToC, whichever the switcher had picked.
   await waitFor(page, 'the layer to open', `!!document.querySelector('.citadel-layer:not([hidden])')`);
   assert.match(await layer(page), /^shown (#\/apps\/toc)? ?inert$/, 'letting go of Alt opens the one picked, in the layer');
+});
+
+// Drag to reorder the apps (#649): Citadel's own rail, as a wide screen shows it.
+const appOrder = (page: Page) => page.eval<string[]>(`[...document.querySelectorAll('.citadel-rail a[data-app]')].map((a) => a.dataset.app)`);
+/** Drag ToC's or Peek's tile to `toY` with the mouse, in small steps. */
+async function mouseDrag(page: Page, app: string, toY: number) {
+  const { x, y } = await page.centre(`.citadel-rail a[data-app="${app}"]`);
+  const mouse = (type: string, my: number) => page.send('Input.dispatchMouseEvent', { type, x, y: my, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1 });
+  await mouse('mousePressed', y);
+  for (let i = 1; i <= 6; i++) await mouse('mouseMoved', y + ((toY - y) * i) / 6);
+  await mouse('mouseReleased', toY);
+}
+const citadel = () => base.replace('/apps/peek/', '/c/');
+
+test('a mouse drag moves an app at once, saves the order, and opens nothing; two quick drags both count', { skip }, async () => {
+  Object.assign(state, { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false });
+  Object.assign(orders, { saved: [], fail: false, delay: 300 });
+  const page = await browser.page(citadel(), { width: 1000, height: 500 });
+  await waitFor(page, "Citadel's rail", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
+  assert.deepEqual(await appOrder(page), ['', 'peek', 'toc']);
+  const peek = await page.centre('.citadel-rail a[data-app="peek"]');
+  await mouseDrag(page, 'toc', peek.y - 15);
+  assert.deepEqual(await appOrder(page), ['', 'toc', 'peek'], 'moved the moment it dropped, before the save answers');
+  assert.equal(await page.eval('location.hash'), '', 'the drop opened nothing');
+  // Straight away, back again, while the first save is still on its way.
+  const top = await page.centre('.citadel-rail a[data-app="toc"]');
+  await mouseDrag(page, 'peek', top.y - 15);
+  assert.deepEqual(await appOrder(page), ['', 'peek', 'toc']);
+  await waitFor(page, 'both saves', 'true').then(() => wait(800));
+  assert.deepEqual(orders.saved, [['toc', 'peek'], ['peek', 'toc']], 'both saved, in the order dropped');
+  // A plain click still opens the app.
+  await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
+  assert.equal(await page.eval('location.hash'), '#/apps/toc');
+});
+
+test('a failed save puts the app back and says so with a Retry', { skip }, async () => {
+  Object.assign(orders, { saved: [], fail: true, delay: 0 });
+  const page = await browser.page(citadel(), { width: 1000, height: 500 });
+  await waitFor(page, "Citadel's rail", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
+  const peek = await page.centre('.citadel-rail a[data-app="peek"]');
+  await mouseDrag(page, 'toc', peek.y - 15);
+  await waitFor(page, 'the failure toast', `/Couldn't save the order of your apps: disk full/.test(document.querySelector('.cui-toast')?.textContent ?? '')`);
+  assert.deepEqual(await appOrder(page), ['', 'peek', 'toc'], 'back where it was');
+  orders.fail = false;
+  await page.eval(`[...document.querySelectorAll('.cui-toast button')].find((b) => b.textContent === 'Retry').click()`);
+  await waitFor(page, 'the retried save', `[...document.querySelectorAll('.citadel-rail a[data-app]')].map((a) => a.dataset.app).join() === ',toc,peek'`);
+  await wait(100);
+  assert.deepEqual(orders.saved, [['toc', 'peek']]);
+});
+
+test('on a touch screen a held press drags, and a swipe that moves at once does not', { skip }, async () => {
+  Object.assign(orders, { saved: [], fail: false, delay: 0 });
+  const page = await browser.page(citadel(), { width: 1000, height: 500, touch: true });
+  await waitFor(page, "Citadel's rail", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
+  const peek = await page.centre('.citadel-rail a[data-app="peek"]');
+  const toc = await page.centre('.citadel-rail a[data-app="toc"]');
+  const touch = (type: string, y?: number) => page.send('Input.dispatchTouchEvent', { type, touchPoints: y === undefined ? [] : [{ x: toc.x, y }] });
+  const drag = async (holdMs: number) => {
+    await touch('touchStart', toc.y);
+    await wait(holdMs);
+    for (let i = 1; i <= 6; i++) await touch('touchMove', toc.y + ((peek.y - 15 - toc.y) * i) / 6);
+    await touch('touchEnd');
+  };
+  await drag(0);
+  await wait(100);
+  assert.deepEqual(await appOrder(page), ['', 'peek', 'toc'], 'a swipe is a scroll, not a drag');
+  await drag(500);
+  assert.deepEqual(await appOrder(page), ['', 'toc', 'peek'], 'held, then dragged: moved');
+  await wait(100);
+  assert.deepEqual(orders.saved, [['toc', 'peek']]);
 });

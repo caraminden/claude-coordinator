@@ -125,8 +125,11 @@ test('every seed scenario applies to a fresh store, twice over', async () => {
     const ctx = seedScheme(s, dir, 'robin');
     for (const [name, sc] of Object.entries(SCENARIOS)) assert.match(sc.seed(ctx), new RegExp(`^#/p/${ctx.project.id}(/t/\\d+)?`), name);
   }
-  assert.equal(s.listProjects().length, 1, 'one Seeded scheme, reused');
-  assert.ok(s.listMembers(s.listProjects()[0].id).some((m: any) => m.id === robin.id || m.login === 'robin'));
+  // Seeded is reused, and so are the schemes scenario's own (#649): seeding twice makes no second of any.
+  const names = s.listProjects().map((p: any) => p.name);
+  assert.equal(names.filter((n: string) => n === 'Seeded').length, 1, 'one Seeded scheme, reused');
+  assert.equal(new Set(names).size, names.length, 'no scheme made twice');
+  assert.ok(s.listMembers(s.listProjects().find((p: any) => p.name === 'Seeded')!.id).some((m: any) => m.id === robin.id || m.login === 'robin'));
   s.db.close();
 });
 

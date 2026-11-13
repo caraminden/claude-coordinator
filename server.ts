@@ -847,8 +847,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       const renewed = auth.renewal(session, isSecure(req));
       if (renewed) res.setHeader('Set-Cookie', renewed);
       await routes(app, req, res, url, session);
-    } else if (/^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/.test(url.pathname)) {
-      // The app rail, phone drawers (and their types), the Alt+` switcher the rail loads, colours and Citadel UI (public/ui/) for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
+    } else if (/^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/.test(url.pathname)) {
+      // The app rail, phone drawers (and their types), the Alt+` switcher and drag to reorder the rail loads, colours and Citadel UI (public/ui/) for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
       await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length), true);
     } else if (url.pathname.startsWith('/apps/')) {
       apps.serve(req, res);

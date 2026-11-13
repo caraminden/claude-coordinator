@@ -282,7 +282,7 @@ export function artifactViewer(a) {
 // The open full-screen viewer: the chat section lives inside it until it closes.
 let viewer = null; // { dialog, stage, bar, chat, placeholder, ticket, file, inPlace, scrollY }
 // A question card's picture options (#634), set as one is opened: the bar steps between them and picks one.
-let gallery = null; // { ticketId, answered(), options: [{ path, label, picked(), pick() }] }
+let gallery = null; // { ticketId, at, answered(), options: [{ path, label, picked(), pick() }] }
 
 /** Browse a question card's picture options in the viewer (cards.js), until it closes. */
 export function setViewerGallery(g) {
@@ -372,7 +372,9 @@ function renderViewerBar() {
   const a = file.artifact && (view.artifacts.find((x) => x.id === file.artifact.id) ?? file.artifact);
   const src = `${fileUrl(t.id, file.path)}&v=${file.mtime}`;
   const options = gallery?.ticketId === t.id ? gallery.options : [];
-  const at = options.findIndex((o) => o.path === file.path);
+  // By place, not path alone: two options may share one picture.
+  const at = options[gallery?.at]?.path === file.path ? gallery.at : options.findIndex((o) => o.path === file.path);
+  if (at >= 0) gallery.at = at;
   const open = file.missing ? '' : openButton(src, file, viewerBridge(t, file));
   if (open && at >= 0) open.classList.add('wide-only'); // a phone's bar keeps its room for the option's controls
   viewer.bar.replaceChildren(
@@ -393,8 +395,18 @@ function renderViewerBar() {
  */
 function galleryControls(t, options, at) {
   const o = options[at];
-  const step = (by, label, text) => options.length < 2 ? '' :
-    h('a', { class: 'button secondary step', href: fileHref(t.id, options[(at + by + options.length) % options.length].path), 'aria-label': label }, text);
+  const step = (by, label, text) => {
+    if (options.length < 2) return '';
+    const to = (at + by + options.length) % options.length;
+    return h('a', {
+      class: 'button secondary step', href: fileHref(t.id, options[to].path), 'aria-label': label,
+      onclick: (e) => {
+        gallery.at = to;
+        // The same picture under another option: no new address to go to, so only the bar changes.
+        if (options[to].path === options[at].path) { e.preventDefault(); renderViewerBar(); }
+      },
+    }, text);
+  };
   const picked = o.picked();
   const pick = gallery.answered()
     ? (picked ? h('span', { class: 'picked' }, '✓ Picked') : '')

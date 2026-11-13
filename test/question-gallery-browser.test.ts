@@ -21,6 +21,7 @@ const CARDS: Record<number, { questions: unknown[]; answered?: string[] }> = {
   8: { questions: [{ header: 'Palette', question: 'Which direction?', options: opts(2) }], answered: ['Forest'] },
   9: { questions: [{ header: 'Layout', question: 'Tabs or list?', options: [{ label: 'Tabs', recommended: true }, { label: 'List' }] }] },
   10: { questions: [{ header: 'Palette', question: 'Which direction?', options: opts(2) }, { header: 'Size', question: 'How big?', options: [{ label: 'Small', recommended: true }, { label: 'Large' }] }] },
+  11: { questions: [{ header: 'Palette', question: 'Which direction?', options: [...opts(2), { label: 'Garden, darker', image: 'takes/garden.svg' }] }] },
 };
 
 // Runs before app.js: a fake server for the API. Answers are recorded in `sent` and never answered, as a
@@ -188,6 +189,29 @@ test('a picture card with a second question waits for Send with both answers', {
   assert.equal(await page.eval('sent.length'), 0);
   await page.eval(`${sendBtn}.click()`);
   assert.deepEqual(await page.eval('sent[0].answers'), [{ selected: ['Garden'], other: '' }, { selected: ['Small'], other: '' }]);
+});
+
+test('two options with one picture each get their own place in the viewer and their own pick', { skip }, async () => {
+  const page = await chat(11);
+  await click(page, '.tile:nth-child(3) .opt');
+  await waitFor(page, 'the viewer', viewerOpen);
+  assert.equal(await page.eval(title), 'Garden, darker');
+  assert.equal(await page.eval(`document.querySelector('.gallery-controls .count').textContent`), '3 / 3');
+  await click(page, '.gallery-controls .pick');
+  assert.deepEqual(await page.eval(picked), ['Garden, darker']);
+  await click(page, '.gallery-controls a[aria-label="Next option"]');
+  await waitFor(page, 'Garden', `${title} === 'Garden'`);
+  await click(page, '.gallery-controls a[aria-label="Previous option"]');
+  await waitFor(page, 'back to Garden, darker', `${title} === 'Garden, darker'`);
+});
+
+test('a card settled while its picture is open turns the viewer read-only', { skip }, async () => {
+  const page = await chat(7);
+  await click(page, '.tile:nth-child(1) .thumb');
+  await waitFor(page, 'the viewer', viewerOpen);
+  // What a question_result event does: thread.js calls the card's markSettled.
+  await page.eval(`import('/base.js').then((b) => void b.view.cards.get('q7').markSettled())`);
+  assert.equal(await page.eval(`!!document.querySelector('.gallery-controls .pick')`), false);
 });
 
 // The three states Cara asked to see, at desktop and phone widths: nothing picked, one picked waiting for Send,

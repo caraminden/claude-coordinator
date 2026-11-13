@@ -335,6 +335,7 @@ export function questionCard(ticketId, card) {
     el.classList.toggle('answered', on);
     for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = on;
     sendBtn.hidden = on;
+    if (pictures) refreshViewerBar();
   };
   const send = () => {
     if (answered || !ready()) return;
@@ -383,10 +384,12 @@ export function questionCard(ticketId, card) {
         refresh();
         if (single && !pictures) send();
       };
-      // Opening a picture hands the viewer this question's pictures, to step through and pick from.
-      const browse = () => setViewerGallery({
-        ticketId, answered: () => answered,
-        options: q.options.filter((o) => o.image).map((o) => ({
+      // Opening a picture hands the viewer this question's pictures, to step through and pick from; a
+      // click that opens it in a new tab instead leaves the viewer as it is.
+      const pictured = q.options.filter((o) => o.image);
+      const browse = (o) => (e) => !e.button && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && setViewerGallery({
+        ticketId, at: pictured.indexOf(o), answered: () => answered,
+        options: pictured.map((o) => ({
           path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => choose(o),
         })),
       });
@@ -402,7 +405,7 @@ export function questionCard(ticketId, card) {
           q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
         gallery
           ? h('div', { class: 'opts gallery' }, q.options.map((o) => {
-            const thumb = o.image && optionThumb(ticketId, o, browse);
+            const thumb = o.image && optionThumb(ticketId, o, browse(o));
             return h('div', { class: 'tile' }, thumb || h('div', { class: 'thumb none' }, 'No picture'), pickBtn(o, thumb));
           }))
           : h('div', { class: 'opts' }, q.options.map((o) => pickBtn(o))),
@@ -436,6 +439,7 @@ export function questionCard(ticketId, card) {
       for (const other of el.querySelectorAll('.other')) other.hidden = true;
       sendBtn.hidden = true;
       status.textContent = 'Answered in the chat';
+      if (pictures) refreshViewerBar();
     },
   });
   if (card.settled) view.cards.get(card.id).markSettled();

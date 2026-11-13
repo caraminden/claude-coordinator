@@ -39,7 +39,6 @@ dialog.start-brief .from { margin: 0 0 0.9rem; }
 .start-brief-form summary { cursor: pointer; color: var(--muted); font-size: 0.9em; min-height: 44px; display: flex; align-items: center; }
 .start-brief-form details pre { max-height: 40vh; overflow: auto; margin: 0.25rem 0 0; font-size: 0.8rem; white-space: pre-wrap; }
 .start-brief-form .sheet-actions { gap: 0.5rem; }
-.scheme-menu { position: fixed; z-index: 40; min-width: 12rem; max-width: calc(100vw - 16px); max-height: 60vh; overflow-y: auto; padding: 0.3rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); box-shadow: 0 6px 20px rgb(0 0 0 / 0.15); }
 a.nav-item:has(> .scheme-count) { display: flex; align-items: center; gap: 0.5rem; }
 a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 /* A scheme's favicon (#222). */
@@ -125,7 +124,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .shelf:not([open]) > summary .label { max-height: 14rem; }
 /* Wide screens (#495, Cara 2026-11-10: "make the scheme list be able to scale to the point where all
    scheme names fit, then let the minion list and chat boxes scale proportionally to fit the rest"):
-   the overview is as wide as its longest scheme row (only the scheme list sets it; capped at 22rem
+   the overview is as wide as its longest scheme row (only the scheme list and its header set it; capped at 22rem
    or 18vw, whichever is wider, so one absurd name can't take the screen), and the minions list and
    main panel share what's left 3:7, the list never under 15rem. Prose in the chat still wraps at a readable 100ch;
    its boxes, tables, code and pictures take the full width. */
@@ -133,7 +132,8 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   .split { grid-template-columns: auto minmax(15rem, 3fr) minmax(0, 7fr); }
   .split:has(> .panels > .shelf[open] + .sidebar:not([open])) { grid-template-columns: auto auto minmax(0, 1fr); }
   .shelf[open] { width: max-content; min-width: 220px; max-width: max(22rem, 18vw); }
-  .shelf[open] > :not(#schemes-shelf) { contain: inline-size; }
+  /* The header too, so who is signed in fits beside the scheme name (up to the cap) rather than breaking mid-word. */
+  .shelf[open] > :not(#schemes-shelf, summary) { contain: inline-size; }
   .sidebar[open] { width: auto; }
   #log .msg :is(p, li, blockquote, h1, h2, h3, h4, h5, h6) { max-width: 100ch; }
   #log > .note { max-width: 100ch; margin-inline: auto; }
@@ -218,9 +218,14 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 /* The name's text lines up with the panel's edge, or sits just after the scheme's icon. */
 .shelf[open] > summary .project-title .scheme-icon:not([hidden]) + .label { margin-left: -0.25rem; }
 .shelf:not([open]) > summary .project-title .label { padding: 0; margin: 0; }
+/* Who is signed in, behind a divider; a long name wraps between words. The collapsed tab shows only the scheme. */
+.shelf > summary .project-title .divider { flex: none; align-self: stretch; width: 1px; margin: 0.2rem 0.35rem; background: var(--line); }
+.shelf > summary .project-title .who { flex: 1 1 auto; min-width: 0; font-weight: 500; color: var(--muted); overflow-wrap: break-word; }
+.shelf > summary .project-title:has(> .who) > .label { flex: none; max-width: 65%; }
+.shelf:not([open]) > summary .project-title :is(.divider, .who) { display: none; }
 :is(.shelf, .sidebar) > summary .rename { flex: none; min-width: var(--control-h); min-height: var(--control-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
 :is(.shelf, .sidebar) > summary .rename:is(:hover, :focus-visible) { color: var(--accent); background: var(--panel); }
-.shelf > summary .rename-input { flex: 1; min-width: 0; font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
+.shelf > summary .rename-input { flex: 1; min-width: 0; width: 0; /* fills the header without widening the panel */ font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
 :is(.shelf, .sidebar):not([open]) > summary .rename { display: none; }
 .shelf .column h3 .browse { --b: max(4px, (var(--control-h) - 1lh) / 2); display: inline-block; padding-block: var(--b); margin-block: calc(-1 * var(--b)); font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
 .shelf .column h3 .more:hover, .shelf .column h3 .browse:hover, .shelf .column h3 .browse.active { text-decoration: underline; }

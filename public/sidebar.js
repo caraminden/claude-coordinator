@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, costText, h, isCoordinator, isSeen, jumpHref, listGroupsOf, schemeIcon, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, api, costText, h, isCoordinator, isSeen, jumpHref, listGroupsOf, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, sending, setSending, usage } from './core.js';
 import { fitHeight, loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
@@ -10,7 +10,7 @@ import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
-import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
+import { renderInbox } from './inbox.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
 
@@ -129,37 +129,6 @@ export function openNewScheme() {
   dialog.addEventListener('close', () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
-}
-
-let closeSchemeMenu = () => {};
-
-/** A small menu of the schemes under the switcher button, with the new-scheme entry at the end. */
-export function toggleSchemeMenu(button) {
-  if (document.getElementById('scheme-menu')) return closeSchemeMenu();
-  const menu = h('div', { id: 'scheme-menu', class: 'scheme-menu' },
-    view.projects.filter((p) => !p.hidden || p.id === view.projectId).map((p) => h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, title: p.name, onclick: () => closeSchemeMenu() },
-      schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
-    h('button', { type: 'button', class: 'nav-item add', onclick: () => { closeSchemeMenu(); openNewScheme(); } }, '+ New scheme'));
-  const outside = (e) => { if (!menu.contains(e.target) && !button.contains(e.target)) closeSchemeMenu(); };
-  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeSchemeMenu(); button.focus(); } };
-  closeSchemeMenu = () => {
-    menu.remove();
-    button.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('pointerdown', outside, true);
-    document.removeEventListener('keydown', onKey, true);
-    closeSchemeMenu = () => {};
-  };
-  document.addEventListener('pointerdown', outside, true);
-  document.addEventListener('keydown', onKey, true);
-  document.body.append(menu);
-  button.setAttribute('aria-expanded', 'true');
-  const r = button.getBoundingClientRect();
-  menu.style.top = `${r.bottom + 4}px`;
-  // Never under the app rail (z-index 50, over the menu): the switch sits near the panel's left edge.
-  const rail = document.querySelector('.citadel-rail')?.getBoundingClientRect().right || 0;
-  menu.style.left = `${Math.max(rail + 8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
-  // The counts came with the page; other schemes' minions have moved since, so fetch them again.
-  refreshSchemeCounts();
 }
 
 export function newTicketForm(projectId) {

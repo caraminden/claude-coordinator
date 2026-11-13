@@ -1,11 +1,11 @@
 /* Settings: its tabs, the instructions editor, Machines, Members and People, accounts. */
-/* Settings: the link beside Sign out (with how many properties wait for review), and the page's tabs */
-.shelf .account .settings-link { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.6rem; }
-/* The overview fits its scheme rows; give the account name its own line so its controls never squeeze it. */
-.shelf .account > .row:first-child { flex-wrap: wrap; gap: 0.4rem; }
-.shelf .account > .row:first-child > strong { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
-.shelf .account > .row:first-child > .spacer { display: none; }
-.shelf .account > .row:first-child > :is(a, button) { flex: none; }
+/* Settings and Sign out: quiet links along the overview account box's foot (Settings with how many properties wait for review) */
+.shelf .account .foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin: 0.1rem -0.6rem -0.5rem; padding: 0 0.6rem; border-top: 1px solid var(--line); }
+.shelf .account .foot > :is(a, button) { display: inline-flex; align-items: center; gap: 0.35rem; min-height: var(--control-h); padding: 0; background: none; border: 0; font: inherit; text-decoration: none; cursor: pointer; }
+.shelf .account .foot .settings-link { color: var(--accent); }
+.shelf .account .foot .sign-out { color: var(--muted); }
+.shelf .account .foot > :is(a, button):is(:hover, :focus-visible) { text-decoration: underline; }
+.shelf .account .foot .sign-out:is(:hover, :focus-visible) { color: var(--ink); }
 .settings-link .count, .settings-tabs a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
 .settings-link .count[hidden], .settings-tabs a .count[hidden] { display: none; }
 /* Every tab in sight: they wrap to a second line rather than scroll off the edge with no cue (#471). */

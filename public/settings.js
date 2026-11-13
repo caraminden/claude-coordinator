@@ -3,7 +3,7 @@ import { account, ago, api, h, icon, listGroupsOf, me, schemeIcon, view } from '
 import { ciDesktopPanel } from './ci-desktop.js';
 import { openHash } from './core.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
-import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
+import { renderSidebar } from './sidebar.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
@@ -205,8 +205,9 @@ export function renderGithubStrip() {
 }
 
 /**
- * The overview's header: the project name is a button that turns it into a text field in place
- * (on a collapsed panel it opens the panel instead). Enter or ✓ saves; Esc or tapping away cancels.
+ * The overview's header: the project name, then who is signed in behind a divider. The name is a button
+ * that turns it into a text field in place (on a collapsed panel it opens the panel instead). Enter or ✓
+ * saves; Esc or tapping away cancels.
  * It sits in the panel's <summary>, so its own clicks and keys must not collapse the panel or close
  * the phone drawer.
  */
@@ -216,9 +217,8 @@ export function projectTitle(project) {
     wrap.replaceChildren(
       schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
       h('button', { type: 'button', class: 'label', 'data-project-name': project.id, title: 'Rename scheme (its repo stays as it is)', onclick: edit }, view.project.name),
-      h('span', { class: 'spacer' }),
-      h('button', { type: 'button', class: 'rename switch', 'aria-label': 'Switch scheme', title: 'Switch scheme', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (e) => toggleSchemeMenu(e.currentTarget) }, '⇅'),
-      h('button', { type: 'button', class: 'rename add', 'aria-label': 'New scheme', title: 'New scheme', onclick: openNewScheme }, '+'));
+      me && h('span', { class: 'divider', 'aria-hidden': 'true' }),
+      me && h('span', { class: 'who' }, me));
   };
   // Every label showing the name changes now; the server's broadcast confirms it, and a refusal puts the old name back.
   const rename = (name) => onProjectUpdate({ ...(view.projectId === project.id ? view.project : project), name });

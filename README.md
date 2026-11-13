@@ -74,7 +74,7 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   cap of 60 per person in 10 minutes. All kinds answer 202 `{ scheme, member, proposal, files }`, data
   adding `sidecar`, the JSON's path.
 - Each scheme can have **instructions** (up to 16,000 characters), edited on the
-  scheme's Settings page (beside Sign out in the overview panel). They're appended
+  scheme's Settings page (linked along the foot of the overview panel's account box). They're appended
   to the system prompt of the Taskmaster and every minion, so they apply from each one's next turn. "Import from Claude Code" lists
   the instruction and memory files of the login the app runs as (`~/.claude/CLAUDE.md`
   and `rules/`, the repo's `CLAUDE.md` files, and auto-memory) to add with a tick.

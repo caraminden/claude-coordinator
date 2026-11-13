@@ -162,4 +162,25 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return `#/p/${c.project.id}`;
     },
   },
+  'taskmaster-chat': {
+    about: 'the scheme page with a long Taskmaster chat and 30 minions, for scrolling every column',
+    seed(c) {
+      let tm = c.store.getCoordinator(c.project.id);
+      if (!tm) {
+        tm = c.store.createTicket({ project_id: c.project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'bypassPermissions', created_by: 'Taskmaster' });
+        const cwd = join(projectDir(c.dataDir, c.project.id), 'coordinator');
+        mkdirSync(cwd, { recursive: true });
+        c.store.setTicketDir(tm.id, cwd, null);
+      }
+      const w = chat(c, tm, 80);
+      for (let i = 1; i <= 20; i++) {
+        w.asked(`Round ${i}: where do the minions stand, and what should start next?`);
+        w.init();
+        w.said([`## Round ${i}`, '', `- #${i} is **ready**: tested, risk low.`, `- #${i + 1} is waiting on a pick.`, '', 'Next: start a minion for the rail settings once #12 is live.'].join('\n'));
+        w.done(`Round ${i} summarised.`);
+      }
+      for (let i = 1; i <= 30; i++) minion(c, `Seeded minion ${i}`, { note: `note for minion ${i}` }, i % 3 ? 'feature' : 'bug');
+      return `#/p/${c.project.id}`;
+    },
+  },
 };

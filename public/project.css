@@ -90,19 +90,13 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .panels { display: contents; }
 /* Both collapsed: one sticky column with the two tabs stacked, and the main panel takes the rest. */
 .split:not(:has(> .panels > details[open])) { grid-template-columns: auto minmax(0, 1fr); }
-.panels:not(:has(> details[open])) { display: flex; flex-direction: column; gap: 0.5rem; position: sticky; top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + 1rem); }
+.panels:not(:has(> details[open])) { display: flex; flex-direction: column; gap: 0.5rem; position: sticky; top: calc(var(--banner-h, 0px) + var(--split-top, 1rem)); }
 .panels:not(:has(> details[open])) > details { position: static; }
 .shelf[open] { width: clamp(220px, 18vw, 270px); }
 .sidebar[open] { width: clamp(230px, 20vw, 300px); }
-/* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
-   page end. Keep the side panels short enough (1rem top gap + 3rem) that the chat reaching the bottom
-   never drags them up, and keep wheel/touch scrolls inside them from chaining to the page. */
-.sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - var(--banner-h, 0px) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
-/* In a desktop app with the title bar in the page (#637), their headers stay in its strip (style.css). */
-@media (display-mode: window-controls-overlay) {
-  .panels:not(:has(> details[open])), .sidebar, .shelf { top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + var(--strip-pad, 0px)); }
-  .sidebar, .shelf { max-height: calc(100dvh - var(--topbar-h, 3rem) - var(--banner-h, 0px) - var(--strip-pad, 0px) - 3rem); }
-}
+/* They pin where main's top pad puts them (--split-top, style.css) and reach the window's bottom edge, which is the
+   bottom of .split too (main has no bottom pad here, #648), and wheel/touch scrolls inside them don't chain to the page. */
+.sidebar, .shelf { position: sticky; top: calc(var(--banner-h, 0px) + var(--split-top, 1rem)); max-height: calc(100dvh - var(--banner-h, 0px) - var(--split-top, 1rem)); overflow-y: auto; overscroll-behavior: contain; }
 /* Panel headers double as collapse toggles: a row with ‹ when open, a slim vertical tab with › when closed. */
 .sidebar > summary, .shelf > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; list-style: none; display: flex; align-items: center; gap: 0.4rem; user-select: none; }
 .sidebar > summary::-webkit-details-marker, .shelf > summary::-webkit-details-marker { display: none; }
@@ -140,6 +134,13 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   /* The header too, so who is signed in fits beside the scheme name (up to the cap) rather than breaking mid-word. */
   .shelf[open] > :not(#schemes-shelf, summary) { contain: inline-size; }
   .sidebar[open] { width: auto; }
+  /* Open, a column runs to the window's bottom even when short, so its edge and scrollbar do (#648). */
+  :is(.sidebar, .shelf)[open] { height: calc(100dvh - var(--banner-h, 0px) - var(--split-top, 1rem)); }
+  /* Both headers are one height, so they line up. The minions list's header and new-minion box stay put while the
+     list scrolls under them (Josh, 2026-11-13: "a locked title frame that stays when you scroll"). */
+  :is(.sidebar, .shelf)[open] > summary { box-sizing: border-box; min-height: 1.9rem; }
+  .sidebar[open] > summary { position: sticky; top: 0; z-index: 2; height: 2.4rem; margin-bottom: 0; padding-bottom: 0.5rem; background: var(--bg); }
+  .sidebar[open] > .new-thread { position: sticky; top: 2.4rem; z-index: 2; margin: 0; padding-bottom: 0.6rem; background: var(--bg); }
   #log .msg :is(p, li, blockquote, h1, h2, h3, h4, h5, h6) { max-width: 100ch; }
   #log > .note { max-width: 100ch; margin-inline: auto; }
 }

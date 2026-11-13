@@ -274,7 +274,12 @@ body.navigating::after { content: ''; pointer-events: none; position: fixed; z-i
    clear the notch, a strip of page colour covers the status bar area and the thread bar sticks below it. */
 body:has(.split) .topbar { display: none; }
 body:has(.split)::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: var(--top-inset); z-index: 6; background: var(--bg); }
-body:has(.split) main { padding-top: calc(1.25rem + var(--top-inset)); }
+/* --split-top is main's top pad here, and where the sticky columns pin, so they line up and fill to the window's
+   bottom edge (#648). main has no bottom pad on scheme pages, or every column stops that much short of it; the pages
+   that aren't a chat keep it on their own section. */
+body:has(.split) { --split-top: calc(1.25rem + var(--top-inset)); }
+body:has(.split) main { padding-top: var(--split-top); padding-bottom: 0; }
+.split > section:not(.chat) { padding-bottom: 3rem; }
 body:has(.split) .ticket-head { top: max(0px, calc(var(--top-inset) + var(--banner-h, 0px) - 1px)); }
 body:has(.split) .update-banner { top: var(--top-inset); }
 /* In a desktop app (#637, Josh: "lets try moving stuff up into that space"), the columns' header rows sit in the
@@ -282,10 +287,12 @@ body:has(.split) .update-banner { top: var(--top-inset); }
    window controls on the right (Windows, Linux) or on the left (a Mac). The strip behind them
    drags the window; everything clickable in it opts out. */
 @media (display-mode: window-controls-overlay) {
-  body:has(.split) { --strip-pad: max(0px, (var(--top-inset) - 1.9rem) / 2); }
+  /* At least 10px (Josh, 2026-11-13: "a bit more padding at the top"): the head's own 0.6rem, so it starts where it sticks,
+     rounded to a whole pixel so the side columns don't shift 1px as they stick. */
+  body:has(.split) { --strip-pad: max(0.625rem, (var(--top-inset) - 1.9rem) / 2); --split-top: var(--strip-pad); }
   body:has(.split)::before { z-index: -1; background: none; app-region: drag; }
   .split :is(a, button, input, select, textarea, summary, label, [tabindex]) { app-region: no-drag; }
-  body:has(.split) main { padding-top: var(--strip-pad); padding-left: max(1rem, calc(env(titlebar-area-x, 0px) + 0.5rem - var(--citadel-rail, 0px))); }
+  body:has(.split) main { padding-left: max(1rem, calc(env(titlebar-area-x, 0px) + 0.5rem - var(--citadel-rail, 0px))); }
   body:has(.split) .update-banner { top: 0; padding-inline: calc(1rem + env(titlebar-area-x, 0px)) calc(1rem + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
   .update-banner :is(a, button) { app-region: no-drag; }
   body:has(.split) .ticket-head { top: calc(var(--banner-h, 0px) + var(--strip-pad) - 0.6rem); }

@@ -375,11 +375,17 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
    violet-tinted ground, a minion's on the plain one. --chat-tone and --chat-bg are for other surfaces
    that want to follow the same split. The tint keeps muted text at 4.5:1 (8% light, 12% dark). */
 .chat { --chat-tone: var(--accent); --chat-bg: var(--bg); }
-.chat.role-taskmaster { --chat-tone: var(--held); --chat-bg: color-mix(in srgb, var(--held) 8%, var(--bg)); }
-@media (prefers-color-scheme: dark) { .chat.role-taskmaster { --chat-bg: color-mix(in srgb, var(--held) 12%, var(--bg)); } }
+:root { --tm-bg: color-mix(in srgb, var(--held) 8%, var(--bg)); }
+@media (prefers-color-scheme: dark) { :root { --tm-bg: color-mix(in srgb, var(--held) 12%, var(--bg)); } }
+.chat.role-taskmaster { --chat-tone: var(--held); --chat-bg: var(--tm-bg); }
+/* The page's scrollbar is the chat's, so it takes the tint too (Josh, 2026-11-13). */
+html:has(.split > .chat.role-taskmaster) { scrollbar-color: color-mix(in srgb, var(--held) 40%, var(--bg)) var(--tm-bg); }
 /* The ground reaches past the text by the gutter, and up over the head's pull into main's padding, so nothing moves. Square,
    since the head and composer stick to the screen's edges. */
 .chat.role-taskmaster { background: var(--chat-bg); padding: 0.6rem 0.75rem 0; margin: -0.6rem -0.75rem 0; }
+/* On the scheme page it covers main's whole top pad and reaches the window's bottom, so no edge of it is ever on
+   screen to move as the page scrolls (#648). */
+.split > .chat.role-taskmaster { box-sizing: border-box; min-height: calc(100dvh - var(--banner-h, 0px)); margin-top: calc(-1 * var(--split-top)); padding-top: var(--split-top); }
 .chat.role-taskmaster :is(.ticket-head, .composer) { background: var(--chat-bg); }
 .chat.role-taskmaster .msg:not(.user) { border-color: color-mix(in srgb, var(--held) 22%, var(--line)); }
 /* A dismissed minion's message box is tinted grey, so it reads as dismissed before you type. */

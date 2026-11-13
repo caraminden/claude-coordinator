@@ -218,6 +218,11 @@ async function mouseDrag(page: Page, app: string, toY: number) {
   await mouse('mouseReleased', toY);
 }
 const citadel = () => base.replace('/apps/peek/', '/c/');
+/** Until the fake Citadel has taken `n` saves (10 s at most). */
+async function saves(n: number) {
+  for (const end = Date.now() + 10_000; orders.saved.length < n && Date.now() < end; await wait(20));
+  return orders.saved;
+}
 
 test('a mouse drag moves an app at once, saves the order, and opens nothing; two quick drags both count', { skip }, async () => {
   Object.assign(state, { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false });
@@ -233,11 +238,30 @@ test('a mouse drag moves an app at once, saves the order, and opens nothing; two
   const top = await page.centre('.citadel-rail a[data-app="toc"]');
   await mouseDrag(page, 'peek', top.y - 15);
   assert.deepEqual(await appOrder(page), ['', 'peek', 'toc']);
-  await waitFor(page, 'both saves', 'true').then(() => wait(800));
-  assert.deepEqual(orders.saved, [['toc', 'peek'], ['peek', 'toc']], 'both saved, in the order dropped');
-  // A plain click still opens the app.
-  await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
+  assert.deepEqual(await saves(2), [['toc', 'peek'], ['peek', 'toc']], 'both saved, in the order dropped');
+  // A slow click (held half a second, not moved) still opens the app: a mouse drags only once it moves.
+  const at = await page.centre('.citadel-rail a[data-app="toc"]');
+  const mouse = (type: string) => page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
+  await mouse('mousePressed');
+  await wait(500);
+  await mouse('mouseReleased');
   assert.equal(await page.eval('location.hash'), '#/apps/toc');
+});
+
+test('Alt+Up and Alt+Down move the focused app, and focus stays on it', { skip }, async () => {
+  Object.assign(orders, { saved: [], fail: false, delay: 0 });
+  const page = await browser.page(citadel(), { width: 1000, height: 500 });
+  await waitFor(page, "Citadel's rail", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
+  await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').focus()`);
+  const key = (type: string) => page.send('Input.dispatchKeyEvent', { type, key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38, modifiers: 1 });
+  await key('rawKeyDown');
+  await key('keyUp');
+  assert.deepEqual(await appOrder(page), ['', 'toc', 'peek']);
+  assert.equal(await page.eval('document.activeElement.dataset.app'), 'toc');
+  await key('rawKeyDown');
+  await key('keyUp');
+  assert.deepEqual(await appOrder(page), ['', 'toc', 'peek'], 'already first among the apps: Citadel stays above');
+  assert.deepEqual(await saves(1), [['toc', 'peek']]);
 });
 
 test('a failed save puts the app back and says so with a Retry', { skip }, async () => {
@@ -251,8 +275,26 @@ test('a failed save puts the app back and says so with a Retry', { skip }, async
   orders.fail = false;
   await page.eval(`[...document.querySelectorAll('.cui-toast button')].find((b) => b.textContent === 'Retry').click()`);
   await waitFor(page, 'the retried save', `[...document.querySelectorAll('.citadel-rail a[data-app]')].map((a) => a.dataset.app).join() === ',toc,peek'`);
-  await wait(100);
-  assert.deepEqual(orders.saved, [['toc', 'peek']]);
+  assert.deepEqual(await saves(1), [['toc', 'peek']]);
+});
+
+test("an older drop's Retry, after a newer drop saved, leaves the newer order alone", { skip }, async () => {
+  Object.assign(orders, { saved: [], fail: true, delay: 0 });
+  const page = await browser.page(citadel(), { width: 1000, height: 500 });
+  await waitFor(page, "Citadel's rail", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
+  const peek = await page.centre('.citadel-rail a[data-app="peek"]');
+  await mouseDrag(page, 'toc', peek.y - 15);
+  await waitFor(page, 'the failure toast', `/Couldn't save the order/.test(document.querySelector('.cui-toast')?.textContent ?? '')`);
+  orders.fail = false;
+  // A newer drop of its own, which saves: the same move, then ToC back down.
+  await mouseDrag(page, 'toc', peek.y - 15);
+  const peekNow = await page.centre('.citadel-rail a[data-app="peek"]');
+  await mouseDrag(page, 'toc', peekNow.y + 15);
+  assert.deepEqual(await saves(2), [['toc', 'peek'], ['peek', 'toc']]);
+  await page.eval(`[...document.querySelectorAll('.cui-toast button')].find((b) => b.textContent === 'Retry')?.click()`);
+  await wait(200);
+  assert.deepEqual(await appOrder(page), ['', 'peek', 'toc'], 'the newest drop stands');
+  assert.deepEqual(orders.saved, [['toc', 'peek'], ['peek', 'toc']], 'and nothing older is sent');
 });
 
 test('on a touch screen a held press drags, and a swipe that moves at once does not', { skip }, async () => {
@@ -269,10 +311,8 @@ test('on a touch screen a held press drags, and a swipe that moves at once does 
     await touch('touchEnd');
   };
   await drag(0);
-  await wait(100);
   assert.deepEqual(await appOrder(page), ['', 'peek', 'toc'], 'a swipe is a scroll, not a drag');
   await drag(500);
   assert.deepEqual(await appOrder(page), ['', 'toc', 'peek'], 'held, then dragged: moved');
-  await wait(100);
-  assert.deepEqual(orders.saved, [['toc', 'peek']]);
+  assert.deepEqual(await saves(1), [['toc', 'peek']], 'one save: the swipe sent none');
 });

@@ -476,6 +476,7 @@ deploy:
 | `rail.js`, `rail.d.ts` | `mountRail`, `hideRail`, `showRail`, `openRail`, `closeRail`, `leaveEdge`, `hasRail`, `railItems`, `opensApart`, `installMode`, `chromeIntent` |
 | `drawers.js`, `drawers.d.ts` | `initDrawers`, `NARROW`, `EDGE`, `classify`, `settleOpen`, `edgeSide` |
 | `appswitch.js` | Loaded by the rail (the Alt+` switcher) |
+| `reorder.js` | Loaded by the rail: drag (or Alt+Up and Alt+Down) to put your apps in your own order, saved to `PUT /api/me/order/apps` |
 | `ui/base.css` | The `cui-*` parts |
 | `ui/markdown.js` | `renderMarkdown`, `markdownElement`, `updateMarkdown`, `markdownLine`, `slug`, `copyText` |
 | `ui/chat.js` | `mountChat`, `renderChat`, `chatModel`, `stepMark`, `gruntName`, `duration` |

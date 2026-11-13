@@ -1,7 +1,8 @@
 // Drag to reorder (#649, Josh 2026-11-13: "Can we make the scheme list reorderable? Click hold drag, same for
 // the contraption list"): the schemes shelf (hidden.js) and the app rail (rail.js). One pointer-events path for
-// mouse, pen and touch. A press held still, or with a mouse one moved a few px, picks the row up; on a touch
-// screen a finger that moves before the hold is a scroll, so a swipe still scrolls the list. The row follows the
+// mouse, pen and touch. A mouse picks the row up once it moves a few px held down; a finger or pen by holding still,
+// and one that moves before the hold is a scroll, so a swipe still scrolls the list. Alt+Up and Alt+Down move the
+// focused row, for a keyboard. The row follows the
 // pointer, the rows it passes slide aside, a dashed slot marks where it will land, and onDrop says where it went; a plain click still opens it.
 // Standalone like rail.js beside it, which contraptions load as /apps/_citadel/rail.js; the server imports inOrder.
 
@@ -26,7 +27,8 @@ export function moved(keys, from, to) {
 /**
  * Let people drag `list`'s rows into a new order. items() lists the rows that can move, in order (anything else in
  * the list, a heading or a collapsed Hidden section, stays put); carry(row) gives what moves with a row, like the
- * release lines under a scheme. onDrop(from, to) gets indexes into items(), only when the row changed place.
+ * release lines under a scheme. onDrop(from, to) gets indexes into items(), only when the row changed place, and
+ * must have redrawn the list in its new order by the time it returns (the keyboard's move refocuses the row there).
  * Once per list element: a redraw that keeps the element keeps it working.
  */
 export function dragReorder(list, { items, carry = () => [], onDrop }) {
@@ -124,10 +126,23 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     const row = items().find((r) => r.contains(e.target));
     if (!row || e.target.closest('button, input, select, textarea')) return;
     press = { row, id: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', dragging: false };
-    press.timer = setTimeout(() => press && !press.dragging && (begin(), press && follow(press.y)), HOLD_MS);
+    // A finger or pen picks a row up by holding it; a mouse once it moves, so a slow click still opens it.
+    if (!press.mouse) press.timer = setTimeout(() => press && !press.dragging && (begin(), press && follow(press.y)), HOLD_MS);
     addEventListener('pointermove', move, true);
     addEventListener('pointerup', up, true);
     addEventListener('pointercancel', cancel, true);
+  });
+  // A keyboard's way: Alt+Up or Alt+Down moves the focused row one place, and focus stays on it.
+  list.addEventListener('keydown', (e) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || press) return;
+    const rows = items();
+    const from = rows.findIndex((r) => r.contains(document.activeElement));
+    const to = from + (e.key === 'ArrowUp' ? -1 : 1);
+    if (from < 0 || to < 0 || to >= rows.length) return;
+    e.preventDefault();
+    onDrop(from, to);
+    const row = items()[to];
+    (row?.matches('a, button, [tabindex]') ? row : row?.querySelector('a, button, [tabindex]'))?.focus();
   });
   // Once a row is up, the finger moves it: no scrolling, and no drawer swipe (drawers.js listens on document).
   list.addEventListener('touchmove', (e) => {

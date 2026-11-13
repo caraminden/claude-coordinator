@@ -461,11 +461,14 @@ function drawRail(items) {
 
 const appLinks = () => [...nav.querySelectorAll('a[data-app]:not([data-app=""])')];
 let dragged = null; // the app names of a drop not yet saved
+let drops = 0; // counts drops: each saves the whole list, so an older one's Retry has nothing to add
 
-/** Put the apps in a new order, on the rail at once and on the server behind; a failed save puts them back. */
+/** Move an app from `from` to `to`: on the rail at once, saved behind; a failed save puts it back. */
 function reorderApps(from, to) {
-  const before = appLinks().map((a) => a.dataset.app);
-  const keys = moved(before, from, to);
+  const keys = moved(appLinks().map((a) => a.dataset.app), from, to);
+  const drop = ++drops;
+  let before = null; // the order just before this drop showed, to put back if its save fails
+  let stale = false; // a Retry once a newer drop has been made: that one's order stands, so this does nothing
   const show = (order) => {
     if (!nav) return;
     const end = nav.querySelector('button.install');
@@ -474,12 +477,19 @@ function reorderApps(from, to) {
   };
   optimistic({
     sets: 'order:apps',
-    apply: () => show(dragged = keys),
+    apply: () => {
+      stale = drop !== drops;
+      if (stale || !nav) return;
+      before = appLinks().map((a) => a.dataset.app);
+      show(dragged = keys);
+    },
     send: async () => {
+      if (stale) return;
       const res = await fetch(new URL('api/me/order/apps', root), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys }) });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
     },
     undo: () => {
+      if (!before) return;
       dragged = null;
       show(before);
     },

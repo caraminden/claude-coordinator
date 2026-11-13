@@ -45,6 +45,7 @@ if (!hasRail) { /* nothing enabled besides you: drop the slot and the swipe page
 - It brings its own styles (classes `citadel-rail*`, as a constructed stylesheet, so a strict `style-src` CSP doesn't block it). It needs nothing else from you.
 - Your `icon` in Citadel's registry (Settings → Contraptions) is a path you serve, relative to your base: `/icon.svg` means `/apps/<name>/icon.svg`. Make it square and at least 72 px; it's shown at 34–36 px with rounded corners. With no icon you get a letter tile.
 - Picking an app opens it inside Citadel's window (next section); picking the one you're in does nothing (in the default mode it closes the switcher).
+- People put their apps in their own order by dragging them on the rail (press and hold on a touch screen) or with Alt+Up and Alt+Down; Citadel stays first. The order is per person, saved by Citadel, so your page has nothing to do. The rail loads `reorder.js` from beside it.
 
 ## Inside Citadel's window (#274)
 

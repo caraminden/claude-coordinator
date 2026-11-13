@@ -65,22 +65,31 @@ const row = (p, button = null) => h('div', { class: 'scheme-row' },
   button);
 
 let dragged = null; // the scheme ids of a drop not yet saved
+let drops = 0; // counts drops: each saves the whole list, so an older one's Retry has nothing to add
 
-/** Put the schemes in `keys`' order, here and on the server, at once; a failed save puts them back (#649). */
+/** Move a scheme from `from` to `to` among the shown ones: at once here, saved behind; a failed save puts it back (#649). */
 function reorderSchemes(from, to) {
-  const before = view.projects.map((p) => p.id);
   const shown = view.projects.filter((p) => !p.hidden).map((p) => p.id);
   // Hidden ones keep their place after the shown, so Unhide brings one back where it was among them.
   const keys = [...moved(shown, from, to), ...view.projects.filter((p) => p.hidden).map((p) => p.id)];
+  const drop = ++drops;
+  let before = null; // the order just before this drop showed, to put back if its save fails
+  let stale = false; // a Retry once a newer drop has been made: that one's order stands, so this does nothing
   const show = (order) => {
     view.projects = inOrder(view.projects, (p) => p.id, order);
     renderSchemesShelf();
   };
   optimistic({
     sets: 'order:schemes',
-    apply: () => show(dragged = keys),
-    send: () => api('api/me/order/schemes', { method: 'PUT', body: { keys } }),
+    apply: () => {
+      stale = drop !== drops;
+      if (stale) return;
+      before = view.projects.map((p) => p.id);
+      show(dragged = keys);
+    },
+    send: () => (stale ? null : api('api/me/order/schemes', { method: 'PUT', body: { keys } })),
     undo: () => {
+      if (!before) return;
       dragged = null;
       show(before);
     },

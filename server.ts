@@ -40,7 +40,7 @@ import { peopleRoutes } from './src/routes/people.ts';
 import { Credentials } from './src/credentials.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AppServices, serviceOptions } from './src/app-services.ts';
-import { contraptionRoutes } from './src/routes/contraptions.ts';
+import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
@@ -58,7 +58,8 @@ import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { Waits } from './src/waits.ts';
-import { CitadelServer, previewCopies, Releases } from './src/releases.ts';
+import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
+import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, MainReader, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
@@ -453,6 +454,14 @@ const contraptionReader = new ContraptionReader({ store, finder: targetFinder, f
 services.onDeploy = (view) => {
   if (view.finished_at === null) return releases.poll();
   contraptionReader.record(view).catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err)).finally(() => void releases.refresh());
+  // Nobody watches an auto-deploy (#629), so one that didn't go live is told to the app's home Taskmaster.
+  const row = view.by === AUTO_BY && view.state !== 'deployed' ? store.getContraption(view.name) : undefined;
+  if (row?.home_scheme != null) tellHome(row.home_scheme, `Auto-deploy of ${row.title} (${row.name}) to ${view.to?.slice(0, 9) ?? 'its main'}: ${view.state}. ${view.said.at(-1) ?? ''}\n\nIt won't try that commit again by itself: the next landing on main, or Deploy on its card on the Releases page, deploys again. deploy_contraption's status has the whole log.`);
+};
+/** A message from Citadel to a scheme's Taskmaster, if it has one. */
+const tellHome = (projectId: number, text: string) => {
+  const tm = store.getCoordinator(projectId);
+  if (tm) runner.send(tm.id, APP_NAME, text);
 };
 // The workflow readers go through CI health's etag-cached reads (defined below; first called after startup's scan).
 const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r) };
@@ -488,7 +497,7 @@ const testCopyReader = new TestCopyReader({
   }),
 });
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, mainReader], broadcast,
+  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
   scan: async () => {
     await targetFinder.scan();
     await testCopyReader.scan();
@@ -497,6 +506,28 @@ const releases = new Releases({
     const all = previewCopies(store, { own: ownScheme, running: (key) => previews?.runningAt(key) ?? null, builds: (id) => builds.get(id).map((b) => b.build) });
     for (const [id, copies] of testCopyReader.list()) all.set(id, [...(all.get(id) ?? []), ...copies]);
     return all;
+  },
+});
+// Auto-deploy and the release cards' Deploy button (#629, src/auto-deploy.ts): each kind's release step.
+const autoDeploy = new AutoDeploy({
+  store, targets: () => targetFinder.list(), view: () => releases.view(() => true),
+  failed: (t, why) => tellHome(t.projectId, `Auto-deploy of ${t.name} couldn't start: ${why}`),
+  enabled: () => !services.opts.off,
+  deployers: {
+    contraption: {
+      // The reader's next release waits at its deploy call while main is ahead and no deploy runs.
+      waits: (tv) => tv.next?.stage === 'call',
+      head: async (t) => {
+        const row = store.getContraption(t.contraption!);
+        const p = store.getProject(t.projectId);
+        return (row && p?.repo_dir && (await git(['rev-parse', '--verify', '--quiet', `${row.branch ?? t.branch}^{commit}`], p.repo_dir))?.trim()) || null;
+      },
+      start: (t, by, uid) => {
+        const row = store.getContraption(t.contraption!);
+        if (!row) throw new HttpError(404, `No contraption ${t.contraption}`);
+        startDeploy(app, row, by, null, uid);
+      },
+    },
   },
 });
 
@@ -569,7 +600,11 @@ if (!BOOT_CHECK || PREVIEW) {
   }), 2_000).unref();
   // Release targets' git reads every 15 s, and finding every scheme's targets again every 5 minutes (#627).
   void safely('release targets', () => releases.refresh(true));
-  setInterval(() => void safely('release reads', () => releases.refresh()), SHIP_POLL_MS).unref();
+  setInterval(() => void safely('release reads', async () => {
+    await releases.refresh();
+    await autoDeploy.tick();
+    releases.poll(); // a due time it just noted shows on the cards
+  }), SHIP_POLL_MS).unref();
   setInterval(() => void safely('release targets', () => releases.refresh(true)), 20 * SHIP_POLL_MS).unref();
   ciRuns.start();
 }
@@ -739,7 +774,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, releases, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
+  store, runner, auth, waiters, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
   get assetVersion() {

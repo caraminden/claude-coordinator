@@ -167,6 +167,26 @@ function deployable(app: App, name: string, caller: Ctx['caller']): ContraptionR
   throw new HttpError(403, `Only its home scheme's ${AGENT_NAME} and minions, or an admin, deploy a contraption`);
 }
 
+/**
+ * Start a contraption's deploy by `by` (deploy_contraption, a release card's Deploy button, or auto-deploy, #629): its
+ * install check reads the app's page as person `uid` (none: only the registry's icon is checked), and its to-dos go to
+ * its home Taskmaster. Throws a ServiceError when it can't start (no repo, a deploy already running, services off).
+ */
+export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx['caller'], uid: number | null) {
+  const person = uid != null ? app.store.getUser(uid) : undefined;
+  const identity = person ? () => app.contraptions.signIdentity(c.name, person) : undefined;
+  const hooks = {
+    // Only into an empty icon: one set by hand meanwhile stays.
+    setIcon: (icon: string) => {
+      if (app.store.getContraption(c.name)?.icon) return false;
+      app.store.updateContraption(c.name, { icon });
+      return true;
+    },
+    todo: (todo: string[]) => void deployTodo(app, c, caller, person?.id ?? null, todo).catch((err) => console.error(`Couldn't send ${c.name}'s deploy to-dos to its home Taskmaster:`, err)),
+  };
+  return app.services.deploy(c, by, app.store.listContraptions(), identity, hooks);
+}
+
 /** Asks per contraption and person: ASK_LIMIT in ASK_WINDOW_MS, then 429. shortcut: kept in memory, so a restart forgets it; fine as a loop backstop. */
 const ASK_LIMIT = 10;
 /** Data asks wake no one, so they get more room (one per save, say); a loop backstop on their count, not their size. */
@@ -433,18 +453,7 @@ export const contraptionRoutes: Route[] = [
       const by = caller ? (caller.kind === 'coordinator' ? `${app.store.getProject(caller.project_id)?.name ?? 'a'} Taskmaster` : `#${caller.number}`) : app.store.getUser(session.uid as number)?.name ?? 'an admin';
       // The install check reads the app's page as the person deploying (a turn's: whoever asked for it).
       const uid = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
-      const person = typeof uid === 'number' ? app.store.getUser(uid) : undefined;
-      const identity = person ? () => app.contraptions.signIdentity(c.name, person) : undefined;
-      const hooks = {
-        // Only into an empty icon: one set by hand meanwhile stays.
-        setIcon: (icon: string) => {
-          if (app.store.getContraption(c.name)?.icon) return false;
-          app.store.updateContraption(c.name, { icon });
-          return true;
-        },
-        todo: (todo: string[]) => void deployTodo(app, c, caller, person?.id ?? null, todo).catch((err) => console.error(`Couldn't send ${c.name}'s deploy to-dos to its home Taskmaster:`, err)),
-      };
-      return service(async () => json(res, 202, app.services.deploy(c, by, app.store.listContraptions(), identity, hooks)));
+      return service(async () => json(res, 202, startDeploy(app, c, by, caller, typeof uid === 'number' ? uid : null)));
     },
   },
   {

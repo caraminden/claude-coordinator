@@ -19,6 +19,7 @@ import type { CiLoad } from './ci-load.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { Previews } from './previews.ts';
 import type { Releases } from './releases.ts';
+import type { AutoDeploy } from './auto-deploy.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
 import type { Schedule } from './schedules.ts';
@@ -201,6 +202,8 @@ export interface App {
   previews: Previews | null;
   /** The release monitor's data: each scheme's targets and test copies (src/releases.ts, #625). */
   releases: Releases;
+  /** Auto-deploy and the release cards' Deploy button (src/auto-deploy.ts, #629). */
+  autoDeploy: AutoDeploy;
   machines: MachineRelay;
   pusher: Pusher;
   /** People's own GitHub links (src/github-link.ts). */

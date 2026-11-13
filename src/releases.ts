@@ -7,6 +7,7 @@
 // starts nothing: server.ts calls poll() and live().
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { DeployInfo } from './auto-deploy.ts';
 import type { Ship } from './branch.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
 import { repoSlug } from './prlinks.ts';
@@ -107,6 +108,8 @@ export interface TargetView {
   testCopies: TestCopy[];
   /** The releases before the current one, newest first. */
   recent: Release[];
+  /** Its deploy button and auto-deploy (src/auto-deploy.ts, #629); absent when its kind has no release step Citadel starts. */
+  deploy?: DeployInfo;
 }
 
 export interface SchemeReleases {
@@ -142,6 +145,8 @@ export interface ReleasesDeps {
   broadcast: (msg: object) => void;
   /** Find every scheme's targets again (src/release-targets.ts), before the readers read theirs. */
   scan?: () => Promise<void>;
+  /** A target's deploy button and auto-deploy (src/auto-deploy.ts), or null when it has no release step. */
+  deploy?: (tv: Omit<TargetView, 'testCopies'>) => DeployInfo | null;
 }
 
 export class Releases {
@@ -159,7 +164,10 @@ export class Releases {
     const byScheme = new Map<number, SchemeReleases>();
     const scheme = (id: number) => byScheme.get(id) ?? byScheme.set(id, { projectId: id, targets: [], testCopies: [] }).get(id)!;
     for (const reader of this.d.readers) {
-      for (const t of reader.read()) scheme(t.target.projectId).targets.push({ ...t, testCopies: [] });
+      for (const t of reader.read()) {
+        const deploy = this.d.deploy?.(t);
+        scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}) });
+      }
     }
     for (const [id, list] of copies) {
       for (const c of list) {

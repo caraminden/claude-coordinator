@@ -1,10 +1,12 @@
 // The app as a whole: signing in and out, health for tools/deploy.sh, who you are, the event stream,
 // costs and which minion owns each PR.
-import { hashPassword, looksLikeUrl, NOT_PEOPLE } from '../auth.ts';
+import { hashPassword, looksLikeUrl, NOT_PEOPLE, type Session } from '../auth.ts';
 import { costDays, dayBudget } from '../costs.ts';
 import { fallbacks } from '../fallbacks.ts';
 import { prOwners } from '../prlinks.ts';
-import { clientIp, HttpError, isSecure, json, readJson, type Ctx, type Route } from '../http.ts';
+import { ServiceError } from '../app-services.ts';
+import type { Store } from '../db.ts';
+import { clientIp, HttpError, isSecure, json, readJson, str, type Ctx, type Route } from '../http.ts';
 
 const MAX_CLIENTS = 100;
 
@@ -112,4 +114,33 @@ export const appRoutes: Route[] = [
     const member = url.searchParams.get('scope') === 'member' ? store.memberSchemes(session.uid) : null;
     return json(res, 200, { schemes: releases.view((id) => store.canSee(session, id) && (!member || member.has(id))) });
   } },
+  // A release card's Deploy button (#629; Cara, 2026-11-12: "Yes, on any target that can deploy"): any member of the
+  // target's scheme deploys it at once. Starts it and answers; the releases event follows it.
+  { method: 'POST', path: '/api/releases/deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {
+    const { projectId, target } = releaseTarget(store, session, await readJson(req));
+    try {
+      await autoDeploy.deployNow(projectId, target, store.getUser(session.uid as number)?.name ?? 'a member', session.uid ?? null);
+    } catch (err) {
+      if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
+      throw err;
+    }
+    releases.poll();
+    return json(res, 202, { ok: true });
+  } },
+  // A target's auto-deploy on or off (#629: "A scheme can turn it off"), from its card, by any member of its scheme.
+  { method: 'PUT', path: '/api/releases/auto-deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {
+    const body = await readJson(req);
+    const { projectId, target } = releaseTarget(store, session, body);
+    if (typeof body.on !== 'boolean') throw new HttpError(400, 'on must be true or false');
+    if (!autoDeploy.setOn(projectId, target, body.on)) throw new HttpError(404, `${target} has no release step Citadel can start`);
+    releases.poll();
+    return json(res, 200, { on: body.on });
+  } },
 ];
+
+/** The scheme and target a release action names, if the person may see that scheme. */
+function releaseTarget(store: Store, session: Session, body: any): { projectId: number; target: string } {
+  const projectId = Number(body?.projectId);
+  if (!Number.isInteger(projectId) || !store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
+  return { projectId, target: str(body?.target, 'target') };
+}

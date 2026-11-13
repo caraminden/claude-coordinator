@@ -1,0 +1,127 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import { AUTO_BY, AutoDeploy, QUIET_MS } from '../src/auto-deploy.ts';
+import { Store } from '../src/db.ts';
+import type { Found } from '../src/release-targets.ts';
+import type { SchemeReleases, TargetView } from '../src/releases.ts';
+
+// src/auto-deploy.ts (#629): a target deploys by itself once its main has sat still for QUIET_MS, once per commit,
+// unless its scheme turned that off; the card's Deploy button deploys it at once.
+const root = mkdtempSync(join(tmpdir(), 'auto-deploy-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+let dbs = 0;
+
+function world() {
+  const store = new Store(join(root, `t-${++dbs}.db`));
+  let now = 1_800_000_000_000;
+  const app: Found = { projectId: 3, id: 'app:peek', kind: 'contraption', name: 'App', link: '/apps/peek/', branch: 'main', contraption: 'peek' };
+  const ci: Found = { projectId: 3, id: 'ci:windows:release', kind: 'ci', name: 'Windows', link: null, branch: 'main', workflow: 'w.yml', job: 'release' };
+  let head = 'aaa';
+  let waits = true;
+  const started: string[] = [];
+  const failed: string[] = [];
+  let refuse: string | null = null;
+  const tv = (t: Found): Omit<TargetView, 'testCopies'> => ({ target: { id: t.id, projectId: t.projectId, name: t.name, kind: t.kind, link: t.link }, current: null, next: null, line: [], recent: [] });
+  const view = (): SchemeReleases[] => [{ projectId: 3, targets: [app, ci].map((t) => ({ ...tv(t), testCopies: [] })), testCopies: [] }];
+  const auto = new AutoDeploy({
+    store, targets: () => [app, ci], view, now: () => now,
+    failed: (t, why) => failed.push(`${t.id}: ${why}`),
+    deployers: {
+      contraption: {
+        waits: () => waits,
+        head: async () => head,
+        start: (t, by) => {
+          if (refuse) throw new Error(refuse);
+          started.push(`${t.id} by ${by} at ${head}`);
+        },
+      },
+    },
+  });
+  return {
+    auto, started, failed, app: tv(app), ci: tv(ci),
+    set: (o: { head?: string; waits?: boolean; refuse?: string | null }) => {
+      if (o.head !== undefined) head = o.head;
+      if (o.waits !== undefined) waits = o.waits;
+      if (o.refuse !== undefined) refuse = o.refuse;
+    },
+    pass: (ms: number) => (now += ms),
+    now: () => now,
+  };
+}
+
+test('a waiting target deploys once main has been still for QUIET_MS, and a landing meanwhile restarts the wait', async () => {
+  const w = world();
+  await w.auto.tick();
+  assert.deepEqual(w.started, []);
+  assert.equal(w.auto.info(w.app)?.due, w.now() + QUIET_MS, 'the card says when');
+  w.pass(QUIET_MS - 1000);
+  w.set({ head: 'bbb' }); // another landing: the burst goes out as one deploy
+  await w.auto.tick();
+  w.pass(QUIET_MS - 1000);
+  await w.auto.tick();
+  assert.deepEqual(w.started, []);
+  w.pass(1000);
+  await w.auto.tick();
+  assert.deepEqual(w.started, [`app:peek by ${AUTO_BY} at bbb`]);
+  assert.equal(w.auto.info(w.app)?.due, null, 'tried at this commit: no longer due');
+});
+
+test('a commit is tried once: a deploy that rolled back waits for main to move', async () => {
+  const w = world();
+  await w.auto.tick();
+  w.pass(QUIET_MS);
+  await w.auto.tick();
+  w.pass(QUIET_MS);
+  await w.auto.tick();
+  assert.equal(w.started.length, 1, 'still waiting at the same commit, so not again');
+  w.set({ head: 'ccc' });
+  await w.auto.tick();
+  w.pass(QUIET_MS);
+  await w.auto.tick();
+  assert.deepEqual(w.started.at(-1), `app:peek by ${AUTO_BY} at ccc`);
+});
+
+test('turned off, it waits for the button; the button deploys at once and counts as the commit\'s try', async () => {
+  const w = world();
+  assert.equal(w.auto.setOn(3, 'app:peek', false), true);
+  assert.equal(w.auto.isOn(3, 'app:peek'), false);
+  await w.auto.tick();
+  w.pass(QUIET_MS * 3);
+  await w.auto.tick();
+  assert.deepEqual(w.started, []);
+  assert.deepEqual(w.auto.info(w.app), { can: true, auto: false, due: null });
+  await w.auto.deployNow(3, 'app:peek', 'Cara', 1);
+  assert.deepEqual(w.started, ['app:peek by Cara at aaa']);
+  w.auto.setOn(3, 'app:peek', true);
+  await w.auto.tick();
+  w.pass(QUIET_MS);
+  await w.auto.tick();
+  assert.equal(w.started.length, 1, 'the person\'s deploy was this commit\'s try');
+});
+
+test('nothing waiting, nothing due; a kind with no release step has no button or switch', async () => {
+  const w = world();
+  w.set({ waits: false });
+  await w.auto.tick();
+  w.pass(QUIET_MS);
+  await w.auto.tick();
+  assert.deepEqual(w.started, []);
+  assert.deepEqual(w.auto.info(w.app), { can: false, auto: true, due: null });
+  assert.equal(w.auto.info(w.ci), null);
+  assert.equal(w.auto.setOn(3, 'ci:windows:release', false), false);
+  await assert.rejects(w.auto.deployNow(3, 'ci:windows:release', 'Cara', 1), /no release step/);
+});
+
+test('an auto-deploy that can\'t start is told, and not retried at that commit', async () => {
+  const w = world();
+  w.set({ refuse: 'peek is being installed or deployed already' });
+  await w.auto.tick();
+  w.pass(QUIET_MS);
+  await w.auto.tick();
+  w.pass(QUIET_MS);
+  await w.auto.tick();
+  assert.deepEqual(w.failed, ['app:peek: peek is being installed or deployed already']);
+});

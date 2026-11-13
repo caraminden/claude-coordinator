@@ -6,6 +6,7 @@
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
 import { ago, api, fileUrl, h, view } from './base.js';
 import { mountTips } from './ui/tip.js';
+import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
 import { TRACK, waitBar } from './wait.js';
 
@@ -34,6 +35,8 @@ export function onReleases(msg) {
   if (!loaded) return;
   const s = msg.releases;
   const had = schemes.has(msg.projectId);
+  // A deploy pressed here shows as one until the server's own view stops offering it (it's running, or done).
+  for (const tv of s.targets) if (!tv.deploy?.can) deploying.delete(`${msg.projectId}/${tv.target.id}`);
   if (s.targets.length || s.testCopies.length) schemes.set(msg.projectId, s);
   else schemes.delete(msg.projectId);
   if (!had && schemes.has(msg.projectId)) return loadReleases();
@@ -232,6 +235,7 @@ function targetCard(projectId, tv) {
     h('header', {}, h('h3', {}, tv.target.name), h('span', { class: 'tag' }, schemeName(projectId))),
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
       recent.length ? h('span', { class: 'muted' }, ' · before: ', recent.flatMap((r, i) => [i ? ', ' : '', versionLink(r, 'rel-ver old'), ` took ${tookText(r)}`])) : ''),
+    deployBar(projectId, tv),
     h('h4', {}, 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
@@ -243,6 +247,44 @@ function targetCard(projectId, tv) {
     ] : h('p', { class: 'muted' }, 'Nothing on its way.'),
     tv.line.length ? [h('h4', {}, 'Land line'), lineList(projectId, tv.line)] : '',
     tv.testCopies.length ? [h('h4', {}, 'Test copies'), copyList(tv.testCopies)] : '');
+}
+
+// ---------- deploying (#629) ----------
+
+/** Targets whose Deploy was pressed here and whose deploy the server hasn't shown yet: "projectId/target". */
+const deploying = new Set();
+
+/**
+ * A deployable target's Deploy button and auto-deploy switch (Cara, 2026-11-12: "Yes, on any target that can deploy").
+ * The button shows while a next release waits and no deploy runs; pressing it shows "Deploying…" at once and sends
+ * behind it, and a refusal puts the button back with a toast and Retry. Busy shows on this card alone.
+ */
+function deployBar(projectId, tv) {
+  const d = tv.deploy;
+  if (!d) return '';
+  const key = `${projectId}/${tv.target.id}`;
+  const body = { projectId, target: tv.target.id };
+  const press = () => optimistic({
+    key: `deploy:${key}`,
+    apply: () => { deploying.add(key); redraw(); },
+    send: () => api('api/releases/deploy', { method: 'POST', body }),
+    undo: () => { deploying.delete(key); redraw(); },
+    label: `deploy ${schemeName(projectId)} ${tv.target.name}`,
+  });
+  const flip = (on) => optimistic({
+    sets: `auto-deploy:${key}`,
+    apply: () => { d.auto = on; redraw(); },
+    send: () => api('api/releases/auto-deploy', { method: 'PUT', body: { ...body, on } }),
+    undo: () => { d.auto = !on; redraw(); },
+    label: `turn ${on ? 'on' : 'off'} auto-deploy for ${schemeName(projectId)} ${tv.target.name}`,
+  });
+  const busy = deploying.has(key) && d.can;
+  return h('div', { class: 'rel-deploy' },
+    busy ? h('span', { class: 'rel-deploying', role: 'status' }, 'Deploying…')
+      : d.can ? h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Deploy the next release now' }, 'Deploy') : '',
+    h('label', { class: 'rel-auto', title: 'Deploys by itself about 5 minutes after main last moved' },
+      h('input', { type: 'checkbox', checked: d.auto, onchange: (e) => flip(e.target.checked) }), 'Auto-deploy'),
+    d.due && !busy ? h('span', { class: 'muted' }, 'deploys by itself ', etaText(d.due)) : '');
 }
 
 /** Who holds the land line and who waits behind it. */

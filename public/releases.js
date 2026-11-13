@@ -327,7 +327,7 @@ function changeList(projectId, tv) {
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
   return h('ol', { class: 'rel-changes' }, rows.map(({ c, e }, i) => {
     const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}`;
-    const pos = h('span', { class: 'rel-pos', 'aria-hidden': 'true' }, String(i + 1));
+    const pos = h('span', { class: 'rel-pos' }, String(i + 1));
     if (c) {
       return h('li', { class: cls }, pos, h('div', { class: 'body' },
         h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
@@ -366,8 +366,12 @@ function tryIt(projectId, tv, c) {
   const ask = () => optimistic({
     key: `preview:${c.ticketId}`,
     apply: () => { requested.add(c.ticketId); redraw(); },
-    // The server lists the preview once it's up; ask again rather than wait for the next poll's event.
-    send: () => api(`api/tickets/${c.ticketId}/preview`, { method: 'POST' }).then(() => loadReleases()),
+    // The POST alone decides success. The server lists the preview once it's up: ask again rather than wait for the next
+    // poll's event, then let the row draw from the list (the link, or the button if it somehow isn't there).
+    send: async () => {
+      await api(`api/tickets/${c.ticketId}/preview`, { method: 'POST' });
+      void loadReleases().finally(() => { requested.delete(c.ticketId); redraw(); });
+    },
     undo: () => { requested.delete(c.ticketId); redraw(); },
     label: `start #${c.number ?? c.ticketId}'s preview`,
   });

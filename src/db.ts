@@ -27,6 +27,19 @@ export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** Each project has one long-lived coordinator ticket that manages the others. */
 export type TicketKind = 'ticket' | 'coordinator';
 
+/** A row of the releases table (#625); changes and stages are JSON. */
+export interface ReleaseRow {
+  id: number;
+  project_id: number;
+  target: string;
+  version: string;
+  changes: string;
+  started_at: number | null;
+  live_at: number | null;
+  outcome: string;
+  stages: string;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -700,6 +713,21 @@ CREATE TABLE IF NOT EXISTS contraption_turns (
   cache_write_tokens INTEGER
 );
 CREATE INDEX IF NOT EXISTS contraption_turns_day ON contraption_turns(contraption_id, user_id, started_at);
+-- One row per release of a scheme's target (#625, specs/release-monitor.md): the version people got, the minions
+-- in it (JSON [{ ticketId, number, title, stages }]), when its first change started on its way and went live,
+-- how it ended, and each stage's length in s (JSON { stage: s }). src/releases.ts writes and reads them.
+CREATE TABLE IF NOT EXISTS releases (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  target TEXT NOT NULL,
+  version TEXT NOT NULL,
+  changes TEXT NOT NULL DEFAULT '[]',
+  started_at INTEGER,
+  live_at INTEGER,
+  outcome TEXT NOT NULL,
+  stages TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS releases_target ON releases(project_id, target, id);
 `;
 
 /**
@@ -845,6 +873,7 @@ export const SCHEMA_HISTORY = [
   [39, 'last_actions (#538)'],
   [40, 'runner_load (#534)'],
   [41, 'step_times (#571)'],
+  [42, 'releases (#625)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1325,6 +1354,13 @@ export class Store {
     if (who.admin || this.inScheme(who.uid, GLOBAL_OWNER)) return null;
     const rows = this.db.prepare(`SELECT id FROM projects WHERE owner_id = ?1
       UNION SELECT project_id FROM project_members WHERE user_id = ?1`).all(who.uid ?? -1) as { id: number }[];
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /** The schemes a person owns or is a member of, admin or not: the Releases page's All view (#625). */
+  memberSchemes(uid: number | undefined): Set<number> {
+    const rows = this.db.prepare(`SELECT id FROM projects WHERE owner_id = ?1
+      UNION SELECT project_id FROM project_members WHERE user_id = ?1`).all(uid ?? -1) as { id: number }[];
     return new Set(rows.map((r) => r.id));
   }
 
@@ -2237,6 +2273,17 @@ export class Store {
 
   deleteSetting(key: string) {
     this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+  }
+
+  /** Record a release of a scheme's target (src/releases.ts). */
+  addRelease(r: Omit<ReleaseRow, 'id'>): number {
+    return Number(this.db.prepare('INSERT INTO releases (project_id, target, version, changes, started_at, live_at, outcome, stages) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(r.project_id, r.target, r.version, r.changes, r.started_at, r.live_at, r.outcome, r.stages).lastInsertRowid);
+  }
+
+  /** A target's newest releases, newest first. */
+  listReleases(projectId: number, target: string, limit: number): ReleaseRow[] {
+    return this.db.prepare('SELECT * FROM releases WHERE project_id = ? AND target = ? ORDER BY id DESC LIMIT ?').all(projectId, target, limit) as unknown as ReleaseRow[];
   }
 
   /** Every settings key starting with `prefix`. */

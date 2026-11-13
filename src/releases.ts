@@ -1,0 +1,418 @@
+// Releases (#625, specs/release-monitor.md): per scheme, each target it ships to people (a Target), the release
+// people have now, the next one on its way and how far along it is, the land line, test copies and the last few
+// releases. One shape for every kind of target, filled by one small reader per kind; only Citadel's own server
+// has a reader so far (CitadelServer below). Test copies (previews, builds' previews) belong to a target when
+// they run its code, else to the scheme, so a scheme with no target still lists them.
+// Served at GET /api/releases and sent as a `releases` event per scheme when its part changes. Importing it
+// starts nothing: server.ts calls poll() and live().
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import type { Ship } from './branch.ts';
+import type { Project, ReleaseRow, Store } from './db.ts';
+import { repoSlug } from './prlinks.ts';
+import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
+import { landPhase, TRACK, type LandTicket, type Wait } from './waits.ts';
+
+export interface Target {
+  /** Unique within its scheme: "citadel-server". */
+  id: string;
+  projectId: number;
+  /** Short, as it sits under its scheme's row: "Server". */
+  name: string;
+  kind: string;
+  link: string | null;
+}
+
+export interface Release {
+  /** A commit (sha) or a version number. */
+  version: string;
+  link: string | null;
+  changes: { ticketId: number; number: number | null; title: string }[];
+  /** When its first change started on its way (ms), and when it went live; null when not known. */
+  started: number | null;
+  live: number | null;
+  outcome: string;
+  /** Each stage's length, s. */
+  stages: Record<string, number>;
+}
+
+/** Where a change, or a whole next release, is: its stage, since when, its usual length, and what it waits on. */
+export interface Progress {
+  stage: string;
+  since: number;
+  /** The stage's usual length, s; null when not known or while it waits. */
+  usual: number | null;
+  /** What it waits on outside the pipeline ("2nd in line, behind #620"): no estimate then. */
+  waitingOn: string | null;
+  text: string;
+  done?: number;
+  total?: number;
+}
+
+export interface Change extends Progress {
+  ticketId: number;
+  number: number | null;
+  title: string;
+}
+
+export interface Next extends Progress {
+  /** The kind's stages in order, each with its usual length in s (null: not known, or a wait): the bar's segments. */
+  stages: { name: string; usual: number | null }[];
+  /** When the whole release should be live (ms), only when the current stage and every one after it have a usual time and none waits. */
+  eta: number | null;
+  /** The changes on their way, the furthest along first; the release's own stage is the first's. */
+  changes: Change[];
+}
+
+export interface LineEntry {
+  /** "#620", or the label of a run that isn't a minion's ("tools/deploy.sh"). */
+  name: string;
+  ticketId: number | null;
+  /** Holding the lock (true) or waiting for it. */
+  holds: boolean;
+  stage: string;
+  since: number;
+}
+
+export interface TestCopy {
+  kind: 'preview' | 'build-preview';
+  /** The target whose code it runs, or null for the scheme's own list. */
+  target: string | null;
+  name: string;
+  /** Relative to the app's root, as previewPath gives it. */
+  path: string;
+  ticketId?: number;
+  build?: number;
+  running: boolean;
+  /** The commit it runs, while it runs. */
+  commit: string | null;
+}
+
+export interface TargetView {
+  target: Target;
+  current: Release | null;
+  next: Next | null;
+  line: LineEntry[];
+  testCopies: TestCopy[];
+  /** The releases before the current one, newest first. */
+  recent: Release[];
+}
+
+export interface SchemeReleases {
+  projectId: number;
+  targets: TargetView[];
+  /** Test copies of no target. */
+  testCopies: TestCopy[];
+}
+
+/** One kind of target's reader: its targets now (it may find none). */
+export interface Reader {
+  read(): Omit<TargetView, 'testCopies'>[];
+}
+
+const RECENT = 5;
+
+/** A releases row as a Release. */
+export function releaseOf(row: ReleaseRow, link: string | null): Release {
+  const changes = JSON.parse(row.changes) as (Release['changes'][number] & { stages?: unknown })[];
+  return {
+    version: row.version, link, outcome: row.outcome, started: row.started_at, live: row.live_at, stages: JSON.parse(row.stages),
+    changes: changes.map(({ ticketId, number, title }) => ({ ticketId, number, title })),
+  };
+}
+
+export interface ReleasesDeps {
+  store: Store;
+  readers: Reader[];
+  /** Every scheme's test copies. */
+  testCopies: () => Map<number, TestCopy[]>;
+  broadcast: (msg: object) => void;
+}
+
+export class Releases {
+  private d: ReleasesDeps;
+  private shown = new Map<number, string>();
+  private last: SchemeReleases[] = [];
+  constructor(d: ReleasesDeps) {
+    this.d = d;
+  }
+
+  /** Every scheme with a target or a test copy, read afresh. */
+  read(): SchemeReleases[] {
+    const copies = this.d.testCopies();
+    const byScheme = new Map<number, SchemeReleases>();
+    const scheme = (id: number) => byScheme.get(id) ?? byScheme.set(id, { projectId: id, targets: [], testCopies: [] }).get(id)!;
+    for (const reader of this.d.readers) {
+      for (const t of reader.read()) scheme(t.target.projectId).targets.push({ ...t, testCopies: [] });
+    }
+    for (const [id, list] of copies) {
+      for (const c of list) {
+        const own = c.target ? byScheme.get(id)?.targets.find((t) => t.target.id === c.target) : undefined;
+        (own ? own.testCopies : scheme(id).testCopies).push(own ? c : { ...c, target: null });
+      }
+    }
+    return [...byScheme.values()].sort((a, b) => a.projectId - b.projectId);
+  }
+
+  /** Read again, and send each scheme whose part changed (an empty one when it has nothing any more). */
+  poll() {
+    this.last = this.read();
+    const now = new Map(this.last.map((s) => [s.projectId, s]));
+    for (const id of new Set([...this.shown.keys(), ...now.keys()])) {
+      const s = now.get(id) ?? { projectId: id, targets: [], testCopies: [] };
+      const json = JSON.stringify(s);
+      if (this.shown.get(id) === json) continue;
+      const first = !this.shown.has(id);
+      if (now.has(id)) this.shown.set(id, json);
+      else this.shown.delete(id);
+      // The first poll sends nothing: a page asks GET /api/releases when it opens.
+      if (!first || !now.has(id)) this.d.broadcast({ type: 'releases', projectId: id, releases: s });
+    }
+  }
+
+  /** The schemes `visible` allows (null: all), as the last poll read them, or afresh before the first. */
+  view(visible: (projectId: number) => boolean): SchemeReleases[] {
+    if (!this.shown.size) this.last = this.read();
+    return this.last.filter((s) => visible(s.projectId));
+  }
+}
+
+const run = promisify(execFile);
+async function git(args: string[], cwd: string): Promise<string | null> {
+  try {
+    return (await run('git', args, { cwd, timeout: 15_000, maxBuffer: 16 * 1024 * 1024 })).stdout;
+  } catch {
+    return null;
+  }
+}
+
+export const CITADEL_TARGET = 'citadel-server';
+/** When each change in flight first reached each stage: { [ticket id]: { [stage]: ms } }. Kept, as the restart that makes it live restarts this server. */
+const TRACKING = 'releases-tracking';
+const TRACKING_MAX_AGE = 24 * 60 * 60_000;
+
+export interface CitadelDeps {
+  store: Store;
+  /** The scheme whose repo the live checkout is, or null before it's known. */
+  scheme: () => Project | null;
+  /** The commit the server runs. */
+  head: () => string | null;
+  /** The land line, as Waits last read it. */
+  line: () => LandTicket[];
+  ticketFor: (label: string) => number | null;
+  /** A minion's wait (Waits.wait): its landing's stage, or the idle restart. */
+  wait: (ticketId: number) => Wait | null;
+  ship: (ticketId: number) => Ship | null;
+  /** A stage's usual length in s (Waits.usual, the wait-usual setting). */
+  usual: (key: string) => number | null;
+  /** Running turns the restart waits for. */
+  interruptible: () => number;
+  now?: () => number;
+}
+
+/**
+ * Citadel's own server (tools/land.sh → tools/deploy.sh): a release is the commit the server runs. Its next release
+ * is every change in the land line, or on main and not live yet; its stages are the land track's (TRACK). A release
+ * row is written when the server sees a new commit running (live, from liveOn in server.ts), with the minions whose
+ * branch tips landed since the last row.
+ */
+export class CitadelServer implements Reader {
+  private d: CitadelDeps;
+  private tracking: Record<string, Record<string, number>>;
+  private writing: Promise<void> = Promise.resolve();
+  constructor(d: CitadelDeps) {
+    this.d = d;
+    this.tracking = d.store.getSetting(TRACKING) ?? {};
+  }
+
+  private now = () => (this.d.now ?? Date.now)();
+
+  private link(p: Project, sha: string): string | null {
+    const slug = repoSlug(p.repo_url);
+    return slug ? `https://github.com/${slug}/commit/${sha}` : null;
+  }
+
+  /** The usual length of each stage of the track, s; the line is a wait, so it has none. */
+  private stageUsual(stage: string): number | null {
+    const { usual } = this.d;
+    switch (stage) {
+      case 'rebase': return usual('land:rebase');
+      case 'test': return usual('land:ci') ?? usual('land:tests');
+      case 'deploy': return usual('land:deploy');
+      case 'restart': return usual('restart');
+      case 'live': return 0;
+      default: return null;
+    }
+  }
+
+  /** Where one change is: from its landing's wait while it's in the land line, else from its ship stage. */
+  private progress(id: number, ship: Ship | null, loneDeploy: LandTicket | undefined): Progress | null {
+    const w = this.d.wait(id);
+    if (w?.kind === 'land') {
+      const waits = w.stage === 'line';
+      const p: Progress = { stage: w.stage, since: w.since, usual: waits ? null : w.usual, waitingOn: waits ? w.text : null, text: w.text };
+      if (w.total) Object.assign(p, { done: w.done, total: w.total });
+      return p;
+    }
+    if (!ship) return null;
+    // Stable while it lasts: when this stage was first seen (track), so a poll doesn't move it.
+    const since = (stage: string) => (w?.kind === 'restart' ? w.since : this.tracking[id]?.[stage] ?? this.now());
+    if (ship.stage === 'deploying') {
+      const n = this.d.interruptible();
+      const text = n ? `the restart waits for ${n} running turn${n === 1 ? '' : 's'} to end` : 'restarting';
+      return { stage: 'restart', since: since('restart'), usual: n ? null : this.stageUsual('restart'), waitingOn: n ? text : null, text };
+    }
+    if (ship.stage === 'failed') return { stage: 'deploy', since: since('deploy'), usual: null, waitingOn: ship.text, text: ship.text };
+    if (ship.stage !== 'main') return null;
+    // On main and not live: a deploy run alone (tools/deploy.sh) may be carrying it; else nothing is yet.
+    if (loneDeploy) {
+      const ph = landPhase(loneDeploy.phase);
+      return { stage: ph.stage, since: loneDeploy.mtime, usual: this.stageUsual(ph.stage), waitingOn: null, text: ph.text };
+    }
+    return { stage: 'deploy', since: since('deploy'), usual: null, waitingOn: 'on main, waiting for a deploy', text: ship.text };
+  }
+
+  /** Note when each change first reached each stage, for the release's stage times; a change that went back starts afresh. */
+  private track(changes: Change[]) {
+    const now = this.now();
+    let dirty = false;
+    for (const c of changes) {
+      const had = this.tracking[c.ticketId] ?? {};
+      const latest = Math.max(-1, ...Object.keys(had).map((s) => TRACK.indexOf(s)));
+      const t = TRACK.indexOf(c.stage) < latest ? {} : { ...had };
+      if (!(c.stage in t)) {
+        t[c.stage] = c.since;
+        this.tracking[c.ticketId] = t;
+        dirty = true;
+      }
+    }
+    for (const [id, t] of Object.entries(this.tracking)) {
+      if (now - Math.max(...Object.values(t)) > TRACKING_MAX_AGE) {
+        delete this.tracking[id];
+        dirty = true;
+      }
+    }
+    if (dirty) this.d.store.setSetting(TRACKING, this.tracking);
+  }
+
+  read(): Omit<TargetView, 'testCopies'>[] {
+    const p = this.d.scheme();
+    if (!p) return [];
+    const { store } = this.d;
+    const head = this.d.head();
+    const rows = store.listReleases(p.id, CITADEL_TARGET, RECENT + 1);
+    const currentRow = head && rows[0]?.version === head ? rows[0] : null;
+    const current = currentRow ? releaseOf(currentRow, this.link(p, currentRow.version))
+      : head ? { version: head, link: this.link(p, head), changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
+    const recent = rows.slice(currentRow ? 1 : 0, (currentRow ? 1 : 0) + RECENT).map((r) => releaseOf(r, this.link(p, r.version)));
+
+    const lineTickets = this.d.line();
+    const line: LineEntry[] = lineTickets.map((t) => {
+      const id = this.d.ticketFor(t.label);
+      const ticket = id != null ? store.getTicket(id) : undefined;
+      return {
+        name: ticket ? `#${ticket.number ?? ticket.id}` : t.label.replace(/ \(.*\)$/, ''), ticketId: ticket?.id ?? null,
+        holds: t.got > 0, stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
+      };
+    });
+    // A deploy run alone holding the lock carries whatever is on main.
+    const loneDeploy = lineTickets.find((t) => t.got > 0 && t.label === 'tools/deploy.sh');
+
+    const changes: Change[] = [];
+    const inLine = new Set(line.flatMap((e) => (e.ticketId != null ? [e.ticketId] : [])));
+    for (const t of store.listTickets(p.id)) {
+      // A dismissed minion's ship stage isn't looked at again (ShipStatus.poll), so only open ones and the land line count.
+      if (t.kind !== 'ticket' || !t.branch || (t.status === 'closed' && !inLine.has(t.id))) continue;
+      const ship = this.d.ship(t.id);
+      if (!inLine.has(t.id) && !ship) continue;
+      const pr = this.progress(t.id, ship, loneDeploy);
+      if (pr) changes.push({ ticketId: t.id, number: t.number, title: t.title, ...pr });
+    }
+    changes.sort((a, b) => TRACK.indexOf(b.stage) - TRACK.indexOf(a.stage) || a.since - b.since);
+    this.track(changes);
+
+    let next: Next | null = null;
+    if (changes.length) {
+      const lead = changes[0];
+      const stages = TRACK.map((name) => ({ name, usual: this.stageUsual(name) }));
+      const after = stages.slice(TRACK.indexOf(lead.stage) + 1);
+      const eta = lead.waitingOn || lead.usual == null || after.some((s) => s.usual == null)
+        ? null : lead.since + (lead.usual + after.reduce((sum, s) => sum + s.usual!, 0)) * 1000;
+      const { ticketId: _i, number: _n, title: _t, ...at } = lead;
+      next = { ...at, stages, eta, changes };
+    }
+    return [{ target: { id: CITADEL_TARGET, projectId: p.id, name: 'Server', kind: CITADEL_TARGET, link: null }, current, next, line, recent }];
+  }
+
+  /** The server now runs `head`: write its release row once, with the changes that landed since the last one. */
+  live(head: string | null): Promise<void> {
+    this.writing = this.writing.then(() => this.write(head)).catch((err) => console.error('Writing the release row failed:', err));
+    return this.writing;
+  }
+
+  private async write(head: string | null) {
+    const p = this.d.scheme();
+    if (!head || !p?.repo_dir) return;
+    const { store } = this.d;
+    const last = store.listReleases(p.id, CITADEL_TARGET, 1)[0];
+    if (last?.version === head) return;
+    const landed = last ? await this.landed(p, last.version, head) : [];
+    const liveAt = this.now();
+    const changes = landed.map((t) => ({ ticketId: t.id, number: t.number, title: t.title, stages: this.tracking[t.id] ?? {} }));
+    // The stage lengths of the change whose deploy carried the release live: the latest to start deploying.
+    const carrier = changes.filter((c) => c.stages.deploy != null).sort((a, b) => b.stages.deploy! - a.stages.deploy!)[0];
+    const stages: Record<string, number> = {};
+    if (carrier) {
+      const seen = TRACK.filter((s) => carrier.stages[s] != null);
+      seen.forEach((s, i) => (stages[s] = Math.max(0, Math.round(((i + 1 < seen.length ? carrier.stages[seen[i + 1]] : liveAt) - carrier.stages[s]) / 1000))));
+    }
+    const starts = changes.flatMap((c) => Object.values(c.stages));
+    store.addRelease({
+      project_id: p.id, target: CITADEL_TARGET, version: head, changes: JSON.stringify(changes),
+      started_at: starts.length ? Math.min(...starts) : null, live_at: liveAt, outcome: 'live', stages: JSON.stringify(stages),
+    });
+    if (landed.length) {
+      for (const t of landed) delete this.tracking[t.id];
+      store.setSetting(TRACKING, this.tracking);
+    }
+  }
+
+  /**
+   * The scheme's minions whose branch tip is a commit in prev..head: land.sh rebases a branch and fast-forwards
+   * main to it, so a landed branch's tip is on main. A tip committed before its minion started is where a new branch
+   * began, not its work.
+   */
+  private async landed(p: Project, prev: string, head: string) {
+    const [log, refs] = await Promise.all([
+      git(['log', '--format=%H %ct', `${prev}..${head}`], p.repo_dir!),
+      git(['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads/'], p.repo_dir!),
+    ]);
+    if (log == null || refs == null) return [];
+    const at = new Map(log.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ct]) => [sha, Number(ct) * 1000]));
+    const tips = new Map(refs.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ref]) => [ref, sha]));
+    return this.d.store.listTickets(p.id)
+      .filter((t) => t.kind === 'ticket' && t.branch && at.has(tips.get(t.branch) ?? '') && at.get(tips.get(t.branch)!)! >= t.created_at - 1000)
+      .sort((a, b) => (a.number ?? a.id) - (b.number ?? b.id));
+  }
+}
+
+/** Every scheme's previews that people were offered, and the builds' previews of the scheme whose code this server runs. */
+export function previewCopies(store: Store, d: { own: () => Project | null; running: (key: string) => { commit: string | null } | null; builds: (projectId: number) => number[] }): Map<number, TestCopy[]> {
+  const out = new Map<number, TestCopy[]>();
+  const own = d.own();
+  const add = (id: number, c: TestCopy) => (out.get(id) ?? out.set(id, []).get(id)!).push(c);
+  for (const key of store.settingKeys(previewKey(0).replace(/0$/, ''))) {
+    const t = store.getTicket(Number(key.split(':')[1]));
+    if (!t || t.status === 'closed') continue;
+    const r = d.running(String(t.id));
+    // A preview runs this server's code from the minion's branch.
+    add(t.project_id, { kind: 'preview', target: own?.id === t.project_id ? CITADEL_TARGET : null, name: `#${t.number ?? t.id} ${t.title}`, path: previewPath(t.id), ticketId: t.id, running: !!r, commit: r?.commit ?? null });
+  }
+  if (own) {
+    for (const n of d.builds(own.id)) {
+      const r = d.running(`build-${n}`);
+      add(own.id, { kind: 'build-preview', target: CITADEL_TARGET, name: `Build ${n}`, path: buildPreviewPath(n), build: n, running: !!r, commit: r?.commit ?? null });
+    }
+  }
+  return out;
+}

@@ -139,6 +139,12 @@ export class Previews {
     return !!this.store.getSetting(previewKey(ticketId));
   }
 
+  /** A running preview by its key (a ticket id, or build-<n> for a build's), with the commit it runs; null when it isn't running. */
+  runningAt(key: string): { commit: string | null } | null {
+    const r = this.running.get(key);
+    return r ? { commit: r.head } : null;
+  }
+
   isRunning(ticketId: number): boolean {
     return this.running.has(String(ticketId));
   }

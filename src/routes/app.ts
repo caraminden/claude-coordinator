@@ -106,4 +106,10 @@ export const appRoutes: Route[] = [
     const seen = store.visibleProjects(session);
     return json(res, 200, await prOwners(store.listProjects().filter((p) => !seen || seen.has(p.id)), (id) => store.listTickets(id)));
   } },
+  // The release monitor (#625, src/releases.ts): the schemes this person may see; ?scope=member keeps those they own or
+  // are a member of, for the All view (Josh, 2026-11-13: "all should only show schemes you are a member of").
+  { method: 'GET', path: '/api/releases', who: ['person'], handler: ({ res, url, app: { store, releases }, session }) => {
+    const member = url.searchParams.get('scope') === 'member' ? store.memberSchemes(session.uid) : null;
+    return json(res, 200, { schemes: releases.view((id) => store.canSee(session, id) && (!member || member.has(id))) });
+  } },
 ];

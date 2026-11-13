@@ -303,9 +303,12 @@ export class Waits {
     };
   }
 
+  /** The land line as the last poll read it (src/releases.ts reads it too). */
+  line: LandTicket[] = [];
+
   /** Labels found to be a minion; a miss is looked up again next time, as its minion may not be there yet. */
   private byLabel = new Map<string, number>();
-  private ticketFor(label: string): number | null {
+  ticketFor(label: string): number | null {
     if (!this.byLabel.has(label)) {
       const { store } = this.d;
       let t = label.includes('/') && label !== 'tools/deploy.sh' ? store.ticketByBranch(label) : undefined;
@@ -330,6 +333,7 @@ export class Waits {
     const next = new Map<number, Wait & { key?: string }>();
     if (this.d.deployState) {
       const { line, took } = readLandLine(this.d.deployState, this.d.alive);
+      this.line = line;
       // Before ci.landings below lets go of a landing that left its CI wait, so its run's last stage is still there.
       this.d.landLine?.(line.map((t) => {
         const id = this.ticketFor(t.label);

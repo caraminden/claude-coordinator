@@ -58,6 +58,7 @@ import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { Waits } from './src/waits.ts';
+import { CitadelServer, previewCopies, Releases } from './src/releases.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
@@ -212,13 +213,8 @@ const previews = PREVIEW ? null : new Previews(store, DATA_DIR);
 if (previews) {
   previews.onChange = (ticketId) => runner.broadcastTicket(ticketId);
   runner.onClose = (ticketId) => previews.stop(ticketId, true);
-  // Builds' previews are of this server's own code, so only its own scheme has them; checked again once a deploy moves the live commit.
-  let own: { head: string | null; id: number | null } | null = null;
-  previews.buildScheme = () => {
-    // Only a found scheme is kept: one made or cloned after the first look is found on the next.
-    if (own?.head !== waiters.head || own.id === null) own = { head: waiters.head, id: store.listProjects().find((p) => runsRepo(p.repo_dir, waiters.head))?.id ?? null };
-    return own.id === null ? null : store.getProject(own.id) ?? null;
-  };
+  // Builds' previews are of this server's own code, so only its own scheme has them.
+  previews.buildScheme = ownScheme;
 }
 if (!BOOT_CHECK) runner.recover();
 if (runner.units && !BOOT_CHECK) {
@@ -229,6 +225,13 @@ if (runner.units && !BOOT_CHECK) {
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
+// The scheme whose code this server runs (its repo has the live commit); checked again once a deploy moves the live commit.
+let own: { head: string | null; id: number | null } | null = null;
+function ownScheme(): Project | null {
+  // Only a found scheme is kept: one made or cloned after the first look is found on the next.
+  if (own?.head !== waiters.head || own.id === null) own = { head: waiters.head, id: store.listProjects().find((p) => runsRepo(p.repo_dir, waiters.head))?.id ?? null };
+  return own.id === null ? null : store.getProject(own.id) ?? null;
+}
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
 waiters.prs = githubPrs(githubOf);
@@ -257,6 +260,9 @@ function liveOn(head: string | null) {
   void (async () => {
     await waiters.check(head);
     for (const id of await waiters.pendingLive()) runner.deployLive(id);
+    // Last, so nothing above waits on it; after waiters.check, which moves the head that says whose code is live.
+    await citadelServer.live(head);
+    releases.poll();
   })().catch((err) => console.error('Checking waiters after a deploy failed:', err));
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
@@ -433,6 +439,15 @@ const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects
   },
 });
 runner.wait = waits.wait;
+// The release monitor's data (#625, src/releases.ts): Citadel's own server as a target, every scheme's test copies.
+const citadelServer = new CitadelServer({
+  store, scheme: ownScheme, head: () => waiters.head, line: () => waits.line, ticketFor: (label) => waits.ticketFor(label),
+  wait: waits.wait, ship: ships.ship, usual: waits.usual, interruptible: () => runner.interruptible(),
+});
+const releases = new Releases({
+  store, readers: [citadelServer], broadcast,
+  testCopies: () => previewCopies(store, { own: ownScheme, running: (key) => previews?.runningAt(key) ?? null, builds: (id) => builds.get(id).map((b) => b.build) }),
+});
 
 runner.onFilesMayChange = (ticketId) => {
   artifacts.schedule(ticketId);
@@ -497,7 +512,10 @@ if (!BOOT_CHECK || PREVIEW) {
   void safely('builds', () => builds.poll());
   setInterval(() => void safely('builds', () => builds.poll()), 2 * SHIP_POLL_MS).unref();
   // A few small files, so every 2 s: a landing's phases last tens of seconds.
-  setInterval(() => void safely('waits', () => waits.poll()), 2_000).unref();
+  setInterval(() => void safely('waits', () => {
+    waits.poll();
+    releases.poll();
+  }), 2_000).unref();
   ciRuns.start();
 }
 
@@ -662,7 +680,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
+  store, runner, auth, waiters, previews, releases, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
   get assetVersion() {

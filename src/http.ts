@@ -198,6 +198,8 @@ export interface App {
   auth: Auth;
   waiters: LiveWaiters;
   previews: Previews | null;
+  /** The release monitor's data: each scheme's targets and test copies (src/releases.ts, #625). */
+  releases: Releases;
   machines: MachineRelay;
   pusher: Pusher;
   /** People's own GitHub links (src/github-link.ts). */

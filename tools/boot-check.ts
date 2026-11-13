@@ -72,6 +72,9 @@ try {
   const turnStore = new Store(copy);
   // A running ultra review's record names its live working folder, which a server recovering it would delete.
   turnStore.deleteSetting('ultrareview_running');
+  // The stand-in tests Claude's launch, not a real Codex turn or review. Copied volume paths can
+  // otherwise select (or wake) the server login's Codex container, bypassing CLAUDE_BIN entirely.
+  turnStore.db.prepare("DELETE FROM settings WHERE key GLOB 'container_home:*' OR key GLOB 'codex:on:user:*'").run();
   // A scheme's worktree folders beside the live database: a Taskmaster's launch lists each one (#92).
   const worktrees = (projectId: number) => {
     try {
@@ -114,7 +117,9 @@ try {
   // makes from COORDINATOR_ADMIN below when the copy has no people yet.
   const adminLogin = turnStore.listUsers().find((u) => u.admin && !u.disabled_at)?.login ?? 'boot-check';
   turnStore.db.close();
-  const claude = join(root, 'claude');
+  // Keep the executable separate from CLAUDE_CONFIG_DIR, which must be a directory.
+  mkdirSync(join(root, 'bin'));
+  const claude = join(root, 'bin', 'claude');
   writeFileSync(claude, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(import.meta.dirname, 'boot-check-claude.ts'))} "$@"\n`);
   chmodSync(claude, 0o755);
 

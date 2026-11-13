@@ -28,6 +28,51 @@ async function deadPort(): Promise<number> {
 const cache = join(homedir(), '.cache', 'ms-playwright');
 const hasChromium = existsSync(cache) && readdirSync(cache).some((d) => /^chromium_headless_shell-\d+$/.test(d));
 
+test('the stand-in executable leaves the Claude config path available as a directory', { timeout: 60_000 }, async () => {
+  const dir = join(root, 'config-directory');
+  mkdirSync(join(dir, 'public'), { recursive: true });
+  mkdirSync(join(dir, 'src'));
+  const db = join(dir, 'coordinator.db');
+  new Store(db).db.close();
+  writeFileSync(join(dir, 'src', 'db.ts'), `export * from ${JSON.stringify(join(repo, 'src', 'db.ts'))};\n`);
+  const seen = join(dir, 'seen.txt');
+  // Stop after inspecting the actual server environment: this test needs no browser or real launcher.
+  writeFileSync(join(dir, 'server.ts'), `import { mkdirSync, writeFileSync } from 'node:fs';
+mkdirSync(process.env.CLAUDE_CONFIG_DIR + '/projects/memory', { recursive: true });
+writeFileSync(${JSON.stringify(seen)}, 'config directory created');
+process.exit(1);
+`);
+  await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), dir, db], { timeout: 50_000 }).catch(() => {});
+  assert.equal(readFileSync(seen, 'utf8'), 'config directory created');
+});
+
+test('the boot copy uses its stand-in Claude even when the server login has Codex enabled', { skip: !hasChromium, timeout: 200_000 }, async () => {
+  const dir = join(root, 'codex-enabled');
+  mkdirSync(dir);
+  const db = join(dir, 'coordinator.db');
+  const store = new Store(db);
+  const admin = store.createUser({ name: 'Boot', login: 'boot', admin: true, server_login: true });
+  const project = store.createProject('Codex enabled', null);
+  store.setProjectRepoDir(project.id, dir);
+  store.createTicket({ project_id: project.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'boot' });
+  // A stand-in volume: only the presence of auth.json is inspected, never its contents.
+  const home = join(dir, 'volume');
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  writeFileSync(join(home, '.codex', 'auth.json'), '{}');
+  store.setSetting(`container_home:${admin.id}`, home);
+  store.setSetting(`codex:on:user:${admin.id}`, true);
+  store.db.close();
+  const run = await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), repo, db], { timeout: 190_000 })
+    .then(({ stderr }) => ({ ok: true, out: stderr }), (err) => ({ ok: false, out: String(err.stderr) }));
+  assert.ok(run.ok, run.out);
+  assert.match(run.out, /a Taskmaster turn started/);
+  assert.match(run.out, /a minion turn started/);
+  const original = new Store(db);
+  assert.equal(original.getSetting(`container_home:${admin.id}`), home);
+  assert.equal(original.getSetting(`codex:on:user:${admin.id}`), true);
+  original.db.close();
+});
+
 test('a contraption whose service is down and whose keys don\'t open in the copy: the app still boots clean', { skip: !hasChromium && 'no headless Chromium (the boot check needs one)', timeout: 200_000 }, async () => {
   const db = join(root, 'coordinator.db');
   const store = new Store(db);

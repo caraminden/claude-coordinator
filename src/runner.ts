@@ -97,6 +97,7 @@ export interface QueuedMessage {
   typed?: boolean; // a signed-in person sent it from the chat; only these can be a go to merge (#201)
   asker?: number | null; // whose ask it is (Store.turnAsker), taken when it was sent; null for no person's
   fresh?: 'handoff' | 'compact'; // a Taskmaster's fresh-start step (#406), which runs alone
+  fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
 }
 
 /**
@@ -192,6 +193,8 @@ const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
 /** The note the server last wrote about a failed or stopped turn, which the next turn that ends well clears (#428). */
 const failNoteKey = (ticketId: number) => `failnote:${ticketId}`;
+/** Why a minion's close_self was cancelled at its turn's end, told to its next turn (#619). */
+const closeCancelledKey = (ticketId: number) => `close-cancelled:${ticketId}`;
 /** Idle this long, a Taskmaster's prompt cache (1 hour) is still warm, so its handoff turn reads it cheaply. */
 export const FRESH_IDLE_MS = 55 * 60_000;
 /** Past this much context (tokens), a Taskmaster starts fresh by itself: as its turn ends (#423), or idle (#406). */
@@ -712,6 +715,7 @@ export class Runner {
   close(ticketId: number, text: string): Promise<void> {
     if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
     this.cancelNetWait(ticketId);
+    this.store.deleteSetting(closeCancelledKey(ticketId));
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
@@ -1293,9 +1297,9 @@ export class Runner {
    * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
    * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null } & object = {}, steer = false, files: MessageFile[] = []) {
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean } & object = {}, steer = false, files: MessageFile[] = []) {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
-    const { asker: askedBy, ...shown } = extra;
+    const { asker: askedBy, fyi, ...shown } = extra;
     extra = shown;
     const ticket = this.store.getTicket(ticketId);
     const refused = ticket && this.refuseTurn?.(ticket, author, extra.from);
@@ -1320,7 +1324,7 @@ export class Runner {
       author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
     });
-    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), asker };
+    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(fyi ? { fyi: true } : {}), asker };
     // A person's typed "merge it" stands for the whole scheme until its PR merges (#260), whenever a turn reads it.
     if (ticket) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg);
     // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
@@ -1926,8 +1930,11 @@ export class Runner {
     const step = batch[0]?.fresh;
     // A fresh session's first turn starts from the old session's handoff.
     const handoff = !step && !ticket.session_id ? this.store.getSetting<string>(handoffKey(ticket.id)) : null;
+    const cancelled = !step && this.store.getSetting<string>(closeCancelledKey(ticket.id));
+    if (cancelled) this.store.deleteSetting(closeCancelledKey(ticket.id));
+    const cancelledLine = cancelled ? [{ author: 'System', text: `Your close_self at the end of your last turn was cancelled: ${cancelled}, so this minion is still open. Once nothing is left for people, call close_self again.`, images: [] }] : [];
     const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
-      : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...handBack, ...batch]);
+      : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...handBack, ...cancelledLine, ...batch]);
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     const typer = typedBy ? this.store.getUser(typedBy) : undefined;
@@ -2254,11 +2261,16 @@ export class Runner {
     const reason = this.closing.get(ticketId);
     this.closing.delete(ticketId);
     // Checked again here: the turn may have posted a card or set try/ready after close_self.
-    const keep = closing && status === 'idle' && !stopped && !signal ? (this.queued(ticketId) ? 'a new message arrived' : this.keptOpen(ticketId)) : null;
+    // A notice that needs no action (the PR it just merged, #619) doesn't count as a new message; it stays in the chat, unrun.
+    const asks = this.queues.get(ticketId)?.some((m) => !m.fyi);
+    const keep = closing && status === 'idle' && !stopped && !signal ? (asks ? 'a new message arrived' : this.keptOpen(ticketId)) : null;
     if (closing && status === 'idle' && !stopped && !signal && !keep) {
+      this.queues.delete(ticketId);
       this.close(ticketId, `Claude dismissed this minion${reason ? `: ${reason}` : '.'}`);
     } else {
       if (keep) this.emit(ticketId, 'note', { text: `Claude asked to dismiss this minion, but ${keep}, so it stays open.` });
+      // The note is for people; the next turn hears it too, so the minion doesn't sit open unaware (#619).
+      if (keep) this.store.setSetting(closeCancelledKey(ticketId), keep);
       this.setStatus(ticketId, status);
     }
     if (turn && status === 'idle' && !stopped && !signal && !closing) this.freshAtTurnEnd(ticketId, turn);

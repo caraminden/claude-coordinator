@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -20,8 +20,9 @@ const fake = join(root, 'claude-fake');
 writeFileSync(
   fake,
   `#!${process.execPath}
-const { existsSync, readFileSync } = require('node:fs');
-process.stdin.resume();
+const { appendFileSync, existsSync, readFileSync } = require('node:fs');
+// Each turn's prompt, kept for the tests that read what a turn was told.
+process.stdin.on('data', (d) => appendFileSync(${JSON.stringify(join(root, 'prompts.log'))}, d));
 const wait = setInterval(() => {
   const release = ${JSON.stringify(join(root, 'release'))};
   if (!existsSync(release)) return;
@@ -103,6 +104,44 @@ test('a message queued during the turn keeps it open and runs next', async () =>
   assert.match(notes(id)[0], /new message arrived/);
   await endTurn(id, 'ok');
   assert.equal(store.getTicket(id)!.status, 'idle');
+});
+
+test('a GitHub notice that needs no action, like its own merge, leaves a pending close armed and starts no turn (#619)', async () => {
+  const id = newTicket();
+  runner.send(id, 'Cara', 'land it');
+  runner.closeAfterTurn(id, 'Merged PR #82');
+  runner.send(id, 'GitHub', 'PR #82 was merged by josh.', [], { fyi: true });
+  await endTurn(id, 'ok');
+  assert.equal(store.getTicket(id)!.status, 'closed');
+  assert.deepEqual(notes(id), ['Claude dismissed this minion: Merged PR #82']);
+  assert.equal(runner.queued(id), 0);
+  // The notice stays in the chat.
+  assert.ok(store.listEvents(id).some((e) => e.kind === 'user_message' && JSON.parse(e.data).text === 'PR #82 was merged by josh.'));
+});
+
+test('a GitHub notice that needs action, or a person beside a no-action one, still cancels the close, and the next turn is told (#619)', async () => {
+  for (const extra of [[], [['Josh', 'one more thing', {}]]] as const) {
+    const id = newTicket();
+    runner.send(id, 'Cara', 'land it');
+    runner.closeAfterTurn(id, null);
+    if (extra.length) runner.send(id, 'GitHub', 'PR #82 was merged by josh.', [], { fyi: true });
+    else runner.send(id, 'GitHub', 'CI failed on abc1234 in PR #82 — build: https://ci/build');
+    for (const [who, text, more] of extra) runner.send(id, who, text, [], more);
+    rmSync(join(root, 'prompts.log'), { force: true });
+    rmSync(join(root, 'release'), { force: true });
+    writeFileSync(join(root, 'release'), 'ok');
+    while (!notes(id).length) await new Promise((r) => setTimeout(r, 20));
+    assert.match(notes(id)[0], /new message arrived/);
+    // The second turn's prompt says the close was cancelled, before the message that cancelled it.
+    const prompts = () => readFileSync(join(root, 'prompts.log'), { encoding: 'utf8', flag: 'a+' });
+    for (const end = Date.now() + 5000; !prompts().includes('land it') || !/one more thing|CI failed/.test(prompts()); ) {
+      if (Date.now() > end) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.match(prompts(), /close_self at the end of your last turn was cancelled: a new message arrived/);
+    await endTurn(id, 'ok');
+    assert.equal(store.getTicket(id)!.status, 'idle');
+  }
 });
 
 test('refuses while a question or plan card waits on people, or the state is try', async () => {

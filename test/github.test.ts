@@ -322,6 +322,18 @@ test('a draft marked ready for review gets the full window before a no-checks nu
   assert.match(sent[0], /^CI hasn't started on abc1234 in PR #12: no checks after 10 minutes\. /);
 });
 
+test('only merges, closes and passed CI are notices that need no action (#619)', () => {
+  const fyi = (p: PrSnapshot) => decide(p, new Set(), opts()).fyi;
+  assert.equal(fyi(pr({ state: 'MERGED', closedAt: T, closedBy: 'josh' })), true);
+  assert.equal(fyi(pr({ state: 'CLOSED', closedAt: T, closedBy: 'josh' })), true);
+  assert.equal(fyi(pr({ checks: [check('build', 'passed')] })), true);
+  assert.equal(fyi(pr({ checks: [check('build', 'failed')] })), false);
+  assert.equal(fyi(pr({ remarks: [remark(1)] })), false);
+  // One that needs action makes the whole message need it.
+  assert.equal(fyi(pr({ state: 'MERGED', closedAt: T, closedBy: 'josh', remarks: [remark(1)] })), false);
+  assert.equal(fyi(pr()), false);
+});
+
 test('merged or closed by someone is sent once; by the ticket\'s own turn it is not', () => {
   const merged = pr({ state: 'MERGED', closedAt: T, closedBy: 'josh', checks: [check('build', 'failed')] });
   const seen = new Set(['baseline']);

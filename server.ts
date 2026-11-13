@@ -501,7 +501,7 @@ if (!BOOT_CHECK || PREVIEW) {
 }
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
-const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
+const github = new GithubWatcher(store, (ticketId, text, fyi) => runner.send(ticketId, GITHUB_NAME, text, [], fyi ? { fyi } : {}));
 github.as = githubOf;
 github.onPr = (id, repo, as, pr) => ciRuns.pr(id, repo, as, pr);
 if (!BOOT_CHECK) github.start();

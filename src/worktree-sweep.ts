@@ -35,30 +35,46 @@ export async function ownCheckout(dir: string): Promise<boolean> {
 }
 
 /**
- * Save what a worktree holds beyond `branch` (null: a detached HEAD, always saved) into `ref`: a commit of
- * the whole working tree (tracked and new, not ignored, files) whose parent is HEAD. Nothing in the
- * worktree changes. Returns whether it saved, or why the worktree must be kept.
+ * A git checkout inside `dir` besides its own (a clone a minion made, a Grunt's worktree): its unpushed work
+ * would go with the folder and a save can't hold it. Build and dependency folders aren't searched.
+ */
+export async function nestedCheckout(dir: string): Promise<string | null> {
+  const { stdout } = await low(['find', dir, '(', '-path', join(dir, '.git'), '-o', '-name', 'node_modules', '-o', '-name', 'target', ')', '-prune', '-o', '-name', '.git', '-print', '-quit']);
+  return stdout.trim() ? stdout.trim().slice(dir.length + 1, -'/.git'.length) : null;
+}
+
+/**
+ * Save what a worktree holds beyond `branch` (null: a detached HEAD, always saved) into `ref`, as `git stash`
+ * does: a commit of the working tree (tracked and new, not ignored, files) whose parents are HEAD and a
+ * commit of the index, so staged and unstaged versions both survive. Nothing in the worktree changes.
+ * Returns whether it saved, or why the worktree must be kept.
  */
 export async function saveWork(dir: string, ref: string, branch: string | null, message: string): Promise<{ saved: boolean } | { kept: string }> {
+  const nested = await nestedCheckout(dir);
+  if (nested) return { kept: `holds another git checkout, ${nested}` };
   const head = await git(['rev-parse', 'HEAD'], dir);
   const tip = branch ? await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`], dir).catch(() => '') : '';
   const dirty = await git(['--no-optional-locks', 'status', '--porcelain'], dir);
   if (!dirty && tip === head) return { saved: false };
+  // An earlier save a reopen couldn't put back (its branch moved) is someone's work: never write over it.
+  if (await git(['rev-parse', '--verify', '--quiet', ref], dir).catch(() => '')) return { kept: `its earlier saved work in ${ref} isn't restored yet` };
   let bytes = 0;
   for (const f of (await git(['ls-files', '-z', '--others', '--exclude-standard'], dir)).split('\0').filter(Boolean)) {
     bytes += (await lstat(join(dir, f)).catch(() => null))?.size ?? 0;
   }
   if (bytes > SAVE_LIMIT) return { kept: `${Math.round(bytes / 2 ** 20)} MiB of new files, too big to save` };
-  // A copy of its index, so `add -A` rehashes only what changed and the real index is never touched.
+  // A copy of its index, so the real one is never touched and `add -A` rehashes only what changed.
   const scratch = await mkdtemp(join(tmpdir(), 'citadel-save-'));
   try {
     const index = join(scratch, 'index');
     await copyFile(await git(['rev-parse', '--path-format=absolute', '--git-path', 'index'], dir), index).catch(() => {});
     const env = { GIT_INDEX_FILE: index };
+    const who = await identity(dir);
+    const staged = await git([...who, 'commit-tree', await git(['write-tree'], dir, env), '-p', head, '-m', `${message} (its index)`], dir);
     await git(['add', '-A', '--', ':/'], dir, env);
-    const tree = await git(['write-tree'], dir, env);
-    const commit = await git([...await identity(dir), 'commit-tree', tree, '-p', head, '-m', message], dir);
-    await git(['update-ref', ref, commit], dir);
+    const commit = await git([...who, 'commit-tree', await git(['write-tree'], dir, env), '-p', head, '-p', staged, '-m', message], dir);
+    // The empty old value: only if no ref appeared meanwhile.
+    await git(['update-ref', ref, commit, ''], dir);
     return { saved: true };
   } finally {
     await rm(scratch, { recursive: true, force: true });
@@ -74,19 +90,19 @@ export async function removeWorktree(repoDir: string, dir: string): Promise<numb
 }
 
 /**
- * Put a saved ref's files back into a recreated worktree as uncommitted changes (the index stays at the
- * branch), then drop the ref. Only when its parent is the branch's tip; otherwise the ref stays and the
+ * Put a saved ref's files back into a recreated worktree as they were, staged and unstaged, then drop the ref. Only when its parent is the branch's tip; otherwise the ref stays and the
  * answer says where. Null when there was nothing saved. Synchronous: it runs just before a turn starts.
  */
 export function restoreSaved(cwd: string, repoDir: string, ref: string, branch: string): string | null {
   const g = (args: string[], dir = repoDir) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', timeout: 10 * 60_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   let parent: string;
   try {
-    parent = g(['rev-parse', '--verify', '--quiet', `${ref}^`]);
+    parent = g(['rev-parse', '--verify', '--quiet', `${ref}^1`]);
   } catch {
     return null;
   }
   if (parent !== g(['rev-parse', `refs/heads/${branch}`])) return `its uncommitted work was saved in ${ref}, but the branch has moved since: \`git checkout ${ref} -- .\` brings it back`;
+  g(['restore', `--source=${ref}^2`, '--staged', '--', ':/'], cwd);
   g(['restore', `--source=${ref}`, '--worktree', '--', ':/'], cwd);
   g(['update-ref', '-d', ref]);
   return 'its uncommitted work is back as uncommitted changes';

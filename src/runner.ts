@@ -885,13 +885,17 @@ export class Runner {
   private async sweepGrunts(p: Project, now: number, keep: (what: string, why: string) => void, removed: (what: string, bytes: number, extra?: string) => void) {
     const top = projectDir(this.dataDir, p.id) + '/';
     for (const g of await gruntWorktrees(p.repo_dir!).catch(() => [])) {
-      if (!g.path.startsWith(top) || g.locked) continue;
+      if (!g.path.startsWith(top)) continue;
       const made = await madeAt(g.path);
       if (made === null || made > now - GRUNT_AGE_MS) continue;
       const inUse = [...this.turns].some(([id, turn]) => this.store.getTicket(id)?.project_id === p.id && turn.startedAt <= made);
       if (inUse) continue;
       const name = g.path.slice(g.path.lastIndexOf('/') + 1);
       const what = `Grunt ${name} (${g.path})`;
+      if (g.locked) {
+        keep(what, 'locked');
+        continue;
+      }
       try {
         const ref = savedRef(`grunt/${name}`);
         const s = await saveWork(g.path, ref, g.branch, `Citadel: Grunt ${name}'s work not on its branch, saved before its worktree was removed`);
@@ -916,13 +920,20 @@ export class Runner {
     if (this.store.getSetting(key)) return;
     const peek = this.store.getProject(3);
     if (peek?.name !== 'Peek Auras') return this.store.setSetting(key, 'not this data');
+    // Mid-turn: try again at the next sweep.
+    let busy = false;
     for (const id of [833, 807, 1195]) {
       const t = this.store.getTicket(id);
       const dir = ticketWorktree(this.dataDir, 3, id);
-      if (t?.project_id !== 3 || resolve(t.cwd) !== dir || this.turns.has(id) || this.lanes.busy(id)) continue;
+      if (t?.project_id !== 3 || resolve(t.cwd) !== dir) continue;
+      if (this.turns.has(id) || this.lanes.busy(id)) {
+        busy = true;
+        continue;
+      }
       await this.lanes.run(id, 'one-off target/ clear', async () => {
+        if (this.turns.has(id)) return void (busy = true);
         const target = (await findBuildOutput(dir).catch(() => [])).find((d) => d === join(dir, 'target'));
-        if (!target || this.turns.has(id)) return;
+        if (!target) return;
         const bytes = await diskUsage([target]);
         await low(['rm', '-rf', '--one-file-system', '--', target]);
         const text = `Removed this minion's old target/ build folder (${size(bytes)}), from before the shared build cache (Josh's go, #660).`;
@@ -932,7 +943,7 @@ export class Runner {
         if (coordinator) this.emit(coordinator.id, 'note', { text: `#${t.number}: ${text}` });
       });
     }
-    this.store.setSetting(key, new Date(Date.now()).toISOString());
+    if (!busy) this.store.setSetting(key, new Date(Date.now()).toISOString());
   }
 
   /**

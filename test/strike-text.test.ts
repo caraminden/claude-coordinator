@@ -66,6 +66,23 @@ test('strikes the newest reply or relayed message holding the words, with a note
   runner.detachAll();
 });
 
+test('searches only the newest 500 replies, counting replies with text, not tool calls (#622)', () => {
+  const store = new Store(join(root, 'cap.db'));
+  const project = store.createProject('P', null);
+  const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(minion.id, root, null);
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  store.addEvent(minion.id, 'claude', reply('The old wrong claim.'));
+  store.addEvent(minion.id, 'claude', reply('The newer wrong claim.'));
+  // Tool calls and results show no words, so 600 of them don't push either claim out of reach.
+  for (let i = 0; i < 600; i++) store.addEvent(minion.id, 'claude', { type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } });
+  for (let i = 0; i < 499; i++) store.addEvent(minion.id, 'claude', reply(`Step ${i}.`));
+  assert.deepEqual(runner.strike(minion.id, 'newer wrong claim', 'x'), { ticketId: minion.id });
+  // 501 replies back is past the search.
+  assert.throws(() => runner.strike(minion.id, 'old wrong claim', 'x'), /None of your newest 500 replies/);
+  runner.detachAll();
+});
+
 test('struck words render as ~~strikethrough~~ line by line, keeping list and quote markers', () => {
   assert.equal(struckSource('a b c', [{ text: 'b' }]), 'a ~~b~~ c');
   assert.equal(struckSource('x\n- one\n- two\ny', [{ text: 'one\n- two' }]), 'x\n- ~~one~~\n- ~~two~~\ny');

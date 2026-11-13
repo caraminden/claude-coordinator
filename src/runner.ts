@@ -32,6 +32,8 @@ import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, pr
 import { packPlan, unpackPlan } from './history.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
+/** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
+const STRIKE_SEARCH = 500;
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
 const CODEX_LOG_MAX = 2 * HANDOVER_MAX;
 
@@ -1517,25 +1519,31 @@ export class Runner {
   strike(by: number, quote: string, reason: string): { ticketId: number } {
     const texts = (e: EventRow, data: any): string[] =>
       e.kind === 'claude' ? (data.type === 'assistant' ? (data.message?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text) : []) : [data.text ?? ''];
-    for (const e of this.store.wordsBy(by)) {
-      const data = JSON.parse(e.data);
-      if (!texts(e, data).some((t) => t.includes(quote))) continue;
-      const strikes: { text: string; reason: string; at: number }[] = data.strikes ?? [];
-      if (strikes.some((s) => s.text === quote)) throw new Error('That text is struck through already');
-      strikes.push({ text: quote, reason, at: this.now() });
-      this.store.setEventData(e.id, { ...data, strikes });
-      this.emit(e.ticket_id, 'strike', { event: e.id, strikes });
-      // `strike` lets the chat draw the quote struck through; `chat` (another chat's note only) is where the message shows.
-      const where = this.store.getTicket(e.ticket_id)!;
-      const words = clip(quote.replace(/[*`~]/g, ''));
-      for (const id of new Set([e.ticket_id, by])) {
-        const chat = id === e.ticket_id ? null : { project: where.project_id, number: where.number };
-        const place = chat ? ` in ${where.number == null ? `the ${AGENT_NAME}'s chat` : `#${where.number}`}` : '';
-        this.emit(id, 'note', { text: `Struck through as wrong${place}: "${words}". ${reason}`, strike: { quote: words, reason, chat } });
+    let e: EventRow | undefined;
+    let data: any;
+    // Find it first: leaving the loop closes the read before anything is written.
+    for (const w of this.store.wordsBy(by, STRIKE_SEARCH)) {
+      data = JSON.parse(w.data);
+      if (texts(w, data).some((t) => t.includes(quote))) {
+        e = w;
+        break;
       }
-      return { ticketId: e.ticket_id };
     }
-    throw new Error('None of your replies or messages contains that text. Quote it exactly as you wrote it, Markdown and all, from a single message.');
+    if (!e) throw new Error(`None of your newest ${STRIKE_SEARCH} replies or messages contains that text. Quote it exactly as you wrote it, Markdown and all, from a single message.`);
+    const strikes: { text: string; reason: string; at: number }[] = data.strikes ?? [];
+    if (strikes.some((s) => s.text === quote)) throw new Error('That text is struck through already');
+    strikes.push({ text: quote, reason, at: this.now() });
+    this.store.setEventData(e.id, { ...data, strikes });
+    this.emit(e.ticket_id, 'strike', { event: e.id, strikes });
+    // `strike` lets the chat draw the quote struck through; `chat` (another chat's note only) is where the message shows.
+    const where = this.store.getTicket(e.ticket_id)!;
+    const words = clip(quote.replace(/[*`~]/g, ''));
+    for (const id of new Set([e.ticket_id, by])) {
+      const chat = id === e.ticket_id ? null : { project: where.project_id, number: where.number };
+      const place = chat ? ` in ${where.number == null ? `the ${AGENT_NAME}'s chat` : `#${where.number}`}` : '';
+      this.emit(id, 'note', { text: `Struck through as wrong${place}: "${words}". ${reason}`, strike: { quote: words, reason, chat } });
+    }
+    return { ticketId: e.ticket_id };
   }
 
   /**

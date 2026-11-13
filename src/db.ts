@@ -347,6 +347,9 @@ export interface PersonNote {
   at: number;
 }
 
+/** What Store.recentCards knows of a card: its first person's reply and its result, and the newest event id it looked at. */
+type CardFate = { reply: string | null; result: string | null; upTo: number };
+
 export interface EventRow {
   id: number;
   ticket_id: number;
@@ -1484,6 +1487,7 @@ export class Store {
     this.deleteSetting(pagePlanKey(id));
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     this.doneCards.clear(); // events.id has no AUTOINCREMENT: a deleted newest card's id can come back as a new card
+    this.cardFates.clear();
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
@@ -1800,11 +1804,21 @@ export class Store {
     return { since, turns: Object.fromEntries(rows.map((r) => [r.ticket_id, r.n])) };
   }
 
-  /** Words a thread wrote that show in a chat, newest first: its own replies, and its messages relayed into other threads (strike_text). */
-  wordsBy(ticketId: number): EventRow[] {
-    return this.db
-      .prepare(`SELECT * FROM events WHERE (ticket_id = ? AND kind = 'claude') OR (kind = 'user_message' AND json_extract(data, '$.from') = ?) ORDER BY id DESC`)
-      .all(ticketId, ticketId) as unknown as EventRow[];
+  /**
+   * Words a thread wrote that show in a chat, newest first, at most `limit`: its own replies, and its messages relayed
+   * into other threads (strike_text). Read lazily from its first event on: reading them all at once held the server 9 s (#622).
+   */
+  *wordsBy(ticketId: number, limit: number): Generator<EventRow> {
+    const first = (this.db.prepare('SELECT min(id) AS id FROM events WHERE ticket_id = ?').get(ticketId) as { id: number | null }).id;
+    if (first == null) return;
+    let n = 0;
+    for (const row of this.db
+      .prepare(`SELECT * FROM events WHERE id >= ? AND ((ticket_id = ? AND kind = 'claude' AND json_extract(data, '$.type') = 'assistant' AND instr(data, '"type":"text"') > 0)
+        OR (kind = 'user_message' AND json_extract(data, '$.from') = ?)) ORDER BY id DESC`)
+      .iterate(first, ticketId, ticketId)) {
+      yield row as unknown as EventRow;
+      if (++n >= limit) return;
+    }
   }
 
   /** A chat's newest plan card, or undefined. */
@@ -1924,21 +1938,48 @@ export class Store {
    * a click on another card (`reply`), and an approval's result (`result`). For the link check (#531).
    */
   recentCards(projectId: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
-    return this.db.prepare(`
+    const cards = this.db.prepare(`
       SELECT * FROM (
-        SELECT e.*, t.number, t.kind AS tkind, t.status AS tstatus,
-          (SELECT json_object('author', json_extract(a.data, '$.author'), 'at', a.created_at, 'text', substr(json_extract(a.data, '$.text'), 1, 200),
-              'answer', json(json_extract(a.data, '$.answer')))
-            FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id AND ${PERSON_WROTE}
-              AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), json_extract(e.data, '$.id')) = json_extract(e.data, '$.id')
-            ORDER BY a.id LIMIT 1) AS reply,
-          (SELECT json_set(r.data, '$.at', r.created_at) FROM events r WHERE r.ticket_id = e.ticket_id AND r.kind = 'approval_result' AND r.id > e.id
-              AND json_extract(r.data, '$.id') = json_extract(e.data, '$.id') ORDER BY r.id LIMIT 1) AS result
+        SELECT e.*, json_extract(e.data, '$.id') AS cid, t.number, t.kind AS tkind, t.status AS tstatus
         FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
         WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval')
         ORDER BY e.id DESC LIMIT ?)
-      ORDER BY id`).all(projectId, limit) as any;
+      ORDER BY id`).all(projectId, limit) as any[];
+    const upTo = (this.db.prepare('SELECT max(id) AS id FROM events').get() as { id: number | null }).id ?? 0;
+    const fates = cards.map((c) => this.cardFates.get(c.id) ?? { reply: null, result: null, upTo: c.id });
+    // Each chat's messages are read once from its oldest card still waiting, not once per card: 500 cards each
+    // scanning the rest of a long chat held the event loop 1-3 s (#622).
+    for (const ticket of new Set(cards.map((c) => c.ticket_id))) {
+      const mine = cards.flatMap((c, i) => c.ticket_id === ticket ? [{ cid: c.cid, fate: fates[i] }] : []);
+      const from = (pick: (f: CardFate) => string | null) => Math.min(...mine.filter((m) => pick(m.fate) == null).map((m) => m.fate.upTo));
+      const replyFrom = from((f) => f.reply);
+      const replies = replyFrom === Infinity ? [] : this.db.prepare(`
+        SELECT a.id, coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) AS card,
+          json_object('author', json_extract(a.data, '$.author'), 'at', a.created_at, 'text', substr(json_extract(a.data, '$.text'), 1, 200),
+            'answer', json(json_extract(a.data, '$.answer'))) AS reply
+        FROM events a WHERE a.ticket_id = ? AND a.kind = 'user_message' AND a.id > ? AND a.id <= ? AND ${PERSON_WROTE} ORDER BY a.id`)
+        .all(ticket, replyFrom, upTo) as { id: number; card: unknown; reply: string }[];
+      const resultFrom = from((f) => f.result);
+      const results = resultFrom === Infinity ? [] : this.db.prepare(`
+        SELECT id, json_extract(data, '$.id') AS card, json_set(data, '$.at', created_at) AS result
+        FROM events WHERE ticket_id = ? AND kind = 'approval_result' AND id > ? AND id <= ? ORDER BY id`)
+        .all(ticket, resultFrom, upTo) as { id: number; card: unknown; result: string }[];
+      for (const { cid, fate } of mine) {
+        // A click on another card answers that card, not this one.
+        fate.reply ??= replies.find((a) => a.id > fate.upTo && (a.card ?? cid) === cid)?.reply ?? null;
+        fate.result ??= results.find((r) => r.id > fate.upTo && r.card === cid)?.result ?? null;
+        fate.upTo = upTo;
+      }
+    }
+    return cards.map(({ cid, ...c }, i) => {
+      this.cardFates.set(c.id, fates[i]);
+      return { ...c, reply: fates[i].reply, result: fates[i].result };
+    });
   }
+
+  // What recentCards found of each card, by event id: a reply or result once found stays (events are only appended),
+  // and `upTo` is the newest event looked at, so the next read only scans messages after it (#622).
+  private cardFates = new Map<number, CardFate>();
 
   // Card events found answered, settled or no longer pending. None ever waits again (a plan never goes back to pending,
   // and events are only appended), so later reads skip their rows: cold, re-reading Citadel's 335 card rows and the
@@ -2006,6 +2047,7 @@ export class Store {
       throw err;
     }
     const deleted = changes.filter((c) => c.data == null).length;
+    if (deleted) this.cardFates.clear(); // a deleted newest id can come back, below recentCards' `upTo`
     return { changed: changes.length - deleted, deleted };
   }
 

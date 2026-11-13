@@ -265,6 +265,44 @@ test('a turn\'s snapshot lists the scheme\'s recently settled cards with who set
   ]);
 });
 
+test('a later snapshot sees replies and results that came after the last one, and still not clicks on other cards (#622)', () => {
+  const fake = join(root, 'claude-622');
+  writeFileSync(fake, '#!/bin/sh\nexit 0\n');
+  chmodSync(fake, 0o755);
+  const store = new Store(join(root, 'db-622.sqlite'));
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const p = store.createProject('Citadel', null);
+  const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const a = store.createTicket({ project_id: p.id, title: 'Asker', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const q1 = runner.emit(a.id, 'question', { id: 'q1', questions: [{ header: 'One', question: '?' }] });
+  const q2 = runner.emit(a.id, 'question', { id: 'q2', questions: [{ header: 'Two', question: '?' }] });
+  runner.approvals.request(a.id, 'Bash', { command: 'ls', description: 'List' });
+  const approval = store.listEvents(a.id).find((e) => e.kind === 'approval')!;
+  const file = join(root, 'refs-622.json');
+  const settled = () => {
+    (runner as any).writeRefs(file, store.getTicket(tm.id)!);
+    return Object.fromEntries((JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs).settled!.map((c) => [c.label, c.how]));
+  };
+  assert.deepEqual(settled(), {});
+  // A click on q2 answers q2 only; a relayed message answers nothing.
+  const click = runner.emit(a.id, 'user_message', { author: 'Cara', text: 'My answers…', answer: { questionId: 'q2', answers: [{ selected: ['B'] }] } });
+  runner.emit(a.id, 'user_message', { author: 'Taskmaster', text: 'relay', from: 1 });
+  assert.deepEqual(settled(), { Two: `answered by Cara at ${clockTime(click.created_at)}: B` });
+  const typed = runner.emit(a.id, 'user_message', { author: 'Josh', text: 'Go with one' });
+  runner.approvals.decide(a.id, JSON.parse(approval.data).id, true, 'Cara');
+  const allowed = store.listEvents(a.id).find((e) => e.kind === 'approval_result')!;
+  // Josh's message came after the approval card too, but its result says how it ended.
+  assert.deepEqual(settled(), {
+    One: `Josh wrote in its chat at ${clockTime(typed.created_at)}: "Go with one"`,
+    Two: `answered by Cara at ${clockTime(click.created_at)}: B`,
+    'Bash: List': `allowed by Cara at ${clockTime(allowed.created_at)}`,
+  });
+  // A second reply doesn't replace the first.
+  runner.emit(a.id, 'user_message', { author: 'Cara', text: 'Actually two' });
+  assert.equal(settled().One, `Josh wrote in its chat at ${clockTime(typed.created_at)}: "Go with one"`);
+  assert.ok(q1.id < q2.id);
+});
+
 test('cardWhat: a merge go, a tripwire approval, or the card\'s own kind (#575)', () => {
   assert.equal(cardWhat('question', { questions: [], kind: 'merge' }), 'merge');
   assert.equal(cardWhat('approval', { tool: 'Bash', merge: { repo: 'o/r' } }), 'merge');

@@ -19,21 +19,26 @@
   <script type="module" src="app.js"></script>
 </head>
 <body>
-  <nav id="sections" aria-label="Sections">
-    <h2>Sections</h2>
-    <a href="#">Notes</a>
-  </nav>
-  <main id="main">
-    <header class="bar">
-      <h1>My app</h1>
-      <!-- A setting that takes effect at once is a switch: a native checkbox with Citadel's .cui-switch. -->
-      <!-- data-tip gives anything a tooltip (ui/tip.js, mounted in app.js): extra detail on hover. -->
-      <label data-tip="Sample replies come every 100 ms instead of 400"><input type="checkbox" role="switch" class="cui-switch" id="quick"> Quick replies</label>
-    </header>
-    <!-- A status line, always there and 22 px tall even when empty, so a status never moves the page (ui/status.js). -->
-    <div id="status"></div>
-    <div class="chat" id="chat"></div>
-    <div class="compose" id="compose"></div>
-  </main>
+  <!-- The top bar (Citadel UI's .cui-topbar): first in the page and the full width. In Citadel's installed app it
+       takes the title bar strip, and Citadel's ‹ › × sit over its end; keep it one row. -->
+  <header class="cui-topbar">
+    <img src="icon.svg" alt="">
+    <h1>My app</h1>
+    <!-- A setting that takes effect at once is a switch: a native checkbox with Citadel's .cui-switch. -->
+    <!-- data-tip gives anything a tooltip (ui/tip.js, mounted in app.js): extra detail on hover. -->
+    <label data-tip="Sample replies come every 100 ms instead of 400"><input type="checkbox" role="switch" class="cui-switch" id="quick"> Quick replies</label>
+  </header>
+  <div class="page">
+    <nav id="sections" aria-label="Sections">
+      <h2>Sections</h2>
+      <a href="#">Notes</a>
+    </nav>
+    <main id="main">
+      <!-- A status line, always there and 22 px tall even when empty, so a status never moves the page (ui/status.js). -->
+      <div id="status"></div>
+      <div class="chat" id="chat"></div>
+      <div class="compose" id="compose"></div>
+    </main>
+  </div>
 </body>
 </html>

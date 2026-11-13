@@ -307,10 +307,31 @@ html.framed { overflow: hidden; }
 html.framed #frames { display: block; position: fixed; top: var(--banner-h, 0px); right: 0; bottom: 0; left: var(--citadel-rail, 0px); z-index: 45; background: var(--bg); }
 /* Citadel's update banner stays above the frame, which starts below it. */
 html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 0px); right: 0; z-index: 46; padding-top: calc(0.4rem + var(--top-inset)); }
-@media (max-width: 800px) { html.framed #frames, html.framed .update-banner { left: 0; } }
-@media (display-mode: window-controls-overlay) { html.framed #frames { top: max(var(--banner-h, 0px), var(--top-inset)); } }
+@media (max-width: 800px) { html.framed :is(#frames, .update-banner, .frame-strip) { left: 0; } }
 #frames iframe { display: block; width: 100%; height: 100%; border: 0; }
 #frames iframe[hidden] { display: none; }
+/* The frame's top bar (#666, frames.js fit): Citadel's ‹ › × over the end of an app's .cui-topbar, centred on its row
+   (Citadel UI's .cui-topbar: the same row and padding), left of the window controls in the installed app. */
+.frame-probe { position: fixed; top: 0; left: env(titlebar-area-x, 0px); width: env(titlebar-area-width, 100vw); height: env(titlebar-area-height, 0px); visibility: hidden; pointer-events: none; }
+.frame-nav { --head-btn: 1.9rem; --strip: 0px; display: none; gap: 0.15rem; position: fixed; z-index: 1;
+  top: calc(var(--banner-h, 0px) + max(0.625rem, (var(--strip) - var(--head-btn)) / 2));
+  right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 0.5rem); }
+@media (max-width: 800px) { .frame-nav { --head-btn: 2.5rem; } }
+html.frame-topbar .frame-nav { display: inline-flex; }
+.frame-strip { display: none; }
+@media (display-mode: window-controls-overlay) {
+  .frame-nav { --strip: var(--top-inset); }
+  .frame-nav > button { app-region: no-drag; }
+  /* An app with no .cui-topbar starts under the strip, which shows its icon, its name and ‹ › ×, and drags the window. */
+  html.framed:not(.frame-topbar) #frames { top: max(var(--banner-h, 0px), var(--top-inset)); }
+  html:not(.frame-topbar) .frame-strip { display: flex; align-items: center; gap: 0.5rem; position: fixed; top: 0; left: var(--citadel-rail, 0px); right: 0;
+    box-sizing: border-box; height: var(--top-inset); padding-left: max(1rem, calc(env(titlebar-area-x, 0px) + 0.5rem - var(--citadel-rail, 0px)));
+    padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 7.5rem);
+    background: var(--bg); border-bottom: 1px solid var(--line); app-region: drag; }
+  .frame-strip > img { width: 18px; height: 18px; }
+  .frame-strip > b { font-size: 0.95rem; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  html:not(.frame-topbar) .frame-nav { display: inline-flex; --head-btn: min(1.9rem, var(--top-inset) - 0.25rem); top: calc((var(--top-inset) - var(--head-btn)) / 2); }
+}
 
 /* Alt+` app switcher: its styles are in appswitch.js, which brings them to contraptions' pages too. */
 

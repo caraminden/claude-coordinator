@@ -48,8 +48,8 @@ button.secondary.act-reopen { --act: var(--done); }
 .ticket-head { --head-btn: 1.9rem; }
 @media (max-width: 800px) { .ticket-head { --head-btn: 2.5rem; } }
 .ticket-head .head-nav { flex: none; display: inline-flex; gap: 0.15rem; }
-.ticket-head :is(.close-view, .nav-btn) { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--head-btn); height: var(--head-btn); padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); text-decoration: none; }
-.ticket-head :is(.close-view, .nav-btn:enabled):is(:hover, :focus-visible) { background: var(--line); color: var(--ink); }
+:is(.ticket-head, .frame-nav) :is(.close-view, .nav-btn) { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--head-btn); height: var(--head-btn); padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); text-decoration: none; }
+:is(.ticket-head, .frame-nav) :is(.close-view, .nav-btn:enabled):is(:hover, :focus-visible) { background: var(--line); color: var(--ink); }
 .find-box { display: inline-flex; align-items: center; gap: 0.25rem; }
 .find-box .chat-find { width: 9rem; padding: 0.2rem 0.5rem; font-size: 0.85em; transition: width 0.15s; }
 .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 13rem; }

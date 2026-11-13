@@ -101,6 +101,7 @@
       "cui-toast-action",
       "cui-toast-say",
       "cui-toast-text",
+      "cui-topbar",
       "cui-working"
     ],
     "chat.js": [

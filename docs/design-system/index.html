@@ -683,6 +683,16 @@ background: var(--citadel-warn-tint);</code></pre></div>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/status.js</code> (<code>statusSlot</code>, <code>steadyLabel</code>, <code>toast</code>, and <code>statusSlotHtml</code>, <code>statusTextHtml</code>, <code>statusWorkingHtml</code>, <code>steadyLabelHtml</code> for views that draw HTML) · <code>.cui-status</code>, <code>.cui-status-text</code>, <code>.cui-status-fill</code>, <code>.cui-steady</code>, <code>.cui-toast</code>, <code>.cui-toast-text</code>, <code>.cui-toast-action</code> in <code>ui/base.css</code></p>
       </div>
     </div>
+    <h3>Top bar</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <header class="cui-topbar"><h1>Peek Auras</h1><span class="doc-grow"></span><button class="cui-btn cui-small">Packs</button><button class="cui-btn cui-small">Setup</button></header>
+      </div>
+      <div class="mk-about">
+        <p>An app's header (#666, Josh 2026-11-13: "Citadel part, then each app adopts"): one row, first in the page, the full width, on the surface colour with a bottom border; the title at a chat title's size. Framed in Citadel's installed app it is the title bar: Citadel tells it the strip's room (<code>--citadel-strip-h</code>, <code>-start</code>, <code>-end</code>, <code>-row</code>) and draws ‹ › × over its end, clear of the window controls. In a browser tab it is a chat header's height. Its background drags the window. An app without one stays under the strip, which shows its name and ‹ › ×.</p>
+        <p class="mk-lives">Lives in: <code>.cui-topbar</code> in <code>ui/base.css</code>; Citadel's side in <code>public/frames.js</code></p>
+      </div>
+    </div>
     <h3>Dialog</h3>
     <div class="mk-specimen">
       <div class="mk-show doc-col">
@@ -1053,6 +1063,7 @@ row.innerHTML =
 .cui-scope .cui-steady > [hidden] { visibility: hidden; }
 .cui-scope .doc-status-demo { display: flex; flex-direction: column; gap: var(--citadel-space-2); max-width: 340px; padding: var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
 .cui-scope .doc-row { display: flex; gap: var(--citadel-space-2); align-items: center; }
+.cui-scope .doc-grow { flex: 1; }
 .cui-scope .doc-status-demo p, .cui-scope .doc-shift p { margin: 0; }
 .cui-scope .doc-shift p.doc-naive:empty { display: none; }
 .cui-scope .doc-spin-always { animation: cui-spin 0.8s linear infinite; }

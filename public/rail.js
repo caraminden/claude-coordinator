@@ -529,6 +529,8 @@ if (typeof document !== 'undefined') {
   });
   // A framed contraption's rail.js reaches Citadel's rail through this.
   if (!inContraption) window.citadelRail = { openRail, closeRail, hasRail };
+  // Framed: Citadel fits this page's top bar to the title bar strip now, before its first paint where it can (frames.js).
+  if (host) try { window.parent.citadelFrameFit?.(); } catch {}
   // Citadel's page in this contraption's layer reaches it through this.
   else if (!host) window.citadelLayer = { app: showing(), close: closeLayer };
   narrow?.addEventListener('change', () => {

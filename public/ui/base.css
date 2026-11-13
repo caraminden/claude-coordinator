@@ -31,7 +31,10 @@
    Dialog:   <dialog class="cui-dialog" aria-labelledby="t"><form method="dialog" class="cui-dialog-head"><h2 id="t">…</h2>
              <button class="cui-btn cui-ghost cui-icon" aria-label="Close">✕</button></form>…body…</dialog>, opened with
              showModal(): the head stays at the top while the rest scrolls, and the page behind doesn't scroll.
-             ui/dialog.js's mountDialogs() closes it on a backdrop click; --cui-dialog-width sets its width (480px). */
+             ui/dialog.js's mountDialogs() closes it on a backdrop click; --cui-dialog-width sets its width (480px).
+   Top bar:  <header class="cui-topbar"><img src="icon.svg" alt=""><h1>My app</h1>…buttons, status…</header> at the
+             very top of the page: in Citadel's installed app it takes the title bar strip, clear of the window
+             controls and of Citadel's ‹ › × (which Citadel draws over its end), and drags the window; one row. */
 
 /* Buttons: every variant the same height, content centred, so the room above and below is equal. */
 :where(.cui-btn) {
@@ -291,6 +294,25 @@
     width: calc(100vw - 2 * var(--citadel-space-2)); max-height: calc(100dvh - 2 * var(--citadel-space-2));
   }
 }
+
+/* Top bar (#666): the app's header row, the same height as a chat's in Citadel. Framed in Citadel, Citadel sets
+   --citadel-strip-h (the title bar strip's height, 0 in a browser tab), --citadel-strip-start and --citadel-strip-end
+   (room kept at either end: the window controls, and Citadel's ‹ › ×) and --citadel-strip-row (its buttons' height);
+   on the app's own page they come from its own title bar. Its background drags the window; what's clickable doesn't. */
+:where(.cui-topbar) {
+  --cui-topbar-row: var(--citadel-strip-row, 1.9rem);
+  --cui-topbar-pad: max(0.625rem, (var(--citadel-strip-h, env(titlebar-area-height, 0px)) - var(--cui-topbar-row)) / 2);
+  box-sizing: border-box; display: flex; flex-wrap: nowrap; align-items: center; gap: var(--citadel-space-3);
+  min-height: calc(var(--cui-topbar-row) + 2 * var(--cui-topbar-pad)); margin: 0; padding-block: var(--cui-topbar-pad);
+  padding-inline: calc(var(--citadel-space-4) + var(--citadel-strip-start, env(titlebar-area-x, 0px)))
+    max(var(--citadel-space-4), calc(var(--citadel-strip-end, 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)) + var(--citadel-space-2)));
+  background: var(--citadel-surface); border-bottom: 1px solid var(--citadel-border); color: var(--citadel-text);
+  app-region: drag;
+}
+:where(.cui-topbar :is(a, button, input, select, textarea, summary, label, [tabindex])) { app-region: no-drag; }
+:where(.cui-topbar > img) { flex: none; width: 20px; height: 20px; }
+:where(.cui-topbar > :is(h1, h2)) { min-width: 0; margin: 0; font: 600 var(--citadel-size-h2)/1.3 var(--citadel-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 800px) { :where(.cui-topbar) { --cui-topbar-row: var(--citadel-strip-row, 2.5rem); } }
 
 /* A long press on a tipped link or button shows its tip, not the phone's own menu or a selection. */
 @media (pointer: coarse) { :where([data-tip]:is(a, button, [role="button"])) { -webkit-touch-callout: none; user-select: none; } }

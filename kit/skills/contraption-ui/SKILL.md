@@ -28,7 +28,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | File | What | How, and the details |
 |---|---|---|
 | `theme.css` | Every token below as `--citadel-*`, light and dark | `<link rel="stylesheet">`, first; [Tokens](#tokens-themecss) below |
-| `ui/base.css` | Buttons, inputs, chips, notices, switches, spinner, busy regions, skeletons, focus ring, as `cui-*` classes | `<link rel="stylesheet">` after theme.css; [references/base-parts.md](references/base-parts.md) |
+| `ui/base.css` | Buttons, inputs, chips, notices, switches, spinner, busy regions, skeletons, focus ring, the top bar (`cui-topbar`, the app's header: the title bar in Citadel's installed app), as `cui-*` classes | `<link rel="stylesheet">` after theme.css; [references/base-parts.md](references/base-parts.md) |
 | `ui/markdown.js` (+ `.d.ts`) | An agent's markdown as safe HTML, streaming-aware, Copy on code blocks; `linkify` for plain text with URLs and DOIs | ES module import; [references/markdown.md](references/markdown.md) |
 | `rail.js`, `drawers.js` (+ `.d.ts`) | The app rail; phone drawers (`NARROW`, the 800 px breakpoint) | [rail-and-drawers.md](rail-and-drawers.md) |
 | `ui/composer.js` (+ `.d.ts`) | The message box under a chat | ES module import, needs base.css; [references/composer.md](references/composer.md) |
@@ -96,7 +96,7 @@ needs 1, 7 and 8, as the chat's parts carry their own look. The code for each:
    `danger`, `info`), and not Citadel's orange: the app should look like itself. Primary buttons,
    the current tab, links and what's selected wear it.
 2. **Cards group the content.** `bg` is the page; each list, form, pane or panel sits on a
-   `surface` card with the border and `radius`, and the top bar is `surface`. No text sits loose on `bg`.
+   `surface` card with the border and `radius`, and the top bar (`cui-topbar`) is `surface`. No text sits loose on `bg`.
 3. **At least three levels of type** on any view with content: an `h1` title, a heading per card,
    body, and muted `size-meta` for times, counts and ids. A key number is a big stat with a label.
 4. **Every state is a toned chip** (`cui-chip data-tone`, with its word, rule 17), the same tone for
@@ -198,6 +198,10 @@ fails a view that's a wall of plain text (`citadel:critique`).
     one item, with a toast saying what failed and a Retry. Do it with `optimistic()` from
     `ui/optimistic.js`, never a hand-rolled version. Only an action whose result can't be guessed
     (a calculation, an agent turn) shows busy (rule 10), and only on its own region.
+24. **The page's header is the kit top bar.** Josh, 2026-11-13: "Citadel part, then each app adopts".
+    One `<header class="cui-topbar">`, first in the page and one row, with no top padding, border or
+    `env()` insets of your own: in Citadel's installed app it becomes the title bar, beside Citadel's
+    ‹ › ×. [references/base-parts.md](references/base-parts.md#top-bar).
 
 A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
 finding (`citadel:self-review`, "UI findings").

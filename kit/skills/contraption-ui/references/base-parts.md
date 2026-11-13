@@ -14,6 +14,31 @@ Part of `citadel:contraption-ui` (its SKILL.md has the file list, tokens and rul
 Every rule sits in `:where()`, so any selector of yours wins: restyle by writing your own rule, no
 `!important`.
 
+## Top bar
+
+```html
+<header class="cui-topbar">
+  <img src="icon.svg" alt=""><h1>My app</h1>
+  <span class="grow"></span>  <!-- your own .grow { flex: 1 }, or margin-inline-start: auto on the first button -->
+  <button class="cui-btn cui-small">Packs</button>
+</header>
+```
+
+The app's header row (#666, Josh 2026-11-13: "Citadel part, then each app adopts"). Put it first in the
+page, the full width, and keep it one row: the title and buttons, no second line under them.
+
+- **In Citadel's installed app it is the title bar.** Framed in Citadel, the page starts at the top of the
+  window and the bar sits in the title bar strip. Citadel tells it the room it has (`--citadel-strip-h`,
+  `-start`, `-end`, `-row`), and the bar keeps clear of the window controls and of Citadel's ‹ › ×, which
+  Citadel draws over its end. Its background drags the window; links, buttons and fields in it don't.
+- **In a browser tab** it is a chat header's height, with ‹ › × at its end, as a chat and the Releases page have them.
+- **No bar,** and an app framed in the installed app stays under the strip, where Citadel shows the app's
+  icon, its name and ‹ › ×: two rows. Adopt the bar to get one.
+- Leave its padding, height, border and background to the part. Don't add `env(safe-area-inset-top)` or
+  `env(titlebar-area-*)` of your own: the part reads them on your own page too.
+- It is `surface` with a bottom border (First look rule 2). Its `h1` is the chat title's size, cut off with …
+  where the row runs out; an `img` first is 20 px.
+
 ## Dialog
 
 Every modal (rule 22), from `ui/base.css` and `ui/dialog.js`:

@@ -29,6 +29,8 @@ export interface CiNow {
   short: string;
   /** "test-linux step 5 of 8: the full suite (cara-desktop-2)". */
   text: string;
+  /** One job's step underway, by name ("the full suite"), for the readout's short line (#630). */
+  step?: string;
   since: number;
   ended?: number;
   done?: number;
@@ -81,7 +83,7 @@ export function ciNow(jobs: Job[], over = true): CiNow | null {
   // One job says more by its steps; several, by how many are done.
   if (jobs.length === 1) {
     const s = stepOf(jobs[0]);
-    return { stage: 'jobs', short: `step ${s.n}/${s.of}`, text, since, done: s.n - 1, total: s.of };
+    return { stage: 'jobs', short: `step ${s.n}/${s.of}`, text, since, done: s.n - 1, total: s.of, ...(s.name ? { step: s.name } : {}) };
   }
   return { stage: 'jobs', short: `${done.length}/${jobs.length} jobs`, text, since, done: done.length, total: jobs.length };
 }

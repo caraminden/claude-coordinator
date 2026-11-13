@@ -236,10 +236,12 @@ test('a landing waiting for CI shows its run on land/<branch>; a fallback says s
   assert.ok(gh.calls.includes(`${runs}?per_page=5&branch=land%2F${encodeURIComponent(m.branch)}`));
   const w = waits.wait(m.id)!;
   assert.deepEqual([w.kind, w.stage, w.chip, w.text], ['land', 'test', 'land · CI queued', 'waiting for CI: queued for a runner (citadel-ci-linux); if none starts it soon, the suite runs on perigee']);
+  assert.equal(w.brief, 'CI: queued');
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'in_progress', runner_name: 'cara-desktop', steps: steps(4, 8) })] });
   at(85);
   await ci.tick();
   assert.deepEqual([waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['land · CI 5/8', 'waiting for CI: test step 5 of 8: step 5 (cara-desktop)']);
+  assert.equal(waits.wait(m.id)!.brief, 'CI: step 5', "the line's short form: one counter (the landing's stage), the step by name, no runner (#630)");
   // No runner took it in time: land.sh cancels the run and tests on perigee.
   phase('running the tests since 12:03');
   waits.poll();

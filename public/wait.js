@@ -112,10 +112,19 @@ export function waitWords(w) {
   return lead ? `${lead}: ${w.text}` : w.text.charAt(0).toUpperCase() + w.text.slice(1);
 }
 
-/** The readout line's "now" part while it waits (#551): the stage, "3/6" on a landing, and the detail. */
-export function waitNow(w) {
+/**
+ * The readout line's "now" part while it waits (#551): the stage, "3/6" on a landing, and the detail: its `brief`
+ * when it has one ("Test 3/6 · CI: the full suite", #630), the whole text when `full` (the opened readout).
+ */
+export function waitNow(w, full = false) {
   const { at, label } = stageOf(w);
-  return [h('b', { class: `f-${waitFam(w)}` }, label), at >= 0 ? ` ${at + 1}/${TRACK.length}` : '', ` · ${w.text}`];
+  return [h('b', { class: `f-${waitFam(w)}` }, label), at >= 0 ? ` ${at + 1}/${TRACK.length}` : '', ` · ${full ? w.text : w.brief ?? w.text}`];
+}
+
+/** waitNow's short line as plain text, for the list row's subtitle, so the row and the chat say the same (#630). */
+export function waitLine(w) {
+  const { at, label } = stageOf(w);
+  return `${label}${at >= 0 ? ` ${at + 1}/${TRACK.length}` : ''} · ${w.brief ?? w.text}`;
 }
 
 /** Elapsed (against usual, when known) that the ticker below moves on: a wait's, or a turn's ({ since }) with no usual. */

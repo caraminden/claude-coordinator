@@ -20,6 +20,8 @@ export interface Wait {
   chip: string;
   /** The readout's detail: "2nd in line, behind #513 (testing)". */
   text: string;
+  /** A shorter detail for the one-line readout and the list row, when the text runs long: "CI: the full suite" (#630). */
+  brief?: string;
   /** When this stage began, ms. */
   since: number;
   /** About how long it takes, s: the median of its last five, or an estimate; null when nothing is known. */
@@ -204,7 +206,8 @@ type CiView = NonNullable<ReturnType<CiRuns['view']>>;
 export function landCi(w: Wait, ci: CiView): Wait {
   const short = `CI ${ci.short.replace(/^step /, '')}`;
   const text = ci.stage === 'queued' ? `waiting for CI: ${ci.text}; if none starts it soon, the suite runs on perigee` : `waiting for CI: ${ci.text}`;
-  return { ...w, chip: `land · ${short}`, text, ...(ci.total ? { done: ci.done, total: ci.total } : {}) };
+  // The line keeps one counter, the landing's stage (Cara: "are the tests on step 3/6 or 10/13?"): CI's steps fill its piece.
+  return { ...w, chip: `land · ${short}`, text, brief: `CI: ${ci.step ?? ci.short}`, ...(ci.total ? { done: ci.done, total: ci.total } : {}) };
 }
 
 /** A minion's PR waiting on its CI run. */

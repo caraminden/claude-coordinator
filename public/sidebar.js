@@ -9,7 +9,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP } from './threadstate.js';
-import { progressTrack, waitBar, waitClock, waitWords } from './wait.js';
+import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
@@ -396,7 +396,7 @@ export function threadRow(t, href = threadHref(t)) {
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     card,
     st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
-    wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, waitWords(wait), ' · ', waitClock(wait))
+    wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, waitLine(wait), ' · ', waitClock(wait))
       : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',

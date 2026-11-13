@@ -244,3 +244,10 @@ test("progressPieces: the plan's track stays through a wait, the wait filling th
   assert.equal(progressPieces({ track: null, wait: { kind: 'ci', stage: 'ci', since: NOW } }), null, 'nothing known: no bar');
   assert.equal(progressPieces({ track: [[2, 'c']], wait: null }).segs.length, 1, 'a plan with no wait: its steps');
 });
+
+test("waitLine: the list row's wait says what the chat's line does, one counter and the short words (#630)", async () => {
+  const { waitLine } = await import('../public/wait.js');
+  const ci = { kind: 'land', stage: 'test', since: NOW, usual: 90, text: 'waiting for CI: test step 10 of 13: the full suite (DESKTOP-G248IJ8-linux)', brief: 'CI: the full suite', done: 9, total: 13 };
+  assert.equal(waitLine(ci), 'Test 3/6 · CI: the full suite', "Cara: 'are the tests on step 3/6 or 10/13?'");
+  assert.equal(waitLine({ kind: 'land', stage: 'line', since: NOW, text: '2nd in line, behind #513' }), 'Land line 1/6 · 2nd in line, behind #513', 'no brief: the text');
+});

@@ -812,7 +812,7 @@ function renderProgress() {
     const req = view.turnRequest;
     detail = h('div', { class: 'progress-detail' },
       // The wait in full, its words uncut, with a landing's whole track above it.
-      w ? h('div', { class: 'wait-line' }, waitTrack(w), h('p', { class: 'wait-full' }, waitNow(w), ' · ', waitClock(w))) : '',
+      w ? h('div', { class: 'wait-line' }, waitTrack(w), h('p', { class: 'wait-full' }, waitNow(w, true), ' · ', waitClock(w))) : '',
       req?.length ? h('p', { class: 'request' }, h('span', { class: 'muted' }, running ? 'Working on ' : 'Last worked on '),
         req.flatMap((m, n) => [n ? ' and ' : '', `${m.author}'s request: `, h('q', {}, firstSentence(m.text, 160))])) : '',
       section('Done', groups.completed),

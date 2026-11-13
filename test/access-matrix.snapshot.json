@@ -1412,6 +1412,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "PUT /api/releases/auto-deploy": {
+  "anon": "401 Not logged in",
+  "person": "404 No such scheme",
+  "member": "404 No such scheme",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/releases/deploy": {
+  "anon": "401 Not logged in",
+  "person": "404 No such scheme",
+  "member": "404 No such scheme",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "DELETE /api/schedules/:s": {
   "anon": "401 Not logged in",
   "person": "200",

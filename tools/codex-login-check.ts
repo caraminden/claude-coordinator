@@ -3,8 +3,9 @@
 // running app-server reloads a token another process refreshed was checked by hand: it takes 50 s to show
 // near expiry, and the 401 path needs a stand-in for the model endpoint.) A made-up login in a temp CODEX_HOME and a
 // stand-in for OpenAI's token endpoint and ChatGPT backend: no real login is read, and config.toml points
-// codex at the stand-in. Skipped where codex isn't installed; a codex upgrade that changes when it
-// refreshes turns this red.
+// codex at the stand-in. Not part of the suite: CI's runners have no codex, and a skipped test fails a
+// land. Run it by hand after a codex upgrade, on a machine that has codex:
+//   tools/citadel-node --test tools/codex-login-check.ts
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,8 +15,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { codexLock } from '../src/codex-lock.ts';
 
-const installed = spawnSync('codex', ['--version'], { stdio: 'ignore' }).status === 0;
-const skip = installed ? false : 'codex is not installed here: the refresh behaviour the Codex lock rests on is NOT checked';
+assert.equal(spawnSync('codex', ['--version'], { stdio: 'ignore' }).status, 0, 'this check needs codex installed');
 const root = mkdtempSync(join(tmpdir(), 'codex-race-'));
 const DAY = 86400;
 
@@ -97,7 +97,7 @@ const until = async (cond: () => boolean, ms: number) => {
   for (const end = Date.now() + ms; !cond() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 50));
 };
 
-test('without the login check, app-servers started together on a stale login reuse its refresh token', { skip, timeout: 60_000 }, async () => {
+test('without the login check, app-servers started together on a stale login reuse its refresh token', { timeout: 60_000 }, async () => {
   const { env } = home(60);
   delayMs = 3000; // the first refresh is still on its way while the others start
   const servers = [1, 2, 3, 4].map(() => appServer(env));
@@ -108,7 +108,7 @@ test('without the login check, app-servers started together on a stale login reu
   assert.ok(seen.reused >= 1, `the race this lock exists for: ${seen.reused} refreshes were refused as reused`);
 });
 
-test('with the login check, runs started together on a stale login make one refresh and all go on', { skip, timeout: 90_000 }, async () => {
+test('with the login check, runs started together on a stale login make one refresh and all go on', { timeout: 90_000 }, async () => {
   const { dir, env } = home(60);
   delayMs = 300;
   const results = await Promise.all([1, 2, 3, 4].map(async () => {

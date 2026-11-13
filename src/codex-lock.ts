@@ -1,5 +1,5 @@
 // A person's Codex runs share one ChatGPT login, whose refresh token is single-use: two app-servers that
-// refresh the same token at once sign the person out (#636 proved it on codex 0.166.0: of eight started
+// refresh the same token at once sign the person out (tools/codex-login-check.ts shows it; on codex 0.166.0, of eight started
 // together on a stale login, seven were refused as reused). Codex refreshes only within 5 minutes of the
 // access token's expiry or after a 401, and reloads the login from disk first. So a run holds the person's
 // lock just long enough to check the token, refreshing it early while it holds the lock, and then runs

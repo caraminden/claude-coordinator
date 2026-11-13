@@ -130,7 +130,8 @@ const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
 const PARENT = process.ppid;
 if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000).unref();
 // Stalls of the event loop are named in the journal (#526), the start's own synchronous work included, with the code that ran (#609).
-if (!BOOT_CHECK) watchLoopLag(console.warn, 100, 500, { profile: true });
+// A long one names who else has the databases open: a lock they hold, or a copy loading the disk (#622).
+if (!BOOT_CHECK) watchLoopLag(console.warn, 100, 500, { profile: true, files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.

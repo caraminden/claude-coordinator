@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { namedStacks, watchLoopLag } from '../src/loop-lag.ts';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ioStalledUs, namedStacks, openersOf, watchLoopLag } from '../src/loop-lag.ts';
 
 const spin = (ms: number) => {
   const until = performance.now() + ms;
@@ -21,6 +25,8 @@ test('a stall of the event loop is logged with its length, and a free loop logs 
     assert.equal(logged.length, 1);
     const held = Number(logged[0].match(/held for (\d+\.\d) s/)?.[1]);
     assert.ok(held >= 0.3, `it logs the stall's length: ${logged[0]}`); // longer on a busy box, never shorter
+    // Where the kernel tells disk stalls (PSI), the line says how much of it was the disk (#622).
+    if (ioStalledUs() != null) assert.match(logged[0], / Disk: the box was fully stalled on I\/O for \d+\.\d s of it\.$/);
   } finally {
     watch.stop();
   }
@@ -63,4 +69,32 @@ test('namedStacks counts only the window, leaf first then the repo\'s own caller
   // A stall across the sampler's roll is read from both profiles, the roll's and the next.
   const next = { ...profile, startTime: 1050, samples: [4], timeDeltas: [5] };
   assert.equal(namedStacks([profile, next], 1015, 1060), '60% all (node:sqlite) < listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 40% (garbage collector)'); // 1020-1050 and 1055
+});
+
+test('ioStalledUs reads the box\'s full I/O stall from PSI, and null without it (#622)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'psi-'));
+  try {
+    writeFileSync(join(dir, 'io'), 'some avg10=0.30 avg60=0.85 avg300=1.26 total=8868426449\nfull avg10=0.25 avg60=0.64 avg300=0.86 total=4769907761\n');
+    assert.equal(ioStalledUs(join(dir, 'io')), 4769907761);
+    assert.equal(ioStalledUs(join(dir, 'none')), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('openersOf names the other processes with a database open, its -wal included, not the server itself (#622)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'openers-'));
+  const db = join(dir, 'coordinator.db');
+  writeFileSync(`${db}-wal`, '');
+  const child = spawn(process.execPath, ['-e', `require('fs').openSync(${JSON.stringify(`${db}-wal`)}, 'r'); console.log('open'); setInterval(() => {}, 1000)`], { stdio: ['ignore', 'pipe', 'inherit'] });
+  try {
+    await new Promise((r) => child.stdout!.once('data', r));
+    const who = await openersOf([db, join(dir, 'state.db')]);
+    assert.deepEqual(who.filter((w) => w.startsWith(`${child.pid} `)), [`${child.pid} ${process.execPath.split('/').at(-1)} -e`]);
+    assert.ok(!who.some((w) => w.startsWith(`${process.pid} `)));
+  } finally {
+    child.kill();
+    await new Promise((r) => child.once('exit', r));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -180,17 +180,15 @@ test("a step's guessed minutes fill the readout's bar from when it started, and 
   assert.deepEqual(p.tasks.map((t) => t.estimate), [10, 20, undefined], 'a guess that is not a number is dropped');
   assert.equal(planEstimate(p, true, at(1)), null, 'nothing underway yet');
   call('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(2));
-  assert.deepEqual(planEstimate(p, true, at(6)), { since: at(2), usual: 600, left: 26, planSince: at(2), planUsual: 1800 }, '6 of 10 minutes left, plus the 20 not started; the plan is 4 minutes in of 30');
+  assert.deepEqual(planEstimate(p, true, at(6)), { since: at(2), usual: 600, left: 26, planSince: at(2) }, '6 of 10 minutes left, plus the 20 not started; the plan is 4 minutes in');
   call('u2', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(5));
   assert.equal(planEstimate(p, true, at(6)).since, at(2), 'marking it underway again keeps its start');
   assert.equal(planEstimate(p, true, at(30)).left, 20, 'a step past its guess adds nothing more');
-  const over = planEstimate(p, true, at(30));
-  assert.equal((at(30) - over.planSince) / 1000 / over.planUsual, 28 / 48, "the plan's fill is time spent of spent plus left, so it agrees with ~20 min left (#630)");
   call('u3', 'TaskUpdate', { taskId: '1', status: 'completed' }, at(9));
   call('u4', 'TaskUpdate', { taskId: '3', status: 'in_progress' }, at(9));
   assert.equal(planEstimate(p, true, at(10)), null, 'a step with no guess shows no estimate');
   call('u5', 'TaskUpdate', { taskId: '3', metadata: { estimate: 5 } }, at(10));
-  assert.deepEqual(planEstimate(p, true, at(10)), { since: at(9), usual: 300, left: 24, planSince: at(2), planUsual: 1920 }, 'the plan counts the 7 minutes the first step really took, then the 1 of this one, then 24 left (#630)');
+  assert.deepEqual(planEstimate(p, true, at(10)), { since: at(9), usual: 300, left: 24, planSince: at(2) }, 'the plan counts the 7 minutes the first step really took, then the 1 of this one, then 24 left (#630)');
 });
 
 test("the plan's guesses are scaled by what steps really took, and a step counts only its working time (#571)", () => {
@@ -203,8 +201,8 @@ test("the plan's guesses are scaled by what steps really took, and a step counts
   call('c1', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: 20 } }, at(0)); made('c1', 1, at(0));
   call('c2', 'TaskCreate', { subject: 'Ship', description: 'x', metadata: { estimate: 10 } }, at(0)); made('c2', 2, at(0));
   call('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(0));
-  assert.deepEqual(planEstimate(p, true, at(0), 0.3), { since: at(0), usual: 360, left: 9, planSince: at(0), planUsual: 540 }, 'a 20-minute guess is a 6-minute bar, and the 10 not started are 3');
-  assert.deepEqual(planEstimate(p, true, at(0)), { since: at(0), usual: 1200, left: 30, planSince: at(0), planUsual: 1800 }, 'no ratio is the guesses as they are');
+  assert.deepEqual(planEstimate(p, true, at(0), 0.3), { since: at(0), usual: 360, left: 9, planSince: at(0) }, 'a 20-minute guess is a 6-minute bar, and the 10 not started are 3');
+  assert.deepEqual(planEstimate(p, true, at(0)), { since: at(0), usual: 1200, left: 30, planSince: at(0) }, 'no ratio is the guesses as they are');
   assert.equal(planEstimate(p, true, at(0), 0).usual, 1200, 'a ratio that is no use is ignored');
   // The turn ends 2 minutes in and waits an hour on a card; the next turn picks the step up again.
   ev({ type: 'result', is_error: false }, at(2));

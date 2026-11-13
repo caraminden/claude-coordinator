@@ -440,11 +440,10 @@ export function planEstimate(p, running, now = Date.now(), ratio = 1) {
   // A step from before working time was counted (no work yet) falls back to its wall clock.
   const since = current.work == null ? current.startedAt : (current.workFrom ?? now) - current.work;
   const leftS = Math.max(0, usual - (now - since) / 1000) + pending;
-  // The whole plan (#630): its working time so far starts at planSince (the steps done, then this one), and
-  // planUsual is that time plus what's left, so its bar's fill agrees with "~N min left".
+  // The whole plan's working time so far (#630) starts at planSince: the steps done, then this one.
   const doneMs = p.tasks.filter((t) => t.status === 'completed').reduce((s, t) => s + (t.work ?? (t.estimate ?? 0) * 60_000 * scale), 0);
   const planSince = since - doneMs;
-  return { since, usual, left: Math.ceil(leftS / 60), planSince, planUsual: Math.round((now - planSince) / 1000 + leftS) };
+  return { since, usual, left: Math.ceil(leftS / 60), planSince };
 }
 
 /**

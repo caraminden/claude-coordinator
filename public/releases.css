@@ -1,7 +1,7 @@
 /* The release monitor (#626, public/releases.js): target rows in the Schemes list, the Releases page (a scheme's cards,
    All's board), the chip beside a minion's PR info, and the stage track they share. Tokens: style.css. */
 
-/* Under a scheme's row: one indented row per target, its stage dots under it while a release moves. */
+/* Under a scheme's row: one indented row per target, its stage track under it while a release moves. */
 .rel-rows:empty { display: none; }
 .rel-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; column-gap: 0.5rem; margin-left: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.85em; cursor: pointer; }
 .rel-row:hover { background: var(--panel); }
@@ -13,12 +13,7 @@ a.rel-ver:hover { text-decoration: underline; }
 .rel-ver.old { color: var(--muted); }
 .rel-est { font-weight: 600; color: var(--running); font-variant-numeric: tabular-nums; }
 .rel-est.waits, :is(.releases-main, .rel-tip, .rel-chip) .waits { color: var(--held); }
-.rel-dots { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.6rem; padding: 0.25rem 0 0.1rem; }
-.rel-dots i { position: relative; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--control-line); }
-.rel-dots i + i::before { content: ''; position: absolute; right: calc(100% + 2px); top: calc(50% - 0.5px); width: calc(0.6rem - 4px); border-top: 1px solid var(--control-line); }
-.rel-dots i.done { background: var(--done); border-color: var(--done); }
-.rel-dots i.now { background: var(--running); border-color: var(--running); box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--running) 28%, transparent); }
-.rel-dots i.now.waits { background: var(--held); border-color: var(--held); box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--held) 28%, transparent); }
+.rel-row > .rel-track { grid-column: 1 / -1; margin: 0.3rem 0 0.15rem; }
 /* The hover's detail (ui/tip.js). */
 .rel-tip { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.9em; max-width: 22rem; }
 .rel-tip a:not(.rel-ver) { color: var(--accent); }

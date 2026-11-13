@@ -1,5 +1,5 @@
 // The release monitor (#626, specs/release-monitor.md; data from #625's GET /api/releases and `releases` event): each
-// scheme's targets under its row in the Schemes list (stage dots, the whole release's estimate, the current version,
+// scheme's targets under its row in the Schemes list (take A's stage track, the whole release's estimate, the current version,
 // a hover with the detail), the Releases page over the chat (a scheme's cards, take D; All's stage board, take E, on
 // desktop and every member scheme's cards on a phone) and the chip beside a minion's PR info (take F).
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
@@ -81,14 +81,6 @@ function versionLink(r, cls = 'rel-ver') {
 
 // ---------- the Schemes list ----------
 
-/** Stage dots (take B): done, the current one (violet while it waits), the ones to come. */
-function dots(next) {
-  const list = segments(next.stages);
-  const at = list.findIndex((s) => s.name === next.stage);
-  return h('span', { class: 'rel-dots', 'aria-hidden': 'true' },
-    list.map((s, i) => h('i', { class: i < at ? 'done' : i === at ? (next.waitingOn ? 'now waits' : 'now') : '' })));
-}
-
 /** The whole release's estimate: "~3m", "waiting" while a stage waits, else the stage it's at. */
 function estimate(next) {
   if (next.waitingOn) return h('span', { class: 'rel-est waits' }, 'waiting');
@@ -113,7 +105,7 @@ export function releaseRows(projectId) {
     h('a', { class: 'rel-name', href, onclick: opening }, tv.target.name),
     tv.next ? estimate(tv.next) : '',
     tv.current ? versionLink(tv.current) : '',
-    tv.next ? dots(tv.next) : '');
+    tv.next ? stageTrack(tv.next.stages, tv.next) : '');
   }));
 }
 

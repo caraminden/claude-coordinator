@@ -2,7 +2,8 @@
 // against a copy of the database, confirm it serves the app, that the app renders in headless Chromium
 // without a console error, and that a minion turn and a Taskmaster turn start through the runner's real
 // arguments (with tools/boot-check-claude.ts as claude, which checks the turn's MCP server initializes,
-// reads the longest chat and the scheme instructions, and that no launch argument nears Linux's cap), that
+// reads the longest chat and the scheme instructions, and that no launch argument nears Linux's cap and no
+// launch file its consumer's), that
 // the file viewer's details of a linked and a shared file load, then stop it. Prints the front-end version it served; exits non-zero with the reason on any
 // failure.
 //   node tools/boot-check.ts <checkout> <coordinator.db>
@@ -10,12 +11,13 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import { copyDb } from '../src/db-copy.ts';
 import { listeningPort } from '../src/ports.ts';
-import { projectDir, projectSharedDir } from '../src/workspace.ts';
+import { GLOBAL_OWNER } from '../src/properties.ts';
+import { projectSharedDir } from '../src/workspace.ts';
 
 const [checkout, db] = process.argv.slice(2);
 if (!checkout || !db) throw new Error('usage: boot-check.ts <checkout> <coordinator.db>');
@@ -65,9 +67,10 @@ try {
   copied = true;
   arm();
 
-  // The turns to start: the Taskmaster of the scheme with the most worktrees (the largest arguments)
-  // and a new minion there. Both run in folders of their own, never a real worktree, and nothing is
-  // held for the usage limit in the copy.
+  // The turns to start: the largest Taskmaster launch and a new minion in its scheme. That is the Citadel scheme's,
+  // asked by an admin as below, so it reads every scheme (#656, #661: that launch passed Claude Code's 2 MiB cap
+  // while a plain one passed this check); with no Citadel Taskmaster, the one with the most open minions. Both run
+  // in folders of their own, never a real worktree, and nothing is held for the usage limit in the copy.
   begin('migrating the copy');
   const turnStore = new Store(copy);
   // A running ultra review's record names its live working folder, which a server recovering it would delete.
@@ -75,16 +78,10 @@ try {
   // The stand-in tests Claude's launch, not a real Codex turn or review. Copied volume paths can
   // otherwise select (or wake) the server login's Codex container, bypassing CLAUDE_BIN entirely.
   turnStore.db.prepare("DELETE FROM settings WHERE key GLOB 'container_home:*' OR key GLOB 'codex:on:user:*'").run();
-  // A scheme's worktree folders beside the live database: a Taskmaster's launch lists each one (#92).
-  const worktrees = (projectId: number) => {
-    try {
-      return readdirSync(join(projectDir(dirname(db), projectId), 'tickets'), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
-    } catch {
-      return [];
-    }
-  };
+  // A Taskmaster's git rules name each open minion's worktree (#92, #661): counted here from the copy, as the runner does.
+  const openIn = (projectId: number) => (turnStore.db.prepare(`select count(*) n from tickets where project_id = ? and kind != 'coordinator' and status != 'closed' and coalesce(cwd, '') != ''`).get(projectId) as any).n as number;
   const busiest = (turnStore.db.prepare(`select id, project_id, permission_mode, branch from tickets where kind = 'coordinator'`).all() as any[])
-    .map((c) => ({ ...c, worktrees: worktrees(c.project_id) })).sort((a, b) => b.worktrees.length - a.worktrees.length)[0];
+    .map((c) => ({ ...c, open: openIn(c.project_id) })).sort((a, b) => Number(b.project_id === GLOBAL_OWNER) - Number(a.project_id === GLOBAL_OWNER) || b.open - a.open)[0];
   const turnChecks: { what: string; id: number; dir: string }[] = [];
   // A file in the new minion's folder and one in the scheme's shared folder, for the file viewer's details (#157).
   const fileChecks: { what: string; path: string }[] = [];
@@ -96,9 +93,9 @@ try {
       turnStore.setTicketDir(id, dir, branch);
       turnChecks.push({ what, id, dir });
     }
-    // Empty stand-ins for them where the copy's server looks (its own data folder), so the Taskmaster's launch is the live size.
-    for (const name of busiest.worktrees) mkdirSync(join(projectDir(root, busiest.project_id), 'tickets', name), { recursive: true });
-    console.error(`boot-check: the Taskmaster of scheme ${busiest.project_id}, with ${busiest.worktrees.length} worktrees`);
+    const others = busiest.project_id === GLOBAL_OWNER ? (turnStore.db.prepare(`select count(*) n from tickets t join projects p on p.id = t.project_id
+      where t.project_id != ? and coalesce(p.repo_dir, '') != '' and t.kind != 'coordinator' and t.status != 'closed' and coalesce(t.cwd, '') != ''`).get(busiest.project_id) as any).n : null;
+    console.error(`boot-check: the Taskmaster of scheme ${busiest.project_id}, with ${busiest.open} open minions${others === null ? '' : ` and every scheme's reads (${others} open minions in other schemes)`}`);
     // What the Taskmaster's stand-in claude reads back: the longest open chat (#120 broke read_ticket past
     // one page) and the first line of the scheme's instructions.
     const longest = turnStore.db.prepare(`select t.number from events e join tickets t on t.id = e.ticket_id
@@ -165,8 +162,9 @@ try {
   }
   begin('Taskmaster and minion turns');
 
-  // A person's message starts each turn; the stand-in claude leaves report.json in its folder.
-  await Promise.all(turnChecks.map(async ({ what, id, dir }) => {
+  // A person's message starts each turn; the stand-in claude leaves report.json in its folder. Both settle before a
+  // failure is reported: the stop below ends the server, not a turn still running (each has its own 30 s).
+  const turns = await Promise.allSettled(turnChecks.map(async ({ what, id, dir }) => {
     const ticket = async () => (await fetch(`${base}/api/tickets/${id}`, { headers: { Cookie: cookie } }).then((r) => r.json())).ticket;
     const sent = await fetch(`${base}/api/tickets/${id}/messages`, {
       method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Boot check', after: true }),
@@ -184,6 +182,7 @@ try {
       if (Date.now() > end) fail(`A ${what} turn did not finish within 30 s`);
     }
   }));
+  for (const t of turns) if (t.status === 'rejected') throw t.reason;
   begin('');
   console.error(`boot-check: total ${((Date.now() - start) / 1000).toFixed(1)} s`);
   console.log(health.version);

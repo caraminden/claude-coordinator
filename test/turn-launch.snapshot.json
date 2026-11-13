@@ -751,13 +751,6 @@
      "Bash(git -C <ROOT>/repo fetch --all)",
      "Bash(git -C <ROOT>/repo fetch --prune)",
      "Bash(git -C <ROOT>/repo fetch origin --prune)",
-     "Bash(git -C <ROOT>/projects/3/tickets/1 fetch)",
-     "Bash(git -C <ROOT>/projects/3/tickets/1 fetch -q)",
-     "Bash(git -C <ROOT>/projects/3/tickets/1 fetch origin)",
-     "Bash(git -C <ROOT>/projects/3/tickets/1 fetch -q origin)",
-     "Bash(git -C <ROOT>/projects/3/tickets/1 fetch --all)",
-     "Bash(git -C <ROOT>/projects/3/tickets/1 fetch --prune)",
-     "Bash(git -C <ROOT>/projects/3/tickets/1 fetch origin --prune)",
      "mcp__coordinator"
     ]
    },

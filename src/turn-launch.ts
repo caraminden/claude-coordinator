@@ -244,8 +244,9 @@ const READ_ONLY_GIT = [
   ...['branch', 'branch -a', 'branch -r', 'branch -v', 'branch -vv', 'branch -av', 'branch --list', 'branch -a -vv', 'branch --show-current', 'remote', 'remote -v'],
 ];
 /**
- * Fetches a Taskmaster may run in its scheme's repo and worktrees (#621), exact: they only move remote-tracking refs.
+ * Fetches a Taskmaster may run in its scheme's repo (#621), exact: they only move remote-tracking refs.
  * Any other form could name a refspec that moves a local branch (`origin main:main`) or a command (--upload-pack).
+ * Not in worktrees: they share the repo's refs, so its fetch is theirs, and 7 rules a worktree helped pass the 2 MiB cap (#661).
  * Not in the live checkout, which only deploy.sh changes.
  */
 const GIT_FETCH = ['fetch', 'fetch -q', 'fetch origin', 'fetch -q origin', 'fetch --all', 'fetch --prune', 'fetch origin --prune'];
@@ -348,7 +349,7 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
         // readDirs (the live data folder, mise's installs) and the contraptions' folders are readable but not added, so acceptEdits can't write there.
         allow: ['WebSearch', 'WebFetch', ...[...readDirs, ...apps].map((d) => `${d}/**`).concat(HEALTH_FILES).map((p) => `Read(/${p})`), ...READ_ONLY_COMMANDS,
           ...readGit.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
-          ...gitDirs.filter((d) => d !== liveDir).flatMap((d) => GIT_FETCH.map((c) => `Bash(git -C ${d} ${c})`))],
+          ...(repoDir ? GIT_FETCH.map((c) => `Bash(git -C ${repoDir} ${c})`) : [])],
       },
       ...(memoryDir ? { autoMemoryDirectory: memoryDir } : {}),
     },
@@ -402,6 +403,21 @@ export interface TurnFacts {
   claudeBin: string;
   /** The systemd unit it runs in, or null for a plain child (and in a container). */
   unit: string | null;
+}
+
+/** Claude Code refuses a settings file past 2 MiB (2.1.x: "Settings file exceeds the 2MiB limit"). */
+export const SETTINGS_CAP = 2 * 1024 * 1024;
+
+/** Why a turn's settings.json passes SETTINGS_CAP, with the counts that grow: the Taskmaster's per-folder git rules. */
+function settingsTooBig(bytes: number, allow: string[], facts: TurnFacts): string {
+  const git = allow.filter((r) => r.startsWith('Bash(git -C '));
+  const folders = new Set(git.map((r) => r.slice('Bash(git -C '.length).split(' ')[0])).size;
+  const n = (x: number) => x.toLocaleString('en-US');
+  const own = facts.folders.openTickets?.length ?? 0;
+  const every = facts.everyScheme ? `, ${n(facts.everyScheme.gitDirs.length)} folders in other schemes and ${n(facts.everyScheme.apps.length)} contraptions' (every-scheme reads)` : '';
+  return `This turn's settings.json would be ${(bytes / 1024 / 1024).toFixed(1)} MiB, over Claude Code's ${SETTINGS_CAP / 1024 / 1024} MiB cap, so it can't start: `
+    + `${n(allow.length)} allow rules, ${n(git.length)} of them read-only git rules for ${n(folders)} folders (${n(own)} open minions' worktrees in this scheme${every}). `
+    + 'Closing finished minions shrinks it; for good, the per-folder git rules need a hook in their place (shared handoffs/taskmaster-settings-2mib.md, follow-up 4).';
 }
 
 /** A turn's launch as plain data: nothing here is written or started. The runner writes `files` into the turn's folder, puts command, args and env in its spec.json and spawns the wrapper as `spawn` says. */
@@ -488,7 +504,10 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   }
   settings.permissions.allow = [...(settings.permissions.allow ?? []), ...Object.keys(servers).map((name) => `mcp__${name}`)];
   // As a file: the Taskmaster's git rules (one per worktree) outgrew Linux's 128 KiB cap on one argument (E2BIG).
-  files.push({ name: 'settings.json', text: JSON.stringify(settings) });
+  const settingsText = JSON.stringify(settings);
+  // Past Claude Code's cap the turn dies at launch with a bare "Settings file exceeds the 2MiB limit" (#661): say why instead.
+  if (Buffer.byteLength(settingsText) > SETTINGS_CAP) throw new Error(settingsTooBig(Buffer.byteLength(settingsText), settings.permissions.allow ?? [], facts));
+  files.push({ name: 'settings.json', text: settingsText });
   args.push('--settings', join(dir, 'settings.json'));
   if (addDirs.length) args.push('--add-dir', ...addDirs);
   if (existsSync(pinned(pins.KIT))) args.push('--plugin-dir', pinned(pins.KIT));

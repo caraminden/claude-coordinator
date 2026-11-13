@@ -27,7 +27,7 @@ import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, remov
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
-import { alive, launchPlan, type EveryScheme, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
+import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { appFolder } from './app-services.ts';
 import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
@@ -2145,20 +2145,31 @@ export class Runner {
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
     // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
-    const plan = launchPlan({
-      project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
-      folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
-        // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
-        openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
-      codex: codex ? { thread: same || null } : null,
-      codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
-      env: { server: process.env, coordinator, heavy, github: github?.env ?? null },
-      memory: this.memoryScheme(project.id),
-      typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
-      homeContraptions: homeOf,
-      everyScheme,
-      claudeBin: this.claudeBin,
-    });
+    let plan: LaunchPlan;
+    try {
+      plan = launchPlan({
+        project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
+        folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
+          // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
+          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
+        codex: codex ? { thread: same || null } : null,
+        codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
+        env: { server: process.env, coordinator, heavy, github: github?.env ?? null },
+        memory: this.memoryScheme(project.id),
+        typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
+        homeContraptions: homeOf,
+        everyScheme,
+        claudeBin: this.claudeBin,
+      });
+    } catch (err: any) {
+      // A launch that can't be built (a settings file past Claude Code's cap, #661; claude not on the PATH) fails the turn with its reason, in the chat.
+      rmSync(dir, { recursive: true, force: true });
+      const event = this.emit(ticket.id, 'error', { text: `Could not start the turn: ${err.message}` });
+      this.setFailNote(ticket.id, { note: `Could not start: ${err.message}`.slice(0, 60) });
+      this.setStatus(ticket.id, 'error');
+      this.onTurnError(ticket.id, err.message, event.id);
+      return;
+    }
     // Written before anything of the minion's changes below, so a launch that can't be written leaves who it runs for as it was.
     for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
     const { command, args, env, configDir } = plan;

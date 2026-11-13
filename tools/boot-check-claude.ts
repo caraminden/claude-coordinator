@@ -1,17 +1,26 @@
 // A stand-in for `claude -p` that tools/boot-check.ts runs one minion turn and one Taskmaster turn
 // with, through the runner's real arguments. An argument over Linux's 128 KiB cap fails the turn's spawn
-// (E2BIG) before this runs, and this fails any over 100 KiB; it checks the rest a turn needs to start: a
-// --settings that parses, and the turn's own MCP server (the pinned copy, with the turn's environment)
+// (E2BIG) before this runs, and this fails any over 100 KiB and any file the launch wrote over 1 MiB; it
+// checks the rest a turn needs to start: a --settings that parses, and the turn's own MCP server (the pinned copy, with the turn's environment)
 // answering initialize, tools/list and read-only tool calls (a Taskmaster's: list_tickets, read_ticket on
 // the longest chat and the scheme instructions, as boot-check.json in its folder names them). It writes
 // what it found to report.json in its working directory and ends the turn as claude would.
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
 const role = process.env.COORDINATOR_ROLE ?? '';
 const MAX_ARG = 100 * 1024;
+/** Every file a launch writes into its turn's folder may be 1 MiB, half the smallest cap among them (Claude Code's on settings). */
+const FILE_BUDGET = 1024 * 1024;
+const LAUNCH_FILES: Record<string, string> = {
+  'settings.json': 'Claude Code refuses a settings file past 2 MiB',
+  'mcp.json': 'Claude Code loads it at launch',
+  'codex-tripwire.json': 'the tripwire reads it on every Codex tool call',
+  'scheme-refs.json': 'the link and scheme-refs checks read it on every reply and tool call',
+};
 const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 
 async function check(): Promise<string> {
@@ -65,7 +74,13 @@ async function check(): Promise<string> {
     const largest = args.reduce((a, b) => (Buffer.byteLength(b) > Buffer.byteLength(a) ? b : a), '');
     const bytes = Buffer.byteLength(largest);
     if (bytes > MAX_ARG) throw new Error(`The largest launch argument is ${bytes} bytes, over ${MAX_ARG / 1024} KiB (Linux's cap is 128 KiB): ${largest.slice(0, 80)}…`);
-    return `${found.join('; ')}; largest argument ${bytes} bytes`;
+    // Each file the launch wrote, against the budget: one Taskmaster's settings.json passed Claude Code's
+    // 2 MiB at launch (#661), with git rules per open minion's worktree, in every scheme on a Citadel member's ask.
+    const dir = dirname(flag('--append-system-prompt-file') ?? '');
+    const sizes = Object.entries(LAUNCH_FILES).map(([name, why]) => ({ name, why, bytes: existsSync(join(dir, name)) ? statSync(join(dir, name)).size : 0 }));
+    for (const f of sizes) if (f.bytes > FILE_BUDGET) throw new Error(`The launch's ${f.name} is ${f.bytes} bytes, over the ${FILE_BUDGET / 1024} KiB budget for a launch file (${f.why})`);
+    const folders = new Set((parsed.permissions?.allow ?? []).filter((r: string) => r.startsWith('Bash(git -C ')).map((r: string) => r.split(' ')[2])).size;
+    return `${found.join('; ')}; largest argument ${bytes} bytes; settings.json ${sizes[0].bytes} bytes, git rules for ${folders} folders`;
   } finally {
     mcp.kill();
   }

@@ -274,6 +274,24 @@ test("a Taskmaster's settings travel as a file, so hundreds of worktrees stay un
   assert.ok(t.settings.hooks.PreToolUse);
 });
 
+test("a Taskmaster launch past Claude Code's 2 MiB settings cap doesn't start, and the chat says why with the counts (#661)", async () => {
+  const p = store.createProject('Huge scheme', null);
+  store.setProjectRepoDir(p.id, join(root, 'huge-repo'));
+  // Never made: the rules are built from the open minions' paths.
+  for (let i = 0; i < 1000; i++) store.setTicketDir(store.createTicket({ project_id: p.id, title: `M${i}`, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id, join(root, 'w'.repeat(100), String(i)), null);
+  const tm = store.createTicket({ project_id: p.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
+  store.setTicketDir(tm.id, join(root, `ticket-${tm.id}`), null);
+  mkdirSync(join(root, `ticket-${tm.id}`), { recursive: true });
+  runner.send(tm.id, 'Cara', 'go');
+  while (runner.isRunning(tm.id)) await wait(20);
+  const shown = store.listEvents(tm.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
+  assert.equal(shown.length, 1);
+  assert.match(shown[0], /^Could not start the turn: This turn's settings\.json would be \d+\.\d MiB, over Claude Code's 2 MiB cap, so it can't start: [\d,]+ allow rules, [\d,]+ of them read-only git rules for 1,001 folders \(1,000 open minions' worktrees in this scheme\)\./);
+  const t = store.getTicket(tm.id)!;
+  assert.equal(t.status, 'error');
+  assert.match(t.note!, /^Could not start: This turn's settings\.json would be/);
+});
+
 test('every turn finds citadel-heavy first on its PATH, pinned, with the shared slots folder and who it runs for; only minions are told to use it (#325)', async () => {
   const t = await turn('ticket', 'connected');
   assert.equal(t.heavy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-heavy'), 'utf8'), 'on PATH and executable');

@@ -96,7 +96,19 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
   mkdirSync(dir);
   const store = new Store(db);
   store.createUser({ name: 'Boot', login: 'boot', admin: true, server_login: true });
+  // Another scheme, which the Citadel scheme's Taskmaster (scheme 2, asked by an admin) reads too (#656): git rules for
+  // its open minions' worktrees, never its closed ones (#661: counting closed ones passed Claude Code's 2 MiB cap).
+  const other = store.createProject('Other', null);
+  store.setProjectRepoDir(other.id, join(dir, 'other-repo'));
+  for (let i = 0; i < 700; i++) {
+    const t = store.createTicket({ project_id: other.id, title: `Closed ${i}`, permission_mode: 'default', created_by: 'boot' });
+    // Short, fixed paths (never made): the budget test below must not hang on how long the test's temp folder is.
+    store.setTicketDir(t.id, `/x/${'w'.repeat(40)}/${i}`, null);
+    store.updateTicket(t.id, { status: 'closed' });
+  }
+  for (let i = 0; i < 5; i++) store.setTicketDir(store.createTicket({ project_id: other.id, title: `Open ${i}`, permission_mode: 'default', created_by: 'boot' }).id, `/x/open/${i}`, null);
   const p = store.createProject('Smoke', null);
+  assert.equal(p.id, 2, 'the smoke scheme is the Citadel scheme (GLOBAL_OWNER)');
   store.setProjectInstructions(p.id, '\nShip small changes.\nSecond line.', 'boot');
   store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'boot' });
   store.createTicket({ project_id: p.id, title: 'Short chat', permission_mode: 'default', created_by: 'boot' });
@@ -128,8 +140,9 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
   test('a healthy checkout passes, reading the longest chat and the instructions', { timeout: 200_000 }, async () => {
     const run = await bootCheck(repo);
     assert.ok(run.ok, run.out.slice(0, 2000));
-    assert.match(run.out, /the Taskmaster of scheme \d+, with 70 worktrees/);
-    assert.match(run.out, new RegExp(`Taskmaster turn started \\(\\d+ tools; read_ticket #${long.number}; largest argument \\d+ bytes\\)`));
+    assert.match(run.out, /the Taskmaster of scheme 2, with 70 open minions and every scheme's reads \(5 open minions in other schemes\)/);
+    // The repo, the live checkout, 71 worktrees (with the boot check's own minion), the other scheme's repo and its 5 open minions'.
+    assert.match(run.out, new RegExp(`Taskmaster turn started \\(\\d+ tools; read_ticket #${long.number}; largest argument \\d+ bytes; settings.json \\d+ bytes, git rules for 79 folders\\)`));
   });
 
   // #43: a new import the pinned copy of mcp.ts lacked (the pinner follows only `from './x'`), so every turn's tool server died on start.
@@ -162,6 +175,15 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
     const run = await bootCheck(checkout);
     assert.equal(run.ok, false);
     assert.match(run.out, /turn started, but: The largest launch argument is 112640 bytes, over 100 KiB/);
+  });
+
+  // #661: git rules for every minion's worktree, closed ones included, took the Citadel Taskmaster's every-scheme
+  // settings.json past Claude Code's 2 MiB cap. Put back for other schemes, the 700 closed minions above pass the 1 MiB budget.
+  test('a launch file that grows with closed minions fails it', { timeout: 200_000 }, async () => {
+    const checkout = brokenCheckout('closed-minions', 'src/runner.ts', ".filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))]", ".filter((t) => t.cwd).map((t) => t.cwd!)]))]");
+    const run = await bootCheck(checkout);
+    assert.equal(run.ok, false);
+    assert.match(run.out, /A Taskmaster turn started, but: The launch's settings\.json is \d+ bytes, over the 1024 KiB budget for a launch file \(Claude Code refuses a settings file past 2 MiB\)/);
   });
 
   // #92: the Taskmaster's inline --settings held a git rule per worktree and passed Linux's 128 KiB cap at about 90 of

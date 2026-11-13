@@ -180,14 +180,16 @@ test('writes stay denied: cp, sed -i, python, curl -X POST, gh api -X, sqlite3 w
   ]) assert.ok(!bashAllowed(c), c);
 });
 
-test('#621: file, sandboxed sed, more gh reads and plain fetches run; their writing forms stay denied', () => {
+test('#621: file, sandboxed sed, more gh reads and plain fetches in the repo run; their writing forms stay denied', () => {
   const repo = `${data}/projects/2/repo`;
   const wt = `${data}/projects/2/tickets/141`;
   for (const c of ['gh repo view caraminden/peek-auras --json visibility',
-    'gh release list -R a/b', 'gh workflow view tests.yml -R a/b', `git -C ${repo} fetch`, `git -C ${wt} fetch origin`, `git -C ${repo} fetch --prune`]) assert.ok(bashAllowed(c), c);
+    'gh release list -R a/b', 'gh workflow view tests.yml -R a/b', `git -C ${repo} fetch`, `git -C ${repo} fetch origin`, `git -C ${repo} fetch --prune`, `git -C ${wt} log -1`]) assert.ok(bashAllowed(c), c);
   for (const c of [`sed -n 1,20p ${data}/x`, `sed --sandbox -i s/a/b/ ${data}/x`, `sed --sandbox -ni s/a/b/p ${data}/x`, `sed --sandbox --in-place s/a/b/ ${data}/x`,
     `sed --sandbox -n 1,20p ${data}/x`, `sed --sandbox -nsi s/a/b/p ${data}/x`, `file ${data}/x`, `file -bC -m ${data}/magic`, `file -C -m ${data}/magic`, `git -C ${repo} fetch origin main:main`, `git -C ${repo} fetch --upload-pack=sh origin`, `git -C ${repo} fetch origin +main:main`,
-    `git -C ${live} fetch`, 'gh repo view a/b --web', 'gh release download v1 -R a/b']) assert.ok(!bashAllowed(c), c);
+    `git -C ${live} fetch`, 'gh repo view a/b --web', 'gh release download v1 -R a/b',
+    // A worktree shares the repo's refs, so the repo's fetch is its fetch; per-worktree fetch rules filled the 2 MiB settings cap (#661).
+    `git -C ${wt} fetch`, `git -C ${wt} fetch origin`]) assert.ok(!bashAllowed(c), c);
 });
 
 test("the data folder and mise's installs are readable, not added: acceptEdits can't write there", () => {
@@ -214,4 +216,43 @@ test("the tripwire still refuses secrets, environments, the credentials table an
   // The push key isn't the tripwire's: Claude Code's Read deny keeps it from the Read tool and from cat (tried in real runs).
   assert.ok(credentialDenies('/home/u', '/home/u/.claude', box).includes(`Read(/${box}/vapid.json)`));
   assert.equal(tripwire({ tool_name: 'Bash', tool_input: { command: `sqlite3 -readonly -safe ${box}/coordinator.db "select id from tickets"` }, cwd }, cfg), null);
+});
+
+// ---------- #661: the largest launch, the Citadel Taskmaster's on a member's ask, against Claude Code's 2 MiB settings cap ----------
+
+test("#661: the Citadel Taskmaster's every-scheme settings.json stays under 1 MiB at 3x today's open minions, and past 2 MiB fails with why", async () => {
+  const { launchPlan, SETTINGS_CAP } = await import('../src/turn-launch.ts');
+  const { GLOBAL_OWNER } = await import('../src/properties.ts');
+  const { testPins } = await import('./helpers.ts');
+  const pins = testPins();
+  // Live-length paths: rules grow with each folder's path (2026-11-13: 10 open here, 77 in other schemes, 237 KB).
+  const base = '/home/cara/.local/share/claude-coordinator/projects';
+  const launch = (own: number, schemes: number, perScheme: number) => {
+    const turnDir = join(root, `launch-${own}-${schemes}-${perScheme}`);
+    mkdirSync(turnDir, { recursive: true });
+    return launchPlan({
+      project: { id: GLOBAL_OWNER, repo_dir: `${base}/2/repo`, approval_rules: '', plugin_dirs: '', optional_plugin_dirs: '' } as any,
+      ticket: { id: 1, kind: 'coordinator', permission_mode: 'default', cwd: `${base}/2/repo`, plugin_dirs: '' } as any,
+      dir: turnDir, pins, place: { host: true }, machines: [], model: null, effort: null, codex: null, codexReview: null, deploys: false, memory: false, typer: null, homeContraptions: [], claudeBin: 'claude', unit: null,
+      env: { server: { HOME: '/home/cara', PATH: '/usr/bin' }, coordinator: {}, heavy: {}, github: null },
+      folders: { files: null, shared: `${base}/2/shared/project`, memory: null, tmp: null, tickets: `${base}/2/tickets`, data: '/home/cara/.local/share/claude-coordinator',
+        openTickets: Array.from({ length: own }, (_, i) => `${base}/2/tickets/${1500 + i}`) },
+      everyScheme: {
+        gitDirs: Array.from({ length: schemes }, (_, s) => [`${base}/${s + 10}/repo`, ...Array.from({ length: perScheme }, (_, i) => `${base}/${s + 10}/tickets/${1500 + i}`)]).flat(),
+        apps: Array.from({ length: 10 }, (_, i) => `/home/cara/apps/contraption-${i}`), data: '/home/cara/.local/share/claude-coordinator', keysDir: '/home/cara/.local/share/claude-coordinator/contraptions',
+      },
+    });
+  };
+  // 3x today's 87 open minions: 30 here, 25 in each of 10 other schemes, and 10 contraptions. The boot check holds the same 1 MiB line on the live data.
+  const grown = launch(30, 10, 25);
+  const settings = grown.files.find((f) => f.name === 'settings.json')!.text;
+  assert.ok(Buffer.byteLength(settings) < 1024 * 1024, `settings.json at 3x is ${Buffer.byteLength(settings)} bytes`);
+  assert.ok(JSON.parse(settings).permissions.allow.includes(`Bash(git -C ${base}/19/tickets/1524 log:*)`), "the every-scheme rules are in it");
+  for (const f of grown.files) assert.ok(Buffer.byteLength(f.text) < 1024 * 1024, `${f.name} is ${Buffer.byteLength(f.text)} bytes`);
+  // 200 open in each of 11 schemes is far past the cap: the launch says why, not Claude Code's bare "Settings file exceeds the 2MiB limit".
+  assert.throws(() => launch(200, 10, 200), (err: Error) => {
+    assert.match(err.message, /^This turn's settings\.json would be \d+\.\d MiB, over Claude Code's 2 MiB cap, so it can't start: [\d,]+ allow rules, [\d,]+ of them read-only git rules for 2,222 folders \(200 open minions' worktrees in this scheme, 2,010 folders in other schemes and 10 contraptions' \(every-scheme reads\)\)\. /);
+    return true;
+  });
+  assert.equal(SETTINGS_CAP, 2 * 1024 * 1024);
 });

@@ -16,7 +16,7 @@ export function propertyChip(t) {
   const entries = Object.entries(t.properties ?? {});
   const body = h('div', {});
   const chip = h('details', { class: 'prop-chip' },
-    h('summary', { class: 'tag-chip', title: 'Properties', 'aria-label': `${entries.length} properties` }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '🏷️'), String(entries.length)),
+    h('summary', { class: 'tag-chip', title: 'Properties', 'aria-label': `${entries.length} properties` }, icon('tag'), String(entries.length)),
     h('div', { class: 'prop-pop' },
       h('h4', {}, 'Properties'),
       body,

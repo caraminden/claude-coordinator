@@ -19,7 +19,7 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 .payer-line.warn { background: color-mix(in srgb, var(--waiting-tint) 16%, transparent); }
 .payer-line.cold { color: var(--muted); }
 .payer-line .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.45rem; }
-.payer-chip, .payer-line button { white-space: nowrap; flex: none; }
+.payer-line button { white-space: nowrap; flex: none; }
 .replies-bar[hidden] { display: none; }
 .replies-bar { margin-bottom: 0.5rem; }
 .attachments[hidden] { display: none; }

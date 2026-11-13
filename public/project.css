@@ -223,11 +223,12 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 /* The name's text lines up with the panel's edge, or sits just after the scheme's icon. */
 .shelf[open] > summary .project-title .scheme-icon:not([hidden]) + .label { margin-left: -0.25rem; }
 .shelf:not([open]) > summary .project-title .label { padding: 0; margin: 0; }
-/* Who is signed in, behind a divider; a long name wraps between words. The collapsed tab shows only the scheme. */
+/* The scheme's Settings, behind a divider. The collapsed tab shows only the scheme. */
 .shelf > summary .project-title .divider { flex: none; align-self: stretch; width: 1px; margin: 0.2rem 0.35rem; background: var(--line); }
-.shelf > summary .project-title .who { flex: 1 1 auto; min-width: 0; font-weight: 500; color: var(--muted); overflow-wrap: break-word; }
-.shelf > summary .project-title:has(> .who) > .label { flex: none; max-width: 65%; }
-.shelf:not([open]) > summary .project-title :is(.divider, .who) { display: none; }
+.shelf > summary .project-title .settings-link { flex: none; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.35rem; margin-left: -0.35rem; border-radius: 6px; font-weight: 500; color: var(--accent); text-decoration: none; }
+.shelf > summary .project-title .settings-link:is(:hover, :focus-visible) { background: var(--panel); text-decoration: underline; }
+.shelf > summary .project-title:has(> .settings-link) > .label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf:not([open]) > summary .project-title :is(.divider, .settings-link) { display: none; }
 :is(.shelf, .sidebar) > summary .rename { flex: none; min-width: var(--control-h); min-height: var(--control-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
 :is(.shelf, .sidebar) > summary .rename:is(:hover, :focus-visible) { color: var(--accent); background: var(--panel); }
 .shelf > summary .rename-input { flex: 1; min-width: 0; width: 0; /* fills the header without widening the panel */ font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
@@ -303,6 +304,7 @@ button.pin.on { color: var(--accent); }
 .prop-chip { position: relative; flex: none; }
 .prop-chip > summary { list-style: none; cursor: pointer; }
 .prop-chip > summary::-webkit-details-marker { display: none; }
+.tag-chip .icon { width: 1.15em; height: 1.15em; }
 .tag-chip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.25rem 0.55rem; border-radius: 999px; border: 1px solid var(--control-line); color: var(--muted); font-size: 0.78em; line-height: 1.3; }
 .prop-chip[open] > .tag-chip { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .prop-pop { position: absolute; z-index: 10; top: calc(100% + 6px); right: 0; width: min(270px, 80vw); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.45); padding: 0.6rem 0.7rem; font-size: 0.9em; }

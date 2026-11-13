@@ -1,5 +1,5 @@
-// Whose Claude plan a minion's turns run on (#219, take A): a chip in its head, and a line over the
-// composer only when your message would switch it, or the payer's limit is hit.
+// Whose Claude plan a minion's turns run on (#219, take A): a line over the composer only when your
+// message would switch it, or the payer's limit is hit. The head's chip went (Josh, 2026-11-13).
 import { account, h } from './base.js';
 import { usage } from './core.js';
 
@@ -15,15 +15,6 @@ const time = (ms, now = Date.now()) => {
 const mine = (t) => !!t.payer && !!account && t.payer.id === account.payer;
 /** Your own week, as your meter shows it; only your own plan's is shown to you. */
 const myWeek = () => (usage?.weekly ? `wk ${Math.round(Math.min(1, Math.max(0, usage.weekly.utilization)) * 100)}%` : null);
-
-/** The head's chip: whose plan the minion last ran on, and the reset time while that plan's limit is hit. */
-export function payerChip(t) {
-  if (!t.payer) return '';
-  const who = mine(t) ? 'Your plan' : `${t.payer.name}'s plan`;
-  const limited = t.state === 'limited';
-  const text = [who, limited ? (t.limit_resume_at ? `limit, ${time(t.limit_resume_at)}` : 'limit') : mine(t) && myWeek()].filter(Boolean).join(' · ');
-  return h('span', { class: `link-chip payer-chip ${limited ? 'warn' : 'ok'}`, title: `Its last turn ran on ${mine(t) ? 'your' : `${t.payer.name}'s`} Claude plan` }, text);
-}
 
 /** Over the composer: the payer's limit is hit, you haven't linked a plan, or your message would switch the payer. Null when none applies. */
 export function payerLine(t, sendText) {

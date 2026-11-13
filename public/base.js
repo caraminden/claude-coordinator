@@ -6,16 +6,16 @@ import { iconSrc } from './schemes.js';
 const STATUS_LABEL = { running: 'Running', idle: 'Waiting for you', new: 'Starting', error: 'Error', closed: 'Dismissed' };
 // Thread naming and the threads list follow Delve's Custom view: threads are grouped by their `type`
 // property, and each is one compact row of number + short ask, a state, and a terse note.
-// In the list's order; `other` has no emoji or header word, as a minion of no particular kind.
+// In the list's order; `other` has no header word, as a minion of no particular kind.
 export const TYPES = {
-  feature: { emoji: '🛠️', label: 'Feature', section: 'Features' },
-  bug: { emoji: '🐛', label: 'Bug', section: 'Bugs' },
-  design: { emoji: '🎨', label: 'Design', section: 'Design' },
-  art: { emoji: '🖌️', label: 'Art', section: 'Art' },
-  research: { emoji: '🔬', label: 'Research', section: 'Research' },
-  chore: { emoji: '⚙️', label: 'Chore', section: 'Chores' },
+  feature: { label: 'Feature', section: 'Features' },
+  bug: { label: 'Bug', section: 'Bugs' },
+  design: { label: 'Design', section: 'Design' },
+  art: { label: 'Art', section: 'Art' },
+  research: { label: 'Research', section: 'Research' },
+  chore: { label: 'Chore', section: 'Chores' },
   other: { section: 'Other' },
-  ideation: { emoji: '💡', label: 'Idea', section: 'Ideas' },
+  ideation: { label: 'Idea', section: 'Ideas' },
 };
 /** A scheme's promoted list groups, "key: value" each (#253). */
 export function listGroupsOf(p) {
@@ -26,14 +26,14 @@ export function listGroupsOf(p) {
   }
 }
 export const STATES = {
-  ready: { emoji: '✅', label: 'Ready to merge or pick up' },
-  complete: { emoji: '🏁', label: 'Complete: no work left' },
-  try: { emoji: '🧪', label: 'Ready for you to try' },
-  parked: { emoji: '🧊', label: 'Parked' },
-  blocked: { emoji: '⛔', label: 'Blocked on something outside the minion' },
-  outside: { emoji: '⏳', label: 'Waiting on work running elsewhere' },
-  'pending-deploy': { emoji: '🚀', label: 'Deployed; dismissed once it is live' },
-  limited: { emoji: '⌛', label: 'Hit the usage limit; waiting for it to reset' },
+  ready: { label: 'Ready to merge or pick up' },
+  complete: { label: 'Complete: no work left' },
+  try: { label: 'Ready for you to try' },
+  parked: { label: 'Parked' },
+  blocked: { label: 'Blocked on something outside the minion' },
+  outside: { label: 'Waiting on work running elsewhere' },
+  'pending-deploy': { label: 'Deployed; dismissed once it is live' },
+  limited: { label: 'Hit the usage limit; waiting for it to reset' },
 };
 
 export let me = null;
@@ -98,7 +98,7 @@ export function schemeIcon(p) {
   return img;
 }
 
-const ICONS = { back: 'M10.25 3.5 5.75 8l4.5 4.5', forward: 'M5.75 3.5 10.25 8l-4.5 4.5', close: 'M4 4l8 8M12 4l-8 8', pin: 'M5.5 2.5h5M6.5 2.5v4l-2 3h7l-2-3v-4M8 9.5V14' };
+const ICONS = { back: 'M10.25 3.5 5.75 8l4.5 4.5', forward: 'M5.75 3.5 10.25 8l-4.5 4.5', close: 'M4 4l8 8M12 4l-8 8', pin: 'M5.5 2.5h5M6.5 2.5v4l-2 3h7l-2-3v-4M8 9.5V14', tag: 'M2.5 2.5h5l6 6-5 5-6-6zM5.25 5.25h.01' };
 /** A line icon in the text colour. Drawn on its own centre, so it sits dead centre in its button, as a font's glyph doesn't. */
 export function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -109,6 +109,24 @@ export function icon(name) {
   path.setAttribute('d', ICONS[name]);
   svg.append(path);
   return svg;
+}
+
+/**
+ * In the desktop app (#637) the window controls sit on the page's theme colour (app.js's metas), so a
+ * Taskmaster chat's tint reaches them (Josh, 2026-11-13); null puts the plain colour back. A canvas pixel
+ * turns the computed color-mix() into the hex a theme colour surely takes.
+ */
+let pixel = null;
+export function tintTitleBar(el) {
+  for (const m of document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')) {
+    m.dataset.base ??= m.content;
+    if (!el || !matchMedia(m.media).matches) { m.content = m.dataset.base; continue; }
+    pixel ??= h('canvas', { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true });
+    pixel.fillStyle = m.dataset.base;
+    pixel.fillStyle = getComputedStyle(el).backgroundColor;
+    pixel.fillRect(0, 0, 1, 1);
+    m.content = `#${[...pixel.getImageData(0, 0, 1, 1).data.slice(0, 3)].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+  }
 }
 
 /** A cost at API prices, marked as an estimate: "≈ $0.42", "≈ $12". Not a bill on a subscription. */
@@ -207,21 +225,18 @@ export function taskmasterName(projectId = view?.projectId) {
 /** taskmasterName in a span that follows renames of the scheme. */
 export const taskmasterLabel = (projectId = view?.projectId) => h('span', { 'data-taskmaster-name': projectId }, taskmasterName(projectId));
 export const threadLabel = (t) => (isCoordinator(t) ? taskmasterName(t.project_id) : `#${t.number ?? t.id} ${t.title}`);
-/** The full name, Delve style: "🛠️ 12 FEATURE: Usage bar ✅". */
+/** The full name: "12 FEATURE: Usage bar". No type or state emoji (Josh, 2026-11-13: "leftover from a bygone era"). */
 export function threadFullName(t) {
   if (isCoordinator(t)) return taskmasterName(t.project_id);
   const type = TYPES[t.properties?.type];
-  const state = t.status !== 'running' && STATES[t.state];
-  return [type?.emoji, t.number ?? t.id, type?.label ? `${type.label.toUpperCase()}: ${t.title}` : t.title, state?.emoji].filter(Boolean).join(' ');
+  return `${t.number ?? t.id} ${type?.label ? `${type.label.toUpperCase()}: ${t.title}` : t.title}`;
 }
 
-/** threadFullName in parts; phones hide the type word and state emoji, which the emoji and state label already say. */
+/** threadFullName in parts; phones hide the type word for room (the properties chip has it). */
 export function threadTitleParts(t) {
   if (isCoordinator(t)) return taskmasterLabel(t.project_id);
   const type = TYPES[t.properties?.type];
-  const state = t.status !== 'running' && STATES[t.state];
-  return [type?.emoji ? `${type.emoji} ` : '', `${t.number ?? t.id} `, type?.label ? h('span', { class: 'wide-only' }, `${type.label.toUpperCase()}: `) : '', t.title,
-    state ? h('span', { class: 'wide-only' }, ` ${state.emoji}`) : ''];
+  return [`${t.number ?? t.id} `, type?.label ? h('span', { class: 'wide-only' }, `${type.label.toUpperCase()}: `) : '', t.title];
 }
 
 /** Wrap matches of the text inside el in <mark>, returning the marks in document order. */

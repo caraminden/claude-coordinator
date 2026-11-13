@@ -213,12 +213,15 @@ export function renderGithubStrip() {
  */
 export function projectTitle(project) {
   const wrap = h('span', { class: 'project-title' });
+  // Settings sits beside the scheme it belongs to (Josh, 2026-11-13); made once so a rename keeps its count.
+  const settings = h('a', { class: 'settings-link', href: `#/p/${project.id}/settings`, title: 'Instructions, approvals, properties and machines for this scheme' },
+    'Settings', h('span', { id: 'settings-count', class: 'count', hidden: true }));
   const show = () => {
     wrap.replaceChildren(
       schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
       h('button', { type: 'button', class: 'label', 'data-project-name': project.id, title: 'Rename scheme (its repo stays as it is)', onclick: edit }, view.project.name),
-      me && h('span', { class: 'divider', 'aria-hidden': 'true' }),
-      me && h('span', { class: 'who' }, me));
+      h('span', { class: 'divider', 'aria-hidden': 'true' }),
+      settings);
   };
   // Every label showing the name changes now; the server's broadcast confirms it, and a refusal puts the old name back.
   const rename = (name) => onProjectUpdate({ ...(view.projectId === project.id ? view.project : project), name });
@@ -255,6 +258,7 @@ export function projectTitle(project) {
   wrap.addEventListener('click', (e) => {
     // Clicks inside the title edit it; they don't collapse the panel or close the drawer.
     if (e.target.closest('button, input')) { e.preventDefault(); e.stopPropagation(); }
+    else if (e.target.closest('a')) e.stopPropagation(); // Settings goes there without toggling the panel
   });
   show();
   return wrap;

@@ -1,5 +1,5 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
-import { account, api, h, isCoordinator, loadPanelState, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
+import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciWarning } from './ci-desktop.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
@@ -158,10 +158,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
       h('div', { id: 'machine-warning', class: 'machine-warning', hidden: true }),
       // Only while CI overloads its desktop, crashed it, or the desktop went offline (#534).
       ciWarning(`#/p/${projectId}/machines`),
-      // Who is signed in shows in the header beside the scheme; these sit quietly along the box's foot.
+      // Settings shows in the header beside the scheme; who is signed in sits with Sign out along the box's foot.
       h('div', { class: 'foot' },
-        h('a', { class: 'settings-link', href: `#/p/${projectId}/settings`, title: 'Instructions, approvals, properties and machines for this scheme' },
-          'Settings', h('span', { id: 'settings-count', class: 'count', hidden: true })),
+        h('span', { class: 'who' }, me),
         h('button', { type: 'button', class: 'sign-out', onclick: logout }, 'Sign out'))),
     h('section', { class: 'column', id: 'schemes-shelf' }),
     h('div', { id: 'artifact-shelf' }));

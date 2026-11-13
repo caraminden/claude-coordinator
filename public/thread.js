@@ -20,7 +20,7 @@ import { releaseChip } from './releases.js';
 import { askHeader } from './askcard.js';
 import { firstSentence, GITHUB_NAME, machineAuthor, shortDuration, shortNote, ticketActionRef } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
-import { payerChip, payerLine } from './payer.js';
+import { payerLine } from './payer.js';
 import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, nowDoing, planEstimate, planTrack, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
@@ -444,8 +444,8 @@ export function renderTicketHead() {
     h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
     h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
     phone ? '' : close);
-  // Wider screens: the title's line keeps who it is and the way out; the line under it takes the state,
-  // where the change is, the tools and the buttons.
+  // Wider screens: the title's line keeps who it is; the line under it takes the state, where the change
+  // is, the tools, the buttons, Find and the way out.
   // Phones (#492): two rows. Title, ⋯ and ×; then the state or the progress line beside the one button
   // that matters now. Everything else waits behind ⋯.
   // Find's box is put back in the redrawn bar, which drops the caret from it: keep it there.
@@ -457,15 +457,16 @@ export function renderTicketHead() {
     menuFor = menuOpen ? null : t.id;
     renderTicketHead();
   } }, '⋯');
-  const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen }, phone ? payerChip(t) : '', phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
-    h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', phone ? nav : '');
+  // ‹ › × sit right of Find (Josh, 2026-11-13); on phones × stays on the title's line.
+  const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen }, phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
+    h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', nav);
   el.replaceChildren(
     h('div', { class: phone ? 'row head-top' : 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
-      h('span', { class: 'spacer' }),
-      phone ? more : payerChip(t),
-      phone ? close : nav),
+      phone ? h('span', { class: 'spacer' }) : '',
+      phone ? more : '',
+      phone ? close : ''),
     coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
     phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
     sub,
@@ -779,7 +780,7 @@ function renderProgress() {
     view.ui.open = !view.ui.open;
     renderProgress();
   } },
-    h('span', { class: `dot ${running ? 'running' : view.ticket.status}` }),
+    // No dot of its own: the title's dot just above says the same (Josh, 2026-11-13: "we've duplicated the dots").
     h('span', { class: 'text' },
       step ? h('span', { class: 'stepname' }, step) : '',
       step && now ? h('span', { class: 'arrow', 'aria-hidden': 'true' }, ' › ') : '',

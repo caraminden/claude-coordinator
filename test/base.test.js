@@ -116,10 +116,9 @@ test('minion names: the full name, its phone-friendly parts, the address and the
   Object.assign(globalThis, { Node, document: { createElement: (tag) => new El(tag) } });
   t.after(() => { delete globalThis.Node; delete globalThis.document; setView(null); });
   const minion = { id: 900, number: 12, project_id: 2, title: 'Usage bar', status: 'idle', state: 'ready', properties: { type: 'feature' } };
-  assert.equal(threadFullName(minion), '🛠️ 12 FEATURE: Usage bar ✅');
-  assert.equal(flat(threadTitleParts(minion)), '🛠️ 12 <wide-only>FEATURE: </>Usage bar<wide-only> ✅</>');
-  // No state emoji while it runs; `other` has no emoji or type word; no number falls back to the id.
-  assert.equal(threadFullName({ ...minion, status: 'running' }), '🛠️ 12 FEATURE: Usage bar');
+  // No type or state emoji (#647); `other` has no type word; no number falls back to the id.
+  assert.equal(threadFullName(minion), '12 FEATURE: Usage bar');
+  assert.equal(flat(threadTitleParts(minion)), '12 <wide-only>FEATURE: </>Usage bar');
   const plain = { id: 900, project_id: 2, title: 'Odd job', status: 'idle', properties: { type: 'other' } };
   assert.equal(threadFullName(plain), '900 Odd job');
   assert.equal(flat(threadTitleParts(plain)), '900 Odd job');

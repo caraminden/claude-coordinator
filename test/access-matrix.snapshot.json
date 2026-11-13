@@ -1223,6 +1223,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/releases/publish": {
+  "anon": "401 Not logged in",
+  "person": "403 Not for people",
+  "member": "403 Not for people",
+  "outsider": "403 Not for people",
+  "tmA": "400 contraption is required",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "400 contraption is required",
+  "m2": "400 contraption is required"
+ },
  "GET /api/projects/:p/schedules": {
   "anon": "401 Not logged in",
   "person": "200",

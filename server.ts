@@ -45,6 +45,7 @@ import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
+import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { CiHealth, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
 import { CiLoad } from './src/ci-load.ts';
@@ -688,6 +689,9 @@ const ciHealth = new CiHealth(store, {
   },
 });
 if (!BOOT_CHECK) ciHealth.start();
+// GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).
+const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined), log: (line) => console.log(line) });
+if (!BOOT_CHECK) setInterval(() => void artifactSweep.tick().catch((err) => console.error(`Artifact sweep: ${err?.message ?? err}`)), 60 * 60_000).unref();
 // The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that
 // holds is a quiet Mandate item for every admin, cleared when it ends.
 const ciLoad = new CiLoad(store, {

@@ -137,6 +137,7 @@ test('a deploy still starting (an APK downloading) is not started twice, and its
     deployers: { apk: { waits: () => true, head: async () => 'publish:8', start: () => (starts++, new Promise<void>((done) => (finish = done))) } },
   });
   const first = auto.deployNow(3, apk.id, 'Cara', 1);
+  await assert.rejects(auto.deployNow(3, apk.id, 'Josh', 2), /being deployed already/, 'two presses at once');
   await new Promise((r) => setImmediate(r));
   assert.equal(auto.info(tv)?.can, false);
   await assert.rejects(auto.deployNow(3, apk.id, 'Josh', 2), /being deployed already/);

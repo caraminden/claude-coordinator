@@ -117,16 +117,13 @@ export class AutoDeploy {
     if (!t || !deployer) throw new HttpError(404, `${target} has no release step Citadel can start`);
     const key = keyOf(projectId, target);
     if (this.starting.has(key)) throw new HttpError(409, `${t.name} is being deployed already`);
-    const head = await deployer.head(t);
-    // A person's deploy counts as this commit's try: if it rolls back, auto-deploy waits for main to move.
-    if (head) this.mark(key, head);
-    await this.start(key, () => deployer.start(t, by, uid));
-  }
-
-  private async start(key: string, go: () => void | Promise<void>) {
+    // Held from here, before the first await, so two presses at once start one deploy.
     this.starting.add(key);
     try {
-      await go();
+      const head = await deployer.head(t);
+      // A person's deploy counts as this commit's try: if it rolls back, auto-deploy waits for main to move.
+      if (head) this.mark(key, head);
+      await deployer.start(t, by, uid);
     } finally {
       this.starting.delete(key);
     }
@@ -168,11 +165,11 @@ export class AutoDeploy {
         }
         if (now - m.at < QUIET_MS || !this.isOn(t.projectId, t.id) || this.saved().tried[key] === head || this.starting.has(key)) continue;
         this.mark(key, head);
-        try {
-          await this.start(key, () => deployer.start(t, AUTO_BY, null));
-        } catch (err: any) {
-          this.d.failed(t, err?.message ?? String(err));
-        }
+        // Not awaited: a slow start (an APK downloading) mustn't hold up the other targets' checks.
+        this.starting.add(key);
+        void (async () => deployer.start(t, AUTO_BY, null))()
+          .catch((err: any) => this.d.failed(t, err?.message ?? String(err)))
+          .finally(() => this.starting.delete(key));
       }
     }
     for (const key of this.moved.keys()) if (!waiting.has(key)) this.moved.delete(key);

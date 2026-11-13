@@ -198,6 +198,11 @@ export interface ShippedFile { url: string; expires: number | null }
 
 const ms = (s: string | null | undefined) => (s ? Date.parse(s) : null);
 const secs = (from: number | null, to: number | null) => (from != null && to != null ? Math.max(0, Math.round((to - from) / 1000)) : null);
+/** A target's key in the readers' maps: target ids (apk:android-release) repeat across schemes. */
+const tkey = (t: Found) => `${t.projectId}:${t.id}`;
+/** How long after Citadel starts a release run it waits to see it listed before it would start another. */
+const SENT_MS = 3 * 60_000;
+
 /** Re-read a workflow that isn't moving this often; one that is, every refresh. */
 const IDLE_MS = 5 * 60_000;
 
@@ -273,20 +278,20 @@ class RunsCache {
   }
 
   /** Read a target's runs again on the next refresh, moving or not (a run was just started for it). */
-  forget(id: string) {
-    this.readAt.delete(id);
+  forget(t: Found) {
+    this.readAt.delete(tkey(t));
   }
 
   async read(t: Found) {
     const p = this.d.store.getProject(t.projectId);
     if (!p || !t.workflow) return;
     const now = (this.d.now ?? Date.now)();
-    const had = this.runs.get(t.id);
+    const had = this.runs.get(tkey(t));
     const moving = had?.some((r) => r.run.status !== 'completed');
-    if (had && !moving && now - (this.readAt.get(t.id) ?? 0) < IDLE_MS) return;
+    if (had && !moving && now - (this.readAt.get(tkey(t)) ?? 0) < IDLE_MS) return;
     const runs = await this.d.actions.workflowRuns(p, t.workflow.replace(/^.*\//, ''), t.branch);
     if (!runs) return;
-    this.readAt.set(t.id, now);
+    this.readAt.set(tkey(t), now);
     const out: RunJobs[] = [];
     // The newest few: enough for the current, the usual times and the recent list.
     for (const run of runs.slice(0, RECENT * 2)) {
@@ -304,7 +309,7 @@ class RunsCache {
       if (job && job.conclusion !== 'skipped') out.push({ run, jobs: [job] });
       else if (run.status !== 'completed') out.push({ run, jobs: [] });
     }
-    this.runs.set(t.id, out);
+    this.runs.set(tkey(t), out);
     const kept = new Set([...this.runs.values()].flat().map((r) => r.run.id));
     for (const id of this.changes.keys()) if (!kept.has(id)) this.changes.delete(id);
     for (const id of this.files.keys()) if (!kept.has(id)) this.files.delete(id);
@@ -335,7 +340,7 @@ class RunsCache {
     const key = (r: RunJobs) => r.run.run_number ?? r.run.id;
     const last = store.listReleases(t.projectId, t.id, 1)[0];
     const done = last ? Number(last.version.replace(/^run:/, '')) : null;
-    const fresh = (this.runs.get(t.id) ?? []).filter((r) => shipped(r) && (done == null || key(r) > done));
+    const fresh = (this.runs.get(tkey(t)) ?? []).filter((r) => shipped(r) && (done == null || key(r) > done));
     for (const r of (done == null ? fresh.slice(0, 1) : fresh).reverse()) {
       const s = span(r);
       store.addRelease({ project_id: t.projectId, target: t.id, version: `run:${key(r)}`, changes: '[]', started_at: s.start, live_at: s.end, outcome: 'live', stages: '{}' });
@@ -372,7 +377,7 @@ export class CiPackageReader implements Reader {
   read(): Omit<TargetView, 'testCopies'>[] {
     const now = (this.d.now ?? Date.now)();
     return this.d.finder.list('ci').map((t) => {
-      const runs = this.cache.runs.get(t.id) ?? [];
+      const runs = this.cache.runs.get(tkey(t)) ?? [];
       const ch = (r: RunJobs) => this.cache.changes.get(r.run.id) ?? [];
       const file = (r: RunJobs) => this.cache.file(r.run.id, now);
       const num = this.cache.numbers(t);
@@ -430,6 +435,8 @@ export class ApkReader implements Reader {
   private mains = new Map<string, { head: string; code: number; name: string | null } | null>();
   /** Signed runs whose APK turned out no newer than the published one: not a release to publish (#629). */
   private old = new Set<number>();
+  /** When Citadel last started a release run: GitHub can take a while to list it, and till then it would look unstarted. */
+  private sent = new Map<string, number>();
   constructor(d: ApkDeps) {
     this.d = d;
     this.cache = new RunsCache(d);
@@ -438,17 +445,17 @@ export class ApkReader implements Reader {
   async refresh() {
     for (const t of this.d.finder.list('apk')) {
       await this.cache.read(t);
-      if (t.contraption) this.feeds.set(t.id, await this.d.feed(t.contraption));
+      if (t.contraption) this.feeds.set(tkey(t), await this.d.feed(t.contraption));
       // With no latest.json its signed runs are its releases, numbered as a CI package's.
-      if (!this.feeds.get(t.id)) this.cache.record(t);
+      if (!this.feeds.get(tkey(t))) this.cache.record(t);
       const p = this.d.store.getProject(t.projectId);
       if (!p?.repo_dir) continue;
       const head = (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim();
-      if (!head || this.mains.get(t.id)?.head === head) continue;
+      if (!head || this.mains.get(tkey(t))?.head === head) continue;
       const files = (await git(['ls-tree', '-r', '--name-only', head], p.repo_dir)) ?? '';
       const gradle = files.split('\n').find((f) => /(^|\/)app\/build\.gradle(\.kts)?$/.test(f));
       const v = gradle ? gradleVersion((await git(['show', `${head}:${gradle}`], p.repo_dir)) ?? '') : null;
-      this.mains.set(t.id, v && { head, ...v });
+      this.mains.set(tkey(t), v && { head, ...v });
     }
   }
 
@@ -458,17 +465,19 @@ export class ApkReader implements Reader {
    * newest signed run). Null while a run is moving, with nothing waiting, or with no latest.json to publish into.
    */
   pending(t: Found): { step: 'dispatch'; head: string } | { step: 'publish'; run: Run; current: number; main: { code: number; name: string | null } } | null {
-    const feed = this.feeds.get(t.id);
-    const main = this.mains.get(t.id);
-    const runs = this.cache.runs.get(t.id) ?? [];
+    const feed = this.feeds.get(tkey(t));
+    const main = this.mains.get(tkey(t));
+    const runs = this.cache.runs.get(tkey(t)) ?? [];
     if (!feed || !main || main.code <= feed.versionCode || runs.some((r) => r.run.status !== 'completed')) return null;
+    if ((this.d.now ?? Date.now)() - (this.sent.get(tkey(t)) ?? -Infinity) < SENT_MS) return null;
     const signed = runs.find((r) => shipped(r) && !this.old.has(r.run.id) && (ms(r.run.created_at) ?? 0) > feed.at);
     return signed ? { step: 'publish', run: signed.run, current: feed.versionCode, main: { code: main.code, name: main.name } } : { step: 'dispatch', head: main.head };
   }
 
-  /** A release run was just started for it: read its runs again on the next refresh. */
-  started(id: string) {
-    this.cache.forget(id);
+  /** A release run was just started for it: read its runs again on the next refresh, and start no other for a while. */
+  started(t: Found) {
+    this.cache.forget(t);
+    this.sent.set(tkey(t), (this.d.now ?? Date.now)());
   }
 
   /** Run `runId` signed an APK no newer than the published one (built before the bump): it waits for a new run instead. */
@@ -479,11 +488,11 @@ export class ApkReader implements Reader {
   read(): Omit<TargetView, 'testCopies'>[] {
     const now = (this.d.now ?? Date.now)();
     return this.d.finder.list('apk').map((t) => {
-      const runs = this.cache.runs.get(t.id) ?? [];
+      const runs = this.cache.runs.get(tkey(t)) ?? [];
       const signs = runs.filter(shipped).slice(0, RECENT).flatMap((r) => apkRun(r, 'live').stages.sign ?? []);
       const usual = (s: string) => (s === 'sign' ? median(signs) : null);
-      const feed = this.feeds.get(t.id);
-      const main = this.mains.get(t.id);
+      const feed = this.feeds.get(tkey(t));
+      const main = this.mains.get(tkey(t));
       const file = (r: RunJobs) => this.cache.file(r.run.id, now);
       const moving = runs.find((r) => r.run.status !== 'completed');
       /** The run in flight, signing; waiting while no runner has it. */
@@ -508,15 +517,15 @@ export class ApkReader implements Reader {
       let lead: Progress | null = null;
       let tryIt: string | null = null;
       if (main && main.code > feed.versionCode) {
-        const signed = runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? 0) > feed.at);
+        const signed = runs.find((r) => shipped(r) && !this.old.has(r.run.id) && (ms(r.run.created_at) ?? 0) > feed.at);
         const name = main.name ?? `Release ${main.code}`;
         if (moving) lead = signing(moving);
         else if (signed) {
-          const text = `${name} is signed, but nobody has published it yet: ask the scheme's Taskmaster to publish it`;
+          const text = `${name} is signed: it goes out with the Deploy button, or by auto-deploy within 5 minutes`;
           lead = { stage: 'publish', since: span(signed).end ?? now, usual: null, waitingOn: text, text };
           tryIt = file(signed);
         } else {
-          const text = `${name} is on main, but nobody has started its release run yet: ask the scheme's Taskmaster to start it`;
+          const text = `${name} is on main, but its release run hasn't started: the Deploy button starts it, or auto-deploy once main sits still for 5 minutes`;
           lead = { stage: 'sign', since: feed.at, usual: null, waitingOn: text, text };
         }
       }
@@ -691,7 +700,7 @@ export class TestCopyReader {
         continue;
       }
       await this.cache.read(s.run);
-      const r = (this.cache.runs.get(s.run.id) ?? []).find(shipped);
+      const r = (this.cache.runs.get(tkey(s.run)) ?? []).find(shipped);
       if (r) add(s.projectId, { kind: 'debug-apk', target: s.target, name: `build ${r.run.run_number ?? r.run.id}`, link: r.run.html_url ?? s.run.link ?? undefined, running: false, commit: r.run.head_sha, at: span(r).end ?? undefined });
     }
     this.copies = out;

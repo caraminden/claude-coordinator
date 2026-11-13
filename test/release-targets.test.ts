@@ -355,7 +355,7 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   git(repo, ['commit', '-q', '-am', 'v6']);
   await reader.refresh();
   [v] = reader.read();
-  const notStarted = "1.5 is on main, but nobody has started its release run yet: ask the scheme's Taskmaster to start it";
+  const notStarted = "1.5 is on main, but its release run hasn't started: the Deploy button starts it, or auto-deploy once main sits still for 5 minutes";
   assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta, v.next?.number], ['sign', notStarted, null, 6]);
   const bumped = git(repo, ['rev-parse', 'HEAD']).toString().trim();
   assert.deepEqual(reader.pending(t), { step: 'dispatch', head: bumped }, 'runs signed before latest.json was written are not this release');
@@ -376,7 +376,7 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   runs[0] = run(8, 'completed', 'success', now - 2 * m, now);
   await reader.refresh();
   [v] = reader.read();
-  assert.deepEqual([v.next?.stage, v.next?.waitingOn], ['publish', "1.5 is signed, but nobody has published it yet: ask the scheme's Taskmaster to publish it"]);
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn], ['publish', '1.5 is signed: it goes out with the Deploy button, or by auto-deploy within 5 minutes']);
   assert.deepEqual(reader.pending(t), { step: 'publish', run: runs[0], current: 5, main: { code: 6, name: '1.5' } });
   reader.tooOld(8);
   assert.deepEqual(reader.pending(t), { step: 'dispatch', head: bumped }, 'a run signed before the bump waits for a new run');
@@ -507,4 +507,29 @@ test('the test-copy reader: builds open minions left in their files, a preview s
   assert.deepEqual(copies.filter((c) => c.kind === 'download').map((c) => [c.name, c.commit, c.number]).sort(), [['Delve-debug.apk', null, open.number], ['Delve-ticket-70-exe-e889baa9-windows.zip', 'e889baa9', open.number]], "a closed minion's files, a zip not named like a build and a type the file route won't serve (.exe) don't count");
   assert.deepEqual(copies.filter((c) => c.kind === 'site').map((c) => [c.port, c.running]), [[8116, true], [9000, false]]);
   assert.deepEqual(copies.filter((c) => c.kind === 'debug-apk').map((c) => [c.target, c.name, c.commit, c.link]), [['apk:android-release', 'build 8', 'sha8', 'https://github.com/o/r/actions/runs/8']], 'the newest run that passed, not the one running');
+});
+
+test('the APK reader keeps each scheme\'s target apart, and holds off a second release run while GitHub lists the first', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `apk-repo-${++n}`);
+  mkdirSync(join(repo, 'app'), { recursive: true });
+  git(repo, ['init', '-q', '-b', 'main']);
+  writeFileSync(join(repo, 'app/build.gradle'), 'versionCode 9\n');
+  git(repo, ['add', '.']);
+  git(repo, ['commit', '-q', '-m', 'v9']);
+  const a = store.createProject('A', 'https://github.com/o/a');
+  const b = store.createProject('B', 'https://github.com/o/b');
+  store.setProjectRepoDir(a.id, repo);
+  const t = (p: number, c: string): Found => ({ id: 'apk:android-release', projectId: p, name: 'Android', kind: 'apk', link: null, branch: 'main', workflow: '.github/workflows/android-release.yml', contraption: c });
+  const ta = t(a.id, 'a'), tb = t(b.id, 'b');
+  let clock = Date.now();
+  const { actions } = fakeActions([], {});
+  const reader = new ApkReader({ store, finder: finderOf([ta, tb]), actions, now: () => clock, feed: async (c) => ({ versionCode: c === 'a' ? 8 : 9, at: clock - 60_000 }) });
+  await reader.refresh();
+  assert.equal(reader.pending(ta)?.step, 'dispatch', "A's main is ahead of A's feed");
+  assert.equal(reader.pending(tb), null, "B has no clone: A's version on main isn't B's");
+  reader.started(ta);
+  assert.equal(reader.pending(ta), null, 'just started: not listed yet, but not started again');
+  clock += 3 * 60_000;
+  assert.equal(reader.pending(ta)?.step, 'dispatch', 'a dispatch GitHub never listed can be tried again');
 });

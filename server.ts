@@ -548,7 +548,7 @@ const autoDeploy = new AutoDeploy({
         const as = githubOf(p.repo_dir);
         const release = async () => {
           await dispatch(slug, t.workflow!.replace(/^.*\//, ''), t.branch, as);
-          apkReader.started(t.id);
+          apkReader.started(t);
         };
         if (w.step === 'dispatch') await release();
         else {

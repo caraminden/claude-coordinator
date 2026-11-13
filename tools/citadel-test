@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Run a few test files and see only what matters (#641), on every turn's PATH like citadel-wait:
+#   citadel-test test/a.test.ts [test/b.test.ts ...] [--name '<pattern>'] [--full] [--timeout <seconds>]
+# Runs them through the worktree's tools/citadel-node --test with the leak guard (test/leak-guard.ts) and a time
+# limit (default 300 s), and prints a line of counts, then each failure's file, name and assertion diff, and the leak
+# guard's complaint if any. The full output goes to $TMPDIR/citadel-test.log; --full prints it too. --name keeps the
+# tests whose name matches (node's --test-name-pattern). Exits with the tests' status, 124 at the time limit.
+# The full suite is the land gate's job (tools/land.sh), so it refuses to run without files or on a folder.
+set -uo pipefail
+say() { echo "citadel-test: $*" >&2; }
+usage() { say "usage: citadel-test test/<name>.test.ts ... [--name '<pattern>'] [--full] [--timeout <seconds>]"; exit 2; }
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || { say "run it inside a worktree of Citadel's repo"; exit 2; }
+reporter=$root/tools/citadel-test-reporter.ts
+[ -f "$reporter" ] || { say "$root has no tools/citadel-test-reporter.ts: it isn't Citadel's repo, or its branch is older than the command (rebase onto main)"; exit 2; }
+
+files=() opts=() full= limit=300
+while [ $# -gt 0 ]; do
+  case $1 in
+    --name) [ $# -ge 2 ] || usage; opts+=("--test-name-pattern=$2"); shift ;;
+    --name=*) opts+=("--test-name-pattern=${1#--name=}") ;;
+    --full) full=1 ;;
+    --timeout) [ $# -ge 2 ] && [[ $2 =~ ^[0-9]+$ ]] || usage; limit=$2; shift ;;
+    --timeout=*) limit=${1#--timeout=}; [[ $limit =~ ^[0-9]+$ ]] || usage ;;
+    -*) say "unknown option $1"; usage ;;
+    *) files+=("$1") ;;
+  esac
+  shift
+done
+full_suite="the full suite is the land gate's job (tools/land.sh runs it on CI); if you must run it here: citadel-heavy npm test"
+[ ${#files[@]} -gt 0 ] || { say "name the test files your change touches; $full_suite"; exit 2; }
+for f in "${files[@]}"; do
+  [ -d "$f" ] && { say "$f is a folder; $full_suite"; exit 2; }
+  [ -f "$f" ] || { say "no such file: $f"; exit 2; }
+done
+
+log=${TMPDIR:-/tmp}/citadel-test.log
+err=$(mktemp) out=$(mktemp)
+trap 'rm -f "$err" "$out"' EXIT
+start=$SECONDS
+# The spec output goes to the log, the short version to stdout, and node's own stderr (the leak guard says its
+# piece there) to a file read after. --test-force-exit as in tools/run-tests.sh, so a local run matches the gate's.
+timeout -k 10 "$limit" "$root/tools/citadel-node" --test --test-force-exit --test-global-setup="$root/test/leak-guard.ts" \
+  --test-reporter=spec --test-reporter-destination="$log" --test-reporter="$reporter" --test-reporter-destination=stdout \
+  "${opts[@]}" "${files[@]}" >"$out" 2>"$err"
+status=$?
+cat "$err" >>"$log"
+[ -n "$full" ] && cat "$log" && echo
+cat "$out"
+if [ -s "$err" ]; then
+  if [ -n "$full" ]; then :
+  elif [ "$(wc -l <"$err")" -gt 40 ]; then head -n 40 "$err"; echo "… $(($(wc -l <"$err") - 40)) more lines in the log"
+  else cat "$err"
+  fi
+fi
+[ $status -eq 124 ] || [ $status -eq 137 ] && echo "✖ stopped at the time limit, ${limit} s (--timeout <seconds> to change it), after $((SECONDS - start)) s"
+echo "full output: $log"
+exit $status

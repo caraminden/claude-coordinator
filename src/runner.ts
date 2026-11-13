@@ -2163,9 +2163,11 @@ export class Runner {
       });
     } catch (err: any) {
       // A launch that can't be built (a settings file past Claude Code's cap, #661; claude not on the PATH) fails the turn with its reason, in the chat.
+      console.error(`Minion ${ticket.id}: its launch could not be built:`, err);
       rmSync(dir, { recursive: true, force: true });
       const event = this.emit(ticket.id, 'error', { text: `Could not start the turn: ${err.message}` });
-      this.setFailNote(ticket.id, { note: `Could not start: ${err.message}`.slice(0, 60) });
+      const note = `Could not start: ${err.message}`;
+      this.setFailNote(ticket.id, { note: note.length > 60 ? `${note.slice(0, 59)}…` : note });
       this.setStatus(ticket.id, 'error');
       this.onTurnError(ticket.id, err.message, event.id);
       return;

@@ -26,7 +26,9 @@ const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 
 async function check(): Promise<string> {
   const settings = flag('--settings');
   if (!settings) throw new Error('No --settings');
-  const parsed = JSON.parse(settings.trimStart().startsWith('{') ? settings : readFileSync(settings, 'utf8'));
+  // A file since #92: inline, it grows past Linux's 128 KiB on one argument.
+  if (settings.trimStart().startsWith('{')) throw new Error('--settings is inline JSON, not a file');
+  const parsed = JSON.parse(readFileSync(settings, 'utf8'));
   if (!parsed.hooks) throw new Error('--settings has no hooks (the tripwire)');
 
   const config = flag('--mcp-config') ?? '{}';
@@ -76,8 +78,12 @@ async function check(): Promise<string> {
     if (bytes > MAX_ARG) throw new Error(`The largest launch argument is ${bytes} bytes, over ${MAX_ARG / 1024} KiB (Linux's cap is 128 KiB): ${largest.slice(0, 80)}…`);
     // Each file the launch wrote, against the budget: one Taskmaster's settings.json passed Claude Code's
     // 2 MiB at launch (#661), with git rules per open minion's worktree, in every scheme on a Citadel member's ask.
-    const dir = dirname(flag('--append-system-prompt-file') ?? '');
-    const sizes = Object.entries(LAUNCH_FILES).map(([name, why]) => ({ name, why, bytes: existsSync(join(dir, name)) ? statSync(join(dir, name)).size : 0 }));
+    // Every launch writes all four into the turn's folder, beside the settings file its --settings names.
+    const dir = dirname(settings);
+    const sizes = Object.entries(LAUNCH_FILES).map(([name, why]) => {
+      if (!existsSync(join(dir, name))) throw new Error(`The launch wrote no ${name} beside its --settings (${settings})`);
+      return { name, why, bytes: statSync(join(dir, name)).size };
+    });
     for (const f of sizes) if (f.bytes > FILE_BUDGET) throw new Error(`The launch's ${f.name} is ${f.bytes} bytes, over the ${FILE_BUDGET / 1024} KiB budget for a launch file (${f.why})`);
     const folders = new Set((parsed.permissions?.allow ?? []).filter((r: string) => r.startsWith('Bash(git -C ')).map((r: string) => r.split(' ')[2])).size;
     return `${found.join('; ')}; largest argument ${bytes} bytes; settings.json ${sizes[0].bytes} bytes, git rules for ${folders} folders`;

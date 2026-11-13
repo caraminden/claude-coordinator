@@ -144,13 +144,14 @@ summary { --tap-pad: max(0px, (24px - 1lh) / 2); padding-block: var(--tap-pad); 
 #me { color: var(--muted); font-size: 0.9em; }
 #me button { margin-left: 0.5rem; padding: 0.2rem 0.6rem; font-size: 0.85em; }
 
-main { max-width: 1200px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+/* --main-pad-l/-r are its side pads, for a surface that reaches over them to the window's edge (the Taskmaster's purple). */
+main { --main-pad-l: 1rem; --main-pad-r: 1rem; max-width: 1200px; margin: 0 auto; padding: 1.25rem var(--main-pad-r) 3rem var(--main-pad-l); }
 /* Installed as an app (home screen or desktop window): keep clear of side notches in landscape and
    fill the window. Browser tabs keep the layout above unchanged. */
 @media (display-mode: standalone) {
   body { min-height: 100dvh; }
   .topbar { padding-left: calc(1rem + env(safe-area-inset-left, 0px)); padding-right: calc(1rem + env(safe-area-inset-right, 0px)); }
-  main { padding-left: calc(1rem + env(safe-area-inset-left, 0px)); padding-right: calc(1rem + env(safe-area-inset-right, 0px)); }
+  main { --main-pad-l: calc(1rem + env(safe-area-inset-left, 0px)); --main-pad-r: calc(1rem + env(safe-area-inset-right, 0px)); }
 }
 /* What sits at the top of the window: the notch on a phone, the title bar strip in a desktop app with its
    title bar folded into the page (#637, manifest's display_override). Everything pinned to the top adds it. */
@@ -292,7 +293,7 @@ body:has(.split) .update-banner { top: var(--top-inset); }
   body:has(.split) { --strip-pad: max(0.625rem, (var(--top-inset) - 1.9rem) / 2); --split-top: var(--strip-pad); }
   body:has(.split)::before { z-index: -1; background: none; app-region: drag; }
   .split :is(a, button, input, select, textarea, summary, label, [tabindex]) { app-region: no-drag; }
-  body:has(.split) main { padding-left: max(1rem, calc(env(titlebar-area-x, 0px) + 0.5rem - var(--citadel-rail, 0px))); }
+  body:has(.split) main { --main-pad-l: max(1rem, calc(env(titlebar-area-x, 0px) + 0.5rem - var(--citadel-rail, 0px))); }
   body:has(.split) .update-banner { top: 0; padding-inline: calc(1rem + env(titlebar-area-x, 0px)) calc(1rem + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
   .update-banner :is(a, button) { app-region: no-drag; }
   body:has(.split) .ticket-head { top: calc(var(--banner-h, 0px) + var(--strip-pad) - 0.6rem); }

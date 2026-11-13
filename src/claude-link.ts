@@ -4,7 +4,7 @@
 // Their turns run in it (src/runner.ts, placeFor) at the same paths as on the host. The server
 // login's owner keeps running on the host. The credential row (kind claude_runner) holds only
 // Citadel's bookkeeping: container, volume path, email and plan.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -17,6 +17,25 @@ import { claudeConfigDir, projectSlug } from './sessions.ts';
 const IMAGE_REPO = 'localhost/citadel-claude';
 /** The checkout this server runs from (prompts.ts CHECKOUT). */
 const LIVE_CHECKOUT = join(import.meta.dirname, '..');
+/** More ignored files than this in the live checkout (an installed node_modules) and it isn't mounted at all. */
+const MAX_MASKED = 50;
+
+/**
+ * The live checkout's read-only mount, with each file git ignores there (`.env`, `env`, a stray `.db`, the test box's
+ * password file) covered by /dev/null, since they can hold secrets (#621 floor). Null, so nothing is mounted, when git
+ * can't list them or there are too many to cover.
+ */
+export function checkoutMounts(dir: string): Mount[] | null {
+  let ignored: string[];
+  try {
+    ignored = execFileSync('git', ['-C', dir, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard'], { encoding: 'utf8', timeout: 10_000 })
+      .split('\0').filter(Boolean);
+  } catch {
+    return null;
+  }
+  if (ignored.length > MAX_MASKED) return null;
+  return [{ src: dir, dst: dir, ro: true }, ...ignored.map((f) => ({ src: '/dev/null', dst: join(dir, f), ro: true }))];
+}
 const CONTAINERFILE_DIR = join(import.meta.dirname, '..', 'deploy', 'claude-container');
 /**
  * Host tool folders a turn may need, mounted read-only where they exist: Delve's dotnet and Godot, mise and its
@@ -203,7 +222,7 @@ export class ClaudeLink {
     for (const d of TOOL_DIRS) if (existsSync(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
     // The code this server runs, read-only, so a member's turn checks the live checkout as a host turn does (#621). A dev
     // copy runs from a worktree, already mounted writable under projects/.
-    if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push({ src: LIVE_CHECKOUT, dst: LIVE_CHECKOUT, ro: true });
+    if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push(...checkoutMounts(LIVE_CHECKOUT) ?? []);
     // Each scheme's Claude Code memory, shared with the host's turns: the server's copy, at the path claude looks in.
     for (const p of this.store.listProjects()) {
       if (!p.repo_dir) continue;

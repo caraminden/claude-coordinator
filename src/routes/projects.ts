@@ -375,7 +375,8 @@ export const projectRoutes: Route[] = [
   {
     // Try again to put a new scheme's repo on GitHub after it failed at creation. It goes where the
     // create would have put it: on the scheme owner's GitHub, with their token, unless they're an admin (#195).
-    method: 'POST', path: '/api/projects/:project/github', who: ['person'], access: 'owner',
+    // Any member may ask (#621): it makes the repo the owner already asked for, the same way.
+    method: 'POST', path: '/api/projects/:project/github', who: ['person'],
     async handler({ res, app, project }) {
       if (app.preview) throw new HttpError(403, 'A preview can\'t make GitHub repos');
       if (!project.github_error || !project.repo_dir) throw new HttpError(409, 'This scheme has no GitHub repo waiting to be made');

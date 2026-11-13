@@ -754,7 +754,7 @@ export const ticketRoutes: Route[] = [
     async handler({ req, res, app, caller }) {
       const body = await readJson(req);
       // The database holds every scheme's chat, so only a turn whose person sees every scheme reads it (db.ts canSee).
-      const refused = body?.what === 'db' && caller ? adminAskRefusal(app.store, caller.id) : null;
+      const refused = body?.what === 'db' ? adminAskRefusal(app.store, caller!.id) : null;
       if (refused) throw new HttpError(403, refused);
       const { systemctl, journalctl } = app.services.opts;
       return json(res, 200, { output: await hostCheck({ db: join(app.dataDir, 'coordinator.db'), systemctl, journalctl }, body) });

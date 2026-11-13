@@ -263,8 +263,8 @@ const READ_ONLY_COMMANDS = [
     'systemctl --user status', 'systemctl --user is-active', 'systemctl --user show', 'systemctl --user list-units', 'systemctl --user list-timers',
     'sqlite3 -readonly -safe', 'sqlite3 -safe -readonly',
     'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh pr status', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
-    // #621: more reads a Taskmaster reached for. sed only sandboxed, which refuses its e, r and w commands.
-    'file', 'sed --sandbox', 'gh repo view', 'gh release list', 'gh release view', 'gh workflow list', 'gh workflow view', 'gh label list',
+    // #621: more reads a Taskmaster reached for. Not sed or file: a writing flag bundled anywhere (-nsi, -bC) passes any rule.
+    'gh repo view', 'gh release list', 'gh release view', 'gh workflow list', 'gh workflow view', 'gh label list',
   ].map((c) => `Bash(${c}:*)`),
   ...['-s', '-sS', '-s -m 5'].flatMap((f) => ['127.0.0.1', 'localhost'].map((host) => `Bash(curl ${f} http://${host}:8573/api/health)`)),
 ];
@@ -281,9 +281,6 @@ const READ_ONLY_EXCEPTIONS = [
   ['journalctl', '--vac', '--rot', '--fl', '--syn', '--rel', '--sm', '--se', '--up', '--cursor-f'],
   ['sqlite3', '-nonce', '--nonce', '-unsafe', '--unsafe'],
   ['gh api', '-X', '--method', '-f', '-F', '--field', '--raw-field', '--input'],
-  // file compiling a magic file; sed in place, alone or bundled after its other short flags.
-  ['file', '-C', '--c'],
-  ['sed', '-i', '--i', '-ni', '-Ei', '-ri', '-si', '-zi', '-ui'],
   // A file it saves, or a browser it opens.
   ['gh release view', '-w', '--w'], ['gh repo view', '-w', '--w'], ['gh workflow view', '-w', '--w'],
 ].flatMap(([cmd, ...flags]) => flags.flatMap((f) => [`Bash(${cmd} ${f}*)`, `Bash(${cmd} * ${f}*)`]))

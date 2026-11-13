@@ -986,7 +986,7 @@
  "POST /api/projects/:p/github": {
   "anon": "401 Not logged in",
   "person": "409 This scheme has no GitHub repo waiting to be made",
-  "member": "403 Only the scheme's owner can do that",
+  "member": "409 This scheme has no GitHub repo waiting to be made",
   "outsider": "404 No such scheme",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",

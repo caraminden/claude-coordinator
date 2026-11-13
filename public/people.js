@@ -6,8 +6,6 @@ import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 
-/** Whether you may change this scheme's members and settings: its owner, or an admin. */
-
 function head(title, meta) {
   return h('div', { class: 'ticket-head' },
     h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),

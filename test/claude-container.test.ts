@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ANDROID_JDK, ANDROID_SDK, androidEnv, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
+import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMounts, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { CodexLink } from '../src/codex-link.ts';
@@ -293,12 +294,22 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   const home = process.env.HOME!;
   for (const m of spec.mounts) {
     for (const bad of ['.ssh', '.config/gh', '.config/claude-coordinator', '.claude/.credentials.json', 'coordinator.db', 'state.db']) assert.ok(!m.src.includes(bad), `${m.src} mounts ${bad}`);
-    assert.ok(m.volume || m.src === m.dst, `${m.src} sits at its own path`);
+    assert.ok(m.volume || m.src === m.dst || (m.src === '/dev/null' && m.ro), `${m.src} sits at its own path`);
   }
   assert.ok(!spec.mounts.some((m) => !m.volume && m.src === join(home, '.claude')), "the server's own Claude folder stays out");
   // The code the server runs is readable, never writable (#621).
   const checkout = join(import.meta.dirname, '..');
   assert.deepEqual(spec.mounts.filter((m) => m.src === checkout), [{ src: checkout, dst: checkout, ro: true }]);
+  // Files git ignores there can hold secrets: each is covered, read-only, and a checkout git can't list isn't mounted.
+  const live = mkdtempSync(join(root, 'live-'));
+  execFileSync('git', ['init', '-q', live]);
+  writeFileSync(join(live, '.gitignore'), '.env\n*.db\n');
+  writeFileSync(join(live, '.env'), 'TOKEN=x');
+  writeFileSync(join(live, 'c.db'), '');
+  writeFileSync(join(live, 'code.ts'), '');
+  assert.deepEqual(checkoutMounts(live), [{ src: live, dst: live, ro: true },
+    { src: '/dev/null', dst: join(live, '.env'), ro: true }, { src: '/dev/null', dst: join(live, 'c.db'), ro: true }]);
+  assert.equal(checkoutMounts(join(root, 'not-a-repo')), null);
   assert.equal(link.place(josh.id), null);
   assert.equal(link.linked(josh.id), null);
   // A fresh server has no run/turns yet; podman refuses a bind mount whose folder is missing.

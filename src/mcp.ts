@@ -261,7 +261,6 @@ const LIST_TICKETS = {
   },
 };
 
-/** A scheme's CI runners on Cara's desktop (#328), through the runner agent there. */
 /** The host's read-only checks (#621), for a turn in a container: it has no live database or systemd user bus of its own. */
 const HOST_CHECK = {
   name: 'host_check',
@@ -281,6 +280,7 @@ const HOST_CHECK = {
   },
 };
 
+/** A scheme's CI runners on Cara's desktop (#328), through the runner agent there. */
 const CI_RUNNERS = {
   name: 'ci_runners',
   description:

@@ -3,11 +3,11 @@
 // Run as a child (src/host-check.ts), so a slow query never stalls the server: `node db-view.ts <db file>`, the SQL on stdin.
 import { constants, DatabaseSync } from 'node:sqlite';
 
-/** Columns no turn reads: password and invite hashes, machine and contraption key hashes, linked logins, push keys. */
+/** Columns no turn reads: password and invite hashes, machine and contraption keys, linked logins, push keys. */
 export const SECRET: Record<string, string[]> = {
   users: ['password_hash', 'invite_hash'],
   machines: ['token_hash'],
-  contraptions: ['key_hash'],
+  contraptions: ['key_hash', 'identity_private'],
   credentials: ['secret', 'meta'],
   push_subscriptions: ['endpoint', 'p256dh', 'auth'],
 };
@@ -22,28 +22,26 @@ export const MAX_ROWS = 1000;
  * Open `file` read-only with every table that holds a secret shadowed by a temp view of the same name (unqualified
  * names find temp first) that masks it, and an authorizer that allows only reads and refuses any other read of a
  * secret: `main.users`, an ATTACH, a write or a pragma that sets something all fail with "not authorized".
+ * Settings, whose secrets are rows, not a column, is a masked temp copy made before the authorizer is on, since a
+ * CTE named like a view passes for it in the authorizer: so nothing reads main.settings.value at all.
  */
 export function openMasked(file: string): DatabaseSync {
   const db = new DatabaseSync(file, { readOnly: true });
-  const views = new Set<string>();
   for (const table of [...Object.keys(SECRET), 'settings']) {
     const cols = (db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all() as { name: string }[]).map((c) => c.name);
     if (!cols.length) continue;
     const pick = cols.map((c) => (SECRET[table]?.includes(c) ? `${HIDDEN} AS "${c}"`
       : table === 'settings' && c === 'value' ? `CASE WHEN ${SECRET_SETTINGS} THEN ${HIDDEN} ELSE value END AS value` : `"${c}"`));
-    db.exec(`CREATE TEMP VIEW "${table}" AS SELECT ${pick.join(', ')} FROM main."${table}"`);
-    views.add(table);
+    db.exec(`CREATE TEMP ${table === 'settings' ? 'TABLE' : 'VIEW'} "${table}" AS SELECT ${pick.join(', ')} FROM main."${table}"`);
   }
-  db.setAuthorizer((action, a, b, dbName, view) => {
+  db.setAuthorizer((action, a, b, dbName) => {
     if (action === constants.SQLITE_SELECT || action === constants.SQLITE_FUNCTION || action === constants.SQLITE_RECURSIVE) return constants.SQLITE_OK;
     // These pragmas only describe; their argument is a table or index name.
     if (action === constants.SQLITE_PRAGMA) return a && PRAGMAS.has(a.toLowerCase()) ? constants.SQLITE_OK : constants.SQLITE_DENY;
     if (action !== constants.SQLITE_READ) return constants.SQLITE_DENY;
-    // The masking views' own columns (temp) are safe. Of the real tables (main), only those views read settings.value,
-    // and nothing reads a secret column at all.
+    // The masked copies (temp) are safe; of the real tables (main), nothing reads a secret column or settings.value.
     if (dbName !== 'main') return constants.SQLITE_OK;
-    if (a === 'settings' && b === 'value') return view !== null && views.has(view) ? constants.SQLITE_OK : constants.SQLITE_DENY;
-    return a && b && SECRET[a]?.includes(b) ? constants.SQLITE_DENY : constants.SQLITE_OK;
+    return a && b && (SECRET[a]?.includes(b) || (a === 'settings' && b === 'value')) ? constants.SQLITE_DENY : constants.SQLITE_OK;
   });
   return db;
 }

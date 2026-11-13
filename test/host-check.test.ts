@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { SECRET } from '../src/db-view.ts';
 import { hostCheck } from '../src/host-check.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'host-check-'));
@@ -18,6 +19,10 @@ store.db.prepare("INSERT INTO credentials (user_id, kind, secret, meta, created_
 store.setSetting('agent-nonce:7', { current: 'NONCE', previous: null });
 store.setSetting('wake-when-live', [1]);
 store.createMachine('box', 'MACHINEHASH', 'Cara', null);
+store.db.prepare("INSERT INTO contraptions (name, title, port, identity_public, identity_private, key_hash, keys_at, created_at) VALUES ('mandate', 'Mandate', 9100, 'PUB', 'PRIVKEY', 'KEYHASH', 1, 1)").run();
+// Every column whose name says secret, in the schema the code makes today.
+const secretish = (store.db.prepare("SELECT m.name AS t, p.name AS c FROM sqlite_schema m, pragma_table_info(m.name) p WHERE m.type = 'table'").all() as { t: string; c: string }[])
+  .filter(({ c }) => /hash|secret|private|password|nonce|p256dh|^auth$|^endpoint$|^meta$/.test(c)).map(({ t, c }) => `${t}.${c}`);
 store.db.close();
 
 // Stand-ins that print what they were asked.
@@ -32,18 +37,28 @@ test('the database reads as sqlite3 prints it, with every secret [hidden]', asyn
   assert.equal(await sql('SELECT kind, secret, meta FROM credentials'), 'kind|secret|meta\ngithub|[hidden]|[hidden]');
   assert.equal(await sql("SELECT key, value FROM settings WHERE key IN ('agent-nonce:7', 'wake-when-live') ORDER BY key"), 'key|value\nagent-nonce:7|[hidden]\nwake-when-live|[1]');
   assert.equal(await sql('SELECT name, token_hash FROM machines'), 'name|token_hash\nbox|[hidden]');
+  assert.equal(await sql('SELECT name, identity_public, identity_private, key_hash FROM contraptions'), 'name|identity_public|identity_private|key_hash\nmandate|PUB|[hidden]|[hidden]');
   assert.match(await sql('PRAGMA table_info(users)'), /password_hash/);
   assert.equal(await sql('SELECT 1 WHERE 0'), '(no rows)');
 });
 
 test('the real tables, writes, ATTACH and setting pragmas are refused', async () => {
   for (const q of ['SELECT password_hash FROM main.users', 'SELECT * FROM main.credentials', "SELECT value FROM main.settings WHERE key = 'agent-nonce:7'",
-    'WITH x AS (SELECT * FROM main.users) SELECT * FROM x', 'SELECT (SELECT secret FROM main.credentials)']) assert.match(await sql(q), /prohibited|not authorized/, q);
+    'WITH x AS (SELECT * FROM main.users) SELECT * FROM x', 'SELECT (SELECT secret FROM main.credentials)', 'SELECT identity_private FROM main.contraptions',
+    // A CTE named like a masking view must not pass for it (#621 review).
+    'WITH settings AS (SELECT key, value FROM main.settings) SELECT * FROM settings', 'WITH users AS (SELECT key, value FROM main.settings) SELECT * FROM users',
+  ]) assert.match(await sql(q), /prohibited|not authorized/, q);
+  assert.doesNotMatch(await sql("SELECT group_concat(value) FROM settings, (SELECT 1) WHERE key LIKE 'agent-nonce:%'"), /NONCE/);
   for (const q of ["ATTACH '/etc/hostname' AS x", 'DELETE FROM tickets', 'UPDATE main.users SET admin = 1', 'PRAGMA journal_mode = DELETE', 'CREATE TABLE x (a)']) {
     assert.match(await sql(q), /not authorized|readonly|view/, q);
   }
   // Nothing changed.
   assert.equal(await sql('SELECT admin FROM users'), 'admin\n1');
+});
+
+test('every column named like a secret is masked, so a new one fails here until it is listed', () => {
+  assert.ok(secretish.length >= 10, secretish.join(' '));
+  assert.deepEqual(secretish.filter((tc) => !SECRET[tc.split('.')[0]]?.includes(tc.split('.')[1])), []);
 });
 
 test('journal, status and units run the fixed commands; bad arguments say what to send', async () => {

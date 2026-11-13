@@ -129,7 +129,7 @@ const STILL_DENIED: [RegExp, string][] = [
   [/^Bash: cd /, 'a cd first: run one command with absolute paths'],
   [/^Bash: (cp|python3) /, 'writes'],
   [/^Bash: (for|[A-Za-z]+=)/, 'a loop or a path in a variable, which Claude Code cannot match by rule'],
-  [/\b(sed|awk|xargs|tr|last|tailscale) /, 'not on the list: awk and xargs can write or run anything, and sed only as `sed --sandbox`'],
+  [/\b(sed|awk|xargs|tr|last|tailscale) /, 'not on the list: awk and xargs can write or run anything; sed and file write with a flag bundled in anywhere (`-nsi`, `-bC`), which no rule can list (#621 review)'],
   [/sqlite3 -readonly (?!-safe)/, 'sqlite3 without -safe, which could run .shell or write with .output'],
   [/git -C \S+\/projects\/[^2]\/repo /, "another scheme's repo: git is allowed per folder of this scheme"],
   [/ branch --contains /, 'branch takes -D after a filter, so only listing forms are allowed'],
@@ -174,10 +174,10 @@ test('writes stay denied: cp, sed -i, python, curl -X POST, gh api -X, sqlite3 w
 test('#621: file, sandboxed sed, more gh reads and plain fetches run; their writing forms stay denied', () => {
   const repo = `${data}/projects/2/repo`;
   const wt = `${data}/projects/2/tickets/141`;
-  for (const c of [`file ${data}/x`, `sed --sandbox -n 1,20p ${data}/x`, `grep -n a ${data}/x | sed --sandbox 's/a/b/'`, 'gh repo view caraminden/peek-auras --json visibility',
+  for (const c of ['gh repo view caraminden/peek-auras --json visibility',
     'gh release list -R a/b', 'gh workflow view tests.yml -R a/b', `git -C ${repo} fetch`, `git -C ${wt} fetch origin`, `git -C ${repo} fetch --prune`]) assert.ok(bashAllowed(c), c);
   for (const c of [`sed -n 1,20p ${data}/x`, `sed --sandbox -i s/a/b/ ${data}/x`, `sed --sandbox -ni s/a/b/p ${data}/x`, `sed --sandbox --in-place s/a/b/ ${data}/x`,
-    `file -C -m ${data}/magic`, `git -C ${repo} fetch origin main:main`, `git -C ${repo} fetch --upload-pack=sh origin`, `git -C ${repo} fetch origin +main:main`,
+    `sed --sandbox -n 1,20p ${data}/x`, `sed --sandbox -nsi s/a/b/p ${data}/x`, `file ${data}/x`, `file -bC -m ${data}/magic`, `file -C -m ${data}/magic`, `git -C ${repo} fetch origin main:main`, `git -C ${repo} fetch --upload-pack=sh origin`, `git -C ${repo} fetch origin +main:main`,
     `git -C ${live} fetch`, 'gh repo view a/b --web', 'gh release download v1 -R a/b']) assert.ok(!bashAllowed(c), c);
 });
 

@@ -3,11 +3,15 @@
 
 /* Under a scheme's row: one indented row per target, its stage track under it while a release moves. */
 .rel-rows:empty { display: none; }
-.rel-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; column-gap: 0.5rem; margin-left: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.85em; cursor: pointer; }
+.rel-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; column-gap: 0.5rem; margin-left: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.85em; cursor: pointer; }
 .rel-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .rel-row .rel-name { color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rel-row:not(.moving) .rel-name { color: var(--muted); }
 .rel-row .rel-ver { grid-column: 3; }
+/* The row's text trimmed to its capitals and baseline, so the padding above and below the letters is equal whatever the font
+   (Cara, 2026-11-12: "it should be equal padding on the top and bottom"): a line box keeps room for descenders under them. */
+.rel-row > :is(.rel-name, .rel-ver, .rel-est) { text-box: trim-both cap alphabetic; padding-block: 0.35em; }
+/* The name clips its overflow for the ellipsis: that padding keeps its descenders (the p of Contraption) inside the clip. */
 /* A release number links the release itself (its site, file or test copy) and reads as a link; with nothing to link it's plain. */
 .rel-ver { font-variant-numeric: tabular-nums; color: var(--muted); }
 a.rel-ver { color: var(--accent); text-decoration: underline; text-underline-offset: 0.15em; }

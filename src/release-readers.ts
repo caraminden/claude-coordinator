@@ -338,25 +338,30 @@ class RunsCache {
    * target counts its releases from 1 with no gaps, rather than by GitHub's run number, which counts every run.
    */
   record(t: Found) {
-    const { store } = this.d;
-    const key = (r: RunJobs) => r.run.run_number ?? r.run.id;
-    const last = store.listReleases(t.projectId, t.id, 1)[0];
-    const done = last ? Number(last.version.replace(/^run:/, '')) : null;
-    const fresh = (this.runs.get(tkey(t)) ?? []).filter((r) => shipped(r) && (done == null || key(r) > done));
-    for (const r of (done == null ? fresh.slice(0, 1) : fresh).reverse()) {
+    const seen = new Set(this.recorded(t));
+    // Every shipped run in view is counted, those from before counting began too (Cara, 2026-11-12: "This should say
+    // the build number, not "earlier release""); they're numbered by run, so a late one slots into its place.
+    for (const r of (this.runs.get(tkey(t)) ?? []).filter((r) => shipped(r) && !seen.has(runKey(r))).reverse()) {
       const s = span(r);
-      store.addRelease({ project_id: t.projectId, target: t.id, version: `run:${key(r)}`, changes: '[]', started_at: s.start, live_at: s.end, outcome: 'live', stages: '{}' });
+      this.d.store.addRelease({ project_id: t.projectId, target: t.id, version: `run:${runKey(r)}`, changes: '[]', started_at: s.start, live_at: s.end, outcome: 'live', stages: '{}' });
     }
   }
 
-  /** The release number of each recorded run (by run number), and how many there are: the newest's number. */
+  /** The runs counted as releases, newest first: by run, since the ones from before counting began were added after. */
+  private recorded(t: Found): number[] {
+    return this.d.store.listReleases(t.projectId, t.id, -1).map((r) => Number(r.version.replace(/^run:/, ''))).sort((a, b) => b - a);
+  }
+
+  /** The release number of each recorded run, and how many there are: the newest's number. */
   numbers(t: Found): { of: (r: RunJobs) => number | null; total: number } {
-    const total = this.d.store.countReleases(t.projectId, t.id);
-    const rows = this.d.store.listReleases(t.projectId, t.id, PREVIOUS * 2 + 1);
-    const by = new Map(rows.map((row, i) => [row.version, total - i]));
-    return { of: (r) => by.get(`run:${r.run.run_number ?? r.run.id}`) ?? null, total };
+    const runs = this.recorded(t);
+    const by = new Map(runs.map((run, i) => [run, runs.length - i]));
+    return { of: (r) => by.get(runKey(r)) ?? null, total: runs.length };
   }
 }
+
+/** A run's key in the releases table: its run number. */
+const runKey = (r: RunJobs) => r.run.run_number ?? r.run.id;
 
 export const CI_TRACK = ['ci', 'package', 'live'];
 

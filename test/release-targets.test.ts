@@ -277,14 +277,14 @@ test('the CI package reader: the newest run whose job passed is the release, a r
   await reader.refresh();
   const [v] = reader.read();
   assert.deepEqual(v.target, { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null });
-  assert.deepEqual([v.current?.number, v.current?.version], [1, 'sha3'], 'run 4 skipped its release job, so run 3 is what people have: release 1, the first counted');
+  assert.deepEqual([v.current?.number, v.current?.version], [2, 'sha3'], 'run 4 skipped its release job, so run 3 is what people have: release 2, after run 2 that shipped before it');
   assert.equal(v.current?.link, 'https://github.com/o/r/actions/runs/3/artifacts/31', 'the package named for the repo, not the dump');
   clock = now + 61 * m;
   assert.equal(reader.read()[0].current?.link, 'https://github.com/o/r/actions/runs/3', 'once its file expires, the run page');
   clock = now;
   assert.deepEqual(v.current?.stages, { ci: 600, package: 600 });
-  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome, r.link]), [[null, 'live', 'https://github.com/o/r/actions/runs/2'], [null, 'failed', 'https://github.com/o/r/actions/runs/1']], 'before counting began, and a failed one: no number; no file left: its run page');
-  assert.equal(v.next?.number, 2);
+  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome, r.link]), [[1, 'live', 'https://github.com/o/r/actions/runs/2'], [null, 'failed', 'https://github.com/o/r/actions/runs/1']], 'runs from before counting began are counted in (Cara: "This should say the build number"); a failed one has no number; no file left: its run page');
+  assert.equal(v.next?.number, 3);
   assert.equal(v.next?.stage, 'package');
   assert.equal(v.next?.usual, 600, 'the median package time of the shipped runs');
   assert.equal(v.next?.eta, now - 2 * m + 600_000);
@@ -300,11 +300,28 @@ test('the CI package reader: the newest run whose job passed is the release, a r
   await reader.refresh();
   assert.equal(reads.runs, 3, 'nothing moving: no read until the idle interval passes');
   const [done] = reader.read();
-  assert.equal(done.current?.number, 2, 'counted on with no gap for the runs that shipped nothing');
-  assert.deepEqual(done.recent.map((r) => r.number), [1, null, null]);
+  assert.equal(done.current?.number, 3, 'counted on with no gap for the runs that shipped nothing');
+  assert.deepEqual(done.recent.map((r) => r.number), [2, 1, null]);
   await reader.refresh();
-  assert.equal(store.countReleases(p.id, t.id), 2, 'each run is counted once');
+  assert.equal(store.countReleases(p.id, t.id), 3, 'each run is counted once');
   assert.equal(done.next, null);
+});
+
+test('the CI package reader: a target that began counting at its newest run counts its older shipped runs in under it', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release' };
+  const now = Date.now(), m = 60_000;
+  // Counting began before this change with run 3 alone as Release 1.
+  store.addRelease({ project_id: p.id, target: t.id, version: 'run:3', changes: '[]', started_at: now - 60 * m, live_at: now - 40 * m, outcome: 'live', stages: '{}' });
+  const runs = [3, 2, 1].map((i) => run(i, 'completed', 'success', now - (100 - i) * m, now - (90 - i) * m));
+  const jobs = Object.fromEntries([3, 2, 1].map((i) => [i, [job(i, 'release', 'completed', 'success', now - (95 - i) * m, now - (90 - i) * m)]]));
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions: fakeActions(runs, jobs).actions, now: () => now });
+  await reader.refresh();
+  const [v] = reader.read();
+  assert.deepEqual([v.current?.number, ...v.recent.map((r) => r.number)], [3, 2, 1], 'numbered by run: the older ones slot in under it, no "Earlier release" left');
+  await reader.refresh();
+  assert.equal(store.countReleases(p.id, t.id), 3, 'each run is counted once');
 });
 
 test('the CI package reader: a run waiting for a runner waits, with no estimate', async () => {

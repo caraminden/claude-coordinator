@@ -66,12 +66,12 @@ const BUILD = {
 const MODEL = {
   type: ['string', 'null'],
   enum: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna', null],
-  description: "The model for the minion's turns, as in its composer. Leave it out (or null) for Claude Code's default, which suits most minions. By type: chore or read-only check claude-sonnet-5-5; hard work (design, judgment research, ideation, hard bugs, security and risk reviews, big refactors) claude-fable-5-2; everything else the default. The gpt-6 ones are Codex, only for a person who asked for it.",
+  description: "The model for the minion's turns, as in its composer. Leave it out (or null) for Claude Code's default, which suits most minions. By type: chore or read-only check claude-sonnet-5-5; ordinary design, judgment research, ideation, big refactors and first-repro-failed bugs claude-opus-5-5; claude-fable-5-2 only for architecture shaping a big multi-part feature or major build, security and risk reviews of a high-risk change, and bugs where a fix failed to hold or that are intermittent; everything else the default. The gpt-6 ones are Codex, only for a person who asked for it.",
 };
 const EFFORT = {
   type: ['string', 'null'],
   enum: ['low', 'medium', 'high', 'xhigh', 'max', null],
-  description: "The effort for the minion's turns, as in its composer. Leave it out (or null) for the scheme's default effort. By type: chore medium, read-only check low, hard work medium (with claude-fable-5-2), everything else the default. xhigh only after a hard-tier run failed twice or a person asks; never max.",
+  description: "The effort for the minion's turns, as in its composer. Leave it out (or null) for the scheme's default effort. By type: chore medium, read-only check low, Opus-tier hard work high, Fable-tier work medium (with claude-fable-5-2), everything else the default. xhigh only after a Fable run failed twice or a person asks; never max.",
 };
 // What a schedule's runs start with (#387): Sonnet or medium suits a mechanical checkup.
 const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with; null (or left out) for the default. Sonnet suits a mechanical checkup.' };

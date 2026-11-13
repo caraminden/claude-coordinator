@@ -861,9 +861,12 @@ export class Runner {
           log.removed.push(`${what}, ${size(bytes)}${extra}`);
           log.bytes += bytes;
         };
-        // What a removal cut short by a restart left behind.
-        const trash = (await clearTrash(join(projectDir(this.dataDir, p.id), 'tickets'))) + (await clearTrash(join(p.repo_dir, '.claude', 'worktrees')));
-        if (trash) removed('folders an interrupted removal left', trash);
+        // What a removal that failed or was cut short left behind.
+        for (const parent of [join(projectDir(this.dataDir, p.id), 'tickets'), join(p.repo_dir, '.claude', 'worktrees')]) {
+          const trash = await clearTrash(parent).catch((err) => ({ bytes: 0, stuck: [`${parent}: ${err.message}`] }));
+          if (trash.bytes) removed(`folders earlier removals left in ${relative(projectDir(this.dataDir, p.id), parent)}`, trash.bytes);
+          for (const stuck of trash.stuck) keep(relative(projectDir(this.dataDir, p.id), stuck.slice(0, stuck.indexOf(': '))), `can't delete: ${stuck.slice(stuck.indexOf(': ') + 2)}`);
+        }
         const listed = await worktrees(p.repo_dir).catch(() => null);
         if (!listed) continue;
         await this.sweepGrunts(p, now, listed.filter(isGrunt), keep, removed);
@@ -876,12 +879,11 @@ export class Runner {
             // updated_at only moves on: a reopen and a new dismissal restart the clock.
             if (now2?.status !== 'closed' || this.turns.has(t.id) || now2.updated_at > now - GRACE_MS) return;
             const what = `#${t.number} (${relative(projectDir(this.dataDir, p.id), dir)})`;
-            const entry = listed.find((w) => w.path === dir);
-            // Half a folder that git no longer lists, from a removal by the old code that a restart cut short.
-            if (!entry && !existsSync(join(dir, '.git'))) return removed(what, await removeWorktree(p.repo_dir!, dir), ', left half-removed by a restart');
-            if (!(await ownCheckout(dir))) return;
-            if (entry?.locked) return keep(what, 'locked');
+            if (listed.find((w) => w.path === dir)?.locked) return keep(what, 'locked');
             try {
+              // Half a folder, its .git gone: a removal by the first version of this sweep that failed or was cut short.
+              if (!existsSync(join(dir, '.git'))) return removed(what, await removeWorktree(p.repo_dir!, dir), ', left half-removed earlier');
+              if (!(await ownCheckout(dir))) return;
               const ref = savedRef(String(t.id));
               const s = await saveWork(dir, ref, t.branch, `Citadel: #${t.number}'s work not on its branch, saved before its worktree was removed`);
               if ('kept' in s) return keep(what, s.kept);

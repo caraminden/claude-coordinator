@@ -7,6 +7,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { copyFile, lstat, mkdtemp, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { diskUsage, low } from './build-output.ts';
@@ -85,29 +86,43 @@ export async function saveWork(dir: string, ref: string, branch: string | null, 
 export const trashOf = (dir: string) => join(dirname(dir), `.removing-${basename(dir)}`);
 
 /**
- * Remove a worktree whatever it holds (save it first, and never a locked one) at low priority; returns the
- * bytes it took. The folder is renamed aside first, then git forgets it, then it's deleted, so a restart
- * midway leaves either the whole worktree or a `.removing-*` folder the next sweep deletes, never half a
- * checkout that a reopen can't recreate.
+ * Remove a worktree whatever it holds (save it first) at low priority; returns the bytes it took. Throws,
+ * touching nothing, on a locked one. The folder is renamed aside first, then git forgets it, then it's
+ * deleted, so a delete that fails or is cut short leaves a `.removing-*` folder (clearTrash), never half a
+ * checkout at the minion's path that a reopen can't recreate.
  */
 export async function removeWorktree(repoDir: string, dir: string): Promise<number> {
+  const admin = existsSync(join(dir, '.git')) ? await git(['rev-parse', '--absolute-git-dir'], dir).catch(() => null) : null;
+  if (admin && existsSync(join(admin, 'locked'))) throw new Error('locked');
   const bytes = await diskUsage([dir]);
   const trash = trashOf(dir);
-  await low(['rm', '-rf', '--one-file-system', '--', trash]);
+  if (existsSync(trash)) throw new Error(`${basename(trash)} is still there from an earlier removal`);
   await rename(dir, trash);
-  // Its admin entry now points at a folder that's gone, so prune drops it (a locked one it would keep).
+  // Its admin entry now points at a folder that's gone, so prune drops it.
   await git(['worktree', 'prune'], repoDir);
-  await low(['rm', '-rf', '--one-file-system', '--', trash]);
+  // Best effort: what it can't delete (files another user owns) stays for clearTrash to report.
+  await low(['rm', '-rf', '--one-file-system', '--', trash]).catch(() => {});
   return bytes;
 }
 
-/** Delete what an interrupted removal left (`.removing-*` folders in `parent`); returns the bytes freed. */
-export async function clearTrash(parent: string): Promise<number> {
-  const names = (await readdir(parent).catch(() => [] as string[])).filter((n) => n.startsWith('.removing-'));
-  const dirs = names.map((n) => join(parent, n));
-  const bytes = await diskUsage(dirs);
-  for (const d of dirs) await low(['rm', '-rf', '--one-file-system', '--', d]);
-  return bytes;
+/**
+ * Delete what a removal left (`.removing-*` folders in `parent`), each on its own. Returns the bytes freed
+ * and the folders it couldn't delete.
+ */
+export async function clearTrash(parent: string): Promise<{ bytes: number; stuck: string[] }> {
+  const out = { bytes: 0, stuck: [] as string[] };
+  for (const name of (await readdir(parent).catch(() => [] as string[])).filter((n) => n.startsWith('.removing-'))) {
+    const dir = join(parent, name);
+    const before = await diskUsage([dir]);
+    try {
+      await low(['rm', '-rf', '--one-file-system', '--', dir]);
+      out.bytes += before;
+    } catch (err: any) {
+      out.bytes += before - (await diskUsage([dir]));
+      out.stuck.push(`${dir}: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+    }
+  }
+  return out;
 }
 
 /**

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -144,19 +144,34 @@ test('dismissed past the grace: removed with its branch kept, saving uncommitted
   assert.match(again.kept.join('\n'), new RegExp(`#${old.number} .*earlier saved work .* isn't restored yet`));
 });
 
-test('a restart mid-removal leaves nothing a reopen trips on: a .removing-* folder or a half folder git no longer lists goes at the next sweep', async () => {
+test('a removal cut short leaves nothing a reopen trips on: .removing-* folders and half folders go at the next sweep, and one it cannot delete is named, not fatal', async () => {
   const s = scheme('Interrupted');
   const half = minion(s, 4);
-  // As the old code left #307: git's entry gone, a few files still in the folder.
+  // As the first version left #307: its .git gone, a few files still in the folder.
   rmSync(join(half.dir, '.git'));
   git(s.repo, 'worktree', 'prune');
+  const listedHalf = minion(s, 4);
+  rmSync(join(listedHalf.dir, '.git')); // git still lists this one, as prunable
   const tickets = join(data, 'projects', String(s.id), 'tickets');
   mkdirSync(join(tickets, '.removing-99', 'deep'), { recursive: true });
   writeFileSync(join(tickets, '.removing-99', 'deep', 'f'), 'x');
   const done = (await runner.sweepWorktrees()).get(s.id)!;
-  assert.ok(!existsSync(half.dir) && !existsSync(join(tickets, '.removing-99')));
-  assert.match(done.removed.join('\n'), /folders an interrupted removal left/);
-  assert.match(done.removed.join('\n'), new RegExp(`#${half.number} .*left half-removed by a restart`));
+  assert.ok(!existsSync(half.dir) && !existsSync(listedHalf.dir) && !existsSync(join(tickets, '.removing-99')));
+  assert.match(done.removed.join('\n'), /folders earlier removals left in tickets/);
+  assert.match(done.removed.join('\n'), new RegExp(`#${half.number} .*left half-removed earlier`));
+  assert.match(done.removed.join('\n'), new RegExp(`#${listedHalf.number} .*left half-removed earlier`));
+  assert.ok(!git(s.repo, 'worktree', 'list').includes(listedHalf.dir), 'git forgets it too');
+
+  // A folder rm can't delete (another user's files; here, a folder without write permission): named once, and the sweep goes on.
+  const stuck = join(tickets, '.removing-98');
+  mkdirSync(join(stuck, 'ro'), { recursive: true });
+  writeFileSync(join(stuck, 'ro', 'f'), 'x');
+  chmodSync(join(stuck, 'ro'), 0o500);
+  const later = minion(s, 4);
+  const next = (await runner.sweepWorktrees()).get(s.id)!;
+  chmodSync(join(stuck, 'ro'), 0o700);
+  assert.match(next.kept.join('\n'), /tickets\/\.removing-98 \(can't delete/);
+  assert.ok(!existsSync(later.dir), 'the rest of the sweep still runs');
   store.updateTicket(half.id, { status: 'idle' });
   await runner.reopened(half.id);
   assert.equal(git(half.dir, 'branch', '--show-current'), half.branch, 'and a reopen recreates it');

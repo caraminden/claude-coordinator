@@ -297,6 +297,11 @@ export interface Route {
    * scheme's owner (and admins). Threads keep to `who`.
    */
   access?: 'admin' | 'owner';
+  /**
+   * Also a contraption's own server with its key (as 'contraption' routes), for its home scheme only: the
+   * path's :project must be its home_scheme (#665, so a contraption reads its own scheme's CI files).
+   */
+  homeContraption?: true;
   /** A GET the Citadel scheme's Taskmaster may make in any scheme, on a turn a Citadel member or admin asked for (#656). */
   everyScheme?: true;
   handler(ctx: Ctx): unknown;
@@ -398,6 +403,15 @@ export function router(routes: Route[]) {
     if (route?.who === 'anyone' || route?.who === 'machine') return route.handler(ctx);
     if (route?.who === 'contraption') {
       ctx.contraption = app.contraptions.caller(req);
+      return route.handler(ctx);
+    }
+    // A bearer that isn't a minion's token leaves no session: on these routes it may be a contraption's key.
+    if (!session && route?.homeContraption && req.headers.authorization) {
+      ctx.contraption = app.contraptions.caller(req);
+      if (ctx.contraption.home_scheme === null || Number(ctx.params.project) !== ctx.contraption.home_scheme) {
+        throw new HttpError(403, 'A contraption may only read its own home scheme here');
+      }
+      for (const name of hit!.names) if (LOADED.includes(name)) load(ctx, name, Number(ctx.params[name]));
       return route.handler(ctx);
     }
     if (!session) throw new HttpError(401, 'Not logged in');

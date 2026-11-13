@@ -61,5 +61,11 @@ folder:
 - For people and pages: `/api/projects/<scheme id>/ci-files` lists them,
   `/api/projects/<scheme id>/ci-files/latest?workflow=<file>&kind=release` redirects to the newest,
   and each file's own URL stays the same until the rules delete it.
+- For a contraption's server: the same three routes, with its contraption key
+  (`Authorization: Bearer <contraption.key>`), for its home scheme only (another scheme's id is
+  403). The newest Windows build of `windows.yml`, as its details:
+  `GET $CITADEL_URL/api/projects/<home scheme id>/ci-files/latest?workflow=windows.yml&kind=build&target=windows&json=1`,
+  then the bytes from its `url`. Leave out `json=1` and the redirect leads straight to the bytes.
+  The contraption-ui skill's `references/api.md` ("Your home scheme's CI files") has the code.
 - An Android release run's signed APK (kind `release`, named `<app>-<versionCode>.apk`) is what
   the Releases page's publish step copies into the contraption's `android/` folder.

@@ -1,5 +1,5 @@
 // The CI store's routes (#658, src/ci-store.ts): a runner's job uploads on the machines listener; a scheme's
-// members, minions and Taskmaster list and read its files on the app's own address.
+// members, minions, Taskmaster and contraptions list and read its files on the app's own address.
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
@@ -55,7 +55,8 @@ function matching({ app, project, url }: Ctx): CiFile[] {
     (!q('name') || f.name === q('name')) && (!q('run') || f.run_id === Number(q('run'))) && (!q('commit') || f.sha.startsWith(q('commit').toLowerCase())));
 }
 
-const readers = { who: ['person', 'minion', 'taskmaster'], refuse: 'Only a scheme\'s members, its minions and its Taskmaster read its CI files' } as const;
+// A contraption reads its home scheme's too (#665: Peek's app updates players from its newest build), with its key.
+const readers = { who: ['person', 'minion', 'taskmaster'], homeContraption: true, refuse: 'Only a scheme\'s members, its minions, its Taskmaster and its contraptions read its CI files' } as const;
 
 export const ciStoreRoutes: Route[] = [
   {

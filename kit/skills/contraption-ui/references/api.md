@@ -407,6 +407,43 @@ No chat text: `line`, `step` and `note` are what the minions list shows every me
   should replace Citadel's window, not your frame. Only members can open it, so show it only to
   them (`member` from `/home`).
 
+## Your home scheme's CI files
+
+Your server can read what your home scheme's CI runs keep in Citadel's CI store (the
+`citadel:ci-store` skill): say the newest Windows build, to update your players' apps from. These
+are the same routes the scheme's members use, called with your key under the rules above, with no
+`person` (tested):
+
+- **`GET /api/projects/<scheme id>/ci-files`** lists the files, newest first, as
+  `200 { files: [{ id, workflow, run_id, sha, ref, name, kind, target, size, sha256, created_at, url, … }], usage, rules }`.
+  Filter with `workflow` (the file name, like `windows.yml`), `kind` (`build`, `report` or
+  `release`), `target`, `name`, `run` and `commit` (a prefix).
+- **`GET /api/projects/<scheme id>/ci-files/latest?…`**, the same filters, redirects (302) to the
+  newest match's own URL, or with `json=1` answers `200 { file }`. 404 when nothing matches.
+- **`GET <file's url>`** (`/api/projects/<scheme id>/ci-files/<id>/<name>`) answers the bytes.
+  A file's URL stays the same until the store's rules delete it.
+
+Only your home scheme: another scheme's id gets 403, as does any scheme when your app has none.
+The scheme id is your registry entry's `home_scheme` (`id` from `/api/contraptions/home`); it
+doesn't change, so keeping it in your config is fine. No key gets 401. Reading only: uploads
+come from the scheme's CI jobs.
+
+The newest build `windows.yml` made for target `windows`:
+
+```js
+const key = (await readFile(join(process.env.CITADEL_KEYS, 'contraption.key'), 'utf8')).trim();
+const headers = { Authorization: `Bearer ${key}` };
+const q = new URLSearchParams({ workflow: 'windows.yml', kind: 'build', target: 'windows', json: '1' });
+const r = await fetch(`${process.env.CITADEL_URL}/api/projects/${SCHEME_ID}/ci-files/latest?${q}`, { headers });
+if (r.status === 404) return null; // no build yet
+const { file } = await r.json(); // { name, sha, sha256, size, created_at, url, … }
+const bytes = await fetch(`${process.env.CITADEL_URL}${file.url}`, { headers }); // the file itself
+```
+
+Without `json=1`, `fetch` follows the redirect and keeps the `Authorization` header (same
+origin), so one call gets the bytes; with it you can skip a download whose `sha256` you already
+have.
+
 ## The relay: calling another contraption
 
 `GET | PUT | POST | DELETE /api/contraptions/relay/<to>/<path>` from your server, with your bearer
@@ -579,6 +616,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-13:** Your server reads your home scheme's CI files (`/api/projects/<id>/ci-files`,
+  `/latest` and each file's URL) with your key.
 - **2026-11-13:** A failed call's `tool_result` event carries `error`, the error text the agent saw
   (up to 2000 characters).
 - **2026-11-10:** `POST /api/contraptions/embed` turns texts into vectors with Citadel's local

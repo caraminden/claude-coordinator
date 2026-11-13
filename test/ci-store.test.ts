@@ -314,6 +314,34 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     assert.equal((await fetch(`${srv.base}${file.url}`)).status, 401);
     assert.equal((await srv.call(`/api/projects/${id + 1}/ci-files`)).status, 404);
     assert.equal((await srv.call(`/api/projects/${id}/ci-files/${file.id}/other.apk`)).status, 404);
+
+    // A contraption reads its home scheme's files with its key (#665), and no other scheme's.
+    const elsewhere = (await srv.call('/api/projects', { name: 'Elsewhere', source: 'none' })).data;
+    const register = async (name: string, home: number) => {
+      const r = await srv.call('/api/contraptions', { name, title: name, port: await freePort(), home_scheme: home });
+      assert.equal(r.status, 201, JSON.stringify(r.data));
+      return { Authorization: `Bearer ${readFileSync(join(srv.data, 'contraptions', name, 'contraption.key'), 'utf8')}` };
+    };
+    const mandateApp = await register('mandate-app', id);
+    const otherApp = await register('other-app', elsewhere.id ?? elsewhere.project?.id);
+    const own = await fetch(`${srv.base}/api/projects/${id}/ci-files?kind=release`, { headers: mandateApp });
+    assert.equal(own.status, 200);
+    assert.deepEqual((await own.json()).files.map((f: any) => f.name).sort(), ['mandate-7.apk', 'mandate-8.apk', 'mandate-9.apk']);
+    const newest = await fetch(`${srv.base}/api/projects/${id}/ci-files/latest?workflow=android.yml&kind=release&json=1`, { headers: mandateApp });
+    assert.equal((await newest.json()).file.name, 'mandate-9.apk');
+    // The redirect's stable URL takes the key too, so a plain fetch follows it to the bytes.
+    assert.equal(await (await fetch(`${srv.base}/api/projects/${id}/ci-files/latest?workflow=android.yml&kind=release`, { headers: mandateApp })).text(), 'apk from the script');
+    for (const path of ['ci-files', 'ci-files/latest?kind=release', `ci-files/${file.id}/mandate-7.apk`]) {
+      const theirs = await fetch(`${srv.base}/api/projects/${id}/${path}`, { headers: otherApp });
+      assert.equal(theirs.status, 403, `another scheme's contraption: ${path}`);
+      assert.match((await theirs.json()).error, /only read its own home scheme/);
+      assert.equal((await fetch(`${srv.base}/api/projects/${id}/${path}`)).status, 401, `no key: ${path}`);
+      assert.equal((await fetch(`${srv.base}/api/projects/${id}/${path}`, { headers: { Authorization: `Bearer ck_${'x'.repeat(43)}` } })).status, 401, `a key no contraption has: ${path}`);
+    }
+    // Through the web (Caddy adds X-Forwarded-For) the key is refused, as on the turn API.
+    assert.equal((await fetch(`${srv.base}/api/projects/${id}/ci-files`, { headers: { ...mandateApp, 'X-Forwarded-For': '100.64.0.9' } })).status, 403);
+    // The key is only for reading: an upload with it is still a run token's job.
+    assert.equal((await fetch(`${srv.base}/api/ci-store/x.zip?kind=build`, { method: 'PUT', headers: mandateApp, body: 'x' })).status, 401);
   } finally {
     await srv.stop();
     keys.close();

@@ -254,13 +254,17 @@ class RunsCache {
       }
       const jobs = await this.d.actions.runJobs(p, run);
       if (!jobs) return; // a half-read list would drop the current release: keep the last whole one
-      // Matched by its id, its name, or "name (matrix)": a job named in the workflow shows by its name.
-      const job = jobs.find((j) => j.name === t.job || j.name.startsWith(`${t.job} (`)) ?? jobs.find((j) => j.name.toLowerCase().includes(t.job!.toLowerCase()));
+      // The API calls a job by its `name:` (its id when it has none), "name (matrix values)" for a matrix, and a name
+      // built from ${{ }} by what comes before it.
+      const want = (t.jobName ?? t.job).split('${{')[0].trim() || t.job;
+      const job = jobs.find((j) => j.name === want || j.name.startsWith(`${want} (`)) ?? jobs.find((j) => j.name.toLowerCase().startsWith(want.toLowerCase()) || j.name === t.job);
       // A run whose job is missing or skipped (a light lane, a gate that didn't pass) shipped nothing.
       if (job && job.conclusion !== 'skipped') out.push({ run, jobs: [job] });
       else if (run.status !== 'completed') out.push({ run, jobs: [] });
     }
     this.runs.set(t.id, out);
+    const kept = new Set([...this.runs.values()].flat().map((r) => r.run.id));
+    for (const id of this.changes.keys()) if (!kept.has(id)) this.changes.delete(id);
     // What each in-flight or newest run carries since the run before it that shipped.
     if (p.repo_dir) {
       for (const [i, r] of out.slice(0, 2).entries()) {
@@ -458,6 +462,8 @@ export class MainReader implements Reader {
 
   private since(id: number, stage: string, now: number): number {
     const key = `${id}:${stage}`;
+    // A PR back at its checks (a new push) starts them again.
+    for (const s of ['checks', 'failed', 'merge']) if (s !== stage) this.seen.delete(`${id}:${s}`);
     if (!this.seen.has(key)) this.seen.set(key, now);
     return this.seen.get(key)!;
   }
@@ -482,7 +488,8 @@ export class MainReader implements Reader {
   read(): Omit<TargetView, 'testCopies'>[] {
     const { store } = this.d;
     const now = (this.d.now ?? Date.now)();
-    return this.d.finder.list('main').map((t) => {
+    const open = new Set<number>();
+    const out = this.d.finder.list('main').map((t) => {
       const p = store.getProject(t.projectId);
       const slug = repoSlug(p?.repo_url ?? null);
       const head = this.heads.get(`${t.projectId}:${t.id}`) ?? null;
@@ -496,6 +503,7 @@ export class MainReader implements Reader {
         if (x.kind !== 'ticket' || x.status === 'closed' || !x.branch) continue;
         const pr = this.d.pr(x.id);
         if (pr?.state !== 'OPEN' || pr.draft) continue;
+        open.add(x.id);
         changes.push({ ticketId: x.id, number: x.number, title: x.title, ...this.progress(x.id, pr, now) });
       }
       changes.sort((a, b) => MAIN_TRACK.indexOf(b.stage) - MAIN_TRACK.indexOf(a.stage) || a.since - b.since);
@@ -506,5 +514,7 @@ export class MainReader implements Reader {
       }
       return { target: targetOf(t), current, next, line: [], recent };
     });
+    for (const k of this.seen.keys()) if (!open.has(Number(k.split(':')[0]))) this.seen.delete(k);
+    return out;
   }
 }

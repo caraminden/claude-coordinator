@@ -20,6 +20,8 @@ export interface Found extends Target {
   /** apk and ci: the workflow file (.github/workflows/x.yml) that builds it, and for ci the job. */
   workflow?: string;
   job?: string;
+  /** A ci job's own `name:`, which is what the Actions API calls it; its id when it has none. */
+  jobName?: string;
 }
 
 export interface Override {
@@ -97,12 +99,16 @@ export function jobsOf(text: string): Map<string, string> {
 const PUBLISHES = /gh release (create|upload)|action-gh-release|actions\/create-release|actions\/upload-release-asset/;
 const RELEASE_JOB = /release|package|dist|publish|bundle|installer/i;
 
+/** A job's own `name:` (not a step's or an input's), unquoted, or null. */
+export function jobName(job: string): string | null {
+  return children(job).get('name')?.replace(/#.*/, '').trim().replace(/^(["'])(.*)\1$/, '$2') || null;
+}
+
 /** A job that hands people something: it publishes a GitHub Release, or uploads an artifact from a release-like job. */
 export function shipsPackage(id: string, job: string): boolean {
   if (PUBLISHES.test(job)) return true;
   if (!/actions\/upload-artifact/.test(job)) return false;
-  const name = /^\s+name:\s*(.+)$/m.exec(job)?.[1] ?? '';
-  return RELEASE_JOB.test(id) || RELEASE_JOB.test(name);
+  return RELEASE_JOB.test(id) || RELEASE_JOB.test(jobName(job) ?? '');
 }
 
 /** A platform's short name from a job's runs-on, its workflow's file name, or its name. */
@@ -139,7 +145,7 @@ export function detect(f: SchemeFacts): Found[] {
     }
     if (on !== 'push') continue;
     for (const [id, job] of jobsOf(w.text)) {
-      if (shipsPackage(id, job)) out.push({ ...base, id: `ci:${file.replace(/\.ya?ml$/, '')}:${id}`, kind: 'ci', name: platform(w.path, w.text, job), link: actions, workflow: w.path, job: id });
+      if (shipsPackage(id, job)) out.push({ ...base, id: `ci:${file.replace(/\.ya?ml$/, '')}:${id}`, kind: 'ci', name: platform(w.path, w.text, job), link: actions, workflow: w.path, job: id, jobName: jobName(job) ?? id });
     }
   }
   for (const feed of feeds) out.push({ ...base, id: `apk:${feed}`, kind: 'apk', name: 'Android', link: `/apps/${feed}/android/`, contraption: feed });

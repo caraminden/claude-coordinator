@@ -9,7 +9,7 @@ import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, gradleVersion, lengths, MainReader, type Actions } from '../src/release-readers.ts';
-import { detect, shipsOn, TargetFinder, type Found, type SchemeFacts } from '../src/release-targets.ts';
+import { detect, jobName, shipsOn, TargetFinder, type Found, type SchemeFacts } from '../src/release-targets.ts';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
 const root = mkdtempSync(join(tmpdir(), 'release-targets-'));
@@ -415,4 +415,27 @@ test('the Main reader: each head of main is a release with the minions it took i
   assert.deepEqual(v.recent.map((r) => r.version), [base]);
   assert.deepEqual([v.next?.stage, v.next?.text, v.next?.usual], ['checks', 'test step 3 of 8', 300]);
   assert.equal(v.next?.eta, null, 'merge waits on a person, so no estimate');
+});
+
+test("a job's own name, not a step's or an input's, is what its runs are matched by", async () => {
+  const text = `
+    name: "Build Windows package"
+    runs-on: windows-latest
+    steps:
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: peek-installer
+`;
+  assert.equal(jobName(text), 'Build Windows package');
+  assert.equal(jobName('\n    runs-on: x\n    steps:\n      - uses: actions/upload-artifact@v4\n        with:\n          name: release-zip\n'), null, "an artifact's name is not the job's");
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', jobName: 'Build ${{ matrix.os }} package' };
+  const now = Date.now();
+  const { actions } = fakeActions([run(2, 'completed', 'success', now - 600_000, now)], { 2: [job_('test'), job_('Build windows-latest package')] });
+  function job_(name: string) { return job(2, name, 'completed', 'success', now - 300_000, now); }
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => now });
+  await reader.refresh();
+  assert.equal(reader.read()[0].current?.version, 'build 2');
 });

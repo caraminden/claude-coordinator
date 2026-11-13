@@ -29,19 +29,23 @@ const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
 const Josh = store.createUser({ name: 'Josh', login: 'josh' });
 const Rachel = store.createUser({ name: 'Rachel', login: 'rachel' });
 const Dana = store.createUser({ name: 'Dana', login: 'dana' });
+const Lee = store.createUser({ name: 'Lee', login: 'lee' });
 const Delve = store.createProject('Delve', null);
 const Citadel = store.createProject('Citadel', null);
 const Peek = store.createProject('Peek Auras', null);
 const Obsidian = store.createProject('Obsidian', null, Josh.id);
 assert.equal(Citadel.id, GLOBAL_OWNER, 'the second scheme stands in for Citadel');
 store.adoptOwnerless(Cara.id);
-for (const [p, u] of [[Delve, Josh], [Citadel, Josh], [Obsidian, Rachel], [Citadel, Dana]] as const) store.addMember(p.id, u.id);
+// Josh is in Citadel, so an admin everywhere (#621); Dana and Lee aren't.
+for (const [p, u] of [[Delve, Josh], [Citadel, Josh], [Obsidian, Rachel], [Obsidian, Lee], [Delve, Lee]] as const) store.addMember(p.id, u.id);
 
 const names = (from: number, person: number | null, now = Date.now()) => taskmasterTargets(store, from, person, now).map((p) => p.name).sort();
 
 test('the schemes a Taskmaster turn may reach: its person in both, an admin anywhere, Citadel always', () => {
-  // Member of both: Josh is in Obsidian (its owner), Delve and Citadel, but not Peek Auras.
-  assert.deepEqual(names(Obsidian.id, Josh.id), ['Citadel', 'Delve']);
+  // Member of both: Lee is in Obsidian and Delve, but not Peek Auras.
+  assert.deepEqual(names(Obsidian.id, Lee.id), ['Citadel', 'Delve']);
+  // A Citadel member is in every scheme, as an admin is (#621).
+  assert.deepEqual(names(Obsidian.id, Josh.id), ['Citadel', 'Delve', 'Peek Auras']);
   // Member of one: Rachel is only in Obsidian, so Citadel alone.
   assert.deepEqual(names(Obsidian.id, Rachel.id), ['Citadel']);
   // An admin is in every scheme.
@@ -54,7 +58,7 @@ test('the schemes a Taskmaster turn may reach: its person in both, an admin anyw
 test("Citadel's Taskmaster answers a scheme that wrote to it, for 7 days, but never starts one", () => {
   const key = askedCitadelKey(Peek.id);
   try {
-    // Dana is only in Citadel: no conversation to start.
+    // Dana is in no scheme: no conversation to start.
     assert.deepEqual(names(Citadel.id, Dana.id), []);
     store.setSetting(key, 1_000_000);
     assert.deepEqual(names(Citadel.id, Dana.id, 1_000_000 + CITADEL_REPLY_MS - 1), ['Peek Auras']);
@@ -104,7 +108,7 @@ test('message_taskmaster: labels who asks Citadel, and refuses without naming hi
   assert.equal((await send(CitadelTM, 'obsidian', 'fixed, live now')).status, 202);
   r = await send(CitadelTM, 'Peek Auras');
   assert.equal(r.status, 404);
-  // Dana is in no scheme but Citadel, so the schemes it may only answer stay unlisted.
+  // Dana is in no scheme, so the schemes it may only answer stay unlisted.
   assert.match(r.body.error, /You can reach: none\./);
 
   // Rachel's Obsidian turn reaches Citadel alone: Delve and Peek Auras get "no such scheme", naming neither.

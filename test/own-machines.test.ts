@@ -14,6 +14,7 @@ const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
 const josh = store.createUser({ name: 'Josh', login: 'josh' });
 const dana = store.createUser({ name: 'Dana', login: 'dana' });
 const caras = store.createProject('Caras', null, cara.id);
+store.createProject('Citadel', null, cara.id); // id 2, Citadel's (#621): its members are admins
 const shared = store.createProject('Shared', null, cara.id);
 store.addMember(shared.id, josh.id);
 store.addMember(shared.id, dana.id);

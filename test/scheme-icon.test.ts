@@ -21,6 +21,8 @@ after(async () => {
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="red"/></svg>';
 const store = new Store(join(data, 'coordinator.db'));
+store.createProject('Delve', null);
+store.createProject('Citadel', null); // id 2, Citadel's (#621): its members are admins, so no test scheme sits there
 /** A scheme whose checkout holds `icon` at assets/icon/icon.svg (a string, or a symlink target), or nothing. */
 function scheme(name: string, icon?: string | { link: string }) {
   const p = store.createProject(name, null);

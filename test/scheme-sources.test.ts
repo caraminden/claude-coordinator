@@ -340,17 +340,14 @@ test('non-admins: New repo goes on their own GitHub with their token, or is refu
   assert.deepEqual(asCalls().slice(-2), ['gho_josh repo view joshgh/josh-game --json name', `gho_josh repo create joshgh/josh-game --private --source ${r.data.repo_dir} --remote origin --push`]);
   assert.ok(asCalls().every((c) => c.startsWith('gho_josh ')), 'never the box login');
 
-  // Retry: the scheme's owner may, with their token; someone else may not; an admin's goes on the owner's GitHub too.
+  // Retry: any member may (#621), and it goes on the owner's GitHub with the owner's token, as an admin's does too.
   writeFileSync(join(stub, 'fail'), 'HTTP 502');
   const failed = await asJosh('/api/projects', { name: 'Josh Retry', source: 'new' });
   assert.equal(failed.status, 201, JSON.stringify(failed.data));
   assert.match(failed.data.github_error, /HTTP 502/);
   rmSync(join(stub, 'fail'));
   store.addMember(failed.data.id, olive.id);
-  const notOwner = await asOlive(`/api/projects/${failed.data.id}/github`, {});
-  assert.equal(notOwner.status, 403);
-  assert.match(notOwner.data.error, /Only the scheme's owner/);
-  const ok = await asJosh(`/api/projects/${failed.data.id}/github`, {});
+  const ok = await asOlive(`/api/projects/${failed.data.id}/github`, {});
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
   assert.equal(ok.data.repo_url, 'https://github.com/joshgh/josh-retry');
   assert.equal(asCalls().at(-1), `gho_josh repo create joshgh/josh-retry --private --source ${failed.data.repo_dir} --remote origin --push`);

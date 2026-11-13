@@ -297,13 +297,16 @@
 
 /* Top bar (#666): the app's header row, the same height as a chat's in Citadel. Framed in Citadel, Citadel sets
    --citadel-strip-h (the title bar strip's height, 0 in a browser tab), --citadel-strip-start and --citadel-strip-end
-   (room kept at either end: the window controls, and Citadel's ‹ › ×) and --citadel-strip-row (its buttons' height);
-   on the app's own page they come from its own title bar. Its background drags the window; what's clickable doesn't. */
+   (room kept at either end: the window controls, and Citadel's ‹ › ×), --citadel-strip-row (its buttons' height) and
+   --citadel-safe-top (a phone's notch, which the bar sits below);
+   on the app's own page they come from its own title bar and notch. Its background drags the window; what's clickable doesn't. */
 :where(.cui-topbar) {
   --cui-topbar-row: var(--citadel-strip-row, 1.9rem);
   --cui-topbar-pad: max(0.625rem, (var(--citadel-strip-h, env(titlebar-area-height, 0px)) - var(--cui-topbar-row)) / 2);
   box-sizing: border-box; display: flex; flex-wrap: nowrap; align-items: center; gap: var(--citadel-space-3);
-  min-height: calc(var(--cui-topbar-row) + 2 * var(--cui-topbar-pad)); margin: 0; padding-block: var(--cui-topbar-pad);
+  --cui-topbar-safe: var(--citadel-safe-top, env(safe-area-inset-top, 0px));
+  min-height: calc(var(--cui-topbar-row) + 2 * var(--cui-topbar-pad) + var(--cui-topbar-safe)); margin: 0;
+  padding-block: calc(var(--cui-topbar-pad) + var(--cui-topbar-safe)) var(--cui-topbar-pad);
   padding-inline: calc(var(--citadel-space-4) + var(--citadel-strip-start, env(titlebar-area-x, 0px)))
     max(var(--citadel-space-4), calc(var(--citadel-strip-end, 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)) + var(--citadel-space-2)));
   background: var(--citadel-surface); border-bottom: 1px solid var(--citadel-border); color: var(--citadel-text);

@@ -38,8 +38,8 @@ function fit() {
   const area = probe.getBoundingClientRect();
   const left = box.getBoundingClientRect().left;
   const end = nav.getBoundingClientRect();
-  const vars = { h: area.height, start: Math.max(0, area.left - left), end: innerWidth - end.left, row: end.height };
-  for (const [k, v] of Object.entries(vars)) doc.documentElement.style.setProperty(`--citadel-strip-${k}`, `${v}px`);
+  const vars = { 'strip-h': area.height, 'strip-start': Math.max(0, area.left - left), 'strip-end': innerWidth - end.left, 'strip-row': end.height, 'safe-top': area.top };
+  for (const [k, v] of Object.entries(vars)) doc.documentElement.style.setProperty(`--citadel-${k}`, `${v}px`);
 }
 if (typeof window !== 'undefined') {
   window.citadelFrameFit = fit;

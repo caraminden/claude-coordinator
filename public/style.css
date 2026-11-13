@@ -312,9 +312,10 @@ html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 
 #frames iframe[hidden] { display: none; }
 /* The frame's top bar (#666, frames.js fit): Citadel's ‹ › × over the end of an app's .cui-topbar, centred on its row
    (Citadel UI's .cui-topbar: the same row and padding), left of the window controls in the installed app. */
-.frame-probe { position: fixed; top: 0; left: env(titlebar-area-x, 0px); width: env(titlebar-area-width, 100vw); height: env(titlebar-area-height, 0px); visibility: hidden; pointer-events: none; }
+/* The probe's top is a phone's notch (the bar sits below it); its box, the title bar strip's area. */
+.frame-probe { position: fixed; top: env(safe-area-inset-top, 0px); left: env(titlebar-area-x, 0px); width: env(titlebar-area-width, 100vw); height: env(titlebar-area-height, 0px); visibility: hidden; pointer-events: none; }
 .frame-nav { --head-btn: 1.9rem; --strip: 0px; display: none; gap: 0.15rem; position: fixed; z-index: 1;
-  top: calc(var(--banner-h, 0px) + max(0.625rem, (var(--strip) - var(--head-btn)) / 2));
+  top: calc(var(--banner-h, 0px) + env(safe-area-inset-top, 0px) + max(0.625rem, (var(--strip) - var(--head-btn)) / 2));
   right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 0.5rem); }
 @media (max-width: 800px) { .frame-nav { --head-btn: 2.5rem; } }
 html.frame-topbar .frame-nav { display: inline-flex; }

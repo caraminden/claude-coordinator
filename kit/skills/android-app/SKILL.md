@@ -62,6 +62,8 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
 - The app serves the signed APK and `android/latest.json` (`{ "versionCode": N, "apk": "<url>" }`)
   under a contraption **open path** (its `open_paths`), so the phone's browser downloads them
   without Citadel's cookie. The tailnet keeps them private.
+- A signed APK built in CI reaches perigee through Citadel's CI store, not a GitHub artifact: the
+  release workflow uploads it as kind `release` (the `citadel:ci-store` skill).
 - The web layer compares `App.getInfo().build` with `latest.json`. When it's behind, it shows
   "Update the app", which opens the APK URL in the system browser, and Android's installer takes
   it from there. A web-only change needs no new APK.

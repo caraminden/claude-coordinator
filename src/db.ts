@@ -84,6 +84,27 @@ export interface Project {
   created_at: number;
 }
 
+/** A file in the CI store (#658, src/ci-store.ts). */
+export interface CiFile {
+  id: number;
+  project_id: number;
+  /** The workflow's file name, "android.yml". */
+  workflow: string;
+  run_id: number;
+  run_attempt: number;
+  sha: string;
+  ref: string;
+  name: string;
+  kind: string;
+  /** What the rules group by beside the workflow, '' for a workflow with one. */
+  target: string;
+  size: number;
+  sha256: string;
+  created_at: number;
+  published_to: string | null;
+  published_at: number | null;
+}
+
 /** A person who signs in. `name` is what their messages are signed with. */
 export interface User {
   id: number;
@@ -450,6 +471,26 @@ CREATE TABLE IF NOT EXISTS artifacts (
   UNIQUE (ticket_id, path)
 );
 CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts(project_id, mtime);
+-- CI output a scheme's runners uploaded (#658, src/ci-store.ts): the file is at projects/<project>/ci-store/<workflow>/<run>-<attempt>/<name>.
+-- A row goes when its file does. published_to names the place a release was last copied to (a contraption's feed).
+CREATE TABLE IF NOT EXISTS ci_files (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  workflow TEXT NOT NULL,
+  run_id INTEGER NOT NULL,
+  run_attempt INTEGER NOT NULL,
+  sha TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  target TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  published_to TEXT,
+  published_at INTEGER,
+  UNIQUE (project_id, workflow, run_id, run_attempt, name)
+);
 CREATE TABLE IF NOT EXISTS ticket_seen (
   name TEXT NOT NULL,
   ticket_id INTEGER NOT NULL REFERENCES tickets(id),
@@ -915,6 +956,7 @@ export const SCHEMA_HISTORY = [
   [42, 'releases (#625)'],
   [43, 'contraption_deploys (#627)'],
   [44, 'list_orders (#649)'],
+  [45, 'ci_files (#658)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1695,6 +1737,37 @@ export class Store {
 
   pinnedArtifactPaths(ticketId: number): string[] {
     return (this.db.prepare('SELECT path FROM artifacts WHERE ticket_id = ? AND pinned_at IS NOT NULL').all(ticketId) as { path: string }[]).map((r) => r.path);
+  }
+
+  /** Record an upload; the same run, attempt and name again replaces its row (and is no longer published). */
+  putCiFile(f: Omit<CiFile, 'id' | 'published_to' | 'published_at'>): CiFile {
+    return this.db
+      .prepare(
+        `INSERT INTO ci_files (project_id, workflow, run_id, run_attempt, sha, ref, name, kind, target, size, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, workflow, run_id, run_attempt, name) DO UPDATE SET sha = excluded.sha, ref = excluded.ref, kind = excluded.kind, target = excluded.target,
+           size = excluded.size, sha256 = excluded.sha256, created_at = excluded.created_at, published_to = NULL, published_at = NULL
+         RETURNING *`,
+      )
+      .get(f.project_id, f.workflow, f.run_id, f.run_attempt, f.sha, f.ref, f.name, f.kind, f.target, f.size, f.sha256, f.created_at) as unknown as CiFile;
+  }
+
+  getCiFile(id: number): CiFile | undefined {
+    return this.db.prepare('SELECT * FROM ci_files WHERE id = ?').get(id) as unknown as CiFile | undefined;
+  }
+
+  /** The CI store's files, newest first: every scheme's, or one's. */
+  ciFiles(projectId?: number): CiFile[] {
+    const where = projectId === undefined ? '' : 'WHERE project_id = ?';
+    return this.db.prepare(`SELECT * FROM ci_files ${where} ORDER BY created_at DESC, id DESC`).all(...(projectId === undefined ? [] : [projectId])) as unknown as CiFile[];
+  }
+
+  deleteCiFile(id: number) {
+    this.db.prepare('DELETE FROM ci_files WHERE id = ?').run(id);
+  }
+
+  /** A file was copied to `to` (a contraption's feed): the newest one published there is never swept. */
+  publishCiFile(id: number, to: string) {
+    this.db.prepare('UPDATE ci_files SET published_to = ?, published_at = ? WHERE id = ?').run(to, Date.now(), id);
   }
 
   /** Pins on files of a project's shared folder, by path relative to it. Kept while the file is gone, like an artifact's. */

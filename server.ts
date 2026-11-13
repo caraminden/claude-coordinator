@@ -34,6 +34,8 @@ import { ScheduledRuns } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
+import { ciStoreRoutes } from './src/routes/ci-store.ts';
+import { CiStore } from './src/ci-store.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
@@ -273,6 +275,7 @@ function liveOn(head: string | null) {
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
+const ciStore = new CiStore(store, DATA_DIR);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 runner.refuseTurn = (ticket, author, from) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from);
 // Sender pays (#213): the server login's owner runs on the host, everyone else in their own container.
@@ -562,7 +565,10 @@ const autoDeploy = new AutoDeploy({
         else {
           const feedFile = join(services.opts.home, '.local/share', t.contraption, 'android', 'latest.json');
           try {
-            await publish({ slug, runId: w.run.id, feedFile, current: w.current, main: w.main, as });
+            // The signed APK the run put in the CI store (#658), when it did; else its GitHub artifact.
+            const stored = ciStore.releaseApk(p.id, w.run.id);
+            await publish({ slug, runId: w.run.id, feedFile, current: w.current, main: w.main, as, stored: (stored && (await ciStore.plain(stored))) ?? undefined });
+            if (stored) store.publishCiFile(stored.id, `${t.contraption}/android`);
           } catch (err) {
             if (!(err instanceof OldApk)) throw err;
             // Signed before main's version bump: sign main instead.
@@ -730,6 +736,17 @@ runnerTokens.onFetched = (project, text, machine) => {
   if (coordinator) runner.emit(coordinator.id, 'note', { text });
 };
 // So is each runner agent add or remove (#328), once, when it ends, its output collapsed under it (#339); a list isn't.
+// The CI store (#658): a refusal for room is told in the scheme Taskmaster's chat; the rules also run daily (and soon
+// after a start), for schemes that have stopped uploading and for what a restart cut off mid-upload.
+ciStore.onFull = (project, text) => {
+  const coordinator = store.getCoordinator(project.id);
+  if (coordinator) runner.emit(coordinator.id, 'note', { text });
+};
+if (!BOOT_CHECK && !PREVIEW) {
+  const sweepCi = () => void safely('ci store sweep', () => ciStore.sweep(true));
+  setTimeout(sweepCi, 15 * 60_000).unref();
+  setInterval(sweepCi, 24 * 60 * 60_000).unref();
+}
 runnerJobs.onNote = (project, text, detail) => {
   const coordinator = store.getCoordinator(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text, detail });
@@ -822,7 +839,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
+  store, runner, auth, waiters, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
   get assetVersion() {
@@ -830,7 +847,7 @@ const app: App = {
   },
   broadcast, notify, newMinion, startChained: startChain, ticketBranch, builds, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
 };
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes, ...contraptionRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;

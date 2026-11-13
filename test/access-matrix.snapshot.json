@@ -129,6 +129,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "PUT /api/ci-store/nope": {
+  "anon": "400 kind must be one of build, report, release",
+  "person": "400 kind must be one of build, report, release",
+  "member": "400 kind must be one of build, report, release",
+  "outsider": "400 kind must be one of build, report, release",
+  "tmA": "400 kind must be one of build, report, release",
+  "tmB": "400 kind must be one of build, report, release",
+  "m1": "400 kind must be one of build, report, release",
+  "m2": "400 kind must be one of build, report, release"
+ },
  "POST /api/contraption-read/nope": {
   "anon": "401 Not logged in",
   "person": "403 Only a minion or Taskmaster reads a person's contraption data",
@@ -972,6 +982,36 @@
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/ci-files": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "200"
+ },
+ "GET /api/projects/:p/ci-files/1/nope": {
+  "anon": "401 Not logged in",
+  "person": "404 No such file in the CI store",
+  "member": "404 No such file in the CI store",
+  "outsider": "404 No such scheme",
+  "tmA": "404 No such file in the CI store",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "404 No such file in the CI store",
+  "m2": "404 No such file in the CI store"
+ },
+ "GET /api/projects/:p/ci-files/latest": {
+  "anon": "401 Not logged in",
+  "person": "404 No file in the CI store matches",
+  "member": "404 No file in the CI store matches",
+  "outsider": "404 No such scheme",
+  "tmA": "404 No file in the CI store matches",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "404 No file in the CI store matches",
+  "m2": "404 No file in the CI store matches"
  },
  "GET /api/projects/:p/ci-runners": {
   "anon": "401 Not logged in",

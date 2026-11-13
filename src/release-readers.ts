@@ -317,7 +317,12 @@ class RunsCache {
     for (const id of this.files.keys()) if (!kept.has(id)) this.files.delete(id);
     const slug = repoSlug(p.repo_url);
     // The runs a page can show a download for: the newest few that shipped.
+    // A run's build or release in Citadel's own CI store (#658) is its download, read each time since the store sweeps.
+    const stored = this.d.store.ciFiles(p.id).filter((f) => f.kind !== 'report');
     for (const r of out.filter(shipped).slice(0, PREVIOUS + 1)) { // the current and its Previous releases
+      const mine = stored.find((f) => f.run_id === r.run.id && f.kind === 'release') ?? stored.find((f) => f.run_id === r.run.id);
+      if (mine) this.files.set(r.run.id, { url: `/api/projects/${p.id}/ci-files/${mine.id}/${encodeURIComponent(mine.name)}`, expires: null });
+      else if (this.files.get(r.run.id)?.url.startsWith('/api/')) this.files.delete(r.run.id); // swept since
       if (this.files.has(r.run.id) || !slug || !this.d.actions.runArtifacts) continue;
       const list = await this.d.actions.runArtifacts(p, r.run);
       if (list) this.files.set(r.run.id, shippedFile(slug, r.run, list));

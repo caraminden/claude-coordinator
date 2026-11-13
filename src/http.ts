@@ -17,6 +17,7 @@ import type { GithubLink } from './github-link.ts';
 import type { RepoAccess } from './repo-access.ts';
 import type { CiLoad } from './ci-load.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
+import type { CiStore } from './ci-store.ts';
 import type { Previews } from './previews.ts';
 import type { Releases } from './releases.ts';
 import type { AutoDeploy } from './auto-deploy.ts';
@@ -214,6 +215,8 @@ export interface App {
   runnerTokens: RunnerTokens;
   /** The CI desktop's load: the runner agents' samples, each PC's view and verdict (src/ci-load.ts, #534). */
   ciLoad: CiLoad;
+  /** CI output the schemes' runners upload, kept per scheme and swept by rule (src/ci-store.ts, #658). */
+  ciStore: CiStore;
   /** Jobs for the CI runner agent on Cara's desktop: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
   runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */

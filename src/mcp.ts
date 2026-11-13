@@ -296,6 +296,25 @@ const CI_RUNNERS = {
   },
 };
 
+/** The scheme's files in Citadel's CI store (#658, src/ci-store.ts): every minion and Taskmaster. */
+const CI_FILES = {
+  name: 'ci_files',
+  description:
+    "List what this scheme's CI runs uploaded to Citadel's own CI store (builds, reports, release builds), newest first, or with latest: true only the newest match. This replaces `gh run download`: each file comes with its path on this server (read or copy it from there) and its URL under the app's address. Filter by workflow (the file name, like android.yml), kind, target, name, run (a run id) or commit (a prefix). The store deletes by rule: reports after 7 days, builds beyond the newest 5 runs per workflow and target, old releases beyond the newest 10; each target's newest build and release and a published release stay.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      latest: { type: 'boolean', description: 'true for only the newest file that matches' },
+      workflow: { type: 'string', description: "The workflow's file name, like android-release.yml" },
+      kind: { type: 'string', enum: ['build', 'report', 'release'] },
+      target: { type: 'string' },
+      name: { type: 'string', description: "The file's exact name" },
+      run: { type: 'number', description: 'A GitHub Actions run id' },
+      commit: { type: 'string', description: 'A commit hash or its first characters' },
+    },
+  },
+};
+
 const TOOLS = [
   LIST_TICKETS,
   {
@@ -1347,6 +1366,15 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'strike_text':
       await call('POST', `/api/tickets/${TICKET}/strike`, { text: args.text, reason: args.reason });
       return 'Struck through in the chat, with your reason in a note.';
+    case 'ci_files': {
+      const q = new URLSearchParams();
+      for (const k of ['workflow', 'kind', 'target', 'name', 'run', 'commit']) if (args[k] !== undefined && args[k] !== '') q.set(k, String(args[k]));
+      const { files, usage } = await call('GET', `/api/projects/${PROJECT}/ci-files?${q}`);
+      if (!files.length) return 'No file in the CI store matches.';
+      const line = (f: any) => `${f.kind} ${f.name} (${f.size.toLocaleString('en')} bytes) from ${f.workflow} run ${f.run_id}${f.run_attempt > 1 ? ` attempt ${f.run_attempt}` : ''}, commit ${f.sha.slice(0, 8)}${f.target ? `, target ${f.target}` : ''}${f.published_to ? `, published to ${f.published_to}` : ''}, uploaded ${new Date(f.created_at).toISOString()}\n  path: ${f.path}\n  url: ${f.url}`;
+      if (args.latest === true) return line(files[0]);
+      return `${files.slice(0, 50).map(line).join('\n')}${files.length > 50 ? `\n… and ${files.length - 50} older` : ''}\n${(usage.scheme / 1024 ** 2).toFixed(1)} MiB in this scheme's store.`;
+    }
     case 'ci_runners': {
       const started = await call('POST', `/api/projects/${PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}), ...(args.os !== undefined ? { os: args.os } : {}) });
       let job = started;
@@ -1523,8 +1551,8 @@ function toolList() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, CI_RUNNERS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, CI_RUNNERS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
-  return [...THREAD_TOOLS, CI_RUNNERS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
+  return [...THREAD_TOOLS, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

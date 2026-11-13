@@ -220,6 +220,10 @@ scheme's label, and runs its steps in bash, which works on both:
         shell: bash
 ```
 
+A workflow that keeps a file from a run (a build, reports, a release) uploads it to Citadel's own
+store, never with `actions/upload-artifact`: the `citadel:ci-store` skill has the script and the
+rules for what may be kept.
+
 Write no workflow the plan doesn't ask for. If the repo has workflows, add the scheme's runner
 yourself: call the `ci_runners` tool with `op: "add"` (one runner unless the plan names a count,
 at most 4). Citadel's runner agent on the desktop installs it, and the tool waits until GitHub

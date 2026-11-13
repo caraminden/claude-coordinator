@@ -669,3 +669,21 @@ test('the file reader: each shared release file is a release, numbered from the 
   await copies.scan();
   assert.deepEqual((copies.list().get(p.id) ?? []).map((c) => c.name), ['FuckSpamTexts-debug.apk'], 'a release is no test copy; the debug build still is');
 });
+
+test('a run\'s file in the CI store is its download, and once the store sweeps it the link goes back to GitHub (#658)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release' };
+  const now = Date.now(), m = 60_000;
+  const runs = [run(3, 'in_progress', null, now - 2 * m), run(2, 'completed', 'success', now - 60 * m, now - 40 * m)];
+  const jobs = { 3: [job(3, 'release', 'in_progress', null, now - m, null)], 2: [job(2, 'release', 'completed', 'success', now - 50 * m, now - 40 * m)] };
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions: fakeActions(runs, jobs).actions });
+  const file = { project_id: p.id, workflow: 'windows.yml', run_id: 2, run_attempt: 1, sha: 'a'.repeat(40), ref: '', target: '', size: 1, sha256: '', created_at: now };
+  store.putCiFile({ ...file, name: 'logs.tar.gz', kind: 'report' });
+  const build = store.putCiFile({ ...file, name: 'peek auras.zip', kind: 'build' });
+  await reader.refresh();
+  assert.equal(reader.read()[0].current?.link, `/api/projects/${p.id}/ci-files/${build.id}/peek%20auras.zip`, 'the build, not the report');
+  store.deleteCiFile(build.id);
+  await reader.refresh(); // run 3 still moves, so this reads again
+  assert.equal(reader.read()[0].current?.link, 'https://github.com/o/r/actions/runs/2');
+});

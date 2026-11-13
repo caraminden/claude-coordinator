@@ -32,22 +32,26 @@ export function nextFeed(was: Record<string, unknown>, code: number, apk: string
 }
 
 /**
- * Publish run `runId`'s signed APK beside `feedFile` (a contraption's android/latest.json): download its artifacts, take
- * its one APK, refuse one no newer than `current`, copy it in, then rewrite latest.json (the APK first, so latest.json
+ * Publish run `runId`'s signed APK beside `feedFile` (a contraption's android/latest.json): take `stored`, the APK the
+ * run put in the CI store (#658), or else download its GitHub artifacts and take their one APK, refuse one no newer than `current`, copy it in, then rewrite latest.json (the APK first, so latest.json
  * never names a file that isn't there). Returns the published versionCode.
  */
-export async function publish(o: { slug: string; runId: number; feedFile: string; current: number; main: { code: number; name: string | null }; as: GithubEnv }): Promise<number> {
+export async function publish(o: { slug: string; runId: number; feedFile: string; current: number; main: { code: number; name: string | null }; as: GithubEnv; stored?: string }): Promise<number> {
   const tmp = await mkdtemp(join(tmpdir(), 'apk-release-'));
   try {
-    await run('gh', ['run', 'download', String(o.runId), '--repo', o.slug, '--dir', tmp], { env: asEnv(o.as), timeout: 10 * 60_000 });
-    const apks = (await readdir(tmp, { recursive: true })).filter((f) => f.endsWith('.apk'));
-    if (apks.length !== 1) throw new Error(`run ${o.runId}'s artifacts hold ${apks.length} APKs, not one`);
-    const name = basename(apks[0]);
+    let apk = o.stored;
+    if (!apk) {
+      await run('gh', ['run', 'download', String(o.runId), '--repo', o.slug, '--dir', tmp], { env: asEnv(o.as), timeout: 10 * 60_000 });
+      const apks = (await readdir(tmp, { recursive: true })).filter((f) => f.endsWith('.apk'));
+      if (apks.length !== 1) throw new Error(`run ${o.runId}'s artifacts hold ${apks.length} APKs, not one`);
+      apk = join(tmp, apks[0]);
+    }
+    const name = basename(apk);
     const code = apkCode(name);
     if (code == null) throw new Error(`${name} doesn't name its versionCode (<app>-<versionCode>.apk)`);
     if (code <= o.current) throw new OldApk(`the newest signed APK, ${name}, is no newer than build ${o.current}, which is published: start a release run of the bumped version`);
     const dir = dirname(o.feedFile);
-    await copyFile(join(tmp, apks[0]), join(dir, name));
+    await copyFile(apk, join(dir, name));
     const was = JSON.parse(await readFile(o.feedFile, 'utf8').catch(() => '{}'));
     const feed = nextFeed(was && typeof was === 'object' ? was : {}, code, name, o.main.code === code ? o.main.name : null);
     await writeFile(`${o.feedFile}.tmp`, JSON.stringify(feed, null, 2) + '\n');

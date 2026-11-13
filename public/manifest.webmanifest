@@ -6,6 +6,7 @@
   "start_url": "/c/",
   "scope": "/c/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay"],
   "launch_handler": { "client_mode": ["focus-existing", "auto"] },
   "share_target": {
     "action": "/c/share",

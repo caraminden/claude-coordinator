@@ -132,7 +132,7 @@ summary { --tap-pad: max(0px, (24px - 1lh) / 2); padding-block: var(--tap-pad); 
   align-items: center;
   gap: 1rem;
   padding: 0.6rem 1rem;
-  padding-top: calc(0.6rem + env(safe-area-inset-top, 0px));
+  padding-top: calc(0.6rem + var(--top-inset));
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   position: sticky;
@@ -151,6 +151,22 @@ main { max-width: 1200px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
   body { min-height: 100dvh; }
   .topbar { padding-left: calc(1rem + env(safe-area-inset-left, 0px)); padding-right: calc(1rem + env(safe-area-inset-right, 0px)); }
   main { padding-left: calc(1rem + env(safe-area-inset-left, 0px)); padding-right: calc(1rem + env(safe-area-inset-right, 0px)); }
+}
+/* What sits at the top of the window: the notch on a phone, the title bar strip in a desktop app with its
+   title bar folded into the page (#637, manifest's display_override). Everything pinned to the top adds it. */
+html { --top-inset: env(safe-area-inset-top, 0px); }
+@media (display-mode: window-controls-overlay) {
+  html { --top-inset: env(titlebar-area-height, 0px); }
+  body { min-height: 100dvh; }
+  /* The home page's top bar is the title bar: the strip's height, clear of the window controls on either side,
+     in page colour like the strip on scheme pages (app.js sets the controls' colour to match). */
+  .topbar {
+    box-sizing: border-box; min-height: env(titlebar-area-height, 0px); padding-block: 0.25rem; background: var(--bg);
+    padding-left: calc(1rem + env(titlebar-area-x, 0px));
+    padding-right: calc(1rem + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+    app-region: drag;
+  }
+  .topbar > :not(#crumbs), #crumbs a { app-region: no-drag; }
 }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
 .login { max-width: 360px; margin: 10vh auto; }
@@ -182,7 +198,7 @@ h2 { font-size: 1.15rem; margin: 0; }
   text-align: center;
 }
 /* core.js's "Reconnecting…" while the live stream is down: floats over the page, so nothing moves. */
-.reconnecting { position: fixed; top: calc(0.5rem + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); z-index: 50; box-shadow: 0 4px 12px rgb(0 0 0 / 0.12); }
+.reconnecting { position: fixed; top: calc(0.5rem + var(--top-inset)); left: 50%; transform: translateX(-50%); z-index: 50; box-shadow: 0 4px 12px rgb(0 0 0 / 0.12); }
 .reconnecting .cui-spin { border-color: color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; }
 .update-banner button { padding: 0.15rem 0.6rem; font-size: 0.85em; margin-left: 0.25rem; }
 
@@ -257,18 +273,25 @@ body.navigating::after { content: ''; pointer-events: none; position: fixed; z-i
 /* Project pages drop the top bar; its account and usage live in the overview panel. With no bar to
    clear the notch, a strip of page colour covers the status bar area and the thread bar sticks below it. */
 body:has(.split) .topbar { display: none; }
-body:has(.split)::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); z-index: 6; background: var(--bg); }
-body:has(.split) main { padding-top: calc(1.25rem + env(safe-area-inset-top, 0px)); }
-body:has(.split) .ticket-head { top: max(0px, calc(env(safe-area-inset-top, 0px) + var(--banner-h, 0px) - 1px)); }
-body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
+body:has(.split)::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: var(--top-inset); z-index: 6; background: var(--bg); }
+body:has(.split) main { padding-top: calc(1.25rem + var(--top-inset)); }
+body:has(.split) .ticket-head { top: max(0px, calc(var(--top-inset) + var(--banner-h, 0px) - 1px)); }
+body:has(.split) .update-banner { top: var(--top-inset); }
+/* In a desktop app, the strip over the window controls drags the window, and the page starts closer under it
+   than under a notch: the strip already keeps it clear of the edge. */
+@media (display-mode: window-controls-overlay) {
+  body:has(.split)::before { app-region: drag; }
+  body:has(.split) main { padding-top: calc(0.5rem + var(--top-inset)); }
+}
 
 /* A contraption inside Citadel's window (frames.js): over the page, right of the rail, under the switcher. */
 #frames { display: none; }
 html.framed { overflow: hidden; }
 html.framed #frames { display: block; position: fixed; top: var(--banner-h, 0px); right: 0; bottom: 0; left: var(--citadel-rail, 0px); z-index: 45; background: var(--bg); }
 /* Citadel's update banner stays above the frame, which starts below it. */
-html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 0px); right: 0; z-index: 46; padding-top: calc(0.4rem + env(safe-area-inset-top, 0px)); }
+html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 0px); right: 0; z-index: 46; padding-top: calc(0.4rem + var(--top-inset)); }
 @media (max-width: 800px) { html.framed #frames, html.framed .update-banner { left: 0; } }
+@media (display-mode: window-controls-overlay) { html.framed #frames { top: max(var(--banner-h, 0px), var(--top-inset)); } }
 #frames iframe { display: block; width: 100%; height: 100%; border: 0; }
 #frames iframe[hidden] { display: none; }
 

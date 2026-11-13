@@ -59,7 +59,7 @@ let slot = null; // the contraption's own container for it (mountRail), else it 
 let edgeTaken = false; // drawers.js has a left drawer, so the left edge is its (leaveEdge)
 // Framed, it's Citadel's window that is narrow or not: the frame is the rail's width narrower.
 const narrow = typeof matchMedia === 'function' ? (host ? window.parent : window).matchMedia(NARROW) : null;
-const installed = typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches;
+const installed = typeof matchMedia === 'function' && matchMedia('(display-mode: standalone), (display-mode: window-controls-overlay)').matches;
 // Citadel's page in a contraption's layer (below): picking that contraption puts the layer away.
 const layerHost = (() => {
   try { return !inContraption && window.parent !== window ? window.parent.citadelLayer ?? null : null; } catch { return null; }
@@ -499,7 +499,7 @@ if (typeof document !== 'undefined') {
 /** The switcher as a list (a phone, or a wide slot), for the rail matched by `r`. */
 const list = (r) => `
   ${r} { align-items: stretch; gap: 6px;
-    padding: calc(14px + env(safe-area-inset-top, 0px)) 12px calc(14px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
+    padding: calc(14px + var(--top-inset, env(safe-area-inset-top, 0px))) 12px calc(14px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
   ${r} :is(a, button.install) { width: auto; height: auto; padding: 10px; gap: 12px; justify-content: flex-start; border-radius: 10px; }
   ${r} a.current { box-shadow: none; background: #3b3631; font-weight: 600; }
   ${r} :is(img, .tile, .glyph) { width: 36px; height: 36px; opacity: 1; }
@@ -515,7 +515,7 @@ function addStyles() {
 html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0px)); padding-left: var(--citadel-rail); }
 .citadel-rail { position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; box-sizing: border-box; width: var(--citadel-rail);
   display: flex; flex-direction: column; align-items: center; gap: 10px; overflow-y: auto; margin: 0;
-  padding: calc(10px + env(safe-area-inset-top, 0px)) 0 calc(10px + env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 0px);
+  padding: calc(10px + var(--top-inset, env(safe-area-inset-top, 0px))) 0 calc(10px + env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 0px);
   background: #2a2622; color: #f4efe9; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
 @media (prefers-color-scheme: dark) { .citadel-rail { background: #0f0e0d; border-right: 1px solid #34322e; } }
 .citadel-rail :is(a, button.install) { flex: none; box-sizing: border-box; width: 42px; height: 42px; padding: 4px; border-radius: 12px;

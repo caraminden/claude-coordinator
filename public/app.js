@@ -62,9 +62,13 @@ function boot() {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 // Only in the installed app, so browser tabs look and behave as before: colour the title/status bar
 // like the top bar, and on Android shrink the page when the keyboard opens so the composer stays in view.
-if (matchMedia('(display-mode: standalone)').matches) {
+// With the title bar folded into the page (#637), the window controls take the page's colour; the first match wins.
+if (matchMedia('(display-mode: standalone), (display-mode: window-controls-overlay)').matches) {
   const viewport = document.querySelector('meta[name=viewport]');
   viewport.content += ', interactive-widget=resizes-content';
+  for (const [scheme, color] of [['light', '#f6f5f2'], ['dark', '#161514']]) {
+    document.head.append(h('meta', { name: 'theme-color', content: color, media: `(display-mode: window-controls-overlay) and (prefers-color-scheme: ${scheme})` }));
+  }
   for (const [scheme, color] of [['light', '#ffffff'], ['dark', '#201f1d']]) {
     document.head.append(h('meta', { name: 'theme-color', content: color, media: `(prefers-color-scheme: ${scheme})` }));
   }

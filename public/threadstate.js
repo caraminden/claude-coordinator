@@ -1,7 +1,7 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
 import { STATES } from './base.js';
-import { waitFam } from './wait.js';
+import { waitFam, waitShows } from './wait.js';
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked. */
 export function byUrgency(a, b, usage, now = Date.now()) {
@@ -69,17 +69,18 @@ function limitState(t, waited, usage, now) {
 }
 
 /**
- * What a list row's bar (#573) fills from, or null for none: a wait with its own estimate (a land, CI, a deploy),
- * else the plan's running step or its steps done, only while the minion works. A row waiting on a person (a card,
+ * What a list row's bar (#573) is drawn from, or null for none: the plan's steps (`track`, and `done`/`total` from an
+ * older server) while the minion works, and the `wait` (a land, CI, a deploy) while it works or after its turn. A row waiting on a person (a card,
  * an approval, ready, try it), blocked, parked or at the usage limit has none; the card badge flags a card (Cara,
  * 2026-11-11: "if a minion is asking a question it shouldnt have a progress bar right?"). `st` is its rowState.
  */
 export function rowBar(t, st) {
   if (st.rank === 0 || t.status === 'closed') return null;
-  const working = t.status === 'running', w = t.wait;
-  if (w && (w.total || w.usual) && (working || t.state === 'outside' || t.state === 'pending-deploy')) return w;
+  const working = t.status === 'running', w = waitShows(t.wait) ? t.wait : null;
+  // The plan's track and the wait together (#630): wait.js progressTrack draws the wait in the step underway.
+  if (w && (working || t.state === 'outside' || t.state === 'pending-deploy')) return { ...(working && t.steps), track: working ? t.step_track ?? null : null, wait: w };
   if (!working || !t.steps) return null;
-  return t.step_track ? { ...t.steps, track: t.step_track } : t.steps; // the plan's track (#630): sidebar.js draws it with wait.js stepTrack
+  return { ...t.steps, track: t.step_track ?? null };
 }
 
 /**

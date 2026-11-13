@@ -158,12 +158,14 @@ test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none
   assert.equal(bar({ status: 'running', approvals: 1, steps: half }), null, 'an approval card holds the turn');
   assert.equal(bar({ status: 'closed', steps: half }), null, 'dismissed');
   assert.equal(bar({ steps: half, state: 'ready', wait: ci }), null, 'a stale wait on a row waiting on you');
-  assert.deepEqual(bar({ status: 'running', steps: half }), half, 'working: steps done');
+  assert.deepEqual(bar({ status: 'running', steps: half }), { ...half, track: null }, 'working: steps done');
   const steps = { ...half, since: NOW - MIN, usual: 120 }, track = [[2, 'c'], [3, 'c'], [2, 'i'], [null, 'p']];
   assert.deepEqual(bar({ status: 'running', steps, step_track: track }), { ...steps, track }, "working: the plan's track, its running step against its guess (#630)");
-  assert.equal(bar({ status: 'running', steps: half, wait: ci }), ci, 'a CI wait in the turn');
-  assert.equal(bar({ state: 'outside', steps: half, wait: ci }), ci, 'waiting on CI after the turn');
-  assert.equal(bar({ state: 'pending-deploy', wait: { kind: 'deploy', stage: 'restart', total: 3, done: 1 } }).total, 3, 'a deploy');
+  assert.deepEqual(bar({ status: 'running', steps, step_track: track, wait: ci }), { ...steps, track, wait: ci }, 'a CI wait in the turn keeps the plan with it (#630)');
+  assert.deepEqual(bar({ status: 'running', wait: ci }), { track: null, wait: ci }, 'a CI wait in a turn with no plan');
+  assert.deepEqual(bar({ state: 'outside', steps: half, wait: ci }), { track: null, wait: ci }, 'waiting on CI after the turn');
+  assert.equal(bar({ state: 'pending-deploy', wait: { kind: 'deploy', stage: 'restart', total: 3, done: 1 } }).wait.total, 3, 'a deploy');
+  assert.equal(bar({ status: 'running', wait: { kind: 'land', stage: 'line', since: NOW, text: '2nd in line' } }).wait.stage, 'line', 'a landing in the line, with no estimate, still shows its stages');
   assert.equal(bar({ state: 'outside', steps: half }), null, 'waiting elsewhere with no estimate of its own');
 });
 
@@ -217,4 +219,28 @@ test("a segmented track's pieces are as wide as their usual time, the average wh
   assert.deepEqual(segSizes([4, null, 8]), [4, 6, 8], 'a step with no guess takes the average of the others');
   assert.deepEqual(segSizes([null, null]), [1, 1], 'none known: equal pieces');
   assert.deepEqual(segSizes([1, 100]), [8.08, 100], 'a 1-second rebase still shows, at 8% of the whole');
+});
+
+test("progressPieces: the plan's track stays through a wait, the wait filling the step underway; a landing with no step underway shows its stages (#630)", async () => {
+  const { progressPieces } = await import('../public/wait.js');
+  const track = [[2, 'c'], [3, 'i'], [null, 'p']];
+  const test = { kind: 'land', stage: 'test', since: NOW - MIN, usual: 90, text: 'step 3 of 13' };
+  const line = { kind: 'land', stage: 'line', since: NOW - MIN, text: '2nd in line' };
+  const states = (r) => r.segs.map((s) => s.state + (s.waits ? '~' : '') + (s.clock ? '*' : ''));
+  const est = progressPieces({ track, since: NOW - MIN, usual: 180 });
+  assert.deepEqual(states(est), ['done', 'now*', ''], 'no wait: the step fills against its guess');
+  assert.equal(est.segs[1].clock.usual, 180);
+  const landing = progressPieces({ track, since: NOW - MIN, usual: 180, wait: test });
+  assert.deepEqual(states(landing), ['done', 'now*', ''], 'a landing mid-step: still the plan, not the wait\'s solid bar');
+  assert.equal(landing.segs[1].clock, test, 'the step underway fills by the wait');
+  assert.deepEqual(states(progressPieces({ track, wait: line })), ['done', 'now~', ''], 'waiting in the line: the step underway is hatched');
+  // Cara's screenshot: a land with no plan step underway read "Test 3/6" over one solid bar.
+  const stages = progressPieces({ track: [[2, 'c'], [3, 'c']], wait: test });
+  assert.deepEqual(states(stages), ['done', 'done', 'now*', '', '', ''], "no step underway: the landing's own six stages");
+  assert.equal(stages.label, 'Test, stage 3 of 6');
+  assert.deepEqual(states(progressPieces({ track: null, wait: line })), ['now~', '', '', '', '', ''], 'in the line with no estimate');
+  const ci = { kind: 'ci', stage: 'ci', since: NOW - MIN, usual: 300 };
+  assert.deepEqual(progressPieces({ track: null, wait: ci }), { bar: ci }, 'a CI wait with no plan step underway: its own bar');
+  assert.equal(progressPieces({ track: null, wait: { kind: 'ci', stage: 'ci', since: NOW } }), null, 'nothing known: no bar');
+  assert.equal(progressPieces({ track: [[2, 'c']], wait: null }).segs.length, 1, 'a plan with no wait: its steps');
 });

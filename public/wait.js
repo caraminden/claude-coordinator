@@ -71,13 +71,33 @@ export function segTrack(segs, { cls = '', cap = 90, labels = false, label = '' 
   }));
 }
 
+/** A wait that draws a bar: one with a count or a usual time, or a landing at a known stage. */
+export const waitShows = (w) => !!w && !!(w.total || w.usual || TRACK.some(([key]) => key === w.stage));
+
 /**
- * The plan as a segmented track (#630, Cara's pick B; the list row too: "Can we just make it the segmented track like
- * the bar?"). `track` is [guess minutes or null, 'c' done | 'i' underway | 'p' not started] per step; the step underway
- * fills against `since`/`usual`, its scaled guess.
+ * The one progress track for the chat readout and the list row (#630; Cara, on her bar during a land: "the progress
+ * bars for 630 on the list and chat are out of sync, arent showing the stages"). A plan with a step underway draws
+ * its steps (`track`: [guess minutes or null, 'c' done | 'i' underway | 'p' not started]), the step underway filling
+ * by the `wait` when there is one (hatched while it waits in a line or queue), else against `since`/`usual`, its
+ * scaled guess. With no step underway, a landing draws its own stages; another wait its bar; a plan its steps.
  */
-export function stepTrack({ track, since, usual }, cls = '') {
-  return segTrack(track.map(([g, st]) => ({ size: g, state: st === 'c' ? 'done' : st === 'i' ? 'now' : '', clock: st === 'i' && usual ? { since, usual } : null })), { cls });
+export function progressTrack(src, cls = '') {
+  const what = progressPieces(src);
+  return !what ? '' : what.bar ? waitBar(what.bar, `wait-bar${cls ? ` ${cls}` : ''}`) : segTrack(what.segs, { cls, label: what.label });
+}
+
+/** What progressTrack draws: { segs, label } for a segmented track, { bar } for a wait's own bar, or null. */
+export function progressPieces({ track, since, usual, wait }) {
+  const w = waitShows(wait) ? wait : null;
+  const wClock = w && (w.total || w.usual) ? w : null;
+  const piece = (state, size, clock = null) => ({ size, state, clock, waits: state === 'now' && !!w && waitFam(w) === 'wait' });
+  if (track?.length && (track.some(([, st]) => st === 'i') || !w)) {
+    return { segs: track.map(([g, st]) => st === 'c' ? piece('done', g) : st === 'i' ? piece('now', g, wClock ?? (usual ? { since, usual } : null)) : piece('', g)), label: '' };
+  }
+  if (!w) return null;
+  const { at } = stageOf(w);
+  if (at < 0) return { bar: w };
+  return { segs: TRACK.map(([, name], i) => ({ ...piece(i < at ? 'done' : i === at ? 'now' : '', null, i === at ? wClock : null), name })), label: `${TRACK[at][1]}, stage ${at + 1} of ${TRACK.length}` };
 }
 
 /** The wait's stage name and where it is on a landing's track. */

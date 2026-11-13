@@ -104,6 +104,9 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
   return { stage: 'rebase', word: 'rebase', key: 'rebase', text: p === 'starting' ? 'starting' : 'rebasing onto main' };
 }
 
+// The one-line readout's words for a landing's test phases (#630): the stage and its count say the rest, and the
+// suite's file counts fill its piece of the track.
+const BRIEF: Record<string, string> = { ci: 'CI: starting', tests: 'full suite on perigee' };
 const HEAD_WORD: Record<string, string> = { rebase: 'rebasing', ci: 'waiting for CI', tests: 'testing', deploy: 'deploying' };
 
 /** Each land-line ticket's wait, by its label (a branch, or "tools/deploy.sh"). `name` turns a label into "#513". */
@@ -117,7 +120,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
       out.set(t.label, {
         kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`),
         chip: `land · ${c ? `${c.done}/${c.total}` : ph.word}`, text: c ? `${ph.text}: ${countsText(c)}` : ph.text,
-        ...(c && { done: c.done, total: c.total }),
+        ...(BRIEF[ph.key] && { brief: BRIEF[ph.key] }), ...(c && { done: c.done, total: c.total }),
       });
       return;
     }

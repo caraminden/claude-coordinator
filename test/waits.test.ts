@@ -61,7 +61,7 @@ test('the land line: the holder by its phase, each waiter by its place and who i
   dead.add(ticket(4, d.branch, 0, 'waiting', 5)); // its process is gone
   waits.poll();
 
-  assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', chip: 'land · tests', text: 'CI fell back: running the full suite on perigee', since: now - 30_000, usual: null });
+  assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', chip: 'land · tests', text: 'CI fell back: running the full suite on perigee', brief: 'full suite on perigee', since: now - 30_000, usual: null });
   const wb = waits.wait(b.id)!;
   assert.equal(wb.chip, 'line · 2nd');
   assert.equal(wb.text, `2nd in line, behind #${a.number} (testing)`);
@@ -188,7 +188,7 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
   progress(join(state, 'land-test.progress'), '96\n212\ntest/runner.test.ts\n', 1);
   waits.poll();
   assert.deepEqual(waits.wait(a.id), {
-    kind: 'land', stage: 'test', chip: 'land · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts',
+    kind: 'land', stage: 'test', chip: 'land · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts', brief: 'full suite on perigee',
     since: now - 30_000, usual: null, done: 96, total: 212,
   });
   // deploy.sh's own run logs to test.log, so its counts are in test.progress.

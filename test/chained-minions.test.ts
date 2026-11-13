@@ -100,6 +100,7 @@ async function chain(w: LiveWaiters, leader: number, when: Chain['when'], projec
 const reset = () => {
   started.length = 0;
   held.length = 0;
+  store.setSetting('chained-minions', []); // chains a failed test left behind don't fail the tests after it (#633)
 };
 
 test('a live chain waits through the merge and starts once the server runs the leader\'s work', async () => {
@@ -215,8 +216,10 @@ test('a feeder folded into its build and dismissed is merged for a chain, and li
   const afterMerged = await chain(w, merged.id, 'merged');
   const afterLive = await chain(w, forLive.id, 'live');
   for (const t of [merged, forLive]) {
-    live.git('update-ref', 'refs/heads/build/7', live.work(t.branch)); // tools/land.sh --into build/7, from build/7's tip
+    // tools/land.sh --into build/7: the branch is rebased onto build/7's tip, then the build fast-forwards to it.
+    // Rebase first (#633): two feeders committing on main's tip were one commit only when made in the same second.
     live.git('update-ref', `refs/heads/${t.branch}`, live.git('rev-parse', 'build/7'));
+    live.git('update-ref', 'refs/heads/build/7', live.work(t.branch));
     store.updateTicket(t.id, { status: 'closed' });
   }
   assert.equal(await w.check(), 1);

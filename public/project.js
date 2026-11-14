@@ -2,7 +2,7 @@
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciWarning } from './ci-desktop.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, projectTitle, pushControls, renderGithubStrip } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
@@ -155,8 +155,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('section', { class: 'account' },
       usageMeter(),
       pushControls(project),
-      // Only while a machine this scheme's minions get needs a fix or is down (#437).
-      h('div', { id: 'machine-warning', class: 'machine-warning', hidden: true }),
       // Only while CI overloads its desktop, crashed it, or the desktop went offline (#534).
       ciWarning(`#/p/${projectId}/machines`),
       // Settings shows in the header beside the scheme; who is signed in sits with Sign out along the box's foot.
@@ -221,7 +219,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   // The recap waits on it: it lists minions dismissed while you were away.
   if (stale) view.dismissedLoad = refreshScheme(projectId);
   else if (!findClosed && dismissed) view.dismissedLoad = loadDismissed(projectId);
-  renderMachineWarning();
   renderHiddenNote();
   refreshInbox();
   prefetchTopRows();
@@ -289,7 +286,6 @@ async function refreshScheme(projectId) {
   renderSidebar();
   setArtifacts(artifacts, shared);
   renderGithubStrip();
-  renderMachineWarning();
   renderHiddenNote();
   await loadDismissed(projectId);
   if (view?.kind === 'project') headUp();

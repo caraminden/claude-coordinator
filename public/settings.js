@@ -826,7 +826,6 @@ export function onMachinesUpdate(machines) {
   if (view?.kind !== 'project') return;
   view.machines = machines;
   renderMachineList();
-  renderMachineWarning();
 }
 
 /** A machine's status line as the server words it (#437): "Asleep · seen 3h ago". */
@@ -837,22 +836,6 @@ function machineStatusText(m) {
 
 /** Whether this scheme's minions get a machine for the viewer: a shared one lent here, or their own (their turns get it). */
 const oursHere = (m) => !m.runners && m.gets?.includes(view.projectId) && (m.owner_id === null || m.owner_id === account?.id);
-
-/** The machines this scheme's minions get that need a fix or are down (#437). */
-const troubled = () => (view.machines ?? []).filter((m) => oursHere(m) && (m.status === 'fix' || m.status === 'down'));
-
-/** The overview's one warning line, only while a machine this scheme's minions get is yellow or red (#437). */
-export function renderMachineWarning() {
-  const el = document.getElementById('machine-warning');
-  if (!el) return;
-  const bad = troubled();
-  el.hidden = !bad.length;
-  el.replaceChildren(...(bad.length ? [
-    h('span', { class: `dot ${bad.some((m) => m.status === 'down') ? 'down' : 'fix'}` }),
-    h('a', { href: `#/p/${view.projectId}/machines`, title: bad.map((m) => `${m.name}: ${m.reason}`).join('\n') },
-      bad.length === 1 ? `${bad[0].name} ${bad[0].status === 'down' ? 'is down' : 'needs a fix'}` : `${bad.length} machines minions here use need a look`),
-  ] : []));
-}
 
 /** The add form (#439): a name, and nothing about what it lends, which is ticked once its agent reports. runners: a CI runner host. */
 function machineAddForm(runners, label) {

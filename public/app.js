@@ -1,6 +1,6 @@
 // Front end: hash-routed views over the JSON API, live via SSE. This entry starts the app;
 // each view lives in its own module (see base.js for what they share, core.js for the shell).
-import { api, h, tintTitleBar, view } from './base.js';
+import { api, h, view } from './base.js';
 import { app, reloadNow, renderInvite, renderUsage, start, usage } from './core.js';
 import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
@@ -72,6 +72,4 @@ if (matchMedia('(display-mode: standalone), (display-mode: window-controls-overl
   for (const [scheme, color] of [['light', '#ffffff'], ['dark', '#201f1d']]) {
     document.head.append(h('meta', { name: 'theme-color', content: color, media: `(prefers-color-scheme: ${scheme})` }));
   }
-  // A Taskmaster chat tints the window controls (core.js route); a light/dark switch re-reads its tint.
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => tintTitleBar(document.querySelector('.split .chat.role-taskmaster')));
 }

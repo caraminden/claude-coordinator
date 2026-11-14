@@ -207,3 +207,26 @@ test('reopening a dismissed minion that still waits on you puts it back in Needs
   await settle(400);
   assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true });
 });
+
+// #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through
+// background (the Taskmaster chat's after #693) once came back from the canvas as #000000, a black strip.
+test('the window controls keep the base colour for a see-through background and take an opaque one', { skip }, async () => {
+  for (const [dark, baseColour] of [[false, '#f6f5f2'], [true, '#161514']] as const) {
+    const page = await browser.page(base, { dark });
+    const meta = `document.querySelector('meta[name=theme-color][media*="${dark ? 'dark' : 'light'}"]').content`;
+    const tint = (bg: string | null) => page.eval(`(async () => {
+      const { tintTitleBar } = await import('/base.js');
+      // Headless Chromium can't emulate display-mode, so each meta also matches on its colour scheme alone.
+      if (!document.querySelector('meta[name=theme-color]')) {
+        for (const [s, c] of [['light', '#f6f5f2'], ['dark', '#161514']]) document.head.insertAdjacentHTML('beforeend', '<meta name="theme-color" content="' + c + '" media="(prefers-color-scheme: ' + s + '), (display-mode: window-controls-overlay) and (prefers-color-scheme: ' + s + ')">');
+      }
+      const el = ${bg === null ? 'null' : `document.body.appendChild(Object.assign(document.createElement('div'), { style: 'background: ${bg}' }))`};
+      tintTitleBar(el);
+      return ${meta};
+    })()`);
+    assert.equal(await tint('transparent'), baseColour, 'a transparent background leaves the base colour, not black');
+    assert.equal(await tint('rgba(255, 0, 0, 0.5)'), baseColour, 'a half see-through one does too');
+    assert.equal(await tint('rgb(18, 52, 86)'), '#123456', 'an opaque bar colours the controls');
+    assert.equal(await tint(null), baseColour, 'no bar puts the base back');
+  }
+});

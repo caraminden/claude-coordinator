@@ -148,6 +148,8 @@ export function dropFrames() {
 
 function setFramed(on) {
   document.documentElement.classList.toggle('framed', on);
+  // Leaving a contraption gives the window controls back their plain colour.
+  if (!on) tintTitleBar(null);
   for (const el of document.querySelectorAll('body > .topbar, body > main')) el.inert = on;
 }
 

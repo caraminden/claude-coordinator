@@ -1,6 +1,6 @@
 // The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
 // module shares without needing the shell (state, api, h, helpers) is base.js.
-import { ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, me, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, tintTitleBar, view } from './base.js';
+import { ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, me, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { onAppInstructionsUpdate, onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { costChip, renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
@@ -816,10 +816,7 @@ async function route() {
       setView(null);
     }
   } finally {
-    if (seq === routeSeq) {
-      document.body.classList.remove('navigating');
-      tintTitleBar(document.querySelector('.split .chat.role-taskmaster'));
-    }
+    if (seq === routeSeq) document.body.classList.remove('navigating');
   }
 }
 

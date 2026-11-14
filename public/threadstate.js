@@ -68,6 +68,9 @@ function limitState(t, waited, usage, now) {
   return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
 }
 
+/** A track with one piece, not started: the bar's line while a working minion has no plan yet (#696). */
+export const EMPTY_TRACK = [[null, 'p']];
+
 /**
  * What a list row's bar (#573) is drawn from, or null for none: the plan's steps (`track`, and `done`/`total` from an
  * older server) while the minion works, and the `wait` (a land, CI, a deploy) while it works or after its turn. A row waiting on a person (a card,
@@ -76,10 +79,13 @@ function limitState(t, waited, usage, now) {
  */
 export function rowBar(t, st) {
   if (st.rank === 0 || t.status === 'closed') return null;
-  const working = t.status === 'running', w = waitShows(t.wait) ? t.wait : null;
+  // A new minion not parked on start_after counts as working, as in rowState (#261).
+  const working = t.status === 'running' || (t.status === 'new' && !t.parked_for), w = waitShows(t.wait) ? t.wait : null;
   // The plan's track and the wait together (#630): wait.js progressTrack draws the wait in the step underway.
   if (w && (working || t.state === 'outside' || t.state === 'pending-deploy')) return { ...(working && t.steps), track: working ? t.step_track ?? null : null, wait: w };
-  if (!working || !t.steps) return null;
+  if (!working) return null;
+  // Before its task list exists, one empty piece holds the line's room, so the row doesn't grow when the steps arrive (#696).
+  if (!t.steps) return { track: EMPTY_TRACK };
   return { ...t.steps, track: t.step_track ?? null };
 }
 

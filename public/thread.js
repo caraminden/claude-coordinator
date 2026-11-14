@@ -5,7 +5,7 @@ import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSee
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
-import { rowState, SHIP } from './threadstate.js';
+import { EMPTY_TRACK, rowState, SHIP } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
@@ -790,10 +790,11 @@ function renderProgress() {
     count ? h('span', { class: 'count', title: count.includes('/') ? `${done} of ${total} steps done` : '' }, count) : '',
     time,
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
-  // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13).
+  // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13); while it works, an
+  // empty track shows the line before the plan exists (#696).
   // The plan as a track of its steps (#630), the one underway filling against its guess or by the wait; with no step
   // underway, a landing's stages or the wait's bar; after the turn, a wait drops the plan (as the list row's rowBar does).
-  const meter = progressTrack({ track: total && (running || !w) ? planTrack(p) : null, since: est?.since, usual: est?.usual, wait: w || null }, 'big') || h('progress', { class: 'meter blank', max: 1, value: 0 });
+  const meter = progressTrack({ track: total && (running || !w) ? planTrack(p) : running && !w ? EMPTY_TRACK : null, since: est?.since, usual: est?.usual, wait: w || null }, 'big') || h('progress', { class: 'meter blank', max: 1, value: 0 });
   // Which time is which (#630, Cara's pick "1"): the step's against its guess under the bar's left, the whole plan's at its end.
   const stepClock = est && waitClock({ since: est.since, usual: est.usual }, `wait-time${waitLate(est) ? ' late' : ''}`);
   const caption = est ? h('div', { class: 'progress-cap' },

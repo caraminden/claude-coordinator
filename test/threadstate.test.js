@@ -167,6 +167,10 @@ test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none
   assert.equal(bar({ state: 'pending-deploy', wait: { kind: 'deploy', stage: 'restart', total: 3, done: 1 } }).wait.total, 3, 'a deploy');
   assert.equal(bar({ status: 'running', wait: { kind: 'land', stage: 'line', since: NOW, text: '2nd in line' } }).wait.stage, 'line', 'a landing in the line, with no estimate, still shows its stages');
   assert.equal(bar({ state: 'outside', steps: half }), null, 'waiting elsewhere with no estimate of its own');
+  // Cara, 2026-11-14: "When a minion is created it should have the progress bar line there even if we dont yet know how many sections it will have"
+  assert.deepEqual(bar({ status: 'running' }), { track: [[null, 'p']] }, 'working before its task list: an empty track holds the line');
+  assert.deepEqual(bar({ status: 'new' }), { track: [[null, 'p']] }, 'just created, its first turn not started yet');
+  assert.equal(bar({ status: 'new', parked_for: 12, state: 'parked' }), null, 'a new minion parked on start_after is not working');
 });
 
 test('rowUnread: an unseen row is unread only when it has something for a person, never while it works or waits on the system (#576)', () => {

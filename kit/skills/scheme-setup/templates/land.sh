@@ -456,7 +456,7 @@ numbered_clashes() {
 # more, of 12+ characters, compared trimmed; one the branch adds back in any file is a move, not a removal) and, if
 # it removed lines, puts at least half of those back. Commits of the branch's own ticket don't count (ticket/N-…
 # against a subject's leading "#N" or last "#N)"); an undo that is meant names each one in a message line "Undoes:
-# <sha>". Tried on 2026-11-14 over ~690 landings in four schemes: it refused the stale squash, two deliberate
+# <sha>" (git revert's "This reverts commit <sha>" counts too). Tried on 2026-11-14 over ~690 landings in four schemes: it refused the stale squash, two deliberate
 # removals of another minion's work (what the trailer is for), and nothing else.
 undo_guard() {
   local base
@@ -478,7 +478,7 @@ undo_guard() {
     }
     sub text { (split /\0/, $_[0], 2)[1] }
     sub ticket { my $s = shift; return $1 if $s =~ /^#(\d+)\b/; my @t = $s =~ /#(\d+)\)/g; @t ? $t[-1] : "" }
-    my @named = run("git log --format=%B $base..HEAD") =~ /^Undoes: *([0-9a-f]{7,40})\b/mg;
+    my @named = run("git log --format=%B $base..HEAD") =~ /^(?:Undoes: *|This reverts commit )([0-9a-f]{7,40})\b/mg;
     my $diff = "diff -U0 --no-renames --no-color $base HEAD";
     my ($removed, $added) = (lines("-", $diff), lines("+", $diff));
     my %moved = map { text($_) => 1 } keys %$added;

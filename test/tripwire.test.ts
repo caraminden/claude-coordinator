@@ -756,14 +756,20 @@ test('a soft or mixed reset onto a commit the branch lacks is refused: the next 
     sh('git checkout -q trunk && echo c > c.txt && git add c.txt && git commit -qm c && git update-ref refs/remotes/origin/trunk trunk && git checkout -q ticket/9-x');
     const at = (command: string, cwd: string | null = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
     const tip = sh('git rev-parse trunk');
-    for (const no of ['git reset --soft trunk', 'git reset --soft origin/trunk', `git reset --soft ${tip}`, 'git reset trunk', 'git reset -q --mixed trunk', `git -C ${wt} reset --soft trunk`]) {
-      assert.match(at(no, no.includes(' -C ') ? '/tmp' : wt) ?? '', /would revert .*`git rebase .*git reset --soft \$\(git merge-base HEAD /s, no);
+    const no = ['git reset --soft trunk', 'git reset --soft origin/trunk', `git reset --soft ${tip}`, 'git reset trunk', 'git reset -q --mixed trunk', `git -C ${wt} reset --soft trunk`, 'git reset --soft trunk --'];
+    // What leaves HEAD where it is earlier in the same call doesn't excuse it (#677 review).
+    no.push('git merge --abort; git reset --soft trunk', 'git rebase --abort && git reset --soft trunk', 'git checkout -b ticket/10-y && git reset --soft trunk', 'git cherry-pick abc123 && git reset --soft trunk');
+    for (const cmd of no) {
+      assert.match(at(cmd, cmd.includes(' -C ') ? '/tmp' : wt) ?? '', /would revert .*`git rebase .*git reset --soft \$\(git merge-base HEAD /s, cmd);
     }
     // Squashing onto where the branch started, a path, a hard reset, or a reset after a rebase in the same call.
     const base = sh('git merge-base HEAD trunk');
-    for (const ok of ['git reset --soft HEAD~1', `git reset --soft ${base}`, 'git reset --soft $(git merge-base HEAD trunk)', 'git reset a.txt', 'git reset -- trunk', 'git reset --hard trunk', 'git rebase -q trunk && git reset --soft trunk']) {
+    for (const ok of ['git reset --soft HEAD~1', `git reset --soft ${base}`, 'git reset --soft $(git merge-base HEAD trunk)', 'git reset a.txt', 'git reset -- trunk', 'git reset trunk -- a.txt', 'git reset --hard trunk', 'git rebase -q trunk && git reset --soft trunk']) {
       assert.equal(at(ok), null, ok);
     }
+    // Undoing an amend: the commit before it is on no branch, and nothing is reverted.
+    sh('git commit -q --amend -m b2');
+    assert.equal(at('git reset --soft HEAD@{1}'), null);
     // A branch rebased onto the tip squashes onto it freely.
     sh('git rebase -q trunk');
     assert.equal(at('git reset --soft trunk'), null);

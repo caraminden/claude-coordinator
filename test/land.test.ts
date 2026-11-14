@@ -432,6 +432,22 @@ test("a stale squash, which reverts what landed since the branch started, is ref
   assert.ok(!existsSync(join(r.source, 'c.txt')), 'the named undo landed');
 });
 
+test("a plain git revert of another minion's landing names it, so the undo guard lets it land (#677)", () => {
+  const r = setup();
+  r.commit(r.source, 'c.txt', [1, 2, 3, 4, 5].map((k) => `someone else landed this, line ${k}\n`).join(''));
+  git(r.wt, 'rebase', '-q', 'main');
+  git(r.wt, 'revert', '--no-edit', 'HEAD');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.ok(!existsSync(join(r.source, 'c.txt')));
+});
+
+test("the undo guard is the kit template's, line for line, so a fix to one reaches the other (#677)", () => {
+  const guard = (f: string) => readFileSync(f, 'utf8').match(/^# The undo guard \(#677[^]*?\n\}\n/m)?.[0];
+  assert.ok(guard(land));
+  assert.equal(guard(land), guard(join(import.meta.dirname, '..', 'kit/skills/scheme-setup/templates/land.sh')));
+});
+
 test('a conflict aborts the rebase and lands nothing', () => {
   const r = setup();
   r.commit(r.wt, 'a.txt', 'mine\n');

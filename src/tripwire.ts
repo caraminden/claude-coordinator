@@ -946,8 +946,8 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
   const moved = st.moved;
   // Commit first, then move: the move's dirty check can't see what the commit will take.
   if (sub === 'commit') st.committed = true;
-  // A reset after a rebase or merge in the same call runs on a HEAD the check can't see yet.
-  if (['rebase', 'merge', 'pull', 'checkout', 'switch', 'cherry-pick', 'am'].includes(sub)) st.moved = true;
+  // A reset after a rebase or merge in the same call runs on a HEAD the check can't see yet (not after an abort).
+  if (['rebase', 'merge', 'pull'].includes(sub) && !rest.some((t) => /^--(abort|quit|skip)$/.test(t))) st.moved = true;
   return gitHabitReason(sub, args.slice(j + 1), dir, cfg, committed, moved);
 }
 
@@ -1039,7 +1039,12 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
       break;
     case 'reset':
       if (has('--hard', '--merge', '--keep')) move = `git reset ${words.find((a) => /^--(hard|merge|keep)$/.test(a))}`;
-      else if (dir && !moved && !has('--') && plain.length === 1 && !plain[0].unknown) return staleSquashReason(plain[0].text, words, dir);
+      else if (dir && !moved) {
+        // `git reset <commit> -- <paths>` resets only those paths; a bare `--` after the commit changes nothing.
+        const dd = words.indexOf('--');
+        const ref = plain.filter((w) => dd < 0 || args.indexOf(w) < dd);
+        if ((dd < 0 || dd === words.length - 1) && ref.length === 1 && !ref[0].unknown) return staleSquashReason(ref[0].text, words, dir);
+      }
       break;
     case 'rebase': case 'pull': case 'cherry-pick':
       if (!has('--abort', '--continue', '--quit', '--skip')) move = `git ${sub}`;
@@ -1060,11 +1065,15 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
  * A soft or mixed reset keeps the working tree, so onto a commit HEAD lacks (main's tip, from a branch that started
  * further back) the next commit has that commit as its parent and the branch's old tree: a fast-forward that quietly
  * reverts everything that landed since (Peek Auras #309 undid Peek Auras #310 so). By ancestry, not by name: any default branch.
+ * Two git calls on the usual path, a third only when it would refuse.
  */
 function staleSquashReason(target: string, words: string[], dir: string): Verdict | null {
   const sha = git(dir, 'rev-parse', '--verify', '--quiet', `${target}^{commit}`);
   if (sha?.status !== 0) return null; // a path, not a commit
   if (git(dir, 'merge-base', '--is-ancestor', sha.out.trim(), 'HEAD')?.status !== 1) return null;
+  // Only a commit on some branch is other work: the commit before an amend (HEAD@{1}) is on none, and undoing an amend reverts nothing.
+  const on = git(dir, 'for-each-ref', '--count=1', '--contains', sha.out.trim(), '--format=%(refname)', 'refs/heads', 'refs/remotes');
+  if (on?.status !== 0 || !on.out.trim()) return null;
   return hard(`\`git reset ${words.join(" ")}\` keeps this branch's files but puts it on ${target}, which has commits this branch doesn't: the next commit would revert them (Peek Auras #309 undid a landing that way, and land saw a clean fast-forward). To squash, rebase first (\`git rebase ${target}\`) and then reset, or squash where the branch started: \`git reset --soft $(git merge-base HEAD ${target})\`. To move a branch with no work of its own up to ${target}, use \`git reset --keep ${target}\`.`);
 }
 

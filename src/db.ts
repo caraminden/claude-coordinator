@@ -135,6 +135,9 @@ export const onboardingOpen = (p: Pick<Project, 'onboarding'>) => p.onboarding !
 
 /** Longest project instructions the app accepts, the same cap as Claude Code's own projects. */
 export const MAX_INSTRUCTIONS = 16_000;
+export const MAX_PERSONAL_INSTRUCTIONS = 4_000;
+/** A person's own instructions as a minion they own loads them: for everywhere, then for its scheme ('' for none). */
+export type PersonalLayer = { name: string; everywhere: string; scheme: string };
 
 const APP_INSTRUCTIONS = 'app_instructions';
 export interface AppInstructions {
@@ -603,6 +606,17 @@ CREATE TABLE IF NOT EXISTS app_instruction_history (
   old_text TEXT NOT NULL,
   new_text TEXT NOT NULL
 );
+-- Each person's own instructions (#688), one text for everywhere (project_id NULL) and one per scheme. Every save is a row;
+-- the newest row of a person and scope holds the current text, so this is the history too.
+CREATE TABLE IF NOT EXISTS personal_instructions (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  old_text TEXT NOT NULL,
+  new_text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS personal_instructions_scope ON personal_instructions(user_id, project_id, id);
 -- A brief in a file that someone started as a minion (#129), keyed by the file's absolute path and the brief's
 -- heading ('' for a whole handoff file). ticket_id is null while its minion is being made. No foreign key on
 -- ticket_id, so an older release's deleteTicket still works after a rollback; reads join tickets instead.
@@ -973,6 +987,7 @@ export const SCHEMA_HISTORY = [
   [43, 'contraption_deploys (#627)'],
   [44, 'list_orders (#649)'],
   [45, 'ci_files (#658)'],
+  [46, 'personal_instructions (#688)'],
   [46, 'apk_publishes (#663)'],
   [47, 'projects.ci_quiet (#678)'],
 ] as const;
@@ -1287,6 +1302,37 @@ export class Store {
       this.db.exec('ROLLBACK');
       throw err;
     }
+  }
+
+  /** A person's own instructions for everywhere (projectId null) or one scheme, with when they last changed; '' when unset. */
+  personalInstructions(userId: number, projectId: number | null): { text: string; at: number | null } {
+    const r = this.db.prepare('SELECT new_text, at FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT 1')
+      .get(userId, projectId) as { new_text: string; at: number } | undefined;
+    return { text: r?.new_text ?? '', at: r?.at ?? null };
+  }
+
+  /** Saves a person's own instructions for one scope; the row is its history entry too. */
+  setPersonalInstructions(userId: number, projectId: number | null, text: string) {
+    const old = this.personalInstructions(userId, projectId).text;
+    if (old === text) return;
+    this.db.prepare('INSERT INTO personal_instructions (user_id, project_id, at, old_text, new_text) VALUES (?, ?, ?, ?, ?)').run(userId, projectId, Date.now(), old, text);
+  }
+
+  /** The personal layer of a minion's prompt (#688): its owner's (`assigned`) texts; null for the Taskmaster, nobody or no text. */
+  personalLayer(ticket: Pick<Ticket, 'id' | 'kind' | 'project_id'>): PersonalLayer | null {
+    if (ticket.kind === 'coordinator') return null;
+    const assigned = String(this.props.forTarget('minion', ticket.id).assigned ?? '').trim();
+    const name = assigned && this.props.personName(assigned);
+    const user = name ? this.findUser('name', name) : undefined;
+    if (!user) return null;
+    const layer = { name: user.name, everywhere: this.personalInstructions(user.id, null).text, scheme: this.personalInstructions(user.id, ticket.project_id).text };
+    return layer.everywhere || layer.scheme ? layer : null;
+  }
+
+  /** A person's latest saves for one scope, newest first. */
+  personalInstructionHistory(userId: number, projectId: number | null, limit: number): { at: number; old_text: string; new_text: string }[] {
+    return this.db.prepare('SELECT at, old_text, new_text FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT ?')
+      .all(userId, projectId, limit) as any[];
   }
 
   /** The latest Citadel-wide instruction saves, newest first. */

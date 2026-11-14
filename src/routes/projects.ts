@@ -6,7 +6,7 @@ import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, lines } 
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { askerKey, buildOwnerKey, EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
+import { askerKey, buildOwnerKey, EFFORTS, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
@@ -568,6 +568,45 @@ export const projectRoutes: Route[] = [
     handler({ res, app, project }) {
       const history = app.store.instructionHistory(project.id, 5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
       return json(res, 200, { history });
+    },
+  },
+  {
+    // Your own instructions (#688): the text for everywhere and this scheme's, for the My instructions tab.
+    method: ['GET', 'PUT'], path: '/api/projects/:project/my-instructions', who: ['person'],
+    async handler({ req, res, app, session, project }) {
+      const uid = session.uid;
+      if (typeof uid !== 'number') throw new HttpError(400, 'Sign in again first');
+      if (req.method === 'PUT') {
+        const body = await readJson(req);
+        if (body.scope !== 'everywhere' && body.scope !== 'scheme') throw new HttpError(400, 'scope must be everywhere or scheme');
+        if (typeof body.text !== 'string') throw new HttpError(400, 'text must be text');
+        const text = body.text.replace(/\r\n/g, '\n').trim();
+        if (text.length > MAX_PERSONAL_INSTRUCTIONS) {
+          throw new HttpError(400, `Instructions are ${text.length.toLocaleString('en')} characters; the limit is ${MAX_PERSONAL_INSTRUCTIONS.toLocaleString('en')}`);
+        }
+        app.store.setPersonalInstructions(uid, body.scope === 'scheme' ? project.id : null, text);
+      }
+      return json(res, 200, { everywhere: app.store.personalInstructions(uid, null), scheme: app.store.personalInstructions(uid, project.id), max: MAX_PERSONAL_INSTRUCTIONS });
+    },
+  },
+  {
+    method: 'GET', path: '/api/projects/:project/my-instructions/history', who: ['person'],
+    handler({ res, app, session, project, url }) {
+      if (typeof session.uid !== 'number') throw new HttpError(400, 'Sign in again first');
+      const history = app.store.personalInstructionHistory(session.uid, url.searchParams.get('scope') === 'scheme' ? project.id : null, 5)
+        .map((h) => ({ by: session.name, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
+      return json(res, 200, { history });
+    },
+  },
+  {
+    // The Taskmaster's read_person_instructions: its own prompt never carries a person's text, so it reads it before starting a minion for them.
+    method: 'GET', path: '/api/projects/:project/people/:person/instructions', who: ['taskmaster'],
+    handler({ res, app, project, params }) {
+      const asked = decodeURIComponent(params.person);
+      const name = app.store.props.personName(asked);
+      const user = name ? app.store.findUser('name', name) : undefined;
+      if (!user) throw new HttpError(404, `No one called ${asked}`);
+      return json(res, 200, { name: user.name, everywhere: app.store.personalInstructions(user.id, null).text, scheme: app.store.personalInstructions(user.id, project.id).text });
     },
   },
   {

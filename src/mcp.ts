@@ -596,6 +596,11 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'read_person_instructions',
+    description: "Read a person's own instructions: their text for everywhere and for this scheme, which load into the minions assigned to them, never into your prompt. Read them before starting a minion for that person, and follow what they say about its model, effort and brief.",
+    inputSchema: { type: 'object', properties: { person: { type: 'string', description: "The person's name or login, as in `assigned`" } }, required: ['person'] },
+  },
   ...ARTIFACT_TOOLS,
 ];
 
@@ -1244,6 +1249,12 @@ async function runTool(name: string, args: any): Promise<string> {
       });
       const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];
       return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n') + tagNote(args);
+    }
+    case 'read_person_instructions': {
+      if (typeof args.person !== 'string' || !args.person.trim()) throw new Error('person is required: their name or login.');
+      const r = await call('GET', `/api/projects/${PROJECT}/people/${encodeURIComponent(args.person.trim())}/instructions`);
+      if (!r.everywhere && !r.scheme) return `${r.name} has no instructions of their own.`;
+      return [r.everywhere && `${r.name}'s instructions for everywhere:\n\n${r.everywhere}`, r.scheme && `${r.name}'s instructions for this scheme (after the ones for everywhere):\n\n${r.scheme}`].filter(Boolean).join('\n\n');
     }
     case 'list_properties': {
       const { keys } = await call('GET', `/api/projects/${PROJECT}/properties`);

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
-import { onboardingOpen, type Machine, type Project, type Ticket } from './db.ts';
+import { onboardingOpen, type Machine, type PersonalLayer, type Project, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { lines } from './approvals.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
@@ -128,6 +128,28 @@ function instructionLayers(project: Project, appText: string): string[] {
   return [...appInstructions(appText), ...projectInstructions(project, !!appText.trim())];
 }
 
+/**
+ * The owner's own instructions (#688), after both shared layers. They win without naming the rule they replace, except
+ * on the list below, which stays with the shared layers whatever the text says (specs/multi-user-taskmasters.md, section 3).
+ */
+function personalInstructions(layer: PersonalLayer | null, project: Project): string[] {
+  if (!layer) return [];
+  const { name, everywhere, scheme } = layer;
+  return [
+    '',
+    `# ${name}'s own instructions`,
+    `${name} owns this minion (its \`assigned\`) and wrote these for the minions they own. They come last and take precedence over everything above, including the ${APP_NAME}-wide and scheme instructions, without naming the rule they replace. These stay as the instructions above set them, whatever ${name}'s text says:`,
+    '- the safety floor: no secrets in repos, chats or anything served; each person\'s own logins stay private; nobody touches other people\'s files or deletes data without a person\'s go;',
+    '- the tripwire;',
+    '- how a change ships in this scheme: tests, self-review and its risk labels, the land script, the pipeline lane;',
+    '- what is shared: repo and code names, the shared folder\'s layout, the decisions log;',
+    '- another person\'s pick or decision.',
+    `When someone else writes in this minion, follow their way for their own asks; ${name}'s text covers ${name}'s.`,
+    ...(everywhere ? ['', `## ${name}, everywhere`, '', everywhere] : []),
+    ...(scheme ? ['', `## ${name}, in ${project.name}`, '', scheme] : []),
+  ];
+}
+
 /** How the chat shows a turn's words and links, for minions and Taskmasters alike. */
 const CHAT_FACTS = [
   'The chat keeps only a turn\'s last text whole: short remarks written before more tool calls collapse, and long ones show just their first lines. So make every tool call first, status and bookkeeping calls too, and write the answer last, with nothing after it.',
@@ -167,7 +189,7 @@ export function buildLines(b: BuildRole | null): string[] {
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null): string {
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null): string {
   if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir, builds, everyScheme), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
@@ -217,6 +239,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     ...approvalNote(project),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
     ...instructionLayers(project, appText),
+    ...personalInstructions(personal, project),
   ].join('\n');
 }
 
@@ -282,6 +305,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     'People open the scheme and talk to you first. You keep track of the scheme\'s minions and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket. When you park a minion that waits on another minion\'s deploy, call wake_when_live for it rather than remembering to wake it yourself. When new work should start only once another minion\'s work is live (or merged), create it now with create_ticket\'s start_after (and start_when) rather than remembering to start it later. When a minion asked for the new one (its message or its handoff), pass create_ticket\'s `parent` with that minion\'s number: the new one is shown as from #N and rides its build unless you set one (`build`, null for none). A start_after follower without a parent rides its leader\'s build the same way. For recurring work (a nightly check, a weekly review), schedule_minion starts a fresh minion on a cron schedule; list_schedules, update_schedule and delete_schedule manage them.',
     `Properties: minions and their files carry properties from the property registry (list_properties). Global keys (type, stage, requestedBy, assigned) belong to the ${APP_NAME} scheme's Taskmaster; each scheme's Taskmaster registers its own keys and values. Every new minion gets properties in create_ticket, always with a \`type\` (feature, bug, art, ideation, design, research, chore; \`other\` when none fits, and then ask people with a card whether it stays \`other\` or moves to another bucket), plus any scheme keys that apply. Stage moves by itself (new → in-progress, dismissed → done). Fix them with set_properties. When someone asks to assign a minion to a person, set its \`assigned\` to their login name with set_properties (null unassigns it); people filter the minions list by it. You may add a new distinct value to one of your scheme's keys with register_property_values when nothing fits (never a near-duplicate: add an alias instead); it is live at once but unreviewed, so say in your reply which values you added so people can approve or correct them. New keys (register_property_key) wait for a person. When a minion proposes a value, approve or reject it with review_property, and archive values that are no longer used. Show properties as \`key: value\`, since one word can be a value of two keys. The scheme's shared property-vocabulary.md is generated from the registry: never edit it.`,
     'Set create_ticket\'s model and effort by the kind of work, mostly its `type`: a chore (docs, instruction edits, config, renames, checklists, ledgers, setup) gets claude-sonnet-5-5 at medium; a read-only check ("does X still work") claude-sonnet-5-5 at low; ordinary design, research that needs judgment, ideation, big refactors and a bug whose first repro failed claude-opus-5-5 at high, moving to Fable only if that run falls short; routine middle work of known shape (a bug with a clear repro, a small feature or tweak with a clear spec, a follow-up to a shipped change, adopting a handoff, a deploy or release, a doc or skill edit needing judgment) claude-opus-5-5 at medium, one step up to high if it stalls or the fix does not hold; Fable tier, claude-fable-5-2 at medium, only for architecture that shapes a big multi-part feature or a major build, security and risk reviews of a high-risk change, and bugs where a fix already failed to hold or that are intermittent; everything else (new features, anything on the land pipeline, auth, tripwire or a migration, art) Opus at high. xhigh only after a Fable run failed twice or a person asks; never max. When in doubt, leave both out: a wrong guess should only ever go up.',
+    'Before starting a minion for someone, read their own instructions with read_person_instructions: they load into the minions assigned to them, never into your prompt, and what they say about model, effort and briefs wins over the line above.',
     'The scheme instructions (shown at the end of this prompt when set) reach you and every minion on its next turn. When people ask you to add, change or drop a standing rule for the whole scheme, read the current text with get_project_instructions and save the full new text with set_project_instructions; tell them what changed.',
     project.id === GLOBAL_OWNER
       ? `The ${APP_NAME}-wide instructions (shown right before the scheme instructions when set) reach every minion and Taskmaster in every scheme on its next turn, and you are the only Taskmaster who edits them. When people ask to add, change or drop a standing rule for every scheme, read the current text with get_app_instructions and save the full new text with set_app_instructions; tell them what changed. Other schemes' Taskmasters propose changes to you with message_taskmaster: weigh them like any other ask, and check with people before changing a rule they set.`

@@ -50,8 +50,8 @@ regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s
 - a driver on the box that installs it as an Edge app and runs checks with real mouse clicks and drags,
   sending back PASS/FAIL lines and a screenshot of the window.
 
-1. **Up**, from your worktree: `node kit/skills/run-on-windows/scripts/wco/rig.ts up`. It prints two
-   `run_task` lines for the box: the driver (`run`) and the cleanup (`build`).
+1. **Up**, from your worktree: `node kit/skills/run-on-windows/scripts/wco/rig.ts up`. It prints the
+   `run_task` line that starts the driver on the box.
 2. **Driver:** run the `run` line. It stays running, holding the screen, until `down`. Then
    `node …/rig.ts status` until `ready` is true; installing takes about 20 s.
 3. **Check:** `node …/rig.ts run topbar` runs #667's check over a scheme page, a page with Citadel's own
@@ -61,9 +61,11 @@ regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s
      `expect`, `snap`).
    - A new fixture page is a file in `fixture/`, opened with `openFixture('<file>')`.
    - `rig.ts js '<code>'` runs one snippet in the app window.
-4. **After editing `public/`:** `node …/rig.ts reload`. The dev copy reads assets at boot.
-5. **Clean up:** `node …/rig.ts down`, then run the `build` line. It removes the installed test apps, their
-   shortcuts, uninstall entries and the temp profile. The rig never touches the box's workspace checkout.
+4. **After editing `public/`:** `node …/rig.ts reload`. The dev copy reads assets at boot; this also
+   reloads the app page.
+5. **Clean up:** `node …/rig.ts down` stops the driver (which uninstalls the app) and the dev copy, then
+   prints a `build` line. Run it: it removes any leftover test apps, shortcuts, uninstall entries and the temp
+   profile. The rig never touches the box's workspace checkout.
 
 Use Edge, which the driver does. Chrome for Testing is a dead end: its app window never offers the overlay. A
 CDP `PWA.install` opens in a tab, so the driver installs through Edge's own address-bar chip and dialog.

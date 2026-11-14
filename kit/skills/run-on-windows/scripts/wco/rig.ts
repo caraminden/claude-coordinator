@@ -5,7 +5,7 @@
 //   node rig.ts run <check> [route ...]   checks/<check>.js in the app window, over those routes (default: a scheme page,
 //                                  a page with Citadel's .topbar, an artifact page); prints PASS/FAIL lines, saves shots
 //   node rig.ts js '<code>'        one snippet there, with checks/lib.js's helpers
-//   node rig.ts reload             SIGHUP the dev copy, so it serves public/ as it is now (assets load at boot)
+//   node rig.ts reload             SIGHUP the dev copy (it reads public/ at boot) and reload the app page, after editing public/
 //   node rig.ts down               ends the box driver, this rig's server and the dev copy; prints the box's cleanup
 //   node rig.ts serve              (what up starts) fixture pages, the box's files and its command queue on one tailnet
 //                                  port, and a raw forward to the dev copy on another
@@ -180,7 +180,9 @@ else if (cmd === 'status') {
   process.exit(!out.ok || /^FAIL /m.test(out.text) ? 1 : 0);
 } else if (cmd === 'reload') {
   process.kill(state().devPid, 'SIGHUP');
-  console.log('dev copy reloads public/; reload the app page too: node rig.ts js "await ev(\'location.reload(); return 1\')"');
+  await sleep(1500);
+  const out = await queue(snippet("await ev('setTimeout(() => location.reload(), 50); return 1'); await sleep(4000); note('reloaded');", []));
+  console.log(out.ok ? 'dev copy reloaded public/, and the app page reloaded' : out.text);
 } else if (cmd === 'down') {
   const s = state();
   if (alive(s.serverPid)) {

@@ -6,14 +6,14 @@ for (const under of ROUTES) {
   await go(under);
   await openFixture();
   for (const late of [false, true]) {
-    await ev(`${FRAME} d.getElementById('late').hidden = ${!late}; w.clicks.length = 0; return 1`);
+    await ev(`${FRAME} d.getElementById('late').style.display = ${late ? "''" : "'none'"}; w.clicks.length = 0; return 1`);
     await sleep(400);
-    const ids = await ev(`${FRAME} return [...d.querySelectorAll('.cui-topbar button')].filter((b) => !b.hidden).map((b) => b.id)`);
+    const ids = await ev(`${FRAME} return [...d.querySelectorAll('.cui-topbar button')].filter((b) => b.getClientRects().length).map((b) => b.id)`);
     for (const id of ids) await click(`#${id}`, true);
     await click('#body', true);
     expect(late ? 'bar buttons click, late Restart shown' : 'bar buttons click', await frameClicks(), [...ids, 'body']);
   }
-  await ev(`${FRAME} d.getElementById('late').hidden = true; w.clicks.length = 0; return 1`);
+  await ev(`${FRAME} d.getElementById('late').style.display = 'none'; w.clicks.length = 0; return 1`);
   await snap(`topbar ${under.replace(/[#/]+/g, ' ').trim()}`);
   // The bar's empty middle, between Left and Icons.
   const gap = await ev(`${FRAME} const a = d.getElementById('b1').getBoundingClientRect(), b = d.getElementById('b2').getBoundingClientRect(); return [fr.left + (a.right + b.left) / 2, fr.top + (a.top + a.bottom) / 2];`);

@@ -750,7 +750,9 @@ function renderProgress() {
   if (view?.kind !== 'project' || !view.ticket) return;
   const p = view.progress;
   const progressEl = view.progressEl;
-  const running = view.ticket.status === 'running';
+  // A new minion not parked on start_after reads as working while its first turn sets up, as its list row does (#696);
+  // a Taskmaster that hasn't run yet is only waiting for a message.
+  const running = view.ticket.status === 'running' || (view.ticket.status === 'new' && !view.ticket.parked_for && !isCoordinator(view.ticket));
   const line = progressLine(p, running);
   // One line (#551, Josh's pick): the step › what's happening now · steps done · time. While it waits on
   // something (#544: the land line, a heavy slot, the restart), the wait takes the "now" part and its time,
@@ -801,8 +803,8 @@ function renderProgress() {
     h('span', { class: 'cap-step' }, 'This step: ', stepClock),
     h('span', { class: 'cap-plan' }, h('b', {}, h('span', { class: 'wide' }, 'Whole plan:'), h('span', { class: 'narrow' }, 'Plan')), ' ',
       h('span', { class: 'wide' }, waitClock({ since: est.planSince }), ' in · '), left))
-    // Before the plan exists, its caption's line is held empty, so the head doesn't grow when the plan arrives (#696).
-    : running && !total && !w ? h('div', { class: 'progress-cap blank', 'aria-hidden': 'true' }, h('span', { class: 'cap-step' }, '\u00a0')) : '';
+    // Until a step with a guess is underway, its caption's line is held empty, so the head doesn't grow when it starts (#696).
+    : running && !w ? h('div', { class: 'progress-cap blank', 'aria-hidden': 'true' }, h('span', { class: 'cap-step' }, '\u00a0')) : '';
 
   const prevDetail = progressEl.querySelector('.progress-detail');
   const scrollTop = prevDetail?.scrollTop ?? 0;

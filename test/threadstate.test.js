@@ -171,6 +171,7 @@ test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none
   assert.deepEqual(bar({ status: 'running' }), { track: [[null, 'p']] }, 'working before its task list: an empty track holds the line');
   assert.deepEqual(bar({ status: 'new' }), { track: [[null, 'p']] }, 'just created, its first turn not started yet');
   assert.equal(bar({ status: 'new', parked_for: 12, state: 'parked' }), null, 'a new minion parked on start_after is not working');
+  assert.equal(rowBar(t({ status: 'new' }), { fam: '', cell: '' }), null, "a Taskmaster that hasn't run yet (sidebar.js gives it no rank)");
 });
 
 test('rowUnread: an unseen row is unread only when it has something for a person, never while it works or waits on the system (#576)', () => {

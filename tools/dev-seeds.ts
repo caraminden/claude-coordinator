@@ -162,9 +162,9 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
     },
   },
   starting: {
-    about: 'a minion just started: its turn is running but it has no task list yet (#696)',
+    about: 'a minion just created: its first turn is setting up and it has no task list yet (#696)',
     seed(c) {
-      const t = minion(c, 'Progress line from the start', { status: 'running', last_activity: 'Working…' }, 'bug');
+      const t = minion(c, 'Progress line from the start', { status: 'new' }, 'bug');
       const w = chat(c, t, 2);
       w.asked('The bar line should be there before the task list exists.');
       w.init();

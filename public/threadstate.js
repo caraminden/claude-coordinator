@@ -79,8 +79,8 @@ export const EMPTY_TRACK = [[null, 'p']];
  */
 export function rowBar(t, st) {
   if (st.rank === 0 || t.status === 'closed') return null;
-  // A new minion not parked on start_after counts as working, as in rowState (#261).
-  const working = t.status === 'running' || (t.status === 'new' && !t.parked_for), w = waitShows(t.wait) ? t.wait : null;
+  // Rank 1 is working: running, or new and not parked on start_after (#261); the Taskmaster's idle row has no rank.
+  const working = st.rank === 1, w = waitShows(t.wait) ? t.wait : null;
   // The plan's track and the wait together (#630): wait.js progressTrack draws the wait in the step underway.
   if (w && (working || t.state === 'outside' || t.state === 'pending-deploy')) return { ...(working && t.steps), track: working ? t.step_track ?? null : null, wait: w };
   if (!working) return null;

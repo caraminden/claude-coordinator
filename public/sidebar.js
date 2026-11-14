@@ -335,7 +335,8 @@ export function threadRow(t, href = threadHref(t)) {
   const quiet = st.fam === 'work' || st.fam === 'idle' || st.fam === 'wait';
   // The state cell already shows steps done, so the activity line drops its own count.
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
-  const note = (t.status === 'running' ? activity : t.note || activity) || '';
+  // A minion setting up its first turn has no activity yet: a word holds the subtitle's line, so the row doesn't grow (#696).
+  const note = (t.status === 'running' ? activity : t.note || activity) || (st.rank !== 1 ? '' : t.status === 'new' ? 'Starting…' : 'Working…');
   const share = t.host_cost && weekShare(t.host_cost); // the meter is the server login's plan
   // People's own note (#146), on a line of its own so the minion's note keeps its place.
   const pnote = !coord && view.personNotes?.[t.id];

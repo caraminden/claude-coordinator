@@ -308,8 +308,11 @@ function syncRail() {
 /** Take the rail away (signing out). */
 export function hideRail() {
   shown++;
-  lastView = '#/';
-  try { sessionStorage.removeItem(viewKey); localStorage.removeItem(viewKey); } catch {} // the next person starts afresh
+  // Citadel signing out: the next person starts afresh. Not a framed contraption's rail, which hides itself as it loads.
+  if (!inContraption) {
+    lastView = '#/';
+    try { sessionStorage.removeItem(viewKey); localStorage.removeItem(viewKey); } catch {}
+  }
   clearRail();
 }
 

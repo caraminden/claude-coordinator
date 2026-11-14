@@ -197,6 +197,9 @@ test("a reload on a framed app keeps Citadel's entry on the minion you left, not
   await waitFor(page, "Citadel's rail on the minion", `${entry} === '/c/#/p/2/t/9'`);
   await page.eval(`location.hash = '#/apps/toc'`);
   await waitFor(page, 'ToC current', `!!document.querySelector('.citadel-rail a[data-app="toc"].current')`);
+  // The framed app's own rail.js loads too (and hides its rail, Citadel's being beside it): it mustn't wipe the memory.
+  await page.eval(`document.body.append(Object.assign(document.createElement('iframe'), { src: '/apps/peek/' }))`);
+  await waitFor(page, "the framed app's rail.js", `document.querySelector('iframe')?.contentWindow.ready === true`);
   await page.eval(`window.beforeReload = true; setTimeout(() => location.reload(), 0)`);
   await waitFor(page, "Citadel's rail after the reload", `!window.beforeReload && window.ready && !!document.querySelector('.citadel-rail a[data-app="toc"].current')`);
   assert.equal(await page.eval(entry), '/c/#/p/2/t/9');

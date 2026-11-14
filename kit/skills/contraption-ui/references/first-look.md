@@ -7,13 +7,14 @@ Cara picked on 2026-11-14 as the default for every minion's UI.
 
 ## 1. The two accents
 
-Your app's own colour (from its icon, say), as a light and a dark value. In your `app.css`, after
-theme.css loads, on `:root` (not a container, so the focus ring, `cui-primary`, `cui-choice` and
-switches all follow it):
+Your app's own colour, as a light and a dark value. Take the hue from what the app is about or
+from its icon, so two apps rarely share one; the values below are only the shape. In your
+`app.css`, after theme.css loads, on `:root` (not a container, so the focus ring, `cui-primary`,
+`cui-choice` and switches all follow it):
 
 ```css
-:root { --citadel-accent: #0f766e; }
-@media (prefers-color-scheme: dark) { :root { --citadel-accent: #2dd4bf; } }
+:root { --citadel-accent: <light value>; }
+@media (prefers-color-scheme: dark) { :root { --citadel-accent: <dark value>; } }
 ```
 
 Pick a hue none of the tones use (teal, pink, indigo), so a primary button never reads as a status.

@@ -96,8 +96,10 @@ instead. The code for each, and the picked take:
 [references/first-look.md](references/first-look.md).
 
 1. **Two accents of its own.** `--citadel-accent` on `:root` in your CSS: your own light and dark
-   pair in a hue no tone uses. Never a status tone (`ok`, `warn`, `danger`, `info`), a grey, or
-   Citadel's orange: the app should look like itself. Primary buttons, the current tab, links and
+   pair, its hue taken from the app's subject or icon (a bakery's raspberry pink, a game studio's
+   ink indigo) and named with its reason in your first reply, in a hue no tone uses. Never a
+   status tone (`ok`, `warn`, `danger`, `info`), a grey, or Citadel's orange: the app should look
+   like itself. Primary buttons, the current tab, links and
    what's selected wear it. `--citadel-accent-2` is the second colour, for highlights: ratings, a
    "new" mark, one stat tile, a secondary button's text and border, the empty state's mark. Keep
    theme.css's fuchsia, or set your own pair at least 60° round the colour wheel from your accent

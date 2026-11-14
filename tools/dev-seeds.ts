@@ -106,6 +106,35 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t, e);
     },
   },
+  'direct-card': {
+    about: 'cards addressed to one person (#687): a question and a notice to you, a question to Josh, and one to you from a second scheme',
+    seed(c) {
+      const opts = [
+        { label: '3 slots', description: 'Fine now the desktop runners take the suite.', recommended: true },
+        { label: 'Stay at 2', description: 'Load on perigee still spikes past 100.' },
+      ];
+      const josh = c.store.findUser('name', 'Josh') ?? c.store.createUser({ name: 'Josh', login: 'josh' });
+      c.store.addMember(c.project.id, josh.id);
+      const t = minion(c, 'Heavy job slots', { note: 'asked two people' });
+      const w = chat(c, t, 10);
+      w.asked('Check whether the heavy slots can go to 3, then do it.');
+      w.init();
+      w.said('Asked with the cards below.');
+      const e = w.put('question', { id: hex(), to: c.who, questions: [{ question: 'Can the heavy-job slots go from 2 to 3?', header: 'Slots', multiSelect: false, options: opts }] });
+      w.put('question', { id: hex(), to: 'Josh', questions: [{ question: 'Is your runner box fine with a third slot?', header: 'Runner', multiSelect: false, options: opts }] });
+      w.put('question', { id: hex(), to: c.who, questions: [], notice: 'The perigee load alarm is muted until 6 pm PST while the suite reruns.' });
+      w.done('Asked two people.');
+      // A second scheme you are in, whose Taskmaster asks you: shown in this scheme's Needs-you list too.
+      const other = c.store.listProjects().find((p) => p.name === 'Seeded elsewhere') ?? c.store.createProject('Seeded elsewhere', null, c.store.findUser('name', c.who)?.id ?? null);
+      c.store.setProjectSettings(other.id, { onboarding: 'skipped' });
+      const me = c.store.findUser('name', c.who);
+      if (me) c.store.addMember(other.id, me.id);
+      const tm = c.store.listTickets(other.id).find((x) => x.kind === 'coordinator')
+        ?? c.store.createTicket({ project_id: other.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: c.who });
+      c.store.addEvent(tm.id, 'plan', { id: hex(), status: 'pending', to: c.who, summary: 'Move the nightly backup to 3 am PST', plan: '- Change the timer to 03:00 PST.\n- Nothing else moves.' });
+      return route(c, t, e);
+    },
+  },
   'mid-turn': {
     about: 'a minion mid-turn: a five-step plan with two done, one in progress and a Bash call still running',
     seed(c) {

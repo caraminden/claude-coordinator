@@ -4,7 +4,8 @@ import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetch
 import { ciWarning } from './ci-desktop.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
-import { artifactBrowser, artifactViewer, renderArtifactHead, setArtifacts, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
+import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
+import { filesView, renderFiles } from './files.js';
 import { chatSection, chatView, mountChat, renderTicketHead } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
@@ -53,10 +54,10 @@ function renderCrumbs(main) {
   // The scheme list's row carries the icon's version; the scheme's own doesn't.
   const icon = () => schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project);
   const projectLink = h('a', { href: `#/p/${project.id}`, class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name));
-  const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
+  const filesLink = (to) => h('a', { href: `#/p/${project.id}/${to}` }, 'Files');
   const settingsLink = h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
   crumbs.replaceChildren(...(
-    main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
+    main.kind === 'files' ? [projectLink, ' / ', 'Files']
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
       : main.kind === 'app-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Citadel-wide instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Needs approval']
@@ -66,10 +67,9 @@ function renderCrumbs(main) {
       : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
-      : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
-      : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
+      : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
-      : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
+      : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]));
 }
@@ -190,7 +190,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     shelf.open = panelOpen('shelf');
     sidebar.open = panelOpen('threads');
   };
-  const section = main.kind === 'artifacts' ? artifactBrowser()
+  const section = main.kind === 'files' ? filesView(main.folder)
     : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'app-instructions' ? appInstructionsEditor()
     : main.kind === 'approvals' ? approvalsEditor()
@@ -200,7 +200,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'contraptions' ? contraptionsPage()
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
-    : main.kind === 'sharedList' ? sharedList()
     : main.kind === 'releases' ? releasesPage()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
@@ -224,10 +223,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderHiddenNote();
   refreshInbox();
   prefetchTopRows();
-  if (main.kind === 'artifacts') renderArtifactResults();
+  if (main.kind === 'files') renderFiles();
   if (main.kind === 'artifact') renderArtifactHead();
   if (main.kind === 'shared') renderSharedHead();
-  if (main.kind === 'sharedList') renderSharedList();
   if (!chatId) return window.scrollTo(0, 0);
   revealActiveRow();
   await mountChat(chatId, ticket, page, cached?.fresh);

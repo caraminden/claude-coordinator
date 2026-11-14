@@ -49,7 +49,8 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   as image blocks alongside the message text.
 - `projects/<id>/shared/project/` is a folder every minion and the Taskmaster can read and
   write (`--add-dir`, plus a line in the system prompt) for handoffs, specs and notes. Its
-  documents and pages are listed on a "Shared files" page, linked from the artifacts panel. The Taskmaster can
+  documents, pages, pictures and clips are listed in the scheme's Files view (`public/files.js`, with what
+  minions linked), where people also upload into it: `inbox/` unless they pick a folder. The Taskmaster can
   also read and write the repo's Claude Code memory folder, still with no shell.
 - Opening a scheme creates its Taskmaster minion on first visit. Its turns
   run with an extra MCP server (`src/mcp.ts`) whose tools call this app's API

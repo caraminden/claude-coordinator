@@ -16,6 +16,7 @@ import { onHiddenChanged } from './hidden.js';
 import { loadReleases, onReleases } from './releases.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { renderModelPicker, uploadsRunning } from './composer.js';
+import { filesUploading } from './files.js';
 import { linkifyHtml, markdownElement } from './ui/markdown.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
@@ -364,6 +365,7 @@ function unsentWork() {
   // A page opened with Open saves through this tab, which a reload would forget.
   if (tabBridgeOpen()) return 'once you close the page you opened with Open';
   if (document.querySelector('.attachments:not([hidden])') || uploadsRunning()) return writing;
+  if (filesUploading()) return 'once your files finish uploading';
   return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim()) ? writing : null;
 }
 
@@ -786,14 +788,14 @@ async function route() {
       return;
     }
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
-    else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'files', folder: '@minions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(?:settings|instructions)$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/app-instructions$/))) await showProject(Number(m[1]), { kind: 'app-instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(members|people|contraptions|account)$/))) await showProject(Number(m[1]), { kind: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'sharedList' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'files' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/releases\/(all|\d+)(?:\/(\d+))?$/))) await showReleases(Number(m[1]), m[2] === 'all' ? 'all' : Number(m[2]), m[3] ? Number(m[3]) : null);
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/s\/(\d+)\/(.+)$/))) await showSharedFile(Number(m[1]), decodeURIComponent(m[2]));

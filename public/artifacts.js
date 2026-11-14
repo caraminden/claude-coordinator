@@ -9,6 +9,7 @@ import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
 import { linkify } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
+import { renderFiles } from './files.js';
 
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
 export async function showFile(ticketId, path) {
@@ -52,14 +53,6 @@ export async function showArtifact(artifactId) {
 
 const RECENT_ARTIFACTS = 5;
 const MAX_TEXT_PREVIEW = 2 * 1024 * 1024;
-const ARTIFACT_FILTERS = [
-  { key: 'all', label: 'All', match: () => true },
-  { key: 'pinned', label: 'Pinned', match: (a) => !!a.pinned_at },
-  { key: 'docs', label: 'Documents', match: (a) => a.kind === 'markdown' || a.kind === 'pdf' },
-  { key: 'web', label: 'Web pages', match: (a) => a.kind === 'html' },
-  { key: 'canvas', label: 'Canvases', match: (a) => a.kind === 'canvas' },
-  { key: 'downloads', label: 'Downloads', match: (a) => a.kind === 'download' },
-];
 
 const rawUrl = (a) => `api/artifacts/${a.id}/raw?v=${a.mtime}`;
 const extOf = (a) => (a.name.includes('.') ? a.name.split('.').pop() : a.kind).slice(0, 5).toUpperCase();
@@ -90,10 +83,9 @@ export function setArtifacts(artifacts, shared = view.shared) {
   view.artifacts = artifacts;
   view.shared = shared;
   renderShelf();
-  if (view.main === 'artifacts') renderArtifactResults();
+  if (view.main === 'files') renderFiles();
   if (view.main === 'artifact') renderArtifactHead();
   renderViewerBar();
-  if (view.main === 'sharedList') renderSharedList();
   if (view.main === 'shared') renderSharedHead();
 }
 
@@ -116,7 +108,7 @@ function setPinned(a, pinned) {
   }).then(() => refreshArtifacts(), () => {}); // a failure already said so in its toast
 }
 
-function pinButton(a) {
+export function pinButton(a) {
   const pinned = !!a.pinned_at;
   return h('button', {
     type: 'button',
@@ -157,92 +149,9 @@ export function renderShelf() {
   recentFold.addEventListener('toggle', () => savePanelState({ ...loadPanelState(), recent: recentFold.open }));
   el.replaceChildren(h('section', { class: 'column' },
     h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }),
-      h('a', { class: `browse${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts`, title: `Browse all ${all.length} artifacts` }, 'Browse')),
+      h('a', { class: `browse${view.main === 'files' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Every file: the shared folder and what minions linked' }, 'All files')),
     sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
-    recentFold,
-    // The shared folder gets one link, not a list: its files are listed on their own page.
-    h('a', { class: `shared-link${view.main === 'sharedList' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Handoffs and notes in the scheme\'s shared folder' }, 'Shared files')));
-}
-
-/** Main panel: every document and page in the project's shared folder, newest first. */
-export function sharedList() {
-  return h('section', { class: 'artifacts-main' },
-    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, 'Shared files'), h('span', { class: 'muted', id: 'shared-summary' }))),
-    h('div', { class: 'shared-list', id: 'shared-results' }));
-}
-
-export function renderSharedList() {
-  const el = document.getElementById('shared-results');
-  if (!el) return;
-  document.getElementById('shared-summary').textContent = `${view.shared.filter((f) => !f.missing).length} in the scheme's shared folder`;
-  el.replaceChildren(...(view.shared.length ? view.shared.map(sharedItem) : [h('p', { class: 'muted' }, 'Handoffs and notes minions put in the scheme\'s shared folder show up here.')]));
-}
-
-/** A document or page in the project's shared folder, as a row of the Shared files list. */
-function sharedItem(f) {
-  const when = f.missing ? 'missing' : ago(f.mtime);
-  return h('a', { class: `artifact-item${view.main === 'shared' && view.file?.path === f.path ? ' active' : ''}${f.missing ? ' missing' : ''}`, href: sharedHref(view.projectId, f.path), title: f.display_path },
-    h('span', { class: `badge k-${f.kind}` }, extOf(f)),
-    h('span', { class: 'text' },
-      h('span', { class: 'name' }, f.name),
-      h('span', { class: 'meta' }, f.path.includes('/') ? `${f.path.slice(0, f.path.lastIndexOf('/'))} · ${when}` : when)),
-    pinButton(f));
-}
-
-/** Main panel: every artifact in the project, searchable, with pin toggles. */
-export function artifactBrowser() {
-  view.artifactFilter = 'all';
-  const search = h('input', { type: 'search', id: 'artifact-search', placeholder: 'Search by name, folder or minion…', autocomplete: 'off' });
-  search.addEventListener('input', renderArtifactResults);
-  const chips = h('div', { class: 'chips', id: 'artifact-filters' });
-  const section = h('section', { class: 'artifacts-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Artifacts'), h('span', { class: 'muted', id: 'artifact-summary' })),
-      search, chips),
-    h('div', { class: 'artifact-grid', id: 'artifact-results' }));
-  setTimeout(() => search.focus());
-  return section;
-}
-
-export function renderArtifactResults() {
-  const el = document.getElementById('artifact-results');
-  if (!el) return;
-  const terms = document.getElementById('artifact-search').value.toLowerCase().split(/\s+/).filter(Boolean);
-  const filter = ARTIFACT_FILTERS.find((f) => f.key === view.artifactFilter) ?? ARTIFACT_FILTERS[0];
-  document.getElementById('artifact-filters').replaceChildren(...ARTIFACT_FILTERS.map((f) => {
-    const n = view.artifacts.filter(f.match).length;
-    if (!n && f.key !== 'all' && f.key !== view.artifactFilter) return '';
-    return h('button', { type: 'button', class: `chip${f === filter ? ' on' : ''}`, onclick: () => {
-      view.artifactFilter = f.key;
-      renderArtifactResults();
-    } }, f.label, h('span', { class: 'count' }, n));
-  }));
-  const results = view.artifacts.filter((a) => {
-    if (!filter.match(a)) return false;
-    const hay = `${a.display_path ?? a.path} ${threadName(a)} ${a.kind}`.toLowerCase();
-    return terms.every((t) => hay.includes(t));
-  });
-  document.getElementById('artifact-summary').textContent =
-    `${results.length === view.artifacts.length ? '' : `${results.length} of `}${view.artifacts.length} file${view.artifacts.length === 1 ? '' : 's'}`;
-  if (!results.length) {
-    el.replaceChildren(h('p', { class: 'muted' }, view.artifacts.length
-      ? 'Nothing matches.'
-      : 'No artifacts yet. When minions create documents, web pages or canvases in their folders, they appear here.'));
-    return;
-  }
-  el.replaceChildren(...results.map((a) => {
-    const shown = a.display_path ?? a.path;
-    const dirs = shown.split('/').slice(0, -1);
-    // The last two folders tell cards apart; the start of a long path is the same on every one (the full path is the card's title).
-    const dir = dirs.length > 2 ? `…/${dirs.slice(-2).join('/')}/` : dirs.length ? `${dirs.join('/')}/` : '';
-    return h('a', { class: `artifact-card${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: shown },
-      h('div', { class: 'preview' }, h('span', { class: `badge big k-${a.kind}` }, extOf(a))),
-      pinButton(a),
-      h('div', { class: 'name' }, a.name),
-      dir ? h('div', { class: 'meta path' }, dir) : '',
-      h('div', { class: 'meta' }, threadName(a)),
-      h('div', { class: 'meta' }, a.missing ? 'File no longer exists' : `${formatSize(a.size)} · ${ago(a.mtime)}`));
-  }));
+    recentFold));
 }
 
 // What a page's bridge says the viewer opened: a file a chat linked, or a file in the scheme's shared folder.
@@ -616,6 +525,15 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
       show(doc ? h('div', { class: 'msg doc' }, doc) : pre);
     }).catch((err) => show(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
   }
+}
+
+/** A file's body for the Files view's preview: a minion's artifact (it has an id) or a shared-folder file. */
+export function previewBody(file, src) {
+  const body = h('div', { class: 'artifact-body' });
+  if (file.missing) body.append(h('p', { class: 'muted' }, 'This file no longer exists. Unpin it to take it off the list.'));
+  else if (file.id) renderFileBody(body, { ...file, src, ticketId: file.ticket_id, brief: { projectId: file.project_id, path: file.abs ?? file.path, name: file.name }, bridge: { open: { artifact: file.id }, owner: threadName(file) } });
+  else renderFileBody(body, { ...file, src, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge: sharedBridge(file) });
+  return body;
 }
 
 export function renderArtifactHead() {

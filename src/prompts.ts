@@ -91,7 +91,7 @@ function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string
       : '',
     'Linking a file is the only way people see it; they cannot browse your folders. Files you link are also listed in the scheme\'s artifacts, so link only what is meant for people, not files you made for your own use (test pages, scratch notes, fixtures).',
     sharedDir
-      ? `${sharedDir} is a folder every minion in the scheme and the Taskmaster can read and write. Put handoffs, specs and notes that other minions should be able to find there (for example a handoff file a fresh minion can start from), and look there before starting related work. Keep scratch files, build output and secrets out of it. Documents and pages in it are listed as Shared in the scheme's artifacts. Its inbox/ holds files other schemes' ${AGENT_NAME}s sent this scheme through ${APP_NAME}.`
+      ? `${sharedDir} is a folder every minion in the scheme and the Taskmaster can read and write. Put handoffs, specs and notes that other minions should be able to find there (for example a handoff file a fresh minion can start from), and look there before starting related work. Keep scratch files, build output and secrets out of it. Its documents, pages, pictures and clips are listed in the scheme's Files view. Its inbox/ holds files people uploaded there (unless they picked another folder) and files other schemes' ${AGENT_NAME}s sent this scheme through ${APP_NAME}: look there first when someone says they shared or dropped a file.`
       : '',
   ].filter(Boolean);
 }

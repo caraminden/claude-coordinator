@@ -78,6 +78,7 @@ test('threads and the coordinator are told where the shared folder is and what g
     assert.ok(line, `${t.kind} prompt names ${shared}`);
     assert.match(line, /handoffs, specs and notes/i);
     assert.match(line, /scratch files, build output and secrets/);
+    assert.match(line, /inbox\/ holds files people uploaded/); // the Files view's upload lands there (#676)
   }
   assert.ok(!systemPrompt(project, ticket, null, null, tickets, null).includes('every thread in the project'));
 });

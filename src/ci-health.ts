@@ -16,11 +16,16 @@
 // One exception tells a Taskmaster, not a person (#588, Josh's pick on #581's card, 2026-11-12: "CI health tells
 // it"): a scheduled run on the default branch that failed. It tests main as it is, so no land saw the break (Citadel's
 // nightly runs the pipeline tests lands leave out); the scheme's Taskmaster hears once per run, to start a bug minion.
+// #678 (Cara's pick on Peek Auras #355's card, 2026-11-14: "Ask Citadel to watch it") widens that to every run no PR
+// started: a workflow_dispatch run on a minion's branch wakes that minion with its result, red or green, as a PR's CI
+// would; a failed one on the default branch, like a failed scheduled run, is held mail for the Taskmaster, and the
+// next green run of that workflow says it's back to green. A scheme quiets a workflow in its settings (ci_quiet).
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { lines } from './approvals.ts';
 import { APP_NAME } from './appname.ts';
 import { schemeLabels } from './ci-runner.ts';
-import type { Project, Store, User } from './db.ts';
+import type { Project, Store, Ticket, User } from './db.ts';
 import { repoSlug } from './prlinks.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 
@@ -57,6 +62,11 @@ export interface Run {
   run_number?: number;
   run_started_at?: string;
   html_url?: string;
+  /** What started it: push, pull_request, schedule, workflow_dispatch… */
+  event?: string;
+  /** Its workflow file, ".github/workflows/drift.yml". */
+  path?: string;
+  triggering_actor?: { login?: string } | null;
 }
 export interface Job {
   id: number;
@@ -85,6 +95,17 @@ export interface Problem {
 }
 
 const at = (s: string) => Date.parse(s);
+const short = (sha: string) => sha.slice(0, 7);
+const runUrl = (slug: string, r: Run) => `https://github.com/${slug}/actions/runs/${r.id}`;
+/** A run's workflow file name, as a scheme's ci_quiet lists it. */
+const workflowFile = (r: Run) => (r.path ?? '').split('/').pop() || r.name;
+/** When dispatched runs started counting (#678), so the deploy that brought them told none from before. */
+const DISPATCH_SINCE = 'ci-health:dispatch-since';
+
+/** "Nov 14, 03:42 PST": times people read are Pacific. */
+export function pacific(t: number): string {
+  return new Date(t).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short' });
+}
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** "Nov 5 18:31" in the server's zone. Always dated: a title that dropped it for today would change at midnight and re-send the alert (#509). */
@@ -426,9 +447,9 @@ export interface CiHealthDeps {
   get?: GhGet;
   /** A REST POST (the sweep's cancel); the gh CLI by default. */
   post?: (path: string, as: GithubEnv) => Promise<{ status: number }>;
-  /** Message a minion (wake_when_runners_back); no message, no wakes. */
-  wake?: (ticketId: number, text: string) => void;
-  /** Message a scheme's Taskmaster (a failed scheduled run); false (no Taskmaster) or none at all, and those wait untold. */
+  /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing. No message, no wakes. */
+  wake?: (ticketId: number, text: string, fyi?: boolean) => void;
+  /** Held mail for a scheme's Taskmaster (a failed scheduled run); false (no Taskmaster) or none at all, and those wait untold. */
   tell?: (project: Project, text: string) => boolean;
 }
 
@@ -601,7 +622,7 @@ export class CiHealth {
         if (s) out.push(s);
       }
     }
-    await this.scheduledFailures(p, slug, branch, as, now);
+    await this.outsideRuns(p, slug, branch, as, now);
     return out;
   }
 
@@ -663,32 +684,114 @@ export class CiHealth {
     }
   }
 
-  /** Tell the scheme's Taskmaster, once per run, of each scheduled run on `branch` in the last day that failed. */
-  private async scheduledFailures(p: Project, slug: string, branch: string, as: GithubEnv, now: number) {
-    if (!this.deps.tell) return;
-    const runs: Run[] = (await this.read(`repos/${slug}/actions/runs?event=schedule&branch=${encodeURIComponent(branch)}&per_page=20`, as))?.workflow_runs ?? [];
+  /**
+   * Runs no PR started (#588, #678), each told once, oldest first: a dispatched run on an open minion's branch wakes it
+   * with its result; a failed scheduled run, or dispatched one on `branch`, is held mail for the Taskmaster, and the next
+   * green run of that workflow there says it's back to green. Two conditional lists a poll, whatever the workflows.
+   */
+  private async outsideRuns(p: Project, slug: string, branch: string, as: GithubEnv, now: number) {
+    if (!this.deps.tell && !this.deps.wake) return;
+    const scheduled = (await this.read(`repos/${slug}/actions/runs?event=schedule&branch=${encodeURIComponent(branch)}&per_page=20`, as))?.workflow_runs;
+    const dispatched = (await this.read(`repos/${slug}/actions/runs?event=workflow_dispatch&per_page=20`, as))?.workflow_runs;
+    const listed: Run[] = [...(Array.isArray(scheduled) ? scheduled : []), ...(Array.isArray(dispatched) ? dispatched : [])];
     const key = `ci-health:scheduled:${p.id}`;
-    const told = this.store.getSetting<number[]>(key) ?? [];
+    const told = new Set(this.store.getSetting<number[]>(key) ?? []);
+    const redKey = `ci-health:red:${p.id}`;
+    // Workflow → the red run its Taskmaster was told of, until a newer green one.
+    const red = this.store.getSetting<Record<string, { run: number; at: string }>>(redKey) ?? {};
+    // Dispatched runs count from the first poll that read them, so a deploy doesn't tell a day of old ones.
+    const since = this.store.getSetting<number>(DISPATCH_SINCE) ?? (this.store.setSetting(DISPATCH_SINCE, now), now);
+    const quiet = new Set(lines(p.ci_quiet));
+    const save = () => {
+      // Ids GitHub no longer lists are dropped, but only when both lists were read, so a bad answer can't forget them.
+      const keep = Array.isArray(scheduled) && Array.isArray(dispatched) ? [...told].filter((id) => listed.some((r) => r.id === id)) : [...told];
+      this.store.setSetting(key, keep);
+      this.store.setSetting(redKey, red);
+    };
     // Aged by when it ended, so a run that sat queued for most of a day still counts.
-    const red = runs.filter((r) => r.status === 'completed' && r.conclusion === 'failure' && now - at(r.updated_at ?? r.created_at) <= WINDOW_MS && !told.includes(r.id));
-    const sent: number[] = [];
-    for (const r of red) {
-      let where = '';
+    const ended = (r: Run) => at(r.updated_at ?? r.created_at);
+    const done = listed.filter((r) => r.status === 'completed' && r.conclusion && now - ended(r) <= WINDOW_MS).sort((a, b) => at(a.created_at) - at(b.created_at));
+    let open: Ticket[] | undefined;
+    const pruned = [...told].some((id) => !listed.some((r) => r.id === id));
+    for (const r of done) {
+      const dispatch = r.event === 'workflow_dispatch';
+      if (told.has(r.id) || (dispatch && ended(r) < since)) continue;
+      // Branch names repeat across schemes (ticket/12-… in each), so only this scheme's open minions.
+      const minion = dispatch && r.head_branch !== branch ? (open ??= this.store.listTickets(p.id).filter((t) => t.status !== 'closed')).find((t) => t.branch === r.head_branch) : undefined;
+      if (minion) {
+        if (!this.deps.wake) continue;
+        const text = await this.runText(p, slug, r, as, 'minion');
+        told.add(r.id);
+        save(); // before sending, so a restart can't send it twice
+        try {
+          this.deps.wake(minion.id, text, r.conclusion === 'success');
+        } catch (err) {
+          console.error(`Waking #${minion.number} for run ${r.id} failed:`, err);
+        }
+        continue;
+      }
+      // The Taskmaster hears of the default branch only: scheduled runs, and dispatched ones there.
+      if (!this.deps.tell || (dispatch && r.head_branch !== branch) || quiet.has(workflowFile(r))) continue;
+      const w = String(r.workflow_id);
+      let text: string | null = null;
+      if (r.conclusion === 'failure') text = await this.runText(p, slug, r, as, 'taskmaster');
+      else if (r.conclusion === 'success' && red[w] && at(r.created_at) > at(red[w].at)) text = `${p.name}'s ${r.name} is back to green on ${branch}: ${runUrl(slug, r)} (${short(r.head_sha)}, ${pacific(ended(r))}), after run ${red[w].run} failed.`;
+      if (!text) continue;
+      try {
+        if (!this.deps.tell(p, text)) continue; // no Taskmaster yet: tried again next poll
+      } catch (err) {
+        console.error(`Telling ${p.name}'s Taskmaster of run ${r.id} failed:`, err);
+        continue;
+      }
+      if (r.conclusion === 'failure') {
+        told.add(r.id);
+        red[w] = { run: r.id, at: r.created_at };
+      } else delete red[w];
+      save();
+    }
+    if (pruned) save();
+  }
+
+  /** What a finished run says to the minion that dispatched it, or (failed) to the Taskmaster: where it failed, GitHub's error lines, its CI-store files. */
+  private async runText(p: Project, slug: string, r: Run, as: GithubEnv, to: 'minion' | 'taskmaster'): Promise<string> {
+    let where = '';
+    let errors: string[] = [];
+    if (r.conclusion === 'failure') {
       try {
         const job = (await this.jobs(slug, r, as)).find((j) => j.conclusion === 'failure');
         const step = (job?.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
-        if (job) where = `, at ${job.name}${step ? ` › ${step}` : ''}`;
+        if (job) {
+          where = `, at ${job.name}${step ? ` › ${step}` : ''}`;
+          errors = await this.errorLines(slug, job, as);
+        }
       } catch (err) {
-        if (err instanceof RateLimited) throw err; // the step is a nicety: any other failure to read it still tells
-      }
-      try {
-        if (this.deps.tell(p, `${p.name}'s scheduled ${r.name} run on ${branch} failed on ${r.head_sha.slice(0, 7)}${where}: https://github.com/${slug}/actions/runs/${r.id}. It tests ${branch} as it is, so no land saw this break: start a bug minion for it, or ask people if it's CI itself (a runner, GitHub) rather than the code.`)) sent.push(r.id);
-      } catch (err) {
-        console.error(`Telling ${p.name}'s Taskmaster of run ${r.id} failed:`, err);
+        if (err instanceof RateLimited) throw err; // these are niceties: any other failure to read them still tells
       }
     }
-    // Ids GitHub no longer lists are dropped; one not sent is tried again next poll.
-    if (sent.length || told.some((id) => !runs.some((r) => r.id === id))) this.store.setSetting(key, [...told.filter((id) => runs.some((r) => r.id === id)), ...sent]);
+    const files = this.store.ciFiles(p.id).filter((f) => f.run_id === r.id);
+    const extra = [
+      // GitHub's API has no way to read a job's step summary, so its error annotations (::error:: lines) stand in.
+      errors.length ? `GitHub's error lines:\n${errors.map((e) => `- ${e}`).join('\n')}` : '',
+      files.length ? `Its files in ${APP_NAME}'s CI store (ci_files with run: ${r.id}): ${files.slice(0, 5).map((f) => `${f.name} (${f.kind})`).join(', ')}${files.length > 5 ? `, ${files.length - 5} more` : ''}.` : '',
+    ].filter(Boolean).join('\n');
+    const finished = `finished ${pacific(at(r.updated_at ?? r.created_at))}`;
+    const failures = `\`ci-failures ${r.id} -R ${slug}\` prints its failing tests.`;
+    if (to === 'minion') {
+      const how = r.conclusion === 'success' ? 'passed' : r.conclusion === 'failure' ? `failed${where}` : `ended ${r.conclusion}`;
+      return `Your dispatched ${r.name} run on ${r.head_branch} ${how} (${short(r.head_sha)}, ${finished}): ${runUrl(slug, r)}${extra ? `\n${extra}` : ''}${r.conclusion === 'failure' ? `\n${failures}` : ''}`;
+    }
+    const kind = r.event !== 'workflow_dispatch' ? 'scheduled' : `dispatched${r.triggering_actor?.login ? ` (by ${r.triggering_actor.login})` : ''}`;
+    return `${p.name}'s ${kind} ${r.name} run on ${r.head_branch} failed on ${short(r.head_sha)}${where} (${finished}): ${runUrl(slug, r)}${extra ? `\n${extra}` : ''}\n${failures} No PR started it, so no land saw this break: start a bug minion for it, or ask people if it's CI itself (a runner, GitHub) rather than the code. To stop these for ${workflowFile(r)}, add it to the scheme's quiet CI workflows (set_project_settings quiet_workflows).`;
+  }
+
+  /** A failed job's error annotations, the generic "Process completed with exit code" left out: at most 5, each cut short. */
+  private async errorLines(slug: string, j: Job, as: GithubEnv): Promise<string[]> {
+    const path = `repos/${slug}/check-runs/${j.id}/annotations`;
+    const notes = await this.read(path, as, true);
+    this.cache.delete(path);
+    if (!Array.isArray(notes)) return [];
+    return notes.filter((n) => n?.annotation_level === 'failure' && typeof n.message === 'string' && !/^Process completed with exit code \d+\.?$/.test(n.message.trim()))
+      .slice(0, 5).map((n) => { const m = n.message.replace(/\s+/g, ' ').trim(); return m.length > 200 ? `${m.slice(0, 199)}…` : m; });
   }
 
   /**

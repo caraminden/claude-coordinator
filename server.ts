@@ -704,11 +704,11 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   mandate: (from, person, key, title, quiet, link) => mandateAlert('CI health', from, person, key, title, link, quiet),
-  wake: (ticketId, text) => runner.send(ticketId, APP_NAME, text),
-  // A failed scheduled run (#588) goes to the scheme's Taskmaster, to start a bug minion.
+  wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi } : {}),
+  // A failed scheduled run (#588), or a dispatched one on main, is held mail for the scheme's Taskmaster (#678), to start a bug minion.
   tell: (project, text) => {
     const coordinator = store.getCoordinator(project.id);
-    if (coordinator) runner.send(coordinator.id, APP_NAME, text);
+    if (coordinator) runner.leaveMail(coordinator.id, APP_NAME, text);
     return !!coordinator;
   },
 });

@@ -2,7 +2,7 @@
 // search, and one Taskmaster writing to another's.
 import { mkdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { cleanPluginDirs, cleanPluginPicks, cleanRules, lines } from '../approvals.ts';
+import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
@@ -462,12 +462,12 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode and list_groups; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups and ci_quiet; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -481,6 +481,7 @@ export const projectRoutes: Route[] = [
         if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
         if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
         if (body.optional_plugin_dirs !== undefined) settings.optional_plugin_dirs = cleanPluginDirs(body.optional_plugin_dirs);
+        if (body.ci_quiet !== undefined) settings.ci_quiet = cleanWorkflows(body.ci_quiet);
         if (body.list_groups !== undefined) settings.list_groups = JSON.stringify(store.props.listGroups(project.id, body.list_groups));
       } catch (err: any) {
         throw new HttpError(400, err.message);
@@ -522,6 +523,9 @@ export const projectRoutes: Route[] = [
         }
         if (coordinator && settings.optional_plugin_dirs !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the optional plugin folders to: ${shown(settings.optional_plugin_dirs)}. Minions load them only when they pick them, from their next turn.` });
+        }
+        if (coordinator && settings.ci_quiet !== undefined) {
+          runner.emit(coordinator.id, 'note', { text: `${session.name} set the quiet CI workflows to: ${shown(settings.ci_quiet)}. Their red scheduled and dispatched runs no longer tell you.` });
         }
         if (coordinator && settings.default_effort !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });

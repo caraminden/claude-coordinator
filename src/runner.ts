@@ -1637,6 +1637,11 @@ export class Runner {
    * the receiver's next turn, whoever wakes it, after that turn's own messages, labelled with its sender
    * and time. It carries no person, so it never decides whose turn that is.
    */
+  /** Held mail from the app itself (#678: a red scheduled run for a Taskmaster): no loop guard, no turn started. */
+  leaveMail(to: number, author: string, text: string) {
+    this.mail(to, author, text);
+  }
+
   private mail(to: number, author: string, text: string, from?: number, cold = false) {
     const row = this.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
     if (cold && !this.store.getSetting<number>(coldKey(to))) this.store.setSetting(coldKey(to), this.now());

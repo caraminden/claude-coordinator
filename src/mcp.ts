@@ -560,13 +560,13 @@ const TOOLS = [
   {
     name: 'get_project_settings',
     description:
-      "Read the scheme's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat), plugin folders (folders in the repo every minion loads as Claude Code plugins), optional plugin folders (loaded only by a minion that picks them, with create_ticket's plugin_folders) and default effort (what a minion without its own effort runs at).",
+      "Read the scheme's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat), plugin folders (folders in the repo every minion loads as Claude Code plugins), optional plugin folders (loaded only by a minion that picks them, with create_ticket's plugin_folders), quiet CI workflows (whose red scheduled or dispatched runs don't message the Taskmaster) and default effort (what a minion without its own effort runs at).",
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders, optional plugin folders, default effort and/or onboarding step; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
+      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, default effort and/or onboarding step; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -584,6 +584,11 @@ const TOOLS = [
           type: 'array',
           items: { type: 'string' },
           description: 'Plugin folders, as plugin_folders, that a minion loads only when it picks them (create_ticket or update_ticket plugin_folders, or its composer): for plugins too costly for every minion, like Chrome DevTools. Admin-only, as plugin_folders.',
+        },
+        quiet_workflows: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Workflow file names, like drift.yml, whose failed scheduled runs and dispatched runs on the default branch should no longer message you. A minion that dispatched a run on its own branch still hears that run's result.",
         },
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
         onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },
@@ -1278,20 +1283,21 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
-      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}`;
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}`;
     }
     case 'set_project_settings': {
       const body: Record<string, unknown> = {};
       if (args.approval_rules !== undefined) body.approval_rules = args.approval_rules;
       if (args.plugin_folders !== undefined) body.plugin_dirs = args.plugin_folders;
       if (args.optional_plugin_folders !== undefined) body.optional_plugin_dirs = args.optional_plugin_folders;
+      if (args.quiet_workflows !== undefined) body.ci_quiet = args.quiet_workflows;
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
       if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, default_effort, onboarding, onboarding_mode or a mix');
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, default_effort, onboarding, onboarding_mode or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.`;
     }
     case 'approve':
       return approve(args);

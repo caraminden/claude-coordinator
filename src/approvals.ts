@@ -53,6 +53,14 @@ export function cleanPluginDirs(raw: unknown): string {
   return dirs.join('\n');
 }
 
+/** Validate quiet CI workflows (#678) from the API: workflow file names, one per line (a .github/workflows/ path is cut to its name); returns them as stored. */
+export function cleanWorkflows(raw: unknown): string {
+  const names = [...new Set(list(raw, 'Quiet CI workflows').map((w) => w.replace(/^\.?\/?\.github\/workflows\//, '')))];
+  if (names.length > MAX_RULES) throw new Error(`At most ${MAX_RULES} quiet CI workflows`);
+  for (const w of names) if (!/^[\w.-]{1,150}\.ya?ml$/.test(w)) throw new Error(`"${w.slice(0, 80)}" is not a workflow file name, like drift.yml`);
+  return names.join('\n');
+}
+
 /**
  * Validate a minion's plugin picks (#361): folders from its scheme's optional list, as stored ('' for none).
  * Registering a folder there is admin-only (src/routes/projects.ts), so a pick never names a new path.

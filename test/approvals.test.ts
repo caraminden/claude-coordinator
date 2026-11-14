@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
-import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanPluginPicks, cleanRules, permissionArgs, pluginDirArgs, turnPluginDirs, unsettledCards } from '../src/approvals.ts';
+import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, permissionArgs, pluginDirArgs, turnPluginDirs, unsettledCards } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { agentToken, bootServer, stopTurns, testPins, until } from './helpers.ts';

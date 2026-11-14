@@ -146,7 +146,7 @@ export function onProjectUpdate(project) {
   view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
   if (view.projectId !== project.id) return;
   view.project = project;
-  for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs'], ['optional-plugin-dirs', 'optional_plugin_dirs'], ['list-groups', 'list_groups']]) {
+  for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs'], ['optional-plugin-dirs', 'optional_plugin_dirs'], ['list-groups', 'list_groups'], ['ci-quiet', 'ci_quiet']]) {
     const el = document.getElementById(id);
     if (el && !el.hasAttribute('data-draft')) el.value = settingText(project, key);
   }
@@ -348,6 +348,8 @@ export function approvalsEditor() {
   optional.setAttribute('aria-label', 'Optional plugin folders');
   const groups = field('list-groups', 'list_groups', 'area: balance');
   groups.rows = 3;
+  const quiet = field('ci-quiet', 'ci_quiet', 'drift.yml');
+  quiet.rows = 3;
   // Plugins load code from any folder on the server, so only an admin changes them.
   dirs.readOnly = optional.readOnly = !account?.admin;
   const status = h('span', { class: 'muted', role: 'status' });
@@ -356,7 +358,7 @@ export function approvalsEditor() {
   const same = (a, b) => splitLines(a).join('\n') === splitLines(b).join('\n');
   const sync = () => {
     let dirty = false;
-    for (const [t, key] of [[rules, 'approval_rules'], [dirs, 'plugin_dirs'], [optional, 'optional_plugin_dirs'], [groups, 'list_groups']]) {
+    for (const [t, key] of [[rules, 'approval_rules'], [dirs, 'plugin_dirs'], [optional, 'optional_plugin_dirs'], [groups, 'list_groups'], [quiet, 'ci_quiet']]) {
       // Marked as a draft only while it differs, so someone else's save still shows otherwise.
       const d = !same(t.value, settingText(view.project, key));
       t.toggleAttribute('data-draft', d);
@@ -364,14 +366,14 @@ export function approvalsEditor() {
     }
     save.disabled = discard.disabled = !dirty;
   };
-  for (const t of [rules, dirs, optional, groups]) t.addEventListener('input', () => {
+  for (const t of [rules, dirs, optional, groups, quiet]) t.addEventListener('input', () => {
     status.textContent = '';
     sync();
   });
   // Saved at once: the fields stop counting as drafts and the sidebar shows new groups; a refusal turns them
   // back into drafts (the text stays in the fields) with a toast to retry.
   save.onclick = () => {
-    const body = { approval_rules: rules.value, plugin_dirs: dirs.value, optional_plugin_dirs: optional.value };
+    const body = { approval_rules: rules.value, plugin_dirs: dirs.value, optional_plugin_dirs: optional.value, ci_quiet: quiet.value };
     // Only when edited: a group whose value was archived since mustn't block saving the rules.
     if (!same(groups.value, settingText(view.project, 'list_groups'))) body.list_groups = splitLines(groups.value);
     const mine = { ...body, ...(body.list_groups ? { list_groups: JSON.stringify(body.list_groups) } : {}) };
@@ -385,6 +387,7 @@ export function approvalsEditor() {
     dirs.value = view.project.plugin_dirs ?? '';
     optional.value = view.project.optional_plugin_dirs ?? '';
     groups.value = settingText(view.project, 'list_groups');
+    quiet.value = view.project.ci_quiet ?? '';
     status.textContent = '';
     sync();
   };
@@ -418,6 +421,9 @@ export function approvalsEditor() {
     card('List groups', groups, [], '',
       'Values of this scheme\'s own properties, one per line, like ', h('code', {}, 'area: balance'),
       '. Minions outside a build that carry one get their own group at the top of the minions list; one that matches two sits in the first.'),
+    card('Quiet CI workflows', quiet, [], '',
+      'A failed scheduled run, or a failed run someone dispatched on the default branch, tells the Taskmaster. List a workflow file here, one per line, like ',
+      h('code', {}, 'drift.yml'), ', to stop that. A minion that dispatched a run on its own branch still hears its result.'),
     h('div', { class: 'row instructions-actions' }, save, discard, status));
   sync();
   return section;

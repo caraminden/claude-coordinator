@@ -171,6 +171,9 @@ function world({ delve = false } = {}) {
     jobs: new Map<number, Job[]>(),
     mainRuns: [] as Run[],
     scheduled: [] as Run[],
+    dispatched: [] as Run[],
+    // A check run's annotations by job id; Peek's billing one for the rest.
+    notes: new Map<number, { message: string; annotation_level: string }[]>(),
     calls: [] as string[],
     rateLimited: false,
     down: null as RegExp | null,
@@ -190,11 +193,13 @@ function world({ delve = false } = {}) {
     else if (path === 'repos/caraminden/delve/actions/runners?per_page=100') body = { runners: gh.delveRunners };
     else if (path.endsWith('/actions/runners?per_page=100')) body = { runners: gh.runners };
     else if (path.includes('/actions/workflows/7/runs?branch=main')) body = { workflow_runs: gh.mainRuns };
-    else if (path.endsWith('/actions/runs?event=schedule&branch=main&per_page=20')) body = { workflow_runs: gh.scheduled };
+    // Peek's own; any other repo has none.
+    else if (path.endsWith('/actions/runs?event=schedule&branch=main&per_page=20')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.scheduled : [] };
+    else if (path.endsWith('/actions/runs?event=workflow_dispatch&per_page=20')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.dispatched : [] };
     else if (path.endsWith('/actions/runs?per_page=50')) body = { workflow_runs: gh.runs };
     else if (/^repos\/caraminden\/[^/]+$/.test(path)) body = { default_branch: 'main' };
     else if (/\/runs\/\d+\/jobs/.test(path)) body = { jobs: gh.jobs.get(Number(/runs\/(\d+)\//.exec(path)![1])) ?? [] };
-    else if (/check-runs\/\d+\/annotations/.test(path)) body = [{ message: BILLING, annotation_level: 'failure' }];
+    else if (/check-runs\/\d+\/annotations/.test(path)) body = gh.notes.get(Number(/check-runs\/(\d+)\//.exec(path)![1])) ?? [{ message: BILLING, annotation_level: 'failure' }];
     else return { status: 404, etag: null, body: { message: 'Not Found' } };
     const tag = etagOf(body);
     return etag === tag ? { status: 304, etag: tag, body: null } : { status: 200, etag: tag, body };
@@ -625,12 +630,12 @@ test('a failed scheduled run on main tells its scheme\'s Taskmaster once, failed
   const nightly = (fields: Partial<Run>) => runOf({ name: 'Tests', workflow_id: 9, created_at: iso(2 * HOUR), ...fields });
   const red = nightly({ id: 4242, head_sha: 'abc1234def', conclusion: 'failure' });
   w.gh.jobs.set(4242, [job({ run_id: 4242, name: 'tests', conclusion: 'failure', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run the suite', conclusion: 'failure' }] })]);
-  // GitHub's event=schedule filter keeps push runs out; a green nightly, one still running and a red one from two days ago say nothing.
-  w.gh.scheduled = [nightly({ conclusion: 'success', created_at: iso(HOUR) }), nightly({ status: 'in_progress', conclusion: null }), red, nightly({ conclusion: 'failure', created_at: iso(48 * HOUR) })];
+  // GitHub's event=schedule filter keeps push runs out; a green nightly (before the red one: no back to green), one still running and a red one from two days ago say nothing.
+  w.gh.scheduled = [nightly({ conclusion: 'success', created_at: iso(3 * HOUR) }), nightly({ status: 'in_progress', conclusion: null }), red, nightly({ conclusion: 'failure', created_at: iso(48 * HOUR) })];
   await health.tick(NOW);
   assert.equal(told.length, 1);
   assert.equal(told[0][0], 'Peek Auras');
-  assert.match(told[0][1], /^Peek Auras's scheduled Tests run on main failed on abc1234, at tests › Run the suite: https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4242\./);
+  assert.match(told[0][1], /^Peek Auras's scheduled Tests run on main failed on abc1234, at tests › Run the suite \(finished Nov 5, 02:00 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4242\n/);
   assert.deepEqual(w.puts, [], 'not a Mandate alert');
 
   await health.tick(NOW + 5 * MIN);
@@ -642,7 +647,7 @@ test('a failed scheduled run on main tells its scheme\'s Taskmaster once, failed
   w.gh.scheduled = [nightly({ id: 4343, head_sha: 'def5678abc', conclusion: 'failure', created_at: iso(MIN) }), ...w.gh.scheduled];
   await health.tick(NOW + 15 * MIN);
   assert.equal(told.length, 2);
-  assert.match(told[1][1], /^Peek Auras's scheduled Tests run on main failed on def5678: https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4343\./);
+  assert.match(told[1][1], /^Peek Auras's scheduled Tests run on main failed on def5678 \(finished Nov 5, 03:59 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4343\n/);
 });
 
 test('a failed scheduled run waits, untold, while nothing can tell the Taskmaster: no hook, no Taskmaster, or a send that throws (#588)', async () => {
@@ -675,7 +680,104 @@ test("a failed scheduled run whose jobs can't be read still tells, without the s
   w.gh.down = /runs\/4545\/jobs/;
   await health.tick(NOW);
   assert.equal(told.length, 1);
-  assert.match(told[0], /^Peek Auras's scheduled Tests run on main failed on feed123: https:/);
+  assert.match(told[0], /^Peek Auras's scheduled Tests run on main failed on feed123 \(finished [^)]+ PST\): https:/);
+});
+
+/** A world whose minions and Taskmaster hear of runs no PR started (#678), with what each was sent. */
+function outsideWorld() {
+  const w = world({ delve: true });
+  const woken: [number, string, boolean][] = [];
+  const told: [string, string][] = [];
+  const deps = { ...w.deps, wake: (id: number, text: string, fyi?: boolean) => void woken.push([id, text, !!fyi]), tell: (p: { name: string }, text: string) => (told.push([p.name, text]), true) };
+  const minion = (project: number, branch: string) => {
+    const t = w.store.createTicket({ project_id: project, title: branch, permission_mode: 'default', created_by: 1 } as any);
+    w.store.setTicketDir(t.id, '/tmp/x', branch);
+    return t;
+  };
+  return { ...w, woken, told, outside: deps, minion };
+}
+const dispatched = (fields: Partial<Run>) => runOf({ event: 'workflow_dispatch', name: 'stress', workflow_id: 11, path: '.github/workflows/stress.yml', created_at: iso(10 * MIN), updated_at: iso(5 * MIN), ...fields });
+
+test('a run a minion dispatched on its branch wakes it once with its result, red or green, across a restart; others say nothing (#678)', async () => {
+  const w = outsideWorld();
+  const mine = w.minion(w.peek.id, 'ticket/12-stress');
+  const closed = w.minion(w.peek.id, 'ticket/13-done');
+  w.store.updateTicket(closed.id, { status: 'closed' });
+  // Delve's own minion on the same branch name never hears Peek's run.
+  w.minion(w.store.listProjects().find((p) => p.name === 'Delve')!.id, 'ticket/12-stress');
+  // Ended before the first poll that read dispatched runs: history from before the deploy, not news.
+  w.gh.dispatched = [dispatched({ id: 5000, head_branch: 'ticket/12-stress', conclusion: 'failure', updated_at: iso(2 * HOUR) })];
+  const health = new CiHealth(w.store, w.outside);
+  await health.tick(NOW - HOUR);
+  assert.deepEqual(w.woken, []);
+
+  const failed = job({ run_id: 5001, name: 'stress', conclusion: 'failure', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run it', conclusion: 'failure' }] });
+  w.gh.jobs.set(5001, [failed]);
+  w.gh.notes.set(failed.id, [{ message: 'Process completed with exit code 1.', annotation_level: 'failure' }, { message: 'bar_fill:\n 3 of 100 runs failed', annotation_level: 'failure' }, { message: 'Node 20 is deprecated', annotation_level: 'warning' }]);
+  w.store.putCiFile({ project_id: w.peek.id, workflow: 'stress.yml', run_id: 5001, run_attempt: 1, sha: 'a'.repeat(40), ref: 'refs/heads/ticket/12-stress', name: 'stress-5001.txt', kind: 'report', target: '', size: 10, sha256: 'b'.repeat(64), created_at: NOW });
+  w.gh.dispatched = [
+    dispatched({ id: 5004, head_branch: 'ticket/99-gone', conclusion: 'failure' }), // nobody's branch
+    dispatched({ id: 5003, head_branch: 'ticket/13-done', conclusion: 'failure' }), // a dismissed minion's
+    dispatched({ id: 5002, head_branch: 'ticket/12-stress', conclusion: 'success', created_at: iso(8 * MIN), head_sha: 'feedface00' }),
+    dispatched({ id: 5001, head_branch: 'ticket/12-stress', conclusion: 'failure', head_sha: 'abc1234fff' }),
+    ...w.gh.dispatched,
+  ];
+  await health.tick(NOW);
+  assert.equal(w.woken.length, 2);
+  const [red, green] = w.woken;
+  assert.equal(red[0], mine.id);
+  assert.equal(red[2], false, 'a red run is work to do');
+  assert.equal(red[1], [
+    'Your dispatched stress run on ticket/12-stress failed, at stress › Run it (abc1234, finished Nov 5, 03:55 PST): https://github.com/caraminden/peek-auras/actions/runs/5001',
+    "GitHub's error lines:",
+    '- bar_fill: 3 of 100 runs failed',
+    "Its files in Citadel's CI store (ci_files with run: 5001): stress-5001.txt (report).",
+    '`ci-failures 5001 -R caraminden/peek-auras` prints its failing tests.',
+  ].join('\n'));
+  assert.deepEqual(green, [mine.id, 'Your dispatched stress run on ticket/12-stress passed (feedfac, finished Nov 5, 03:55 PST): https://github.com/caraminden/peek-auras/actions/runs/5002', true]);
+  assert.deepEqual(w.told, [], 'none of these is the Taskmaster\'s');
+
+  await health.tick(NOW + 5 * MIN);
+  await new CiHealth(w.store, w.outside).tick(NOW + 10 * MIN);
+  assert.equal(w.woken.length, 2, 'not again, nor after a restart');
+});
+
+test('a red scheduled run, or a red dispatched one on main, is one message to the Taskmaster; the next green says back to green once; a quiet workflow says nothing (#678)', async () => {
+  const w = outsideWorld();
+  const health = new CiHealth(w.store, w.outside);
+  await health.tick(NOW - HOUR); // dispatched runs count from here
+  const drift = (fields: Partial<Run>) => runOf({ event: 'schedule', name: 'drift', workflow_id: 12, path: '.github/workflows/drift.yml', created_at: iso(30 * MIN), updated_at: iso(20 * MIN), ...fields });
+  w.gh.scheduled = [drift({ id: 6002, head_sha: 'd1d1d1d1d1', conclusion: 'failure' })];
+  w.gh.dispatched = [dispatched({ id: 6001, name: 'windows', workflow_id: 13, path: '.github/workflows/windows.yml', head_sha: 'e2e2e2e2e2', conclusion: 'failure', triggering_actor: { login: 'josh' } })];
+  await health.tick(NOW);
+  assert.equal(w.told.length, 2);
+  assert.match(w.told[0][1], /^Peek Auras's scheduled drift run on main failed on d1d1d1d \(finished Nov 5, 03:40 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/6002\n/);
+  assert.match(w.told[0][1], /To stop these for drift\.yml, add it to the scheme's quiet CI workflows/);
+  assert.match(w.told[1][1], /^Peek Auras's dispatched \(by josh\) windows run on main failed on e2e2e2e \(finished Nov 5, 03:55 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/6001\n/);
+  assert.deepEqual(w.woken, []);
+
+  await health.tick(NOW + 5 * MIN);
+  await new CiHealth(w.store, w.outside).tick(NOW + 10 * MIN);
+  assert.equal(w.told.length, 2, 'not again, nor after a restart');
+
+  // The next green of each says so once; a green after that says nothing.
+  w.gh.scheduled = [drift({ id: 6003, head_sha: 'f3f3f3f3f3', created_at: iso(-MIN), updated_at: iso(-10 * MIN) }), ...w.gh.scheduled];
+  w.gh.dispatched = [dispatched({ id: 6004, name: 'windows', workflow_id: 13, path: '.github/workflows/windows.yml', head_sha: 'a4a4a4a4a4', created_at: iso(-MIN), updated_at: iso(-10 * MIN) }), ...w.gh.dispatched];
+  await health.tick(NOW + 15 * MIN);
+  await new CiHealth(w.store, w.outside).tick(NOW + 20 * MIN);
+  assert.deepEqual(w.told.slice(2).map(([, t]) => t), [
+    "Peek Auras's drift is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/6003 (f3f3f3f, Nov 5, 04:10 PST), after run 6002 failed.",
+    "Peek Auras's windows is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/6004 (a4a4a4a, Nov 5, 04:10 PST), after run 6001 failed.",
+  ]);
+  w.gh.scheduled = [drift({ id: 6005, created_at: iso(-20 * MIN), updated_at: iso(-25 * MIN) }), ...w.gh.scheduled];
+  await health.tick(NOW + 30 * MIN);
+  assert.equal(w.told.length, 4);
+
+  // Quieted in the scheme's settings: its red runs no longer tell.
+  w.store.setProjectSettings(w.peek.id, { ci_quiet: 'drift.yml' });
+  w.gh.scheduled = [drift({ id: 6006, conclusion: 'failure', created_at: iso(-30 * MIN), updated_at: iso(-35 * MIN) }), ...w.gh.scheduled];
+  await health.tick(NOW + 40 * MIN);
+  assert.equal(w.told.length, 4);
 });
 
 test('orphanRuns: queued land/** runs over an hour old that no landing holds', () => {

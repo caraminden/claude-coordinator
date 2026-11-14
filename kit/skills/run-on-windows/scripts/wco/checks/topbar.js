@@ -8,7 +8,8 @@ for (const under of ROUTES) {
   for (const late of [false, true]) {
     await ev(`${FRAME} d.getElementById('late').style.display = ${late ? "''" : "'none'"}; w.clicks.length = 0; return 1`);
     await sleep(400);
-    const ids = await ev(`${FRAME} return [...d.querySelectorAll('.cui-topbar button')].filter((b) => b.getClientRects().length).map((b) => b.id)`);
+    const ids = ['b1', 'b2', 'b3', 'b4', ...(late ? ['late'] : []), 'pc'];
+    expect('the bar shows', await ev(`${FRAME} return [...d.querySelectorAll('.cui-topbar button')].filter((b) => b.getClientRects().length).map((b) => b.id)`), ids);
     for (const id of ids) await click(`#${id}`, true);
     await click('#body', true);
     expect(late ? 'bar buttons click, late Restart shown' : 'bar buttons click', await frameClicks(), [...ids, 'body']);

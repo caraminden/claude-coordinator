@@ -1,6 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
-import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
+import { ago, api, h, isCoordinator, isSeen, jumpHref, me, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
+import { planCard, questionCard } from './cards.js';
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, turnMoved } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 
@@ -49,8 +50,11 @@ const others = otherSchemes(() => {
 /** A chat event from the stream: refetch when it opens or settles a card, in this scheme or another. */
 export function inboxEvent(event) {
   if (view?.kind !== 'project') return;
-  if (!ticketOf(event.ticket_id)) others.event(event);
-  else if (cardEvent(event)) refreshSoon();
+  if (!ticketOf(event.ticket_id)) {
+    others.event(event);
+    // A card another scheme addressed to you (#687), or news of one this list shows, redraws this list too.
+    if (cardEvent(event) && (inbox.items.some((i) => i.ticketId === event.ticket_id) || JSON.parse(event.data).to === me)) refreshSoon();
+  } else if (cardEvent(event)) refreshSoon();
 }
 
 /** One of this scheme's minions changed: refetch when that can move the count; a turn starting or ending only redraws the spinner. */
@@ -73,6 +77,12 @@ const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
 let strip = null;
+// The opened list, and in it the cards addressed to you (#687) and the minions' rows. Every minion update redraws
+// the rows, so the cards are drawn again only when the set of them changes: a pick or a half-typed answer keeps its focus.
+const parts = { list: null, direct: null, rows: null, sig: null };
+
+/** A question or plan card addressed to you (#687), which the list draws whole to answer in place. */
+const directFor = (i) => (i.kind === 'question' || i.kind === 'plan') && !!i.card?.to && i.card.to === me;
 
 /** The strip for the minions panel (showProject puts it above the Taskmaster's row). */
 export function inboxStrip() {
@@ -120,11 +130,14 @@ export function onSeenItems(projectId) {
 export function renderInbox() {
   if (view?.kind !== 'project' || inbox.projectId !== view.projectId) return;
   // A dismissed minion is never in your inbox (#589), even while the server's list still has it: your own dismiss shows at once.
-  const items = inbox.items.filter((i) => ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed');
+  // Cards addressed to you from your other schemes (`from`, #687) show here too, though only their own scheme's pill counts them.
+  const items = inbox.items.filter((i) => i.from || (ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed'));
   const strip = inboxStrip();
   // Minions, not items: one waiting on two things is one to see to (Cara, 2026-11-01).
-  const waiting = items.filter((i) => !faded(i));
+  const all = items.filter((i) => !faded(i));
+  const waiting = all.filter((i) => !i.from);
   const count = new Set(waiting.map((i) => i.ticketId)).size;
+  const shown = new Set(all.map((i) => i.ticketId)).size;
   // A scheme you hid (#226) keeps its strip but no pill.
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
   const running = !hidden && [view.coordinator, ...view.tickets.values()].some(isWorking);
@@ -139,15 +152,16 @@ export function renderInbox() {
   if (!items.length) return strip.replaceChildren();
   let open = false;
   try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch {}
-  // A minion's items share its row, in the order of its most urgent one.
+  // A minion's items share its row, in the order of its most urgent one; a card addressed to you is drawn whole instead.
+  const direct = items.filter(directFor);
   const rows = new Map();
-  for (const i of items) {
+  for (const i of items.filter((i) => !directFor(i))) {
     if (!rows.has(i.ticketId)) rows.set(i.ticketId, []);
     rows.get(i.ticketId).push(i);
   }
   const toggle = h('button', { type: 'button', class: 'inbox-toggle', 'aria-expanded': String(open), title: open ? 'Minimize' : 'Show what waits on you' },
     h('span', { class: 'label' }, 'Needs you'),
-    count ? h('span', { class: 'count' }, count) : h('span', { class: 'muted' }, 'all seen'),
+    shown ? h('span', { class: 'count' }, shown) : h('span', { class: 'muted' }, 'all seen'),
     h('span', { class: 'spacer' }),
     h('span', { class: 'chev', 'aria-hidden': 'true' }, open ? '▾' : '▸'));
   toggle.addEventListener('click', () => {
@@ -155,11 +169,33 @@ export function renderInbox() {
     renderInbox();
   });
   strip.classList.toggle('open', open);
-  // Every minion update redraws the strip (renderSidebar), so the new rows take the old ones' scroll (#668).
-  const scrolled = strip.querySelector('.inbox-rows')?.scrollTop ?? 0;
-  const list = open ? h('div', { class: 'inbox-rows' }, [...rows.values()].map(inboxRow)) : '';
-  strip.replaceChildren(toggle, list);
-  if (list) list.scrollTop = scrolled;
+  // The list stays in place across redraws (renderSidebar redraws on every minion update), keeping its scroll (#668)
+  // and the addressed cards' focus: only the toggle and the rows are new.
+  parts.list ??= h('div', { class: 'inbox-rows' }, parts.direct = h('div', { class: 'inbox-direct' }), parts.rows = h('div', { class: 'inbox-minions' }));
+  const sig = direct.map((i) => i.key).join();
+  if (sig !== parts.sig) {
+    parts.sig = sig;
+    parts.direct.replaceChildren(...direct.map(directCard));
+  }
+  parts.direct.hidden = !direct.length;
+  parts.rows.replaceChildren(...[...rows.values()].map(inboxRow));
+  if (strip.firstChild) strip.firstChild.replaceWith(toggle);
+  else strip.append(toggle);
+  if (open && parts.list.parentNode !== strip) strip.append(parts.list);
+  else if (!open) parts.list.remove();
+}
+
+/**
+ * A card addressed to you (#687), whole, to answer in place: headed by the minion or Taskmaster that asks, linked
+ * to the card in its chat. One from another scheme names that scheme.
+ */
+function directCard(i) {
+  const t = ticketOf(i.ticketId) ?? { id: i.ticketId, project_id: i.from.projectId, number: i.from.number, kind: i.from.kind, title: i.from.title };
+  const where = i.from ? `${i.from.scheme} ` : '';
+  const name = isCoordinator(t) ? (i.from ? `${i.from.scheme} Taskmaster` : taskmasterLabel(t.project_id)) : `${where}#${t.number ?? t.id} ${t.title}`;
+  const asker = h('a', { class: 'asker', href: i.eventId ? jumpHref(t, i.eventId) : threadHref(t) }, name);
+  const opts = { inbox: true, at: i.at, asker };
+  return i.kind === 'plan' ? planCard(i.ticketId, i.card, opts) : questionCard(i.ticketId, i.card, opts);
 }
 
 /** A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited. */

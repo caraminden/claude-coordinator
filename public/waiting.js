@@ -13,6 +13,6 @@ export function waitingStrip(t) {
     class: 'waiting-card', href: c.href, title: `Open the ${c.what ?? c.kind} card${c.label ? ` "${c.label}"` : ''}`,
     // openHash also jumps when the link is the address you're on already (a second click on the same card).
     onclick: (e) => { if (e.button || e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); openHash(c.href); },
-  }, h('span', { class: 'what' }, c.what ?? c.kind), c.label ? h('span', { class: 'label' }, c.label) : '');
+  }, h('span', { class: 'what' }, c.what ?? c.kind, c.to ? ` for ${c.to}` : ''), c.label ? h('span', { class: 'label' }, c.label) : '');
   return h('div', { class: 'waiting-strip' }, h('span', { class: 'waiting-head' }, cards.length === 1 ? '1 card waits on you' : `${cards.length} cards wait on you`), ...cards.map(link));
 }

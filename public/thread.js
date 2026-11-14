@@ -916,13 +916,13 @@ export function appendEvent(event, scroll = true) {
     const bubble = log.querySelector(`[data-event="${data.id}"]`);
     if (bubble) showTakenBack(bubble, data.by, false);
   } else if (event.kind === 'question') {
-    nodes.push(stamped(questionCard(event.ticket_id, data), event));
+    nodes.push(stamped(questionCard(event.ticket_id, data, { at: event.created_at }), event));
   } else if (event.kind === 'approval') {
     nodes.push(stamped(approvalCard(event.ticket_id, data), event));
   } else if (event.kind === 'plan') {
-    nodes.push(stamped(planCard(event.ticket_id, data), event));
+    nodes.push(stamped(planCard(event.ticket_id, data, { at: event.created_at }), event));
   } else if (event.kind === 'question_result') {
-    view.cards.get(data.id)?.markSettled();
+    view.cards.get(data.id)?.markSettled(data.settled);
   } else if (event.kind === 'strike') {
     // strike_text: redraw the message it struck, wherever it shows now (a bubble or a collapsed update).
     for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) {

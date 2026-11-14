@@ -1,6 +1,6 @@
 // The cards in a chat that wait on a person: approval (and merge), plan, loop and question cards.
 // appendEvent in thread.js builds them, and each registers itself in view.cards so later events settle it.
-import { account, api, fileHref, fileKind, fileUrl, h, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
+import { account, ago, api, fileHref, fileKind, fileUrl, h, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
 import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 import { adoptTicket } from './thread.js';
@@ -13,6 +13,25 @@ import { refreshViewerBar, setViewerGallery } from './artifacts.js';
 export function speaker(doing = '') {
   if (!view.ticket || !isCoordinator(view.ticket)) return doing ? `Your Minion ${doing}` : 'Your Minion';
   return doing ? ['The ', taskmasterLabel(view.ticket.project_id), ` ${doing}`] : taskmasterLabel(view.ticket.project_id);
+}
+
+/**
+ * A card's header line: who asks, and on a card addressed to one person (#687) whom, with how long it has
+ * waited on them ("Your Minion asks Josh · waiting on Josh, 4m"), until done() says how it ended. `opts.asker`
+ * names the asker outside its own chat (the Needs-you list), and `opts.at` is when the card was posted.
+ */
+function whoLine(doing, card, opts = {}) {
+  const verb = card.to ? `${doing} ${card.to === me ? 'you' : card.to}` : doing;
+  const who = opts.asker ? [opts.asker, ` ${verb}`] : speaker(verb);
+  const wait = h('span', { class: 'to-wait' }, card.to ? ` · waiting on ${card.to === me ? 'you' : card.to}${opts.at ? `, ${ago(opts.at).replace(/ ago$/, '')}` : ''}` : '');
+  return {
+    el: h('div', { class: 'who' }, who, wait),
+    done(text) {
+      if (!card.to) return;
+      wait.textContent = ` · ${text}`;
+      wait.classList.add('done');
+    },
+  };
 }
 
 // ---------- approval cards ----------
@@ -171,7 +190,7 @@ function notesBody(card) {
  * A plan from Claude waiting for a go: Approve sends it, Revise opens a box for notes that go back
  * to Claude, which answers with a new card. Only people can decide; the card keeps its outcome.
  */
-export function planCard(ticketId, card) {
+export function planCard(ticketId, card, opts = {}) {
   // A machine's notes card (#617): only its owner or an admin approves; anyone may reject, with an optional reason.
   const m = card.machine;
   const mayApprove = !m || !!account?.admin || (m.owner != null && m.owner === me);
@@ -184,8 +203,9 @@ export function planCard(ticketId, card) {
   const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: m ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
   const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !m }, m ? 'Reject' : 'Send notes');
+  const head = whoLine(m ? 'proposes machine notes' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
   const el = h('div', { class: 'qcard pcard' },
-    h('div', { class: 'who' }, speaker(m ? 'proposes machine notes' : 'proposes a plan')),
+    head.el,
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : 'Plan'), card.summary),
     h('div', { class: 'pbody' }, m ? notesBody(card) : markdown(card.plan, ticketId)),
     notes, why,
@@ -246,9 +266,11 @@ export function planCard(ticketId, card) {
       why.hidden = true;
       approve.hidden = revise.hidden = true;
       status.textContent = planOutcome(r, m);
+      if (r.by) head.done(`${r.status === 'approved' ? 'approved' : 'sent back'} by ${r.by}`);
     },
   };
-  view.cards.set(card.id, handle);
+  // In the Needs-you list (#687) it's a second copy: the chat's own card takes the chat's news.
+  if (!opts.inbox) view.cards.set(card.id, handle);
   if (card.status !== 'pending') handle.settle(card);
   return el;
 }
@@ -311,7 +333,8 @@ export function answerRef(cardEl, data) {
 // Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
 const cardPicks = new Map();
 
-export function questionCard(ticketId, card) {
+export function questionCard(ticketId, card, opts = {}) {
+  if (card.notice) return noticeCard(ticketId, card, opts);
   if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
   const picks = cardPicks.get(card.id);
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
@@ -359,8 +382,9 @@ export function questionCard(ticketId, card) {
   };
   sendBtn.addEventListener('click', send);
 
+  const head = whoLine('asks', card, opts);
   el.append(
-    h('div', { class: 'who' }, speaker('asks')),
+    head.el,
     ...card.questions.map((q, i) => {
       // Sent along with the pick, or alone (Cara, 2026-11-14: "Cards should always pass along the text in addition to the selection").
       const other = h('input', { type: 'text', class: 'other', placeholder: 'Type your own answer or expand on the selection', maxlength: 2000, value: picks[i].other });
@@ -421,7 +445,7 @@ export function questionCard(ticketId, card) {
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), sendBtn));
   refresh();
 
-  view.cards.set(card.id, {
+  const handle = {
     el,
     markAnswered(answers, author) {
       answered = confirmed = true;
@@ -436,6 +460,7 @@ export function questionCard(ticketId, card) {
       for (const btn of el.querySelectorAll('.opt:not(.pic)')) btn.disabled = true;
       sendBtn.hidden = true;
       status.textContent = `Answered by ${author}`;
+      head.done(`answered by ${author}`);
       refresh();
     },
     // The minion took a typed reply as the answer (settle_question).
@@ -446,10 +471,49 @@ export function questionCard(ticketId, card) {
       for (const other of el.querySelectorAll('.other')) other.hidden = true;
       sendBtn.hidden = true;
       status.textContent = 'Answered in the chat';
+      head.done('settled in the chat');
       if (pictures) refreshViewerBar();
     },
+  };
+  // In the Needs-you list (#687) it's a second copy: the chat's own card takes the chat's news.
+  if (!opts.inbox) view.cards.set(card.id, handle);
+  if (card.settled) handle.markSettled();
+  return el;
+}
+
+/**
+ * A notice for one person (#687: ask_question with to and no questions): one line, and Got it for them, which
+ * takes it out of their Needs-you list and sends the asker nothing.
+ */
+function noticeCard(ticketId, card, opts) {
+  const head = whoLine('tells', card, opts);
+  const status = h('span', { class: 'muted' });
+  const got = h('button', { type: 'button', class: 'small', hidden: card.to !== me }, 'Got it');
+  const el = h('div', { class: 'qcard notice' }, head.el, h('div', { class: 'qtitle' }, card.notice),
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), got));
+  let seen = false;
+  const handle = {
+    el,
+    markSettled(settled) {
+      seen = true;
+      got.hidden = true;
+      el.classList.add('answered');
+      status.textContent = '';
+      head.done(settled?.by ? `seen by ${settled.by}` : 'settled in the chat');
+    },
+  };
+  got.addEventListener('click', () => {
+    if (seen) return;
+    optimistic({
+      key: `card:${card.id}`,
+      apply: () => { seen = true; got.hidden = true; el.classList.add('answered'); head.done(`seen by ${me}`); },
+      send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id } }),
+      undo: () => { seen = false; got.hidden = false; el.classList.remove('answered'); head.done(`waiting on you`); },
+      label: 'mark the notice seen',
+    }).then((ticket) => adoptTicket(ticketId, ticket), () => {});
   });
-  if (card.settled) view.cards.get(card.id).markSettled();
+  if (!opts.inbox) view.cards.set(card.id, handle);
+  if (card.settled) handle.markSettled(card.settled);
   return el;
 }
 

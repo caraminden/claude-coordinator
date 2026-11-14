@@ -42,6 +42,14 @@ export interface MemoryHit {
   score: number;
 }
 
+/**
+ * How close in meaning a new minion's title and brief must be to an open minion's title and note to count as
+ * maybe the same work (#488, #689). On Citadel's last 40 starts (2026-11-14): true repeats (#651 and #679 of #605)
+ * scored 0.636-0.638, near-misses in the same area 0.62-0.70, unrelated work mostly 0.44-0.60. No clean gap, so
+ * false alarms happen (about 7 starts in 40 flagged): create_ticket's not_duplicate overrides, and a person only gets a note.
+ */
+export const TWIN_SCORE = 0.63;
+
 /** Texts in, one unit-length vector per text out; `query` marks a search, which the model wants instructed. */
 export type Embed = (texts: string[], query?: boolean) => Promise<Float32Array[]>;
 

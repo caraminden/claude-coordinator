@@ -763,19 +763,14 @@ const SEARCH_MEMORY = {
   },
 };
 
-/**
- * create_ticket's duplicate check (#488): open minions whose title and note are this close in meaning to the
- * new one's title and brief. Measured on Citadel's minions: the same work scored 0.67, unrelated ones
- * mostly 0.50-0.60, so false alarms happen and not_duplicate overrides. A search that fails checks nothing.
- */
-const TWIN_SCORE = 0.62;
-async function openTwins(title: string, message: string): Promise<{ number: number; title: string; status: string; score: number }[]> {
+/** create_ticket's duplicate check (#488): open minions the server marks as twins of the new one's title and brief (src/memory.ts TWIN_SCORE). A search that fails checks nothing. */
+async function openTwins(title: string, message: string): Promise<{ number: number; title: string; status: string; score: number; owner: string | null }[]> {
   const q = new URLSearchParams({ q: `${title}\n${message}`.slice(0, 1000), scope: 'minions', limit: '3' });
   // One try, not call()'s two minutes of retries: a down embedding service mustn't hold up a new minion.
   const res = await fetch(`${API}/api/projects/${PROJECT}/memory?${q}`, { headers: { Authorization: `Bearer ${TOKEN}` }, signal: AbortSignal.timeout(30_000) }).catch(() => null);
   if (!res?.ok) return [];
   const { hits } = (await res.json().catch(() => ({}))) as { hits?: any[] };
-  return (hits ?? []).filter((h) => h.score >= TWIN_SCORE);
+  return (hits ?? []).filter((h) => h.twin);
 }
 
 /** search_memory's answer: each hit as a header line and its text, cut so a call stays small. */
@@ -1228,7 +1223,7 @@ async function runTool(name: string, args: any): Promise<string> {
       if (twins.length) {
         return [
           'Not created: these open minions read like the same work (closeness by meaning, 1 is the same):',
-          ...twins.map((h) => `- #${h.number} ${h.title} (${h.status}, ${h.score})`),
+          ...twins.map((h) => `- #${h.number} ${h.title}${h.owner ? `, ${h.owner}'s` : ''} (${h.status}, ${h.score})`),
           'If one is, message it instead (message_ticket). If not, call create_ticket again with not_duplicate: true.',
         ].join('\n');
       }

@@ -23,7 +23,7 @@ import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
 import { ICON_HEADERS, iconVersion, readIcon } from '../scheme-icon.ts';
-import { spokenText } from '../memory.ts';
+import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
@@ -103,6 +103,21 @@ function codeLine(p: Project, source: Source, folder: string | null): string {
 export function kickoff(name: string, code: string, by: string, about: string): string {
   const said = about ? `${by} wrote: "${about}"` : `${by} left "What's it about?" empty, so start by asking.`;
   return `New scheme "${name}" (code: ${code}), created by ${by}. ${said}\n\nSet it up: onboarding has started.`;
+}
+
+/** Minion hits with each one's owner (its `assigned`, for the duplicate checks' "Josh's") and whether it's close enough to be a twin. */
+function minionHits(app: App, hits: MemoryHit[]): (MemoryHit & { owner: string | null; twin: boolean })[] {
+  return hits.map((h) => ({ ...h, owner: String(app.store.props.forTarget('minion', h.ticket_id).assigned ?? '') || null, twin: h.score >= TWIN_SCORE }));
+}
+
+/** After a person starts a minion: a note in its chat naming open minions that read like the same work. Never blocks the start; a failed search says nothing. */
+async function twinNote(app: App, projectId: number, id: number, text: string) {
+  try {
+    const hits = await app.store.memory.search(projectId, text.slice(0, 1000), app.memory.embed, app.memory.model, { limit: 3, openMinions: true });
+    const twins = minionHits(app, hits).filter((h) => h.twin && h.ticket_id !== id);
+    if (!twins.length || !app.store.getTicket(id)) return;
+    app.runner.emit(id, 'note', { text: `Similar and open: ${twins.map((h) => `#${h.number} '${h.title}'${h.owner ? `, ${h.owner}'s` : ''}`).join('; ')}` });
+  } catch {}
 }
 
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
@@ -732,6 +747,8 @@ export const projectRoutes: Route[] = [
       } else {
         runner.send(id, session.name, message, [], { brief: true });
       }
+      // A person's start gets a quiet note on look-alike open minions (#689); the Taskmaster's create_ticket checks before it creates (#488).
+      if (!caller && app.memory.indexed(project.id)) void twinNote(app, project.id, id, `${title}\n${message}`);
       return json(res, 201, { ...ticketView(app, id), notes });
     },
   },
@@ -850,7 +867,7 @@ export const projectRoutes: Route[] = [
           console.error('Semantic memory search failed:', err?.cause?.code ?? err?.message ?? err);
           throw new HttpError(503, "The embedding service isn't answering, so search by meaning is down; exact-text search still works");
         });
-      return json(res, 200, { hits });
+      return json(res, 200, { hits: scope === 'minions' ? minionHits(app, hits) : hits });
     },
   },
 

@@ -248,6 +248,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
   turn(store, a1.id, 'Cara', 'Where do we keep the dentist reminders?', 'In the Mandate app.');
   turn(store, b1.id, 'Cara', 'B dentist secret', 'B reply');
   store.db.prepare("UPDATE tickets SET status = 'closed' WHERE id = ?").run(a2.id);
+  store.props.set('minion', a1.id, A.id, { assigned: 'Josh' }, 'Cara');
   const tmA = store.createTicket({ project_id: A.id, title: 'A', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
   const contraptions = new Contraptions(store, SECRET, join(data, 'contraptions'));
   contraptions.register({ name: 'notes', title: 'Notes', port: 9177, icon: null, home_scheme: A.id, open_paths: '[]', default_model: null, turn_cap: null });
@@ -316,9 +317,24 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     };
     const twin = await create({ title: 'Dentist reminders', message: 'Remind people about the dentist' });
     assert.match(twin, /^Not created: /);
-    assert.match(twin, new RegExp(`^- #${a1.number} Dentist reminders \\(new, [01]\\.\\d+\\)$`, 'm'));
+    assert.match(twin, new RegExp(`^- #${a1.number} Dentist reminders, Josh's \\(new, [01]\\.\\d+\\)$`, 'm'), "with its owner (#689)");
     assert.match(await create({ title: 'Usage bar', message: 'Show the usage bar' }), /^Created /, 'a dismissed minion is no twin');
     assert.match(await create({ title: 'Dentist reminders', message: 'Remind people about the dentist', not_duplicate: true }), /^Created /);
+
+    // A person's start (#689): never refused, and a quiet note in the new minion's chat names the look-alike with its owner.
+    const started = await fetch(`${srv.base}/api/projects/${A.id}/tickets`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: srv.cookie }, body: JSON.stringify({ title: 'Dentist reminders', message: 'Remind people about the dentist' }) });
+    assert.equal(started.status, 201);
+    const { id: newId } = await started.json();
+    const look = new Store(join(data, 'coordinator.db'));
+    const noteOf = (id: number) => (look.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND kind = 'note' AND data LIKE '%Similar and open%'").get(id) as { data: string } | undefined)?.data;
+    let note = noteOf(newId);
+    for (let i = 0; i < 50 && !note; i++) {
+      await new Promise((ok) => setTimeout(ok, 100));
+      note = noteOf(newId);
+    }
+    assert.match(JSON.parse(note ?? '{}').text ?? '', new RegExp(`^Similar and open: .*#${a1.number} 'Dentist reminders', Josh's`));
+    assert.ok(!JSON.parse(note!).text.includes(`'Usage bar'`), 'a dismissed minion is no twin');
+    look.db.close();
 
     // The embed route (#488): a contraption's own server, with its key, gets the model's vectors.
     const embedCall = (body: unknown, headers: Record<string, string> = { Authorization: `Bearer ${appKey}` }) =>

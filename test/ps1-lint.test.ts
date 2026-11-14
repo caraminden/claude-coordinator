@@ -35,7 +35,7 @@ test('Citadel\'s .ps1 files lint clean, and the lint still finds planted mistake
     writeFileSync(bad, planted);
     const broken = join(dir, 'broken.ps1');
     writeFileSync(broken, "if ($true) { Write-Output 'x'\n");
-    const files = [...ps1s('tools/ci-runner'), ...ps1s(kit)];
+    const files = [...ps1s('tools/ci-runner'), ...ps1s(kit), ...ps1s('kit/skills/run-on-windows/scripts/wco')];
     const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', lint, ...files, bad, broken], { encoding: 'utf8' });
     const out = r.stdout + r.stderr;
     assert.equal(r.status, 1, out);

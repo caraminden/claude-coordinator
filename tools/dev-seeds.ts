@@ -196,6 +196,23 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return `#/p/${c.project.id}`;
     },
   },
+  'wco-fixture': {
+    about: 'the run-on-windows WCO rig\'s fixture contraption (open, at port $WCO_FIXTURE_PORT) and a minion with an artifact',
+    seed(c) {
+      const port = Number(process.env.WCO_FIXTURE_PORT) || 1;
+      // Open paths only, so the identity keys are never used: placeholders, not a real key pair.
+      if (c.store.getContraption('wco-fixture')) c.store.updateContraption('wco-fixture', { port });
+      else c.store.createContraption({ name: 'wco-fixture', title: 'WCO fixture', icon: null, port, home_scheme: c.project.id, open_paths: '["/"]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: '', identity_private: '', key_hash: `wco-fixture-${hex()}`, keys_at: Date.now() });
+      const t = minion(c, 'WCO rig artifact');
+      const page = '<!doctype html><title>WCO artifact</title><p>An artifact under the frame.</p>';
+      const file = join(t.cwd!, 'wco-artifact.html');
+      writeFileSync(file, page);
+      // Linked in a reply too, so the artifact scan keeps it.
+      chat(c, t, 1).said(`[The artifact](${file})`);
+      c.store.syncArtifacts(t, [{ path: 'wco-artifact.html', size: page.length, mtime: Date.now() }]);
+      return `#/p/${c.project.id}`;
+    },
+  },
   'inbox-full': {
     about: 'a Needs-you inbox of 25 minions waiting on people, enough to scroll it open (#668)',
     seed(c) {

@@ -1,6 +1,6 @@
 ---
 name: run-on-windows
-description: Run a test, a command or the app on the shared Windows test box and get the output and a screenshot back in minutes, outside the CI queue. Use when a native-app change needs proof on real Windows (a window, an overlay, capture, DPI, rounded corners) before or instead of waiting on CI, or to see what the app looks like.
+description: Run a test, a command or the app on the shared Windows test box and get the output and a screenshot back in minutes, outside the CI queue. Use when a native-app change needs proof on real Windows (a window, an overlay, capture, DPI, rounded corners) before or instead of waiting on CI, to see what the app looks like, or to test Citadel as an installed app (title bar overlay, drag regions, top bar clicks).
 ---
 
 # Run on Windows
@@ -37,6 +37,36 @@ Citadel's `tools/win-test-box/README.md`.
    - `stop_job {id}` closes it and frees the screen. Always stop what you launched: until you do,
      it holds the screen for everyone, for up to 30 minutes.
 7. **Files the tests wrote** (their own screenshots, logs) come back with `fetch_file`.
+
+**A rig you build stays.** Commit a reusable test rig you build for the box (scripts, a driver, a fixture
+page) under this skill's `scripts/`, with a line here, so the next minion starts from it.
+
+## Citadel as an installed app (WCO)
+
+For a Citadel change that only shows in the installed desktop app with the title bar overlay (WCO) on: drag
+regions, clicks in the top bar, a framed contraption's `.cui-topbar`. Emulation on perigee can't hit-test drag
+regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s header lists its commands):
+- an empty-data dev copy of your worktree, with a fixture contraption (`wco-fixture`, served from `fixture/`);
+- a driver on the box that installs it as an Edge app and runs checks with real mouse clicks and drags,
+  sending back PASS/FAIL lines and a screenshot of the window.
+
+1. **Up**, from your worktree: `node kit/skills/run-on-windows/scripts/wco/rig.ts up`. It prints two
+   `run_task` lines for the box: the driver (`run`) and the cleanup (`build`).
+2. **Driver:** run the `run` line. It stays running, holding the screen, until `down`. Then
+   `node …/rig.ts status` until `ready` is true; installing takes about 20 s.
+3. **Check:** `node …/rig.ts run topbar` runs #667's check over a scheme page, a page with Citadel's own
+   `.topbar` and an artifact page. Every bar button clicks, the empty bar drags the window, and ‹ › × work.
+   It exits 1 on any FAIL; the shots land in `$TMPDIR/wco-rig/shots/`.
+   - A new check is a file in `checks/`, using `checks/lib.js`'s helpers (`openFixture`, `click`, `drag`,
+     `expect`, `snap`).
+   - A new fixture page is a file in `fixture/`, opened with `openFixture('<file>')`.
+   - `rig.ts js '<code>'` runs one snippet in the app window.
+4. **After editing `public/`:** `node …/rig.ts reload`. The dev copy reads assets at boot.
+5. **Clean up:** `node …/rig.ts down`, then run the `build` line. It removes the installed test apps, their
+   shortcuts, uninstall entries and the temp profile. The rig never touches the box's workspace checkout.
+
+Use Edge, which the driver does. Chrome for Testing is a dead end: its app window never offers the overlay. A
+CDP `PWA.install` opens in a tab, so the driver installs through Edge's own address-bar chip and dialog.
 
 ## What you get back
 

@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- The WCO rig's fixture contraption: a real .cui-topbar with buttons spread out, an empty middle to drag by, a
+     late-shown button, and a click log (window.clicks) the checks read. Another page for a new bug: copy this file
+     into fixture/ under a new name, change the bar, and open it with openFixture('<name>.html'). -->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WCO fixture</title>
+<link rel="stylesheet" href="/apps/_citadel/theme.css">
+<link rel="stylesheet" href="/apps/_citadel/ui/base.css">
+<script type="module" src="/apps/_citadel/rail.js"></script>
+</head><body style="margin:0">
+<header class="cui-topbar">
+  <h1>Fixture</h1>
+  <button id="b1" class="cui-btn cui-small" type="button">Left</button>
+  <span style="flex:1"></span>
+  <button id="b2" class="cui-btn cui-small" type="button">Icons</button>
+  <button id="b3" class="cui-btn cui-small" type="button">Packs</button>
+  <button id="b4" class="cui-btn cui-small" type="button">Setup</button>
+  <button id="late" class="cui-btn cui-small" type="button" hidden>Restart</button>
+  <button id="pc" class="cui-btn cui-small" type="button">PC</button>
+</header>
+<main style="padding:2rem"><button id="body" type="button">Body button</button><pre id="log"></pre></main>
+<script>
+window.clicks = [];
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b) { clicks.push(b.id); document.getElementById('log').textContent = clicks.join(' '); }
+});
+</script>
+</body></html>

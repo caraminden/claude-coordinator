@@ -50,8 +50,8 @@
 .thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
 .thread-row:hover { border-color: var(--line); }
 .thread-row.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
-/* The Taskmaster's row sits on its chat's violet ground (Josh, 2026-11-13: "use the purple background like its chat
-   background"), selected or not: the accent border marks it selected, and its pills mix onto the violet. */
+/* The Taskmaster's row sits on a violet ground (Josh, 2026-11-13; kept when its chat went plain, Cara, 2026-11-14:
+   "Keep it violet"), selected or not: the accent border marks it selected, and its pills mix onto the violet. */
 .thread-row.coordinator { --panel: var(--tm-bg); background: var(--tm-bg); }
 /* State colour families, one meaning each (sidebar.js rowState): you act, done, broken, working, waiting on the clock or elsewhere, asleep. */
 .f-you { --c: var(--waiting); --t: var(--waiting-tint); }

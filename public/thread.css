@@ -377,6 +377,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
    muted text at 4.5:1 in both modes. --chat-tone is the chat's agent, for other surfaces to follow. */
 .chat { --chat-tone: var(--accent); }
 .chat.role-taskmaster { --chat-tone: var(--held); }
+/* The Taskmaster's row in the minions list keeps a violet ground (Cara, 2026-11-14: "Keep it violet"). */
 :root { --tm-bg: color-mix(in srgb, var(--held) 8%, var(--bg)); }
 @media (prefers-color-scheme: dark) { :root { --tm-bg: color-mix(in srgb, var(--held) 12%, var(--bg)); } }
 .msg:is(.reply, .narration) { --tone: var(--chat-tone, var(--accent)); }
@@ -386,11 +387,8 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 /* Dark needs more to show: 12%, and violet 14%, the most that keeps muted text at 4.5:1. */
 @media (prefers-color-scheme: dark) { .msg { --tint: 12%; } .chat.role-taskmaster .msg:is(.reply, .narration), .msg.from-tm { --tint: 14%; } }
 .msg:is(.reply, .narration, .from-tm, .from-minion) { background: color-mix(in srgb, var(--tone) var(--tint), var(--panel)); border-color: color-mix(in srgb, var(--tone) 30%, var(--line)); }
-/* Fork 1 take A: a relayed message is dashed, in its sender's colour. */
-html:not(.take-b) .msg.user:is(.from-tm, .from-minion) { border-style: dashed; border-color: color-mix(in srgb, var(--tone) 60%, var(--line)); }
-/* Fork 1 take B: a relayed message is plain, with its sender's colour as a stripe down its left edge. */
-html.take-b .msg.user:is(.from-tm, .from-minion) { background: var(--panel); border-color: var(--line); border-left: 3px solid var(--tone); border-radius: 3px 10px 10px 3px; }
-html.take-b .msg.user:is(.from-tm, .from-minion) .who > .name { color: var(--tone); font-weight: 600; }
+/* A relayed message is dashed (Cara, 2026-11-14, picked "A: Sender's tint, dashed"), so it reads apart from the agent's own replies. */
+.msg.user:is(.from-tm, .from-minion) { border-style: dashed; border-color: color-mix(in srgb, var(--tone) 60%, var(--line)); }
 /* A dismissed minion's message box is tinted grey, so it reads as dismissed before you type. */
 .chat.dismissed .composer textarea { background: color-mix(in srgb, var(--closed) 18%, var(--panel)); border-color: color-mix(in srgb, var(--closed) 45%, var(--control-line)); }
 

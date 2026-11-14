@@ -161,7 +161,7 @@ summary { --tap-pad: max(0px, (24px - 1lh) / 2); padding-block: var(--tap-pad); 
 #me { color: var(--muted); font-size: 0.9em; }
 #me button { margin-left: 0.5rem; padding: 0.2rem 0.6rem; font-size: 0.85em; }
 
-/* --main-pad-l/-r are its side pads, for a surface that reaches over them to the window's edge (the Taskmaster's purple). */
+/* --main-pad-l/-r are its side pads, for a surface that reaches over them to the window's edge. */
 main { --main-pad-l: 1rem; --main-pad-r: 1rem; max-width: 1200px; margin: 0 auto; padding: 1.25rem var(--main-pad-r) 3rem var(--main-pad-l); }
 /* Installed as an app (home screen or desktop window): keep clear of side notches in landscape and
    fill the window. Browser tabs keep the layout above unchanged. */

@@ -13,6 +13,7 @@ import { createHash, createPublicKey, verify, randomBytes, type JsonWebKey } fro
 import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, readdir, realpath, rename, rm, rmdir } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
+import { finished } from 'node:stream/promises';
 import { basename, dirname, join } from 'node:path';
 import type { CiFile, Project, Store } from './db.ts';
 import { HttpError } from './http.ts';
@@ -314,8 +315,11 @@ export class CiStore {
           }
         });
         req.on('end', () => out.end(resolve));
-      }).catch((err) => {
+      }).catch(async (err) => {
         out.destroy();
+        // A refusal can come before the part file's open has finished: wait for it to close, or the rm below runs
+        // first and the open then makes a part file nothing removes until the hourly stray sweep (#691).
+        await finished(out).catch(() => {});
         throw err;
       });
       if (declared !== size) throw new HttpError(400, 'The upload stopped part-way');

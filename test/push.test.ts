@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store, type Ticket } from '../src/db.ts';
-import { Pusher, encryptPayload, loadVapidKeys, notificationFor, validSubscription, vapidJwt } from '../src/push.ts';
+import { Pusher, type PushTrigger, encryptPayload, loadVapidKeys, notificationFor, validSubscription, vapidJwt } from '../src/push.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'push-'));
@@ -303,5 +303,64 @@ test('a card addressed to one person pings only their devices (#687)', async () 
   sent.length = 0;
   await pusher.notify(t, { kind: 'question', questions: [{ question: 'Anyone?' }] });
   assert.deepEqual(sent.map((url) => url.split('/').pop()).sort(), ['Cara', 'Cody', 'Josh'], 'a card to everyone still pings everyone');
+  store.db.close();
+});
+
+test('a minion with an owner pings its owner, whoever pinned it and devices set to everything; no owner pings everyone (#690)', async () => {
+  // Cara, 2026-11-14: "Owner only, switch for all".
+  const store = new Store(join(root, 'owner.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara' });
+  const p = store.createProject('P', null, cara.id);
+  const q = store.createProject('Q', null, cara.id);
+  for (const name of ['Josh', 'Cody', 'Ada']) {
+    const u = store.createUser({ name, login: name.toLowerCase() });
+    store.addMember(p.id, u.id);
+    store.addMember(q.id, u.id);
+  }
+  const mk = (title: string, assigned?: string, kind: 'ticket' | 'coordinator' = 'ticket') => {
+    const t = store.createTicket({ project_id: p.id, title, permission_mode: 'default', created_by: 'Cara', kind });
+    if (assigned) store.props.set('minion', t.id, p.id, { assigned }, 'Cara');
+    return t;
+  };
+  for (const name of ['Cara', 'Josh', 'Cody', 'Ada']) {
+    const b = browser(`https://push.example/${name}`);
+    store.savePushSubscription(name, b.endpoint, b.p256dh, b.auth);
+  }
+  store.setPushEverything('https://push.example/Cody', [p.id]);
+  store.setPushEverything('https://push.example/Ada', [q.id]); // everything, but in another scheme
+  const sent: string[] = [];
+  const fakeFetch = (async (url: string) => (sent.push(url), new Response('', { status: 201 }))) as unknown as typeof fetch;
+  const pusher = new Pusher(store, loadVapidKeys(root), fakeFetch);
+  const who = async (t: Ticket, trigger: PushTrigger = { kind: 'state', state: 'ready', note: 'done' }) => {
+    sent.length = 0;
+    await pusher.notify(t, trigger);
+    return sent.map((url) => url.split('/').pop()).sort();
+  };
+
+  const joshs = mk('Josh\'s', 'Josh');
+  assert.deepEqual(await who(joshs), ['Cody', 'Josh'], 'the owner and the everything device');
+  assert.deepEqual(await who(joshs, { kind: 'error', text: 'boom' }), ['Cody', 'Josh'], 'a failed turn too');
+  assert.deepEqual(await who(joshs, { kind: 'question', questions: [{ question: 'Which?' }] }), ['Cody', 'Josh'], 'a card to no one in particular too');
+  assert.deepEqual(await who(joshs, { kind: 'question', questions: [{ question: 'Ada?' }], to: 'Ada' }), ['Ada'], 'a card to Ada goes to her alone');
+  store.setTicketPinned('Ada', joshs.id, true);
+  assert.deepEqual(await who(joshs), ['Ada', 'Cody', 'Josh'], 'pinning follows a minion');
+  // Stored by login, any case, it still finds him.
+  assert.deepEqual(await who(mk('By login', 'JOSH')), ['Cody', 'Josh']);
+  // No owner, the Taskmaster, and an owner who left the scheme: everyone, as before.
+  const all = ['Ada', 'Cara', 'Cody', 'Josh'];
+  assert.deepEqual(await who(mk('Nobody\'s')), all);
+  assert.deepEqual(await who(mk('Taskmaster', 'Josh', 'coordinator')), all);
+  assert.deepEqual(await who(mk('Gone', 'Someone')), all, 'an owner who is nobody here');
+  const leaving = mk('Leaving', 'Josh');
+  store.removeMember(p.id, store.findUser('name', 'Josh')!.id);
+  assert.deepEqual(await who(leaving), ['Ada', 'Cara', 'Cody']);
+  // The everything switch is per scheme and resets when someone else signs in on the device.
+  store.addMember(p.id, store.findUser('name', 'Josh')!.id);
+  store.setPushEverything('https://push.example/Cody', []);
+  assert.deepEqual(await who(joshs), ['Ada', 'Josh']);
+  store.setPushEverything('https://push.example/Josh', [p.id]);
+  const b = browser('https://push.example/Josh');
+  store.savePushSubscription('Cara', b.endpoint, b.p256dh, b.auth);
+  assert.equal(store.getPushSubscription(b.endpoint)!.everything, '[]');
   store.db.close();
 });

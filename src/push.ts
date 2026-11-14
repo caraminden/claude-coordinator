@@ -183,19 +183,32 @@ export class Pusher {
   }
 
   /**
-   * Tell everyone in the ticket's project (its owner and members) who subscribed, or only a card's addressee, except `except` (the person who caused it),
-   * devices that muted the project, people who hid it (#226), and pinned-only devices whose person hasn't pinned this minion
-   * (the Taskmaster can't be pinned, so it always gets through). Resolves once every push service has answered.
+   * Tell the people a ping is for who subscribed, except `except` (the person who caused it), devices that muted the
+   * project, people who hid it (#226), and pinned-only devices whose person hasn't pinned this minion (the Taskmaster
+   * can't be pinned, so it always gets through). Who it is for: a card's addressee alone (#687); else for a minion with an
+   * owner (`assigned`, #690; Cara, 2026-11-14: "Owner only, switch for all"), its owner, whoever pinned it, and devices
+   * set to everything in this scheme; else (the Taskmaster, an unassigned minion, an owner gone from the scheme) everyone
+   * in it. Resolves once every push service has answered.
    */
   async notify(ticket: Ticket, trigger: PushTrigger, except: string | null = null): Promise<void> {
     const project = this.store.getProject(ticket.project_id);
     const msg = notificationFor(ticket, trigger, project?.name);
     if (!msg) return;
-    // A card addressed to one person (#687) goes to their devices only.
     const to = 'to' in trigger && trigger.to ? trigger.to.toLowerCase() : null;
-    const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && (!to || s.name.toLowerCase() === to) && !JSON.parse(s.muted).includes(ticket.project_id)
-      && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || this.store.isTicketPinned(s.name, ticket.id)));
+    const owner = !to && ticket.kind === 'ticket' ? this.owner(ticket) : null;
+    const pinned = (name: string) => this.store.isTicketPinned(name, ticket.id);
+    const forThem = (s: PushSubscriptionRow) => to ? s.name.toLowerCase() === to
+      : !owner || s.name.toLowerCase() === owner || pinned(s.name) || JSON.parse(s.everything).includes(ticket.project_id);
+    const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && forThem(s) && !JSON.parse(s.muted).includes(ticket.project_id)
+      && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || pinned(s.name)));
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
+  }
+
+  /** A minion's owner's name, lowercased, while they're still in its scheme; null for none, so everyone hears (a missed ping is worse than an extra one). */
+  private owner(ticket: Ticket): string | null {
+    const raw = String(this.store.props.forTarget('minion', ticket.id).assigned ?? '').trim();
+    const name = raw && (this.store.props.personName(raw) ?? raw);
+    return name && this.inScheme(name, ticket.project_id) ? name.toLowerCase() : null;
   }
 
   /**

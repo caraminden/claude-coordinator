@@ -6,7 +6,7 @@ import { HttpError, json, readJson, type App, type Ctx, type Route } from '../ht
 /** This browser's subscription as the account panel needs it. */
 const pushView = (app: App, endpoint: string) => {
   const row = app.store.getPushSubscription(endpoint);
-  return { subscribed: !!row, muted: row ? JSON.parse(row.muted) as number[] : [], onlyPinned: !!row?.only_pinned };
+  return { subscribed: !!row, muted: row ? JSON.parse(row.muted) as number[] : [], everything: row ? JSON.parse(row.everything) as number[] : [], onlyPinned: !!row?.only_pinned };
 };
 
 /** The subscription a request names, unless it is someone else's (only its own person may see or change it). */
@@ -17,7 +17,7 @@ async function named({ req, app, session }: Ctx) {
   return { body, endpoint, row, theirs: !!row && row.name !== session.name };
 }
 
-const notTheirs = { subscribed: false, muted: [], onlyPinned: false };
+const notTheirs = { subscribed: false, muted: [], everything: [], onlyPinned: false };
 const people = { who: ['person'], refuse: 'Only people get notifications' } as const;
 
 export const pushRoutes: Route[] = [
@@ -51,12 +51,19 @@ export const pushRoutes: Route[] = [
       const { body, endpoint, row, theirs } = await named(ctx);
       if (theirs) return json(res, 200, notTheirs);
       if (!row) throw new HttpError(404, 'This browser is not subscribed');
-      // Either the device's pinned-only choice, or a mute for one scheme.
+      // The device's pinned-only choice, its everything-in-this-scheme choice (#690), or a mute for one scheme.
       if (typeof body.onlyPinned === 'boolean') {
         app.store.setPushOnlyPinned(endpoint, body.onlyPinned);
         return json(res, 200, pushView(app, endpoint));
       }
       const projectId = Number(body.projectId);
+      if (typeof body.everything === 'boolean') {
+        const all = new Set<number>(JSON.parse(row.everything));
+        if (body.everything) all.add(projectId);
+        else all.delete(projectId);
+        app.store.setPushEverything(endpoint, [...all].filter((id) => app.store.getProject(id)));
+        return json(res, 200, pushView(app, endpoint));
+      }
       const muted = new Set<number>(JSON.parse(row.muted));
       if (body.muted) muted.add(projectId);
       else muted.delete(projectId);

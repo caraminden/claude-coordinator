@@ -295,6 +295,8 @@ export interface PushSubscriptionRow {
   muted: string;
   /** 1: only minions this device's person pinned (#198); 0: every minion that needs them. */
   only_pinned: number;
+  /** JSON list of project ids where this device hears every minion, not only its person's own (#690). */
+  everything: string;
   created_at: number;
 }
 
@@ -637,7 +639,8 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   auth TEXT NOT NULL,
   muted TEXT NOT NULL DEFAULT '[]',
   created_at INTEGER NOT NULL,
-  only_pinned INTEGER NOT NULL DEFAULT 0
+  only_pinned INTEGER NOT NULL DEFAULT 0,
+  everything TEXT NOT NULL DEFAULT '[]'
 );
 -- Each person's own saved views (#194), keyed by name like ticket_pins. saved_views, the shared ones
 -- before it, moves in at start: see Store.moveSharedViews.
@@ -935,6 +938,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
   ['contraptions', 'folder', 'ALTER TABLE contraptions ADD COLUMN folder TEXT'],
   ['push_subscriptions', 'only_pinned', 'ALTER TABLE push_subscriptions ADD COLUMN only_pinned INTEGER NOT NULL DEFAULT 0'],
+  ['push_subscriptions', 'everything', "ALTER TABLE push_subscriptions ADD COLUMN everything TEXT NOT NULL DEFAULT '[]'"],
 ];
 
 /**
@@ -990,6 +994,7 @@ export const SCHEMA_HISTORY = [
   [46, 'apk_publishes (#663)'],
   [47, 'projects.ci_quiet (#678)'],
   [48, 'personal_instructions (#688)'],
+  [49, 'push_subscriptions.everything (#690)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2629,7 +2634,8 @@ export class Store {
         `INSERT INTO push_subscriptions (name, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
            muted = CASE WHEN name = excluded.name THEN muted ELSE '[]' END,
-           only_pinned = CASE WHEN name = excluded.name THEN only_pinned ELSE 0 END, name = excluded.name`,
+           only_pinned = CASE WHEN name = excluded.name THEN only_pinned ELSE 0 END,
+           everything = CASE WHEN name = excluded.name THEN everything ELSE '[]' END, name = excluded.name`,
       )
       .run(name, endpoint, p256dh, auth, Date.now());
     return this.getPushSubscription(endpoint)!;
@@ -2637,6 +2643,10 @@ export class Store {
 
   setPushMuted(endpoint: string, muted: number[]) {
     this.db.prepare('UPDATE push_subscriptions SET muted = ? WHERE endpoint = ?').run(JSON.stringify(muted), endpoint);
+  }
+
+  setPushEverything(endpoint: string, projectIds: number[]) {
+    this.db.prepare('UPDATE push_subscriptions SET everything = ? WHERE endpoint = ?').run(JSON.stringify(projectIds), endpoint);
   }
 
   setPushOnlyPinned(endpoint: string, onlyPinned: boolean) {

@@ -37,7 +37,8 @@ export function refreshSchemeCounts() {
       // A favicon a merge added or changed since the page drew it.
       for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
     }
-    renderInbox();
+    // Refetch, not just redraw: another scheme's minion dismissed or reopened takes its cards addressed to you (#687) with it.
+    refreshInbox();
   }, () => {});
 }
 

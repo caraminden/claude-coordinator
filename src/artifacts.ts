@@ -88,10 +88,13 @@ export function listable(path: string): boolean {
 }
 
 const MEDIA = new Set<FileKind>(['image', 'video', 'audio']);
-/** What the Files view lists from a scheme's shared folder (#676): artifacts, and pictures, clips and sound too; never code or data. */
+/**
+ * What the Files view lists from a scheme's shared folder (#676): artifacts, and pictures, clips and sound too; never code
+ * or data, except in inbox/, where people's uploads land, so a text file someone dropped there doesn't vanish from the list.
+ */
 export function sharedListable(path: string): boolean {
   const t = fileType(path);
-  return !!t && (!!t.artifact || MEDIA.has(t.kind)) && !hidden(path);
+  return !!t && (!!t.artifact || MEDIA.has(t.kind) || path.startsWith('inbox/')) && !hidden(path);
 }
 
 /** The most files the shared folder's list holds: Delve's held about 3,300 in November 2026. */
@@ -144,15 +147,12 @@ async function walk(cwd: string, keep: (path: string) => boolean, max: number): 
 export async function findArtifacts(cwd: string, isGit: boolean, keep = listable, max = MAX_FILES): Promise<FoundArtifact[]> {
   if (!cwd) return [];
   const paths = (isGit ? (await gitAdded(cwd)).filter(keep) : await walk(cwd, keep, max)).slice(0, max);
+  // lstat so a symlink pointing elsewhere on disk never becomes an artifact; null when deleted between listing and stat.
+  const stat = (path: string) => lstat(join(cwd, path)).then((st) => (st.isFile() ? { path, size: st.size, mtime: Math.round(st.mtimeMs) } : null), () => null);
   const found: FoundArtifact[] = [];
-  for (const path of paths) {
-    try {
-      // lstat so a symlink pointing elsewhere on disk never becomes an artifact.
-      const st = await lstat(join(cwd, path));
-      if (st.isFile()) found.push({ path, size: st.size, mtime: Math.round(st.mtimeMs) });
-    } catch {
-      // Deleted between listing and stat.
-    }
+  // A batch at a time: one by one, Delve's 3,400 shared files took 750 ms a scan (#676).
+  for (let i = 0; i < paths.length; i += 64) {
+    for (const f of await Promise.all(paths.slice(i, i + 64).map(stat))) if (f) found.push(f);
   }
   return found;
 }

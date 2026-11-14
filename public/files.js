@@ -5,12 +5,15 @@
 import { ago, fileExt, fileKind, formatSize, h, sharedHref, sharedUrl, threadLabel, view } from './base.js';
 import { pinButton, previewBody } from './artifacts.js';
 import { optimistic } from './ui/optimistic.js';
+import { toast } from './ui/status.js';
 
 /** Folders the README names, in its order; the rest follow by name, then the top level. */
 const ORDER = ['inbox', 'handoffs', 'reports', 'specs', 'mockups'];
 /** Folders tooling writes (the retro log, rule drafts): kept out of All and its sections, still a folder of their own. */
 const TOOLING = new Set(['retro-log', 'rule-drafts']);
 const TOP = '';
+// What the server lists (sharedListable in src/artifacts.ts): any known kind in inbox/, else no code or data.
+const listed = (path) => (path.startsWith('inbox/') ? !!fileKind(path) : !!fileKind(path) && fileKind(path) !== 'text');
 const MINIONS = '@minions';
 const SECTION = 5; // files each folder shows on All
 const PAGE = 200; // rows a folder or search draws before "Show more"
@@ -104,7 +107,7 @@ export function filesView(folder) {
 }
 
 function searchBox() {
-  const input = h('input', { type: 'search', id: 'files-search', placeholder: 'Search names, folders and minions…', autocomplete: 'off', value: state().q });
+  const input = h('input', { type: 'search', id: 'files-search', placeholder: 'Search names, folders and minions…', 'aria-label': 'Search files', autocomplete: 'off', value: state().q });
   input.addEventListener('input', () => {
     Object.assign(state(), { q: input.value, limit: PAGE });
     renderFiles();
@@ -142,7 +145,7 @@ export function renderFiles() {
     f.minions ? railButton(MINIONS, f.n.get(MINIONS)) : '',
     f.tooling.length ? h('h5', {}, 'Tooling') : '',
     ...f.tooling.map((k) => railButton(k, f.n.get(k))));
-  document.getElementById('files-chips').replaceChildren(...['all', ...(pinned ? ['pinned'] : []), ...f.shared, ...(f.minions ? [MINIONS] : [])].map((k) =>
+  document.getElementById('files-chips').replaceChildren(...['all', ...(pinned ? ['pinned'] : []), ...f.shared, ...(f.minions ? [MINIONS] : []), ...f.tooling].map((k) =>
     h('button', { type: 'button', class: `chip${s.sel === k && !terms.length ? ' on' : ''}`, onclick: () => choose(k) }, label(k), h('span', { class: 'count' }, k === 'all' ? total : k === 'pinned' ? pinned : f.n.get(k)))));
 
   const title = terms.length ? 'Search' : label(s.sel);
@@ -319,8 +322,9 @@ function upload(file, folder) {
     },
   }).then((saved) => {
     s.pending = s.pending.filter((x) => x !== p);
+    if (!listed(saved.path)) toast(`Uploaded ${saved.path}. Minions can read it, but this view lists only docs, pages, pictures, clips, sound and archives outside inbox/.`, { ms: 10000 });
     // Listed now, as the server will list it; the shared folder's next scan brings the same row.
-    if (view.projectId === projectId && !view.shared?.some((f) => f.path === saved.path)) {
+    else if (view.projectId === projectId && !view.shared?.some((f) => f.path === saved.path)) {
       view.shared = [{ path: saved.path, name: saved.name, kind: fileKind(saved.name) ?? 'text', display_path: `scheme shared/${saved.path}`, size: saved.size, mtime: saved.mtime, pinned_at: null, pinned_by: null, missing: 0 }, ...(view.shared ?? [])];
     }
     redraw();

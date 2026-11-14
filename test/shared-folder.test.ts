@@ -107,9 +107,11 @@ test('the Shared group lists documents and pages only', async () => {
 
 test('the Files view also lists pictures, clips and sound from the shared folder, never code, data or hidden folders (#676)', async () => {
   mkdirSync(join(shared, '.cache'), { recursive: true });
-  for (const f of ['clip.mp4', 'theme.mp3', 'mockkit.js', '.cache/old.png']) writeFileSync(join(shared, f), 'x');
+  mkdirSync(join(shared, 'inbox'), { recursive: true });
+  for (const f of ['clip.mp4', 'theme.mp3', 'mockkit.js', '.cache/old.png', 'inbox/log.txt', 'inbox/fixture.json']) writeFileSync(join(shared, f), 'x');
   const found = await findArtifacts(shared, false, sharedListable, MAX_SHARED_FILES);
-  assert.deepEqual(found.map((f) => f.path).sort(), ['clip.mp4', 'handoff.md', 'notes/design.html', 'shot.png', 'theme.mp3']);
+  // inbox/ also lists the text and data people upload there.
+  assert.deepEqual(found.map((f) => f.path).sort(), ['clip.mp4', 'handoff.md', 'inbox/fixture.json', 'inbox/log.txt', 'notes/design.html', 'shot.png', 'theme.mp3']);
 });
 
 test('the walk counts only the files it keeps toward its cap, so a folder full of other files hides none', async () => {

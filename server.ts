@@ -36,6 +36,7 @@ import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, SE
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
 import { CiStore } from './src/ci-store.ts';
+import { CiMirror, ghDownload } from './src/ci-mirror.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
@@ -479,9 +480,11 @@ const tellHome = (projectId: number, text: string) => {
 };
 // The workflow readers go through CI health's etag-cached reads (defined below; first called after startup's scan).
 const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r), runArtifacts: (p: Project, r: Run) => ciHealth.runArtifacts(p, r) };
-const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions });
+// A shipped run's GitHub artifact, copied into the CI store so its release links a file on perigee (#673).
+const ciMirror = new CiMirror(ciStore, ghDownload((p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined)));
+const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror });
 const apkReader = new ApkReader({
-  store, finder: targetFinder, actions,
+  store, finder: targetFinder, actions, mirror: ciMirror,
   feed: async (name) => {
     const file = join(services.opts.home, '.local/share', name, 'android', 'latest.json');
     try {
@@ -507,7 +510,7 @@ const mainReader = new MainReader({ ...prDeps, finder: targetFinder });
 const prsInFlight = new PrsInFlight(prDeps);
 // The other test copies (#627): minions' downloads, preview sites and debug APKs, read with the targets on the slow poll.
 const testCopyReader = new TestCopyReader({
-  store, finder: targetFinder, actions, sharedDir,
+  store, finder: targetFinder, actions, mirror: ciMirror, sharedDir,
   listening: (port) => new Promise((done) => {
     const s = createConnection({ host: '127.0.0.1', port, timeout: 500 }, () => (s.destroy(), done(true)));
     s.on('error', () => done(false)).on('timeout', () => (s.destroy(), done(false)));

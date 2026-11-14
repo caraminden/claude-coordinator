@@ -129,11 +129,10 @@ export type CopySource =
 /** A scheme's test-copy sources, beside its targets `found`: a debug APK workflow, and a script that runs a preview site on a port. */
 export function copySources(f: SchemeFacts, found: Found[]): CopySource[] {
   const out: CopySource[] = [];
-  const slug = repoSlug(f.project.repo_url);
   for (const w of f.workflows) {
     if (!/assembleDebug|bundleDebug/.test(w.text) || /assembleRelease|bundleRelease/.test(w.text) || shipsOn(w.text, f.branch) !== 'push') continue;
     const file = w.path.replace(/^.*\//, '');
-    const run: Found = { projectId: f.project.id, branch: f.branch, id: `debug:${file.replace(/\.ya?ml$/, '')}`, kind: 'apk', name: 'Debug APK', link: slug ? `https://github.com/${slug}/actions/workflows/${file}` : null, workflow: w.path };
+    const run: Found = { projectId: f.project.id, branch: f.branch, id: `debug:${file.replace(/\.ya?ml$/, '')}`, kind: 'apk', name: 'Debug APK', link: null, workflow: w.path };
     out.push({ kind: 'debug-apk', projectId: f.project.id, target: found.find((t) => t.kind === 'apk')?.id ?? null, run });
   }
   for (const s of f.scripts ?? []) {
@@ -235,16 +234,15 @@ export function detect(f: SchemeFacts): Found[] {
     const on = shipsOn(w.text, f.branch);
     if (!on) continue;
     const file = w.path.replace(/^.*\//, '');
-    const actions = slug ? `https://github.com/${slug}/actions/workflows/${file}` : null;
     // A release APK (a debug build is a test copy): started by hand is how people make one.
     if (/assembleRelease|bundleRelease/.test(w.text)) {
       const feed = feeds.shift();
-      out.push({ ...base, id: `apk:${file.replace(/\.ya?ml$/, '')}`, kind: 'apk', name: 'Android', link: feed ? `/apps/${feed}/android/` : actions, workflow: w.path, ...(feed ? { contraption: feed } : {}) });
+      out.push({ ...base, id: `apk:${file.replace(/\.ya?ml$/, '')}`, kind: 'apk', name: 'Android', link: feed ? `/apps/${feed}/android/` : null, workflow: w.path, ...(feed ? { contraption: feed } : {}) });
       continue;
     }
     if (on !== 'push') continue;
     for (const [id, job] of jobsOf(w.text)) {
-      if (shipsPackage(id, job)) out.push({ ...base, id: `ci:${file.replace(/\.ya?ml$/, '')}:${id}`, kind: 'ci', name: platform(w.path, w.text, job), link: actions, workflow: w.path, job: id, jobName: jobName(job) ?? id });
+      if (shipsPackage(id, job)) out.push({ ...base, id: `ci:${file.replace(/\.ya?ml$/, '')}:${id}`, kind: 'ci', name: platform(w.path, w.text, job), link: null, workflow: w.path, job: id, jobName: jobName(job) ?? id });
     }
   }
   for (const feed of feeds) out.push({ ...base, id: `apk:${feed}`, kind: 'apk', name: 'Android', link: `/apps/${feed}/android/`, contraption: feed });
@@ -266,7 +264,7 @@ export function detect(f: SchemeFacts): Found[] {
   // Two of one platform keep apart by their job.
   for (const t of out) if (t.kind === 'ci' && out.some((o) => o !== t && o.name === t.name)) t.name = `${t.name} (${t.job})`;
   // Main only where nothing else ships what lands there (Josh's "everything": every scheme's work reaches people somehow).
-  if (!out.length && !f.own) out.push({ ...base, id: 'main', kind: 'main', name: 'Main', link: slug ? `https://github.com/${slug}/commits/${f.branch}` : null });
+  if (!out.length && !f.own) out.push({ ...base, id: 'main', kind: 'main', name: 'Main', link: null });
   const kept: Found[] = [];
   for (const t of out) {
     const o = f.overrides.find((x) => x.id === t.id);

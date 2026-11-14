@@ -399,7 +399,8 @@ function copyLink(c) {
     case 'download': return [h('a', { href: `${fileUrl(c.ticketId, c.file)}&download`, download: '' }, c.name), [h('a', { href: minionHref(null, { ticketId: c.ticketId }) }, `#${c.number}`), ` · ${ago(c.at)}`]];
     // The host people reached Citadel on, which reaches the site too (both on the tailnet).
     case 'site': return [h('a', { href: `${location.protocol}//${location.hostname}:${c.port}/`, ...tab }, `${c.name} (port ${c.port})`), c.running ? 'up' : 'down'];
-    case 'debug-apk': return [h('a', { href: c.link, ...tab }, `Debug APK, ${c.name}`), made];
+    // Linked only to its file on perigee (#673): until it is mirrored, just its name.
+    case 'debug-apk': return [c.link ? h('a', { href: c.link, ...tab }, `Debug APK, ${c.name}`) : h('span', {}, `Debug APK, ${c.name}`), made];
     case 'build-preview': return [h('a', { href: `../${c.path}`, ...tab }, `${c.name} standing preview`), state];
     default: return [h('a', { href: `../${c.path}`, ...tab }, `Preview of ${c.name}`), state];
   }

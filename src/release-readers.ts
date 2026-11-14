@@ -4,6 +4,8 @@ import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DeployView } from './app-services.ts';
 import type { Job, Run } from './ci-health.ts';
+import type { CiMirror } from './ci-mirror.ts';
+import type { Kind } from './ci-store.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
 import { CITADEL_TARGET, git, landedIn, releaseOf, type Change, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
@@ -175,6 +177,7 @@ export interface Artifact {
   name: string;
   expired: boolean;
   expires_at?: string | null;
+  size_in_bytes?: number;
 }
 
 /** GitHub Actions as the release monitor reads it: CiHealth's cached reads (src/ci-health.ts). */
@@ -185,18 +188,14 @@ export interface Actions {
 }
 
 /**
- * The download of what a run shipped: its artifact named for the repo ("peek-auras-<sha>", "mandate-release-apk"), or
- * its only one; null when it has none left (they expire), or several and none named so.
+ * What a run shipped, among its GitHub artifacts: the one named for the repo ("peek-auras-<sha>", "mandate-release-apk"),
+ * or its only one; null when it has none left (they expire), or several and none named so.
  */
-export function shippedFile(slug: string, run: Run, list: Artifact[]): ShippedFile | null {
+export function shippedArtifact(slug: string, list: Artifact[]): Artifact | null {
   const repo = slug.replace(/^.*\//, '').toLowerCase();
   const kept = list.filter((a) => !a.expired);
-  const a = kept.find((x) => x.name.toLowerCase().startsWith(repo)) ?? (kept.length === 1 ? kept[0] : undefined);
-  return a ? { url: `https://github.com/${slug}/actions/runs/${run.id}/artifacts/${a.id}`, expires: ms(a.expires_at) } : null;
+  return kept.find((x) => x.name.toLowerCase().startsWith(repo)) ?? (kept.length === 1 ? kept[0] : null);
 }
-
-/** A shipped run's download, and when GitHub drops it (the link is cached, so it goes back to the run page then). */
-export interface ShippedFile { url: string; expires: number | null }
 
 const ms = (s: string | null | undefined) => (s ? Date.parse(s) : null);
 const secs = (from: number | null, to: number | null) => (from != null && to != null ? Math.max(0, Math.round((to - from) / 1000)) : null);
@@ -229,14 +228,14 @@ const shipped = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ?
 /** A run that tried to ship and didn't: its job ran (not skipped) and failed. */
 const failedShip = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ? r.jobs[0].conclusion === 'failure' : r.run.conclusion === 'failure');
 
-/** A run as a release: linked to the file it shipped or else its run page (where its files are), with its CI and package times. */
+/** A run as a release: linked to the file it shipped when that is in Citadel's CI store (never GitHub, which members may have no access to, #673), with its CI and package times. */
 function runRelease(r: RunJobs, outcome: string, changes: Release['changes'] = [], file: string | null = null, number: number | null = null): Release {
   const s = span(r);
   const stages: Record<string, number> = {};
   const ci = secs(s.start, s.started), pkg = secs(s.started, s.end);
   if (ci != null) stages.ci = ci;
   if (pkg != null) stages.package = pkg;
-  return { version: r.run.head_sha, number, link: file ?? r.run.html_url ?? null, changes, started: s.start, live: outcome === 'live' ? s.end : null, outcome, stages };
+  return { version: r.run.head_sha, number, link: file, changes, started: s.start, live: outcome === 'live' ? s.end : null, outcome, stages };
 }
 
 /** The usual CI and package time of the newest shipped runs. */
@@ -259,6 +258,8 @@ export interface ActionsDeps {
   store: Store;
   finder: Pick<TargetFinder, 'list'>;
   actions: Actions;
+  /** Copies a shipped run's GitHub artifact into the CI store when its workflow didn't put it there (#673). */
+  mirror?: Pick<CiMirror, 'want'>;
   now?: () => number;
 }
 
@@ -269,14 +270,20 @@ class RunsCache {
   private readAt = new Map<string, number>();
   /** The minions in each run's commits since the shipped run before it, by run id. */
   changes = new Map<number, Release['changes']>();
-  /** The download of what each shipped run made (shippedFile), by run id; read once per run. */
-  file(id: number, now: number): string | null {
-    const f = this.files.get(id);
-    return f && (f.expires == null || f.expires > now) ? f.url : null;
+  /** The download of what each shipped run made, in Citadel's CI store, by run id: looked up each read, since the store sweeps. */
+  file(id: number): string | null {
+    return this.files.get(id) ?? null;
   }
-  files = new Map<number, ShippedFile | null>();
-  constructor(d: ActionsDeps) {
+  private files = new Map<number, string>();
+  /** The GitHub artifact each shipped run with nothing in the store has to mirror (null: none), by run id; listed once per run. */
+  private artifacts = new Map<number, Artifact | null>();
+  /** How many of the newest shipped runs get a download, and the store kind a mirrored one is filed as. */
+  private keep: number;
+  private kind: Kind;
+  constructor(d: ActionsDeps, keep = PREVIOUS + 1, kind: Kind = 'release') {
     this.d = d;
+    this.keep = keep;
+    this.kind = kind;
   }
 
   /** Read a target's runs again on the next refresh, moving or not (a run was just started for it). */
@@ -315,17 +322,28 @@ class RunsCache {
     const kept = new Set([...this.runs.values()].flat().map((r) => r.run.id));
     for (const id of this.changes.keys()) if (!kept.has(id)) this.changes.delete(id);
     for (const id of this.files.keys()) if (!kept.has(id)) this.files.delete(id);
+    for (const id of this.artifacts.keys()) if (!kept.has(id)) this.artifacts.delete(id);
     const slug = repoSlug(p.repo_url);
-    // The runs a page can show a download for: the newest few that shipped.
+    // The runs a page can show a download for: the newest few that shipped (a release target's current and Previous).
     // A run's build or release in Citadel's own CI store (#658) is its download, read each time since the store sweeps.
     const stored = this.d.store.ciFiles(p.id).filter((f) => f.kind !== 'report');
-    for (const r of out.filter(shipped).slice(0, PREVIOUS + 1)) { // the current and its Previous releases
+    for (const r of out.filter(shipped).slice(0, this.keep)) {
       const mine = stored.find((f) => f.run_id === r.run.id && f.kind === 'release') ?? stored.find((f) => f.run_id === r.run.id);
-      if (mine) this.files.set(r.run.id, { url: `/api/projects/${p.id}/ci-files/${mine.id}/${encodeURIComponent(mine.name)}`, expires: null });
-      else if (this.files.get(r.run.id)?.url.startsWith('/api/')) this.files.delete(r.run.id); // swept since
-      if (this.files.has(r.run.id) || !slug || !this.d.actions.runArtifacts) continue;
-      const list = await this.d.actions.runArtifacts(p, r.run);
-      if (list) this.files.set(r.run.id, shippedFile(slug, r.run, list));
+      if (mine) {
+        this.files.set(r.run.id, `/api/projects/${p.id}/ci-files/${mine.id}/${encodeURIComponent(mine.name)}`);
+        continue;
+      }
+      this.files.delete(r.run.id);
+      // Not in the store (its workflow uploads only to GitHub, or it was swept): mirror its artifact while GitHub keeps it.
+      if (!slug || !this.d.mirror || !this.d.actions.runArtifacts) continue;
+      if (!this.artifacts.has(r.run.id)) {
+        const list = await this.d.actions.runArtifacts(p, r.run);
+        if (!list) continue;
+        this.artifacts.set(r.run.id, shippedArtifact(slug, list));
+      }
+      const a = this.artifacts.get(r.run.id);
+      if (!a || (a.expires_at && Date.parse(a.expires_at) <= now)) continue;
+      this.d.mirror.want({ project: p, slug, run: r.run, artifact: a, workflow: t.workflow.replace(/^.*\//, ''), kind: this.kind, target: t.job ?? '', done: () => this.forget(t) });
     }
     // What each run carries since the run before it that shipped (read once a run is done).
     if (p.repo_dir) {
@@ -391,7 +409,7 @@ export class CiPackageReader implements Reader {
     return this.d.finder.list('ci').map((t) => {
       const runs = this.cache.runs.get(tkey(t)) ?? [];
       const ch = (r: RunJobs) => this.cache.changes.get(r.run.id) ?? [];
-      const file = (r: RunJobs) => this.cache.file(r.run.id, now);
+      const file = (r: RunJobs) => this.cache.file(r.run.id);
       const num = this.cache.numbers(t);
       const cur = runs.find(shipped);
       const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
@@ -505,7 +523,7 @@ export class ApkReader implements Reader {
       const usual = (s: string) => (s === 'sign' ? median(signs) : null);
       const feed = this.feeds.get(tkey(t));
       const main = this.mains.get(tkey(t));
-      const file = (r: RunJobs) => this.cache.file(r.run.id, now);
+      const file = (r: RunJobs) => this.cache.file(r.run.id);
       const moving = runs.find((r) => r.run.status !== 'completed');
       /** The run in flight, signing; waiting while no runner has it. */
       const signing = (r: RunJobs): Progress => {
@@ -728,7 +746,7 @@ export class TestCopyReader {
   private copies = new Map<number, TestCopy[]>();
   constructor(d: CopyDeps) {
     this.d = d;
-    this.cache = new RunsCache(d);
+    this.cache = new RunsCache(d, 1, 'build'); // only the newest debug APK shows
   }
 
   list(): Map<number, TestCopy[]> {
@@ -765,7 +783,7 @@ export class TestCopyReader {
       }
       await this.cache.read(s.run);
       const r = (this.cache.runs.get(tkey(s.run)) ?? []).find(shipped);
-      if (r) add(s.projectId, { kind: 'debug-apk', target: s.target, name: `build ${r.run.run_number ?? r.run.id}`, link: r.run.html_url ?? s.run.link ?? undefined, running: false, commit: r.run.head_sha, at: span(r).end ?? undefined });
+      if (r) add(s.projectId, { kind: 'debug-apk', target: s.target, name: `build ${r.run.run_number ?? r.run.id}`, link: this.cache.file(r.run.id) ?? undefined, running: false, commit: r.run.head_sha, at: span(r).end ?? undefined });
     }
     this.copies = out;
   }

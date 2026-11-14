@@ -10,10 +10,10 @@
 // after "we need the system to work without manual work and for repos not owned by cara"). Nothing is made, stored
 // or rotated here, and a job can only write to the scheme whose repo it runs in, under its own run.
 import { createHash, createPublicKey, verify, randomBytes, type JsonWebKey } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, readdir, realpath, rename, rm, rmdir } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { CiFile, Project, Store } from './db.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
@@ -198,6 +198,11 @@ export function sweepPlan(rows: Row[], now: number, rules: Rules = RULES): numbe
   return [...gone];
 }
 
+/** Where a file goes: its scheme, run and name. */
+type Key = Pick<CiFile, 'project_id' | 'workflow' | 'run_id' | 'run_attempt' | 'name'>;
+/** What its row says about it besides where it is. */
+type Meta = Pick<CiFile, 'sha' | 'ref' | 'kind' | 'target' | 'size' | 'sha256'>;
+
 export interface Upload {
   name: string;
   kind: Kind;
@@ -315,32 +320,79 @@ export class CiStore {
       });
       if (declared !== size) throw new HttpError(400, 'The upload stopped part-way');
 
-      return await this.locked(async () => {
-        const now = Date.now();
-        const rows = this.store.ciFiles();
-        const was = rows.find((r) => r.project_id === key.project_id && r.workflow === key.workflow && r.run_id === key.run_id && r.run_attempt === key.run_attempt && r.name === key.name);
-        const mine = { ...key, id: was?.id ?? -1, kind: u.kind, target: u.target, size, created_at: now, published_to: null, published_at: null };
-        const next = [...rows.filter((r) => r !== was), mine];
-        const gone = new Set(sweepPlan(next, now, this.rules));
-        const left = next.filter((r) => !gone.has(r.id));
-        const sum = (list: { size: number }[]) => list.reduce((n, r) => n + r.size, 0);
-        if (gone.has(mine.id) || sum(left.filter((r) => r.project_id === project.id)) > this.rules.schemeBytes || sum(left) > this.rules.totalBytes) {
-          const words = `The CI store refused ${u.name} from ${claims.workflow}: ${project.name}'s files are at its ${gib(this.rules.schemeBytes)} limit (or all schemes' at ${gib(this.rules.totalBytes)}), and what is left is each target's newest build or release and published releases.`;
-          if (now - (this.toldFull.get(project.id) ?? 0) > DAY) {
-            this.toldFull.set(project.id, now);
-            this.onFull(project, words);
-          }
-          throw new HttpError(507, words);
-        }
-        await rename(part, file);
-        const row = this.store.putCiFile({ ...key, sha: claims.sha, ref: claims.ref, kind: u.kind, target: u.target, size, sha256: hash.digest('hex'), created_at: now });
-        for (const r of rows) if (r !== was && gone.has(r.id)) await this.remove(r);
-        return row;
-      });
+      const row = await this.commit(key, part, { sha: claims.sha, ref: claims.ref, kind: u.kind, target: u.target, size, sha256: hash.digest('hex') });
+      if (row) return row;
+      const words = `The CI store refused ${u.name} from ${claims.workflow}: ${project.name}'s files are at its ${gib(this.rules.schemeBytes)} limit (or all schemes' at ${gib(this.rules.totalBytes)}), and what is left is each target's newest build or release and published releases.`;
+      const now = Date.now();
+      if (now - (this.toldFull.get(project.id) ?? 0) > DAY) {
+        this.toldFull.set(project.id, now);
+        this.onFull(project, words);
+      }
+      throw new HttpError(507, words);
     } finally {
       this.incoming -= declared;
       await rm(part, { force: true });
       await rmdir(dirname(file)).catch(() => {}); // only when this upload made it and left it empty
+    }
+  }
+
+  /** The rules planned with a file of `meta.size` at `key` in: the rows they give up for it, or null when it doesn't fit (too big, dropped by the rules, or over a cap). */
+  private plan(rows: CiFile[], key: Key, meta: { kind: string; target: string; size: number; created_at: number }): { was?: CiFile; gone: Set<number> } | null {
+    if (meta.size > this.rules.fileBytes) return null;
+    const was = rows.find((r) => r.project_id === key.project_id && r.workflow === key.workflow && r.run_id === key.run_id && r.run_attempt === key.run_attempt && r.name === key.name);
+    const mine = { ...key, ...meta, id: was?.id ?? -1, published_to: null, published_at: null };
+    const next = [...rows.filter((r) => r !== was), mine];
+    const gone = new Set(sweepPlan(next, Date.now(), this.rules));
+    const left = next.filter((r) => !gone.has(r.id));
+    const sum = (list: { size: number }[]) => list.reduce((n, r) => n + r.size, 0);
+    if (gone.has(mine.id) || sum(left.filter((r) => r.project_id === key.project_id)) > this.rules.schemeBytes || sum(left) > this.rules.totalBytes) return null;
+    return { was, gone };
+  }
+
+  /**
+   * With the store locked, plan the rules with the file at `part` in: if it fits, it becomes `key`'s file (replacing
+   * the same run's file of that name) and what the rules give up for it is deleted; if not, null and nothing is touched.
+   */
+  private commit(key: Key, part: string, meta: Meta & { created_at?: number }): Promise<CiFile | null> {
+    return this.locked(async () => {
+      const m = { ...meta, created_at: meta.created_at ?? Date.now() };
+      const rows = this.store.ciFiles();
+      const plan = this.plan(rows, key, m);
+      if (!plan) return null;
+      await rename(part, this.path(key));
+      const row = this.store.putCiFile({ ...key, ...m });
+      for (const r of rows) if (r !== plan.was && plan.gone.has(r.id)) await this.remove(r);
+      return row;
+    });
+  }
+
+  /** Whether a file of `size` would fit in `run` now: a check before fetching one, which keeping it makes again. */
+  fits(run: Omit<Key, 'name'>, meta: { kind: string; target: string; size: number; created_at: number }): boolean {
+    return !!this.plan(this.store.ciFiles(), { ...run, name: '' }, meta);
+  }
+
+  /**
+   * Keep a file this server fetched itself, as a run's file (a GitHub artifact mirrored for the Releases page, #673):
+   * `fetch` writes it into the part folder it is given (in the run's own folder, so the stray sweep clears what a
+   * restart cuts off) and returns its path, named as the store names files; the rules take it or not as an upload's.
+   * Null when it doesn't fit; the part folder goes either way.
+   */
+  async fetched(run: Omit<Key, 'name'>, meta: Omit<Meta, 'size' | 'sha256'> & { created_at: number }, fetch: (dir: string) => Promise<string>): Promise<CiFile | null> {
+    const dir = dirname(this.path({ ...run, name: 'x' }));
+    const part = join(dir, `.${randomBytes(6).toString('hex')}.part`);
+    await mkdir(part, { recursive: true });
+    try {
+      const file = await fetch(part);
+      const name = basename(file);
+      if (!NAME.test(name) || dirname(file) !== part) throw new Error(`${file} isn't a file named as the store names files, in ${part}`);
+      const st = await lstat(file);
+      if (!st.isFile()) throw new Error(`${file} isn't a plain file`);
+      const hash = createHash('sha256');
+      for await (const chunk of createReadStream(file)) hash.update(chunk);
+      return await this.commit({ ...run, name }, file, { ...meta, size: st.size, sha256: hash.digest('hex') });
+    } finally {
+      await rm(part, { recursive: true, force: true });
+      await rmdir(dir).catch(() => {}); // only when nothing was kept
     }
   }
 

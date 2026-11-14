@@ -8,6 +8,7 @@ import type { DeployView } from '../src/app-services.ts';
 import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
+import type { Want } from '../src/ci-mirror.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { CITADEL_TARGET, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, shipsOn, TargetFinder, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
@@ -77,7 +78,7 @@ test('a contraption, an APK workflow and a Windows release job are three targets
   assert.deepEqual(found.map((t) => `${t.kind} ${t.id} ${t.name}`), ['contraption app:mandate Contraption', 'apk apk:android-release Android', 'ci ci:windows:release Windows']);
   assert.equal(found[1].link, '/apps/mandate/android/', 'the APK the app serves');
   assert.equal(found[1].contraption, 'mandate');
-  assert.equal(found[2].link, 'https://github.com/o/mandate/actions/workflows/windows.yml');
+  assert.equal(found[2].link, null, 'nothing on GitHub: members may have no access there (#673)');
   assert.equal(found[2].job, 'release');
 });
 
@@ -273,18 +274,16 @@ test('the CI package reader: the newest run whose job passed is the release, a r
   // Run 3 uploaded its package beside a crash dump; run 2's package expired.
   const artifacts = { 3: [{ id: 30, name: 'dumps-windows-sha3', expired: false }, { id: 31, name: 'r-sha3', expired: false, expires_at: new Date(now + 60 * m).toISOString() }], 2: [{ id: 20, name: 'r-sha2', expired: true }] };
   const { actions, reads } = fakeActions(runs, jobs, artifacts);
-  let clock = now;
-  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => clock });
+  const wants: Want[] = [];
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, mirror: { want: (w) => void wants.push(w) }, now: () => now });
   await reader.refresh();
   const [v] = reader.read();
   assert.deepEqual(v.target, { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null });
   assert.deepEqual([v.current?.number, v.current?.version], [2, 'sha3'], 'run 4 skipped its release job, so run 3 is what people have: release 2, after run 2 that shipped before it');
-  assert.equal(v.current?.link, 'https://github.com/o/r/actions/runs/3/artifacts/31', 'the package named for the repo, not the dump');
-  clock = now + 61 * m;
-  assert.equal(reader.read()[0].current?.link, 'https://github.com/o/r/actions/runs/3', 'once its file expires, the run page');
-  clock = now;
+  assert.equal(v.current?.link, null, 'nothing of it on perigee yet: no link, never GitHub (#673)');
+  assert.deepEqual(wants.map((w) => [w.run.id, w.artifact.id, w.workflow, w.kind, w.target]), [[3, 31, 'windows.yml', 'release', 'release']], 'its package (named for the repo, not the dump) is mirrored into the CI store; run 2\'s expired');
   assert.deepEqual(v.current?.stages, { ci: 600, package: 600 });
-  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome, r.link]), [[1, 'live', 'https://github.com/o/r/actions/runs/2'], [null, 'failed', 'https://github.com/o/r/actions/runs/1']], 'runs from before counting began are counted in (Cara: "This should say the build number"); a failed one has no number; no file left: its run page');
+  assert.deepEqual(v.recent.map((r) => [r.number, r.outcome, r.link]), [[1, 'live', null], [null, 'failed', null]], 'runs from before counting began are counted in (Cara: "This should say the build number"); a failed one has no number; no file on perigee: no link');
   assert.equal(v.next?.number, 3);
   assert.equal(v.next?.stage, 'package');
   assert.equal(v.next?.usual, 600, 'the median package time of the shipped runs');
@@ -573,7 +572,7 @@ test('the test-copy reader: builds open minions left in their files, a preview s
   const copies = reader.list().get(p.id)!;
   assert.deepEqual(copies.filter((c) => c.kind === 'download').map((c) => [c.name, c.commit, c.number]).sort(), [['Delve-debug.apk', null, open.number], ['Delve-ticket-70-exe-e889baa9-windows.zip', 'e889baa9', open.number]], "a closed minion's files, a zip not named like a build and a type the file route won't serve (.exe) don't count");
   assert.deepEqual(copies.filter((c) => c.kind === 'site').map((c) => [c.port, c.running]), [[8116, true], [9000, false]]);
-  assert.deepEqual(copies.filter((c) => c.kind === 'debug-apk').map((c) => [c.target, c.name, c.commit, c.link]), [['apk:android-release', 'build 8', 'sha8', 'https://github.com/o/r/actions/runs/8']], 'the newest run that passed, not the one running');
+  assert.deepEqual(copies.filter((c) => c.kind === 'debug-apk').map((c) => [c.target, c.name, c.commit, c.link]), [['apk:android-release', 'build 8', 'sha8', undefined]], 'the newest run that passed, not the one running; no file of it on perigee, so no link');
 });
 
 test('the APK reader keeps each scheme\'s target apart, and holds off a second release run while GitHub lists the first', async () => {
@@ -670,7 +669,7 @@ test('the file reader: each shared release file is a release, numbered from the 
   assert.deepEqual((copies.list().get(p.id) ?? []).map((c) => c.name), ['FuckSpamTexts-debug.apk'], 'a release is no test copy; the debug build still is');
 });
 
-test('a run\'s file in the CI store is its download, and once the store sweeps it the link goes back to GitHub (#658)', async () => {
+test('a run\'s file in the CI store is its download, and once the store sweeps it there is no link, never GitHub (#658, #673)', async () => {
   const store = new Store(join(root, `c-${++n}.db`));
   const p = store.createProject('Peek Auras', 'https://github.com/o/r');
   const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release' };
@@ -685,5 +684,30 @@ test('a run\'s file in the CI store is its download, and once the store sweeps i
   assert.equal(reader.read()[0].current?.link, `/api/projects/${p.id}/ci-files/${build.id}/peek%20auras.zip`, 'the build, not the report');
   store.deleteCiFile(build.id);
   await reader.refresh(); // run 3 still moves, so this reads again
-  assert.equal(reader.read()[0].current?.link, 'https://github.com/o/r/actions/runs/2');
+  assert.equal(reader.read()[0].current?.link, null);
+});
+
+test('a mirrored artifact links once the mirror says it is in the store, though the workflow sits still (#673)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release' };
+  const now = Date.now(), m = 60_000;
+  const runs = [run(2, 'completed', 'success', now - 60 * m, now - 40 * m)];
+  const jobs = { 2: [job(2, 'release', 'completed', 'success', now - 50 * m, now - 40 * m)] };
+  const { actions, reads } = fakeActions(runs, jobs, { 2: [{ id: 21, name: 'r-sha2', expired: false, expires_at: iso(now + 60 * m) }] });
+  let row: { id: number; name: string } | null = null;
+  // The mirror finishes behind the poll: the file lands, then it tells the reader.
+  const wanted: Want[] = [];
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, mirror: { want: (w) => void wanted.push(w) }, now: () => now });
+  await reader.refresh();
+  assert.equal(reader.read()[0].current?.link, null);
+  assert.equal(wanted.length, 1);
+  row = store.putCiFile({ project_id: p.id, workflow: 'windows.yml', run_id: 2, run_attempt: 1, sha: 'a'.repeat(40), ref: '', target: 'release', size: 1, sha256: '', created_at: now, name: 'r.zip', kind: 'release' });
+  await reader.refresh();
+  assert.equal(reader.read()[0].current?.link, null, 'idle: not read again until the interval, unless told');
+  wanted[0].done();
+  await reader.refresh();
+  assert.equal(reader.read()[0].current?.link, `/api/projects/${p.id}/ci-files/${row.id}/r.zip`);
+  assert.equal(reads.artifacts, 1, 'its artifacts were listed once');
+  assert.equal(wanted.length, 1, 'once in the store, not wanted again');
 });

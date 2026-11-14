@@ -3,6 +3,7 @@ import { api, h, icon, me, view } from './base.js';
 import { threadRefs } from './core.js';
 import { settingsTabs, tuneUpButton } from './settings.js';
 import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.js';
+import { otherOwner, takeOver } from './payer.js';
 import { renderSidebar } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
 
@@ -62,7 +63,13 @@ function assignPicker(t) {
     });
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
-  return [input, list, note];
+  // Handover (#690): typing a name hands it to them; this makes it yours in one tap.
+  const take = otherOwner(t) && me && h('button', { type: 'button', class: 'small', onclick: () => takeOver(t, (done) => {
+    current = input.value = done ? me : t.properties?.assigned ?? '';
+    take.hidden = done;
+    note.textContent = done ? 'Saved' : '';
+  }) }, 'Take it over');
+  return [input, list, take || '', note];
 }
 
 /** A property's values, each a button that adds it to the minions list's filter when the filter offers it. */

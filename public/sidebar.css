@@ -46,7 +46,7 @@
 .g-promoted > h3 { color: hsl(150 50% 34%); }
 .g-parked > h3 { color: var(--muted); }
 .g-pinned > h3 { color: var(--accent); }
-.thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; column-gap: 0; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
+.thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; column-gap: 0; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
 .thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
 .thread-row:hover { border-color: var(--line); }
 .thread-row.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
@@ -90,6 +90,10 @@
 }
 .thread-row .state { align-self: center; font-weight: 650; white-space: nowrap; font-size: 0.78em; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums;
   color: var(--c); background: color-mix(in srgb, var(--t, var(--c)) 15%, var(--panel)); }
+/* The owner's initial (#690): quiet, ringed in the accent when the minion is yours. */
+.thread-row .owner { align-self: center; margin-left: 0.4rem; width: 1.35rem; height: 1.35rem; box-sizing: border-box; display: inline-grid; place-items: center; border-radius: 50%; font-size: 0.72em; font-weight: 650; line-height: 1;
+  color: var(--muted); background: var(--code-bg); border: 1px solid var(--line); }
+.thread-row .owner.mine { color: var(--accent); border-color: var(--accent); }
 .thread-row .state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .thread-row .state .pulse { animation: none; } }
 .thread-row .note { text-align: left; color: var(--ink); grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; }

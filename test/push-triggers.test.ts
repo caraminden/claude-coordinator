@@ -196,3 +196,29 @@ test('only people subscribe, and only https push services', async () => {
   await call('Cara', '/api/push/subscription', { method: 'DELETE', body: { endpoint: browsers.cara.endpoint } });
   assert.deepEqual(await call('Cara', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers.cara.endpoint } }), { subscribed: false, muted: [], everything: [], onlyPinned: false });
 });
+
+test('taking a minion over or handing it on says so in its chat and the Taskmaster\'s, and its pings follow the owner (#690)', async () => {
+  const project = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Handover' } });
+  await call('Cara', `/api/projects/${project.id}/members`, { method: 'POST', body: { person: joshId } });
+  const { coordinator } = await call('Cara', `/api/projects/${project.id}`);
+  const t = await call('Cara', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'build it', title: 'Hand me over' } });
+  await until('the first turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');
+  const notes = async (id: number) => (await call('Cara', `/api/tickets/${id}/events`)).events.filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
+  const assign = (who: string, assigned: string | null) => call(who, `/api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned } } });
+
+  await assign('Josh', 'Josh');
+  await assign('Josh', 'Josh'); // no change, no note
+  await assign('Josh', 'cara'); // by login: stored and said by name
+  await assign(`agent:${coordinator.id}`, null);
+  const said = [`Josh took over #${t.number}`, `Josh handed #${t.number} to Cara`, `The Taskmaster unassigned #${t.number}`];
+  assert.deepEqual(await notes(t.id), said);
+  assert.deepEqual((await notes(coordinator.id)).slice(-3), said);
+
+  // Josh takes it over: its result pings his devices and not Cara's (her device has no Everything switch here).
+  await assign('Josh', 'Josh');
+  await subscribe('Cara', 'cara'); // an earlier test turned hers off
+  const n = received.length;
+  await call(`agent:${t.id}`, `/api/tickets/${t.id}`, { method: 'PATCH', body: { state: 'ready', note: 'handed over' } });
+  const got = await pushes(n, 1);
+  assert.deepEqual(Object.keys(got), ['josh']);
+});

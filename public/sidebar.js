@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, costText, h, isCoordinator, isSeen, jumpHref, listGroupsOf, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, api, costText, h, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, sending, setSending, usage } from './core.js';
 import { fitHeight, loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
@@ -365,11 +365,20 @@ export function threadRow(t, href = threadHref(t)) {
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     card,
     st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
+    ownerChip(t, coord),
     wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, waitLine(wait), ' · ', waitClock(wait))
       : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
     bar);
+}
+
+/** Whose minion it is (#690): the owner's initial at the row's end, ringed when it's yours; nothing for nobody's or the Taskmaster. */
+function ownerChip(t, coord) {
+  const owner = !coord && String(t.properties?.assigned ?? '').trim();
+  if (!owner) return '';
+  const mine = owner.toLowerCase() === me?.toLowerCase();
+  return h('span', { class: `owner${mine ? ' mine' : ''}`, title: mine ? 'Yours' : `${owner}'s`, 'aria-label': `Owner: ${owner}` }, owner[0].toUpperCase());
 }
 
 /**

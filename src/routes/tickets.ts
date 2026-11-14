@@ -689,7 +689,20 @@ export const ticketRoutes: Route[] = [
         if (!a) throw new HttpError(404, `#${ticket.number} has shown no file ${file}; link it in a reply first`);
         return json(res, 200, store.props.set('artifact', a.id, a.project_id, body.properties, session.name));
       }
+      const owner = () => String(store.props.forTarget('minion', id).assigned ?? '');
+      const before = owner();
       const r = store.props.set('minion', id, ticket.project_id, body.properties, session.name);
+      // A handover (#690) is said in the minion's chat and the Taskmaster's: "Josh took over #612".
+      const after = owner();
+      if (after !== before && ticket.kind === 'ticket') {
+        const agent = session.agent != null ? store.getTicket(session.agent) : null;
+        const by = !agent ? session.name : agent.kind === 'coordinator' ? 'The Taskmaster' : `#${agent.number}`;
+        const text = !agent && after.toLowerCase() === by.toLowerCase() ? `${by} took over #${ticket.number}`
+          : after ? `${by} handed #${ticket.number} to ${after}` : `${by} unassigned #${ticket.number}`;
+        runner.emit(id, 'note', { text });
+        const coordinator = store.getCoordinator(ticket.project_id);
+        if (coordinator) runner.emit(coordinator.id, 'note', { text });
+      }
       runner.broadcastTicket(id);
       return json(res, 200, r);
     },

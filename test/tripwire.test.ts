@@ -744,6 +744,34 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
   }
 });
 
+test('a soft or mixed reset onto a commit the branch lacks is refused: the next commit would revert it (Peek Auras #309)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-squash-'));
+  const c = { ...cfg, home: homedir(), data: tmp };
+  const wt = join(tmp, 'projects/2/tickets/9');
+  const sh = (cmd: string) => execSync(cmd, { cwd: wt, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).toString().trim();
+  try {
+    mkdirSync(wt, { recursive: true });
+    // A default branch called trunk: nothing here may lean on the name main.
+    sh('git init -q -b trunk && echo a > a.txt && git add a.txt && git commit -qm a && git checkout -qb ticket/9-x && echo b > b.txt && git add b.txt && git commit -qm b');
+    sh('git checkout -q trunk && echo c > c.txt && git add c.txt && git commit -qm c && git update-ref refs/remotes/origin/trunk trunk && git checkout -q ticket/9-x');
+    const at = (command: string, cwd: string | null = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
+    const tip = sh('git rev-parse trunk');
+    for (const no of ['git reset --soft trunk', 'git reset --soft origin/trunk', `git reset --soft ${tip}`, 'git reset trunk', 'git reset -q --mixed trunk', `git -C ${wt} reset --soft trunk`]) {
+      assert.match(at(no, no.includes(' -C ') ? '/tmp' : wt) ?? '', /would revert .*`git rebase .*git reset --soft \$\(git merge-base HEAD /s, no);
+    }
+    // Squashing onto where the branch started, a path, a hard reset, or a reset after a rebase in the same call.
+    const base = sh('git merge-base HEAD trunk');
+    for (const ok of ['git reset --soft HEAD~1', `git reset --soft ${base}`, 'git reset --soft $(git merge-base HEAD trunk)', 'git reset a.txt', 'git reset -- trunk', 'git reset --hard trunk', 'git rebase -q trunk && git reset --soft trunk']) {
+      assert.equal(at(ok), null, ok);
+    }
+    // A branch rebased onto the tip squashes onto it freely.
+    sh('git rebase -q trunk');
+    assert.equal(at('git reset --soft trunk'), null);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('once tools/deploy.sh exists, it is still allowed', () => {
   assert.equal(bash('~/claude-coordinator/tools/deploy.sh', worktree, { ...cfg, deployScript: true }), null);
   // Run through a shell or systemd-run too (#468 S01-2).

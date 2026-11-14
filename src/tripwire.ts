@@ -6,7 +6,7 @@
 // table; other people's homes and Claude runners; signing Claude in; running server.ts against the
 // live data) and the git habits every scheme shares (no path checkout, restore or stash; no checkout,
 // merge or reset over uncommitted changes, outside a scratch clone in $TMPDIR and --ours/--theirs mid-merge;
-// no push to main or plain force push from a minion's
+// no soft or mixed reset onto commits the branch lacks, a squash that reverts them; no push to main or plain force push from a minion's
 // worktree), and says why and what to do instead.
 //
 // Two tiers. Real dangers are hard blocks. Things a person may reasonably want once (deleting or
@@ -578,7 +578,7 @@ function mktempPath(src: string, home: string): string | null {
 
 interface Segment { words: Word[]; redirects: { op: string; target: Word }[] }
 /** What the command has done so far: its folder, and the variables it set, with the values they can take where known (a loop variable takes several). */
-interface State { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; committed?: boolean; maybe?: boolean }
+interface State { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; committed?: boolean; moved?: boolean; maybe?: boolean }
 
 // Only these commands count as writes. Anything else is taken as a read, so an interpreter or tool
 // that names a protected path (`node -e … coordinator.db`, `curl`) goes through: few false alarms,
@@ -943,9 +943,12 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
     }
   }
   const committed = st.committed;
+  const moved = st.moved;
   // Commit first, then move: the move's dirty check can't see what the commit will take.
   if (sub === 'commit') st.committed = true;
-  return gitHabitReason(sub, args.slice(j + 1), dir, cfg, committed);
+  // A reset after a rebase or merge in the same call runs on a HEAD the check can't see yet.
+  if (['rebase', 'merge', 'pull', 'checkout', 'switch', 'cherry-pick', 'am'].includes(sub)) st.moved = true;
+  return gitHabitReason(sub, args.slice(j + 1), dir, cfg, committed, moved);
 }
 
 // CLAUDE.md's "commit before you move", ported from Delve's git guard (tools/mods/delve/hooks, judgeGit).
@@ -995,7 +998,7 @@ function conflicted(dir: string, paths: Word[]): boolean {
  * reset over uncommitted tracked changes; from a minion's worktree, no push to main and no plain force.
  * With the folder unknown it checks only what the words alone show.
  */
-function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig, committed = false): Verdict | null {
+function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig, committed = false, moved = false): Verdict | null {
   const words = args.map((w) => w.text);
   const has = (...flags: string[]) => words.some((a) => flags.includes(a));
   const plain = args.filter((w) => !w.text.startsWith('-'));
@@ -1036,6 +1039,7 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
       break;
     case 'reset':
       if (has('--hard', '--merge', '--keep')) move = `git reset ${words.find((a) => /^--(hard|merge|keep)$/.test(a))}`;
+      else if (dir && !moved && !has('--') && plain.length === 1 && !plain[0].unknown) return staleSquashReason(plain[0].text, words, dir);
       break;
     case 'rebase': case 'pull': case 'cherry-pick':
       if (!has('--abort', '--continue', '--quit', '--skip')) move = `git ${sub}`;
@@ -1050,6 +1054,18 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
   const dirty = st?.status === 0 ? st.out.split('\n').map((l) => l.slice(3)).filter(Boolean) : [];
   if (!dirty.length) return null;
   return hard(`Commit first: \`${move}\` with ${dirty.length} uncommitted tracked file(s) (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ', …' : ''}) can lose them. Commit (a WIP commit is fine) before any checkout, merge, rebase or reset; to see another version of a file, use \`git show <ref>:path\`.`);
+}
+
+/**
+ * A soft or mixed reset keeps the working tree, so onto a commit HEAD lacks (main's tip, from a branch that started
+ * further back) the next commit has that commit as its parent and the branch's old tree: a fast-forward that quietly
+ * reverts everything that landed since (Peek Auras #309 undid Peek Auras #310 so). By ancestry, not by name: any default branch.
+ */
+function staleSquashReason(target: string, words: string[], dir: string): Verdict | null {
+  const sha = git(dir, 'rev-parse', '--verify', '--quiet', `${target}^{commit}`);
+  if (sha?.status !== 0) return null; // a path, not a commit
+  if (git(dir, 'merge-base', '--is-ancestor', sha.out.trim(), 'HEAD')?.status !== 1) return null;
+  return hard(`\`git reset ${words.join(" ")}\` keeps this branch's files but puts it on ${target}, which has commits this branch doesn't: the next commit would revert them (Peek Auras #309 undid a landing that way, and land saw a clean fast-forward). To squash, rebase first (\`git rebase ${target}\`) and then reset, or squash where the branch started: \`git reset --soft $(git merge-base HEAD ${target})\`. To move a branch with no work of its own up to ${target}, use \`git reset --keep ${target}\`.`);
 }
 
 /** Why a `git push` from a minion's worktree is blocked: it reaches main, or forces without a lease. With dir null, the current branch is unknown. */

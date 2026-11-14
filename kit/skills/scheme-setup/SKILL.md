@@ -74,7 +74,9 @@ item named.
 ### 3. Write CLAUDE.md
 
 Slim: it loads into every session of this scheme. Use `citadel:writing-for-agents` for every
-file from here on. Sections, in this order:
+file from here on. A rule that applies only while working in one area (a front-end folder, a
+content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, and that skill's
+"Path-scoped rules" for what belongs where). Sections, in this order:
 
 1. A title and one line on what the project is, with a pointer to the README for layout and
    running it.
@@ -136,11 +138,15 @@ tests.
 - **Current:** every path and command exists now; nothing describes how the repo used to be.
 - **Concise:** no line restates the README, the code, the Citadel-wide or scheme layers, or a
   default the model already follows (`citadel:writing-for-agents`, "Pruning").
+- **Every turn:** every line is needed whatever the session touches; one that matters only in
+  one area moves, word for word, to a path-scoped rule (step 7).
 
 Keep out: a directory tour the README or `ls` gives, generic advice ("write clean code"),
 one-off fixes that won't recur, template text left as the template, TODOs. On a tune-up, run
 the same tests on the existing file: fix the failures in lines the plan touches, and name the
-rest in your done note.
+rest in your done note. A tune-up also splits an existing CLAUDE.md the same way, moving each
+area-only section to a path-scoped rule, and its done note names what moved, the globs, and the
+file's bytes before and after.
 
 *Done when* every key in the table has a line, each command was run or is marked untried,
 each path named exists or is the stated place its first file goes, and every line passes the
@@ -280,6 +286,11 @@ exists here or is its first place.
 - **Ponytail:** copy this skill's `templates/ponytail.md` to `.claude/rules/ponytail.md`. Set
   its `paths:` to this repo's code files, and write its "In this repo" section.
 - A specific rule is written new, or adapted as in step 5, scrub included.
+- **Path-scoped rules** for this repo's areas (step 3): one file per area,
+  `.claude/rules/<area>.md`, with `paths:` frontmatter as in `citadel:writing-for-agents`,
+  "Path-scoped rules" (format and catches: it loads only once a matching file is read, and never
+  in a Codex turn). Moved text keeps its words; where CLAUDE.md still names the subject (a
+  Project facts line), it keeps a pointer to the rule file.
 
 Record every copy (rules, adapted skills and agents alike) under `## Copies` in
 `$COORDINATOR_SHARED_DIR/onboarding.md`, adding the heading if it isn't there. One row each:

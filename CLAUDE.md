@@ -18,8 +18,6 @@ directly; there are no dependencies and no build step.
   it inside the turn with one blocking command rather than ending the turn: a minion's turn is one
   `claude -p` process, the board shows it idle once that exits, and the job may not outlive it.
 - Never put `effort` on a skill (Grunts: the `citadel:subagents` skill).
-- `src/backup.html` and `src/backup.ts` (the /backup chat with the Taskmaster, for when the front end breaks) are
-  frozen on purpose: leave them out of restyles and refactors; `test/backup.test.ts` pins the page's hash.
 
 ## Compact instructions
 
@@ -36,13 +34,8 @@ skill step is skipped or uses its default.
 - **Check commands:** `npm test` (`node --test test/` through `tools/citadel-node`, so it escapes ananicy's idle `node` rule: `deploy/priority.md`; failing if it leaves processes running: `test/leak-guard.ts`; it also lints the `.ps1` files with pwsh, `test/ps1-lint.test.ts`). The full suite's home is Cara's desktop, not perigee: `tools/land.sh` waits for
   `.github/workflows/tests.yml` on the commit it lands, and runs the suite on perigee only as a loud fallback (`CI FALLBACK`;
   `LAND_CI=0` forces it when CI itself is broken). A red CI run: `tools/ci-failures` (on every turn's PATH, `--help`) prints its failing tests. Before landing, a minion runs only the test files its change touches, with `citadel-test test/<name>.test.ts ...` (leak guard, a 300 s limit, only the failures shown, the full output in `$TMPDIR/citadel-test.log`), never the full suite on perigee. No build step. A UI change is
-  also checked in a dev copy or preview (scheme instructions, "UI checks"): shoot and drive its pages with
-  `node tools/ui-shot.ts <#route>...` (its header: widths, dark, steps, display-mode), under a second a shot
-  on the dev copy it starts and keeps, then `citadel-dev-copy stop`. It is also the page driver: a check like
-  "click this, did that appear" is one command, `--step 'fill .composer textarea | hi' --step 'click .send-group > button'
-  --step 'wait .msg.user | hi'`, and its `open()` gives a script a signed-in page. A scratch server takes its port from
-  `freePort()` (`src/ports.ts`), and a page that isn't Citadel's gets `test/browser.ts` (headless Chromium over a pipe,
-  no port, no dependency).
+  also checked in a dev copy or preview (scheme instructions, "UI checks"), with `node tools/ui-shot.ts`:
+  `.claude/rules/ui-checks.md` (loads when a session reads a file in `public/`).
 - **Front end:** `public/`, plain JS with no build step.
 - **High risk by file (self-review):** auth (`src/auth.ts`); deploy and restart code
   (`tools/deploy.sh`, `tools/land.sh`, `tools/boot-check.ts`, `deploy/`); the tripwire
@@ -78,7 +71,6 @@ in `kit/skills/THIRD_PARTY.md`. A fix to one lands here and reaches every scheme
 no skills or agents of its own. `.claude/rules/ponytail.md` loads whenever a session reads a code
 file (plugins can't carry rules).
 
-This file loads into every session, so keep it slim: a rule for one kind of job goes in its
-skill, and detail goes in the doc that owns it, with at most a pointer here (the
-`citadel:writing-for-agents` skill). `tools/doc-map.sh <doc>` prints a long doc's sections with their
-line ranges, for reading only the part you need.
+Rules for one area of the repo are path-scoped in `.claude/rules/` and load only when a session reads
+a matching file; editing this file or a rule: `.claude/rules/agent-docs.md`. `tools/doc-map.sh <doc>` prints
+a long doc's sections with their line ranges, for reading only the part you need.

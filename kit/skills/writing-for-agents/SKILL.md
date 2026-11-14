@@ -1,6 +1,6 @@
 ---
 name: writing-for-agents
-description: Writing, testing and vetting documents for agents. Use before adding or changing a rule in CLAUDE.md or AGENTS.md (a one-liner asked for in a hurry too), creating or rewriting a skill, or adding a downloaded or third-party skill to a repo.
+description: Writing, testing and vetting documents for agents. Use before adding or changing a rule in CLAUDE.md, AGENTS.md or .claude/rules/ (a one-liner asked for in a hurry too), creating or rewriting a skill, or adding a downloaded or third-party skill to a repo.
 ---
 
 Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / `CLAUDE.md`, a doc reached by a pointer. The packaging differs; the writing does not: the same levers make each one predictable, since the agent takes the same _process_ every run rather than producing the same output.
@@ -57,6 +57,35 @@ Splitting one document into two spends one of the two loads, so split only when 
 
 - **By sequence**: split a run of steps where the post-completion steps tempt the agent to rush the one in front of it. Keeping them out of view drives more legwork on the current task. Beware the reverse: merging sequences exposes each step's later steps to what follows, inviting premature completion.
 - **By invocation**, skill-specific: see [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md).
+
+## Path-scoped rules
+
+A repo's `CLAUDE.md` loads into every turn; a **path-scoped rule** (`.claude/rules/<name>.md` with a `paths:` list) loads only once the session touches a matching file, so it escapes context load on every turn that works elsewhere. Where a rule goes, by when it applies:
+
+- **`CLAUDE.md`**: every turn needs it whatever it touches, or it applies to an action no file marks (running `land.sh`, starting a Grunt, waiting on a job), or a kit skill reads it there (Project facts, Compact instructions).
+- **Path-scoped rule**: it applies only while working in one area (`public/**`, a content folder, the pipeline's files), and the session reads a file there before it acts.
+- **Skill**: it is a procedure for one kind of job, wherever it happens (a review, a release).
+
+Format, at the top of the file; globs are relative to the repo root, quoted:
+
+```markdown
+---
+paths:
+  - "public/**"
+  - "src/backup.ts"
+---
+
+# What the rule is about
+```
+
+A rule without `paths:` loads every turn, like `CLAUDE.md`. Catches, measured on Claude Code 2.1.323 (Citadel #685):
+
+- It loads when the session **reads** a matching file: Read, Write, Edit, or a read-only Bash command naming it (`cat public/x.js`). Glob, Grep, `ls`, `sed -i` and starting the turn inside the folder do not load it. So scope only a rule the session meets after opening a file there, never one it needs before (which folder to work in, how to start).
+- Once loaded it stays for the turn, worktrees included, and a `/compact` kept it in that test, through the summary.
+- A Codex turn reads `CLAUDE.md` alone, never `.claude/rules/`: a rule that must reach Codex stays in `CLAUDE.md`.
+- When a moved rule is still named from `CLAUDE.md` (a Project facts line a skill reads), leave a pointer there naming the rule file, so a Grunt reading `CLAUDE.md` can still reach it.
+
+Move a rule word for word: a split saves load, not wording.
 
 ## Leading words
 

@@ -81,7 +81,8 @@ function openLayer(item) {
     layer.className = 'citadel-layer';
     const f = document.createElement('iframe');
     f.title = 'Citadel';
-    f.src = item.href;
+    const back = !item.name && storedView();
+    f.src = back ? `${item.href.split('#')[0]}${back}` : item.href;
     layer.append(f);
     document.documentElement.append(layer); // beside <body>, which goes inert under it
   } else {
@@ -278,13 +279,22 @@ function showHint(text) {
   setTimeout(gone, 10_000);
 }
 
-let lastView = '#/'; // Citadel's own view before a frame, where its entry goes back to (#/ when it loaded on a frame's address)
+// Citadel's own view before a frame, where its entry goes back to (#675, Cara 2026-11-14: "If I switch from a contraption
+// back to citadel can we maintain the state of which minion I was looking at?"). Kept in the tab's sessionStorage, so a
+// reload on a frame (a deploy's front-end reload) still goes back there, and in localStorage for a phone app the system
+// restarted or a contraption's own window; #/ (the start scheme) only when neither holds one.
+const viewKey = `citadel-last-view:${root.pathname}`;
+const storedView = () => { try { return sessionStorage.getItem(viewKey) ?? localStorage.getItem(viewKey); } catch { return null; } };
+let lastView = (!inContraption && storedView()) || '#/';
 
 /** In Citadel: mark the view showing (Citadel or a framed contraption), and point Citadel's entry back at its last own view. */
 function syncRail() {
   if (inContraption || !nav) return;
   const now = showing();
-  if (!now) lastView = location.hash || '#/'; // never a bare root: that link would reload Citadel, frames and all
+  // Not a share's address (#/share?…), which only passes through on its way to a frame.
+  if (!now && !location.hash.startsWith('#/share') && lastView !== (lastView = location.hash || '#/')) { // never a bare root: that link would reload Citadel, frames and all
+    try { sessionStorage.setItem(viewKey, lastView); localStorage.setItem(viewKey, lastView); } catch {}
+  }
   for (const a of nav.querySelectorAll('a[data-app]')) {
     const here = (a.dataset.app || null) === now;
     a.classList.toggle('current', here);

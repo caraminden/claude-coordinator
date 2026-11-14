@@ -190,6 +190,18 @@ test("Citadel loaded at a framed app's address: its own entry still points at a 
   assert.equal(await page.eval(`document.querySelector('.citadel-rail a[data-app=""]').getAttribute('href')`), '/c/#/');
 });
 
+test("a reload on a framed app keeps Citadel's entry on the minion you left, not the start scheme's Taskmaster (#675)", { skip }, async () => {
+  Object.assign(state, { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false });
+  const page = await browser.page(base.replace('/apps/peek/', '/c/#/p/2/t/9'), { width: 1000 });
+  const entry = `document.querySelector('.citadel-rail a[data-app=""]')?.getAttribute('href')`;
+  await waitFor(page, "Citadel's rail on the minion", `${entry} === '/c/#/p/2/t/9'`);
+  await page.eval(`location.hash = '#/apps/toc'`);
+  await waitFor(page, 'ToC current', `!!document.querySelector('.citadel-rail a[data-app="toc"].current')`);
+  await page.eval(`window.beforeReload = true; setTimeout(() => location.reload(), 0)`);
+  await waitFor(page, "Citadel's rail after the reload", `!window.beforeReload && window.ready && !!document.querySelector('.citadel-rail a[data-app="toc"].current')`);
+  assert.equal(await page.eval(entry), '/c/#/p/2/t/9');
+});
+
 test("Alt+\` switches apps on a contraption's own page too", { skip }, async () => {
   const page = await browser.page(base + '?installed', { width: 1000 });
   assert.equal(await until(page, 'img'), 'img', 'the rail drew, ToC with its icon');

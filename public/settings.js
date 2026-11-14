@@ -479,9 +479,13 @@ export function myInstructionsEditor() {
   const status = h('span', { class: 'muted', role: 'status' }, 'Loading…');
   const save = h('button', { type: 'button', disabled: true }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Discard');
+  // The other scope's unsaved text, in a hidden field marked as a draft so a front-end reload waits for it too.
+  const hidden = h('textarea', { hidden: true, 'aria-hidden': 'true', tabindex: -1 });
   const sync = () => {
     const dirty = !textarea.disabled && textarea.value.trim() !== saved[scope].trim();
     textarea.toggleAttribute('data-draft', dirty);
+    hidden.value = Object.entries(drafts).filter(([k, v]) => k !== scope && v.trim() !== saved[k].trim()).map(([, v]) => v).join('\n');
+    hidden.toggleAttribute('data-draft', !!hidden.value.trim());
     const n = textarea.value.trim().length;
     counter.textContent = `${count(n)} / ${count(MAX_PERSONAL)}`;
     counter.classList.toggle('over', n > MAX_PERSONAL);
@@ -525,7 +529,7 @@ export function myInstructionsEditor() {
       },
       send: () => api(`api/projects/${p.id}/my-instructions`, { method: 'PUT', body: { scope: at, text } }),
       undo: () => {
-        drafts[at] = text;
+        drafts[at] ??= text; // unless it was edited again since
         show(was, 'Not saved.');
       },
       label: 'save your instructions',
@@ -552,7 +556,7 @@ export function myInstructionsEditor() {
       h('div', { class: 'meta' }, 'Only you edit these. They load into the minions assigned to you, from their next turn.')),
     h('h3', { class: 'settings-label' }, 'Applies to'),
     switcher,
-    textarea,
+    textarea, hidden,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
     historySlot,
     h('div', { class: 'settings-card' },

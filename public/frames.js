@@ -65,7 +65,7 @@ function mirrorBar(bar, frame) {
   drag.replaceChildren(...controls.map((el) => place(h('div'), el.getBoundingClientRect(), -r.left, -r.top)));
 }
 
-/** Re-fit when the bar changes under the same window size: a button shown or hidden, a label that grows. */
+/** Re-fit when the bar changes under the same window size: a button shown or hidden, a label that grows, the page scrolled. */
 function watch(bar) {
   if (bar === watched) return;
   for (const w of watchers) w.disconnect();
@@ -81,7 +81,10 @@ function watch(bar) {
   mo.observe(bar, { subtree: true, childList: true, attributes: true, characterData: true });
   const ro = new ResizeObserver(again);
   ro.observe(bar);
-  watchers = [mo, ro];
+  const doc = bar.ownerDocument;
+  doc.addEventListener('scroll', again, { capture: true, passive: true });
+  doc.fonts?.ready.then(again);
+  watchers = [mo, ro, { disconnect: () => doc.removeEventListener('scroll', again, { capture: true }) }];
 }
 
 if (typeof window !== 'undefined') {

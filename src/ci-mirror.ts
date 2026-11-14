@@ -2,7 +2,7 @@
 // so everything is on perigee?"), for schemes whose workflows still upload only to GitHub: the Releases page then links
 // a file on perigee that every member can open, where a GitHub link would need access to the repo.
 import { execFile } from 'node:child_process';
-import { readdir, rename } from 'node:fs/promises';
+import { mkdir, readdir, rename, statfs } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Run } from './ci-health.ts';
@@ -15,6 +15,9 @@ const exec = promisify(execFile);
 
 /** A failed mirror is tried again after this long, not on every refresh. */
 const RETRY_MS = 60 * 60_000;
+/** Free disk a download needs, in times the artifact's zipped size: it is unpacked before the store sees its real size. */
+// shortcut: a guess at how far a build unpacks, not a bound on it; stream the zip with a byte limit if one ever fills the disk.
+const ROOM = 10;
 
 export interface Want {
   project: Project;
@@ -41,15 +44,17 @@ export const ghDownload = (as: (p: Project) => GithubEnv): Download => async (w,
 export const storeName = (s: string, max = 150) => s.replace(/[^A-Za-z0-9._+-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, max) || 'artifact';
 
 export class CiMirror {
-  private ci: Pick<CiStore, 'fits' | 'fetched'>;
+  private ci: Pick<CiStore, 'fits' | 'fetched' | 'dir'>;
   private download: Download;
   private now: () => number;
   /** One download at a time, behind the poll rather than in it. */
   private queue: Promise<unknown> = Promise.resolve();
   private waiting = new Set<string>();
   private failed = new Map<string, number>();
+  /** Artifacts already kept: never downloaded again, even once the store has swept them (until a restart). */
+  private kept = new Set<string>();
 
-  constructor(ci: Pick<CiStore, 'fits' | 'fetched'>, download: Download, now: () => number = Date.now) {
+  constructor(ci: Pick<CiStore, 'fits' | 'fetched' | 'dir'>, download: Download, now: () => number = Date.now) {
     this.ci = ci;
     this.download = download;
     this.now = now;
@@ -58,7 +63,7 @@ export class CiMirror {
   /** Mirror an artifact, behind any already queued, unless it is queued now or failed within RETRY_MS. Returns at once. */
   want(w: Want): void {
     const key = `${w.project.id}:${w.run.id}:${w.artifact.id}`;
-    if (this.waiting.has(key) || this.now() - (this.failed.get(key) ?? -Infinity) < RETRY_MS) return;
+    if (this.waiting.has(key) || this.kept.has(key) || this.now() - (this.failed.get(key) ?? -Infinity) < RETRY_MS) return;
     this.waiting.add(key);
     this.queue = this.queue
       .then(() => this.mirror(w))
@@ -66,7 +71,11 @@ export class CiMirror {
         console.warn(`CI mirror: ${what(w)} failed: ${(err?.stderr || err?.message || String(err)).toString().trim().slice(0, 300)}`);
         return false;
       })
-      .then((ok) => (ok ? w.done() : this.failed.set(key, this.now())))
+      .then((ok) => {
+        if (!ok) return void this.failed.set(key, this.now());
+        this.kept.add(key);
+        w.done();
+      })
       .finally(() => this.waiting.delete(key));
   }
 
@@ -79,9 +88,17 @@ export class CiMirror {
     const run = { project_id: w.project.id, workflow: w.workflow, run_id: w.run.id, run_attempt: w.run.run_attempt ?? 1 };
     // Filed at the run's own time, so the store's rules see the runs in the order they ran, not the order mirrored.
     const meta = { kind: w.kind, target: w.target, sha: w.run.head_sha, ref: `refs/heads/${w.run.head_branch}`, created_at: Date.parse(w.run.updated_at ?? w.run.created_at) || this.now() };
-    const over = "doesn't fit the CI store's caps (a file's, the scheme's or all schemes', after what its rules would give up)";
-    if (!this.ci.fits(run, { ...meta, size: w.artifact.size_in_bytes ?? 0 })) {
+    const over = "doesn't fit the CI store's spare room (a file's, the scheme's or all schemes' cap; a mirror never pushes another file out)";
+    const size = w.artifact.size_in_bytes ?? 0;
+    if (!this.ci.fits(run, { ...meta, size })) {
       console.warn(`CI mirror: not mirroring ${what(w)} (${w.artifact.size_in_bytes ?? '?'} bytes): it ${over}`);
+      return false;
+    }
+    const dir = this.ci.dir(w.project.id);
+    await mkdir(dir, { recursive: true });
+    const disk = await statfs(dir);
+    if (disk.bavail * disk.bsize < ROOM * size) {
+      console.warn(`CI mirror: not mirroring ${what(w)} (${size} bytes): the disk has ${disk.bavail * disk.bsize} bytes free, under ${ROOM} times its size`);
       return false;
     }
     const row = await this.ci.fetched(run, meta, async (dir) => {

@@ -90,6 +90,22 @@ test('a mirror keeps an artifact once as its run\'s release, one file as itself 
   await mirror.idle();
   assert.deepEqual(rows(5).map((f) => f.name), ['ok.exe'], 'tried again after it');
 
+  // Once kept, never downloaded again, even after the store sweeps it.
+  const n5 = got.length;
+  store.deleteCiFile(rows(5)[0].id);
+  mirror.want(want(5, {}));
+  await mirror.idle();
+  assert.equal(got.length, n5, 'already mirrored once');
+
+  // A mirror only takes spare room: it never pushes another file out, where an upload would.
+  const old = { project_id: p.id, workflow: 'other.yml', run_attempt: 1, sha: 'b'.repeat(40), ref: '', kind: 'build', target: '', sha256: '' };
+  const kept = store.putCiFile({ ...old, run_id: 90, name: 'old.zip', size: 2000, created_at: clock - 1e6 });
+  store.putCiFile({ ...old, run_id: 91, name: 'new.zip', size: 10, created_at: clock });
+  files = { 'mid.exe': 'x'.repeat(400) };
+  mirror.want(want(6, { size_in_bytes: 400 }));
+  await mirror.idle();
+  assert.deepEqual([rows(6).length, store.getCiFile(kept.id)?.name], [0, 'old.zip'], 'refused rather than pushing out an older build');
+
   // No part folders left in any run's folder.
   const left = readdirSync(join(ci.dir(p.id), 'windows.yml'), { recursive: true }).map(String);
   assert.deepEqual(left.filter((f) => f.includes('.part')), []);

@@ -336,8 +336,12 @@ export class CiStore {
     }
   }
 
-  /** The rules planned with a file of `meta.size` at `key` in: the rows they give up for it, or null when it doesn't fit (too big, dropped by the rules, or over a cap). */
-  private plan(rows: CiFile[], key: Key, meta: { kind: string; target: string; size: number; created_at: number }): { was?: CiFile; gone: Set<number> } | null {
+  /**
+   * The rules planned with a file of `meta.size` at `key` in: the rows they give up for it, or null when it doesn't fit
+   * (too big, dropped by the rules, or over a cap). With `evict` false it only fits in spare room: null if any other
+   * file would go for it.
+   */
+  private plan(rows: CiFile[], key: Key, meta: { kind: string; target: string; size: number; created_at: number }, evict: boolean): { was?: CiFile; gone: Set<number> } | null {
     if (meta.size > this.rules.fileBytes) return null;
     const was = rows.find((r) => r.project_id === key.project_id && r.workflow === key.workflow && r.run_id === key.run_id && r.run_attempt === key.run_attempt && r.name === key.name);
     const mine = { ...key, ...meta, id: was?.id ?? -1, published_to: null, published_at: null };
@@ -345,7 +349,7 @@ export class CiStore {
     const gone = new Set(sweepPlan(next, Date.now(), this.rules));
     const left = next.filter((r) => !gone.has(r.id));
     const sum = (list: { size: number }[]) => list.reduce((n, r) => n + r.size, 0);
-    if (gone.has(mine.id) || sum(left.filter((r) => r.project_id === key.project_id)) > this.rules.schemeBytes || sum(left) > this.rules.totalBytes) return null;
+    if (gone.has(mine.id) || (!evict && gone.size) || sum(left.filter((r) => r.project_id === key.project_id)) > this.rules.schemeBytes || sum(left) > this.rules.totalBytes) return null;
     return { was, gone };
   }
 
@@ -353,11 +357,11 @@ export class CiStore {
    * With the store locked, plan the rules with the file at `part` in: if it fits, it becomes `key`'s file (replacing
    * the same run's file of that name) and what the rules give up for it is deleted; if not, null and nothing is touched.
    */
-  private commit(key: Key, part: string, meta: Meta & { created_at?: number }): Promise<CiFile | null> {
+  private commit(key: Key, part: string, meta: Meta & { created_at?: number }, evict = true): Promise<CiFile | null> {
     return this.locked(async () => {
       const m = { ...meta, created_at: meta.created_at ?? Date.now() };
       const rows = this.store.ciFiles();
-      const plan = this.plan(rows, key, m);
+      const plan = this.plan(rows, key, m, evict);
       if (!plan) return null;
       await rename(part, this.path(key));
       const row = this.store.putCiFile({ ...key, ...m });
@@ -366,16 +370,16 @@ export class CiStore {
     });
   }
 
-  /** Whether a file of `size` would fit in `run` now: a check before fetching one, which keeping it makes again. */
+  /** Whether a fetched file of `size` would fit in `run`'s spare room now: a check before fetching one, which keeping it makes again. */
   fits(run: Omit<Key, 'name'>, meta: { kind: string; target: string; size: number; created_at: number }): boolean {
-    return !!this.plan(this.store.ciFiles(), { ...run, name: '' }, meta);
+    return !!this.plan(this.store.ciFiles(), { ...run, name: '' }, meta, false);
   }
 
   /**
    * Keep a file this server fetched itself, as a run's file (a GitHub artifact mirrored for the Releases page, #673):
    * `fetch` writes it into the part folder it is given (in the run's own folder, so the stray sweep clears what a
-   * restart cuts off) and returns its path, named as the store names files; the rules take it or not as an upload's.
-   * Null when it doesn't fit; the part folder goes either way.
+   * restart cuts off) and returns its path, named as the store names files. Unlike an upload it only takes spare room:
+   * nothing else is deleted for it (#673). Null when it doesn't fit; the part folder goes either way.
    */
   async fetched(run: Omit<Key, 'name'>, meta: Omit<Meta, 'size' | 'sha256'> & { created_at: number }, fetch: (dir: string) => Promise<string>): Promise<CiFile | null> {
     const dir = dirname(this.path({ ...run, name: 'x' }));
@@ -389,7 +393,7 @@ export class CiStore {
       if (!st.isFile()) throw new Error(`${file} isn't a plain file`);
       const hash = createHash('sha256');
       for await (const chunk of createReadStream(file)) hash.update(chunk);
-      return await this.commit({ ...run, name }, file, { ...meta, size: st.size, sha256: hash.digest('hex') });
+      return await this.commit({ ...run, name }, file, { ...meta, size: st.size, sha256: hash.digest('hex') }, false);
     } finally {
       await rm(part, { recursive: true, force: true });
       await rmdir(dir).catch(() => {}); // only when nothing was kept

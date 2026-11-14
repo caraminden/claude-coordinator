@@ -1173,6 +1173,46 @@
   "m1": "409 A's chats aren't indexed for search by meaning yet",
   "m2": "409 A's chats aren't indexed for search by meaning yet"
  },
+ "GET /api/projects/:p/my-instructions": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/projects/:p/my-instructions": {
+  "anon": "401 Not logged in",
+  "person": "400 scope must be everywhere or scheme",
+  "member": "400 scope must be everywhere or scheme",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/my-instructions/history": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/people/999/instructions": {
+  "anon": "401 Not logged in",
+  "person": "403 Not for people",
+  "member": "403 Not for people",
+  "outsider": "403 Not for people",
+  "tmA": "404 No one called 999",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/properties": {
   "anon": "401 Not logged in",
   "person": "200",

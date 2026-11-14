@@ -9,8 +9,10 @@ judged against this file.
 
 Write a compact plan, put it in the page's notes or your reply, and check it against the brief:
 
-- **Colour:** 4 to 6 named colours with their values (`Slate #2b3140`: the page;
-  `Ember #e2763a`: the one action).
+- **Colour:** 6 to 9 named colours with their values (`Slate #2b3140`: the page;
+  `Ember #e2763a`: the one action), with every role of contraption-ui's First look filled: the
+  page and its 5% tint, the accent, a second accent for highlights, and a hue per kind of thing
+  on the page (the mock kit serves Citadel's as `--mk-accent-2` and `--mk-cat-1` to `-6`).
 - **Type:** the faces and their roles (display, body, numbers), and the scale.
 - **Layout:** one sentence and an ASCII wireframe per take, with how it aligns.
 - **What makes it this scheme's:** a line on where the look comes from in the subject itself
@@ -38,5 +40,7 @@ Use them as a checklist when you check the page (step 5), and fix any that crept
 
 ## Spend boldness in one place
 
-Pick one thing to be memorable (a type treatment, the art, one colour) and keep everything around it
-quiet. Before you show the page, take one decoration off.
+The colour roles above are the floor, the same as First look's for a real screen: a page whose
+only colour is its accent is the bland default (#683, Cara 2026-11-14: "pretty bland and
+colorless"). On top of them, pick one thing to be memorable (a type treatment, the art, a
+gradient) and keep everything around it quiet. Before you show the page, take one decoration off.

@@ -1,13 +1,15 @@
 # First look: the how-to
 
 Part of `citadel:contraption-ui`: the code behind its "First look" checklist. Everything here is the
-kit's tokens and parts; nothing is a new library.
+kit's tokens and parts; nothing is a new library. The look these rules make is take A of #683's
+review page (`mockups/colour-defaults/colour-default-takes.html` in Citadel's shared folder), which
+Cara picked on 2026-11-14 as the default for every minion's UI.
 
-## 1. The accent
+## 1. The two accents
 
-Your app's own colour (from its icon, say), as a light and a dark value: the one hex pair an app
-owns. In your `app.css`, after theme.css loads, on `:root` (not a container, so the focus ring,
-`cui-primary`, `cui-choice` and switches all follow it):
+Your app's own colour (from its icon, say), as a light and a dark value. In your `app.css`, after
+theme.css loads, on `:root` (not a container, so the focus ring, `cui-primary`, `cui-choice` and
+switches all follow it):
 
 ```css
 :root { --citadel-accent: #0f766e; }
@@ -17,10 +19,21 @@ owns. In your `app.css`, after theme.css loads, on `:root` (not a container, so 
 Pick a hue none of the tones use (teal, pink, indigo), so a primary button never reads as a status.
 Short of one, `var(--citadel-violet)` works and switches with dark mode by itself; then violet is
 the accent and stays off your chips. Never `ok`, `warn`, `danger` or `info`: those mean a status,
-and a green Save button reads as "done", a blue one as "running".
+and a green Save button reads as "done", a blue one as "running". Never a grey: an app needs a hue.
 
 Check both against `--citadel-on-accent` (white in light, `#1d1c1a` in dark) at 4.5:1 or better,
 and against `--citadel-surface` at 3:1 (a link, a ring). Dark wants the lighter shade.
+
+`--citadel-accent-2` is the second colour: theme.css serves fuchsia (`#a21caf`, dark `#e879f9`).
+Keep it unless your accent sits within 60° of it on the colour wheel (pink, purple, red, magenta);
+then set your own pair the same way, 4.5:1 or better on `surface`. It wears highlights, never the
+primary button:
+
+```css
+.stars, .is-new { color: var(--citadel-accent-2); }
+.cui-btn.second { border-color: color-mix(in srgb, var(--citadel-accent-2) 55%, var(--citadel-surface));
+  color: color-mix(in srgb, var(--citadel-accent-2) 80%, var(--citadel-text)); }
+```
 
 A tint of the accent marks what's current without shouting: the open tab, a selected row.
 
@@ -31,35 +44,62 @@ A tint of the accent marks what's current without shouting: the open tab, a sele
 }
 ```
 
-## 2. Cards on the page
+## 2. A tinted page, cards with coloured heads
 
-`bg` is the page; content sits on `surface`. One level: inside a card, group with space or a rule
-line (craft floor).
+The page takes 5% of the accent; content sits on `surface`. One level: inside a card, group with
+space or a rule line (craft floor). Each card's head is a band in the card's hue (`--hue`: the
+accent, accent-2 or its category) with an icon tile leading it.
 
 ```css
+html, body { background: color-mix(in srgb, var(--citadel-accent) 5%, var(--citadel-bg)); }
 .card {
+  --hue: var(--citadel-accent);
   background: var(--citadel-surface); border: 1px solid var(--citadel-border);
-  border-radius: var(--citadel-radius); padding: var(--citadel-space-4);
+  border-radius: var(--citadel-radius);
 }
-.card > h2 { margin: 0 0 var(--citadel-space-3); font-size: var(--citadel-size-h3); }
+.card-head {
+  display: flex; align-items: center; gap: var(--citadel-space-2); padding: var(--citadel-space-2) var(--citadel-space-3);
+  background: color-mix(in srgb, var(--hue) 7%, var(--citadel-surface)); border-bottom: 1px solid var(--citadel-border);
+  border-radius: var(--citadel-radius) var(--citadel-radius) 0 0;
+}
+.card-head h2 { flex: 1; margin: 0; font-size: var(--citadel-size-h3); }
+.card-body { padding: var(--citadel-space-3); }
+.icon-tile {
+  width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: var(--citadel-radius-sm);
+  background: color-mix(in srgb, var(--hue) 18%, var(--citadel-surface)); color: color-mix(in srgb, var(--hue) 85%, var(--citadel-text));
+}
 .cards { display: grid; gap: var(--citadel-space-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); }
 ```
 
-A table or list is a card too, its rows split by `border-top: 1px solid var(--citadel-border)`.
+```html
+<section class="card"><div class="card-head"><span class="icon-tile" aria-hidden="true">▤</span><h2>On the shelf</h2><span class="cui-chip">4</span></div>…</section>
+```
 
-## 3. Type scale
+A table or list is a card too, its rows split by `border-top: 1px solid var(--citadel-border)`.
+The glyph in an icon tile is a monochrome character or SVG that takes `currentColor`.
+
+## 3. Type scale and stat tiles
 
 | Level | Size | Weight | Colour |
 |---|---|---|---|
-| The view's title, one per view | `size-h1` | 700 | `text` |
+| The view's title, one per view | 26 px | 750 | `text` |
 | A card's or group's heading | `size-h2` or `size-h3` | 600 | `text` |
 | Body, row titles | `size-body` | 400, a row's title 600 | `text` |
 | Meta: times, counts, ids, hints | `size-meta` or `size-small` | 400 | `muted` |
 | A small label over a group | `size-meta`, `letter-spacing: .04em`, uppercase | 600 | `muted` |
 
-A key number (a total, what's overdue) is a stat: the number at `size-h1`, weight 700,
-`tabular-nums`, with a `size-meta` muted label under it, and in its tone when the tone means
-something (`color: color-mix(in srgb, var(--citadel-danger) 80%, var(--citadel-text))` for overdue).
+A key number (a total, what's overdue) is a stat tile. A row of them takes a different hue each:
+the accent, accent-2, or a tone when the number means a status (overdue in `danger`).
+
+```css
+.stats { display: grid; gap: var(--citadel-space-3); grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+.stat { --hue: var(--citadel-accent); padding: var(--citadel-space-2) var(--citadel-space-3); border-radius: var(--citadel-radius);
+  background: color-mix(in srgb, var(--hue) 11%, var(--citadel-surface)); border: 1px solid color-mix(in srgb, var(--hue) 25%, var(--citadel-surface)); }
+.stat b { display: block; font-size: 22px; font-weight: 750; font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--hue) 80%, var(--citadel-text)); }
+.stat span { font-size: var(--citadel-size-meta); color: var(--citadel-muted); }
+.stat.second { --hue: var(--citadel-accent-2); }
+.stat.overdue { --hue: var(--citadel-danger); }
+```
 
 ## 4. Status in tone
 
@@ -72,12 +112,39 @@ something (`color: color-mix(in srgb, var(--citadel-danger) 80%, var(--citadel-t
 ```
 
 Pick one tone per meaning and keep it across the app: the same state is the same chip on every
-view. `violet` is the spare for a category that isn't a status.
+view.
 
-## 5. Something to scan by
+## 5. A hue per kind
 
-A row leads with something the eye catches before the words: a chip, a monochrome glyph that takes
-`currentColor` (`✓`, `●`, `▲`, `◆`), or a 3 px bar in the row's tone down its left edge:
+Kinds of things (a category, a type, an area, a person) take `cat-1` to `cat-6`: indigo, sky,
+rose, lime, teal, purple. Give each kind its hue once, in one table in your code, so it is the same
+on every view; a seventh kind starts the list again. A kind is drawn square, a status round:
+
+```js
+const KIND_HUE = { Fiction: 1, Science: 2, History: 3, Cooking: 4 };  // fixed, never by list position
+tag.dataset.hue = KIND_HUE[kind] ?? 1;
+```
+
+```css
+[data-hue="1"] { --hue: var(--citadel-cat-1); } [data-hue="2"] { --hue: var(--citadel-cat-2); }
+[data-hue="3"] { --hue: var(--citadel-cat-3); } [data-hue="4"] { --hue: var(--citadel-cat-4); }
+[data-hue="5"] { --hue: var(--citadel-cat-5); } [data-hue="6"] { --hue: var(--citadel-cat-6); }
+.tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 4px; font-size: var(--citadel-size-meta); font-weight: 650;
+  color: color-mix(in srgb, var(--hue) 78%, var(--citadel-text)); background: color-mix(in srgb, var(--hue) 13%, var(--citadel-surface)); }
+.cover { width: 30px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 4px; font-weight: 800;
+  background: color-mix(in srgb, var(--hue) 20%, var(--citadel-surface)); color: color-mix(in srgb, var(--hue) 85%, var(--citadel-text));
+  border-left: 3px solid var(--hue); }
+.avatar { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700;
+  background: color-mix(in srgb, var(--hue) 24%, var(--citadel-surface)); color: color-mix(in srgb, var(--hue) 85%, var(--citadel-text)); }
+```
+
+The tag always shows its word; the cover shows the item's initial or icon. Every `cat-*` is 4.5:1
+or better on `bg` and `surface` in both modes, so the raw hue can be text too.
+
+## 6. Something to scan by
+
+A row leads with something the eye catches before the words: a cover or glyph in the row's
+category hue, a chip, or a 3 px bar in the row's tone down its left edge:
 
 ```css
 .row { border-left: 3px solid var(--row-tone, transparent); }
@@ -86,7 +153,7 @@ A row leads with something the eye catches before the words: a chip, a monochrom
 
 Long lists group under small headings (by status, by day, by owner) with a count beside each.
 
-## 6. An empty state with shape
+## 7. An empty state with shape
 
 ```html
 <section class="card empty">
@@ -98,22 +165,23 @@ Long lists group under small headings (by status, by day, by owner) with a count
 ```
 
 ```css
-.empty { text-align: center; padding: var(--citadel-space-6) var(--citadel-space-4); }
-.empty-mark { font-size: 28px; color: color-mix(in srgb, var(--citadel-accent) 60%, var(--citadel-muted)); }
-.empty p { color: var(--citadel-muted); max-width: 40ch; margin: var(--citadel-space-2) auto var(--citadel-space-4); }
+.empty { text-align: center; padding: var(--citadel-space-6) var(--citadel-space-4); display: grid; justify-items: center; gap: var(--citadel-space-2); }
+.empty-mark { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 18px;
+  background: color-mix(in srgb, var(--citadel-accent-2) 14%, var(--citadel-surface)); color: color-mix(in srgb, var(--citadel-accent-2) 85%, var(--citadel-text)); }
+.empty p { color: var(--citadel-muted); max-width: 40ch; margin: 0 auto var(--citadel-space-2); }
 ```
 
 A view that isn't built yet says so the same way, with what it will hold.
 
-## 7. Dark mode
+## 8. Dark mode
 
 Only tokens and `color-mix()` with `--citadel-surface` or `--citadel-text`, so dark gets its own
 palette: warm dark surfaces, lighter tones, `on-accent` near-black. What breaks it: a fixed light
 tint (`#fef3c7`), `rgba(0,0,0,…)` shadows or overlays doing a border's job, `opacity` on text to
 make it grey, and white or black anywhere. Screenshot dark on its own; don't assume.
 
-## 8. Contrast
+## 9. Contrast
 
-Body text is `text`; secondary text is `muted`, never lighter and never `opacity`. Text in a tone is
-mixed 80% into `text` (as chips do), not the raw tone on a tint. A custom accent passes the two
-checks in 1.
+Body text is `text`; secondary text is `muted`, never lighter and never `opacity`. Text in a tone or
+hue is mixed into `text` (80% for a chip, 78% for a tag), never the raw tone on its own tint. A
+custom accent or accent-2 passes the checks in 1.

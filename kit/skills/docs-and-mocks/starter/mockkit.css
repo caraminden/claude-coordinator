@@ -1,4 +1,4 @@
-/* Citadel mock kit, styles (v2). Copy beside the page with mockkit.js; a scheme's theme.css, linked after
+/* Citadel mock kit, styles (v3). Copy beside the page with mockkit.js; a scheme's theme.css, linked after
    this file, overrides the --mk-* tokens. Classes are mk-*; everything else on the page is the page's own. */
 
 :root {
@@ -14,6 +14,9 @@
   --mk-warn: #b45309;
   --mk-bad: #b91c1c;
   --mk-info: #2563eb;
+  /* v3 (#683): colour roles for a mocked screen, Citadel's --citadel-accent-2 and --citadel-cat-1..6. */
+  --mk-accent-2: #a21caf;
+  --mk-cat-1: #4f46e5; --mk-cat-2: #0369a1; --mk-cat-3: #be123c; --mk-cat-4: #4d7c0f; --mk-cat-5: #0f766e; --mk-cat-6: #9333ea;
   --mk-font: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mk-display: var(--mk-font);
   --mk-mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -36,6 +39,8 @@
     --mk-warn: #fbbf24;
     --mk-bad: #f87171;
     --mk-info: #60a5fa;
+    --mk-accent-2: #e879f9;
+    --mk-cat-1: #a5b4fc; --mk-cat-2: #7dd3fc; --mk-cat-3: #fda4af; --mk-cat-4: #bef264; --mk-cat-5: #5eead4; --mk-cat-6: #d8b4fe;
     color-scheme: dark;
   }
 }

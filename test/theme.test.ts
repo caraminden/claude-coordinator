@@ -56,3 +56,19 @@ test('theme.css carries style.css\'s exact values for light and dark, and its co
 test('a style.css without its :root blocks is refused, not served as an empty theme', () => {
   assert.throws(() => themeCss('body { color: red; }'), /no :root block/);
 });
+
+test('the colour roles for apps (#683) can be text: 4.5:1 or better on the page and on a card, in both modes', () => {
+  const lum = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ratio = (a: string, b: string) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  const roles = ['accent-2', 'cat-1', 'cat-2', 'cat-3', 'cat-4', 'cat-5', 'cat-6'];
+  for (const block of Object.values(citadelPalette(style))) {
+    const v = Object.fromEntries(block.vars);
+    for (const role of roles) {
+      assert.match(v[role] ?? '', /^#[0-9a-f]{6}$/i, `--${role} is a plain hex in ${block.colorScheme}`);
+      for (const under of ['panel', 'bg']) assert.ok(ratio(v[role], v[under]) >= 4.5, `--${role} on --${under} in ${block.colorScheme}: ${ratio(v[role], v[under]).toFixed(2)}:1`);
+    }
+  }
+});

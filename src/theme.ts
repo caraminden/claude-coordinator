@@ -23,6 +23,14 @@ export const THEME_NAMES: Record<string, string> = {
   held: 'violet',
   'code-bg': 'code-bg',
   'on-accent': 'on-accent',
+  // Colour roles for apps (#683): a second accent and six category hues.
+  'accent-2': 'accent-2',
+  'cat-1': 'cat-1',
+  'cat-2': 'cat-2',
+  'cat-3': 'cat-3',
+  'cat-4': 'cat-4',
+  'cat-5': 'cat-5',
+  'cat-6': 'cat-6',
   // The same in both modes (#283): type, spacing, radii, controls, focus, motion, the notice.
   font: 'font',
   mono: 'mono',

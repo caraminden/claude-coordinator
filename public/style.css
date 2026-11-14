@@ -15,6 +15,16 @@
   --held: #7c3aed;
   --waiting-tint: #f5b40b; /* --waiting reads brown as a tint on white */
   --on-accent: #fff; /* text and icons on --accent */
+  /* Colour roles for apps (#683, Cara 2026-11-14 picked "Moderate"): a second accent for highlights and six
+     category hues for kinds of things (tags, covers, avatars, section icons). Citadel's own screens don't use
+     them yet. Each is 4.5:1 or better on --panel and --bg, so it can be text (test/theme.test.ts). */
+  --accent-2: #a21caf;
+  --cat-1: #4f46e5;
+  --cat-2: #0369a1;
+  --cat-3: #be123c;
+  --cat-4: #4d7c0f;
+  --cat-5: #0f766e;
+  --cat-6: #9333ea;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -35,6 +45,13 @@
     --held: #a78bfa;
     --waiting-tint: #fbbf24;
     --on-accent: #1d1c1a; /* white on this accent is about 2.3:1; near-black about 7.5:1 (Cara, 2026-11-02: "Dark text") */
+    --accent-2: #e879f9;
+    --cat-1: #a5b4fc;
+    --cat-2: #7dd3fc;
+    --cat-3: #fda4af;
+    --cat-4: #bef264;
+    --cat-5: #5eead4;
+    --cat-6: #d8b4fe;
     color-scheme: dark;
   }
 }

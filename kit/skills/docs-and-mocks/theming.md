@@ -18,6 +18,7 @@ linked after `mockkit.css`. It sets the tokens, and may load fonts and style hea
   --mk-accent: #f2c761;    /* the one action, links, the recommendation */
   --mk-on-accent: #15161c; /* text on accent */
   --mk-good: #8cd98c;  --mk-warn: #f2d14d;  --mk-bad: #f2594d;  --mk-info: #8cb3f2;
+  --mk-accent-2: #e98fd8;  /* highlights; and --mk-cat-1 to -6, a hue per kind of thing (looks.md) */
   --mk-font: "Open Sans", system-ui, sans-serif;
   --mk-display: "Alegreya Sans SC", serif;   /* headings */
   --mk-mono: ui-monospace, monospace;

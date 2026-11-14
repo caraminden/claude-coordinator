@@ -66,7 +66,8 @@ Citadel's do, so use the variables and never copy a hex value.
 
 - **Colours:** `bg`, `surface`, `text`, `muted`, `border` (dividers and card outlines, subtle), `control-border` (a home-made input, select or bordered button: 3:1 on every surface, WCAG 1.4.11), `accent`, `on-accent` (text and icons on
   the accent: white in light, near-black in dark), `focus`, `danger`, `ok`, `warn`, `warn-tint`,
-  `info`, `neutral`, `violet`, `code-bg`.
+  `info`, `neutral`, `violet`, `code-bg`; the colour roles `accent-2` and `cat-1` to `cat-6` (First look, 1
+  and 5), each 4.5:1 or better on `bg` and `surface`, so they can be text.
 - **Type:** `font`, `mono`; `size-body` 15, `size-small` 13 (tool rows, small buttons), `size-meta`
   12 (chips, timestamps, hints), `size-h1`/`h2`/`h3` 22/18/16.
 - **Space:** `space-1` to `space-6`: 4, 8, 12, 16, 24, 32.
@@ -87,32 +88,49 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
 ## First look
 
 Cara, 2026-11-09: "a big wall of white/black text is never going to be what we want out of our
-UIs". A new page or view meets all eight before its first screenshot; a view that is only a chat
-needs 1, 7 and 8, as the chat's parts carry their own look. The code for each:
+UIs"; 2026-11-14, picking the "Moderate" take of #683 for every minion's UI: "a lot of the UI that is
+made by our minions by default is pretty bland and colorless". A new page or view meets all nine
+before its first screenshot; a view that is only a chat needs 1, 8 and 9, as the chat's parts carry
+their own look. A scheme with its own style guide (a design-system home, a theme) follows that
+instead. The code for each, and the picked take:
 [references/first-look.md](references/first-look.md).
 
-1. **Its own accent.** One `--citadel-accent` on `:root` in your CSS: your own light and dark pair
-   in a hue no tone uses, or `violet` kept off your chips. Never a status tone (`ok`, `warn`,
-   `danger`, `info`), and not Citadel's orange: the app should look like itself. Primary buttons,
-   the current tab, links and what's selected wear it.
-2. **Cards group the content.** `bg` is the page; each list, form, pane or panel sits on a
-   `surface` card with the border and `radius`, and the top bar (`cui-topbar`) is `surface`. No text sits loose on `bg`.
-3. **At least three levels of type** on any view with content: an `h1` title, a heading per card,
-   body, and muted `size-meta` for times, counts and ids. A key number is a big stat with a label.
+1. **Two accents of its own.** `--citadel-accent` on `:root` in your CSS: your own light and dark
+   pair in a hue no tone uses. Never a status tone (`ok`, `warn`, `danger`, `info`), a grey, or
+   Citadel's orange: the app should look like itself. Primary buttons, the current tab, links and
+   what's selected wear it. `--citadel-accent-2` is the second colour, for highlights: ratings, a
+   "new" mark, one stat tile, a secondary button's text and border, the empty state's mark. Keep
+   theme.css's fuchsia, or set your own pair at least 60° round the colour wheel from your accent
+   (always when your accent is pink, purple or red).
+2. **Tinted page, cards with coloured heads.** The page is `bg` mixed with 5% of the accent; each
+   list, form or panel sits on a `surface` card with the border and `radius`, and the top bar
+   (`cui-topbar`) is `surface`. A card's head row is its hue mixed 7% into `surface`, and leads with
+   a 24 px icon tile in that hue (accent, accent-2 or the card's category). No text sits loose on the page.
+3. **Three levels of type, and stats as tiles:** the view's title at 26 px, weight 750; a heading
+   per card; body; muted `size-meta` for times, counts and ids. A key number is a stat tile: the
+   number at 22 px weight 750 in its hue, a label under it, on that hue mixed 11% into `surface`,
+   each tile of a row in a different hue.
 4. **Every state is a toned chip** (`cui-chip data-tone`, with its word, rule 17), the same tone for
    the same meaning on every view.
-5. **Rows have something to scan by:** a leading chip, glyph or tone bar, and long lists grouped
-   under headings with counts.
-6. **Empty means a card, not a sentence:** a mark, a heading, why, and the next step as a button
-   (rule 19). The same for a view not built yet.
-7. **Dark is its own look:** tokens and `color-mix()` only, so no fixed tints, `rgba` black, `opacity`
+5. **Every kind of thing has a hue.** Categories, types, areas and people map to `cat-1` to
+   `cat-6` in a fixed order, the same on every view, drawn as square tags (4 px radius), covers,
+   avatars and section icons: never a round chip, so a kind never reads as a status. A seventh kind
+   reuses the hues in order; the word always shows.
+6. **Rows have something to scan by:** a leading cover or glyph in the row's category hue, or a tone
+   bar, and long lists grouped under headings with counts.
+7. **Empty means a card, not a sentence:** a 40 px round mark in accent-2's tint, a heading, why,
+   and the next step as a button (rule 19). The same for a view not built yet.
+8. **Dark is its own look:** tokens and `color-mix()` only, so no fixed tints, `rgba` black, `opacity`
    greys or pure white or black. Screenshot it separately.
-8. **Contrast holds:** body `text`, secondary `muted` and never fainter, `on-accent` on the accent;
-   your own accent passes 4.5:1 with `on-accent` and 3:1 with `surface`.
+9. **Contrast holds:** body `text`, secondary `muted` and never fainter, `on-accent` on the accent;
+   your own accent passes 4.5:1 with `on-accent` and 3:1 with `surface`, and your own accent-2 4.5:1
+   with `surface`.
 
-The check: squint at the phone and desktop shots in both modes. You should see the accent, the
-cards and where each status sits before you can read a word. The critic's `ui-screenshots` rubric
-fails a view that's a wall of plain text (`citadel:critique`).
+The check: squint at the phone and desktop shots in both modes. Before you can read a word you
+should see the accent, the cards and where each status sits, and count at least three hues besides
+the status tones (the accent, accent-2, a category hue) on any view with a list or two cards. Fewer
+is the bland default this section exists to stop: add the tints, icon tiles, tags and stat tiles
+above until it passes. The critic's `ui-screenshots` rubric fails both (`citadel:critique`).
 
 ## The rules
 
@@ -135,7 +153,7 @@ fails a view that's a wall of plain text (`citadel:critique`).
    web link.
 7. **No inline styles in what a component writes** (`style=""`, `<style>`): Citadel's CSP and maybe
    yours refuse them. Use classes, or a constructed stylesheet adopted once.
-8. **Use the variables, never copied hex.** Your own accent pair (First look, 1) is the one hex an
+8. **Use the variables, never copied hex.** Your own accent pairs (First look, 1) are the only hex an
    app owns.
 9. **Phone breakpoint is 800 px** (`NARROW` from `drawers.js` in script).
 10. **No full-screen loading covers.** Cara, 2026-11-03: "keep the screen visible and just have a spinner

@@ -2419,9 +2419,15 @@ export class Store {
   }
 
   setSetting(key: string, value: unknown) {
+    // An unchanged value writes nothing: ci-health alone rewrote 250 KB of the same job lists every 5 minutes (#680).
     this.db
-      .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value')
       .run(key, JSON.stringify(value));
+  }
+
+  /** Whether this connection checkpoints the WAL itself on commit (SQLite's default) or leaves it to checkpointOffThread (src/checkpoint.ts, #680). */
+  autoCheckpoint(on: boolean) {
+    this.db.exec(`PRAGMA wal_autocheckpoint = ${on ? 1000 : 0}`);
   }
 
   deleteSetting(key: string) {

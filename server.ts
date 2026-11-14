@@ -71,6 +71,7 @@ import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
+import { checkpointOffThread } from './src/checkpoint.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -144,6 +145,8 @@ if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000)
 if (!BOOT_CHECK) watchLoopLag(console.warn, 100, 500, { profile: true, files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
+// Off the event loop: a checkpoint fsyncs, and a stalled disk made one hold every request for seconds (#680).
+checkpointOffThread(store);
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '', {
   get: (id) => {

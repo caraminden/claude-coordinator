@@ -303,10 +303,10 @@ export function answerRef(cardEl, data) {
 
 /**
  * A card of multiple-choice questions from Claude. Click options to pick (several when the question
- * allows), and type your own answer or add to the pick in the box under them; a single one-pick question sends on the first click, unless the
- * card has pictures (#634; Cara, 2026-11-12: "Cards with images should never autosend, and clicking it anywhere
- * should show the image to you"; Josh, 2026-11-13: "clicking should still select them"): a click there selects
- * the option and opens its picture, and only Send sends.
+ * allows), and type your own answer or add to the pick in the box under them; only Send (or Enter in the box)
+ * sends, so text can follow a click (Cara, 2026-11-14, "Wait for Send"). On a card with pictures (#634; Cara,
+ * 2026-11-12: "clicking it anywhere should show the image to you"; Josh, 2026-11-13: "clicking should still
+ * select them") a click selects the option and opens its picture.
  */
 // Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
 const cardPicks = new Map();
@@ -380,7 +380,6 @@ export function questionCard(ticketId, card) {
           sel.add(o.label);
         }
         refresh();
-        if (single && !pictures) send();
       };
       // Opening a picture hands the viewer this question's pictures, to step through and pick from; a
       // click that opens it in a new tab instead leaves the viewer as it is.

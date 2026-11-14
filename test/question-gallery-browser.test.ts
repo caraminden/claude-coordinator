@@ -175,10 +175,15 @@ test('an answered picture card still opens its pictures, read-only', { skip }, a
   assert.equal(await page.eval('sent.length'), 0);
 });
 
-test('a text-only one-pick card still sends on the first click', { skip }, async () => {
+// Cara, 2026-11-14: one-pick cards "Wait for Send", so text typed after the click goes with it.
+test('a text-only one-pick card waits for Send, and sends the pick with the text typed after it', { skip }, async () => {
   const page = await chat(9);
   await click(page, '.opt');
-  assert.deepEqual(await page.eval('sent'), [{ questionId: 'q9', answers: [{ selected: ['Tabs'], other: '' }] }]);
+  assert.equal(await page.eval('sent.length'), 0, 'the click only picks');
+  await page.eval(`(() => { const o = document.querySelector('.qcard .other'); o.value = 'but smaller'; o.dispatchEvent(new Event('input')); })()`);
+  assert.deepEqual(await page.eval(picked), ['Tabs'], 'typing keeps the pick');
+  await page.eval(`${sendBtn}.click()`);
+  assert.deepEqual(await page.eval('sent'), [{ questionId: 'q9', answers: [{ selected: ['Tabs'], other: 'but smaller' }] }]);
 });
 
 test('a picture card with a second question waits for Send with both answers', { skip }, async () => {

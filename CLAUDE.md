@@ -18,6 +18,8 @@ directly; there are no dependencies and no build step.
   it inside the turn with one blocking command rather than ending the turn: a minion's turn is one
   `claude -p` process, the board shows it idle once that exits, and the job may not outlive it.
 - Never put `effort` on a skill (Grunts: the `citadel:subagents` skill).
+- `src/backup.html` and `src/backup.ts` (the /backup chat with the Taskmaster, for when the front end breaks) are
+  frozen on purpose: leave them out of restyles and refactors; `test/backup.test.ts` pins the page's hash.
 
 ## Compact instructions
 
@@ -35,7 +37,7 @@ skill step is skipped or uses its default.
   `.github/workflows/tests.yml` on the commit it lands, and runs the suite on perigee only as a loud fallback (`CI FALLBACK`;
   `LAND_CI=0` forces it when CI itself is broken). A red CI run: `tools/ci-failures` (on every turn's PATH, `--help`) prints its failing tests. Before landing, a minion runs only the test files its change touches, with `citadel-test test/<name>.test.ts ...` (leak guard, a 300 s limit, only the failures shown, the full output in `$TMPDIR/citadel-test.log`), never the full suite on perigee. No build step. A UI change is
   also checked in a dev copy or preview (scheme instructions, "UI checks"), with `node tools/ui-shot.ts`:
-  `.claude/rules/ui-checks.md` (loads when a session reads a file in `public/`).
+  `.claude/rules/ui-checks.md` (loads when a session reads a file in `public/` or `docs/design-system/`).
 - **Front end:** `public/`, plain JS with no build step.
 - **High risk by file (self-review):** auth (`src/auth.ts`); deploy and restart code
   (`tools/deploy.sh`, `tools/land.sh`, `tools/boot-check.ts`, `deploy/`); the tripwire

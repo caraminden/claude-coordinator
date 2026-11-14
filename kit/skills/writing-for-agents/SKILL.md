@@ -80,7 +80,7 @@ paths:
 
 A rule without `paths:` loads every turn, like `CLAUDE.md`. Catches, measured on Claude Code 2.1.323 (Citadel #685):
 
-- It loads when the session **reads** a matching file: Read, Write, Edit, or a read-only Bash command naming it (`cat public/x.js`). Glob, Grep, `ls`, `sed -i` and starting the turn inside the folder do not load it. So scope only a rule the session meets after opening a file there, never one it needs before (which folder to work in, how to start).
+- It loads when the session **reads** a matching file: Read, Write, Edit, or a read-only Bash command naming it (`cat public/x.js`). Glob, Grep, `ls`, `sed -i` and starting the turn inside the folder do not load it. So scope only a rule the session meets after opening a file there, never one it needs before (which folder to work in, how to start) or one about files a session should leave alone (a frozen file a refactor reaches only by Grep).
 - Once loaded it stays for the turn, worktrees included, and a `/compact` kept it in that test, through the summary.
 - A Codex turn reads `CLAUDE.md` alone, never `.claude/rules/`: a rule that must reach Codex stays in `CLAUDE.md`.
 - When a moved rule is still named from `CLAUDE.md` (a Project facts line a skill reads), leave a pointer there naming the rule file, so a Grunt reading `CLAUDE.md` can still reach it.

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store, type Ticket } from '../src/db.ts';
 import { Pusher, encryptPayload, loadVapidKeys, notificationFor, validSubscription, vapidJwt } from '../src/push.ts';
+import { GLOBAL_OWNER } from '../src/properties.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'push-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -232,6 +233,7 @@ test('a scheme someone hid sends them no pushes, and Unhide brings them back (#2
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const p = store.createProject('Obsidian', null, josh.id);
+  store.addMember(p.id, cara.id); // a member: admin reach alone sends no pushes (#674)
   const t = store.createTicket({ project_id: p.id, title: 'Ready', permission_mode: 'default', created_by: 'Josh', kind: 'ticket' });
   const coordinator = store.createTicket({ project_id: p.id, title: 'Coordinator', permission_mode: 'default', created_by: 'Josh', kind: 'coordinator' });
   for (const name of ['Cara', 'Josh']) {
@@ -252,5 +254,32 @@ test('a scheme someone hid sends them no pushes, and Unhide brings them back (#2
   assert.deepEqual(await who(coordinator), ['Josh']);
   store.setProjectHidden(cara.id, p.id, false);
   assert.deepEqual(await who(t), ['Cara', 'Josh']);
+  store.db.close();
+});
+
+test('admin reach sends no pushes: only a scheme\'s owner and members hear about it (#674)', async () => {
+  // Cara, 2026-11-14, on #674's card: pushes follow real membership, "Members only".
+  const store = new Store(join(root, 'members-only.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const alex = store.createUser({ name: 'Alex', login: 'alex' });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  for (const name of ['Delve', 'Citadel']) store.createProject(name, null, cara.id);
+  assert.ok(store.getProject(GLOBAL_OWNER), 'the second scheme is the Citadel scheme');
+  store.addMember(GLOBAL_OWNER, alex.id); // admin reach, by Citadel membership
+  const threadspace = store.createProject('Threadspace', null, josh.id);
+  const t = store.createTicket({ project_id: threadspace.id, title: 'Ready', permission_mode: 'default', created_by: 'Josh', kind: 'ticket' });
+  for (const name of ['Cara', 'Alex', 'Josh']) {
+    const b = browser(`https://push.example/${name}`);
+    store.savePushSubscription(name, b.endpoint, b.p256dh, b.auth);
+  }
+  const sent: string[] = [];
+  const fakeFetch = (async (url: string) => (sent.push(url), new Response('', { status: 201 }))) as unknown as typeof fetch;
+  const pusher = new Pusher(store, loadVapidKeys(root), fakeFetch);
+  await pusher.notify(t, { kind: 'state', state: 'blocked', note: 'stuck' });
+  assert.deepEqual(sent.map((url) => url.split('/').pop()), ['Josh'], 'neither the admin flag nor Citadel membership makes you a member');
+  sent.length = 0;
+  store.addMember(threadspace.id, alex.id);
+  await pusher.notify(t, { kind: 'state', state: 'blocked', note: 'stuck' });
+  assert.deepEqual(sent.map((url) => url.split('/').pop()).sort(), ['Alex', 'Josh'], 'added to it: he hears');
   store.db.close();
 });

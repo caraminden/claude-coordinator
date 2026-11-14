@@ -183,7 +183,7 @@ export class Pusher {
   }
 
   /**
-   * Tell everyone in the ticket's project who subscribed, except `except` (the person who caused it),
+   * Tell everyone in the ticket's project (its owner and members) who subscribed, except `except` (the person who caused it),
    * devices that muted the project, people who hid it (#226), and pinned-only devices whose person hasn't pinned this minion
    * (the Taskmaster can't be pinned, so it always gets through). Resolves once every push service has answered.
    */
@@ -196,10 +196,13 @@ export class Pusher {
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }
 
-  /** Whether the person a device belongs to (by name) is still here, in the scheme, and hasn't hidden it. */
+  /**
+   * Whether the person a device belongs to (by name) is still here, owns or is a member of the scheme, and hasn't hidden it.
+   * Admin reach opens the rest but doesn't push them (#674; Cara, 2026-11-14: "Members only").
+   */
   private inScheme(name: string, projectId: number): boolean {
     const user = this.store.findUser('name', name);
-    return !!user && !user.disabled_at && this.store.canSee({ uid: user.id, admin: !!user.admin }, projectId)
+    return !!user && !user.disabled_at && this.store.memberSchemes(user.id).has(projectId)
       && !this.store.hiddenProjects(user.id).has(projectId);
   }
 

@@ -85,6 +85,25 @@ test('a rebase conflict aborts and leaves main untouched', () => {
   assert.equal(git(r.wt, 'status', '--porcelain'), '');
 });
 
+test("a stale squash, which reverts what landed since the branch started, is refused until it names each undo (#677)", () => {
+  const r = setup();
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  r.commit(r.main, 'c.txt', [1, 2, 3, 4, 5].map((k) => `someone else landed this, line ${k}\n`).join(''));
+  const main = git(r.main, 'rev-parse', 'main');
+  git(r.wt, 'reset', '--soft', 'main');
+  git(r.wt, 'commit', '-qm', 'squashed');
+  const mine = git(r.wt, 'rev-parse', 'HEAD');
+  const res = r.run();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, new RegExp(`removes what these landed, without naming them:\\nland:   ${main.slice(0, 12)} c\\.txt: .*\\(5 of the 5 lines[^]*"Undoes: <sha>"`));
+  assert.equal(git(r.main, 'rev-parse', 'main'), main);
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), mine, 'the branch is back where it was');
+  git(r.wt, 'commit', '-q', '--amend', '-m', `squashed\n\nUndoes: ${main}`);
+  const again = r.run();
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(git(r.main, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+});
+
 test('a failed push keeps main moved and says so', () => {
   const r = setup();
   git(r.main, 'remote', 'set-url', 'origin', join(r.dir, 'missing.git'));
@@ -195,7 +214,8 @@ test('numbered things: a line that does not parse refuses and names it; "none" c
   assert.equal(res.status, 1);
   assert.match(res.stderr, /does not parse: "files db\/migrations\/\*\.sql": files takes one glob with NNNN/);
   assert.equal(git(r.wt, 'rev-parse', 'HEAD'), mine);
-  r.commit(r.wt, 'CLAUDE.md', '- **Numbered things:** none.\n');
+  // Only the line changes: the whole file swapped for it would undo the facts main just landed (the undo guard, #677).
+  r.commit(r.wt, 'CLAUDE.md', facts.replace(/- \*\*Numbered things:\*\*.*\n.*\n/, '- **Numbered things:** none.\n'));
   r.commit(r.wt, 'db/migrations/0001-again.sql', 'dup\n');
   const ok = r.run();
   assert.equal(ok.status, 0, ok.stderr);

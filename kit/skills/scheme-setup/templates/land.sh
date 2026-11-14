@@ -11,6 +11,9 @@
 # 1. Rebases the branch onto the local main. A conflict stops here.
 # 2. Refuses when the branch takes a number main already has (a migration, a version, a ledger id),
 #    as the "Numbered things" line in Project facts names them. No line, or "none": no check.
+#    And refuses a branch that removes what a recent landing added without naming it, such as a squash
+#    onto a newer main that keeps the branch's old files (undo_guard below; a message line "Undoes: <sha>"
+#    lets a meant undo through).
 # 3. Runs the check command on the rebased commit, within LAND_CHECK_TIMEOUT whole seconds (default
 #    1800). A failure or overrun stops here.
 # 4. With the CI gate on (below): pushes the commit to the scratch branch land/<branch> on origin and
@@ -446,6 +449,61 @@ numbered_clashes() {
   ' "$FACTS" "$@"
 }
 
+# The undo guard (#677, after Peek Auras #361's tools/undo-guard.sh): prints, and exits 1 on, the commits among
+# <onto>'s last 60 that this branch reverts without seeing them. A stale squash does that behind a clean
+# fast-forward with CI green: `git reset --soft main` from a branch that started further back keeps its old files
+# (Peek Auras #309 undid six landings so). A commit counts when the branch removes 90% of the lines it added (4 or
+# more, of 12+ characters, compared trimmed; one the branch adds back in any file is a move, not a removal) and, if
+# it removed lines, puts at least half of those back. Commits of the branch's own ticket don't count (ticket/N-…
+# against a subject's leading "#N" or last "#N)"); an undo that is meant names each one in a message line "Undoes:
+# <sha>". Tried on 2026-11-14 over ~690 landings in four schemes: it refused the stale squash, two deliberate
+# removals of another minion's work (what the trailer is for), and nothing else.
+undo_guard() {
+  local base
+  base=$(git merge-base HEAD "$1") || return 2
+  perl -e '
+    use strict; use warnings;
+    my ($base, $ticket) = @ARGV;
+    sub run { my $out = `$_[0]`; $? == 0 or die "undo guard: $_[0] failed\n"; $out }
+    sub lines { # the trimmed lines of 12+ characters a diff adds (+) or removes (-), keyed by file
+      my ($sign, $cmd) = @_; my (%set, $f);
+      for (split /\n/, run("git -c core.quotePath=false $cmd")) {
+        if (/^diff /) { undef $f; next }
+        if (/^--- (?:a\/(.*)|\/dev\/null)$/) { $f = $1; next } # a deleted file is named here only
+        if (/^\+\+\+ (?:b\/(.*)|\/dev\/null)$/) { $f = $1 // $f; next }
+        next if /^@@/ || !defined $f;
+        $set{"$f\0$1"} = 1 if /^\Q$sign\E\s*(.*?)\s*$/ && length $1 >= 12;
+      }
+      \%set;
+    }
+    sub text { (split /\0/, $_[0], 2)[1] }
+    sub ticket { my $s = shift; return $1 if $s =~ /^#(\d+)\b/; my @t = $s =~ /#(\d+)\)/g; @t ? $t[-1] : "" }
+    my @named = run("git log --format=%B $base..HEAD") =~ /^Undoes: *([0-9a-f]{7,40})\b/mg;
+    my $diff = "diff -U0 --no-renames --no-color $base HEAD";
+    my ($removed, $added) = (lines("-", $diff), lines("+", $diff));
+    my %moved = map { text($_) => 1 } keys %$added;
+    my @bad;
+    for (split /\n/, run("git log --no-merges --format=\"%H %s\" -60 $base")) {
+      my ($c, $s) = /^(\S+) (.*)/ or next;
+      next if $ticket ne "" && ticket($s) eq $ticket;
+      next if grep { index($c, $_) == 0 } @named;
+      my $show = "diff-tree -p --root -U0 --no-renames --no-color --format= $c";
+      my $put = lines("+", $show);
+      my $n = keys %$put;
+      next if $n < 4;
+      my $gone = grep { $removed->{$_} && !$moved{text($_)} } keys %$put;
+      next if $gone < 0.9 * $n;
+      my $took = lines("-", $show);
+      my $back = grep { $added->{$_} } keys %$took;
+      next if keys %$took && $back < 0.5 * keys %$took;
+      push @bad, sprintf("  %s %s (%d of the %d lines it added are removed here)", substr($c, 0, 12), $s, $gone, $n);
+    }
+    exit 0 unless @bad;
+    print join("\n", @bad), "\n";
+    exit 1;
+  ' "$base" "$(sed -nE 's|^ticket/([0-9]+)-.*|\1|p' <<<"$branch")"
+}
+
 [ $# -eq 0 ] || refuse "takes no arguments"
 here=$(git rev-parse --show-toplevel)
 cd "$here"
@@ -683,6 +741,15 @@ build() {
     [ "$rc" = 1 ] || refuse "the numbered-things check itself failed (exit $rc), so nothing landed and $branch is back where it was; a person needs to look"
     blocked="this branch takes a number $BRANCH already has (above), so nothing landed and $branch is back where it was. Renumber yours past $BRANCH's highest (bump the version past $BRANCH's), commit, then run this again"
     return 0
+  fi
+
+  queue_phase "checking for landings it undoes"
+  rc=0
+  clashes=$(undo_guard "$want") || rc=$?
+  if [ "$rc" != 0 ]; then
+    [ "$rc" = 1 ] || refuse "the undo check itself failed (exit $rc, above), so nothing landed and $branch is back where it was; a person needs to look"
+    printf 'land: %s\n' "$branch removes what these landed, without naming them:" "$clashes" >&2
+    refuse "nothing landed and $branch is back where it was. A squash onto a newer $BRANCH keeps the branch's old files, which reverts what landed since (git reset --soft from a branch that started further back). Find the branch's last commit before the squash (git reflog), rebase that onto $BRANCH, and squash only then: git reset --soft \$(git merge-base HEAD $BRANCH). If the undo is meant, add a line \"Undoes: <sha>\" to a commit message for each commit above, then run this again"
   fi
 
   say "running $CHECK"

@@ -407,6 +407,31 @@ test('run from a subfolder of the worktree, it tests and lands the same', () => 
   assert.equal(r.note(), 'locked=1 held=yes');
 });
 
+test("a stale squash, which reverts what landed since the branch started, is refused until it names each undo (#677)", () => {
+  const r = setup();
+  const lines = (who: string) => [1, 2, 3, 4, 5].map((k) => `${who} landed this, line ${k}\n`).join('');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  r.commit(r.source, 'c.txt', lines('someone else'));
+  const theirs = git(r.source, 'rev-parse', 'main');
+  // The branch's own ticket's earlier landing doesn't count.
+  writeFileSync(join(r.source, 'd.txt'), lines('an earlier #1'));
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', '#1: the first part');
+  git(r.wt, 'reset', '--soft', 'main');
+  git(r.wt, 'commit', '-qm', 'squashed');
+  const res = r.run();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, new RegExp(`removes what these landed, without naming them:\\nland:   ${theirs.slice(0, 12)} c\\.txt: someone else .*\\(5 of the 5 lines`));
+  assert.doesNotMatch(res.stderr, /^land: +[0-9a-f]{12} #1: the first part/m);
+  assert.match(res.stderr, /git reset --soft \$\(git merge-base HEAD main\).*"Undoes: <sha>"/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.source, 'rev-parse', 'HEAD'));
+  assert.equal(r.note(), null, 'no deploy');
+  git(r.wt, 'commit', '-q', '--amend', '-m', `squashed\n\nUndoes: ${theirs.slice(0, 9)}`);
+  const again = r.run();
+  assert.equal(again.status, 0, again.stderr);
+  assert.ok(!existsSync(join(r.source, 'c.txt')), 'the named undo landed');
+});
+
 test('a conflict aborts the rebase and lands nothing', () => {
   const r = setup();
   r.commit(r.wt, 'a.txt', 'mine\n');

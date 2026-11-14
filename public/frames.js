@@ -12,6 +12,10 @@ let box = null;
 let probe = null; // the title bar strip's area (style.css), to measure
 let nav = null; // Citadel's ‹ › ×, over the frame's end
 let strip = null; // an app with no .cui-topbar: its icon and name in the title bar strip, beside ‹ › ×
+let drag = null; // the frame's .cui-topbar as the window's drag regions (mirrorBar)
+let watched = null; // the bar whose changes re-run fit
+let watchers = [];
+let queued = false;
 
 /**
  * The top bar (#666, Josh 2026-11-13: "Citadel part, then each app adopts"). An app whose page has a .cui-topbar
@@ -34,6 +38,8 @@ function fit() {
     h('b', {}, entry?.querySelector('.label')?.textContent || doc?.title || name));
   // In the installed app the window controls take the bar's colour, or the strip's.
   tintTitleBar(bar);
+  watch(bar);
+  mirrorBar(bar, frame);
   if (!bar) return;
   const area = probe.getBoundingClientRect();
   const left = box.getBoundingClientRect().left;
@@ -41,6 +47,43 @@ function fit() {
   const vars = { 'strip-h': area.height, 'strip-start': Math.max(0, area.left - left), 'strip-end': innerWidth - end.left, 'strip-row': end.height, 'safe-top': area.top };
   for (const [k, v] of Object.entries(vars)) doc.documentElement.style.setProperty(`--citadel-${k}`, `${v}px`);
 }
+/**
+ * The installed app's window takes its drag regions from this page only, never from a frame (#667): the frame's
+ * own app-region did nothing, so a click on its bar's buttons dragged the window, unless Citadel's page beneath
+ * had a control at that spot. So the bar is mirrored here: a drag box over it with a no-drag hole over each of its
+ * controls (base.css's list). Later regions win, so #frames, after Citadel's page, overrides the page's regions
+ * beneath; the box sits before .frame-nav, so ‹ › × stay clickable.
+ */
+function mirrorBar(bar, frame) {
+  drag.hidden = !bar;
+  if (!bar) return drag.replaceChildren();
+  const fr = frame.getBoundingClientRect();
+  const r = bar.getBoundingClientRect();
+  const place = (el, b, x, y) => (Object.assign(el.style, { left: `${x + b.left}px`, top: `${y + b.top}px`, width: `${b.width}px`, height: `${b.height}px` }), el);
+  place(drag, r, fr.left, fr.top);
+  const controls = [...bar.querySelectorAll('a, button, input, select, textarea, summary, label, [tabindex]')].filter((el) => el.getClientRects().length);
+  drag.replaceChildren(...controls.map((el) => place(h('div'), el.getBoundingClientRect(), -r.left, -r.top)));
+}
+
+/** Re-fit when the bar changes under the same window size: a button shown or hidden, a label that grows. */
+function watch(bar) {
+  if (bar === watched) return;
+  for (const w of watchers) w.disconnect();
+  watched = bar;
+  watchers = [];
+  if (!bar) return;
+  const again = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; fit(); });
+  };
+  const mo = new MutationObserver(again);
+  mo.observe(bar, { subtree: true, childList: true, attributes: true, characterData: true });
+  const ro = new ResizeObserver(again);
+  ro.observe(bar);
+  watchers = [mo, ro];
+}
+
 if (typeof window !== 'undefined') {
   window.citadelFrameFit = fit;
   addEventListener('resize', fit);
@@ -65,7 +108,8 @@ export function showFrame(name, src) {
       h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
       h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
       h('button', { type: 'button', class: 'close-view', title: 'Close', 'aria-label': 'Close', onclick: leave }, icon('close')));
-    box.append(probe, strip, nav);
+    drag = h('div', { class: 'frame-drag', 'aria-hidden': 'true', hidden: true });
+    box.append(probe, strip, drag, nav);
     document.body.append(box);
   }
   let frame = frames.get(name);
@@ -94,7 +138,8 @@ export const framed = () => document.documentElement.classList.contains('framed'
 export function dropFrames() {
   setFramed(false);
   box?.remove();
-  box = probe = nav = strip = null;
+  watch(null);
+  box = probe = nav = strip = drag = null;
   frames.clear();
 }
 

@@ -320,9 +320,14 @@ html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 
 @media (max-width: 800px) { .frame-nav { --head-btn: 2.5rem; } }
 html.frame-topbar .frame-nav { display: inline-flex; }
 .frame-strip { display: none; }
+/* The frame's .cui-topbar as the window's drag regions (#667, frames.js mirrorBar): invisible, and takes no clicks. */
+.frame-drag { position: fixed; pointer-events: none; }
+.frame-drag > div { position: absolute; }
 @media (display-mode: window-controls-overlay) {
   .frame-nav { --strip: var(--top-inset); }
   .frame-nav > button { app-region: no-drag; }
+  .frame-drag { app-region: drag; }
+  .frame-drag > div { app-region: no-drag; }
   /* An app with no .cui-topbar starts under the strip, which shows its icon, its name and ‹ › ×, and drags the window. */
   html.framed:not(.frame-topbar) #frames { top: max(var(--banner-h, 0px), var(--top-inset)); }
   html:not(.frame-topbar) .frame-strip { display: flex; align-items: center; gap: 0.5rem; position: fixed; top: 0; left: var(--citadel-rail, 0px); right: 0;

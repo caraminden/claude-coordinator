@@ -1,7 +1,7 @@
 // The app as a whole: signing in and out, health for tools/deploy.sh, who you are, the event stream,
 // costs and which minion owns each PR.
 import { hashPassword, looksLikeUrl, NOT_PEOPLE, type Session } from '../auth.ts';
-import { costDays, dayBudget } from '../costs.ts';
+import { costDays, dayBudget, spendSplit } from '../costs.ts';
 import { fallbacks } from '../fallbacks.ts';
 import { prOwners } from '../prlinks.ts';
 import { ServiceError } from '../app-services.ts';
@@ -102,7 +102,7 @@ export const appRoutes: Route[] = [
     },
   },
   // Every scheme's spend on the server's Claude login, so only for admins.
-  { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner } }) => json(res, 200, { days: costDays(store), dayBudget: dayBudget(store, runner.usage?.weekly) }) },
+  { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner } }) => json(res, 200, { days: costDays(store), dayBudget: dayBudget(store, runner.usage?.weekly), split: spendSplit(store) }) },
   // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).
   { method: 'GET', path: '/api/prs', who: ['person'], handler: async ({ res, app: { store }, session }) => {
     const seen = store.visibleProjects(session);

@@ -40,6 +40,47 @@ export function costDays(store: Store, now = Date.now()): CostDay[] {
   return days;
 }
 
+/** How many days the split's "month" covers, today included. */
+export const MONTH_DAYS = 30;
+
+export interface SpendRow {
+  name: string;
+  /** The last COST_DAYS days, today included. */
+  week: number;
+  /** The last MONTH_DAYS days, today included. */
+  month: number;
+}
+
+/**
+ * Who paid and where it went (#689): every payer's turns by person (the server login under its owner's name)
+ * and by scheme, for the last week and month, most spent this month first.
+ */
+export function spendSplit(store: Store, now = Date.now()): { people: SpendRow[]; schemes: SpendRow[] } {
+  const dayStart = (back: number) => {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - back);
+    return d.getTime();
+  };
+  const users = new Map(store.listUsers().map((u) => [u.id, u.name]));
+  const host = store.listUsers().find((u) => u.server_login)?.name ?? 'Server';
+  const projects = new Map(store.listProjects().map((p) => [p.id, p.name]));
+  const people = new Map<string, SpendRow>();
+  const schemes = new Map<string, SpendRow>();
+  const add = (into: Map<string, SpendRow>, name: string, key: 'week' | 'month', cost: number) => {
+    const row = into.get(name) ?? into.set(name, { name, week: 0, month: 0 }).get(name)!;
+    row[key] += cost;
+  };
+  for (const [key, since] of [['month', dayStart(MONTH_DAYS - 1)], ['week', dayStart(COST_DAYS - 1)]] as const) {
+    for (const r of store.spendByPayer(since)) {
+      add(people, r.payer === null ? `${host} (server login)` : users.get(r.payer) ?? `Person ${r.payer}`, key, r.cost);
+      add(schemes, projects.get(r.project_id) ?? `Scheme ${r.project_id}`, key, r.cost);
+    }
+  }
+  const order = (m: Map<string, SpendRow>) => [...m.values()].filter((r) => r.month > 0).sort((a, b) => b.month - a.month);
+  return { people: order(people), schemes: order(schemes) };
+}
+
 /** Below this the weekly meter, read to two decimals, is too coarse to price a week by. */
 const MIN_UTILIZATION = 0.03;
 

@@ -275,6 +275,8 @@ h2 { font-size: 1.15rem; margin: 0; }
 .cost-pop tfoot :is(th, td) { font-weight: 600; border-bottom: none; }
 .cost-pop .num { text-align: right; }
 .cost-pop .foot { margin: 0.4rem 0 0; padding-top: 0.4rem; border-top: 1px solid var(--line); font-size: 0.8rem; line-height: 1.45; color: var(--muted); max-width: 22rem; }
+.cost-pop .split { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid var(--line); display: grid; gap: 0.4rem; }
+.cost-pop .split h4 { margin: 0; }
 .cost-pop .usd { display: inline-block; min-width: 3.6rem; margin-left: 0.5rem; color: var(--muted); font-size: 0.85em; }
 .cost-pop .warn { color: var(--waiting); font-weight: 600; }
 

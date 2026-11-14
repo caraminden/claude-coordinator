@@ -2459,6 +2459,13 @@ export class Store {
       .all(since) as unknown as { day: string; project_id: number; cost: number; turns: number }[];
   }
 
+  /** Spend since `since` by payer (null: the server login) and project, every payer's turns (#689). */
+  spendByPayer(since: number): { payer: number | null; project_id: number; cost: number }[] {
+    return this.db
+      .prepare('SELECT u.payer, t.project_id, SUM(u.cost_usd) AS cost FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? GROUP BY u.payer, t.project_id')
+      .all(since) as unknown as { payer: number | null; project_id: number; cost: number }[];
+  }
+
   getSetting<T>(key: string): T | null {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
     return row ? JSON.parse(row.value) : null;

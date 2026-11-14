@@ -4,6 +4,8 @@ import { closeOnClickAway } from './properties.js';
 import { renderSidebar } from './sidebar.js';
 
 let days = null;
+// Every payer's spend by person and by scheme, week and month (src/costs.ts spendSplit, #689).
+let split = null;
 // What an even day's share of the weekly limit comes to at API prices (src/costs.ts dayBudget), or null.
 let budget = null;
 
@@ -32,7 +34,7 @@ export async function renderCost() {
   if (!account?.admin) return; // the server login's costs across Citadel, so only admins see them
   const before = budget;
   try {
-    ({ days, dayBudget: budget } = await api('api/costs'));
+    ({ days, dayBudget: budget, split } = await api('api/costs'));
   } catch {
     return; // keep the last figures; the next turn tries again
   }
@@ -57,6 +59,17 @@ export function weekShare(usd) {
   return `${pct < 0.1 ? '<0.1' : pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
 }
 
+/** Who paid and where it went: every login's turns, not just the server login's, in dollars. */
+function splitTables() {
+  const table = (head, rows) => h('table', {},
+    h('thead', {}, h('tr', {}, h('th', {}, head), h('th', { class: 'num' }, '7 days'), h('th', { class: 'num' }, '30 days'))),
+    h('tbody', {}, rows.map((r) => h('tr', {}, h('th', { scope: 'row' }, r.name),
+      h('td', { class: 'num' }, r.week ? costText(r.week) : '–'), h('td', { class: 'num' }, costText(r.month))))));
+  return h('div', { class: 'split' },
+    h('h4', {}, 'Every login, by person and scheme'),
+    table('Person', split.people), table('Scheme', split.schemes));
+}
+
 /** A cost as a share of an even day: "38%". */
 const pct = (usd) => `${Math.round((usd / budget) * 100)}%`;
 
@@ -77,6 +90,7 @@ function drawPop(chip) {
       h('tbody', {}, days.map((d, i) => h('tr', {}, h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total)))),
       h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, budget ? '7-day average' : '7 days'), cell(sum(here), budget ? days.length : 1), cell(sum((d) => d.total), budget ? days.length : 1)))),
     budget ? h('p', { class: 'key' }, h('span', { class: 'warn' }, 'Amber'), ': over that day\'s even share.') : '',
+    split?.people.length ? splitTables() : '',
     h('p', { class: 'foot' }, budget
       ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns (last week's, early in a week). Over it, the week runs out early. The server login's turns only, Taskmasters included; not a bill.`
       : "The server login's turns at API prices, not a bill. Taskmasters included. Shown against the weekly limit once its meter reaches 3%."));

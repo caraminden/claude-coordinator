@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { costDays, dayBudget, localDay } from '../src/costs.ts';
+import { costDays, dayBudget, localDay, spendSplit } from '../src/costs.ts';
 import { Store } from '../src/db.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'costs-'));
@@ -114,4 +114,24 @@ test("the day totals and a minion's share of the week count only the server logi
   assert.deepEqual(today.byProject, { [p.id]: 2 });
   assert.equal(store.ticketCost(t.id), 7, "the minion's own cost is still every turn's");
   assert.equal(store.ticketCost(t.id, true), 2);
+});
+
+test('the spend split counts every payer by person and by scheme, for 7 and 30 days, biggest month first (#689)', () => {
+  const { store, p, t } = setup('split');
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const q = store.createProject('Delve', null);
+  const u = store.createTicket({ project_id: q.id, title: 'y', permission_mode: 'default', created_by: 'Josh' });
+  const now = Date.now();
+  const day = 86400_000;
+  const turn = (ticket: number, cost: number, ago: number, payer: number | null) =>
+    store.recordTurn(ticket, { session_id: `s${Math.random()}`, ended_at: now - ago, session_cost_usd: cost, payer });
+  turn(t.id, 5, 0, null);
+  turn(t.id, 3, 20 * day, null);
+  turn(u.id, 2, 0, josh.id);
+  turn(u.id, 40, 40 * day, josh.id); // past the month
+  const { people, schemes } = spendSplit(store, now);
+  assert.equal(cara.server_login, 1);
+  assert.deepEqual(people.map((r) => [r.name, r.week, r.month]), [['Cara (server login)', 5, 8], ['Josh', 2, 2]]);
+  assert.deepEqual(schemes.map((r) => [r.name, r.week, r.month]), [[p.name, 5, 8], ['Delve', 2, 2]]);
 });

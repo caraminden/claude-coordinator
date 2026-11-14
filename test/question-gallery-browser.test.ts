@@ -269,10 +269,16 @@ for (const [label, size] of [['desktop', { width: 1440, height: 900 }], ['phone'
     if (size.width > 800) assert.ok(bar.tileShown, 'the chat beside the picture keeps the card in sight');
     // Cara, 2026-11-14: "the "Picked" text moves the left and right buttons": they stay put as Pick this turns ✓ Picked.
     const arrows = `[...document.querySelectorAll('.gallery-controls .step')].map((el) => Math.round(el.getBoundingClientRect().left))`;
+    await click(page, '.gallery-controls a[aria-label="Next option"]');
+    await waitFor(page, 'an unpicked picture', `${title} === 'Forest'`);
+    assert.equal(await page.eval(`document.querySelector('.gallery-controls .pick').textContent`), 'Pick this');
     const before = await page.eval<number[]>(arrows);
     await click(page, '.gallery-controls .pick');
     assert.equal(await page.eval(`document.querySelector('.gallery-controls .pick').textContent`), '✓ Picked');
     assert.deepEqual(await page.eval(arrows), before, 'the bar\'s ‹ › stay put');
+    await click(page, '.gallery-controls a[aria-label="Previous option"]');
+    await waitFor(page, 'back to Garden', `${title} === 'Garden'`);
+    await click(page, '.gallery-controls .pick');
     // ‹ › on the picture's own edges, with even room around the arrow, step like the bar's.
     const edges = await page.eval<Record<string, any>>(`(() => {
       const stage = document.querySelector('.viewer-stage').getBoundingClientRect();

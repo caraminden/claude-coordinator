@@ -308,6 +308,8 @@ function syncRail() {
 /** Take the rail away (signing out). */
 export function hideRail() {
   shown++;
+  lastView = '#/';
+  try { sessionStorage.removeItem(viewKey); localStorage.removeItem(viewKey); } catch {} // the next person starts afresh
   clearRail();
 }
 

@@ -10,6 +10,11 @@ import { dragReorder, inOrder, moved } from './reorder.js';
 import { releaseRows, releasesLink } from './releases.js';
 
 let hiddenOpen = false; // whether the shelf's Hidden section is unfolded, kept across redraws
+let othersOpen = false; // the same for its Other schemes section
+
+// Your schemes: ones you own or were added to and haven't hidden. Admin reach (the flag, or the Citadel scheme) opens the
+// rest too, but they sit apart under Other schemes, never mixed into yours (#674). A list from before #674 has no flag: yours.
+const onShelf = (p) => !p.hidden && p.member !== false;
 
 export const isHidden = (projectId) => !!view?.projects?.find((p) => p.id === projectId)?.hidden;
 
@@ -59,9 +64,10 @@ function redrawHidden() {
   document.getElementById('hide-scheme')?.replaceWith(hideButton(view.project));
 }
 
-const row = (p, button = null) => h('div', { class: 'scheme-row' },
+// quiet: no count or spinner, for the ones you hid and the ones you aren't in.
+const row = (p, button = null, quiet = p.hidden) => h('div', { class: 'scheme-row' },
   h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, title: p.name },
-    schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), p.hidden ? null : schemeCount(p)),
+    schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), quiet ? null : schemeCount(p)),
   button);
 
 let dragged = null; // the scheme ids of a drop not yet saved
@@ -69,9 +75,9 @@ let drops = 0; // counts drops: each saves the whole list, so an older one's Ret
 
 /** Move a scheme from `from` to `to` among the shown ones: at once here, saved behind; a failed save puts it back (#649). */
 function reorderSchemes(from, to) {
-  const shown = view.projects.filter((p) => !p.hidden).map((p) => p.id);
-  // Hidden ones keep their place after the shown, so Unhide brings one back where it was among them.
-  const keys = [...moved(shown, from, to), ...view.projects.filter((p) => p.hidden).map((p) => p.id)];
+  const shown = view.projects.filter(onShelf).map((p) => p.id);
+  // The rest keep their place after the shown, so Unhide brings one back where it was among them.
+  const keys = [...moved(shown, from, to), ...view.projects.filter((p) => !onShelf(p)).map((p) => p.id)];
   const drop = ++drops;
   let before = null; // the order just before this drop showed, to put back if its save fails
   let stale = false; // a Retry once a newer drop has been made: that one's order stands, so this does nothing
@@ -97,7 +103,7 @@ function reorderSchemes(from, to) {
   }).then(() => dragged === keys && (dragged = null), () => {});
 }
 
-/** The shelf's Schemes column: the ones you haven't hidden, + New scheme, then the hidden ones collapsed away. */
+/** The shelf's Schemes column: yours you haven't hidden, + New scheme, then the others and the hidden ones collapsed away. */
 export function renderSchemesShelf() {
   const el = document.getElementById('schemes-shelf');
   if (!el) return;
@@ -107,8 +113,14 @@ export function renderSchemesShelf() {
     carry: (row) => (row.nextElementSibling?.classList.contains('rel-rows') ? [row.nextElementSibling] : []),
     onDrop: reorderSchemes,
   });
-  const shown = view.projects.filter((p) => !p.hidden);
+  const shown = view.projects.filter(onShelf);
+  const others = view.projects.filter((p) => !p.hidden && !onShelf(p));
   const hidden = view.projects.filter((p) => p.hidden);
+  // Opened by itself while you're in one of them, so the open scheme's row shows.
+  const elsewhere = others.length ? h('details', { class: 'hidden-schemes other-schemes', open: othersOpen || others.some((p) => p.id === view.projectId) },
+    h('summary', { title: 'Schemes you can open but aren\'t a member of' }, `Other schemes (${others.length})`),
+    others.map((p) => row(p, null, true))) : null;
+  elsewhere?.addEventListener('toggle', () => (othersOpen = elsewhere.open));
   const folded = hidden.length ? h('details', { class: 'hidden-schemes', open: hiddenOpen },
     h('summary', {}, `Hidden (${hidden.length})`),
     hidden.map((p) => row(p, h('button', { type: 'button', class: 'scheme-hide', title: `Show ${p.name} in your lists again`, onclick: () => setHidden(p, false) }, 'Unhide')))) : null;
@@ -117,6 +129,7 @@ export function renderSchemesShelf() {
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),
+    ...(elsewhere ? [elsewhere] : []),
     ...(folded ? [folded] : []));
 }
 

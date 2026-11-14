@@ -224,6 +224,7 @@ export const projectRoutes: Route[] = [
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
     // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
     // hidden: this person hid it (#226); its badge stays at zero.
+    // member: they own it or were added to it (#674); false for one only admin reach opens, listed apart from theirs.
     // running: a minion or its Taskmaster has a turn doing work (#248; not one held on an approval card, #373), for the spinner; false when hidden.
     // working: how many minions (not the Taskmaster) have a turn doing work, the number beside the spinner (#278); 0 when hidden.
     // coordinator_id: the scheme's Taskmaster, null until its first open makes one.
@@ -231,6 +232,7 @@ export const projectRoutes: Route[] = [
     // violet badge. A scheme they've never had open since #539 takes today's items as seen, so nothing is marked on day one.
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
+      const member = store.memberSchemes(session.uid);
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id) });
       const seenItems = store.seenItems(session.name);
       // In the order they dragged the shelf into (#649); one they haven't placed goes at the end.
@@ -244,6 +246,7 @@ export const projectRoutes: Route[] = [
         return {
           ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: tickets.filter((t) => t.kind === 'ticket').length,
           hidden: hidden.has(p.id),
+          member: member.has(p.id),
           inbox,
           fresh: !!seen && waiting.some((i) => !seen.has(i.key)),
           running: !hidden.has(p.id) && tickets.some(busy),

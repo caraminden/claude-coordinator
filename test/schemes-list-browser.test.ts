@@ -119,3 +119,21 @@ test('going back to a scheme draws it as you left it at once, with a ring by Min
   await waitFor(page, 'the refresh to fail once and then bring the new title', row('Alpha renamed'));
   await waitFor(page, 'the ring to go', `!document.querySelector('#app .sidebar').hasAttribute('aria-busy')`);
 });
+
+// #674 (Cara, 2026-11-14: "it shows him as if he is in every scheme"): admin reach still opens a scheme you aren't in,
+// but it sits under Other schemes, quiet and collapsed, not among yours; it opens out while you're in it.
+test('a scheme you can open but aren\'t a member of is listed apart under Other schemes, not among yours', { skip }, async () => {
+  const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the schemes list', `document.querySelectorAll('#schemes-shelf .scheme-row').length === 2`);
+  await page.eval(`titles[3] = 'Gamma one'; schemes.push({ id: 3, name: 'Gamma', inbox: 2, icon: null, member: false });
+    for (const s of schemes.slice(0, 2)) s.member = true; location.hash = '#/p/2'`);
+  const other = `document.querySelector('#schemes-shelf .other-schemes')`;
+  await waitFor(page, 'the Other schemes section', `${other}?.querySelector('summary').textContent === 'Other schemes (1)'`);
+  const top = await page.eval<string[]>(`[...document.querySelectorAll('#schemes-shelf > .scheme-row')].map((r) => r.textContent)`);
+  assert.deepEqual(top, ['Alpha', 'Beta'], 'only your own schemes are in your list');
+  assert.equal(await page.eval(`${other}.open`), false, 'collapsed while you are in one of yours');
+  assert.equal(await page.eval(`${other}.querySelector('.scheme-row').textContent`), 'Gamma');
+  assert.equal(await page.eval(`${other}.querySelector('.scheme-count')`), null, 'no Needs-you count for a scheme you are not in');
+  await page.eval(`location.hash = '#/p/3'`);
+  await waitFor(page, 'Gamma to open, its row showing', `document.querySelector('.scheme-crumb [data-project-name="3"]') && ${other}.open && ${other}.querySelector('.nav-item.active')`);
+});

@@ -800,7 +800,9 @@ function renderProgress() {
   const caption = est ? h('div', { class: 'progress-cap' },
     h('span', { class: 'cap-step' }, 'This step: ', stepClock),
     h('span', { class: 'cap-plan' }, h('b', {}, h('span', { class: 'wide' }, 'Whole plan:'), h('span', { class: 'narrow' }, 'Plan')), ' ',
-      h('span', { class: 'wide' }, waitClock({ since: est.planSince }), ' in · '), left)) : '';
+      h('span', { class: 'wide' }, waitClock({ since: est.planSince }), ' in · '), left))
+    // Before the plan exists, its caption's line is held empty, so the head doesn't grow when the plan arrives (#696).
+    : running && !total && !w ? h('div', { class: 'progress-cap blank', 'aria-hidden': 'true' }, h('span', { class: 'cap-step' }, '\u00a0')) : '';
 
   const prevDetail = progressEl.querySelector('.progress-detail');
   const scrollTop = prevDetail?.scrollTop ?? 0;

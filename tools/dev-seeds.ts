@@ -161,6 +161,17 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t);
     },
   },
+  starting: {
+    about: 'a minion just started: its turn is running but it has no task list yet (#696)',
+    seed(c) {
+      const t = minion(c, 'Progress line from the start', { status: 'running', last_activity: 'Working…' }, 'bug');
+      const w = chat(c, t, 2);
+      w.asked('The bar line should be there before the task list exists.');
+      w.init();
+      w.call('Bash', { command: 'git log -1', description: 'Check the base' }, null);
+      return route(c, t);
+    },
+  },
   'long-chat': {
     about: 'a finished minion with a long chat: markdown headings, lists, a table, code, an image and a file card',
     seed(c) {

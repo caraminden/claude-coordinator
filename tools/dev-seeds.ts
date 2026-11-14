@@ -196,4 +196,12 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return `#/p/${c.project.id}`;
     },
   },
+  'inbox-full': {
+    about: 'a Needs-you inbox of 25 minions waiting on people, enough to scroll it open (#668)',
+    seed(c) {
+      const states = ['ready', 'complete', 'try'] as const;
+      for (let i = 1; i <= 25; i++) minion(c, `Waiting minion ${i}`, { state: states[i % 3], note: `needs you ${i}` });
+      return `#/p/${c.project.id}`;
+    },
+  },
 };

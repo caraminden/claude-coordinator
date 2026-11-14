@@ -155,7 +155,11 @@ export function renderInbox() {
     renderInbox();
   });
   strip.classList.toggle('open', open);
-  strip.replaceChildren(toggle, open ? h('div', { class: 'inbox-rows' }, [...rows.values()].map(inboxRow)) : '');
+  // Every minion update redraws the strip (renderSidebar), so the new rows take the old ones' scroll (#668).
+  const scrolled = strip.querySelector('.inbox-rows')?.scrollTop ?? 0;
+  const list = open ? h('div', { class: 'inbox-rows' }, [...rows.values()].map(inboxRow)) : '';
+  strip.replaceChildren(toggle, list);
+  if (list) list.scrollTop = scrolled;
 }
 
 /** A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited. */

@@ -75,11 +75,25 @@ const pageHref = (scope, hl) => `#/p/${view?.projectId ?? ''}/releases/${scope}$
 /** "50s", "3m", "1h 5m": an estimate's size, rounded. */
 const tookText = (r) => (r.started && r.live ? shortSpan(r.live - r.started) : null);
 
-/** "~3m" that counts down on the ticker, "due now" once it's past. */
-function etaText(eta, suffix = '') {
-  return h('span', { class: 'rel-eta', 'data-eta': eta, 'data-suffix': suffix }, etaWords(eta, suffix));
+/**
+ * "~3m" that counts down on the ticker. Past the estimate it says what's happening rather than "due now", which read as a
+ * deadline (Cara, 2026-11-14: "What does this due now thing mean?"): "running long · usually ~2m", the usual span being
+ * from `since` (the current stage's start) to the estimate; `full` false leaves the usual time to the hover, for narrow
+ rows under a stage line that says it. With no `since` (auto-deploy's timer) it's "any moment".
+ */
+function etaText(eta, { suffix = '', since = null, full = true } = {}) {
+  return h('span', { class: 'rel-eta', 'data-eta': eta, 'data-suffix': suffix, 'data-since': since ?? '', 'data-full': full ? '1' : '', title: etaTitle(eta, since) },
+    etaWords(eta, suffix, since, full));
 }
-const etaWords = (eta, suffix) => (eta > Date.now() ? `~${shortSpan(eta - Date.now())}${suffix}` : 'due now');
+const etaWords = (eta, suffix, since, full) => {
+  if (eta > Date.now()) return `~${shortSpan(eta - Date.now())}${suffix}`;
+  if (!since) return 'any moment';
+  return full ? `running long · usually ~${shortSpan(eta - since)}` : 'running long';
+};
+/** The hover past the estimate: the usual time spelled out, and how long this stage has run. */
+const etaTitle = (eta, since) => (eta <= Date.now() && since
+  ? `Taking longer than usual: this stage and the rest usually take ~${shortSpan(eta - since)}; this stage started ${shortSpan(Date.now() - since)} ago`
+  : '');
 
 /**
  * What people call a release (Cara, 2026-11-12: "a numbered build/release system instead of commit hashes"): "Release 14",
@@ -100,7 +114,7 @@ function versionLink(r, cls = 'rel-ver', short = false) {
 /** The whole release's estimate: "~3m", "waiting" while a stage waits, else the stage it's at. */
 function estimate(next) {
   if (next.waitingOn) return h('span', { class: 'rel-est waits' }, 'waiting');
-  return h('span', { class: 'rel-est' }, next.eta ? etaText(next.eta) : stageName(next.stage));
+  return h('span', { class: 'rel-est' }, next.eta ? etaText(next.eta, { since: next.since, full: false }) : stageName(next.stage));
 }
 
 /** Remember where the page was opened from, for its ×. */
@@ -150,7 +164,7 @@ function stageTrack(stages, p, { mini = false, labels = false } = {}) {
  * Where a change or release is, in a few words: its short ones first (Josh, 2026-11-13: "the line should be apparent
  * from the list you are looking at"): "Line · 2nd", "Test · CI: the full suite" (#630's), then its wait, time left or text.
  */
-const nowWords = (p, eta) => p.brief ?? p.waitingOn ?? (eta ? etaText(eta, ' left') : p.text);
+const nowWords = (p, eta, full = false) => p.brief ?? p.waitingOn ?? (eta ? etaText(eta, { suffix: ' left', since: p.since, full }) : p.text);
 
 /** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
 function changeNow(next, c) {
@@ -234,7 +248,7 @@ function targetCard(projectId, tv, alone) {
     h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
-      h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta))),
+      h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta, true))),
     ] : h('p', { class: 'muted' }, 'Nothing on its way.'),
     changeList(projectId, tv),
     previousList(projectId, tv),
@@ -509,6 +523,10 @@ export function releaseChip(t) {
 
 if (typeof document !== 'undefined') {
   setInterval(() => {
-    for (const el of document.querySelectorAll('.rel-eta[data-eta]')) el.textContent = etaWords(Number(el.dataset.eta), el.dataset.suffix);
+    for (const el of document.querySelectorAll('.rel-eta[data-eta]')) {
+      const [eta, since] = [Number(el.dataset.eta), Number(el.dataset.since) || null];
+      el.textContent = etaWords(eta, el.dataset.suffix, since, !!el.dataset.full);
+      el.title = etaTitle(eta, since);
+    }
   }, 1000);
 }

@@ -22,6 +22,7 @@ export function costChip() {
     pop.showPopover();
     const row = chip.closest('.usage').getBoundingClientRect();
     pop.style.top = `${row.bottom + 6}px`;
+    pop.style.maxHeight = `${innerHeight - row.bottom - 14}px`; // the person and scheme tables make it taller than a phone (#689)
     pop.style.left = `${Math.max(8, Math.min(row.left, innerWidth - pop.offsetWidth - 8))}px`;
     // It would drift once the page or the panel scrolls (not the chat, which scrolls as turns run).
     for (const el of [window, chip.closest('.shelf')]) el?.addEventListener('scroll', () => (chip.open = false), { once: true });
@@ -65,7 +66,7 @@ function splitTables() {
     h('thead', {}, h('tr', {}, h('th', {}, head), h('th', { class: 'num' }, '7 days'), h('th', { class: 'num' }, '30 days'))),
     h('tbody', {}, rows.map((r) => h('tr', {}, h('th', { scope: 'row' }, r.name),
       h('td', { class: 'num' }, r.week ? costText(r.week) : '–'), h('td', { class: 'num' }, costText(r.month))))));
-  return h('div', { class: 'split' },
+  return h('div', { class: 'spend-split' },
     h('h4', {}, 'Every login, by person and scheme'),
     table('Person', split.people), table('Scheme', split.schemes));
 }

@@ -29,6 +29,18 @@ function minion(c: SeedCtx, title: string, fields: Parameters<Store['updateTicke
   return c.store.getTicket(t.id)!;
 }
 
+/** The Seeded scheme's Taskmaster, made once. */
+function taskmaster(c: SeedCtx): Ticket {
+  let tm = c.store.getCoordinator(c.project.id);
+  if (!tm) {
+    tm = c.store.createTicket({ project_id: c.project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'bypassPermissions', created_by: 'Taskmaster' });
+    const cwd = join(projectDir(c.dataDir, c.project.id), 'coordinator');
+    mkdirSync(cwd, { recursive: true });
+    c.store.setTicketDir(tm.id, cwd, null);
+  }
+  return tm;
+}
+
 /** Writes a minion's chat: each call adds one event a few seconds after the last, ending about now. */
 function chat(c: SeedCtx, t: Ticket, steps: number) {
   let at = Date.now() - steps * 7000;
@@ -207,13 +219,7 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
   'taskmaster-chat': {
     about: 'the scheme page with a long Taskmaster chat and 30 minions, for scrolling every column',
     seed(c) {
-      let tm = c.store.getCoordinator(c.project.id);
-      if (!tm) {
-        tm = c.store.createTicket({ project_id: c.project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'bypassPermissions', created_by: 'Taskmaster' });
-        const cwd = join(projectDir(c.dataDir, c.project.id), 'coordinator');
-        mkdirSync(cwd, { recursive: true });
-        c.store.setTicketDir(tm.id, cwd, null);
-      }
+      const tm = taskmaster(c);
       const w = chat(c, tm, 80);
       for (let i = 1; i <= 20; i++) {
         w.asked(`Round ${i}: where do the minions stand, and what should start next?`);
@@ -223,6 +229,33 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       }
       for (let i = 1; i <= 30; i++) minion(c, `Seeded minion ${i}`, { note: `note for minion ${i}` }, i % 3 ? 'feature' : 'bug');
       return `#/p/${c.project.id}`;
+    },
+  },
+  'agent-relays': {
+    about: 'a minion and the Taskmaster messaging each other: a brief, relays both ways, held mail from another scheme\'s Taskmaster, collapsed and shortened replies, and a person\'s messages (#693)',
+    seed(c) {
+      const tm = taskmaster(c);
+      const t = minion(c, 'Sidebar badge colours', { note: 'tested, risk low; landing' });
+      const long = Array.from({ length: 20 }, (_, i) => `Badge ${i + 1}: its unread count sat at 2.9:1 on the dark panel, so it moves to the accent pill with near-black text, 7.1:1.`).join(' ');
+      const m = chat(c, t, 14);
+      m.put('user_message', { author: 'Taskmaster', brief: true, text: `${c.who}, 2026-11-14: "The unread badges in the sidebar are hard to see in dark mode." Fix their contrast, self-review and land.` });
+      m.init();
+      m.said('Reading the sidebar styles first.');
+      m.call('Read', { file_path: `${t.cwd}/public/sidebar.css` }, '.badge { background: var(--accent); }');
+      m.said(long);
+      m.done('Fixed.');
+      m.put('user_message', { author: 'Taskmaster', text: `Josh, via the Taskmaster: "Keep the badge round on phones too." Check it at 390 px before you land.` });
+      m.asked('Also make the count bold, please.');
+      m.said('Done: the count is bold and the badge stays round at 390 px.');
+      const w = chat(c, tm, 10);
+      w.asked('Where does the badge fix stand?');
+      w.said(`#${t.number} has fixed the contrast and is checking phones before it lands.`);
+      w.put('user_message', { author: `#${t.number} ${t.title}`, text: `#${t.number} is live (abc1234), risk low: the sidebar badges pass 4.5:1 in both modes and stay round on phones.` });
+      w.put('user_message', { author: `Taskmaster of Delve, for ${c.who}, a Citadel member`, mail: true, cold: true, text: 'Delve asks for the same badge fix in its own sidebar, if the change can be shared.' });
+      w.said('Checking whether Delve can take the shared style.');
+      w.call('Read', { file_path: 'public/ui/badge.css' }, '.badge {}');
+      w.said(`#${t.number} is live. Delve's Taskmaster asked for the same fix; it reaches them through Citadel UI on their next load, so nothing to start.`);
+      return route(c, t);
     },
   },
   'wco-fixture': {

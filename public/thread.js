@@ -984,7 +984,7 @@ export function appendEvent(event, scroll = true) {
         // A reply the link check sent back, which its rewrite replaced (#281).
         if (block.type === 'text' && block.text.trim() && !data.replaced) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
-          const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
+          const msg = stamped(h('div', { class: 'msg reply' }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);
           spoke = msg;
           view.latestReply = event.id;
@@ -1313,10 +1313,14 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   // Messages between Claudes and from the app aren't meant for people, so they start collapsed to one line,
   // except the brief that started the minion: it says what the minion is for.
   const who = machineAuthor(author);
-  if (who && event?.brief) msg.querySelector('.who').textContent = who;
-  else if (who) {
+  // Sent by another agent: it takes its sender's colour (#693), a Taskmaster's (this scheme's or another's) or a minion's.
+  const tone = /^(Taskmaster|Coordinator)$|^Taskmaster of /.test(author) ? ' from-tm' : /^#\d+ /.test(author) ? ' from-minion' : '';
+  if (who && event?.brief) {
+    msg.querySelector('.who').textContent = who;
+    msg.className += tone;
+  } else if (who) {
     msg.querySelector('.who').remove();
-    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, h('span', { class: 'name' }, who)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
+    return h('details', { class: `msg user coord${tone}` }, h('summary', {}, h('span', { class: 'who' }, h('span', { class: 'name' }, who)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
   }
   return msg;
 }

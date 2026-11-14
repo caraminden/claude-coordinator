@@ -1343,6 +1343,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "PUT /api/projects/:p/shared/upload": {
+  "anon": "401 Not logged in",
+  "person": "201",
+  "member": "201",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only people upload to the shared folder",
+  "tmB": "403 Only people upload to the shared folder",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/tickets": {
   "anon": "401 Not logged in",
   "person": "200",

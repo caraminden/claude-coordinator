@@ -987,9 +987,9 @@ export const SCHEMA_HISTORY = [
   [43, 'contraption_deploys (#627)'],
   [44, 'list_orders (#649)'],
   [45, 'ci_files (#658)'],
-  [46, 'personal_instructions (#688)'],
   [46, 'apk_publishes (#663)'],
   [47, 'projects.ci_quiet (#678)'],
+  [48, 'personal_instructions (#688)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

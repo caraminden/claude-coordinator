@@ -97,6 +97,29 @@ async function cleanQuestions(app: App, ticket: Ticket, raw: unknown) {
   return questions;
 }
 
+/**
+ * A direct card's addressee (#687): `to` names one member of the asking scheme, by name or login, and comes back
+ * as their name (what the chat, the inbox and push go by); null for a card to everyone. Only the asking scheme's
+ * members: a card never reaches anyone a message in its chat couldn't.
+ */
+function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
+  if (raw == null || raw === '') return null;
+  const want = String(raw).trim().replace(/^@/, '').toLowerCase();
+  const members = app.store.listMembers(ticket.project_id);
+  const m = members.find((u) => u.name.toLowerCase() === want || u.login.toLowerCase() === want);
+  if (!m) throw new HttpError(400, `to must be a member of this scheme: ${members.map((u) => u.login).join(', ')}`);
+  return m.name;
+}
+
+/**
+ * Hand a person's answer to a card back to the asking chat. A direct card's answer (#687) keeps held mail's
+ * 55-minute rule unless the card was urgent (Runner.answerCard); any other runs now, as a typed message does.
+ */
+function deliverAnswer(app: App, ticketId: number, card: { to?: string; urgent?: boolean }, author: string, text: string, extra: object) {
+  if (card.to) app.runner.answerCard(ticketId, author, text, extra, !!card.urgent);
+  else app.runner.send(ticketId, author, text, [], extra);
+}
+
 /** A person's picks for each question of a card: chosen option labels, plus optional free text. */
 function cleanAnswers(questions: any[], raw: unknown) {
   if (!Array.isArray(raw) || raw.length !== questions.length) throw new HttpError(400, 'Answer every question on the card');
@@ -171,7 +194,7 @@ function postPlan(app: App, id: number, card: Record<string, unknown> & { summar
   }
   const event = runner.emit(id, 'plan', { id: randomBytes(6).toString('hex'), ...card, status: 'pending' });
   runner.broadcastTicket(id);
-  app.notify(id, { kind: 'plan', summary: card.summary, eventId: event.id });
+  app.notify(id, { kind: 'plan', summary: card.summary, eventId: event.id, ...(typeof card.to === 'string' ? { to: card.to } : {}) });
   return event;
 }
 
@@ -414,13 +437,18 @@ export const ticketRoutes: Route[] = [
       const { runner } = app;
       // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
       const body = await readJson(req);
-      const questions = await cleanQuestions(app, ticket, body.questions);
+      // Addressed to one person (#687): only their Needs-you list and devices get it. With no questions it's a notice, answered with Got it.
+      const to = addressee(app, ticket, body.to);
+      const notice = to && body.questions == null ? str(body.notice, 'Notice', 500) : null;
+      const questions = notice ? [] : await cleanQuestions(app, ticket, body.questions);
       // A card asking for the go to merge or land says so, for the minions list's chip (#575).
       const kind = oneOf(body.kind ?? null, ['merge'], 'kind');
       const questionId = randomBytes(6).toString('hex');
-      const event = runner.emit(id, 'question', { id: questionId, questions, ...(kind ? { kind } : {}) });
+      const event = runner.emit(id, 'question', {
+        id: questionId, questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(to && body.urgent === true && !notice ? { urgent: true } : {}),
+      });
       runner.broadcastTicket(id);
-      app.notify(id, { kind: 'question', questions, eventId: event.id });
+      app.notify(id, { kind: 'question', questions: notice ? [{ question: notice }] : questions, eventId: event.id, ...(to ? { to } : {}) });
       return json(res, 201, { id: questionId, href: cardHref(ticket, event.id) });
     },
   },
@@ -480,8 +508,17 @@ export const ticketRoutes: Route[] = [
       if (events.some((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === body.questionId)) {
         throw new HttpError(409, 'That question has already been answered');
       }
-      if (JSON.parse(card.data).settled) throw new HttpError(409, 'Claude took this as answered in the chat');
-      const { questions } = JSON.parse(card.data);
+      const data = JSON.parse(card.data);
+      if (data.settled) throw new HttpError(409, data.settled.by ? `${data.settled.by} already marked this seen` : 'Claude took this as answered in the chat');
+      // A notice (#687): Got it takes it out of the addressee's list, and sends the asker nothing.
+      if (data.notice) {
+        const settled = { at: Date.now(), by: session.name };
+        store.setEventData(card.id, { ...data, settled });
+        runner.emit(id, 'question_result', { id: data.id, settled });
+        runner.broadcastTicket(id);
+        return json(res, 202, ticketView(app, id));
+      }
+      const { questions } = data;
       const answers = cleanAnswers(questions, body.answers);
       const text = questions.map((q: any, i: number) => {
         const { selected, other } = answers[i];
@@ -489,7 +526,7 @@ export const ticketRoutes: Route[] = [
         const picked = selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
-      runner.send(id, session.name, `My answers to your question card:\n\n${text}`, [], { answer: { questionId: body.questionId, answers } });
+      deliverAnswer(app, id, data, session.name, `My answers to your question card:\n\n${text}`, { answer: { questionId: body.questionId, answers } });
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },
@@ -504,7 +541,8 @@ export const ticketRoutes: Route[] = [
       const body = await readJson(req);
       const plan = str(body.plan, 'Plan', 20_000);
       const summary = str(body.summary, 'Summary', 200);
-      const event = postPlan(app, id, { summary, plan });
+      const to = addressee(app, ticket, body.to);
+      const event = postPlan(app, id, { summary, plan, ...(to ? { to, ...(body.urgent === true ? { urgent: true } : {}) } : {}) });
       return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id) });
     },
   },
@@ -562,14 +600,14 @@ export const ticketRoutes: Route[] = [
       const result = { status: body.verdict === 'approve' ? 'approved' : card.machine ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });
       runner.emit(id, 'plan_result', { id: card.id, ...result });
-      runner.send(id, session.name, card.machine
+      deliverAnswer(app, id, card, session.name, card.machine
         ? notes === null
           ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`
           : `Rejected your proposed notes for ${card.machine.name}; they are unchanged.${notes ? `\n\n${notes}` : ''}`
         : notes === null
           ? `Plan approved: build it this way. ("${card.summary}")`
           : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
-        [], { plan: { planId: card.id, verdict: body.verdict } });
+        { plan: { planId: card.id, verdict: body.verdict } });
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },

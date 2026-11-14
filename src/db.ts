@@ -2200,23 +2200,24 @@ export class Store {
     // scanning the rest of a long chat held the event loop 1-3 s (#622). By kind: left to itself SQLite walked
     // events_ticket, every event of the chat (56,619 rows for 1,861 messages), 2-3 s from a cold cache after a restart.
     for (const ticket of new Set(cards.map((c) => c.ticket_id))) {
-      const mine = cards.flatMap((c, i) => c.ticket_id === ticket ? [{ cid: c.cid, fate: fates[i] }] : []);
+      const mine = cards.flatMap((c, i) => c.ticket_id === ticket ? [{ cid: c.cid, to: !!JSON.parse(c.data).to, fate: fates[i] }] : []);
       const from = (pick: (f: CardFate) => string | null) => Math.min(...mine.filter((m) => pick(m.fate) == null).map((m) => m.fate.upTo));
       const replyFrom = from((f) => f.reply);
       const replies = replyFrom === Infinity ? [] : this.db.prepare(`
         SELECT a.id, coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) AS card,
           json_object('author', json_extract(a.data, '$.author'), 'at', a.created_at, 'text', substr(json_extract(a.data, '$.text'), 1, 200),
             'answer', json(json_extract(a.data, '$.answer'))) AS reply
-        FROM events a INDEXED BY events_ticket_kind WHERE a.ticket_id = ? AND a.kind = 'user_message' AND a.id > ? AND a.id <= ? AND ${PERSON_WROTE} ORDER BY a.id`)
+        FROM events a INDEXED BY events_ticket_kind WHERE a.ticket_id = ? AND a.kind = 'user_message' AND a.id > ? AND a.id <= ?
+          AND (${PERSON_WROTE} OR json_extract(a.data, '$.answer.questionId') IS NOT NULL) ORDER BY a.id`)
         .all(ticket, replyFrom, upTo) as { id: number; card: unknown; reply: string }[];
       const resultFrom = from((f) => f.result);
       const results = resultFrom === Infinity ? [] : this.db.prepare(`
         SELECT id, json_extract(data, '$.id') AS card, json_set(data, '$.at', created_at) AS result
         FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind = 'approval_result' AND id > ? AND id <= ? ORDER BY id`)
         .all(ticket, resultFrom, upTo) as { id: number; card: unknown; result: string }[];
-      for (const { cid, fate } of mine) {
-        // A click on another card answers that card, not this one.
-        fate.reply ??= replies.find((a) => a.id > fate.upTo && (a.card ?? cid) === cid)?.reply ?? null;
+      for (const { cid, to, fate } of mine) {
+        // A click on another card answers that card, not this one; a card addressed to one person only its own answer (#687).
+        fate.reply ??= replies.find((a) => a.id > fate.upTo && (a.card ?? (to ? null : cid)) === cid)?.reply ?? null;
         fate.result ??= results.find((r) => r.id > fate.upTo && r.card === cid)?.result ?? null;
         fate.upTo = upTo;
       }
@@ -2247,9 +2248,11 @@ export class Store {
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
         OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
       AND NOT EXISTS (
-        SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id AND ${PERSON_WROTE}
-          -- a click on another card answers that card, not this one
-          AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), json_extract(e.data, '$.id')) = json_extract(e.data, '$.id'))
+        SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id
+          -- an answer held as mail for a cold asker (#687) still answers its card
+          AND (${PERSON_WROTE} OR json_extract(a.data, '$.answer.questionId') IS NOT NULL)
+          -- a click on another card answers that card, not this one; a card addressed to one person (#687) waits for its own answer, whoever types in the chat
+          AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), CASE WHEN json_extract(e.data, '$.to') IS NULL THEN json_extract(e.data, '$.id') END) = json_extract(e.data, '$.id'))
       ORDER BY e.id`).all(JSON.stringify(ids)) as unknown as EventRow[];
     const still = new Set(open.map((e) => e.id));
     for (const i of ids) if (!still.has(i)) this.doneCards.add(i);

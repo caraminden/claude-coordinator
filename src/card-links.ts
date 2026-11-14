@@ -21,6 +21,8 @@ export interface CardLink {
    * turn (Store.heldBelow), so the link check can catch "the card above" on one that's below (#412).
    */
   below?: boolean;
+  /** The one person it's addressed to (#687), whom it waits on. */
+  to?: string;
 }
 
 /** A card that no longer waits on people, and what happened to it: "answered by Cara at 2:31am: Done, I ran it". */
@@ -52,6 +54,7 @@ export function cardWhat(kind: CardLink['kind'], data: any): CardWhat {
 /** A card's short label from its chat event's data. */
 export function cardLabel(kind: string, data: any): string {
   if (kind === 'plan') return clip(data?.summary);
+  if (kind === 'question' && data?.notice) return clip(data.notice);
   if (kind === 'question') return clip((data?.questions ?? []).map((q: any) => q?.header || q?.question).filter(Boolean).join(', '));
   return clip(typeof data?.input?.description === 'string' ? `${data.tool}: ${data.input.description}` : data?.tool);
 }
@@ -69,12 +72,13 @@ export function settledHow(kind: string, data: any, reply: any, result: any, dis
   if (result?.via) return `allowed on ${result.by}'s go "${clip(result.via.text)}" at ${clock(result.at)}`;
   if (result?.state) return `${result.state}${result.by ? ` by ${result.by}` : ''} at ${clock(result.at)}`;
   if (reply) return `${reply.author} wrote in its chat at ${clock(reply.at)}: "${clip(reply.text)}"`;
+  if (data?.settled?.by) return `seen by ${data.settled.by} at ${clock(data.settled.at)}`;
   if (data?.settled?.at) return `settled by its minion at ${clock(data.settled.at)}`;
   return dismissed != null ? `#${dismissed} was dismissed` : 'no longer waits on people';
 }
 
 /** How a card reads in a tool's text: `question card "Layout": [open it](#/p/2/t/394?e=123)`. */
-export const cardText = (c: CardLink) => `${c.kind} card${c.label ? ` "${c.label}"` : ''}: [open it](${c.href})`;
+export const cardText = (c: CardLink) => `${c.kind} card${c.to ? ` for ${c.to}` : ''}${c.label ? ` "${c.label}"` : ''}: [open it](${c.href})`;
 
 /** "card", "cards", "card's", as a word. */
 const CARD = /(?<![\p{L}\p{N}_-])cards?(?![\p{L}\p{N}_-])/iu;

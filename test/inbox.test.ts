@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
-import { inboxCount, inboxItems } from '../src/inbox.ts';
+import { directCards, inboxCount, inboxItems } from '../src/inbox.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'inbox-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -236,4 +236,43 @@ test('a parked minion waits on something else by design: out of the inbox and it
 
   assert.deepEqual(inboxItems(store, approvals, p, 'Cara').map((i) => [i.kind, i.ticketId]).sort(), [['approval', blocked], ['replies', live]]);
   assert.equal(inboxCount(store, approvals, p, 'Cara', {}), 2);
+});
+
+test('a card addressed to one person (#687) is in their list alone, waits past typed messages, and shows in their other schemes too', () => {
+  const store = new Store(join(root, 'direct.sqlite'));
+  const approvals = new Approvals(() => {});
+  const cara = store.createUser({ name: 'Cara', login: 'cara' });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const citadel = store.createProject('Citadel', cara.id).id;
+  const peek = store.createProject('Peek', josh.id).id;
+  const away = store.createProject('Away', cara.id).id; // Josh isn't a member here
+  store.addMember(citadel, josh.id);
+  const tm = store.createTicket({ project_id: citadel, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' }).id;
+  const parked = store.createTicket({ project_id: citadel, title: 'parked', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  store.updateTicket(parked, { state: 'parked' });
+  const elsewhere = store.createTicket({ project_id: away, title: 'away', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+
+  store.addEvent(tm, 'question', { id: 'q-josh', questions: [], to: 'Josh' });
+  store.addEvent(parked, 'plan', { id: 'p-josh', summary: 's', plan: 'p', status: 'pending', to: 'Josh' });
+  store.addEvent(tm, 'question', { id: 'q-all', questions: [] });
+  store.addEvent(elsewhere, 'question', { id: 'q-away', questions: [], to: 'Josh' });
+  // Cara types in the Taskmaster's chat: it handles the card to everyone, not Josh's.
+  store.addEvent(tm, 'user_message', { author: 'Cara', text: 'carry on', typed: true });
+
+  const ids = (items: { card?: unknown }[]) => items.map((i) => (i.card as any)?.id).sort();
+  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'Cara')), [], 'not in the asker\'s person\'s list');
+  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'josh')), ['p-josh', 'q-josh'], 'the addressee\'s, even on a parked minion');
+  assert.equal(inboxCount(store, approvals, citadel, 'Josh', {}), 2);
+
+  const there = directCards(store, peek, 'Josh');
+  assert.deepEqual(ids(there), ['p-josh', 'q-josh'], 'shown in his own scheme too, never from a scheme he isn\'t in');
+  assert.deepEqual(there.find((i) => (i.card as any).id === 'q-josh')!.from, { projectId: citadel, scheme: 'Citadel', number: store.getTicket(tm)!.number, kind: 'coordinator', title: 'Taskmaster' });
+  assert.deepEqual(directCards(store, citadel, 'Josh'), [], 'the scheme he is looking at lists them already');
+  assert.equal(inboxCount(store, approvals, peek, 'Josh', {}), 0, 'only the asking scheme counts them');
+
+  // His answer, held as mail for a cold Taskmaster, still answers it.
+  store.addEvent(tm, 'user_message', { author: 'Josh', text: 'answers', mail: true, cold: true, answer: { questionId: 'q-josh', answers: [] } });
+  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'Josh')), ['p-josh']);
+  assert.match(store.recentCards(citadel, 10).find((r) => JSON.parse(r.data).id === 'q-josh')!.reply ?? '', /"author":"Josh"/);
+  assert.equal(store.recentCards(citadel, 10).find((r) => JSON.parse(r.data).id === 'p-josh')!.reply, null);
 });

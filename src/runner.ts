@@ -1642,13 +1642,23 @@ export class Runner {
     this.mail(to, author, text);
   }
 
-  private mail(to: number, author: string, text: string, from?: number, cold = false) {
-    const row = this.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
+  /**
+   * A person's answer to a card addressed to them (#687): it wakes the asker while its cache is warm, or when the
+   * card was urgent; a cold asker gets it as held mail, under held mail's 3-hour cap. Sender pays, as a typed
+   * answer does: the turn it runs in is the answerer's. `extra` marks which card it answers.
+   */
+  answerCard(to: number, author: string, text: string, extra: object, urgent: boolean) {
+    if (!urgent && this.cold(to)) this.mail(to, author, text, undefined, true, extra, this.personOf?.(author) ?? null);
+    else this.send(to, author, text, [], extra);
+  }
+
+  private mail(to: number, author: string, text: string, from?: number, cold = false, extra: object = {}, asker?: number | null) {
+    const row = this.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(cold ? { cold: true } : {}), ...(from ? { from } : {}), ...extra });
     if (cold && !this.store.getSetting<number>(coldKey(to))) this.store.setSetting(coldKey(to), this.now());
     const sent = new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ');
     const list = this.store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];
     // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
-    list.push({ author: `Held mail from ${author}, sent ${sent} UTC`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: cold ? this.personOf?.(author, from) ?? null : null });
+    list.push({ author: `Held mail from ${author}, sent ${sent} UTC`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: asker !== undefined ? asker : cold ? this.personOf?.(author, from) ?? null : null });
     this.store.setSetting(mailKey(to), list);
   }
 
@@ -2961,7 +2971,7 @@ export class Runner {
     if (ticket.status === 'closed') return [];
     const minion = ticket.kind === 'coordinator' ? null : ticket.number;
     const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({
-      minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href: cardHref(ticket, eventId),
+      minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href: cardHref(ticket, eventId), ...((data as { to?: string })?.to ? { to: (data as { to: string }).to } : {}),
       // Only question and plan cards are held under the turn's words (public/thread.js heldCards).
       ...(placed ? { below: kind !== 'approval' && this.store.heldBelow(ticket.id, eventId) } : {}),
     });

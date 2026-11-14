@@ -8,7 +8,7 @@ import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { askerKey, buildOwnerKey, EFFORTS, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
-import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
+import { directCards, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
 import { inOrder } from '../../public/reorder.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
@@ -838,8 +838,10 @@ export const projectRoutes: Route[] = [
     },
   },
 
-  // Everything in the scheme waiting on a person: open cards, and minions in state ready, complete or try.
-  { method: 'GET', path: '/api/projects/:project/inbox', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, { items: inboxItems(app.store, app.runner.approvals, project.id, session.name) }) },
+  // Everything in the scheme waiting on a person: open cards, and minions in state ready, complete or try; then cards addressed to them from their other schemes (#687).
+  { method: 'GET', path: '/api/projects/:project/inbox', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, {
+      items: [...inboxItems(app.store, app.runner.approvals, project.id, session.name), ...directCards(app.store, project.id, session.name)],
+    }) },
   // What happened in the scheme since this person last did something there, for the Taskmaster chat.
   { method: 'GET', path: '/api/projects/:project/recap', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.recap(session.name, project.id)) },
   {

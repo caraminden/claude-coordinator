@@ -105,3 +105,29 @@ test('a card answer reaches the minion as the pick plus the text typed with it, 
   assert.ok(prompts.includes('Pick plus text?\\n→ B\\n  Added: but keep it small'), prompts);
   assert.ok(prompts.includes('Text only?\\n→ In their own words: neither'), prompts);
 });
+
+test('a card addressed to one person (#687): to must be a member; a notice takes Got it and sends nothing back; an answer still reaches the asker', async () => {
+  const opts = [{ label: 'A', recommended: true }, { label: 'B' }];
+  const post = (body: unknown) => call(`/api/tickets/${ticket.id}/questions`, { method: 'POST', token: live(), body });
+  await assert.rejects(post({ to: 'nobody', questions: [{ question: 'Who?', options: opts }] }), /400 to must be a member of this scheme: cara/);
+  await assert.rejects(post({ notice: 'no one to tell' }), /400 questions must be a list/);
+
+  const notice = await post({ to: '@Cara', notice: 'Runner slots went to 3' });
+  let events = await call(`/api/tickets/${ticket.id}/events?after=0`);
+  assert.deepEqual(JSON.parse(events.find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === notice.id).data),
+    { id: notice.id, questions: [], to: 'Cara', notice: 'Runner slots went to 3' });
+  assert.equal((await inbox()).length, 1);
+  const turnsBefore = turns().length;
+  await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: notice.id } });
+  assert.equal((await inbox()).length, 0);
+  events = await call(`/api/tickets/${ticket.id}/events?after=0`);
+  assert.equal(JSON.parse(events.find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === notice.id).data).settled.by, 'Cara');
+  assert.equal(events.filter((e: any) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === notice.id).length, 0, 'nothing sent back');
+  await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: notice.id } }), /409 Cara already marked this seen/);
+
+  const { id } = await post({ to: 'cara', urgent: true, questions: [{ question: 'Direct?', options: opts }] });
+  await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['B'], other: '' }] } });
+  await until('the answer\'s turn', () => turns().length > turnsBefore);
+  await idle(ticket.id);
+  assert.ok(JSON.stringify(turns().at(-1).prompt).includes('Direct?\\n→ B'));
+});

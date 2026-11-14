@@ -283,3 +283,25 @@ test('admin reach sends no pushes: only a scheme\'s owner and members hear about
   assert.deepEqual(sent.map((url) => url.split('/').pop()).sort(), ['Alex', 'Josh'], 'added to it: he hears');
   store.db.close();
 });
+
+test('a card addressed to one person pings only their devices (#687)', async () => {
+  const store = new Store(join(root, 'direct.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara' });
+  const project = store.createProject('P', null, cara.id);
+  for (const name of ['Josh', 'Cody']) store.addMember(project.id, store.createUser({ name, login: name.toLowerCase() }).id);
+  const t = store.createTicket({ project_id: project.id, title: 'Ask', permission_mode: 'default', created_by: 'Cara' });
+  for (const name of ['Cara', 'Josh', 'Cody']) {
+    const b = browser(`https://push.example/${name}`);
+    store.savePushSubscription(name, b.endpoint, b.p256dh, b.auth);
+  }
+  const sent: string[] = [];
+  const fakeFetch = (async (url: string) => (sent.push(url), new Response('', { status: 201 }))) as unknown as typeof fetch;
+  const pusher = new Pusher(store, loadVapidKeys(root), fakeFetch);
+  await pusher.notify(t, { kind: 'question', questions: [{ question: 'Three slots?' }], to: 'Josh' });
+  await pusher.notify(t, { kind: 'plan', summary: 'Three slots', to: 'josh' });
+  assert.deepEqual(sent.map((url) => url.split('/').pop()), ['Josh', 'Josh']);
+  sent.length = 0;
+  await pusher.notify(t, { kind: 'question', questions: [{ question: 'Anyone?' }] });
+  assert.deepEqual(sent.map((url) => url.split('/').pop()).sort(), ['Cara', 'Cody', 'Josh'], 'a card to everyone still pings everyone');
+  store.db.close();
+});

@@ -12,7 +12,14 @@ export interface InboxItem {
   card?: unknown;
   /** Names this item while it waits, so a scheme's pill can tell a new one from one you saw (#539). */
   key: string;
+  /** The chat event that posted the card, to open the chat at it. */
+  eventId?: number;
+  /** On a card addressed to you from another scheme (directCards, #687): where it asks from, to draw its row. */
+  from?: { projectId: number; scheme: string; number: number | null; kind: string; title: string };
 }
+
+/** Whether a stored card is for `person`: a card to everyone (no `to`), or one addressed to them (#687). */
+const forPerson = (card: { to?: string }, person: string) => !card.to || card.to.toLowerCase() === person.toLowerCase();
 
 /**
  * Approval cards hold up a running turn, so they come first; the rest newest first. For `person`, only
@@ -33,7 +40,10 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     ...approvals.pending().filter((a) => ids.has(a.ticketId))
       .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined, key: `approval:${(card as { id: string }).id}` })),
     // A new stored card kind only needs adding to Store.openCards.
-    ...store.openCards(projectId).filter((e) => awake.has(e.ticket_id)).map((e) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card: JSON.parse(e.data), eventId: e.id, key: `${e.kind}:${e.id}` })),
+    // A card addressed to one person (#687) is theirs alone, whoever the minion is assigned to and even while it's parked.
+    ...store.openCards(projectId).map((e) => ({ e, card: JSON.parse(e.data) }))
+      .filter(({ e, card }) => (card.to ? forPerson(card, person) : awake.has(e.ticket_id)))
+      .map(({ e, card }) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card, eventId: e.id, key: `${e.kind}:${e.id}` })),
     ...tickets.filter((t) => ['ready', 'complete', 'try'].includes(t.state ?? '')).map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at, key: `state:${t.id}` })),
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.
     ...tickets.filter((t) => t.replies && !['ready', 'complete', 'try', 'parked'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at, key: `replies:${t.id}` })),
@@ -54,4 +64,25 @@ export const minionCount = (items: InboxItem[]) => new Set(items.map((i) => i.ti
 /** How many minions the scheme's Needs-you badge counts for `person` (inboxWaiting says which items count). */
 export function inboxCount(store: Store, approvals: Approvals, projectId: number, person: string, seen: Record<number, number>): number {
   return minionCount(inboxWaiting(store, approvals, projectId, person, seen));
+}
+
+/**
+ * Cards addressed to `person` from their other schemes (#687; Cara, 2026-11-14, "Keep, add cross-scheme"): every
+ * scheme's Needs-you list shows them, to answer in place, though only the asking scheme's count includes them.
+ */
+export function directCards(store: Store, projectId: number, person: string): InboxItem[] {
+  const user = store.findUser('name', person);
+  if (!user) return [];
+  const items: InboxItem[] = [];
+  for (const pid of store.memberSchemes(user.id)) {
+    if (pid === projectId || store.hiddenProjects(user.id).has(pid)) continue;
+    const scheme = store.getProject(pid)?.name ?? '';
+    for (const e of store.openCards(pid)) {
+      const card = JSON.parse(e.data);
+      if (!card.to || !forPerson(card, person)) continue;
+      const t = store.getTicket(e.ticket_id)!;
+      items.push({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card, eventId: e.id, key: `${e.kind}:${e.id}`, from: { projectId: pid, scheme, number: t.number, kind: t.kind, title: t.title } });
+    }
+  }
+  return items.sort((a, b) => b.at - a.at);
 }

@@ -6,6 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
+import { messagePerson } from '../src/access.ts';
 import { Store } from '../src/db.ts';
 import { COLD_HOLD_MAX_MS, COLD_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
@@ -96,6 +97,32 @@ test("the Taskmaster's message to a cold minion is held; urgent wakes it, the he
   await until('the turn', async () => promptCount() > before);
   assert.deepEqual(lastPrompt(), ['[Taskmaster]: Cara says merge it', '[Held mail from Taskmaster, sent 2026-11-08 14:05 UTC]: #12 shipped, FYI']);
   await idle(minion.id);
+});
+
+test("a direct card's answer (#687): held as mail for a cold asker, carrying the answer and its answerer; urgent or warm wakes it", async () => {
+  store.createUser({ name: 'Joshua', login: 'joshua' });
+  runner.personOf = messagePerson(store); // as server.ts sets it
+  const extra = (q: string) => ({ answer: { questionId: q, answers: [{ selected: ['3 slots'], other: '' }] } });
+  const cold = ticket('coordinator', 2 * 3_600_000);
+  runner.answerCard(cold.id, 'Joshua', 'My answers to your question card: 3 slots', extra('q1'), false);
+  const held = lastMessage(cold.id);
+  assert.deepEqual([held.author, held.mail, held.cold, held.answer.questionId], ['Joshua', true, true, 'q1']);
+  assert.equal(runner.isRunning(cold.id), false, 'a cold asker must not wake for it');
+  assert.equal(store.getSetting<any[]>(`mail:${cold.id}`)![0].asker, store.findUser('name', 'Joshua')!.id, 'sender pays: its turn is the answerer\'s');
+  assert.equal(store.getSetting(`cold:${cold.id}`), NOW, 'held mail\'s 3-hour cap applies');
+  // Out of the later tests' way: the sweep test counts every cold session's mail.
+  store.deleteSetting(`mail:${cold.id}`);
+  store.deleteSetting(`cold:${cold.id}`);
+
+  for (const [t, urgent] of [[ticket('coordinator', 2 * 3_600_000), true], [ticket('coordinator', 10 * 60_000), false]] as const) {
+    const before = promptCount();
+    runner.answerCard(t.id, 'Joshua', 'My answers to your question card: 3 slots', extra('q2'), urgent);
+    assert.equal(lastMessage(t.id).mail, undefined);
+    await until('the turn', async () => promptCount() > before);
+    assert.deepEqual(lastPrompt(), ['[Joshua]: My answers to your question card: 3 slots']);
+    await idle(t.id);
+  }
+  runner.personOf = undefined;
 });
 
 test('a warm session gets machine messages at once, as before', async () => {

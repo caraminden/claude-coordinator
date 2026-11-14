@@ -33,8 +33,8 @@ export interface PushMessage {
 
 /** `eventId`: the chat event the notification is about, which clicking it scrolls to (#236). */
 export type PushTrigger =
-  | { kind: 'question'; questions: { question: string }[]; eventId?: number }
-  | { kind: 'plan'; summary: string; eventId?: number }
+  | { kind: 'question'; questions: { question: string }[]; eventId?: number; to?: string }
+  | { kind: 'plan'; summary: string; eventId?: number; to?: string }
   | { kind: 'error'; text: string; eventId?: number }
   | { kind: 'state'; state: string | null; note: string | null };
 
@@ -183,7 +183,7 @@ export class Pusher {
   }
 
   /**
-   * Tell everyone in the ticket's project (its owner and members) who subscribed, except `except` (the person who caused it),
+   * Tell everyone in the ticket's project (its owner and members) who subscribed, or only a card's addressee, except `except` (the person who caused it),
    * devices that muted the project, people who hid it (#226), and pinned-only devices whose person hasn't pinned this minion
    * (the Taskmaster can't be pinned, so it always gets through). Resolves once every push service has answered.
    */
@@ -191,7 +191,9 @@ export class Pusher {
     const project = this.store.getProject(ticket.project_id);
     const msg = notificationFor(ticket, trigger, project?.name);
     if (!msg) return;
-    const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && !JSON.parse(s.muted).includes(ticket.project_id)
+    // A card addressed to one person (#687) goes to their devices only.
+    const to = 'to' in trigger && trigger.to ? trigger.to.toLowerCase() : null;
+    const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && (!to || s.name.toLowerCase() === to) && !JSON.parse(s.muted).includes(ticket.project_id)
       && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || this.store.isTicketPinned(s.name, ticket.id)));
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }

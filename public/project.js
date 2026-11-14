@@ -2,7 +2,7 @@
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciWarning } from './ci-desktop.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
@@ -60,6 +60,7 @@ function renderCrumbs(main) {
     main.kind === 'files' ? [projectLink, ' / ', 'Files']
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
       : main.kind === 'app-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Citadel-wide instructions']
+      : main.kind === 'my-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'My instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Needs approval']
       : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
       : main.kind === 'members' ? [projectLink, ' / ', settingsLink, ' / ', 'Members']
@@ -193,6 +194,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const section = main.kind === 'files' ? filesView(main.folder)
     : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'app-instructions' ? appInstructionsEditor()
+    : main.kind === 'my-instructions' ? myInstructionsEditor()
     : main.kind === 'approvals' ? approvalsEditor()
     : main.kind === 'properties' ? propertiesPage()
     : main.kind === 'members' ? membersPage()

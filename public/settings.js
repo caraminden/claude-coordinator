@@ -271,7 +271,7 @@ const settingText = (p, key) => (key === 'list_groups' ? listGroupsOf(p).join('\
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
 export function settingsTabs() {
   const nav = h('nav', { class: 'settings-tabs' },
-    [['instructions', 'Instructions'], account?.admin && ['app-instructions', 'Citadel-wide'], ['approvals', 'Needs approval'], ['properties', 'Properties'],
+    [['instructions', 'Instructions'], account?.admin && ['app-instructions', 'Citadel-wide'], ['my-instructions', 'My instructions'], ['approvals', 'Needs approval'], ['properties', 'Properties'],
       ['members', 'Members'], account?.admin && ['people', 'People'], account?.admin && ['contraptions', 'Contraptions'], ['machines', 'Machines'], ['account', 'Your account']].filter(Boolean).map(([kind, label]) =>
       h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label,
         // The same waiting-review count as the Settings button (renderSettingsCount fills both).
@@ -458,6 +458,132 @@ function recentChanges(url) {
     }
   };
   return [history, load];
+}
+
+const MAX_PERSONAL = 4000;
+
+/**
+ * Main panel: your own instructions (#688), one text for everywhere and one for this scheme. They load last in the
+ * minions assigned to you, never in the Taskmaster's prompt. Each scope keeps its own draft while you switch.
+ */
+export function myInstructionsEditor() {
+  const p = view.project;
+  let saved = { everywhere: '', scheme: '' };
+  const drafts = {};
+  let scope = 'everywhere';
+  const textarea = h('textarea', {
+    id: 'my-instructions-text', class: 'instructions-text', spellcheck: 'false', disabled: true, 'aria-label': 'My instructions',
+    placeholder: 'How you want your minions to work: tone, when to ask and when to go, previews before landing, the model and effort they start on…',
+  });
+  const counter = h('span', { class: 'muted counter' });
+  const status = h('span', { class: 'muted', role: 'status' }, 'Loading…');
+  const save = h('button', { type: 'button', disabled: true }, 'Save');
+  const discard = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Discard');
+  const sync = () => {
+    const dirty = !textarea.disabled && textarea.value.trim() !== saved[scope].trim();
+    textarea.toggleAttribute('data-draft', dirty);
+    const n = textarea.value.trim().length;
+    counter.textContent = `${count(n)} / ${count(MAX_PERSONAL)}`;
+    counter.classList.toggle('over', n > MAX_PERSONAL);
+    save.disabled = !dirty || n > MAX_PERSONAL;
+    discard.disabled = !dirty;
+  };
+  textarea.addEventListener('input', () => {
+    drafts[scope] = textarea.value;
+    status.textContent = '';
+    sync();
+  });
+  const histories = { everywhere: recentChanges(`api/projects/${p.id}/my-instructions/history?scope=everywhere`), scheme: recentChanges(`api/projects/${p.id}/my-instructions/history?scope=scheme`) };
+  const historySlot = h('div');
+  const scopes = [['everywhere', 'Everywhere'], ['scheme', `${p.name} only`]];
+  const switcher = h('div', { class: 'row my-scope', role: 'group', 'aria-label': 'Applies to' });
+  const showScope = (next) => {
+    scope = next;
+    switcher.replaceChildren(...scopes.map(([key, label]) =>
+      h('button', { type: 'button', class: `chip${key === scope ? ' on' : ''}`, 'aria-pressed': String(key === scope), onclick: () => showScope(key) }, label)));
+    textarea.value = drafts[scope] ?? saved[scope];
+    historySlot.replaceChildren(histories[scope][0]);
+    histories[scope][1]();
+    status.textContent = '';
+    sync();
+  };
+  // Saved at once; a refusal puts the old text back as the saved one, and the field keeps what was typed as a draft.
+  save.onclick = () => {
+    const at = scope;
+    const was = saved[at];
+    const text = textarea.value;
+    const show = (t, said) => {
+      saved = { ...saved, [at]: t };
+      if (scope === at) status.textContent = said;
+      sync();
+    };
+    optimistic({
+      key: `my-instructions-${at}`,
+      apply: () => {
+        delete drafts[at];
+        show(text.trim(), `Saved. Your minions pick this up on their next turn. ${instructionCost(text)}`);
+      },
+      send: () => api(`api/projects/${p.id}/my-instructions`, { method: 'PUT', body: { scope: at, text } }),
+      undo: () => {
+        drafts[at] = text;
+        show(was, 'Not saved.');
+      },
+      label: 'save your instructions',
+    }).then((r) => {
+      histories[at][1]();
+      if (saved[at] !== text.trim()) return; // a later save changed it again
+      saved = { ...saved, [at]: r[at].text };
+      if (scope === at && textarea.value === text) textarea.value = r[at].text; // as the server keeps it
+      sync();
+    }, () => {});
+  };
+  discard.onclick = () => {
+    delete drafts[scope];
+    textarea.value = saved[scope];
+    status.textContent = '';
+    sync();
+  };
+  const layer = (name, who, cls) => h('li', { class: cls }, h('strong', {}, name), h('span', { class: 'muted small' }, who));
+  const section = h('section', { class: 'artifacts-main instructions-main my-instructions' },
+    h('div', { class: 'ticket-head' },
+      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+      settingsTabs(),
+      h('div', { class: 'meta' }, 'Only you edit these. They load into the minions assigned to you, from their next turn.')),
+    h('h3', { class: 'settings-label' }, 'Applies to'),
+    switcher,
+    textarea,
+    h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
+    historySlot,
+    h('div', { class: 'settings-card' },
+      h('h3', { class: 'settings-label' }, 'What a minion of yours reads, in order'),
+      h('ol', { class: 'my-layers' },
+        layer('Citadel-wide', 'everyone, every scheme', 'l-app'),
+        layer('Scheme instructions', `everyone in ${p.name}`, 'l-scheme'),
+        layer('Yours: everywhere, then this scheme\'s', 'the minions assigned to you', 'l-mine')),
+      h('p', { class: 'muted small' }, 'The Taskmaster\'s prompt stays the same for everyone: it reads yours when it starts a minion for you. When someone else writes in your minion, it follows their way for their own asks.')),
+    h('div', { class: 'settings-card' },
+      h('h3', { class: 'settings-label' }, 'Yours wins over 1 and 2, except'),
+      h('ul', { class: 'my-limits' },
+        h('li', {}, 'secrets, logins, other people\'s files and deleting data'),
+        h('li', {}, 'the tripwire'),
+        h('li', {}, 'how a change ships: tests, self-review and risk labels, the land script, the pipeline lane'),
+        h('li', {}, 'shared names, the shared folder\'s layout and the decisions log'),
+        h('li', {}, 'another person\'s pick or decision'))));
+  (async () => {
+    try {
+      const r = await api(`api/projects/${p.id}/my-instructions`);
+      saved = { everywhere: r.everywhere.text, scheme: r.scheme.text };
+      textarea.disabled = false;
+      // Open on this scheme's text when only it is set.
+      showScope(!r.everywhere.text && r.scheme.text ? 'scheme' : 'everywhere');
+    } catch (err) {
+      status.textContent = `Could not load them: ${err.message}`;
+    }
+  })();
+  showScope('everywhere');
+  status.textContent = 'Loading…';
+  return section;
 }
 
 /** The Citadel-wide instructions as last loaded or broadcast, for the tab below. */

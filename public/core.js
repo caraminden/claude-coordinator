@@ -791,6 +791,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'files', folder: '@minions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(?:settings|instructions)$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/app-instructions$/))) await showProject(Number(m[1]), { kind: 'app-instructions' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/my-instructions$/))) await showProject(Number(m[1]), { kind: 'my-instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(members|people|contraptions|account)$/))) await showProject(Number(m[1]), { kind: m[2] });

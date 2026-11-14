@@ -396,9 +396,14 @@ export function questionCard(ticketId, card) {
         });
       };
       // A picture option's button selects it and opens its picture, as its thumbnail does; the rest only pick.
+      // On a pick-any question a picked option's button unpicks it in place, like a checkbox (Cara, 2026-11-14:
+      // "Multi select image cards cant be unselected"); its thumbnail still only looks.
       const pickBtn = (o, thumb) => h('button', {
         type: 'button', class: `opt${thumb ? ' pic' : ''}`, 'data-label': o.label,
-        onclick: () => (thumb ? thumb.click() : choose(o)),
+        onclick: () => {
+          const unpick = q.multiSelect && !answered && picks[i].selected.has(o.label);
+          thumb && !unpick ? thumb.click() : choose(o);
+        },
       }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, o.description) : '');
       // With pictures, the options are a gallery of tiles, each a thumbnail over its label.
       const gallery = q.options.some((o) => o.image);

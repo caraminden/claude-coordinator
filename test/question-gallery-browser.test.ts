@@ -221,7 +221,7 @@ test('a card settled while its picture is open turns the viewer read-only', { sk
   assert.equal(await page.eval(`!!document.querySelector('.gallery-controls .pick')`), false);
 });
 
-test('on a pick-any question a tile click adds the option, a second look keeps it, and the viewer\'s button takes it off', { skip }, async () => {
+test('on a pick-any question a tile click adds the option, a second look at its picture keeps it, and its button or the viewer\'s takes it off', { skip }, async () => {
   const page = await chat(12);
   await click(page, '.tile:nth-child(1) .opt');
   await waitFor(page, 'the viewer', viewerOpen);
@@ -230,11 +230,16 @@ test('on a pick-any question a tile click adds the option, a second look keeps i
   await waitFor(page, 'the viewer', viewerOpen);
   await closeViewer(page);
   assert.deepEqual(await page.eval(picked), ['Garden', 'Forest']);
-  await click(page, '.tile:nth-child(1) .opt .label');
+  await click(page, '.tile:nth-child(1) .thumb');
   await waitFor(page, 'the viewer', viewerOpen);
   assert.deepEqual(await page.eval(picked), ['Garden', 'Forest'], 'a second look keeps it');
   await click(page, '.gallery-controls .pick');
-  assert.deepEqual(await page.eval(picked), ['Forest']);
+  assert.deepEqual(await page.eval(picked), ['Forest'], 'the viewer\'s button takes it off');
+  await closeViewer(page);
+  // Like a checkbox (Cara, 2026-11-14: "Multi select image cards cant be unselected"): the picked option's own button unpicks it, in place.
+  await click(page, '.tile:nth-child(2) .opt .label');
+  assert.deepEqual(await page.eval(picked), [], 'its button takes it off');
+  assert.equal(await page.eval(viewerOpen), false, 'unpicking stays in the chat');
   assert.equal(await page.eval('sent.length'), 0);
 });
 

@@ -513,7 +513,7 @@ function freshSession(t) {
 
 // Phones put ‹ › × on the line under the title, so turning a tablet across the breakpoint redraws the bar.
 const narrow = matchMedia('(max-width: 800px)');
-narrow.addEventListener('change', () => { if (view.ticket) renderTicketHead(); });
+narrow.addEventListener('change', () => { if (view?.ticket) renderTicketHead(); });
 
 // Squeezed is measured against the text's own width, taken while it shows (the label itself may have
 // grown into spare room): once the dots are in, the label is narrower than its text for as long as the room stays short.

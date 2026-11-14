@@ -438,3 +438,8 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .wait-track .now { color: var(--ink); font-weight: 650; }
 /* A phone's line keeps a wait's words ("Test 3/6 · CI: the full suite"); its Test piece already fills by the time (#630). */
 @media (max-width: 800px) { .progress-line .time.of-wait { display: none; } }
+
+/* Someone else is in this chat (#695, public/presence.js): "● Josh is here" beside the title. */
+.presence-head { flex: none; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.8em; font-weight: 600; line-height: 1.2; white-space: nowrap;
+  color: color-mix(in srgb, var(--done) 75%, var(--ink)); background: color-mix(in srgb, var(--done) 14%, transparent); }
+.presence-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--done); font-style: normal; }

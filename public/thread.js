@@ -1,4 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
+import { presenceHead } from './presence.js';
 import { ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight, icon, isCoordinator, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
@@ -464,6 +465,7 @@ export function renderTicketHead() {
     h('div', { class: phone ? 'row head-top' : 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
+      presenceHead(t),
       phone ? h('span', { class: 'spacer' }) : '',
       phone ? more : '',
       phone ? close : ''),

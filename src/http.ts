@@ -1,4 +1,5 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
+import type { Presence } from './presence.ts';
 import type { ClaudeLink } from './claude-link.ts';
 import type { CodexLink } from './codex-link.ts';
 import type { Contraptions } from './contraptions.ts';
@@ -233,6 +234,8 @@ export interface App {
   landings: Landings;
   /** Ultra reviews people start on their own Claude login (src/ultrareview.ts, #432). */
   ultrareviews: UltraReviews;
+  /** Who has each minion open or wrote in it lately (#695, src/presence.ts). */
+  presence: Presence;
   /** Open event streams (GET /api/stream), with whose they are. */
   clients: Map<ServerResponse, Session>;
   /** Semantic memory's model (#331): what embeds a search, and which schemes are indexed. */

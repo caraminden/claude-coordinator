@@ -72,6 +72,7 @@ import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
+import { Presence } from './src/presence.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -317,6 +318,9 @@ const ultrareviews = new UltraReviews({
 });
 // A boot check's or preview's copy names the live reviews' folders: only the live server may clear them.
 if (!BOOT_CHECK) ultrareviews.recover();
+// Who is in which chat (#695): in memory, swept for late heartbeats and old writes.
+const presence = new Presence({ projectOf: (id) => store.getTicket(id)?.project_id, broadcast });
+setInterval(() => presence.sweep(), 15_000).unref();
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
@@ -856,7 +860,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
+  store, runner, auth, waiters, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
   get assetVersion() {

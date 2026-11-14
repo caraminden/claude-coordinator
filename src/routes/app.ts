@@ -6,6 +6,8 @@ import { fallbacks } from '../fallbacks.ts';
 import { prOwners } from '../prlinks.ts';
 import { ServiceError } from '../app-services.ts';
 import type { Store } from '../db.ts';
+import { mayReceive } from '../access.ts';
+import { randomUUID } from 'node:crypto';
 import { clientIp, HttpError, isSecure, json, readJson, str, type Ctx, type Route } from '../http.ts';
 
 const MAX_CLIENTS = 100;
@@ -92,15 +94,32 @@ export const appRoutes: Route[] = [
     handler({ req, res, app, session }) {
       if (app.clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
-      res.write(`data: ${JSON.stringify({ type: 'hello', version: app.assetVersion, usage: app.runner.usageOf(session.uid), codex: app.runner.codexView(session.uid) })}\n\n`);
+      // stream: this tab's id, which its presence heartbeats name (#695).
+      const stream = randomUUID();
+      res.write(`data: ${JSON.stringify({ type: 'hello', version: app.assetVersion, usage: app.runner.usageOf(session.uid), codex: app.runner.codexView(session.uid), stream })}\n\n`);
+      for (const msg of app.presence.snapshot()) if (mayReceive(app.store, session, msg.projectId)) res.write(`data: ${JSON.stringify(msg)}\n\n`);
       app.clients.set(res, session);
+      app.presence.open(stream, session.name);
       const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
       req.on('close', () => {
         clearInterval(ping);
         app.clients.delete(res);
+        app.presence.close(stream);
       });
     },
   },
+  // A tab's presence heartbeat (#695, public/presence.js): the chat it has open, or null. Starts no turn.
+  { method: 'POST', path: '/api/presence', who: ['person'], handler: async ({ req, res, app: { store, presence }, session }) => {
+    const body = await readJson(req);
+    const ticketId = body?.ticketId == null ? null : Number(body.ticketId);
+    if (ticketId !== null) {
+      const t = Number.isInteger(ticketId) ? store.getTicket(ticketId) : undefined;
+      if (!t || !store.canSee(session, t.project_id)) throw new HttpError(404, 'No such minion');
+    }
+    // An unknown stream (the server restarted under the tab) says so, and the tab reconnects.
+    if (!presence.view(String(body?.stream ?? ''), session.name, ticketId)) throw new HttpError(409, 'No such stream');
+    return json(res, 200, {});
+  } },
   // Every scheme's spend on the server's Claude login, so only for admins.
   { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner } }) => json(res, 200, { days: costDays(store), dayBudget: dayBudget(store, runner.usage?.weekly), split: spendSplit(store) }) },
   // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).

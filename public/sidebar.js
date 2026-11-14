@@ -8,6 +8,7 @@ import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
+import { presenceChip } from './presence.js';
 import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
@@ -365,6 +366,7 @@ export function threadRow(t, href = threadHref(t)) {
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     card,
     st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
+    presenceChip(t),
     ownerChip(t, coord),
     wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, waitLine(wait), ' · ', waitClock(wait))
       : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',

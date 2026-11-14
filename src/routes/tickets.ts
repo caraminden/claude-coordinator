@@ -143,9 +143,10 @@ function modelName(id: string): string {
  * A person wrote into a chat, which counts as continuing the loop guard there: for a minion's chat,
  * that minion; for the Taskmaster's, every minion of its scheme and its exchanges with other Taskmasters.
  */
-function personWrote({ app: { store, runner }, caller, session, ticket }: Ctx) {
+function personWrote({ app: { store, runner, presence }, caller, session, ticket }: Ctx) {
   if (caller) return;
   runner.personWrote(ticket.id);
+  presence.wroteIn(ticket.id, session.name);
   const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id) : [ticket];
   for (const t of minions) runner.continueLoop(t.id, session.name);
 }

@@ -22,6 +22,7 @@ import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
 import { toast } from './ui/status.js';
 import { initAppSwitch } from './appswitch.js';
+import { onPresenceMsg, presenceHello, reportPresence } from './presence.js';
 import { codexHigh, codexLevel, codexTop, codexWindows, windowName } from './codexusage.js';
 
 export const app = document.getElementById('app');
@@ -296,6 +297,7 @@ function connectStream(catchUp = false) {
       assetVersion ??= msg.version;
       // Each connect's own hello (it carries usage; a deploy's broadcast one doesn't), so a reconnect catches up (#626).
       if ('usage' in msg) loadReleases();
+      if (msg.stream) presenceHello(msg.stream);
     }
     if (msg.type === 'hello' || msg.type === 'codex') {
       // The broadcast hello of a front-end-only deploy carries only `version`: it leaves Codex as it was.
@@ -325,6 +327,10 @@ function connectStream(catchUp = false) {
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
     if (msg.type === 'releases') onReleases(msg);
+    if (msg.type === 'presence' && onPresenceMsg(msg)) {
+      renderSidebar();
+      if (view.id) renderTicketHead();
+    }
     if (msg.type === 'seen-items' && msg.name === me) onSeenItems(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) { view.builds = msg.builds; renderSidebar(); }
@@ -817,6 +823,7 @@ async function route() {
     }
   } finally {
     if (seq === routeSeq) document.body.classList.remove('navigating');
+    reportPresence();
   }
 }
 

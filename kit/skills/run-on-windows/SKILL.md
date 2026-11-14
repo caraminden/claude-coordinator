@@ -64,8 +64,9 @@ regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s
 4. **After editing `public/`:** `node …/rig.ts reload`. The dev copy reads assets at boot; this also
    reloads the app page.
 5. **Clean up:** `node …/rig.ts down` stops the driver (which uninstalls the app) and the dev copy, then
-   prints a `build` line. Run it: it removes any leftover test apps, shortcuts, uninstall entries and the temp
-   profile. The rig never touches the box's workspace checkout.
+   prints a `build` line. Run it: it removes the leftover shortcuts and uninstall entries that name the rig's
+   profile, and the temp profile. A `left (not the rig profile)` line is a Citadel app someone else installed:
+   leave it. The rig never touches the box's workspace checkout.
 
 Use Edge, which the driver does. Chrome for Testing is a dead end: its app window never offers the overlay. A
 CDP `PWA.install` opens in a tab, so the driver installs through Edge's own address-bar chip and dialog.

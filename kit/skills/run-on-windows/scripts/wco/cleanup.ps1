@@ -10,14 +10,17 @@ Get-CimInstance Win32_Process -Filter "Name='msedge.exe' or Name='node.exe'" |
 Start-Sleep 2
 $shell = New-Object -ComObject WScript.Shell
 foreach ($p in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
-  Get-ChildItem -Path $p -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue |
-    Where-Object { $shell.CreateShortcut($_.FullName).Arguments -like '*citadel-wco*' } |
-    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force; 'removed ' + $_.FullName }
+  Get-ChildItem -Path $p -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($shell.CreateShortcut($_.FullName).Arguments -like '*citadel-wco*') { Remove-Item -LiteralPath $_.FullName -Force; 'removed ' + $_.FullName }
+    elseif ($_.Name -like 'Citadel*') { 'left (not the rig profile): ' + $_.FullName }
+  }
 }
 $apps = Join-Path ([Environment]::GetFolderPath('Programs')) 'Edge Apps'
 if ((Test-Path $apps) -and -not (Get-ChildItem $apps)) { Remove-Item -LiteralPath $apps -Force; 'removed empty ' + $apps }
-Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
-  Where-Object { (Get-ItemProperty $_.PSPath).UninstallString -like '*citadel-wco*' } |
-  ForEach-Object { Remove-Item -LiteralPath $_.PSPath -Recurse -Force; 'removed uninstall entry ' + $_.PSChildName }
+Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | ForEach-Object {
+  $e = Get-ItemProperty $_.PSPath
+  if ($e.UninstallString -like '*citadel-wco*') { Remove-Item -LiteralPath $_.PSPath -Recurse -Force; 'removed uninstall entry ' + $e.DisplayName }
+  elseif ($e.DisplayName -like 'Citadel*') { 'left (not the rig profile): uninstall entry ' + $e.DisplayName }
+}
 if (Test-Path $rig) { Remove-Item -LiteralPath $rig -Recurse -Force -ErrorAction SilentlyContinue; 'removed ' + $rig + ': ' + (-not (Test-Path $rig)) }
 'clean'

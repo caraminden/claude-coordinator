@@ -267,7 +267,28 @@ for (const [label, size] of [['desktop', { width: 1440, height: 900 }], ['phone'
     assert.ok(bar.heights.every((x: number) => Math.abs(x - bar.heights[0]) < 0.5), `the bar's buttons are one height: ${bar.heights}`);
     // A phone's chat under the picture is mostly its message box: the bar's ✓ Picked says it there.
     if (size.width > 800) assert.ok(bar.tileShown, 'the chat beside the picture keeps the card in sight');
+    // Cara, 2026-11-14: "the "Picked" text moves the left and right buttons": they stay put as Pick this turns ✓ Picked.
+    const arrows = `[...document.querySelectorAll('.gallery-controls .step')].map((el) => Math.round(el.getBoundingClientRect().left))`;
+    const before = await page.eval<number[]>(arrows);
     await click(page, '.gallery-controls .pick');
+    assert.equal(await page.eval(`document.querySelector('.gallery-controls .pick').textContent`), '✓ Picked');
+    assert.deepEqual(await page.eval(arrows), before, 'the bar\'s ‹ › stay put');
+    // ‹ › on the picture's own edges, with even room around the arrow, step like the bar's.
+    const edges = await page.eval<Record<string, any>>(`(() => {
+      const stage = document.querySelector('.viewer-stage').getBoundingClientRect();
+      return [...document.querySelectorAll('.viewer-stage > .edge-steps > .step')].map((el) => {
+        const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+        return { left: r.left - stage.left, right: stage.right - r.right, mid: r.top + r.height / 2 - (stage.top + stage.height / 2), padTop: s.paddingTop, padBottom: s.paddingBottom, align: s.alignItems };
+      });
+    })()`);
+    assert.equal(edges.length, 2, JSON.stringify(edges));
+    assert.ok(edges[0].left < 20 && edges[1].right < 20, `on the left and right edges: ${JSON.stringify(edges)}`);
+    for (const e of edges) assert.ok(Math.abs(e.mid) < 1 && e.padTop === e.padBottom && e.align === 'center', JSON.stringify(e));
+    await shot('4-viewer-picked');
+    await click(page, '.viewer-stage .edge-steps .next');
+    await waitFor(page, 'the next picture', `${title} === 'Forest'`);
+    await click(page, '.viewer-stage .edge-steps .prev');
+    await waitFor(page, 'back to the first', `${title} === 'Garden'`);
     await closeViewer(page);
     await page.eval(`document.querySelector('.qcard').scrollIntoView({ block: 'center' })`);
     await shot('2-picked');

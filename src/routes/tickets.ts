@@ -484,8 +484,10 @@ export const ticketRoutes: Route[] = [
       const { questions } = JSON.parse(card.data);
       const answers = cleanAnswers(questions, body.answers);
       const text = questions.map((q: any, i: number) => {
-        const picked = [...answers[i].selected, ...(answers[i].other ? [`Other: ${answers[i].other}`] : [])];
-        return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked.join('; ')}`;
+        const { selected, other } = answers[i];
+        // The text typed with a pick expands on it; typed alone, it is the answer.
+        const picked = selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
+        return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
       runner.send(id, session.name, `My answers to your question card:\n\n${text}`, [], { answer: { questionId: body.questionId, answers } });
       personWrote(ctx);

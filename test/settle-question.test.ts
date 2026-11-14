@@ -90,3 +90,18 @@ test('with no id it settles every open card, and skips ones already answered by 
   assert.deepEqual(await settle(), { settled: [] });
   assert.equal((await inbox()).length, 0);
 });
+
+// Cara, 2026-11-14: "Cards should always pass along the text in addition to the selection".
+test('a card answer reaches the minion as the pick plus the text typed with it, or the text alone', async () => {
+  const both = await ask('Pick plus text?');
+  await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: both.id, answers: [{ selected: ['B'], other: 'but keep it small' }] } });
+  await until('the answer turn', () => turns().some((t) => JSON.stringify(t.prompt).includes('Pick plus text?')));
+  await idle(ticket.id);
+  const own = await ask('Text only?');
+  await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: own.id, answers: [{ selected: [], other: 'neither' }] } });
+  await until('the answer turn', () => turns().some((t) => JSON.stringify(t.prompt).includes('Text only?')));
+  await idle(ticket.id);
+  const prompts = JSON.stringify(turns().map((t) => t.prompt));
+  assert.ok(prompts.includes('Pick plus text?\\n→ B\\n  Added: but keep it small'), prompts);
+  assert.ok(prompts.includes('Text only?\\n→ In their own words: neither'), prompts);
+});

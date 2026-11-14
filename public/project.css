@@ -417,7 +417,7 @@ body:has(dialog.viewer[open]) { overflow: hidden; }
 .viewer-bar .close-view { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
 .viewer-bar .close-view:hover, .viewer-bar .close-view:focus-visible { background: var(--line); color: var(--ink); }
 /* The stage gives the file every pixel left; images and videos scale to fit it, up or down. */
-/* A question card's picture options (#634): ‹ 1 / 3 › and Pick this. */
+/* A question card's picture options (#634): Pick this, then ‹ 1 / 3 ›. */
 .viewer-bar .gallery-controls { flex: none; display: flex; align-items: center; gap: 0.4rem; }
 .viewer-bar .gallery-controls .step { min-width: 2rem; text-align: center; }
 /* Pick this the size of Open beside it: the same padding, type and border width as a.button. */
@@ -427,6 +427,12 @@ body:has(dialog.viewer[open]) { overflow: hidden; }
 .viewer-bar .gallery-controls .picked { color: var(--running); font-weight: 600; font-size: 0.85em; }
 .viewer-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0.75rem; overflow: auto; overscroll-behavior: contain; }
 .viewer-stage > a { display: contents; }
+/* ‹ › over the picture's left and right edges, stepping through the card's pictures like a carousel. */
+.viewer-stage:has(> .edge-steps) { position: relative; }
+.viewer-stage > .edge-steps > .step { position: absolute; top: 50%; translate: 0 -50%; display: inline-flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; padding: 0; border-radius: 999px; border: 0; background: rgb(0 0 0 / 0.5); color: #fff; font-size: 1.5rem; line-height: 1; text-decoration: none; }
+.viewer-stage > .edge-steps > .step:hover, .viewer-stage > .edge-steps > .step:focus-visible { background: rgb(0 0 0 / 0.7); }
+.viewer-stage > .edge-steps > .prev { left: 0.75rem; }
+.viewer-stage > .edge-steps > .next { right: 0.75rem; }
 .viewer-stage .artifact-media { width: 100%; height: 100%; max-height: none; object-fit: contain; border: 0; border-radius: 0; background: none; }
 .viewer-stage .artifact-frame { width: 100%; height: 100%; }
 /* Full screen for HTML pages: sized like the Open link beside it. Where a frame can't go full screen

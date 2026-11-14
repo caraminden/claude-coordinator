@@ -286,6 +286,9 @@ function renderViewerBar() {
   if (at >= 0) gallery.at = at;
   const open = file.missing ? '' : openButton(src, file, viewerBridge(t, file));
   if (open && at >= 0) open.classList.add('wide-only'); // a phone's bar keeps its room for the option's controls
+  // ‹ › on the picture's own edges too, so it steps like a carousel (Cara, 2026-11-14).
+  viewer.stage.querySelector(':scope > .edge-steps')?.remove();
+  if (at >= 0 && options.length > 1) viewer.stage.append(h('div', { class: 'edge-steps' }, stepLink(t, options, at, -1, 'prev'), stepLink(t, options, at, 1, 'next')));
   viewer.bar.replaceChildren(
     at >= 0 ? '' : h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
     h('div', { class: 'name' }, h('h2', { title: file.display_path }, at >= 0 ? options[at].label : file.name),
@@ -302,20 +305,21 @@ function renderViewerBar() {
  * A picture option's controls in the bar: ‹ › to the card's other pictures (swapped in place, as a link
  * from the chat is) and Pick this, which only picks: the card's Send still sends. Read-only once answered.
  */
+function stepLink(t, options, at, by, cls = '') {
+  if (options.length < 2) return '';
+  const to = (at + by + options.length) % options.length;
+  return h('a', {
+    class: `button secondary step ${cls}`, href: fileHref(t.id, options[to].path), 'aria-label': by < 0 ? 'Previous option' : 'Next option',
+    onclick: (e) => {
+      gallery.at = to;
+      // The same picture under another option: no new address to go to, so only the bar changes.
+      if (options[to].path === options[at].path) { e.preventDefault(); renderViewerBar(); }
+    },
+  }, by < 0 ? '‹' : '›');
+}
+
 function galleryControls(t, options, at) {
   const o = options[at];
-  const step = (by, label, text) => {
-    if (options.length < 2) return '';
-    const to = (at + by + options.length) % options.length;
-    return h('a', {
-      class: 'button secondary step', href: fileHref(t.id, options[to].path), 'aria-label': label,
-      onclick: (e) => {
-        gallery.at = to;
-        // The same picture under another option: no new address to go to, so only the bar changes.
-        if (options[to].path === options[at].path) { e.preventDefault(); renderViewerBar(); }
-      },
-    }, text);
-  };
   const picked = o.picked();
   const pick = gallery.answered()
     ? (picked ? h('span', { class: 'picked' }, '✓ Picked') : '')
@@ -326,8 +330,9 @@ function galleryControls(t, options, at) {
         viewer?.bar.querySelector('.pick')?.focus(); // the pick redrew the bar
       },
     }, picked ? '✓ Picked' : 'Pick this');
+  // Pick leads, so its width changing ("Pick this", "✓ Picked", nothing) never moves the arrows.
   return h('div', { class: 'gallery-controls' },
-    step(-1, 'Previous option', '‹'), options.length < 2 ? '' : h('span', { class: 'count' }, `${at + 1} / ${options.length}`), step(1, 'Next option', '›'), pick);
+    pick, stepLink(t, options, at, -1), options.length < 2 ? '' : h('span', { class: 'count' }, `${at + 1} / ${options.length}`), stepLink(t, options, at, 1));
 }
 
 /**

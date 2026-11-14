@@ -279,10 +279,10 @@ export function loopCard(data) {
 
 // ---------- question cards ----------
 
-/** "Answered: Tabs · Other: keep both" lines for an answer message. */
+/** "→ Tabs · keep both" lines for an answer message: the picks, then any text typed with them. */
 export function answerSummary(answers) {
   return h('div', { class: 'answer-lines' }, answers.map((a) =>
-    h('div', {}, '→ ', [...a.selected, ...(a.other ? [`Other: ${a.other}`] : [])].join(' · '))));
+    h('div', {}, '→ ', [...a.selected, ...(a.other ? [a.other] : [])].join(' · '))));
 }
 
 /** Whether any message or card sits below this card in the chat. */
@@ -303,7 +303,7 @@ export function answerRef(cardEl, data) {
 
 /**
  * A card of multiple-choice questions from Claude. Click options to pick (several when the question
- * allows), or type an answer under Other; a single one-pick question sends on the first click, unless the
+ * allows), and type your own answer or add to the pick in the box under them; a single one-pick question sends on the first click, unless the
  * card has pictures (#634; Cara, 2026-11-12: "Cards with images should never autosend, and clicking it anywhere
  * should show the image to you"; Josh, 2026-11-13: "clicking should still select them"): a click there selects
  * the option and opens its picture, and only Send sends.
@@ -362,11 +362,10 @@ export function questionCard(ticketId, card) {
   el.append(
     h('div', { class: 'who' }, speaker('asks')),
     ...card.questions.map((q, i) => {
-      const other = h('input', { type: 'text', class: 'other', placeholder: 'Other: type your own answer', maxlength: 2000, value: picks[i].other });
+      // Sent along with the pick, or alone (Cara, 2026-11-14: "Cards should always pass along the text in addition to the selection").
+      const other = h('input', { type: 'text', class: 'other', placeholder: 'Type your own answer or expand on the selection', maxlength: 2000, value: picks[i].other });
       other.addEventListener('input', () => {
         picks[i].other = other.value;
-        // A typed answer replaces the pick on a one-answer question.
-        if (!q.multiSelect && other.value.trim()) picks[i].selected.clear();
         refresh();
       });
       other.addEventListener('keydown', (e) => {
@@ -379,8 +378,6 @@ export function questionCard(ticketId, card) {
         else {
           sel.clear();
           sel.add(o.label);
-          other.value = '';
-          picks[i].other = '';
         }
         refresh();
         if (single && !pictures) send();

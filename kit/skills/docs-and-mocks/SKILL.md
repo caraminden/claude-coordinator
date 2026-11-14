@@ -48,7 +48,7 @@ when look variants belong in the real app instead, in [`prototypes.md`](prototyp
 1. **Find the scheme's look:** its `theme.css` (its design folder or the shared folder's
    `mockups/`), or with none the kit's default, Citadel's look. A mock of a scheme's own screen (a
    game panel) wears that screen's look: [`theming.md`](theming.md). A look nobody has decided yet
-   gets a token plan first (4 to 6 named colours, type roles, an ASCII wireframe), checked against
+   gets a token plan first (its named colours, type roles, an ASCII wireframe), checked against
    the brief and the "generated page" tells: [`looks.md`](looks.md).
 2. **Copy into the page's folder** `starter/mockkit.js`, `starter/mockkit.css`, the theme if any,
    and the starter, renamed for the page (`stores-panel-takes.html`). The kit sits beside every
@@ -73,8 +73,9 @@ when look variants belong in the real app instead, in [`prototypes.md`](prototyp
    Project facts); a Citadel-facing page or doc at phone width. Every page also gets one light
    phone look (Cara often reviews on her phone): it opens, and mocks scale down to fit, never
    scrolling sideways. Check the console for errors, even room above and below every box, and click
-   every control once; a new look also runs the tells in `looks.md`. A mocked new screen passes
-   `citadel:contraption-ui`'s First look squint check: three hues or more besides the status tones.
+   every control once; a new look also runs the tells in `looks.md`. A mocked screen with no
+   scheme look to wear passes `citadel:contraption-ui`'s First look squint check: three hues or
+   more besides the status tones.
 6. **Reader-test a design doc** before anyone sees it: a Grunt with no context answers the 5 to 10
    questions its readers would ask from the doc alone, and you fix where it missed. The brief and
    what counts as a pass: [`reader-test.md`](reader-test.md). Review pages skip it unless their notes carry

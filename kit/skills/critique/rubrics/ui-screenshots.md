@@ -77,8 +77,8 @@ ignored finding as a note, never a blocker.
    reading a word, you can see the app's accent, the cards that group its content and where each
    status sits (`citadel:contraption-ui`, "First look"). See it: in either mode, text sitting loose
    on the page background with no surface around it; one size and weight of type down the view;
-   states as plain words with no toned chip; on a view with a list or two cards, fewer than three
-   hues besides the status tones (the accent, accent-2, a category hue: "First look", 1 and 5), as
+   states as plain words with no toned chip; on a view with a list or two cards and no scheme
+   style guide of its own, fewer than three hues besides the status tones (the accent, accent-2, a category hue: "First look", 1 and 5), as
    when the accent and the chips are the only colour; an empty view that is one grey sentence. A plain view is fine when there's nothing on it but a chat, whose
    parts carry their own look. Seen: Transdata's Review and Ingest tabs, a single muted line on
    an empty page (2026-11-09); Cara: "a big wall of white/black text is never going to be what we

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { findArtifacts } from '../src/artifacts.ts';
+import { findArtifacts, MAX_SHARED_FILES, sharedListable } from '../src/artifacts.ts';
 import { coordinatorAccess } from '../src/turn-launch.ts';
 import { systemPrompt } from '../src/prompts.ts';
 import { mergeMemory, projectSlug } from '../src/sessions.ts';
@@ -102,4 +102,19 @@ test('the Shared group lists documents and pages only', async () => {
   for (const f of ['handoff.md', 'notes/design.html', 'data.csv', 'shot.png', 'run.ts']) writeFileSync(join(shared, f), 'x');
   const found = await findArtifacts(shared, false);
   assert.deepEqual(found.map((f) => f.path).sort(), ['handoff.md', 'notes/design.html']);
+});
+
+test('the Files view also lists pictures, clips and sound from the shared folder, never code, data or hidden folders (#676)', async () => {
+  mkdirSync(join(shared, '.cache'), { recursive: true });
+  for (const f of ['clip.mp4', 'theme.mp3', 'mockkit.js', '.cache/old.png']) writeFileSync(join(shared, f), 'x');
+  const found = await findArtifacts(shared, false, sharedListable, MAX_SHARED_FILES);
+  assert.deepEqual(found.map((f) => f.path).sort(), ['clip.mp4', 'handoff.md', 'notes/design.html', 'shot.png', 'theme.mp3']);
+});
+
+test('the walk counts only the files it keeps toward its cap, so a folder full of other files hides none', async () => {
+  const dir = join(root, 'crowded');
+  mkdirSync(join(dir, 'a'), { recursive: true });
+  for (let i = 0; i < 5; i++) writeFileSync(join(dir, 'a', `data-${i}.json`), 'x');
+  writeFileSync(join(dir, 'z.md'), 'x');
+  assert.deepEqual((await findArtifacts(dir, false, sharedListable, 1)).map((f) => f.path), ['z.md']);
 });

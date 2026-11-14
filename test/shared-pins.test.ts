@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -138,6 +138,34 @@ test('agents pin and unpin shared files by the shown path or the absolute one', 
   assert.equal(await entry('outside.md'), undefined);
   const bad = await tool(M1, 'pin_artifact', { path: 'scheme shared/link.md', requested_by: 'Cara' });
   assert.equal(bad.error, true);
+});
+
+test('people upload into the shared folder: the bytes as sent, a cleaned name, never overwriting, never outside it (#676)', async () => {
+  const put = (q: string, body: Buffer | string, headers: Record<string, string> = { Cookie: srv.cookie }) =>
+    fetch(`${srv.base}/api/projects/${A.id}/shared/upload?${q}`, { method: 'PUT', headers, body });
+  // Not valid UTF-8, so any re-encoding on the way would show.
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00, 0x80]);
+  const r = await put('name=snap.png', png);
+  assert.equal(r.status, 201);
+  const got = await r.json();
+  assert.equal(got.path, 'inbox/snap.png'); // inbox/ unless a folder is named
+  assert.deepEqual(readFileSync(join(dirA, 'inbox', 'snap.png')), png);
+  assert.equal((await entry('inbox/snap.png')).kind, 'image'); // pictures are listed now
+  // A folder of the person's choosing, made as needed; a second file of the same name keeps the first.
+  assert.equal((await (await put('folder=fixtures-inbox/poe2/&name=snap.png', png)).json()).path, 'fixtures-inbox/poe2/snap.png');
+  assert.equal((await (await put('folder=fixtures-inbox/poe2&name=snap.png', 'two')).json()).path, 'fixtures-inbox/poe2/snap (2).png');
+  assert.deepEqual(readFileSync(join(dirA, 'fixtures-inbox', 'poe2', 'snap.png')), png);
+  // A name can't climb out; a folder can't climb, hide, or go through a link that leads out.
+  assert.equal((await (await put(`name=${encodeURIComponent('../../evil.png')}`, 'x')).json()).path, 'inbox/evil.png');
+  for (const folder of ['..', 'specs/../..', '.git', 'a/b/c/d/e/f/g/h/i']) assert.equal((await put(`folder=${encodeURIComponent(folder)}&name=x.png`, 'x')).status, 400, folder);
+  symlinkSync(join(root, 'elsewhere'), join(dirA, 'away'));
+  assert.equal((await put('folder=away/deeper&name=x.png', 'x')).status, 400);
+  assert.ok(!existsSync(join(root, 'elsewhere', 'deeper')));
+  assert.equal((await put('folder=handoff.md&name=x.png', 'x')).status, 400); // a file, not a folder
+  // People only: an agent's token, or another scheme's Taskmaster, is turned away.
+  assert.equal((await put('name=y.png', 'y', { Authorization: `Bearer ${tokens.agentToken(M1.id)}` })).status, 403);
+  // Agents' list_artifacts keeps to documents and pages, so a folder of snaps doesn't bury it.
+  assert.doesNotMatch((await tool(M1, 'list_artifacts', {})).text, /snap/);
 });
 
 test('scheme scoping: another scheme can neither see nor pin these', async () => {

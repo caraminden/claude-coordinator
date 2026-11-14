@@ -80,10 +80,22 @@ export interface FoundArtifact {
 const MAX_FILES = 2000;
 const SKIP_DIRS = new Set(['node_modules', 'vendor', 'target', 'dist', 'build', '__pycache__']);
 
+const hidden = (path: string) => path.split('/').some((part) => part.startsWith('.') || SKIP_DIRS.has(part));
+
 /** Whether a found file (path relative to the folder scanned) is one people are shown: no hidden or dependency folders. */
 export function listable(path: string): boolean {
-  return isArtifact(path) && !path.split('/').some((part) => part.startsWith('.') || SKIP_DIRS.has(part));
+  return isArtifact(path) && !hidden(path);
 }
+
+const MEDIA = new Set<FileKind>(['image', 'video', 'audio']);
+/** What the Files view lists from a scheme's shared folder (#676): artifacts, and pictures, clips and sound too; never code or data. */
+export function sharedListable(path: string): boolean {
+  const t = fileType(path);
+  return !!t && (!!t.artifact || MEDIA.has(t.kind)) && !hidden(path);
+}
+
+/** The most files the shared folder's list holds: Delve's held about 3,300 in November 2026. */
+export const MAX_SHARED_FILES = 10_000;
 
 async function git(args: string[], cwd: string): Promise<string[]> {
   const { stdout } = await run('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 30_000 });
@@ -103,8 +115,8 @@ async function gitAdded(cwd: string): Promise<string[]> {
   return [...files];
 }
 
-/** Every file in a plain folder, which starts out empty, minus hidden and dependency directories. */
-async function walk(cwd: string): Promise<string[]> {
+/** The files `keep` takes in a plain folder, which starts out empty, minus hidden and dependency directories, up to `max`. */
+async function walk(cwd: string, keep: (path: string) => boolean, max: number): Promise<string[]> {
   const out: string[] = [];
   const visit = async (rel: string) => {
     let entries;
@@ -114,12 +126,12 @@ async function walk(cwd: string): Promise<string[]> {
       return;
     }
     for (const e of entries) {
-      if (out.length >= MAX_FILES) return;
+      if (out.length >= max) return;
       if (e.name.startsWith('.')) continue;
       const path = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
         if (!SKIP_DIRS.has(e.name)) await visit(path);
-      } else if (e.isFile()) {
+      } else if (e.isFile() && keep(path)) {
         out.push(path);
       }
     }
@@ -128,12 +140,10 @@ async function walk(cwd: string): Promise<string[]> {
   return out;
 }
 
-/** The artifacts a ticket has made in its working directory so far. */
-export async function findArtifacts(cwd: string, isGit: boolean): Promise<FoundArtifact[]> {
+/** The artifacts a ticket has made in its working directory so far (or the files `keep` takes, up to `max`). */
+export async function findArtifacts(cwd: string, isGit: boolean, keep = listable, max = MAX_FILES): Promise<FoundArtifact[]> {
   if (!cwd) return [];
-  const paths = (isGit ? await gitAdded(cwd) : await walk(cwd))
-    .filter(listable)
-    .slice(0, MAX_FILES);
+  const paths = (isGit ? (await gitAdded(cwd)).filter(keep) : await walk(cwd, keep, max)).slice(0, max);
   const found: FoundArtifact[] = [];
   for (const path of paths) {
     try {

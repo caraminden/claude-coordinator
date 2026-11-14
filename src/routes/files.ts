@@ -2,16 +2,16 @@
 // the images and files people attach to messages.
 import { randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { cleanEntries, entriesView, injectBridge, LIMITS, storeId, writeStore } from '../artifact-data.ts';
-import { commentMessage, fileTitle, fileType, listable, resolveFile, resolveLink, siblingType } from '../artifacts.ts';
+import { commentMessage, fileTitle, fileType, isArtifact, resolveFile, resolveLink, sharedListable, siblingType } from '../artifacts.ts';
 import type { Session } from '../auth.ts';
 import type { Artifact, Project, Ticket } from '../db.ts';
 import type { MessageFile } from '../runner.ts';
-import { isUploadName, MAX_UPLOADS, opensInline } from '../uploads.ts';
+import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, safeFileName, saveUpload } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
 import { HttpError, json, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 
@@ -91,7 +91,7 @@ async function sharedPinPath(app: App, projectId: number, abs: string, pinning: 
   if (!abs.startsWith(dir + sep)) return null;
   const rel = abs.slice(dir.length + 1).split(sep).join('/');
   if (!pinning && app.store.sharedPins(projectId).some((p) => p.path === rel)) return rel;
-  const found = listable(rel) ? await resolveFile(rel, dir, [dir]) : null;
+  const found = sharedListable(rel) ? await resolveFile(rel, dir, [dir]) : null;
   // The scan skips symlinks, so the path must be the file itself.
   if (!found || found.file !== join(await realpath(dir), rel)) throw new HttpError(404, `No file at scheme shared/${rel} that the Shared list shows`);
   return rel;
@@ -104,6 +104,17 @@ async function pinShared(app: App, projectId: number, rel: string, by: string | 
   app.broadcast({ type: 'artifacts', projectId });
   const file = (await app.sharedFiles(projectId)).find((f) => f.path === rel);
   return { file, already };
+}
+
+/**
+ * A folder path a person typed, as the folders under the shared folder it names: each cleaned as a file name
+ * is, none hidden, "." or "..", at most 8 deep. The top level is allowed (an empty path).
+ */
+export function sharedFolder(raw: string): string[] {
+  const parts = raw.replace(/\\/g, '/').split('/').map((p) => p.trim()).filter(Boolean);
+  if (parts.some((p) => p.startsWith('.'))) throw new HttpError(400, 'Folder names can\'t start with a dot');
+  if (parts.length > 8) throw new HttpError(400, 'At most 8 folders deep');
+  return parts.map(safeFileName);
 }
 
 /** A shared-folder file for an agent: marked as Shared, with its absolute path. */
@@ -396,12 +407,33 @@ export const fileRoutes: Route[] = [
     method: 'GET', path: '/api/projects/:project/shared', who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project }) {
       const files = await app.sharedFiles(project.id);
-      // ?titles, for agents: each document's own title, and its absolute path.
+      // ?titles, for agents: each document's own title, and its absolute path. Only documents and pages, as
+      // before #676: a folder of game snaps would bury list_artifacts.
       if (!url.searchParams.has('titles')) return json(res, 200, files);
-      return json(res, 200, await Promise.all(files.map(async (f) => {
+      return json(res, 200, await Promise.all(files.filter((f) => isArtifact(f.path)).map(async (f) => {
         const v = sharedView(app, project.id, f);
         return { ...v, title: f.missing ? null : await fileTitle(v.abs) };
       })));
+    },
+  },
+  {
+    // A person drops files into the shared folder (#676), one request a file, the bytes kept as sent. `folder` is
+    // relative to the shared folder (default inbox), made if missing; a name already there gets " (2)".
+    method: 'PUT', path: '/api/projects/:project/shared/upload', who: ['person'], refuse: 'Only people upload to the shared folder',
+    async handler({ req, res, url, app, project }) {
+      if (Number(req.headers['content-length'] ?? 0) > MAX_UPLOAD_BYTES) throw new HttpError(413, 'Files must be under 200 MB');
+      const root = projectSharedDir(app.dataDir, project.id);
+      const folder = sharedFolder(url.searchParams.get('folder') ?? 'inbox');
+      // Each folder on the way must be a real folder, not a link that leads out of the shared folder.
+      for (let i = 1; i <= folder.length; i++) {
+        const st = await lstat(join(root, ...folder.slice(0, i))).catch(() => null);
+        if (!st) break;
+        if (!st.isDirectory()) throw new HttpError(400, `${folder.slice(0, i).join('/')} is not a folder`);
+      }
+      const saved = await saveUpload(join(root, ...folder), url.searchParams.get('name') ?? '', req);
+      app.broadcast({ type: 'artifacts', projectId: project.id });
+      const path = [...folder, saved.name].join('/');
+      return json(res, 201, { path, name: saved.name, size: saved.size, mtime: Math.round((await stat(saved.path)).mtimeMs) });
     },
   },
   {

@@ -3,7 +3,7 @@
 import { existsSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
-import { fileType, findArtifacts, findByName, isArtifact, linkedPaths, type FoundArtifact } from './artifacts.ts';
+import { fileType, findArtifacts, findByName, isArtifact, linkedPaths, MAX_SHARED_FILES, sharedListable, type FoundArtifact } from './artifacts.ts';
 import type { Store, Ticket } from './db.ts';
 import type { SharedFile } from './http.ts';
 import { projectDir, projectSharedDir } from './workspace.ts';
@@ -50,12 +50,12 @@ export class ArtifactScanner {
   }
 
   /**
-   * The documents and pages in a project's shared folder, newest first, paths relative to it, with
+   * The documents, pages, pictures, clips and sound in a project's shared folder, newest first, paths relative to it, with
    * their pins. A pinned file that is gone stays listed as missing, like a pinned artifact.
    */
   sharedFiles = async (projectId: number): Promise<SharedFile[]> => {
     const dir = projectSharedDir(this.dataDir, projectId);
-    const files: (FoundArtifact & { missing?: number })[] = await findArtifacts(dir, false);
+    const files: (FoundArtifact & { missing?: number })[] = await findArtifacts(dir, false, sharedListable, MAX_SHARED_FILES);
     const pins = new Map(this.store.sharedPins(projectId).map((p) => [p.path, p]));
     const seen = new Set(files.map((f) => f.path));
     const real = await realpath(dir).catch(() => dir);

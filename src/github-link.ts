@@ -21,6 +21,8 @@ const STATE_MS = 10 * 60_000;
 const CHECK_MS = 10 * 60_000;
 // A slow GitHub fails the call rather than holding the account page or the link open.
 const GITHUB_WAIT_MS = 10_000;
+/** The last limited link refused for the App's expiring tokens, kept for the admins' People page (#670). */
+const REFUSED = 'github_link_refused';
 
 export interface GithubMeta {
   login: string;
@@ -94,6 +96,21 @@ export class GithubLink {
     return this.app.slug ? `https://github.com/apps/${encodeURIComponent(this.app.slug)}/installations/new` : null;
   }
 
+  /** The GitHub App's settings page, where its owner changes "Expire user authorization tokens" (an App an organization owns has its own). */
+  get settingsUrl(): string | null {
+    return this.app.slug ? `https://github.com/settings/apps/${encodeURIComponent(this.app.slug)}` : null;
+  }
+
+  /** The last limited link refused because the App hands out expiring tokens, for the admins; null since one worked. */
+  refused(): { name: string; at: number; fix: string; settings_url: string | null } | null {
+    const r = this.store.getSetting<{ uid: number; name: string; at: number }>(REFUSED);
+    if (!r) return null;
+    return {
+      name: r.name, at: r.at, settings_url: this.settingsUrl,
+      fix: 'Citadel\'s GitHub App hands out user tokens that expire after 8 hours, which Citadel refuses (a refresh would cut off the person\'s other running turns). On the App\'s settings page on GitHub, open Optional features and untick "Expire user authorization tokens" (README, "A limited GitHub link"), then ask them to link again.',
+    };
+  }
+
   /** The client a link of this kind was made with, or null when that kind isn't set up (any more). */
   private client(limited: boolean): Client | null {
     if (limited) return this.limited ? { id: this.app.clientId, secret: this.app.clientSecret } : null;
@@ -147,7 +164,12 @@ export class GithubLink {
       const body = (await r.json()) as { access_token?: string; scope?: string; error_description?: string; expires_in?: number; refresh_token?: string };
       if (!body.access_token) throw new Error(`GitHub didn't give a token: ${body.error_description ?? r.status}`);
       // Citadel doesn't refresh tokens (a refresh kills the token a person's other turns hold): better no link than one that dies in 8 hours.
-      if (body.expires_in || body.refresh_token) throw new Error('Citadel\'s GitHub App hands out tokens that expire, which Citadel can\'t use. An admin unticks "Expire user authorization tokens" under the App\'s Optional features on GitHub (see the README), then you link again.');
+      if (body.expires_in || body.refresh_token) {
+        // The person can't change the App, so they're told it isn't on them; the admins get the fix on Settings → People.
+        if (s.limited) this.store.setSetting(REFUSED, { uid, name: this.store.getUser(uid)?.name ?? `person ${uid}`, at: Date.now() });
+        console.error(`github link: refused an expiring token for person ${uid}; untick "Expire user authorization tokens" on the GitHub App`);
+        throw new Error('GitHub gave Citadel a link that would stop working after 8 hours, so Citadel didn\'t keep it. That\'s nothing you did: it\'s one setting on Citadel\'s GitHub App that only an admin can change, and they can see this on their People page. Link GitHub again once they have.');
+      }
       const granted = (body.scope ?? '').split(/[ ,]+/);
       if (!s.limited && !granted.includes('repo')) throw new Error('GitHub gave a token without the repo permission, so it couldn\'t push.');
       const me = await this.user(body.access_token);
@@ -158,6 +180,8 @@ export class GithubLink {
       this.creds.put(uid, 'github', body.access_token, s.limited ? { ...me, app: true } : me);
       this.checked.set(uid, Date.now());
       this.errors.delete(uid);
+      // A limited link that works means the App's expiring tokens were turned off.
+      if (s.limited) this.store.deleteSetting(REFUSED);
     } catch (err: any) {
       this.errors.set(uid, err.message);
     }

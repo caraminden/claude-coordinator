@@ -203,13 +203,29 @@ test('a full link is unchanged beside the App, and switching kind replaces the l
   creds.remove(rachel.id, 'github');
 });
 
-test('a GitHub App left handing out expiring tokens links nothing and says which setting to change', async () => {
+test('a GitHub App left handing out expiring tokens links nothing, tells the person it is not on them, and tells the admins which setting', async () => {
   const fetch = (async (url: string) => (url.endsWith('/login/oauth/access_token') ? Response.json({ access_token: 'ghu_short', expires_in: 28800, refresh_token: 'ghr_x' }) : Response.json({ login: 'a', id: 1, name: null }))) as typeof globalThis.fetch;
   const link = new GithubLink(store, creds, 'cid', 'csecret', fetch, APP);
   const state = new URL(link.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!;
   await link.finish(rachel.id, new URLSearchParams({ state, code: 'c' }), 'cb');
-  assert.match((await link.status(rachel.id)).error!, /Expire user authorization tokens/);
+  // The person can't change the App: they're told it isn't theirs to fix, not how to fix it.
+  const error = (await link.status(rachel.id)).error!;
+  assert.match(error, /nothing you did/i);
+  assert.match(error, /admin/);
+  assert.doesNotMatch(error, /untick/i);
   assert.equal(creds.get(rachel.id, 'github'), null);
+  // The admins see it without a screenshot: who, when, and the setting, kept across a restart.
+  const later = new GithubLink(store, creds, 'cid', 'csecret', fetch, APP);
+  const r = later.refused()!;
+  assert.equal(r.name, 'Rachel');
+  assert.ok(Date.now() - r.at < 60_000);
+  assert.match(r.fix, /Expire user authorization tokens/);
+  assert.equal(r.settings_url, 'https://github.com/settings/apps/citadel-app');
+  // A limited link that works afterwards means the setting was changed: the notice goes.
+  const fixed = new GithubLink(store, creds, 'cid', 'csecret', fakeApp([]).fetch, APP);
+  await fixed.finish(rachel.id, new URLSearchParams({ state: new URL(fixed.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!, code: 'c' }), 'cb');
+  assert.equal(fixed.refused(), null);
+  creds.remove(rachel.id, 'github');
 });
 
 test('each way of linking shows only when it is set up; a limited state is refused once the App is gone', async () => {
@@ -457,6 +473,40 @@ test('through the server: Link GitHub goes to GitHub for a scheme you can see; a
     assert.equal(status.configured, true);
     assert.equal(status.link, null);
     assert.match(status.error, /expired or was for someone else/);
+  } finally {
+    await s.stop();
+  }
+});
+
+test('through the server: back from installing the App, someone not linked goes straight into the limited link; a linked one back to their account', async () => {
+  const { bootServer, SECRET } = await import('./helpers.ts');
+  const bootRoot = join(root, 'boot-app');
+  mkdirSync(join(bootRoot, 'data'), { recursive: true });
+  const bootStore = new Store(join(bootRoot, 'data', 'coordinator.db'));
+  const scheme = bootStore.createProject('Installed', null);
+  const s = await bootServer({ root: bootRoot, env: { GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'csecret', GITHUB_APP_CLIENT_ID: 'appid', GITHUB_APP_CLIENT_SECRET: 'appsecret', GITHUB_APP_SLUG: 'citadel-app' } });
+  try {
+    const get = (path: string) => fetch(s.base + path, { headers: { Cookie: s.cookie }, redirect: 'manual' });
+    // GitHub's Setup URL brings back the install link's state: the scheme the person came from.
+    for (const q of [`?installation_id=1&setup_action=install&state=${scheme.id}`, '?installation_id=1&setup_action=install', '?state=99999']) {
+      const back = await get(`/api/github/installed${q}`);
+      assert.equal(back.status, 302, q);
+      const to = new URL(back.headers.get('location')!);
+      assert.equal(to.origin + to.pathname, 'https://github.com/login/oauth/authorize', q);
+      assert.equal(to.searchParams.get('client_id'), 'appid', `${q}: the limited kind`);
+      // No scheme named, or one they can't see: their first scheme's Settings.
+      const st = JSON.parse(Buffer.from(to.searchParams.get('state')!.split('.')[0], 'base64url').toString());
+      assert.equal(st.p, scheme.id, q);
+    }
+    // Already linked (either kind): installing doesn't switch their link, it just shows them their account.
+    const me = (await s.call('/api/me')).data;
+    new Credentials(bootStore, SECRET).put(me.id, 'github', 'gho_full', { login: 'me', id: 1, name: null });
+    const linked = await get(`/api/github/installed?state=${scheme.id}`);
+    assert.equal(linked.headers.get('location'), `../../c/#/p/${scheme.id}/account`);
+    // The admins' notice of a refused link.
+    assert.equal((await s.call('/api/github/refused')).data, null);
+    bootStore.setSetting('github_link_refused', { uid: me.id, name: 'Alex', at: 1 });
+    assert.equal((await s.call('/api/github/refused')).data.name, 'Alex');
   } finally {
     await s.stop();
   }

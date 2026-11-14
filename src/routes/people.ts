@@ -156,6 +156,24 @@ export const peopleRoutes: Route[] = [
     },
   },
   {
+    // The GitHub App's Setup URL (README, "A limited GitHub link"): GitHub sends people here after they install it,
+    // with the install link's state, the scheme they came from. Installing links nothing, so someone not linked
+    // goes straight on to the limited link; anyone linked already sees their account (#670).
+    method: 'GET', path: '/api/github/installed', who: ['person'],
+    handler({ req, res, app, url, session }) {
+      const uid = uidOf(session);
+      const asked = Number(url.searchParams.get('state'));
+      const project = Number.isSafeInteger(asked) && app.store.getProject(asked) && app.store.canSee(session, asked) ? asked
+        : app.store.listProjects().find((p) => app.store.canSee(session, p.id))?.id ?? null;
+      const to = project === null ? '../../c/'
+        : !app.store.getCredential(uid, 'github') && app.github.limited ? app.github.authorizeUrl(uid, project, callbackUrl(req), true)
+        : `../../c/#/p/${project}/account`;
+      res.writeHead(302, { Location: to, 'Cache-Control': 'no-store' }).end();
+    },
+  },
+  // The last limited link refused for the GitHub App's expiring tokens, for the People page (#670).
+  { method: 'GET', path: '/api/github/refused', ...admin, handler: ({ res, app }) => json(res, 200, app.github.refused()) },
+  {
     method: 'DELETE', path: '/api/me/github', who: ['person'],
     async handler({ res, app, session }) {
       await app.github.unlink(uidOf(session));

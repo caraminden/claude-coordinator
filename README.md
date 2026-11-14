@@ -384,8 +384,11 @@ limited link reaches. To set it up, once:
 1. [Register a new GitHub App](https://github.com/settings/apps/new). Homepage
    `https://cara.apps.webplatformisbestplatform.net`, callback URL
    `https://cara.apps.webplatformisbestplatform.net/api/github/callback` (add one per hostname people
-   reach Citadel at, up to 10). Leave "Request user authorization (OAuth) during installation" and
-   "Enable Device Flow" off. Untick **Expire user authorization tokens**: GitHub's refresh kills the old
+   reach Citadel at, up to 10). Setup URL
+   `https://cara.apps.webplatformisbestplatform.net/api/github/installed`, with **Redirect on update**
+   ticked: installing the App links nothing, so this brings people back from GitHub and, if they have
+   no link yet, straight on to Link GitHub (limited). Leave "Request user authorization (OAuth) during
+   installation" and "Enable Device Flow" off. Untick **Expire user authorization tokens**: GitHub's refresh kills the old
    token at once, which would cut off a person's other running turns
    ([refreshing user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)).
    Untick Webhook → Active.
@@ -401,7 +404,10 @@ limited link reaches. To set it up, once:
    `github.com/apps/<this>`). No private key is needed. Then restart.
 5. Install the App (its page → Install App) on each account that owns a scheme's repo, choosing the
    scheme repos or all. Only a repo's owner can do this for their own repos; Settings → Your account
-   links to the install page.
+   links to the install page and says the order: install on your repos, then link.
+
+If GitHub hands back an expiring token anyway, Citadel links nothing, tells the person it's on
+Citadel's side, and Settings → People shows the admins who was refused and the setting to untick.
 
 A scheme owner on a limited link needs the App on the scheme's repo for invites, CI runner tokens and
 the server's own reads of the repo (fetches, pull-request state, merges) to work, and a repo moved to another account needs the App installed by its new owner.

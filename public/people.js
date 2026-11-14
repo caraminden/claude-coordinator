@@ -190,9 +190,15 @@ export function peoplePage() {
     }
   };
   api('api/people').then(render).catch(fail);
+  // A limited GitHub link GitHub handed an expiring token: only an admin can fix the App, so it shows here (#670).
+  const refused = h('div');
+  api('api/github/refused').then((r) => r && refused.replaceChildren(h('div', { class: 'github-refused', role: 'status' },
+    h('p', {}, h('b', {}, `Citadel refused ${r.name}'s limited GitHub link`), ` (${new Date(r.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}). `, r.fix),
+    r.settings_url ? h('p', {}, h('a', { href: r.settings_url, target: '_blank', rel: 'noopener' }, 'Open the App\'s settings on GitHub')) : '')))
+    .catch((err) => refused.replaceChildren(h('p', { class: 'error', role: 'status' }, `Couldn't check for refused GitHub links (${err.message}); reload the page to try again.`)));
   return page(
     head('People', 'Everyone who can sign in to Citadel. Each person sees only the schemes they own or were added to, and can make schemes of their own.'),
-    form, link, list,
+    refused, form, link, list,
     h('p', { class: 'muted small' },
       'Each person\'s messages start turns on their own Claude plan, which they link in Settings → Your account. Until they do, they can still read, write and add minions; their messages wait in the chat. ',
       'Turns: whether your messages run on this server\'s own Claude login, which is your subscription.'));
@@ -365,6 +371,8 @@ function githubCard() {
     const linkBtn = (label, kind, cls = '') => h('a', { class: `button small ${cls}`, href: `api/github/link?project=${view.projectId}${kind === 'limited' ? '&kind=limited' : ''}` }, label);
     const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
     const install = install_url ? ext(install_url, 'installs Citadel\'s GitHub App') : 'installs Citadel\'s GitHub App';
+    // GitHub hands the install link's state to the App's Setup URL, which brings the person back to this scheme (#670).
+    const installYours = install_url ? ext(`${install_url}?state=${view.projectId}`, 'Install Citadel\'s GitHub App') : 'Install Citadel\'s GitHub App';
     const kinds = h('ul', { class: 'muted small link-kinds' },
       full ? h('li', {}, h('b', {}, 'Full access'), ': Citadel can act on every repo your GitHub account can reach.') : '',
       limited ? h('li', {}, h('b', {}, 'Limited'), ': Citadel can act only on repos where the repo\'s owner ', install, ' and you already have access. Nothing else in your account.') : '');
@@ -384,10 +392,16 @@ function githubCard() {
     if (!configured) {
       return card.replaceChildren(title('Not set up', 'off'), errLine, h('p', { class: 'muted' }, 'An admin hasn\'t set up Citadel\'s GitHub linking yet (see the README), so turns push with the server\'s own GitHub login.'));
     }
+    // Installing the App links nothing by itself (#670): say the order, install on your own repos, then link.
+    const steps = limited ? h('div', { class: 'link-steps' },
+      h('p', { class: 'small' }, h('b', {}, 'Limited, in two steps'), full ? ' (full access is one: just press its button)' : '', ':'),
+      h('ol', { class: 'small' },
+        h('li', {}, installYours, ' on your own repos. On GitHub, choose "Only select repositories" to pick which. Skip this for repos someone else owns: their owner installs it.'),
+        h('li', {}, `Press Link GitHub${full ? ' (limited)' : ''} below and authorize Citadel on GitHub. Installing alone doesn't link you; GitHub usually brings you straight on to this step.`))) : '';
     if (!link) {
       return card.replaceChildren(title('Not linked', 'off'), errLine,
         h('p', {}, 'Link your GitHub so turns you start push branches and open pull requests as you. Until then they run and commit, but can\'t push.'),
-        kinds, linkRow(), note);
+        kinds, steps, linkRow(), note);
     }
     if (link.failed) {
       return card.replaceChildren(title('Needs linking again', 'warn'), errLine,

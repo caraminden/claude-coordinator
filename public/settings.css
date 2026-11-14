@@ -191,6 +191,11 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .link-chip.ok { color: var(--done); border-color: var(--done); }
 .link-chip.warn { color: var(--waiting); border-color: var(--waiting); }
 .account-card .link-kinds { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.2rem; }
+.account-card .link-steps p { margin: 0; }
+.account-card .link-steps ol { margin: 0.2rem 0 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 0.2rem; }
+.github-refused { margin: 0 0 0.75rem; padding: 0.6rem 0.75rem; border-left: 3px solid var(--error); border-radius: 6px; background: color-mix(in srgb, var(--error) 8%, var(--bg)); overflow-wrap: anywhere; }
+.github-refused p { margin: 0; }
+.github-refused p + p { margin-top: 0.4rem; }
 
 /* The CI desktop panel (#534, public/ci-desktop.js): a PC that hosts CI runners: verdict, now, 24 hours, pools. */
 .ci-desktops { display: grid; gap: var(--space-2); }

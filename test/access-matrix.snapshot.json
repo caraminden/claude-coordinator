@@ -439,11 +439,31 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/github/installed": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/github/link?project=:p": {
   "anon": "401 Not logged in",
   "person": "503 GitHub linking isn't set up on this server yet: an admin adds the OAuth App (see the README).",
   "member": "503 GitHub linking isn't set up on this server yet: an admin adds the OAuth App (see the README).",
   "outsider": "503 GitHub linking isn't set up on this server yet: an admin adds the OAuth App (see the README).",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/github/refused": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",

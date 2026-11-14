@@ -1,7 +1,6 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, me, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
-import { planCard, questionCard } from './cards.js';
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, turnMoved } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 
@@ -81,6 +80,8 @@ let strip = null;
 // The opened list, and in it the cards addressed to you (#687) and the minions' rows. Every minion update redraws
 // the rows, so the cards are drawn again only when the set of them changes: a pick or a half-typed answer keeps its focus.
 const parts = { list: null, direct: null, rows: null, sig: null };
+// cards.js brings the chat's modules with it: loaded when a card addressed to you first shows, so this module loads alone (test/inbox.test.js).
+let cards = null;
 
 /** A question or plan card addressed to you (#687), which the list draws whole to answer in place. */
 const directFor = (i) => (i.kind === 'question' || i.kind === 'plan') && !!i.card?.to && i.card.to === me;
@@ -173,12 +174,14 @@ export function renderInbox() {
   // The list stays in place across redraws (renderSidebar redraws on every minion update), keeping its scroll (#668)
   // and the addressed cards' focus: only the toggle and the rows are new.
   parts.list ??= h('div', { class: 'inbox-rows' }, parts.direct = h('div', { class: 'inbox-direct' }), parts.rows = h('div', { class: 'inbox-minions' }));
-  const sig = direct.map((i) => i.key).join();
+  if (direct.length && !cards) import('./cards.js').then((m) => { cards = m; renderInbox(); });
+  const drawn = cards ? direct : [];
+  const sig = drawn.map((i) => i.key).join();
   if (sig !== parts.sig) {
     parts.sig = sig;
-    parts.direct.replaceChildren(...direct.map(directCard));
+    parts.direct.replaceChildren(...drawn.map(directCard));
   }
-  parts.direct.hidden = !direct.length;
+  parts.direct.hidden = !drawn.length;
   parts.rows.replaceChildren(...[...rows.values()].map(inboxRow));
   if (strip.firstChild) strip.firstChild.replaceWith(toggle);
   else strip.append(toggle);
@@ -196,7 +199,7 @@ function directCard(i) {
   const name = isCoordinator(t) ? (i.from ? `${i.from.scheme} Taskmaster` : taskmasterLabel(t.project_id)) : `${where}#${t.number ?? t.id} ${t.title}`;
   const asker = h('a', { class: 'asker', href: i.eventId ? jumpHref(t, i.eventId) : threadHref(t) }, name);
   const opts = { inbox: true, at: i.at, asker };
-  return i.kind === 'plan' ? planCard(i.ticketId, i.card, opts) : questionCard(i.ticketId, i.card, opts);
+  return i.kind === 'plan' ? cards.planCard(i.ticketId, i.card, opts) : cards.questionCard(i.ticketId, i.card, opts);
 }
 
 /** A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited. */

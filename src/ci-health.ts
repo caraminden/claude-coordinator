@@ -612,8 +612,10 @@ export class CiHealth {
     out.push(...queuedProblems(jobs, now));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';
+    const onMain = new Map<number, Run[]>();
     for (const w of workflows) {
       const mainRuns: Run[] = (await this.read(`repos/${slug}/actions/workflows/${w.id}/runs?branch=${encodeURIComponent(branch)}&per_page=${RUNS}`, as))?.workflow_runs ?? [];
+      onMain.set(w.id, mainRuns);
       const v = verdictProblem(w, branch, mainRuns, now);
       if (v) out.push(v);
       const pair = verdictPair(mainRuns);
@@ -622,7 +624,7 @@ export class CiHealth {
         if (s) out.push(s);
       }
     }
-    await this.outsideRuns(p, slug, branch, as, now);
+    await this.outsideRuns(p, slug, branch, onMain, as, now);
     return out;
   }
 
@@ -660,6 +662,8 @@ export class CiHealth {
   }
 
   private swept = new Set<number>();
+  /** Red runs' texts not yet told (#678). */
+  private texts = new Map<number, string>();
 
   /**
    * Cancel the orphans among `runs` (see orphanRuns), logging each. Only for the scheme whose land line we keep (the
@@ -687,12 +691,14 @@ export class CiHealth {
   /**
    * Runs no PR started (#588, #678), each told once, oldest first: a dispatched run on an open minion's branch wakes it
    * with its result; a failed scheduled run, or dispatched one on `branch`, is held mail for the Taskmaster, and the next
-   * green run of that workflow there says it's back to green. Two conditional lists a poll, whatever the workflows.
+   * green run of that workflow there, whatever started it (`onMain`: each workflow's runs on `branch`), says it's back to
+   * green. Two conditional lists a poll, whatever the workflows. A red told before #678 kept no red mark, so it gets no
+   * back to green.
    */
-  private async outsideRuns(p: Project, slug: string, branch: string, as: GithubEnv, now: number) {
+  private async outsideRuns(p: Project, slug: string, branch: string, onMain: Map<number, Run[]>, as: GithubEnv, now: number) {
     if (!this.deps.tell && !this.deps.wake) return;
     const scheduled = (await this.read(`repos/${slug}/actions/runs?event=schedule&branch=${encodeURIComponent(branch)}&per_page=20`, as))?.workflow_runs;
-    const dispatched = (await this.read(`repos/${slug}/actions/runs?event=workflow_dispatch&per_page=20`, as))?.workflow_runs;
+    const dispatched = (await this.read(`repos/${slug}/actions/runs?event=workflow_dispatch&per_page=50`, as))?.workflow_runs;
     const listed: Run[] = [...(Array.isArray(scheduled) ? scheduled : []), ...(Array.isArray(dispatched) ? dispatched : [])];
     const key = `ci-health:scheduled:${p.id}`;
     const told = new Set(this.store.getSetting<number[]>(key) ?? []);
@@ -731,25 +737,37 @@ export class CiHealth {
         continue;
       }
       // The Taskmaster hears of the default branch only: scheduled runs, and dispatched ones there.
-      if (!this.deps.tell || (dispatch && r.head_branch !== branch) || quiet.has(workflowFile(r))) continue;
-      const w = String(r.workflow_id);
-      let text: string | null = null;
-      if (r.conclusion === 'failure') text = await this.runText(p, slug, r, as, 'taskmaster');
-      else if (r.conclusion === 'success' && red[w] && at(r.created_at) > at(red[w].at)) text = `${p.name}'s ${r.name} is back to green on ${branch}: ${runUrl(slug, r)} (${short(r.head_sha)}, ${pacific(ended(r))}), after run ${red[w].run} failed.`;
-      if (!text) continue;
-      try {
-        if (!this.deps.tell(p, text)) continue; // no Taskmaster yet: tried again next poll
-      } catch (err) {
-        console.error(`Telling ${p.name}'s Taskmaster of run ${r.id} failed:`, err);
-        continue;
-      }
-      if (r.conclusion === 'failure') {
-        told.add(r.id);
-        red[w] = { run: r.id, at: r.created_at };
-      } else delete red[w];
+      if (!this.deps.tell || r.conclusion !== 'failure' || (dispatch && r.head_branch !== branch) || quiet.has(workflowFile(r))) continue;
+      // Kept while no Taskmaster can take it, so each poll's retry doesn't read its jobs and annotations again.
+      const text = this.texts.get(r.id) ?? (await this.runText(p, slug, r, as, 'taskmaster'));
+      this.texts.set(r.id, text);
+      if (this.texts.size > 200) this.texts.delete(this.texts.keys().next().value!);
+      if (!this.say(p, r.id, text)) continue;
+      this.texts.delete(r.id);
+      told.add(r.id);
+      red[String(r.workflow_id)] = { run: r.id, at: r.created_at };
+      save();
+    }
+    // Back to green: the first green run on the branch after the red one, a push's or a PR merge's too.
+    for (const [w, was] of Object.entries(red)) {
+      const green = [...(onMain.get(Number(w)) ?? []), ...listed.filter((r) => String(r.workflow_id) === w && r.head_branch === branch)]
+        .filter((r) => r.status === 'completed' && r.conclusion === 'success' && at(r.created_at) > at(was.at)).sort((a, b) => at(a.created_at) - at(b.created_at))[0];
+      if (!green) continue;
+      if (!quiet.has(workflowFile(green)) && !this.say(p, green.id, `${p.name}'s ${green.name} is back to green on ${branch}: ${runUrl(slug, green)} (${short(green.head_sha)}, ${pacific(ended(green))}), after run ${was.run} failed.`)) continue;
+      delete red[w];
       save();
     }
     if (pruned) save();
+  }
+
+  /** Held mail for the Taskmaster about `run`: true once it has it; false (no Taskmaster yet, or the send threw) to try again next poll. */
+  private say(p: Project, run: number, text: string): boolean {
+    try {
+      return this.deps.tell!(p, text);
+    } catch (err) {
+      console.error(`Telling ${p.name}'s Taskmaster of run ${run} failed:`, err);
+      return false;
+    }
   }
 
   /** What a finished run says to the minion that dispatched it, or (failed) to the Taskmaster: where it failed, GitHub's error lines, its CI-store files. */

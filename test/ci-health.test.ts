@@ -195,7 +195,7 @@ function world({ delve = false } = {}) {
     else if (path.includes('/actions/workflows/7/runs?branch=main')) body = { workflow_runs: gh.mainRuns };
     // Peek's own; any other repo has none.
     else if (path.endsWith('/actions/runs?event=schedule&branch=main&per_page=20')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.scheduled : [] };
-    else if (path.endsWith('/actions/runs?event=workflow_dispatch&per_page=20')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.dispatched : [] };
+    else if (path.endsWith('/actions/runs?event=workflow_dispatch&per_page=50')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.dispatched : [] };
     else if (path.endsWith('/actions/runs?per_page=50')) body = { workflow_runs: gh.runs };
     else if (/^repos\/caraminden\/[^/]+$/.test(path)) body = { default_branch: 'main' };
     else if (/\/runs\/\d+\/jobs/.test(path)) body = { jobs: gh.jobs.get(Number(/runs\/(\d+)\//.exec(path)![1])) ?? [] };
@@ -778,6 +778,31 @@ test('a red scheduled run, or a red dispatched one on main, is one message to th
   w.gh.scheduled = [drift({ id: 6006, conclusion: 'failure', created_at: iso(-30 * MIN), updated_at: iso(-35 * MIN) }), ...w.gh.scheduled];
   await health.tick(NOW + 40 * MIN);
   assert.equal(w.told.length, 4);
+});
+
+test('a red nightly fixed by a push to main says back to green from that push run; a red waiting for a Taskmaster reads GitHub once (#678)', async () => {
+  const w = outsideWorld();
+  let taskmaster = false;
+  const health = new CiHealth(w.store, { ...w.outside, tell: (p: { name: string }, text: string) => (taskmaster && w.told.push([p.name, text]), taskmaster) });
+  // Workflow 7 (desktop) runs nightly and on every push to main.
+  const nightly = runOf({ id: 7001, event: 'schedule', workflow_id: 7, conclusion: 'failure', created_at: iso(3 * HOUR), updated_at: iso(2 * HOUR) });
+  w.gh.jobs.set(7001, [job({ run_id: 7001, conclusion: 'failure' })]);
+  w.gh.scheduled = [nightly];
+  w.gh.mainRuns = [nightly];
+  await health.tick(NOW);
+  const reads = () => w.gh.calls.filter((c) => /runs\/7001\/jobs|check-runs/.test(c)).length;
+  const first = reads();
+  assert.ok(first > 0);
+  await health.tick(NOW + 5 * MIN);
+  assert.equal(reads(), first, 'no Taskmaster yet: the next poll retries from what it read');
+  taskmaster = true;
+  await health.tick(NOW + 10 * MIN);
+  assert.equal(w.told.length, 1);
+
+  w.gh.mainRuns = [runOf({ id: 7002, event: 'push', workflow_id: 7, head_sha: 'c0ffee0000', created_at: iso(HOUR), updated_at: iso(50 * MIN) }), nightly];
+  await health.tick(NOW + 15 * MIN);
+  await health.tick(NOW + 20 * MIN);
+  assert.deepEqual(w.told.slice(1).map(([, t]) => t), ["Peek Auras's desktop is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/7002 (c0ffee0, Nov 5, 03:10 PST), after run 7001 failed."]);
 });
 
 test('orphanRuns: queued land/** runs over an hour old that no landing holds', () => {

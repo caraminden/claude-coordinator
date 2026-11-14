@@ -297,7 +297,10 @@ function connectStream(catchUp = false) {
       assetVersion ??= msg.version;
       // Each connect's own hello (it carries usage; a deploy's broadcast one doesn't), so a reconnect catches up (#626).
       if ('usage' in msg) loadReleases();
-      if (msg.stream) presenceHello(msg.stream);
+      if (msg.stream) {
+        presenceHello(msg.stream);
+        if (view?.kind === 'project') renderSidebar();
+      }
     }
     if (msg.type === 'hello' || msg.type === 'codex') {
       // The broadcast hello of a front-end-only deploy carries only `version`: it leaves Codex as it was.

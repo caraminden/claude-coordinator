@@ -116,7 +116,7 @@ export const appRoutes: Route[] = [
       const t = Number.isInteger(ticketId) ? store.getTicket(ticketId) : undefined;
       if (!t || !store.canSee(session, t.project_id)) throw new HttpError(404, 'No such minion');
     }
-    // An unknown stream (the server restarted under the tab) says so, and the tab reconnects.
+    // An unknown stream (the server restarted under the tab): its EventSource reconnects and reports under the new id.
     if (!presence.view(String(body?.stream ?? ''), session.name, ticketId)) throw new HttpError(409, 'No such stream');
     return json(res, 200, {});
   } },

@@ -12,6 +12,8 @@ const byScheme = new Map();
 export function presenceHello(id) {
   stream = id;
   sent = undefined;
+  // The server sends who is where right after the hello; anything kept from before it may have gone meanwhile.
+  byScheme.clear();
   reportPresence();
 }
 

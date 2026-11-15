@@ -4,10 +4,11 @@
 // Files go to a media folder per contraption and person, which the app reads and clears with its key.
 // When the person has Codex, it also gets generate_image_codex (#733's tool): a PNG from Codex's image_gen on
 // their own ChatGPT login, run in their container by codexImage() below.
-import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { closeSync, constants, copyFileSync, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { resolveFile } from './artifacts.ts';
+import { copyPinned } from './codex-review.ts';
 import { HttpError } from './http.ts';
 import { INPUT_IMAGE, mediaCode, outPath, refusal, target, writeOutput, type MediaTool, type OpenRouter } from './openrouter.ts';
 
@@ -173,9 +174,38 @@ export interface MediaTurn {
 /** The tools a turn's tools/list gives. */
 export const mediaTools = (turn: MediaTurn) => (turn.codex ? [...MEDIA_TOOL_LIST, CODEX_TOOL_DEF] : MEDIA_TOOL_LIST);
 
-// citadel-codex-review's driver and what it imports, plus the tripwire Codex's hook loads: copied into each call's folder, as a contraption Codex turn copies its shim.
-const CODEX_DRIVER = ['codex-review.ts', 'codex.ts', 'codex-lock.ts', 'tripwire.ts'].map((f) => [f, readFileSync(join(import.meta.dirname, f), 'utf8')] as const);
 const PNG = new Set(['.png']);
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/** gpt-image's largest PNGs are a few MB. */
+const MAX_CODEX_PNG = 50 * 1024 * 1024;
+
+/**
+ * The PNG a run left in its folder. The container can write there, so it's opened without following a link
+ * and must be a plain PNG file of a sane size: the server must never copy one of its own files into the folder the app serves.
+ */
+function readPng(file: string): Buffer {
+  let fd: number;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    throw new Error('Codex said it was done but left no picture');
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > MAX_CODEX_PNG) throw new Error('Codex left something that isn\'t a PNG file');
+    const buf = Buffer.alloc(st.size);
+    let got = 0;
+    while (got < st.size) {
+      const n = readSync(fd, buf, got, st.size - got, got);
+      if (!n) break;
+      got += n;
+    }
+    if (got < 8 || !buf.subarray(0, 8).equals(PNG_MAGIC)) throw new Error('Codex left something that isn\'t a PNG file');
+    return buf.subarray(0, got);
+  } finally {
+    closeSync(fd);
+  }
+}
 /** podman exec's own failures: 125 podman (no such container), 126 and 127 the command. */
 const PODMAN_FAILED = new Set([125, 126, 127]);
 
@@ -201,23 +231,30 @@ export async function codexImage(at: CodexAt, dir: string, args: Record<string, 
   mkdirSync(at.turnsDir, { recursive: true });
   const job = mkdtempSync(join(at.turnsDir, 'media-codex-'));
   try {
-    for (const [f, text] of CODEX_DRIVER) writeFileSync(join(job, f), text);
+    // The driver and what it imports, and the tripwire Codex's hook loads, as inContainer copies them for a host turn's review.
+    const driver = join(job, 'codex-review.ts');
+    copyPinned(join(import.meta.dirname, 'codex-review.ts'), job);
+    copyPinned(join(import.meta.dirname, 'tripwire.ts'), job);
     const cfg = join(job, 'codex-tripwire.json');
     writeFileSync(cfg, JSON.stringify({ script: join(job, 'tripwire.ts'), config: at.tripwire }), { mode: 0o444 });
-    mkdirSync(join(job, 'refs'));
     const images = found.flatMap((f, i) => {
-      const name = join('refs', `${i}${extname(f).toLowerCase()}`);
-      copyFileSync(f, join(job, name));
+      const name = `ref-${i}${extname(f).toLowerCase()}`;
+      // EXCL: never through a link the container put there meanwhile.
+      copyFileSync(f, join(job, name), constants.COPYFILE_EXCL);
       return ['--image', name];
     });
     const env = { ...at.env, CITADEL_CODEX_TRIPWIRE: cfg };
     const argv = ['exec', '-i', '-w', job, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container,
-      process.execPath, join(job, 'codex-review.ts'), '--image-gen', '--timeout', '600', '--out', 'out.png', ...(args.background === 'transparent' ? ['--transparent'] : []), ...images];
+      process.execPath, driver, '--image-gen', '--timeout', '600', '--out', 'out.png', ...(args.background === 'transparent' ? ['--transparent'] : []), ...images];
     const r = await new Promise<{ code: number | null; err: string }>((done) => {
       const child = spawn(at.podman, argv, { stdio: ['pipe', 'ignore', 'pipe'] });
       let err = '';
-      // shortcut: a canceled turn doesn't stop this run; the driver's own 600 s limit plus a wait for the person's Codex lock bounds it.
-      const timer = setTimeout(() => child.kill('SIGTERM'), 900_000);
+      // The driver's own limit is 600 s, but its wait for the person's Codex lock isn't: past 15 minutes, stop it in the container too.
+      // shortcut: a canceled turn doesn't stop a run already going; pass the turn's end down if runs pile up.
+      const timer = setTimeout(() => {
+        spawnSync(at.podman, ['exec', at.container, 'pkill', '-f', '--', driver], { stdio: 'ignore', timeout: 10_000 });
+        child.kill('SIGTERM');
+      }, 900_000);
       child.stderr!.on('data', (b) => (err = (err + b).slice(-4000)));
       child.on('error', (e) => { clearTimeout(timer); done({ code: null, err: e.message }); });
       child.on('close', (code) => { clearTimeout(timer); done({ code, err }); });
@@ -230,7 +267,7 @@ export async function codexImage(at: CodexAt, dir: string, args: Record<string, 
     if (r.code === 3) throw refusal(503, 'codex_not_ready', why);
     if (r.code === null || PODMAN_FAILED.has(r.code)) throw new Error(`Couldn't run Codex in this person's container (${at.container}): ${why}`);
     if (r.code !== 0) throw new Error(`Codex couldn't make the image (exit ${r.code}): ${why}`);
-    writeOutput(file, readFileSync(join(job, 'out.png')), { tool: CODEX_TOOL, prompt, model: 'codex image_gen', cost_usd: 0, date: new Date().toISOString(), ...(args.background ? { background: args.background } : {}), ...(refs.length ? { refs } : {}) });
+    writeOutput(file, readPng(join(job, 'out.png')), { tool: CODEX_TOOL, prompt, model: 'codex image_gen', cost_usd: 0, date: new Date().toISOString(), ...(args.background ? { background: args.background } : {}), ...(refs.length ? { refs } : {}) });
     return { path: file, usage };
   } finally {
     rmSync(job, { recursive: true, force: true });

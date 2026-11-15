@@ -96,11 +96,15 @@ const job = argv[argv.indexOf('-w') + 1];
 const prompt = fs.readFileSync(0, 'utf8');
 const env = argv.flatMap((a, i) => (argv[i - 1] === '-e' ? [a] : []));
 const cfg = JSON.parse(fs.readFileSync(env.find((e) => e.startsWith('CITADEL_CODEX_TRIPWIRE=')).split('=')[1], 'utf8'));
-fs.writeFileSync(process.env.FAKE_PODMAN_LOG, JSON.stringify({ argv, prompt, env, cfg, files: fs.readdirSync(job).sort(), refs: fs.readdirSync(path.join(job, 'refs')).map((f) => fs.readFileSync(path.join(job, 'refs', f), 'utf8')) }));
+fs.writeFileSync(process.env.FAKE_PODMAN_LOG, JSON.stringify({ argv, prompt, env, cfg, files: fs.readdirSync(job).sort(), refs: fs.readdirSync(job).filter((f) => f.startsWith('ref-')).map((f) => fs.readFileSync(path.join(job, f), 'utf8')) }));
 if (prompt.startsWith('pace')) { process.stderr.write('citadel-codex-review: Skipped: your Codex use is over pace (5-hour 90%).\\n'); process.exit(4); }
 if (prompt.startsWith('unsigned')) { process.stderr.write("citadel-codex-review: This person hasn't signed in to Codex in their container yet.\\n"); process.exit(3); }
 if (prompt.startsWith('gone')) { process.stderr.write('Error: no container with name or ID found\\n'); process.exit(125); }
-fs.writeFileSync(path.join(job, argv[argv.indexOf('--out') + 1]), 'codex png');
+if (prompt.startsWith('broke')) { process.stderr.write('citadel-codex-review: Codex timed out\\n'); process.exit(124); }
+const out = path.join(job, argv[argv.indexOf('--out') + 1]);
+if (prompt.startsWith('link')) fs.symlinkSync(process.env.FAKE_PODMAN_SECRET, out);
+else if (prompt.startsWith('text')) fs.writeFileSync(out, 'not a png');
+else if (!prompt.startsWith('blank')) fs.writeFileSync(out, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(prompt.startsWith('again') ? 'again' : 'codex png')]));
 process.stderr.write('Codex usage: 5-hour 12%, weekly 30%\\n');
 `;
 
@@ -124,18 +128,18 @@ test('generate_image_codex runs the driver in the person\'s container and copies
 
   const r = await runMediaTool(null as any, root, turn, CODEX_TOOL, { prompt: 'a frost rune', out: 'auras/frost.png', refs: ['base.png'], background: 'transparent' });
   assert.deepEqual(r, { text: "Wrote auras/frost.png with Codex on this person's ChatGPT plan, no charge. Codex usage: 5-hour 12%, weekly 30%.", isError: false });
-  assert.equal(readFileSync(join(dir, 'auras', 'frost.png'), 'utf8'), 'codex png');
+  assert.equal(readFileSync(join(dir, 'auras', 'frost.png')).subarray(8).toString(), 'codex png');
   const note = JSON.parse(readFileSync(join(dir, 'auras', 'frost.png.json'), 'utf8'));
   assert.deepEqual({ ...note, date: 'd' }, { tool: CODEX_TOOL, prompt: 'a frost rune', model: 'codex image_gen', cost_usd: 0, date: 'd', background: 'transparent', refs: ['base.png'] });
-  assert.deepEqual(events, [['media', { tool: CODEX_TOOL, ok: true, files: [{ path: 'auras/frost.png', bytes: 9, type: 'image/png' }], model: 'codex image_gen', cost_usd: 0 }]]);
+  assert.deepEqual(events, [['media', { tool: CODEX_TOOL, ok: true, files: [{ path: 'auras/frost.png', bytes: 17, type: 'image/png' }], model: 'codex image_gen', cost_usd: 0 }]]);
   const ran = JSON.parse(readFileSync(log, 'utf8'));
   const job = ran.argv[ran.argv.indexOf('-w') + 1];
   assert.ok(job.startsWith(join(turnsDir, 'media-codex-')), 'its own folder in the person\'s turns folder, which the container sees at the same path');
-  assert.deepEqual(ran.argv.slice(ran.argv.indexOf('citadel-claude-3')), ['citadel-claude-3', process.execPath, join(job, 'codex-review.ts'), '--image-gen', '--timeout', '600', '--out', 'out.png', '--transparent', '--image', join('refs', '0.png')]);
+  assert.deepEqual(ran.argv.slice(ran.argv.indexOf('citadel-claude-3')), ['citadel-claude-3', process.execPath, join(job, 'codex-review.ts'), '--image-gen', '--timeout', '600', '--out', 'out.png', '--transparent', '--image', 'ref-0.png']);
   assert.equal(ran.prompt, 'a frost rune');
   assert.deepEqual(ran.env, ['HOME=/home/x', 'PATH=/bin', `CITADEL_CODEX_TRIPWIRE=${join(job, 'codex-tripwire.json')}`]);
   assert.deepEqual(ran.cfg, { script: join(job, 'tripwire.ts'), config: { project: 0 } });
-  assert.deepEqual(ran.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'codex.ts', 'refs', 'tripwire.ts']);
+  assert.deepEqual(ran.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'codex.ts', 'ref-0.png', 'tripwire.ts'], "the driver and everything it imports");
   assert.deepEqual(ran.refs, ['base']);
   assert.equal(woke, 1);
   assert.deepEqual(readdirSync(turnsDir), [], 'the folder goes once it ends');
@@ -145,7 +149,15 @@ test('generate_image_codex runs the driver in the person\'s container and copies
   assert.match((await call('pace please')).text, /^codex_over_pace: Skipped: your Codex use is over pace \(5-hour 90%\)\. Use generate_image for this one\.$/);
   assert.match((await call('unsigned')).text, /^codex_not_ready: This person hasn't signed in/);
   assert.match((await call('gone')).text, /^failed: The call didn't finish: Couldn't run Codex in this person's container \(citadel-claude-3\): Error: no container/);
-  assert.deepEqual(events.map(([, d]) => d.code), ['codex_over_pace', 'codex_not_ready', 'failed']);
+  assert.match((await call('broke')).text, /^failed: The call didn't finish: Codex couldn't make the image \(exit 124\): Codex timed out$/);
+  assert.match((await call('blank')).text, /^failed: .*left no picture/);
+  assert.match((await call('text')).text, /^failed: .*isn't a PNG file/);
+  // A link the container left at out.png is never followed: the server's own files stay out of the media folder.
+  const secret = join(root, 'server-only.png');
+  writeFileSync(secret, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('SERVER SECRET')]));
+  process.env.FAKE_PODMAN_SECRET = secret;
+  assert.match((await call('link')).text, /^failed: .*left no picture/);
+  assert.deepEqual(events.map(([, d]) => d.code), ['codex_over_pace', 'codex_not_ready', 'failed', 'failed', 'failed', 'failed', 'failed']);
   assert.ok(!existsSync(join(dir, 'x.png')), 'nothing written on a refusal');
   assert.deepEqual(readdirSync(turnsDir), []);
 
@@ -159,5 +171,7 @@ test('generate_image_codex runs the driver in the person\'s container and copies
   assert.match((await call('a', { background: 'white' })).text, /^bad_request: background/);
   assert.match((await call('')).text, /^bad_request: prompt is required/);
   assert.equal(woke, runs);
+  assert.equal((await call('again', { out: 'auras/frost.png', overwrite: true })).isError, false);
+  assert.equal(readFileSync(join(dir, 'auras', 'frost.png')).subarray(8).toString(), 'again');
   assert.match((await runMediaTool(null as any, root, { ...turn, codex: null }, CODEX_TOOL, { prompt: 'a', out: 'y.png' })).text, /^codex_not_ready: /);
 });

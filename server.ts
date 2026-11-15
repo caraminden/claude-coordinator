@@ -33,6 +33,7 @@ import { type Chain, githubPrs, LiveWaiters, pacificTime, runsRepo, startChained
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
+import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
@@ -789,21 +790,11 @@ const landHandoffs = new LandHandoffs({
     },
   },
 });
-// The minions the server is landing for (#727), read at most once a second for the views. A row is sent again
-// when its hand-off starts or ends, as settling it sends the row before the hand-off is marked settled.
-let handedOff = new Set<number>(), handedOffAt = 0, handedOffShown = new Set<number>();
-const handoffsNow = () => {
-  if (Date.now() - handedOffAt > 1000) [handedOff, handedOffAt] = [new Set(landings.handoffs()), Date.now()];
-  return handedOff;
-};
-runner.serverWork = (id) => (handoffsNow().has(id) ? { kind: 'land' } : null);
-const showHandoffs = () => {
-  handedOffAt = 0;
-  const now = handoffsNow();
-  for (const id of new Set([...handedOffShown, ...now])) if (handedOffShown.has(id) !== now.has(id)) runner.broadcastTicket(id);
-  handedOffShown = now;
-};
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', () => (showHandoffs(), landHandoffs.poll())), 5_000).unref();
+// The minions the server is landing for (#727): working, in the views. Synced again after the poll, since settling a
+// land sends its row before the hand-off is marked settled.
+const serverWork = serverWorkWatch(() => landings.handoffs(), (id) => runner.broadcastTicket(id));
+runner.serverWork = serverWork.of;
+if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync())), 5_000).unref();
 if (!BOOT_CHECK) {
   void safely('deploy watch', () => deployWatch!.tick());
   setInterval(() => void safely('deploy watch', () => deployWatch!.tick()), 60_000).unref();

@@ -72,19 +72,13 @@ export function inboxOtherTicket(ticket) {
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
-const ASKS = { approval: '✋ Approve', question: '❓ Question', plan: '📋 Plan', ready: '✅ Ready', complete: '🏁 Complete', try: '🧪 Try it', replies: '💬 Reply' };
+const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', plan: '📋 Plan', ready: '✅ Ready', complete: '🏁 Complete', try: '🧪 Try it', replies: '💬 Reply' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
 let strip = null;
-// The opened list, and in it the cards addressed to you (#687) and the minions' rows. Every minion update redraws
-// the rows, so the cards are drawn again only when the set of them changes: a pick or a half-typed answer keeps its focus.
-const parts = { list: null, direct: null, rows: null, sig: null };
-// cards.js brings the chat's modules with it: loaded when a card addressed to you first shows, so this module loads alone (test/inbox.test.js).
-let cards = null;
-
-/** A question or plan card addressed to you (#687), which the list draws whole to answer in place. */
-const directFor = (i) => (i.kind === 'question' || i.kind === 'plan') && !!i.card?.to && i.card.to === me;
+// The opened list of rows, kept across redraws.
+let list = null;
 
 /** The strip for the minions panel (showProject puts it above the Taskmaster's row). */
 export function inboxStrip() {
@@ -154,10 +148,10 @@ export function renderInbox() {
   if (!items.length) return strip.replaceChildren();
   let open = false;
   try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch {}
-  // A minion's items share its row, in the order of its most urgent one; a card addressed to you is drawn whole instead.
-  const direct = items.filter(directFor);
+  // A minion's items share its row, in the order of its most urgent one. A card addressed to you is a row like the rest,
+  // linking to it in its chat (Cara, 2026-11-14: "It should just link to the chat that has the card like it used to").
   const rows = new Map();
-  for (const i of items.filter((i) => !directFor(i))) {
+  for (const i of items) {
     if (!rows.has(i.ticketId)) rows.set(i.ticketId, []);
     rows.get(i.ticketId).push(i);
   }
@@ -172,48 +166,32 @@ export function renderInbox() {
   });
   strip.classList.toggle('open', open);
   // The list stays in place across redraws (renderSidebar redraws on every minion update), keeping its scroll (#668)
-  // and the addressed cards' focus: only the toggle and the rows are new.
-  parts.list ??= h('div', { class: 'inbox-rows' }, parts.direct = h('div', { class: 'inbox-direct' }), parts.rows = h('div', { class: 'inbox-minions' }));
-  if (direct.length && !cards) import('./cards.js').then((m) => { cards = m; renderInbox(); });
-  const drawn = cards ? direct : [];
-  const sig = drawn.map((i) => i.key).join();
-  if (sig !== parts.sig) {
-    parts.sig = sig;
-    parts.direct.replaceChildren(...drawn.map(directCard));
-  }
-  parts.direct.hidden = !drawn.length;
-  parts.rows.replaceChildren(...[...rows.values()].map(inboxRow));
+  // only the toggle and the rows are new.
+  list ??= h('div', { class: 'inbox-rows' });
+  list.replaceChildren(...[...rows.values()].map(inboxRow));
   if (strip.firstChild) strip.firstChild.replaceWith(toggle);
   else strip.append(toggle);
-  if (open && parts.list.parentNode !== strip) strip.append(parts.list);
-  else if (!open) parts.list.remove();
+  if (open && list.parentNode !== strip) strip.append(list);
+  else if (!open) list.remove();
 }
 
 /**
- * A card addressed to you (#687), whole, to answer in place: headed by the minion or Taskmaster that asks, linked
- * to the card in its chat. One from another scheme names that scheme.
+ * A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited. One from
+ * another scheme (a card addressed to you there, #687) names that scheme.
  */
-function directCard(i) {
-  const t = ticketOf(i.ticketId) ?? { id: i.ticketId, project_id: i.from.projectId, number: i.from.number, kind: i.from.kind, title: i.from.title };
-  const where = i.from ? `${i.from.scheme} ` : '';
-  const name = isCoordinator(t) ? (i.from ? `${i.from.scheme} Taskmaster` : taskmasterLabel(t.project_id)) : `${where}#${t.number ?? t.id} ${t.title}`;
-  const asker = h('a', { class: 'asker', href: i.eventId ? jumpHref(t, i.eventId) : threadHref(t) }, name);
-  const opts = { inbox: true, at: i.at, asker };
-  return i.kind === 'plan' ? cards.planCard(i.ticketId, i.card, opts) : cards.questionCard(i.ticketId, i.card, opts);
-}
-
-/** A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited. */
 function inboxRow(items) {
-  const t = ticketOf(items[0].ticketId);
+  const { from } = items[0];
+  const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
   const asks = new Map();
   for (const i of items) {
-    const ask = ASKS[i.kind === 'state' ? t.state : i.kind] ?? i.kind;
+    const ask = ASKS[i.kind === 'state' ? t.state : i.card?.notice ? 'notice' : i.kind] ?? i.kind;
     asks.set(ask, (asks.get(ask) ?? 0) + 1);
   }
   const seen = items.every(faded);
   const target = rowTarget(items);
   return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t) },
-    h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h('span', { class: 'name' }, from ? `${from.scheme} ` : '',
+      isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, n]) => h('span', { class: 'chip' }, n > 1 ? `${ask} ×${n}` : ask))),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.
     h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))));

@@ -17,15 +17,14 @@ export function speaker(doing = '') {
 
 /**
  * A card's header line: who asks, and on a card addressed to one person (#687) whom, with how long it has
- * waited on them ("Your Minion asks Josh · waiting on Josh, 4m"), until done() says how it ended. `opts.asker`
- * names the asker outside its own chat (the Needs-you list), and `opts.at` is when the card was posted.
+ * waited on them ("Your Minion asks Josh · waiting on Josh, 4m"), until done() says how it ended. `opts.at` is
+ * when the card was posted.
  */
 function whoLine(doing, card, opts = {}) {
   const verb = card.to ? `${doing} ${card.to === me ? 'you' : card.to}` : doing;
-  const who = opts.asker ? [opts.asker, ` ${verb}`] : speaker(verb);
   const wait = h('span', { class: 'to-wait' }, card.to ? ` · waiting on ${card.to === me ? 'you' : card.to}${opts.at ? `, ${ago(opts.at).replace(/ ago$/, '')}` : ''}` : '');
   return {
-    el: h('div', { class: 'who' }, who, wait),
+    el: h('div', { class: 'who' }, speaker(verb), wait),
     done(text) {
       if (!card.to) return;
       wait.textContent = ` · ${text}`;
@@ -269,8 +268,7 @@ export function planCard(ticketId, card, opts = {}) {
       if (r.by) head.done(`${r.status === 'approved' ? 'approved' : 'sent back'} by ${r.by}`);
     },
   };
-  // In the Needs-you list (#687) it's a second copy: the chat's own card takes the chat's news.
-  if (!opts.inbox) view.cards.set(card.id, handle);
+  view.cards.set(card.id, handle);
   if (card.status !== 'pending') handle.settle(card);
   return el;
 }
@@ -475,8 +473,7 @@ export function questionCard(ticketId, card, opts = {}) {
       if (pictures) refreshViewerBar();
     },
   };
-  // In the Needs-you list (#687) it's a second copy: the chat's own card takes the chat's news.
-  if (!opts.inbox) view.cards.set(card.id, handle);
+  view.cards.set(card.id, handle);
   if (card.settled) handle.markSettled();
   return el;
 }
@@ -512,7 +509,7 @@ function noticeCard(ticketId, card, opts) {
       label: 'mark the notice seen',
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {});
   });
-  if (!opts.inbox) view.cards.set(card.id, handle);
+  view.cards.set(card.id, handle);
   if (card.settled) handle.markSettled(card.settled);
   return el;
 }

@@ -199,6 +199,23 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t);
     },
   },
+  landing: {
+    about: 'a minion whose turn ended on hand_off_land while the server lands it: working, by the server (#727)',
+    seed(c) {
+      const t = minion(c, 'Show server work as working', {}, 'bug');
+      const w = chat(c, t, 24);
+      w.asked('Minions whose land the server runs look idle. Show them as working.');
+      w.init();
+      w.plan([['Expose server work', 4], ['Show it as working', 6], ['Self-review and land', 10]], 3);
+      w.call('mcp__thread__hand_off_land', { summary: 'server work shows as working', risk: 'low', reason: 'front end and one view field' }, 'Handed off: the server runs tools/land.sh.');
+      w.done('Handed off the land; the server reports how it goes.');
+      // Only the hand-off, no started file: the landing reads as not begun, so LandHandoffs leaves it pending.
+      const dir = join(c.dataDir, 'run', 'landings', String(t.id));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'handoff.json'), JSON.stringify({ summary: 'server work shows as working', risk: 'low', reason: 'seeded', args: [] }));
+      return route(c, t);
+    },
+  },
   'long-chat': {
     about: 'a finished minion with a long chat: markdown headings, lists, a table, code, an image and a file card',
     seed(c) {

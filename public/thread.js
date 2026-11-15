@@ -471,7 +471,7 @@ export function renderTicketHead() {
     h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', nav);
   el.replaceChildren(
     h('div', { class: phone ? 'row head-top' : 'row' },
-      h('span', { class: `dot ${t.status}` }),
+      h('span', { class: `dot ${working ? 'running' : t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       presenceHead(t),
       phone ? h('span', { class: 'spacer' }) : '',
@@ -793,9 +793,9 @@ function renderProgress() {
   const planned = total && (current || done < total);
   const stripped = withoutCount(line);
   // Phones show this line in place of the state (#492), so an idle chat's line leads with it.
-  const step = !line ? '' : live ? stepName(p, running) : narrow.matches && !running ? `${headState(view.ticket)} · ${stripped}` : stripped;
-  // The server working for it (#727) leads the line, unless a phone's line already leads with the state that says so.
-  const server = !running && workingBy(view.ticket) === 'server' && !(narrow.matches && line);
+  // The server working for it (#727) leads the line in place of the finished plan's step: "Server" and its land stage.
+  const server = !running && workingBy(view.ticket) === 'server';
+  const step = server || !line ? '' : live ? stepName(p, running) : narrow.matches && !running ? `${headState(view.ticket)} · ${stripped}` : stripped;
   const doing = !w && live ? nowDoing(view.turnActions, Date.now()) : '';
   const now = w ? waitNow(w) : doing;
   // The step count sits in its own chip, so a phone's cut-off text never hides it; the turn's action
@@ -813,7 +813,7 @@ function renderProgress() {
   } },
     // No dot of its own: the title's dot just above says the same (Josh, 2026-11-13: "we've duplicated the dots").
     h('span', { class: 'text' },
-      server ? h('span', { class: 'stepname' }, h('b', { class: 'f-work' }, 'Server'), step ? ` · ${step}` : '') : step ? h('span', { class: 'stepname' }, step) : '',
+      server ? h('span', { class: 'stepname' }, h('b', { class: 'f-work' }, 'Server'), w ? '' : ' · landing…') : step ? h('span', { class: 'stepname' }, step) : '',
       (step || server) && now ? h('span', { class: 'arrow', 'aria-hidden': 'true' }, ' › ') : '',
       now ? h('span', { class: 'doing', 'data-doing': doing }, now) : ''),
     count ? h('span', { class: 'count', title: count.includes('/') ? `${done} of ${total} steps done` : '' }, count) : '',

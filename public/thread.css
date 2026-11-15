@@ -62,6 +62,8 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
 /* Squeezed while Claude works: "." → ".." → "..." instead of "Cla…" (thread.js, stateFit). The text stays for screen readers. */
 .ticket-head .head-state.squeezed > .state-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .ticket-head .head-state.squeezed > .state-dots { display: inline; }
+/* Squeezed, it takes the line's free room, so its width says when the words fit again (else it stays dots, #727). */
+.ticket-head .head-sub > .head-state.squeezed { flex-grow: 1000; }
 /* Phones: the title's line, then (in a chat, further down) the state row and the ⋯ menu. */
 @media (max-width: 800px) {
   .ticket-head > .row { gap: 0.4rem 0.45rem; }

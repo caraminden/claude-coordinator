@@ -321,6 +321,15 @@ test('an image run starts a thread with no shell and image instructions, names t
   const out2 = join(root, 'gen-saved.png');
   assert.equal((await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out: out2, transparent: false }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image', FAKE_SAVED: saved } })).code, 0);
   assert.equal(readFileSync(out2, 'utf8'), 'saved png');
+  // A file that appeared at out since the run checked it (another call, say) stays, unless overwrite.
+  const raced = await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out, transparent: false }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image' } });
+  assert.equal(raced.code, 1);
+  assert.match(raced.text, /EEXIST/);
+  writeFileSync(out2, 'theirs');
+  assert.equal((await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out: out2, transparent: false }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image', FAKE_SAVED: saved } })).code, 1);
+  assert.equal(readFileSync(out2, 'utf8'), 'theirs');
+  assert.equal((await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out: out2, transparent: false, overwrite: true }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image', FAKE_SAVED: saved } })).code, 0);
+  assert.equal(readFileSync(out2, 'utf8'), 'saved png');
 });
 
 test("an image run skips (exit 4) when an image limit is over pace, and says when a used-up image limit resets (#733)", async () => {
@@ -354,6 +363,9 @@ test("--out is a .png inside the worktree or the shared folders, never over a fi
   assert.match(why(join(outside, 'a.png')), /outside/);
   assert.match(why('../x.png'), /outside/);
   assert.match(why('escape/a.png'), /outside/, 'a link out of the worktree is judged by where it points');
+  symlinkSync(join(outside, 'not-yet.png'), join(w, 'dangling.png'));
+  assert.match(why('dangling.png'), /is a link/, 'a link to nothing yet would lead the write out');
+  assert.match((outPath('dangling.png', w, true, env) as { error: string }).error, /is a link/, 'overwrite too');
   assert.match(why(undefined), /needs a path/);
 });
 

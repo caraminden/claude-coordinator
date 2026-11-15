@@ -22,7 +22,7 @@
 // #398) has no hook, so when the runner names the login's Codex container (#341) in the turn's Codex
 // config, the review runs there instead (inContainer), and that copy checks the hook for itself.
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -142,7 +142,10 @@ export function outPath(p: string | undefined, cwd: string, overwrite: boolean, 
   const within = (rs: string[], dir: string) => rs.some((r) => { const rel = relative(r, dir); return !rel.startsWith('..') && !isAbsolute(rel); });
   const outside = `${p} is outside this worktree and the shared folders`;
   if (!within(roots, dirname(path))) return { error: outside };
-  if (existsSync(path) && !overwrite) return { error: `${p} already exists (pass overwrite to replace it)` };
+  const there = lstatSync(path, { throwIfNoEntry: false });
+  // A link, even one to nothing yet, could lead the write out of the roots.
+  if (there?.isSymbolicLink()) return { error: `${p} is a link: write to a plain file` };
+  if (there && !overwrite) return { error: `${p} already exists (pass overwrite to replace it)` };
   try {
     mkdirSync(dirname(path), { recursive: true });
     // A symlinked folder could lead out of the roots: check where it really is.
@@ -184,7 +187,7 @@ interface ReviewOptions {
   env?: Record<string, string | undefined>;
   now?: () => number;
   /** An --image-gen run (#733): the brief is the prompt, `images` its references, and the picture goes to `out`. */
-  imageGen?: { out: string; transparent: boolean };
+  imageGen?: { out: string; transparent: boolean; overwrite?: boolean };
 }
 
 function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; text: string; usage: string }> {
@@ -250,7 +253,7 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
           last = String(msg.params.item.text ?? '');
         } else if (gen && msg.method === 'item/completed' && msg.params?.item?.type === 'imageGeneration') {
           try {
-            saveGenerated(msg.params.item, gen.out);
+            saveGenerated(msg.params.item, gen.out, gen.overwrite === true);
             saved = gen.out;
           } catch (err: any) {
             errors.push(err.message);
@@ -453,7 +456,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.stderr.write(`citadel-codex-review: ${out.error}\n`);
       process.exit(2);
     }
-    imageGen = { out: out.path, transparent: args.includes('--transparent') };
+    imageGen = { out: out.path, transparent: args.includes('--transparent'), overwrite: args.includes('--overwrite') };
   }
   // For the record of what the lock costs (#636): the tool result keeps this line.
   const onWaited = (ms: number) => ms >= 1000 && process.stderr.write(`citadel-codex-review: waited ${Math.round(ms / 1000)} s for this person's Codex lock.\n`);

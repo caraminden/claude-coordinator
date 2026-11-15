@@ -1,7 +1,7 @@
 // Codex as a fallback for turns (#337): its models, how a Claude pick maps onto them, and the
 // verbatim hand-over logs that carry a conversation from Claude to Codex and back. Shared by the
 // runner, contraption turns and the turn shim (src/codex-turn.ts); no local imports, so it pins on its own.
-import { cpSync, existsSync, writeFileSync } from 'node:fs';
+import { constants, copyFileSync, existsSync, writeFileSync } from 'node:fs';
 
 /** The Codex models a person can pick, best first, as [id, name]. Pinned with Codex 0.166.0 (deploy/claude-container). */
 export const CODEX_MODELS = [
@@ -179,11 +179,12 @@ export function codexResetAt(u: CodexUsage | null | undefined): number | null {
 
 /**
  * Write the picture of a Codex imageGeneration item to `to`: the file Codex saved in its own folder, or the
- * inline base64 (#716, #733). Throws why there is none, a used-up image limit included.
+ * inline base64 (#716, #733). Without `overwrite`, never over anything already at `to`, a link included.
+ * Throws why there is none, a used-up image limit included.
  */
-export function saveGenerated(item: any, to: string): void {
-  if (typeof item?.savedPath === 'string' && existsSync(item.savedPath)) return cpSync(item.savedPath, to);
-  if (typeof item?.result === 'string' && item.result) return writeFileSync(to, Buffer.from(item.result, 'base64'));
+export function saveGenerated(item: any, to: string, overwrite = true): void {
+  if (typeof item?.savedPath === 'string' && existsSync(item.savedPath)) return copyFileSync(item.savedPath, to, overwrite ? 0 : constants.COPYFILE_EXCL);
+  if (typeof item?.result === 'string' && item.result) return writeFileSync(to, Buffer.from(item.result, 'base64'), { flag: overwrite ? 'w' : 'wx' });
   const at = item?.failure?.resetsAt ? ` until ${new Date(item.failure.resetsAt * 1000).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}` : '';
   if (item?.failure?.type === 'usageLimitExceeded') throw new Error(`Codex's image generation limit is used up${at}`);
   // An item with only a fileId (Codex's attachment store) has no bytes here to copy.

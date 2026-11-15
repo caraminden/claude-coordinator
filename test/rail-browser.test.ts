@@ -183,8 +183,17 @@ test("in a tab, the rail's entries stay plain links into Citadel", { skip }, asy
   const page = await browser.page(base, { width: 1000 });
   assert.equal(await until(page, 'img'), 'img', 'the rail drew, ToC with its icon');
   assert.equal(await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').getAttribute('href')`), '/c/#/apps/toc');
-  await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))`);
+  // The click would follow the link, and an evaluate sent while the tab leaves for /c/ dies with "Inspected target
+  // navigated or closed" (#725). So the page's last listener notes whether the rail left the click alone, then stops it.
+  const prevented = await page.eval<boolean>(`(() => {
+    let prevented;
+    addEventListener('click', (e) => { prevented = e.defaultPrevented; e.preventDefault(); }, { once: true });
+    document.querySelector('.citadel-rail a[data-app="toc"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    return prevented;
+  })()`);
+  assert.equal(prevented, false, 'the rail leaves the click to the browser');
   assert.equal(await layer(page), 'none');
+  assert.equal(await page.eval('location.pathname'), '/apps/peek/', 'the test itself stopped the click, so the page is still here');
 });
 
 test("Citadel loaded at a framed app's address: its own entry still points at a view, so a click doesn't reload Citadel (#468 S12-7)", { skip }, async () => {

@@ -9,7 +9,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { presenceChip } from './presence.js';
-import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP } from './threadstate.js';
+import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
 import { replaceHash } from './navstack.js';
@@ -364,7 +364,7 @@ function renderThreadResults(el, tickets) {
 export function threadRow(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
   // The coordinator is always there to talk to; only show when it is busy.
-  const st = coord && t.status !== 'running' ? { fam: '', cell: '', label: statusLabel(t) } : rowState(t, usage);
+  const st = coord && !workingBy(t) ? { fam: '', cell: '', label: statusLabel(t) } : rowState(t, usage);
   const quiet = st.fam === 'work' || st.fam === 'idle' || st.fam === 'wait';
   // The state cell already shows steps done, so the activity line drops its own count.
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
@@ -404,7 +404,7 @@ export function threadRow(t, href = threadHref(t)) {
     st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
     presenceChip(t),
     ownerChip(t, coord),
-    wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, waitLine(wait), ' · ', waitClock(wait))
+    wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
       : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',

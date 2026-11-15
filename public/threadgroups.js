@@ -7,8 +7,8 @@
 // the top below Pinned? and then waiting goes above Parked"): Deploying on top, then Waiting (parked, but something wakes
 // it by itself: start_after, wake_when_live, runners back) and Parked (only a person or the Taskmaster wakes it) at the bottom.
 
-/** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise. */
-const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status);
+/** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */
+const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
 const isDeploying = (t) => t.state === 'pending-deploy' && resting(t);
 /** Parked until something wakes it by itself (the server's wakes_on; a held start_after chain has none). */

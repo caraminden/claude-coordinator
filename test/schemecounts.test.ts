@@ -54,6 +54,10 @@ test('isWorking: only a turn doing work spins the scheme\'s spinner and counts b
     assert.equal(isWorking(minion({ state, status: 'running' })), true, `${state} left from before, but a turn runs now`);
   }
   assert.equal(isWorking(undefined), false, 'no Taskmaster loaded yet');
+  // The server landing it after its turn ended counts as working (#727), unless a card holds it or it was dismissed.
+  assert.equal(isWorking(minion({ server_work: { kind: 'land' } })), true, 'its handed-off land runs');
+  assert.equal(isWorking(minion({ server_work: { kind: 'land' }, approvals: 1 })), false, 'a card waits on a person');
+  assert.equal(isWorking(minion({ server_work: { kind: 'land' }, status: 'closed' })), false, 'dismissed');
   assert.equal(turnMoved(minion({ status: 'running' }), minion({ status: 'running', approvals: 1 })), true, 'an approval card stops the spinner');
   assert.equal(turnMoved(minion({ status: 'running', approvals: 1 }), minion({ status: 'running' })), true, 'answering it starts it again');
 });

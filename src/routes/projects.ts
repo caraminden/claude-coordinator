@@ -247,7 +247,7 @@ export const projectRoutes: Route[] = [
     // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
     // hidden: this person hid it (#226); its badge stays at zero.
     // member: they own it or were added to it (#674); false for one only admin reach opens, listed apart from theirs.
-    // running: a minion or its Taskmaster has a turn doing work (#248; not one held on an approval card, #373), for the spinner; false when hidden.
+    // running: a minion or its Taskmaster has a turn doing work, or the server works for it (#248, #727; not one held on an approval card, #373), for the spinner; false when hidden.
     // working: how many minions (not the Taskmaster) have a turn doing work, the number beside the spinner (#278); 0 when hidden.
     // coordinator_id: the scheme's Taskmaster, null until its first open makes one.
     // fresh: something waits on this person that wasn't waiting when they last had the scheme open (#498, #539), for the
@@ -255,7 +255,7 @@ export const projectRoutes: Route[] = [
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
       const member = store.memberSchemes(session.uid);
-      const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id) });
+      const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
       const seenItems = store.seenItems(session.name);
       // In the order they dragged the shelf into (#649); one they haven't placed goes at the end.
       const schemes = inOrder(visibleSchemes(store, session), (p) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));

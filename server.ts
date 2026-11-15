@@ -789,7 +789,21 @@ const landHandoffs = new LandHandoffs({
     },
   },
 });
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', () => landHandoffs.poll()), 5_000).unref();
+// The minions the server is landing for (#727), read at most once a second for the views. A row is sent again
+// when its hand-off starts or ends, as settling it sends the row before the hand-off is marked settled.
+let handedOff = new Set<number>(), handedOffAt = 0, handedOffShown = new Set<number>();
+const handoffsNow = () => {
+  if (Date.now() - handedOffAt > 1000) [handedOff, handedOffAt] = [new Set(landings.handoffs()), Date.now()];
+  return handedOff;
+};
+runner.serverWork = (id) => (handoffsNow().has(id) ? { kind: 'land' } : null);
+const showHandoffs = () => {
+  handedOffAt = 0;
+  const now = handoffsNow();
+  for (const id of new Set([...handedOffShown, ...now])) if (handedOffShown.has(id) !== now.has(id)) runner.broadcastTicket(id);
+  handedOffShown = now;
+};
+if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', () => (showHandoffs(), landHandoffs.poll())), 5_000).unref();
 if (!BOOT_CHECK) {
   void safely('deploy watch', () => deployWatch!.tick());
   setInterval(() => void safely('deploy watch', () => deployWatch!.tick()), 60_000).unref();

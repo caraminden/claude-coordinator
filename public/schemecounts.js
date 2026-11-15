@@ -14,9 +14,10 @@ export const countMoved = (before, after) => !before || before.state !== after.s
 /**
  * A minion or Taskmaster whose turn is doing work, for the spinner and its number (#248, #278). A turn
  * held open on an approval card waits on a person, not working (#373; Cara, 2026-11-07: "it should only
- * count actually working minions"). `t.approvals` is how many of its cards wait, as runner.view sends it.
+ * count actually working minions"). `t.approvals` is how many of its cards wait, as runner.view sends it. The server
+ * working for it with no turn of its own (`t.server_work`, a handed-off land) counts too (#727).
  */
-export const isWorking = (t) => t?.status === 'running' && !t.approvals;
+export const isWorking = (t) => !!t && !t.approvals && (t.status === 'running' || (t.status !== 'closed' && !!t.server_work));
 
 /** A minion started or ended work: the spinner beside the count (#248). */
 export const turnMoved = (before, after) => isWorking(before) !== isWorking(after);

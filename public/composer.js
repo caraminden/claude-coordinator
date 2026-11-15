@@ -66,7 +66,7 @@ export function outbox(chatId) {
   if (!box) outboxes.set(chatId, (box = []));
   return box;
 }
-const onTheWay = new Map(); // chatId → sends started and not yet answered, for "Claude is thinking…"
+const onTheWay = new Map(); // chatId → sends started and not yet answered, for "This Minion is thinking…"
 const chatOpen = (chatId) => view?.kind === 'project' && view.id === chatId;
 
 // Ctrl+V with no field focused pastes into the open chat's box (#654). A field keeps its own paste (Find in

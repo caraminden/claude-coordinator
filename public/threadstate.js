@@ -1,6 +1,6 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
-import { STATES } from './base.js';
+import { isCoordinator, STATES } from './base.js';
 import { waitFam, waitShows } from './wait.js';
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. */
@@ -29,9 +29,36 @@ export function rowState(t, usage, now = Date.now()) {
   // While it works or waits elsewhere, the wait (#544) colours the chip; the chip keeps the plan's steps and the
   // row's subtitle says the wait in words (#551, Josh 2026-11-11: "What does "line 2nd" mean? that isnt a useful
   // progress indicator"), as its bar shows tests or jobs done.
-  if (!t.wait || t.status === 'closed' || (st.rank !== 1 && st.rank !== 2) || st.fam === 'broken') return st;
+  // The server's own work stays blue and pulsing all through, its line included: the track's hatched piece shows that (#727).
+  if (!t.wait || t.status === 'closed' || (st.rank !== 1 && st.rank !== 2) || st.fam === 'broken' || st.server) return st;
   const fam = waitFam(t.wait);
   return { ...st, fam, pulse: fam === 'work' };
+}
+
+/**
+ * Who is working on a minion or Taskmaster now (#727; Cara, 2026-11-14: "either of these (or any other potential
+ * "working" in the future, would all still show in the minion list as an in progress working minion"): 'turn' while
+ * its own turn runs (or a new minion's first turn sets up, not parked on start_after, #261), 'server' while the server
+ * works for it with no turn (`t.server_work`: a handed-off land), else null. A new kind of server work joins through
+ * server_work, not here.
+ */
+export function workingBy(t) {
+  if (t.status === 'running' || (t.status === 'new' && !t.parked_for && !isCoordinator(t))) return 'turn';
+  return t.status !== 'closed' && t.server_work ? 'server' : null;
+}
+
+/** Whose turn it is, in words (Cara, 2026-11-14: "This Minion is working" and "This Taskmaster is working"). */
+export const workingLabel = (t, verb = 'working') => `This ${isCoordinator(t) ? 'Taskmaster' : 'Minion'} is ${verb}`;
+
+/** The server's work in words, at its landing's stage (t.wait, src/waits.ts): "Server: testing (CI: the full suite)". */
+export function serverLabel(w) {
+  if (!w) return 'Server is landing…';
+  if (w.stage === 'line') return `Server: in the land line${/ · (.+)$/.test(w.chip) ? ` (${w.chip.split(' · ').pop()})` : ''}`;
+  if (w.stage === 'rebase') return 'Server: rebasing';
+  if (['test', 'run', 'jobs', 'queued'].includes(w.stage)) return `Server: testing (${w.brief ?? w.text})`;
+  if (w.stage === 'deploy') return 'Server: deploying';
+  if (w.stage === 'restart' || w.stage === 'live') return 'Server: waiting for the restart';
+  return 'Server is landing…';
 }
 
 function baseState(t, usage, now) {
@@ -39,7 +66,9 @@ function baseState(t, usage, now) {
   const waited = (word) => `${word} ${shortAgo(t.updated_at, now)}`;
   if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Waiting for your approval' };
   // A minion parked on start_after is new (it hasn't run) but not working (#261).
-  if (t.status === 'running' || (t.status === 'new' && !t.parked_for)) return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, label: 'Claude is working' };
+  const by = workingBy(t);
+  if (by === 'turn') return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, label: workingLabel(t) };
+  if (by === 'server') return { rank: 1, fam: 'work', cell: 'landing', pulse: true, server: true, label: serverLabel(t.wait) };
   if (t.status === 'error' && t.state === 'limited') return limitState(t, waited, usage, now);
   if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
   if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };

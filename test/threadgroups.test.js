@@ -54,7 +54,9 @@ test('Deploying sits on top; Waiting (something wakes it by itself) sits above P
     m(7, 'design', { state: 'pending-deploy', status: 'idle' }),
     // CI and other outside waits stay in their type or build: only deploying moved.
     m(8, 'bug', { state: 'outside', status: 'idle' }),
-  ]), [['deploying', false, [3, 7]], ['build-7', true, [4]], ['bug', false, [8]], ['chore', false, [6]], ['waiting', false, [2, 5]], ['parked', false, [1]]]);
+    // The server landing it again (#727): working, so in its own section, not resting in Deploying.
+    m(9, 'chore', { state: 'pending-deploy', status: 'idle', server_work: { kind: 'land' } }),
+  ]), [['deploying', false, [3, 7]], ['build-7', true, [4]], ['bug', false, [8]], ['chore', false, [6, 9]], ['waiting', false, [2, 5]], ['parked', false, [1]]]);
 });
 
 test("promoted groups come after the current build, in the scheme's order, the first match winning", () => {

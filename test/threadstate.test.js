@@ -2,7 +2,7 @@
 // kind of minion gets, the usage-limit countdowns, and the list's order.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP } from '../public/threadstate.js';
+import { byUrgency, cardChip, rowBar, rowState, rowUnread, serverLabel, SHIP, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -36,6 +36,10 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     // A card open on a parked or outside minion doesn't make it your move.
     [{ state: 'parked', pending_card_at: NOW - HOUR }, [4, 'idle', 'parked']],
     [{ status: 'closed', state: 'ready' }, [5, 'idle', 'dismissed']],
+    // The server landing it after its turn ended (#727): working, blue, pulsing, whatever the land waits on.
+    [{ server_work: { kind: 'land' } }, [1, 'work', 'landing', 'pulse']],
+    [{ server_work: { kind: 'land' }, wait: { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line', since: NOW, usual: 60 } }, [1, 'work', 'landing', 'pulse']],
+    [{ server_work: { kind: 'land' }, status: 'closed' }, [5, 'idle', 'dismissed']],
   ];
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
 });
@@ -265,4 +269,35 @@ test("waitLine: the list row's wait says what the chat's line does, one counter 
   const ci = { kind: 'land', stage: 'test', since: NOW, usual: 90, text: 'waiting for CI: test step 10 of 13: the full suite (DESKTOP-G248IJ8-linux)', brief: 'CI: the full suite', done: 9, total: 13 };
   assert.equal(waitLine(ci), 'Test 3/6 · CI: the full suite', "Cara: 'are the tests on step 3/6 or 10/13?'");
   assert.equal(waitLine({ kind: 'land', stage: 'line', since: NOW, text: '2nd in line, behind #513' }), 'Land line 1/6 · 2nd in line, behind #513', 'no brief: the text');
+});
+
+test('workingBy: one working rule with two sources, a turn and the server; labels say who (#727)', () => {
+  assert.equal(workingBy(t({ status: 'running' })), 'turn');
+  assert.equal(workingBy(t({ status: 'new' })), 'turn', 'a first turn setting up');
+  assert.equal(workingBy(t({ status: 'new', kind: 'coordinator' })), null, "a Taskmaster that hasn't run is only ready");
+  assert.equal(workingBy(t({ server_work: { kind: 'land' } })), 'server');
+  assert.equal(workingBy(t({ status: 'running', server_work: { kind: 'land' } })), 'turn', 'a person wrote mid-land: its own turn speaks');
+  assert.equal(workingBy(t({ state: 'parked', wakes_on: 'Waiting on #9 going live' })), null, "waiting on another's deploy is waiting");
+  assert.equal(workingBy(t({ state: 'pending-deploy' })), null, 'its own deploy after a clean land is Deploying');
+  // Cara, 2026-11-14: "This Minion is working" and "This Taskmaster is working".
+  assert.equal(rowState(t({ status: 'running' }), null, NOW).label, 'This Minion is working');
+  assert.equal(rowState(t({ status: 'running', kind: 'coordinator' }), null, NOW).label, 'This Taskmaster is working');
+  assert.equal(rowState(t({ server_work: { kind: 'land' }, wait: { kind: 'land', stage: 'test', chip: 'land · CI', text: 'waiting for CI', brief: 'CI: the full suite', since: NOW, usual: null } }), null, NOW).label, 'Server: testing (CI: the full suite)');
+});
+
+test('serverLabel: the land phase in words, from the wait the server already records (#727)', () => {
+  const w = (stage, over = {}) => ({ kind: 'land', stage, chip: 'land · x', text: 'detail', since: NOW, usual: null, ...over });
+  assert.equal(serverLabel(null), 'Server is landing…');
+  assert.equal(serverLabel(w('line', { chip: 'line · 2nd' })), 'Server: in the land line (2nd)');
+  assert.equal(serverLabel(w('rebase')), 'Server: rebasing');
+  assert.equal(serverLabel(w('test')), 'Server: testing (detail)');
+  assert.equal(serverLabel(w('jobs', { kind: 'ci', brief: 'CI: the full suite' })), 'Server: testing (CI: the full suite)');
+  assert.equal(serverLabel(w('deploy')), 'Server: deploying');
+  assert.equal(serverLabel(w('restart')), 'Server: waiting for the restart');
+});
+
+test("rowBar: the server's land draws the landing's track as a turn's wait does (#727)", () => {
+  const row = t({ server_work: { kind: 'land' }, steps: { done: 4, total: 4 }, step_track: [[3, 'c'], [2, 'c']], wait: { kind: 'land', stage: 'test', chip: 'land · CI', text: 'x', since: NOW, usual: 120 } });
+  const bar = rowBar(row, rowState(row, null, NOW));
+  assert.equal(bar.wait.stage, 'test');
 });

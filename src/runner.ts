@@ -554,6 +554,8 @@ export class Runner {
   ship: (ticketId: number) => Ship | null = () => null;
   /** What it waits on now: the land line, a heavy slot, the restart (src/waits.ts), for its row's badge and bar. */
   wait: (ticketId: number) => Wait | null = () => null;
+  /** What the server is doing for it with no turn of its own (#727): today its handed-off land (src/land.ts), set by the server. */
+  serverWork: (ticketId: number) => { kind: string } | null = () => null;
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** What a minion parked on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
@@ -741,6 +743,8 @@ export class Runner {
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
       wait: closed ? null : this.wait(ticket.id),
+      // The server working for it while its own turn has ended (#727): the list and chat show it as working.
+      server_work: closed ? null : this.serverWork(ticket.id),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).

@@ -5,7 +5,7 @@ import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSee
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
-import { EMPTY_TRACK, rowState, SHIP } from './threadstate.js';
+import { EMPTY_TRACK, rowState, SHIP, workingBy, workingLabel } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
@@ -397,7 +397,7 @@ export function renderTicketHead() {
   const form = chat?.querySelector('.composer');
   const bar = chat?.querySelector('#chat-replies');
   if (bar && form) {
-    // Above the composer, sent the way the composer sends (shown at once, "Claude is thinking…").
+    // Above the composer, sent the way the composer sends (shown at once, "This Minion is thinking…").
     const chips = replyChips(t, form.sendText);
     bar.hidden = !chips;
     bar.replaceChildren(chips);
@@ -438,9 +438,9 @@ export function renderTicketHead() {
   }
   actions.unshift(ultraButton(t));
   const state = headState(t);
-  // Titled too, since a narrow line may cut it short. While Claude works,
-  // a cut-short state shows dots that count up instead of "Cla…".
-  const working = t.status === 'running';
+  // Titled too, since a narrow line may cut it short. While it works (its turn or the server, #727),
+  // a cut-short state shows dots that count up instead of "Thi…".
+  const working = !!workingBy(t);
   const stateLabel = h('span', { class: 'muted head-state', title: state }, h('span', { class: 'state-text' }, state),
     working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
   stateFit?.disconnect();
@@ -494,7 +494,7 @@ let menuFor = null;
 
 /** A chat's state in words, as its head shows it. */
 function headState(t) {
-  return (isCoordinator(t) ? statusLabel(t) : rowState(t, usage).label) + (t.queued ? ` · ${t.queued} queued` : '');
+  return (isCoordinator(t) && !workingBy(t) ? statusLabel(t) : rowState(t, usage).label) + (t.queued ? ` · ${t.queued} queued` : '');
 }
 
 /** Take the ticket the server returned after a send or a card's answer, if that chat is still open. */
@@ -794,6 +794,8 @@ function renderProgress() {
   const stripped = withoutCount(line);
   // Phones show this line in place of the state (#492), so an idle chat's line leads with it.
   const step = !line ? '' : live ? stepName(p, running) : narrow.matches && !running ? `${headState(view.ticket)} · ${stripped}` : stripped;
+  // The server working for it (#727) leads the line, unless a phone's line already leads with the state that says so.
+  const server = !running && workingBy(view.ticket) === 'server' && !(narrow.matches && line);
   const doing = !w && live ? nowDoing(view.turnActions, Date.now()) : '';
   const now = w ? waitNow(w) : doing;
   // The step count sits in its own chip, so a phone's cut-off text never hides it; the turn's action
@@ -811,8 +813,8 @@ function renderProgress() {
   } },
     // No dot of its own: the title's dot just above says the same (Josh, 2026-11-13: "we've duplicated the dots").
     h('span', { class: 'text' },
-      step ? h('span', { class: 'stepname' }, step) : '',
-      step && now ? h('span', { class: 'arrow', 'aria-hidden': 'true' }, ' › ') : '',
+      server ? h('span', { class: 'stepname' }, h('b', { class: 'f-work' }, 'Server'), step ? ` · ${step}` : '') : step ? h('span', { class: 'stepname' }, step) : '',
+      (step || server) && now ? h('span', { class: 'arrow', 'aria-hidden': 'true' }, ' › ') : '',
       now ? h('span', { class: 'doing', 'data-doing': doing }, now) : ''),
     count ? h('span', { class: 'count', title: count.includes('/') ? `${done} of ${total} steps done` : '' }, count) : '',
     time,
@@ -1415,11 +1417,13 @@ export function renderTyping() {
   const running = t.status === 'running';
   // A turn that stopped without its answer (stopped, crashed) folds its lines all the same.
   if (!running && view.folds.length) flushFolds();
-  const show = running || view.sendingTo === t.id;
+  // The server working for it with no turn (#727: a handed-off land) gets the line too, in its own words.
+  const server = workingBy(t) === 'server';
+  const show = running || view.sendingTo === t.id || server;
   const wasHidden = el.hidden;
   el.hidden = !show;
   if (!show) return;
-  const lead = t.approvals ? 'Waiting for someone to approve or deny' : running ? 'Claude is working' : 'Claude is thinking…';
+  const lead = t.approvals ? 'Waiting for someone to approve or deny' : running ? workingLabel(t) : view.sendingTo === t.id ? workingLabel(t, 'thinking…') : rowState(t, usage).label;
   const key = `${lead}|${t.queued ?? 0}`;
   if (el.dataset.key !== key) {
     el.dataset.key = key;

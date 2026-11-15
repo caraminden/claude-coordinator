@@ -415,7 +415,7 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .progress-line .doing { color: var(--muted); }
 .progress-line .arrow { color: var(--muted); }
 .progress-line .doing b.f-wait, .wait-full b.f-wait { color: var(--held); }
-.progress-line .doing b.f-work, .wait-full b.f-work { color: var(--running); }
+.progress-line .doing b.f-work, .progress-line .stepname b.f-work, .wait-full b.f-work { color: var(--running); }
 .progress-line .time { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
 .progress .wait-bar.big { width: calc(100% - 0.4rem); margin: 0.25rem 0.2rem 0; }
 .progress .seg-track.big { margin: 0.35rem 0.2rem 0; }

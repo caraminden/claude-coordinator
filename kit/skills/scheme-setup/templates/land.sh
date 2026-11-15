@@ -453,35 +453,40 @@ numbered_clashes() {
 # <onto>'s last 60 that this branch reverts without seeing them. A stale squash does that behind a clean
 # fast-forward with CI green: `git reset --soft main` from a branch that started further back keeps its old files
 # (Peek Auras #309 undid six landings so). A commit counts when the branch removes 90% of the lines it added (4 or
-# more, of 12+ characters, compared trimmed; one the branch adds back in any file is a move, not a removal) and, if
-# it removed lines, puts at least half of those back. Commits of the branch's own ticket don't count (ticket/N-…
-# against a subject's leading "#N" or last "#N)"); an undo that is meant names each one in a message line "Undoes:
-# <sha>" (git revert's "This reverts commit <sha>" counts too). Tried on 2026-11-14 over ~690 landings in four schemes: it refused the stale squash, two deliberate
-# removals of another minion's work (what the trailer is for), and nothing else.
+# more, of 12+ characters, compared trimmed; a removed line is a move, not a removal, only as many times as the
+# branch adds that text back in any file, so a revert that also puts back older copies of a repeated line like
+# "linked: null" still counts: The Trans Agenda #66) and, if it removed lines, puts at least half of those back.
+# Commits of the branch's own ticket don't count (ticket/N-… against a subject's leading "#N" or "WIP #N" or last
+# "#N)"); an undo that is meant names each one in a message line "Undoes: <sha>" (git revert's "This reverts commit
+# <sha>" counts too). Tried on 2026-11-14 over ~690 landings in four schemes: it refused the stale squash, two
+# deliberate removals of another minion's work (what the trailer is for), and nothing else; the line counts of
+# 2026-11-15 refused the same over ~1,090 landings in seven.
 undo_guard() {
   local base
   base=$(git merge-base HEAD "$1") || return 2
   perl -e '
-    use strict; use warnings;
+    use strict; use warnings; use List::Util qw(min max);
     my ($base, $ticket) = @ARGV;
     sub run { my $out = `$_[0]`; $? == 0 or die "undo guard: $_[0] failed\n"; $out }
-    sub lines { # the trimmed lines of 12+ characters a diff adds (+) or removes (-), keyed by file
+    sub lines { # how many times a diff adds (+) or removes (-) each trimmed line of 12+ characters, keyed by file
       my ($sign, $cmd) = @_; my (%set, $f);
       for (split /\n/, run("git -c core.quotePath=false $cmd")) {
         if (/^diff /) { undef $f; next }
         if (/^--- (?:a\/(.*)|\/dev\/null)$/) { $f = $1; next } # a deleted file is named here only
         if (/^\+\+\+ (?:b\/(.*)|\/dev\/null)$/) { $f = $1 // $f; next }
         next if /^@@/ || !defined $f;
-        $set{"$f\0$1"} = 1 if /^\Q$sign\E\s*(.*?)\s*$/ && length $1 >= 12;
+        $set{"$f\0$1"}++ if /^\Q$sign\E\s*(.*?)\s*$/ && length $1 >= 12;
       }
       \%set;
     }
     sub text { (split /\0/, $_[0], 2)[1] }
-    sub ticket { my $s = shift; return $1 if $s =~ /^#(\d+)\b/; my @t = $s =~ /#(\d+)\)/g; @t ? $t[-1] : "" }
+    sub ticket { my $s = shift; return $1 if $s =~ /^(?:WIP:? )?#(\d+)\b/; my @t = $s =~ /#(\d+)\)/g; @t ? $t[-1] : "" }
     my @named = run("git log --format=%B $base..HEAD") =~ /^(?:Undoes: *|This reverts commit )([0-9a-f]{7,40})\b/mg;
     my $diff = "diff -U0 --no-renames --no-color $base HEAD";
     my ($removed, $added) = (lines("-", $diff), lines("+", $diff));
-    my %moved = map { text($_) => 1 } keys %$added;
+    my %net; # per text, how many more lines the branch removes than adds back anywhere
+    $net{text($_)} += $removed->{$_} for keys %$removed;
+    $net{text($_)} -= $added->{$_} for keys %$added;
     my @bad;
     for (split /\n/, run("git log --no-merges --format=\"%H %s\" -60 $base")) {
       my ($c, $s) = /^(\S+) (.*)/ or next;
@@ -489,9 +494,10 @@ undo_guard() {
       next if grep { index($c, $_) == 0 } @named;
       my $show = "diff-tree -p --root -U0 --no-renames --no-color --format= $c";
       my $put = lines("+", $show);
-      my $n = keys %$put;
+      my ($n, $gone, %here) = (0, 0);
+      for (keys %$put) { $n += $put->{$_}; $here{text($_)} += min($put->{$_}, $removed->{$_} // 0) }
       next if $n < 4;
-      my $gone = grep { $removed->{$_} && !$moved{text($_)} } keys %$put;
+      $gone += min($here{$_}, max(0, $net{$_} // 0)) for keys %here;
       next if $gone < 0.9 * $n;
       my $took = lines("-", $show);
       my $back = grep { $added->{$_} } keys %$took;

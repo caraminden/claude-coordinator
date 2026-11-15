@@ -104,6 +104,60 @@ test("a stale squash, which reverts what landed since the branch started, is ref
   assert.equal(git(r.main, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
 });
 
+// The Trans Agenda #66, 2026-11-15: a nightly export repeats lines like "linked: null" in every record, so its
+// revert put back the old records' copies and those counted as moves of the new ones: 89% removed, under the bar.
+const records = (dir: string, names: string[]) => {
+  for (const name of names) {
+    writeFileSync(join(dir, `${name}.yaml`), [`id: record-${name}`, `title: the ${name} record`, `source: https://example.org/${name}`, `notes: none for ${name}`, 'linked: null', "answer: 'no' given"].join('\n') + '\n');
+  }
+  git(dir, 'add', '-A');
+};
+
+test('a stale squash that reverts an export of records repeating lines is still refused (Trans Agenda #66)', () => {
+  const r = setup();
+  records(r.main, ['old']);
+  git(r.main, 'commit', '-qm', 'nightly export 1');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  git(r.main, 'rm', '-q', 'old.yaml');
+  records(r.main, ['new1', 'new2', 'new3', 'new4']);
+  git(r.main, 'commit', '-qm', 'nightly export 2');
+  const main = git(r.main, 'rev-parse', 'main');
+  git(r.wt, 'reset', '--soft', 'main');
+  git(r.wt, 'commit', '-qm', 'squashed');
+  const res = r.run();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, new RegExp(`removes what these landed, without naming them:\\nland:   ${main.slice(0, 12)} nightly export 2 \\(22 of the 24 lines`));
+  assert.equal(git(r.main, 'rev-parse', 'main'), main);
+});
+
+test('moving records with repeated lines into one file is a move, not an undo', () => {
+  const r = setup();
+  records(r.main, ['one', 'two']);
+  git(r.main, 'commit', '-qm', 'two records');
+  git(r.wt, 'rebase', '-q', 'main');
+  const both = readFileSync(join(r.wt, 'one.yaml'), 'utf8') + readFileSync(join(r.wt, 'two.yaml'), 'utf8');
+  git(r.wt, 'rm', '-q', 'one.yaml', 'two.yaml');
+  writeFileSync(join(r.wt, 'all.yaml'), both);
+  git(r.wt, 'add', '-A');
+  git(r.wt, 'commit', '-qm', 'one file for the records');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(r.main, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+});
+
+test("a WIP commit of the branch's own ticket is the branch's, not an undo", () => {
+  const r = setup();
+  writeFileSync(join(r.main, 'c.txt'), [1, 2, 3, 4, 5].map((k) => `an earlier part of #1, line ${k}\n`).join(''));
+  git(r.main, 'add', '-A');
+  git(r.main, 'commit', '-qm', 'WIP #1: the first part');
+  git(r.wt, 'rebase', '-q', 'main');
+  git(r.wt, 'rm', '-q', 'c.txt');
+  git(r.wt, 'commit', '-qm', 'the first part goes');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+});
+
 test('a failed push keeps main moved and says so', () => {
   const r = setup();
   git(r.main, 'remote', 'set-url', 'origin', join(r.dir, 'missing.git'));

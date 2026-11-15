@@ -195,14 +195,25 @@ test('does nothing with no database, or on a filesystem without attributes', () 
   assert.match(moveToNoCow(db, fakeOps({ noCow: () => null })).note, /no file attributes/);
 });
 
-// The real chattr and lsattr, where the test's temp dir is on btrfs (perigee's /home).
+// The real chattr and lsattr on the test's temp dir: on btrfs (perigee's /home) the file moves and has C; on a
+// filesystem without the attribute (CI's runner) the real chattr fails and the old file stays, whole. CI allows
+// no skipped tests, so this runs everywhere and checks whichever case the disk gives it.
 const BTRFS = 0x9123683e;
-test('on btrfs, the moved file really has the C attribute', { skip: statfsSync(root).type !== BTRFS && 'not btrfs' }, () => {
+test('with the real chattr: moved with C on btrfs, left whole where the attribute is missing', () => {
   const db = stopped();
-  assert.equal(hostOps.noCow(db), false);
+  const ino = statSync(db).ino;
+  const rows = settings(db);
+  assert.notEqual(hostOps.noCow(db), true);
   assert.deepEqual(hostOps.openBy(db), []);
   const r = moveToNoCow(db);
-  assert.equal(r.moved, true, r.note);
-  assert.equal(hostOps.noCow(db), true);
-  assert.equal(hostOps.noCow(`${db}-wal`), true);
+  if (statfsSync(root).type === BTRFS) {
+    assert.equal(r.moved, true, r.note);
+    assert.equal(hostOps.noCow(db), true);
+    assert.equal(hostOps.noCow(`${db}-wal`), true);
+  } else {
+    assert.equal(r.moved, false, r.note);
+    assert.equal(statSync(db).ino, ino);
+    assert.ok(!existsSync(`${db}.nocow-tmp`));
+  }
+  assert.equal(settings(db), rows);
 });

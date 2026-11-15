@@ -14,8 +14,8 @@ import { after, test } from 'node:test';
 // The snapshot records each file's mode, and the server's umask (077 under its unit) isn't a shell's.
 process.umask(0o022);
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'turn-launch-')));
-// A late child (the fake systemd-run appending units.jsonl) wrote into root mid-delete under CI load: ENOTEMPTY.
-// So end every process under root, stop following turns and close the database before the delete.
+// The delete hit ENOTEMPTY under CI load (#758): a turn's session save was still running, and its worker thread
+// made state.db in root mid-delete. launch() waits for each save; this ends whatever else a failed test leaves.
 after(async () => {
   await stopTurns(root);
   for (const live of (runner as any).turns.values()) clearInterval(live.timer);
@@ -101,8 +101,10 @@ async function launch(c: Case) {
     spawned: spawned.map(({ how, wrapper }) => ({ how, wrapper })), unit: existsSync(units) ? jsonLines(units) : null };
   // End it: the wrapper that would have run it never started.
   writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
-  for (let i = 0; i < 1000 && runner.isRunning(t.id); i++) await wait(10);
-  assert.ok(!runner.isRunning(t.id), 'the turn ended');
+  // Its lane ends with the session save, whose worker thread opens state.db under root: wait for that too.
+  const busy = () => runner.isRunning(t.id) || (runner as any).lanes.busy(t.id);
+  for (let i = 0; i < 1000 && busy(); i++) await wait(10);
+  assert.ok(!busy(), 'the turn ended and its session is saved');
   return scrub(got);
 }
 

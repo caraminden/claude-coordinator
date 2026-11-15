@@ -9,13 +9,13 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { promisify } from 'node:util';
 import { scriptEnv } from './script-env.ts';
-import { git } from './git.ts';
 
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'kit-land-drift-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // COORDINATOR_*: a minion's own would send the stand-in's message to its real Taskmaster.
 const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined }), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 const TEMPLATE = 'kit/skills/scheme-setup/templates/land.sh';
 
 let n = 0;

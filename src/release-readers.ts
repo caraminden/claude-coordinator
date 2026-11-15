@@ -8,8 +8,8 @@ import type { CiMirror } from './ci-mirror.ts';
 import type { Kind } from './ci-store.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
-import { CITADEL_TARGET, git, landedIn, releaseOf, type Change, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
-import type { BuildFile, Found, TargetFinder } from './release-targets.ts';
+import { CITADEL_TARGET, git, landedIn, releaseOf, type Change, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
+import { shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { median } from './waits.ts';
 
@@ -39,7 +39,20 @@ export function usualOf(rows: { stages: string }[]): (stage: string) => number |
 }
 
 /** The target as served: the finder's own fields stay here. */
-export const targetOf = (t: Found) => ({ id: t.id, projectId: t.projectId, name: t.name, kind: t.kind, link: t.link });
+export const targetOf = (t: Found) => ({ id: t.id, projectId: t.projectId, name: t.name, kind: t.kind, link: t.link, ...(t.numbering ? { numbering: t.numbering } : {}) });
+
+/** Whether files ship on `t` among its scheme's targets (#764, shipsTo); a scheme with one target takes everything. */
+export function shipsOnTarget(t: Found, all: Found[]): (files: string[] | null | undefined) => boolean {
+  const scheme = all.filter((x) => x.projectId === t.projectId);
+  return scheme.length < 2 ? () => true : (files) => shipsTo(files, scheme).includes(t.id);
+}
+
+/** What landed that ships on `t`: its commits and minions by the files they touched. */
+export function landedOn(landed: Landed, on: (files: string[] | null | undefined) => boolean): Landed {
+  return { ...landed, commits: new Map([...landed.commits].filter(([sha]) => on(landed.files.get(sha)))), tickets: landed.tickets.filter((x) => on(landed.ticketFiles.get(x.id))) };
+}
+
+const asChange = (x: { id: number; number: number | null; title: string }) => ({ ticketId: x.id, number: x.number, title: x.title });
 
 /** A contraption's stages: main waits for someone to call deploy_contraption, then the deploy's own steps. */
 export const CONTRAPTION_TRACK = ['call', 'build', 'drain', 'restart', 'live'];
@@ -97,7 +110,9 @@ export class ContraptionReader implements Reader {
       const p = this.scheme(t, row);
       const main = p && (await git(['rev-parse', '--verify', '--quiet', `${row.branch ?? t.branch}^{commit}`], p.repo_dir!))?.trim();
       if (p && deployed && main) {
-        const landed = deployed === main ? { commits: new Map(), tickets: [] } : await landedIn(this.d.store, p, deployed, main);
+        const all = deployed === main ? null : await landedIn(this.d.store, p, deployed, main);
+        // Only what ships on this app: a scheme's other targets' folders (an APK's android/) don't wait on its deploy.
+        const landed = deployed === main ? { commits: new Map(), tickets: [] } : all && landedOn(all, shipsOnTarget(t, this.d.finder.list()));
         if (landed) {
           s.ahead = landed.commits.size;
           s.oldest = landed.commits.size ? Math.min(...landed.commits.values()) : null;
@@ -115,7 +130,8 @@ export class ContraptionReader implements Reader {
     const row = store.getContraption(view.name);
     const t = this.d.finder.list('contraption').find((x) => x.contraption === view.name);
     const p = row && t ? this.scheme(t, row) : null;
-    const landed = p && view.from && view.to && view.from !== view.to ? await landedIn(store, p, view.from, view.to) : null;
+    const all = p && view.from && view.to && view.from !== view.to ? await landedIn(store, p, view.from, view.to) : null;
+    const landed = all && t ? landedOn(all, shipsOnTarget(t, this.d.finder.list())) : null;
     const end = view.finished_at ?? (this.d.now ?? Date.now)();
     store.addContraptionDeploy({
       name: view.name, from_sha: view.from, to_sha: view.to, by: view.by, started_at: view.started_at, finished_at: end, outcome: view.state,
@@ -206,6 +222,9 @@ const SENT_MS = 3 * 60_000;
 
 /** Re-read a workflow that isn't moving this often; one that is, every refresh. */
 const IDLE_MS = 5 * 60_000;
+/** Main moved past every run seen in the last FRESH_MS: its run should be listed soon, so look again this often (#764). */
+const EARLY_MS = 30_000;
+const FRESH_MS = 10 * 60_000;
 
 interface RunJobs {
   run: Run;
@@ -268,8 +287,13 @@ class RunsCache {
   private d: ActionsDeps;
   runs = new Map<string, RunJobs[]>();
   private readAt = new Map<string, number>();
-  /** The minions in each run's commits since the shipped run before it, by run id. */
-  changes = new Map<number, Release['changes']>();
+  /** What each run's commits carry since the shipped run before it, with their files, by run id. */
+  private landed = new Map<number, Landed | null>();
+  /** The minions in a run's commits since the shipped run before it that ship on `t` (#764). */
+  changes(t: Found, r: RunJobs): Release['changes'] {
+    const l = this.landed.get(r.run.id);
+    return l ? landedOn(l, shipsOnTarget(t, this.d.finder.list())).tickets.map(asChange) : [];
+  }
   /** The download of what each shipped run made, in Citadel's CI store, by run id: looked up each read, since the store sweeps. */
   file(id: number): string | null {
     return this.files.get(id) ?? null;
@@ -297,7 +321,11 @@ class RunsCache {
     const now = (this.d.now ?? Date.now)();
     const had = this.runs.get(tkey(t));
     const moving = had?.some((r) => r.run.status !== 'completed');
-    if (had && !moving && now - (this.readAt.get(tkey(t)) ?? 0) < IDLE_MS) return;
+    const age = now - (this.readAt.get(tkey(t)) ?? 0);
+    if (had && !moving && age < IDLE_MS) {
+      const [head, ct] = (p.repo_dir ? (await git(['log', '-1', '--format=%H %ct', t.branch], p.repo_dir))?.trim().split(' ') : null) ?? [];
+      if (age < EARLY_MS || !head || had.some((r) => r.run.head_sha === head) || now - Number(ct) * 1000 > FRESH_MS) return;
+    }
     const runs = await this.d.actions.workflowRuns(p, t.workflow.replace(/^.*\//, ''), t.branch);
     if (!runs) return;
     this.readAt.set(tkey(t), now);
@@ -320,7 +348,7 @@ class RunsCache {
     }
     this.runs.set(tkey(t), out);
     const kept = new Set([...this.runs.values()].flat().map((r) => r.run.id));
-    for (const id of this.changes.keys()) if (!kept.has(id)) this.changes.delete(id);
+    for (const id of this.landed.keys()) if (!kept.has(id)) this.landed.delete(id);
     for (const id of this.files.keys()) if (!kept.has(id)) this.files.delete(id);
     for (const id of this.artifacts.keys()) if (!kept.has(id)) this.artifacts.delete(id);
     const slug = repoSlug(p.repo_url);
@@ -348,10 +376,9 @@ class RunsCache {
     // What each run carries since the run before it that shipped (read once a run is done).
     if (p.repo_dir) {
       for (const [i, r] of out.entries()) {
-        if (this.changes.has(r.run.id) && r.run.status === 'completed') continue;
+        if (this.landed.has(r.run.id) && r.run.status === 'completed') continue;
         const prev = out.slice(i + 1).find(shipped);
-        const landed = prev && prev.run.head_sha !== r.run.head_sha ? await landedIn(this.d.store, p, prev.run.head_sha, r.run.head_sha) : null;
-        this.changes.set(r.run.id, (landed?.tickets ?? []).map((x) => ({ ticketId: x.id, number: x.number, title: x.title })));
+        this.landed.set(r.run.id, prev && prev.run.head_sha !== r.run.head_sha ? await landedIn(this.d.store, p, prev.run.head_sha, r.run.head_sha) : null);
       }
     }
   }
@@ -375,8 +402,24 @@ class RunsCache {
     return this.d.store.listReleases(t.projectId, t.id, -1).map((r) => Number(r.version.replace(/^run:/, ''))).sort((a, b) => b - a);
   }
 
-  /** The release number of each recorded run, and how many there are: the newest's number. */
+  /** What is on `t`'s branch since commit `from` and ships on `t`, read again when either end moves (#764); null: not known. */
+  async since(t: Found, from: string | null): Promise<Landed | null> {
+    const p = this.d.store.getProject(t.projectId);
+    const head = p?.repo_dir && from ? (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim() : null;
+    if (!p || !from || !head) return null;
+    const key = `${from}..${head}`;
+    const had = this.ahead.get(tkey(t));
+    if (had?.key === key) return had.landed;
+    const all = head === from ? { commits: new Map(), tickets: [], files: new Map(), ticketFiles: new Map() } : await landedIn(this.d.store, p, from, head);
+    const landed = all && landedOn(all, shipsOnTarget(t, this.d.finder.list()));
+    this.ahead.set(tkey(t), { key, landed });
+    return landed;
+  }
+  private ahead = new Map<string, { key: string; landed: Landed | null }>();
+
+  /** The release number of each recorded run, and how many there are: the newest's number; by GitHub's run number for a target numbered so. */
   numbers(t: Found): { of: (r: RunJobs) => number | null; total: number } {
+    if (t.numbering?.number === 'run') return { of: (r) => r.run.run_number ?? null, total: 0 };
     const runs = this.recorded(t);
     const by = new Map(runs.map((run, i) => [run, runs.length - i]));
     return { of: (r) => by.get(runKey(r)) ?? null, total: runs.length };
@@ -392,6 +435,8 @@ export const CI_TRACK = ['ci', 'package', 'live'];
 export class CiPackageReader implements Reader {
   private d: ActionsDeps;
   private cache: RunsCache;
+  /** What is on main past the current release and ships on it (#764), by target. */
+  private pending = new Map<string, Landed | null>();
   constructor(d: ActionsDeps) {
     this.d = d;
     this.cache = new RunsCache(d);
@@ -401,6 +446,8 @@ export class CiPackageReader implements Reader {
     for (const t of this.d.finder.list('ci')) {
       await this.cache.read(t);
       this.cache.record(t);
+      const cur = (this.cache.runs.get(tkey(t)) ?? []).find(shipped);
+      this.pending.set(tkey(t), await this.cache.since(t, cur?.run.head_sha ?? null));
     }
   }
 
@@ -408,17 +455,31 @@ export class CiPackageReader implements Reader {
     const now = (this.d.now ?? Date.now)();
     return this.d.finder.list('ci').map((t) => {
       const runs = this.cache.runs.get(tkey(t)) ?? [];
-      const ch = (r: RunJobs) => this.cache.changes.get(r.run.id) ?? [];
+      const ch = (r: RunJobs) => this.cache.changes(t, r);
       const file = (r: RunJobs) => this.cache.file(r.run.id);
       const num = this.cache.numbers(t);
       const cur = runs.find(shipped);
       const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
       const usual = runUsual(runs);
       // The newest run in flight leads; a run older than the current release can't be its next.
-      const moving = runs.find((r) => r.run.status !== 'completed');
-      const lead = moving && (!cur || runs.indexOf(moving) < runs.indexOf(cur)) ? runProgress(moving, usual, now) : null;
-      const changes: Change[] = lead ? ch(moving!).map((c) => ({ ...c, ...lead })) : [];
-      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), file(cur), num.of(cur)) : null, next: lead ? nextOf(CI_TRACK, usual, lead, changes, num.total + 1) : null, line: [], recent };
+      const newer = (r: RunJobs) => !cur || runs.indexOf(r) < runs.indexOf(cur);
+      const moving = runs.find((r) => r.run.status !== 'completed' && newer(r));
+      const running = moving ? runProgress(moving, usual, now) : null;
+      // On main past the current release and not in a run in flight (#764): waiting for CI to build it, or for a fix
+      // when the newest run after the current release failed.
+      const ahead = this.pending.get(tkey(t));
+      const failed = runs.find((r) => r.run.status === 'completed' && newer(r));
+      const text = failed && failedShip(failed) ? 'CI failed on main: it waits on a fix' : 'on main: it goes out with the next build CI ships';
+      const waiting: Progress | null = ahead?.commits.size ? { stage: 'ci', since: Math.min(...ahead.commits.values()), usual: null, waitingOn: text, text } : null;
+      const inRun = new Set(moving ? ch(moving).map((c) => c.ticketId) : []);
+      const changes: Change[] = [
+        ...(running ? ch(moving!).map((c) => ({ ...c, ...running })) : []),
+        ...(waiting ? (ahead?.tickets ?? []).filter((x) => !inRun.has(x.id)).map((x) => ({ ...asChange(x), ...waiting })) : []),
+      ];
+      const lead = running ?? waiting;
+      // A target numbered by run knows its number once its run exists.
+      const number = t.numbering?.number === 'run' ? (moving?.run.run_number ?? null) : num.total + 1;
+      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), file(cur), num.of(cur)) : null, next: lead ? nextOf(CI_TRACK, usual, lead, changes, number) : null, line: [], recent };
     });
   }
 }
@@ -467,6 +528,8 @@ export class ApkReader implements Reader {
   private old = new Set<number>();
   /** When Citadel last started a release run: GitHub can take a while to list it, and till then it would look unstarted. */
   private sent = new Map<string, number>();
+  /** What is on main since the published APK's commit and touches the app's folder (#764), by target. */
+  private ahead = new Map<string, Landed | null>();
   constructor(d: ApkDeps) {
     this.d = d;
     this.cache = new RunsCache(d);
@@ -477,7 +540,11 @@ export class ApkReader implements Reader {
       await this.cache.read(t);
       if (t.contraption) this.feeds.set(tkey(t), await this.d.feed(t.contraption));
       // With no latest.json its signed runs are its releases, numbered as a CI package's.
-      if (!this.feeds.get(tkey(t))) this.cache.record(t);
+      const feed = this.feeds.get(tkey(t));
+      if (!feed) this.cache.record(t);
+      // The published APK's commit: the newest signed run from before latest.json was written.
+      const built = feed ? (this.cache.runs.get(tkey(t)) ?? []).find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at) : null;
+      this.ahead.set(tkey(t), await this.cache.since(t, built?.run.head_sha ?? null));
       const p = this.d.store.getProject(t.projectId);
       if (!p?.repo_dir) continue;
       const head = (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim();
@@ -546,7 +613,9 @@ export class ApkReader implements Reader {
       const recent = runs.filter((r) => shipped(r) || failedShip(r)).slice(0, PREVIOUS).map((r) => apkRun(r, shipped(r) ? 'signed' : 'failed', file(r)));
       let lead: Progress | null = null;
       let tryIt: string | null = null;
-      if (main && main.code > feed.versionCode) {
+      const ahead = this.ahead.get(tkey(t));
+      const bumped = !!main && main.code > feed.versionCode;
+      if (bumped) {
         const signed = runs.find((r) => shipped(r) && !this.old.has(r.run.id) && (ms(r.run.created_at) ?? 0) > feed.at);
         const name = main.name ?? `Release ${main.code}`;
         if (moving) lead = signing(moving);
@@ -558,8 +627,14 @@ export class ApkReader implements Reader {
           const text = `${name} is on main, but its release run hasn't started: the Deploy button starts it, or auto-deploy once main sits still for 5 minutes`;
           lead = { stage: 'sign', since: feed.at, usual: null, waitingOn: text, text };
         }
+      } else if (ahead?.commits.size) {
+        // Changes to the app on main with the version unchanged: no release run builds them until it is bumped (#764).
+        const what = ahead.commits.size === 1 ? '1 change to the app on main waits' : `${ahead.commits.size} changes to the app on main wait`;
+        const text = `${what} on a version bump: a release needs a higher versionCode`;
+        lead = { stage: 'sign', since: Math.min(...ahead.commits.values()), usual: null, waitingOn: text, text };
       }
-      return { target: targetOf(t), current, next: lead ? nextOf(APK_TRACK, usual, lead, [], main?.code ?? null, tryIt) : null, line: [], recent };
+      const changes: Change[] = lead ? (ahead?.tickets ?? []).map((x) => ({ ...asChange(x), ...lead })) : [];
+      return { target: targetOf(t), current, next: lead ? nextOf(APK_TRACK, usual, lead, changes, bumped ? main!.code : null, tryIt) : null, line: [], recent };
     });
   }
 }
@@ -657,8 +732,88 @@ export class PrsInFlight {
         continue;
       }
       const { ticketId: _i, number: _n, title: _t, ...lead } = prs[0];
-      const number = tv.target.kind === 'apk' || tv.current?.number == null ? null : tv.current.number + 1; // an APK's is its versionCode, not known before the bump
+      // An APK's is its versionCode, not known before the bump; a run-numbered target's, not before its run.
+      const number = tv.target.kind === 'apk' || tv.target.numbering?.number === 'run' || tv.current?.number == null ? null : tv.current.number + 1;
       tv.next = nextOf([...PR_STAGES, ...(TRACKS[tv.target.kind] ?? ['live'])], (s) => (s === 'checks' ? checks.usual : null), lead, prs, number);
+    }
+  }
+}
+
+export interface LandDeps {
+  store: Store;
+  finder: Pick<TargetFinder, 'list'>;
+  /** Handed-off lands (src/land.ts Landings): which minions have one, and its output so far (code null while it runs). */
+  landings: { handoffs(): number[]; get(ticketId: number): { output: string; code: number | null } | null };
+  now?: () => number;
+}
+
+/** Where a land stands from land.sh's `queue:` lines: in line for the lock (its place), or landing. */
+export function landProgress(output: string, since: number): Progress {
+  const last = output.split('\n').filter((l) => l.startsWith('queue: ')).at(-1) ?? '';
+  const place = /^queue: (\d+(?:st|nd|rd|th)) in line for the land lock/.exec(last)?.[1];
+  if (place) {
+    const text = `in line to land (${place})`;
+    return { stage: 'land', since, usual: null, waitingOn: text, text, brief: place };
+  }
+  return { stage: 'land', since, usual: null, waitingOn: null, text: 'landing: tests, then onto main' };
+}
+
+/**
+ * Minions handed off to land (#764), on their way before they reach main: in line for the land lock, then landing.
+ * Each goes on the targets its branch's files ship on, ahead of their own stages, from the hand-off until main has it
+ * (then a reader has it as on main). Not for Citadel's own scheme (its land line has them) or Main (it ships at merge).
+ */
+export class LandsInFlight {
+  private d: LandDeps;
+  /** When each was first seen landing (ms), so a poll doesn't move it. */
+  private seen = new Map<number, number>();
+  /** Each landing branch's files against its scheme's branch (null while read), filled behind the poll. */
+  private files = new Map<number, string[] | null>();
+  constructor(d: LandDeps) {
+    this.d = d;
+  }
+
+  /** The files a minion's branch changed; null until read (git runs behind the poll, never in it). */
+  private filesOf(t: Ticket, base: string, dir: string): string[] | null {
+    if (!this.files.has(t.id)) {
+      this.files.set(t.id, null);
+      void git(['diff', '--name-only', `${base}...${t.branch}`], dir).then((out) => {
+        if (out != null) this.files.set(t.id, out.split('\n').filter(Boolean));
+        else this.files.delete(t.id);
+      });
+    }
+    return this.files.get(t.id) ?? null;
+  }
+
+  attach(views: Omit<TargetView, 'testCopies'>[]) {
+    const now = (this.d.now ?? Date.now)();
+    const landing = this.d.landings.handoffs().map((id) => ({ id, run: this.d.landings.get(id) })).filter((x) => x.run?.code === null);
+    const ids = new Set(landing.map((x) => x.id));
+    for (const id of this.seen.keys()) if (!ids.has(id)) this.seen.delete(id);
+    for (const id of this.files.keys()) if (!ids.has(id)) this.files.delete(id);
+    const all = this.d.finder.list();
+    for (const { id, run } of landing) {
+      const t = this.d.store.getTicket(id);
+      const p = t?.branch ? this.d.store.getProject(t.project_id) : null;
+      const mine = views.filter((v) => v.target.projectId === t?.project_id);
+      if (!t || !p?.repo_dir || !mine.length || mine.some((v) => v.target.kind === 'main' || v.target.id === CITADEL_TARGET)) continue;
+      const targets = all.filter((x) => x.projectId === t.project_id);
+      const on = new Set(shipsTo(this.filesOf(t, targets[0]?.branch ?? 'main', p.repo_dir), targets));
+      if (!this.seen.has(id)) this.seen.set(id, now);
+      const lead = landProgress(run!.output, this.seen.get(id)!);
+      const change: Change = { ...asChange(t), ...lead };
+      for (const tv of mine.filter((v) => on.has(v.target.id))) {
+        if (tv.next?.changes.some((c) => c.ticketId === id)) continue;
+        if (tv.next) {
+          // Its own release leads: what is on main is further along than a land.
+          const stages = tv.next.stages.some((s) => s.name === 'land') ? tv.next.stages : [{ name: 'land', usual: null }, ...tv.next.stages];
+          tv.next = { ...tv.next, stages, changes: [...tv.next.changes, change] };
+          continue;
+        }
+        // An APK's number is its versionCode, a run-numbered target's its run's: neither known yet.
+        const number = tv.target.kind === 'apk' || tv.target.numbering?.number === 'run' || tv.current?.number == null ? null : tv.current.number + 1;
+        tv.next = nextOf(['land', ...(TRACKS[tv.target.kind] ?? ['live'])], () => null, lead, [change], number);
+      }
     }
   }
 }

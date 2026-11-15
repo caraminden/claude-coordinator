@@ -9,8 +9,8 @@ import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
-import { CITADEL_TARGET, Releases, type TargetView } from '../src/releases.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, LandsInFlight, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { CITADEL_TARGET, named, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
 
@@ -754,4 +754,185 @@ test('a mirrored artifact links once the mirror says it is in the store, though 
   assert.equal(reader.read()[0].current?.link, `/api/projects/${p.id}/ci-files/${row.id}/r.zip`);
   assert.equal(reads.artifacts, 1, 'its artifacts were listed once');
   assert.equal(wanted.length, 1, 'once in the store, not wanted again');
+});
+
+/** A commit touching `file` at `at`, on a minion's branch named `branch` whose tip it is; its sha. */
+function landOne(repo: string, at: number, file: string, branch?: string): string {
+  mkdirSync(join(repo, file, '..'), { recursive: true });
+  writeFileSync(join(repo, file), `${file} ${at}\n`);
+  git(repo, 'add', '-A');
+  gitAt(at, repo, 'commit', '-q', '-m', file);
+  const sha = git(repo, 'rev-parse', 'HEAD');
+  if (branch) git(repo, 'branch', branch, sha);
+  return sha;
+}
+
+test('a CI package numbered by run: what is on main for it waits for CI, a run carries it as "Build <run>", a red run waits on a fix; the app\'s folder stays off it (#764)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `peek-repo-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  const now = Date.now(), m = 60_000;
+  const base = landOne(repo, now - 60 * m, 'README.md');
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek');
+  store.setProjectRepoDir(p.id, repo);
+  const minion = (title: string, branch: string) => {
+    const t = store.createTicket({ project_id: p.id, title, permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(t.id, root, branch);
+    return t;
+  };
+  minion('Overlay fix', 'ticket/1-overlay');
+  minion('Companion page', 'ticket/2-companion');
+  // A minion's work counts once it is newer than the minion (landedIn).
+  const at = Date.now() + 1000;
+  landOne(repo, at, 'crates/overlay/lib.rs', 'ticket/1-overlay');
+  const head = landOne(repo, at + 1000, 'companion/page.ts', 'ticket/2-companion');
+  const app: Found = { id: 'app:peek', projectId: p.id, name: 'Companion', kind: 'contraption', link: '/apps/peek/', branch: 'main', contraption: 'peek', paths: ['companion/'] };
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', numbering: { name: 'Build {n}', number: 'run' } };
+  const runs: Run[] = [{ ...run(996, 'completed', 'success', now - 58 * m, now - 50 * m), head_sha: base }];
+  const jobs: Record<number, Job[]> = { 996: [job(996, 'release', 'completed', 'success', now - 55 * m, now - 50 * m)] };
+  const { actions, reads } = fakeActions(runs, jobs);
+  let clock = now;
+  const reader = new CiPackageReader({ store, finder: finderOf([app, t]), actions, now: () => clock });
+  const view = () => {
+    const [v] = reader.read();
+    named(v);
+    return v;
+  };
+  await reader.refresh();
+  let v = view();
+  assert.deepEqual([v.current?.number, v.current?.name], [996, 'Build 996'], 'numbered by its run, named by its template');
+  assert.deepEqual(v.target.numbering, { name: 'Build {n}', number: 'run' }, 'served, for the page');
+  assert.equal(v.next?.stage, 'ci');
+  assert.equal(v.next?.waitingOn, 'on main: it goes out with the next build CI ships');
+  assert.deepEqual(v.next?.changes.map((c) => c.title), ['Overlay fix'], "the companion's change ships on the app, not the Windows build");
+  assert.deepEqual([v.next?.number, v.next?.name], [null, 'Next build'], 'no run yet: no number');
+  assert.ok(Math.abs(v.next!.since - at) < 2000, 'since its oldest commit on main');
+
+  // CI starts a run on main's head: main moved past every run seen, so it's read again 30 s on, not 5 min.
+  runs.unshift({ ...run(997, 'in_progress', null, now - 1 * m), head_sha: head });
+  jobs[997] = [job(997, 'release', 'in_progress', null, now - 1 * m, null)];
+  clock += 10_000;
+  await reader.refresh();
+  assert.equal(reads.runs, 1, 'not yet: 10 s since the last read');
+  clock += 25_000;
+  await reader.refresh();
+  assert.equal(reads.runs, 2);
+  v = view();
+  assert.deepEqual([v.next?.stage, v.next?.number, v.next?.name], ['package', 997, 'Build 997']);
+  assert.deepEqual(v.next?.changes.map((c) => [c.title, c.stage]), [['Overlay fix', 'package']]);
+
+  // Its release job fails: what it carried waits on a fix.
+  runs[0] = { ...run(997, 'completed', 'failure', now - 1 * m, clock), head_sha: head };
+  jobs[997] = [job(997, 'release', 'completed', 'failure', now - 1 * m, clock)];
+  await reader.refresh();
+  v = view();
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.name], ['ci', 'CI failed on main: it waits on a fix', 'Next build']);
+  assert.deepEqual(v.recent.map((r) => [r.number, r.name, r.outcome]), [[997, 'Build 997', 'failed']]);
+
+  // Fixed and shipped: the release carries only what ships on Windows, and nothing is left on its way.
+  runs.unshift({ ...run(998, 'completed', 'success', clock, clock + m), head_sha: head });
+  jobs[998] = [job(998, 'release', 'completed', 'success', clock, clock + m)];
+  clock += 6 * m;
+  await reader.refresh();
+  v = view();
+  assert.deepEqual([v.current?.name, v.current?.changes.map((c) => c.title)], ['Build 998', ['Overlay fix']]);
+  assert.equal(v.next, null);
+});
+
+test('an APK: changes to its folder on main with no version bump wait on one; the web app\'s changes stay off it (#764)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `apk-bump-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  const now = Date.now(), m = 60_000;
+  writeFileSync(join(repo, 'x'), '');
+  mkdirSync(join(repo, 'android/app'), { recursive: true });
+  writeFileSync(join(repo, 'android/app/build.gradle'), 'defaultConfig {\n  versionCode 5\n  versionName "1.4"\n}\n');
+  git(repo, 'add', '-A');
+  gitAt(now - 300 * m, repo, 'commit', '-q', '-m', 'v5');
+  const built = git(repo, 'rev-parse', 'HEAD');
+  const p = store.createProject('Mandate', 'https://github.com/o/mandate');
+  store.setProjectRepoDir(p.id, repo);
+  for (const [title, branch] of [['Widget', 'ticket/1-widget'], ['Inbox', 'ticket/2-inbox']]) store.setTicketDir(store.createTicket({ project_id: p.id, title, permission_mode: 'default', created_by: 'Cara' }).id, root, branch);
+  landOne(repo, Date.now() + 1000, 'android/app/src/Widget.kt', 'ticket/1-widget');
+  landOne(repo, Date.now() + 2000, 'server.ts', 'ticket/2-inbox');
+  const web: Found = { id: 'app:mandate', projectId: p.id, name: 'Web', kind: 'contraption', link: '/apps/mandate/', branch: 'main', contraption: 'mandate' };
+  const t: Found = { id: 'apk:android-release', projectId: p.id, name: 'Android', kind: 'apk', link: '/apps/mandate/android/', branch: 'main', workflow: '.github/workflows/android-release.yml', contraption: 'mandate', paths: ['android/'] };
+  const { actions } = fakeActions([{ ...run(6, 'completed', 'success', now - 290 * m, now - 280 * m), head_sha: built }], {});
+  const reader = new ApkReader({ store, finder: finderOf([web, t]), actions, now: () => now, feed: async () => ({ versionCode: 5, apk: 'mandate-5.apk', at: now - 200 * m }) });
+  await reader.refresh();
+  const [v] = reader.read();
+  assert.equal(v.next?.stage, 'sign');
+  assert.equal(v.next?.waitingOn, '1 change to the app on main waits on a version bump: a release needs a higher versionCode');
+  assert.deepEqual(v.next?.changes.map((c) => c.title), ['Widget']);
+  assert.equal(v.next?.number, null, 'its versionCode is not known before the bump');
+  assert.equal(reader.pending(t), null, 'nothing for auto-deploy to start');
+});
+
+test('landProgress: in line for the lock with its place, then landing', () => {
+  const line = landProgress('…\nqueue: 2nd in line for the land lock, about 9 min (ahead: ticket/441-x, checked 10:02)\n', 5);
+  assert.deepEqual(line, { stage: 'land', since: 5, usual: null, waitingOn: 'in line to land (2nd)', text: 'in line to land (2nd)', brief: '2nd' });
+  const got = landProgress('queue: 2nd in line for the land lock, about 9 min\nqueue: got the land lock\n', 5);
+  assert.deepEqual([got.waitingOn, got.text], [null, 'landing: tests, then onto main']);
+  assert.equal(landProgress('', 5).waitingOn, null, 'no queue lines yet: landing');
+});
+
+test('a handed-off land is on its targets from the hand-off: in line, then landing, ahead of what is on main (#764)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `land-repo-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  landOne(repo, Date.now(), 'README.md');
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek');
+  store.setProjectRepoDir(p.id, repo);
+  const x = store.createTicket({ project_id: p.id, title: 'Overlay fix', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(x.id, root, 'ticket/1-overlay');
+  git(repo, 'checkout', '-q', '-b', 'ticket/1-overlay');
+  landOne(repo, Date.now(), 'crates/overlay/lib.rs');
+  git(repo, 'checkout', '-q', 'main');
+  const app: Found = { id: 'app:peek', projectId: p.id, name: 'Companion', kind: 'contraption', link: null, branch: 'main', paths: ['companion/'] };
+  const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
+  let output = 'queue: 2nd in line for the land lock, about 9 min (ahead: ticket/441-x)\n';
+  let code: number | null = null;
+  const lands = new LandsInFlight({ store, finder: finderOf([app, ci]), landings: { handoffs: () => [x.id], get: () => ({ output, code }) }, now: () => 1000 });
+  const views = () => [app, ci].map((t) => ({ target: { id: t.id, projectId: t.projectId, name: t.name, kind: t.kind, link: null, ...(t.numbering ? { numbering: t.numbering } : {}) }, current: { version: 'v', number: 996, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} }, next: null, line: [], recent: [] }));
+  let vs = views();
+  lands.attach(vs);
+  assert.deepEqual(vs.map((v) => v.next?.changes.map((c) => c.title) ?? []), [['Overlay fix'], []], 'its files not read yet: the first target');
+  for (let i = 0; i < 100 && vs[1].next == null; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+    vs = views();
+    lands.attach(vs);
+  }
+  assert.equal(vs[0].next, null, 'its branch touches no companion file');
+  const [v] = [vs[1]];
+  assert.deepEqual(v.next?.stages.map((s) => s.name), ['land', 'ci', 'package', 'live']);
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.brief, v.next?.number], ['land', 'in line to land (2nd)', '2nd', null], 'numbered by run: not known yet');
+  named(v);
+  assert.equal(v.next?.name, 'Next build');
+
+  // It gets the lock, while something already on main waits for CI: that leads, the land joins behind it.
+  output += 'queue: got the land lock\n';
+  vs = views();
+  vs[1].next = { stage: 'ci', since: 0, usual: null, waitingOn: 'w', text: 'w', number: null, link: null, stages: [{ name: 'ci', usual: null }, { name: 'package', usual: 5 }, { name: 'live', usual: 0 }], eta: null, changes: [{ ticketId: 99, number: 9, title: 'On main', stage: 'ci', since: 0, usual: null, waitingOn: 'w', text: 'w' }] };
+  lands.attach(vs);
+  assert.deepEqual(vs[1].next?.stages.map((s) => s.name), ['land', 'ci', 'package', 'live']);
+  assert.deepEqual(vs[1].next?.changes.map((c) => [c.title, c.stage, c.waitingOn]), [['On main', 'ci', 'w'], ['Overlay fix', 'land', null]]);
+
+  // Done: off the list (a reader has it on main now).
+  code = 0;
+  vs = views();
+  lands.attach(vs);
+  assert.deepEqual(vs.map((v) => v.next), [null, null]);
+});
+
+test('named: a template names each numbered release; a next with no number is "Next <name>"; none keeps the default', () => {
+  const r = (number: number | null) => ({ version: 'v', number, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} });
+  const tv = { target: { id: 'x', projectId: 1, name: 'X', kind: 'ci', link: null, numbering: { name: 'Build {n}' } }, current: r(5), recent: [r(4), r(null)], next: { ...r(null), stage: 'ci', since: 0, usual: null, waitingOn: null, text: '', stages: [], eta: null, changes: [] } };
+  named(tv);
+  assert.deepEqual([tv.current.name, tv.recent.map((x) => (x as { name?: string }).name), tv.next.name], ['Build 5', ['Build 4', undefined], 'Next build']);
+  const plain = { ...tv, target: { ...tv.target, numbering: undefined }, current: r(5), next: null, recent: [] };
+  named(plain);
+  assert.equal((plain.current as { name?: string }).name, undefined, 'no template: the page says "Release 5"');
 });

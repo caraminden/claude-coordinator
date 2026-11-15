@@ -33,6 +33,8 @@ export interface Release {
   number: number | null;
   /** The release itself: the live site, the file to download; null when there's nothing to open (never a commit). */
   link: string | null;
+  /** Its name from its target's own numbering ("Build 997", Target.numbering); absent: "Release <number>". */
+  name?: string;
   changes: { ticketId: number; number: number | null; title: string }[];
   /** When its first change started on its way (ms), and when it went live; null when not known. */
   started: number | null;
@@ -69,6 +71,8 @@ export interface Change extends Progress {
 export interface Next extends Progress {
   /** The number it will have once live, when known. */
   number: number | null;
+  /** Its name from its target's own numbering ("Build 997", "Next build" before its number is known); absent: "Release <number>". */
+  name?: string;
   /** Something to try it on before it's live (a preview, a signed build), or null. */
   link: string | null;
   /** The kind's stages in order, each with its usual length in s (null: not known, or a wait): the bar's segments. */
@@ -168,6 +172,15 @@ export interface ReleasesDeps {
   inFlight?: (views: Omit<TargetView, 'testCopies'>[]) => void;
 }
 
+/** A target's releases named by its own template (#764): "Build {n}" → "Build 997"; a next with no number yet "Next build". */
+export function named(tv: Pick<TargetView, 'target' | 'current' | 'next' | 'recent'>) {
+  const tpl = tv.target.numbering?.name;
+  if (!tpl) return;
+  const name = (n: number | null) => (n == null ? null : tpl.replace(/\{n\}/g, String(n)));
+  for (const r of [tv.current, ...tv.recent]) if (r && r.number != null) r.name = name(r.number)!;
+  if (tv.next) tv.next.name = name(tv.next.number) ?? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}`;
+}
+
 export class Releases {
   private d: ReleasesDeps;
   private shown = new Map<number, string>();
@@ -184,6 +197,7 @@ export class Releases {
     const scheme = (id: number) => byScheme.get(id) ?? byScheme.set(id, { projectId: id, targets: [], testCopies: [] }).get(id)!;
     const views = this.d.readers.flatMap((r) => r.read());
     this.d.inFlight?.(views);
+    for (const t of views) named(t);
     for (const t of views) {
       const deploy = this.d.deploy?.(t);
       scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}) });
@@ -454,17 +468,39 @@ export class CitadelServer implements Reader {
  */
 export async function landedIn(store: Store, p: Project, prev: string, head: string) {
   const [log, refs] = await Promise.all([
-    git(['log', '--format=%H %ct', `${prev}..${head}`], p.repo_dir!),
+    git(['log', '--format=%x01%H %ct', '--name-only', `${prev}..${head}`], p.repo_dir!),
     git(['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads/'], p.repo_dir!),
   ]);
   if (log == null || refs == null) return null;
-  const commits = new Map(log.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ct]) => [sha, Number(ct) * 1000]));
+  const commits = new Map<string, number>();
+  /** The files each commit touched (#764), so a change can be put on the target that ships them. */
+  const files = new Map<string, string[]>();
+  for (const chunk of log.split('\x01').slice(1)) {
+    const [line, ...names] = chunk.split('\n');
+    const [sha, ct] = line.split(' ');
+    commits.set(sha, Number(ct) * 1000);
+    files.set(sha, names.filter(Boolean));
+  }
   const tips = new Map(refs.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ref]) => [ref, sha]));
   const tickets = store.listTickets(p.id)
     .filter((t) => t.kind === 'ticket' && t.branch && commits.has(tips.get(t.branch) ?? '') && commits.get(tips.get(t.branch)!)! >= t.created_at - 1000)
     .sort((a, b) => (a.number ?? a.id) - (b.number ?? b.id));
-  return { commits, tickets };
+  // A minion's files: its commits, oldest first up to its branch's tip, since the tip before it (history is linear).
+  const at = new Map<string, number[]>();
+  for (const t of tickets) (at.get(tips.get(t.branch!)!) ?? at.set(tips.get(t.branch!)!, []).get(tips.get(t.branch!)!)!).push(t.id);
+  const ticketFiles = new Map<number, string[]>();
+  let run = new Set<string>();
+  for (const sha of [...commits.keys()].reverse()) {
+    for (const f of files.get(sha)!) run.add(f);
+    const ids = at.get(sha);
+    if (!ids) continue;
+    for (const id of ids) ticketFiles.set(id, [...run]);
+    run = new Set();
+  }
+  return { commits, tickets, files, ticketFiles };
 }
+
+export type Landed = NonNullable<Awaited<ReturnType<typeof landedIn>>>;
 
 /** Every scheme's previews that people were offered, and the builds' previews of the scheme whose code this server runs. */
 export function previewCopies(store: Store, d: { own: () => Project | null; running: (key: string) => { commit: string | null } | null; builds: (projectId: number) => number[] }): Map<number, TestCopy[]> {

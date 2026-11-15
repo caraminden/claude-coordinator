@@ -70,7 +70,7 @@ import { Waits } from './src/waits.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { dispatch, OldApk, OtherKey, publish } from './src/apk-release.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
@@ -558,6 +558,7 @@ const prDeps = {
 const mainReader = new MainReader({ ...prDeps, finder: targetFinder });
 // Every other scheme's open PRs, on its first target (#655).
 const prsInFlight = new PrsInFlight(prDeps);
+const landsInFlight = new LandsInFlight({ store, finder: targetFinder, landings });
 // The other test copies (#627): minions' downloads, preview sites and debug APKs, read with the targets on the slow poll.
 const testCopyReader = new TestCopyReader({
   store, finder: targetFinder, actions, mirror: ciMirror, sharedDir,
@@ -567,7 +568,10 @@ const testCopyReader = new TestCopyReader({
   }),
 });
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv), inFlight: (views) => prsInFlight.attach(views),
+  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv), inFlight: (views) => {
+    landsInFlight.attach(views);
+    prsInFlight.attach(views);
+  },
   scan: async () => {
     await targetFinder.scan();
     await testCopyReader.scan();

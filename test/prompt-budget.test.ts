@@ -77,7 +77,7 @@ test('saving instructions says what they cost, the same in the settings page and
   assert.equal(instructionCost('x'.repeat(11_664)), 'These instructions are about 2.9k tokens; each 1k costs about $22 a week across minions.');
   assert.equal(instructionCost('x'.repeat(400)), 'These instructions are about 100 tokens; each 1k costs about $22 a week across minions.');
   assert.equal(instructionCost('  '), '');
-  for (const n of [0, 400, 11_664, 16_000]) assert.equal(page('x'.repeat(n)), instructionCost('x'.repeat(n)));
+  for (const n of [0, 400, 11_664, 32_000]) assert.equal(page('x'.repeat(n)), instructionCost('x'.repeat(n)));
 });
 
 // The kit's skill and agent descriptions (#708): Claude Code lists every one in the prefix each call re-reads,

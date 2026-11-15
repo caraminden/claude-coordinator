@@ -16,3 +16,7 @@ on the dev copy it starts and keeps, then `citadel-dev-copy stop`. It is also th
 --step 'wait .msg.user | hi'`, and its `open()` gives a script a signed-in page. A scratch server takes its port from
 `freePort()` (`src/ports.ts`), and a page that isn't Citadel's gets `test/browser.ts` (headless Chromium over a pipe,
 no port, no dependency).
+
+Dev copies, scratch servers and browser `--remote-debugging-port`s take a random free port (1024-32767, outside 8000-8999
+unless a person needs Tailscale, never 8573), checked with `ss -ltn`; connect only to the port your process reported and
+stop it when done. The one-line rule is in the Citadel-wide instructions; `freePort()` does it for a script.

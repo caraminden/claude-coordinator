@@ -133,8 +133,8 @@ export type OnboardingMode = (typeof ONBOARDING_MODES)[number];
 /** Whether a scheme is still being set up, which is what gives its Taskmaster the onboarding section. */
 export const onboardingOpen = (p: Pick<Project, 'onboarding'>) => p.onboarding !== 'done' && p.onboarding !== 'skipped';
 
-/** Longest project instructions the app accepts, the same cap as Claude Code's own projects. */
-export const MAX_INSTRUCTIONS = 16_000;
+/** Longest Citadel-wide or scheme instructions the app accepts. Every turn of every minion pays for every character, so the cap keeps the text lean; it is ours, not Claude Code's (which only warns on size). */
+export const MAX_INSTRUCTIONS = 32_000;
 export const MAX_PERSONAL_INSTRUCTIONS = 4_000;
 /** A person's own instructions as a minion they own loads them: for everywhere, then for its scheme ('' for none). */
 export type PersonalLayer = { name: string; everywhere: string; scheme: string };

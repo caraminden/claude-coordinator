@@ -144,7 +144,7 @@ if ('launchQueue' in window) {
 
 // ---------- project instructions ----------
 
-const MAX_INSTRUCTIONS = 16000;
+const MAX_INSTRUCTIONS = 32000;
 const count = (n) => n.toLocaleString('en');
 
 export function onProjectUpdate(project) {

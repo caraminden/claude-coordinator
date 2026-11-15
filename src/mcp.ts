@@ -593,8 +593,8 @@ const TOOLS = [
   {
     name: 'set_project_instructions',
     description:
-      'Replace the scheme instructions with new text (max 16,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 16000, description: 'The whole new text, at most 16,000 characters' } }, required: ['instructions'] },
+      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' } }, required: ['instructions'] },
   },
   {
     name: 'get_project_settings',
@@ -652,8 +652,8 @@ const APP_INSTRUCTION_TOOLS = [
   {
     name: 'set_app_instructions',
     description:
-      `Replace the ${APP_NAME}-wide instructions with new text (max 16,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change. A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 16000, description: 'The whole new text, at most 16,000 characters' } }, required: ['instructions'] },
+      `Replace the ${APP_NAME}-wide instructions with new text (max 32,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change. A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' } }, required: ['instructions'] },
   },
 ];
 

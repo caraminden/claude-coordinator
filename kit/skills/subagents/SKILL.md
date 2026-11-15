@@ -15,7 +15,7 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
 - Effort: sessions run at high. Agent calls set `effort` per call when the work is mechanical:
   `low` for a read-only search that finds where something lives, `medium` for one that reads and
   summarises (code, transcripts, usage data, docs lookups). Building and general-purpose workers
-  inherit high. Never put `effort` on a skill: it would hold for the rest of a long turn, and a
+  inherit high. Nothing above high unless a person asks (xhigh only after a Fable run has failed twice; never max). Never put `effort` on a skill: it would hold for the rest of a long turn, and a
   switch mid-session may restart the prompt cache.
 - Models: Agent calls set `model` too. A general-purpose Grunt gets `sonnet` by default (reading,
   research legwork, regeneration, reviewer passes); `haiku` for bulk reads; the

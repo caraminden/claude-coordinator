@@ -9,6 +9,8 @@ A scheme's CI jobs run on its self-hosted runners and upload what they keep to C
 tailnet. Nothing goes to GitHub's artifact storage: its quota is shared by every repo of an
 account, and when it fills, every scheme's uploads fail and their land gates go red (2026-11-13).
 
+CI runs on Cara's desktop runners; GitHub-hosted runners only through `CI_RUNNER=github`, after asking Cara (Josh's rule, Cara's yes, 2026-11-05). A scheme whose repo has no runners there gets them with the `ci_runners` tool (scheme setup does this for any repo with workflows).
+
 ## What a workflow may keep
 
 - **Reports** (test reports, logs, screenshots, crash dumps): only from a run that failed

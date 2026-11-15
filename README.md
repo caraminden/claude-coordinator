@@ -433,6 +433,18 @@ runs it on perigee instead (`LAND_CI=0` forces that). A conflict
 or a red test stops it before `main` moves; a deploy whose checks fail puts
 `main` back too.
 
+Usually the minion doesn't run it itself: it hands the land off with the
+`hand_off_land` tool (mcp__thread, #706) and ends its turn, so a clean land costs no
+model calls. The server refuses uncommitted work at once, runs `tools/land.sh` in the
+worktree as the `land` tool does (a host job under `run/landings/<minion>/`, which
+outlives the restart it queues), and polls it every 5 s (`LandHandoffs` in
+`src/land.ts`). On exit 0 it posts the shipped line (commit, the minion's summary and
+risk label, live or waiting) and dismisses the minion, or sets pending-deploy when the
+restart is still to come. Exit 75 parks it until the scheme's runners are back. Any
+other exit, a cut-off run included, wakes the minion with the end of the output. A
+person who writes to the minion while its land waits keeps it open: it is told the
+result instead of dismissed.
+
 A big feature can run as a build: a branch `build/<n>` its minions merge into and
 that lands on `main` once (the design is `specs/build-branches.md` in the scheme's
 shared folder). `tools/land.sh --into build/<n> <test files>` merges a feeder in:

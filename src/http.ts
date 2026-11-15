@@ -34,10 +34,13 @@ import type { ClientErrors, DeployWatch } from './deploy-watch.ts';
 /** An answer with a status: what any route or module throws to refuse a request. */
 export class HttpError extends Error {
   status: number;
+  /** A 5xx the server gives on purpose about something outside it (a lent machine that's offline): not a server fault, so the deploy watch doesn't count it. */
+  expected: boolean;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, expected = false) {
     super(message);
     this.status = status;
+    this.expected = expected;
   }
 }
 

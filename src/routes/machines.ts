@@ -301,7 +301,7 @@ export const machineRoutes: Route[] = [
       // The owner check too: a removed machine's id can come back as someone else's.
       if (!turn.machines.includes(id) || app.store.getMachine(id)?.owner_id !== turn.person) throw new HttpError(403, 'That machine isn\'t this turn\'s person\'s, or the turn started without it');
       const who = `${app.store.getUser(turn.person)?.name ?? 'someone'} in ${app.store.listContraptions().find((c) => c.id === turn.contraption)?.title ?? 'a contraption'}`;
-      if (!app.machines.openSession(id, { contraptionTurn: turn.id }, 'mcp', who, res)) throw new HttpError(503, 'That machine is offline');
+      if (!app.machines.openSession(id, { contraptionTurn: turn.id }, 'mcp', who, res)) throw new HttpError(503, 'That machine is offline', true);
     },
   },
   {
@@ -310,7 +310,7 @@ export const machineRoutes: Route[] = [
       const turn = contraptionTurn(ctxToken(req), app);
       if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
       const body = await readJson(req, 50_000_000);
-      if (!app.machines.fromSession(params.session, { contraptionTurn: turn.id }, body.message)) throw new HttpError(503, 'That machine went offline');
+      if (!app.machines.fromSession(params.session, { contraptionTurn: turn.id }, body.message)) throw new HttpError(503, 'That machine went offline', true);
       return json(res, 202, {});
     },
   },
@@ -352,7 +352,7 @@ export const machineRoutes: Route[] = [
         throw new HttpError(403, 'That machine isn\'t lent to this scheme');
       }
       const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;
-      if (!app.machines.openSession(Number(params.machineId), { ticketId: caller!.id, projectId: caller!.project_id }, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline');
+      if (!app.machines.openSession(Number(params.machineId), { ticketId: caller!.id, projectId: caller!.project_id }, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline', true);
     },
   },
   {
@@ -360,7 +360,7 @@ export const machineRoutes: Route[] = [
     async handler({ req, res, app, caller, params }) {
       if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
       const body = await readJson(req, 50_000_000);
-      if (!app.machines.fromSession(params.session, { ticketId: caller!.id, projectId: caller!.project_id }, body.message)) throw new HttpError(503, 'That machine went offline');
+      if (!app.machines.fromSession(params.session, { ticketId: caller!.id, projectId: caller!.project_id }, body.message)) throw new HttpError(503, 'That machine went offline', true);
       return json(res, 202, {});
     },
   },

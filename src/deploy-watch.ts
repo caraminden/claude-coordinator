@@ -99,6 +99,11 @@ export function worse(before: number, after: number, floor: number): boolean {
   return after >= floor && after >= 2 * before;
 }
 
+/** Whether a failed request is a server fault the watch should count: a 5xx, unless the server gave it knowingly (HttpError.expected). */
+export function countsAsServerFault(status: number, err: unknown): boolean {
+  return status >= 500 && !(err as { expected?: boolean } | null)?.expected;
+}
+
 export class DeployWatch {
   private d: WatchDeps;
   private ticking = false;

@@ -15,7 +15,7 @@ import { ClaudeLink } from './src/claude-link.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
-import { ClientErrors, DeployWatch, gitCommits } from './src/deploy-watch.ts';
+import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
@@ -1032,7 +1032,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     const status = err instanceof HttpError ? err.status : 500;
     if (status === 500) console.error(err);
     // Ids in the path would split one failing route into many readings.
-    if (status >= 500) deployWatch?.record('server-5xx', `${req.method} ${(req.url ?? '').split('?')[0].replace(/\d+/g, '#')}: ${String(err?.message ?? err).slice(0, 200)}`);
+    if (countsAsServerFault(status, err)) deployWatch?.record('server-5xx', `${req.method} ${(req.url ?? '').split('?')[0].replace(/\d+/g, '#')}: ${String(err?.message ?? err).slice(0, 200)}`);
     // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
     if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
     else res.end();

@@ -7,7 +7,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import vm from 'node:vm';
 import { HEALTH_MAX_ROWS, Store } from '../src/db.ts';
-import { ClientErrors, DEDUPE_MS, DeployWatch, gitCommits, RATE } from '../src/deploy-watch.ts';
+import { HttpError } from '../src/http.ts';
+import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, gitCommits, RATE } from '../src/deploy-watch.ts';
 
 // The post-deploy watch (#724): readings before and after each deploy, a wake for whoever shipped a regression.
 const root = mkdtempSync(join(tmpdir(), 'deploy-watch-'));
@@ -289,4 +290,21 @@ test('the beacon never throws, sends each error once, skips network noise and st
   failing = false;
   for (let i = 0; i < 20; i++) error(`e${i}`);
   assert.equal(sent.length, 3 + 6, 'at most ten distinct errors a page (one went to the failing fetch)');
+});
+
+test('offline-machine session answers after a deploy are not server faults and never wake a minion', async () => {
+  const { clock, woken, mailed, w, deploy } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  const at = clock.now;
+  deploy(sha('1'), [{ sha: sha('1'), subject: 'x' }]);
+  // The server's catch, as in server.ts: the machine routes' 503s carry `expected`.
+  const offline = new HttpError(503, 'That machine is offline, or its workspace tools are off', true);
+  for (let i = 0; i < 8; i++) if (countsAsServerFault(offline.status, offline)) w.record('server-5xx', 'GET /api/machines/#/session: offline');
+  assert.equal(countsAsServerFault(503, new HttpError(503, 'down')), true); // an unflagged 5xx still counts
+  assert.equal(countsAsServerFault(500, new Error('boom')), true);
+  assert.equal(countsAsServerFault(404, new HttpError(404, 'x')), false);
+  clock.now = at + 20 * MIN;
+  await w.tick();
+  assert.deepEqual([woken, mailed], [[], []]);
 });

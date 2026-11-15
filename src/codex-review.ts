@@ -198,7 +198,12 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
   const gen = opts.imageGen;
   const env = opts.env ?? process.env;
   // An image run needs no shell: off, so Codex can only call image_gen, and the hook runs in image mode (#738), which lets only image_gen through.
-  const imageCfg = gen ? imageConfig(env) : null;
+  let imageCfg: string | null = null;
+  try {
+    imageCfg = gen ? imageConfig(env) : null;
+  } catch (err: any) {
+    return Promise.resolve({ code: 1, text: `Couldn't write the image run's tripwire config: ${err.message}`, usage: '' });
+  }
   const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"', ...(gen ? ['-c', 'features.shell_tool=false'] : [])], { cwd: opts.cwd, env: imageCfg ? { ...env, CITADEL_CODEX_TRIPWIRE: imageCfg } : env, stdio: ['pipe', 'pipe', 'pipe'] });
   let nextId = 1;
   const waiting = new Map<number, (msg: any) => void>();

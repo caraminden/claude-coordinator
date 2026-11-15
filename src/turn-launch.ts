@@ -215,10 +215,12 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
 /**
  * Bundled Claude Code skills that never fired in 19 days of transcripts (#699), set "off" (Claude Code 2.1.323's
  * skillOverrides: skill name -> "off" | "name-only" | "user-invocable-only"). Each one's listing is read on every call.
+ * #760 adds four with no use in a week of turns, each with a Citadel twin: simplify (citadel:self-review),
+ * fewer-permission-prompts (turns run without prompts), run (citadel-dev-copy) and security-review.
  * plugin-authoring (Delve's mods) and the rest stay on.
  */
 export const UNUSED_BUNDLED_SKILLS = Object.fromEntries(
-  ['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init'].map((n) => [n, 'off']),
+  ['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init', 'simplify', 'fewer-permission-prompts', 'run', 'security-review'].map((n) => [n, 'off']),
 ) as Record<string, 'off'>;
 export const TURN_SETTINGS = { autoCompactWindow: 180_000, bashOutputMaxChars: 12_000, skillOverrides: UNUSED_BUNDLED_SKILLS };
 /** A Taskmaster's compact window (#423): same window as a minion's since #703, kept as its own constant; it hands off past FRESH_CONTEXT_TOKENS anyway. */

@@ -124,7 +124,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -324,7 +328,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -559,7 +567,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -957,7 +969,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -1320,7 +1336,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -1514,7 +1534,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -1714,7 +1738,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -1929,7 +1957,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2147,7 +2179,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2347,7 +2383,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2551,7 +2591,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2754,7 +2798,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2949,7 +2997,11 @@
     "loop": "off",
     "keybindings-help": "off",
     "workflow-authoring": "off",
-    "init": "off"
+    "init": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "security-review": "off"
    },
    "permissions": {
     "deny": [

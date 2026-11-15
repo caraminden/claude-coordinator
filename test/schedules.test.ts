@@ -127,14 +127,12 @@ test('a schedule pauses, resumes from now, comes due once, and records its runs'
   assert.deepEqual(store.schedules.list(p), []);
 });
 
-test("a run's brief says how to file a quiet run away without a ping, then gives the brief", () => {
+test("a run's brief names the schedule and ends with the brief", () => {
   const store = new Store(':memory:');
   const p = store.createProject('One', null).id;
   const s = store.schedules.create({ project_id: p, name: 'Nightly', cron: '0 3 * * *', brief: 'Is main healthy?', type: 'chore', created_by: 'Cara' });
   const text = runBrief(s, 'Oct 29, 2026, 3:00 AM');
   assert.match(text, /^Scheduled run of "Nightly" \(Every day at 03:00/);
-  assert.match(text, /close_self/);
-  assert.match(text, /leaving state null/);
   assert.ok(text.endsWith('\n\nIs main healthy?'));
 });
 

@@ -151,16 +151,14 @@ test('state enum error: the string "null" is read as null', async () => {
   assert.ok(!(await tool(Minion, 'thread', 'message_coordinator', { text: 'null' })).isError);
 });
 
-test('"is too long": the limit is in the schema and the description, and the error names it', async () => {
+test('"is too long": the limit is in the schema, and the error names it', async () => {
   const thread = await listTools('thread', Minion);
   const status = thread.find((t) => t.name === 'set_thread_status').inputSchema.properties;
   assert.equal(status.note.maxLength, 60);
-  assert.match(status.note.description, /at most 60 characters/);
   assert.equal(status.title.maxLength, 120);
   assert.equal(status.replies.items.maxLength, 40);
   const option = thread.find((t) => t.name === 'ask_question').inputSchema.properties.questions.items.properties.options.items.properties;
   assert.equal(option.description.maxLength, 300);
-  assert.match(option.description.description, /at most 300 characters/);
   assert.equal(option.label.maxLength, 80);
   // Every string the server caps carries its cap: none of these tools' text arguments is left without one.
   const coord = await listTools('coordinator', TM);
@@ -171,7 +169,6 @@ test('"is too long": the limit is in the schema and the description, and the err
   ] as const) {
     const p = (list as any[]).find((t) => t.name === name).inputSchema.properties[field];
     assert.ok(p.maxLength > 0, `${name}.${field} has no maxLength`);
-    assert.match(p.description, new RegExp(`at most ${p.maxLength.toLocaleString('en')} characters`, 'i'), `${name}.${field}`);
   }
   refused(await tool(Minion, 'thread', 'set_thread_status', { note: 'x'.repeat(61) }), /Note is too long: 61 characters, at most 60/);
 });

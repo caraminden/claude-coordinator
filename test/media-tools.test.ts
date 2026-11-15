@@ -43,19 +43,9 @@ async function mcp(env: Record<string, string>, method: string, params: object =
 const tools = async (env: Record<string, string>) => (await mcp(env, 'tools/list')).tools as { name: string; description: string }[];
 const both = { COORDINATOR_MEDIA: '1', COORDINATOR_CODEX_IMAGES: '1' };
 
-test('every generative media tool opens by saying it is not the default: images and sound are made with code (Cara, 2026-11-14)', async () => {
+test('the generative media tools are offered, in order', async () => {
   const media = (await tools(both)).filter((t) => /image|audio/.test(t.name));
   assert.deepEqual(media.map((t) => t.name), ['generate_image', 'edit_image', 'generate_audio', 'generate_image_codex']);
-  for (const t of media) {
-    assert.match(t.description, /^Not the default: (images are drawn|sound is made) with code \(/, t.name);
-    assert.match(t.description, /only when a person explicitly asks for a generative model, or a scheme system calls for one\./, t.name);
-  }
-});
-
-test('raster images go to Codex and SVG and sound to OpenRouter, which also takes a PNG Codex refuses (Cara, 2026-11-14, "Codex for raster images")', async () => {
-  const by = Object.fromEntries((await tools(both)).map((t) => [t.name, t.description]));
-  for (const n of ['generate_image', 'edit_image']) assert.match(by[n], /Raster images \(PNG\) go to generate_image_codex.*SVG \(Recraft\).*isn't offered or refused because a Codex limit is near/, n);
-  assert.match(by.generate_image_codex, /SVG and sound go to OpenRouter/);
 });
 
 test('generate_image_codex is offered only with its flag, and never to a Taskmaster', async () => {

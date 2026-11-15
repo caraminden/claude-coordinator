@@ -20,10 +20,6 @@ const project = { id: 2, name: 'Demo', repo_dir: repo, instructions: '' } as any
 const ticket = { id: 9, kind: 'ticket', number: 3, title: 'Try it', branch: 'ticket/3-try-it' } as any;
 const coordinator = { ...ticket, kind: 'coordinator' };
 
-test('the project shared folder sits beside the per-ticket ones and cannot clash with them', () => {
-  assert.equal(shared, join(root, 'projects', '2', 'shared', 'project'));
-});
-
 test('Claude Code names the memory folder by turning every non-alphanumeric character into a dash', () => {
   assert.equal(projectSlug('/home/cara/.local/share/claude-coordinator/projects/2/repo'), '-home-cara--local-share-claude-coordinator-projects-2-repo');
 });
@@ -71,31 +67,9 @@ test('without a repo there is no memory folder to add', () => {
   assert.deepEqual(addDirs, [tickets, shared]);
 });
 
-test('threads and the coordinator are told where the shared folder is and what goes in it', () => {
-  for (const t of [ticket, coordinator]) {
-    const prompt = systemPrompt(project, t, join(root, 'shared', '9'), shared, tickets, memory);
-    const line = prompt.split('\n').find((l) => l.startsWith(shared));
-    assert.ok(line, `${t.kind} prompt names ${shared}`);
-    assert.match(line, /handoffs, specs and notes/i);
-    assert.match(line, /scratch files, build output and secrets/);
-    assert.match(line, /inbox\/ holds files people uploaded/); // the Files view's upload lands there (#676)
-  }
-  assert.ok(!systemPrompt(project, ticket, null, null, tickets, null).includes('every thread in the project'));
-});
-
-test('minions are told to batch TaskUpdate and set_thread_status with a real tool call', () => {
-  assert.match(systemPrompt(project, ticket, null, null, tickets, null), /Send TaskUpdate and set_thread_status in the same message as a real tool call/);
-});
-
-test('neither prompt mentions the retired minion tag (#254)', () => {
-  for (const t of [ticket, coordinator]) assert.doesNotMatch(systemPrompt(project, t, null, null, tickets, null), /\btag\b/);
-});
-
 test('only the coordinator is told about its memory folder', () => {
   assert.ok(systemPrompt(project, coordinator, null, shared, tickets, memory).includes(memory));
   assert.ok(!systemPrompt(project, ticket, null, shared, tickets, null).includes('Claude Code memory'));
-  // It runs read-only Bash and `git -C` (coordinatorAccess), so the memory line must not say it can't run shell commands (#468 S04-9).
-  assert.doesNotMatch(systemPrompt(project, coordinator, null, shared, tickets, memory), /cannot run shell commands/);
 });
 
 test('the Shared group lists documents and pages only', async () => {

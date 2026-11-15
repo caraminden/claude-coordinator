@@ -36,6 +36,8 @@ export type PushTrigger =
   | { kind: 'question'; questions: { question: string }[]; eventId?: number; to?: string }
   | { kind: 'plan'; summary: string; eventId?: number; to?: string }
   | { kind: 'error'; text: string; eventId?: number }
+  /** A running turn passed a spend stage (#723); `also` is the turn's person, who hears it on top of the usual people. */
+  | { kind: 'spend'; text: string; eventId?: number; also?: string }
   | { kind: 'state'; state: string | null; note: string | null };
 
 /** States worth a ping: a result to look at, or a blocker. */
@@ -137,6 +139,8 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
     body = clip(`Plan to approve: ${trigger.summary}`);
   } else if (trigger.kind === 'error') {
     body = clip(`Turn failed: ${trigger.text.split('\n')[0]}`);
+  } else if (trigger.kind === 'spend') {
+    body = clip(trigger.text);
   } else {
     if (!trigger.state || !NOTIFY_STATES[trigger.state]) return null;
     body = clip(trigger.note || NOTIFY_STATES[trigger.state]);
@@ -188,7 +192,7 @@ export class Pusher {
    * can't be pinned, so it always gets through). Who it is for: a card's addressee alone (#687); else for a minion with an
    * owner (`assigned`, #690; Cara, 2026-11-14: "Owner only, switch for all"), its owner, whoever pinned it, and devices
    * set to everything in this scheme; else (the Taskmaster, an unassigned minion, an owner gone from the scheme) everyone
-   * in it. Resolves once every push service has answered.
+   * in it. A spend alert (#723) also reaches the turn's own person. Resolves once every push service has answered.
    */
   async notify(ticket: Ticket, trigger: PushTrigger, except: string | null = null): Promise<void> {
     const project = this.store.getProject(ticket.project_id);
@@ -196,11 +200,12 @@ export class Pusher {
     if (!msg) return;
     const to = 'to' in trigger && trigger.to ? trigger.to.toLowerCase() : null;
     const owner = !to && ticket.kind === 'ticket' ? this.owner(ticket) : null;
+    const also = trigger.kind === 'spend' && trigger.also ? trigger.also.toLowerCase() : null;
     const pinned = (name: string) => this.store.isTicketPinned(name, ticket.id);
     const forThem = (s: PushSubscriptionRow) => to ? s.name.toLowerCase() === to
-      : !owner || s.name.toLowerCase() === owner || pinned(s.name) || JSON.parse(s.everything).includes(ticket.project_id);
+      : !owner || s.name.toLowerCase() === owner || s.name.toLowerCase() === also || pinned(s.name) || JSON.parse(s.everything).includes(ticket.project_id);
     const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && forThem(s) && !JSON.parse(s.muted).includes(ticket.project_id)
-      && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || pinned(s.name)));
+      && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || pinned(s.name) || s.name.toLowerCase() === also));
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }
 

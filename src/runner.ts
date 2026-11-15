@@ -36,6 +36,7 @@ import { GLOBAL_OWNER } from './properties.ts';
 import { homedir } from 'node:os';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
+import { SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -165,6 +166,8 @@ interface TurnState {
   fresh?: 'handoff' | 'compact';
   /** Its prompt carried a fresh session's handoff, which goes once the session exists. */
   handoff?: true;
+  /** Its estimated cost so far and the alerts fired (#723, src/spend-alert.ts). */
+  spend?: SpendState;
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -625,6 +628,10 @@ export class Runner {
   }
   /** Called when a turn fails (not when someone stops it), with the error shown in the chat and its event, if it has one. */
   onTurnError: (ticketId: number, text: string, eventId?: number) => void = () => {};
+  /** A running turn passed a spend stage (#723): push it to the usual people and the turn's person. */
+  onSpendAlert: (ticketId: number, text: string, eventId: number, person: number | null) => void = () => {};
+  /** Each running turn's spend meter, by the turn's start (a new turn starts a new one). */
+  private spends = new Map<number, { startedAt: number; meter: SpendMeter }>();
   /** Applies a turn's status trailer (src/status-trailer.ts) as set_thread_status would; the server wires it to the PATCH route's checks. */
   onStatusTrailer: (ticketId: number, fields: StatusFields) => void = () => {};
   /** The running turn's last status trailer, applied when its result comes in. */
@@ -2483,6 +2490,7 @@ export class Runner {
     clearInterval(live.timer);
     clearTimeout(live.stopTimer);
     this.turns.delete(ticketId);
+    this.spends.delete(ticketId);
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     this.store.deleteSetting(turnKey(ticketId));
     const stopped = !!turn?.stopped;
@@ -2696,6 +2704,14 @@ export class Runner {
       this.store.setSetting(contextKey(ticketId), this.contextSizes.get(ticketId));
       this.contextSizes.delete(ticketId);
     }
+    if (ev.type === 'assistant') {
+      // An alert is extra: a failure in it must not cost the line its place in the chat.
+      try {
+        this.meterSpend(ticketId, ev);
+      } catch (err: any) {
+        console.error(`[spend] minion ${ticketId}: metering failed:`, err.message);
+      }
+    }
     if (DROPPED_TYPES.has(ev.type)) return;
     // Joined into paths and passed to --resume later, and a container can write its stream: only what looks like an id.
     if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
@@ -2744,6 +2760,38 @@ export class Runner {
       this.onFilesMayChange(ticketId);
     }
     this.notePushes(ticketId, ev);
+  }
+
+  /**
+   * Count an assistant message (main thread or Grunt) toward the turn's estimated cost, and post the alert card (and push)
+   * when it passes a stage. Saved in the TurnState, so a restart carries on where it was; Codex turns aren't metered.
+   */
+  private meterSpend(ticketId: number, ev: any) {
+    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (!turn?.startedAt || turn.codex) return;
+    let spend = this.spends.get(ticketId);
+    if (spend?.startedAt !== turn.startedAt) this.spends.set(ticketId, spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend) });
+    const { meter } = spend;
+    if (!meter.add(ev)) return;
+    const stage = meter.crossed(stagesFrom(this.store.getSetting(STAGES_SETTING)));
+    this.saveTurn(ticketId, { spend: meter.state });
+    if (stage === null) return;
+    const text = spendText(meter.usd, Date.now() - turn.startedAt);
+    console.log(`[spend] minion ${ticketId}: passed $${stage}, about $${meter.usd.toFixed(2)}`);
+    const row = this.emit(ticketId, 'spend', { text, usd: Math.round(meter.usd), stage, turn: turn.startedAt });
+    this.onSpendAlert(ticketId, text, row.id, turn.person ?? null);
+  }
+
+  /** Keep going (#723): no more spend alerts for the running turn. False when no turn is running. */
+  muteSpend(ticketId: number, by: string): boolean {
+    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (!this.turns.has(ticketId) || !turn?.startedAt) return false;
+    if (turn.spend?.muted) return true;
+    const spend = this.spends.get(ticketId);
+    if (spend?.startedAt === turn.startedAt) spend.meter.muted = by;
+    this.saveTurn(ticketId, { spend: { ...(turn.spend ?? { usd: 0, fired: 0 }), muted: by } });
+    this.emit(ticketId, 'spend_muted', { turn: turn.startedAt, by });
+    return true;
   }
 
   /** A main-thread message without its status trailer, remembering the last good one for the turn's end; a bad one is noted once. */

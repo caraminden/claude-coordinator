@@ -97,6 +97,7 @@ test('only decisions, blockers and results make a notification', () => {
   assert.deepEqual(q, { title: '#34 Web Push', body: 'Tabs or a list? (+1 more)', tag: 'thread-7', url: '/c/#/p/2/t/34' });
   assert.equal(notificationFor(ticket(), { kind: 'plan', summary: 'Usage bar in the top bar' })?.body, 'Plan to approve: Usage bar in the top bar');
   assert.equal(notificationFor(ticket(), { kind: 'error', text: 'claude exited with code 1:\nboom' })?.body, 'Turn failed: claude exited with code 1:');
+  assert.equal(notificationFor(ticket(), { kind: 'spend', text: 'This turn has used about $30 in 70 min.', eventId: 5 })?.url, '/c/#/p/2/t/34?e=5');
   assert.equal(notificationFor(ticket(), { kind: 'state', state: 'ready', note: 'PR #12 open' })?.body, 'PR #12 open');
   assert.equal(notificationFor(ticket(), { kind: 'state', state: 'try', note: null })?.body, 'Ready for you to try');
   assert.equal(notificationFor(ticket(), { kind: 'state', state: 'blocked', note: 'needs a token' })?.body, 'needs a token');
@@ -342,6 +343,8 @@ test('a minion with an owner pings its owner, whoever pinned it and devices set 
   assert.deepEqual(await who(joshs, { kind: 'error', text: 'boom' }), ['Cody', 'Josh'], 'a failed turn too');
   assert.deepEqual(await who(joshs, { kind: 'question', questions: [{ question: 'Which?' }] }), ['Cody', 'Josh'], 'a card to no one in particular too');
   assert.deepEqual(await who(joshs, { kind: 'question', questions: [{ question: 'Ada?' }], to: 'Ada' }), ['Ada'], 'a card to Ada goes to her alone');
+  // A spend alert (#723) also reaches the turn's person, here Ada, on top of the usual people.
+  assert.deepEqual(await who(joshs, { kind: 'spend', text: 'This turn has used about $30 in 70 min.', also: 'ada' }), ['Ada', 'Cody', 'Josh']);
   store.setTicketPinned('Ada', joshs.id, true);
   assert.deepEqual(await who(joshs), ['Ada', 'Cody', 'Josh'], 'pinning follows a minion');
   // Stored by login, any case, it still finds him.

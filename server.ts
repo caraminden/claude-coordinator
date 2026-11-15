@@ -370,6 +370,7 @@ function notify(ticketId: number, trigger: PushTrigger, except: string | null = 
 }
 
 runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'error', text, eventId });
+runner.onSpendAlert = (ticketId, text, eventId, person) => notify(ticketId, { kind: 'spend', text, eventId, also: person ? store.getUser(person)?.name : undefined });
 
 // Chained minions (create_ticket's start_after): one starts with its held brief once its leader's work is in (src/wake.ts startChained).
 const startChain = (c: Chain, why: string) => startChained(c, why, { store, runner, waiters });

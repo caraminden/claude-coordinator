@@ -769,6 +769,14 @@ export const ticketRoutes: Route[] = [
       return json(res, 200, { stopped: runner.stop(id) });
     },
   },
+  // Keep going on a spend alert card (#723): no more alerts for the running turn.
+  {
+    method: 'POST', path: '/api/tickets/:ticket/spend-mute', who: ['person'],
+    async handler(ctx) {
+      const { res, app, session, ticket } = ctx;
+      return json(res, 200, { muted: app.runner.muteSpend(ticket.id, session.name) });
+    },
+  },
   // A Taskmaster's fresh session (#406): a person asks for one (the chat's button), or the Taskmaster's turn hands off (fresh_session).
   {
     method: 'POST', path: '/api/tickets/:ticket/fresh-session', who: ['person', 'self'],

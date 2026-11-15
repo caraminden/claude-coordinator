@@ -297,6 +297,46 @@ export function loopCard(data) {
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), go));
 }
 
+/**
+ * A running turn passed a spend stage (#723): its estimated cost, Stop (the chat's own stop) and Keep going (no more
+ * alerts this turn). The buttons show only while a turn runs (cards.css); a `spend_muted` event settles every card of its turn.
+ */
+export function spendCard(data, ticketId) {
+  const status = h('span', { class: 'muted', role: 'status' });
+  const stop = h('button', { type: 'button', class: 'small secondary' }, 'Stop');
+  const keep = h('button', { type: 'button', class: 'small' }, 'Keep going');
+  const el = h('div', { class: 'qcard scard', 'data-turn': data.turn },
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, `Over $${data.stage}`), data.text),
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), stop, keep));
+  const act = (word, path, label) => optimistic({
+    key: `spend:${path}:${ticketId}:${data.turn}`,
+    apply: () => {
+      el.classList.add('answered');
+      stop.hidden = keep.hidden = true;
+      status.textContent = word;
+    },
+    send: () => api(`api/tickets/${ticketId}/${path}`, { method: 'POST', body: {} }),
+    undo: () => {
+      el.classList.remove('answered');
+      stop.hidden = keep.hidden = false;
+      status.textContent = '';
+    },
+    label,
+  });
+  stop.addEventListener('click', () => act('Stopping…', 'stop', 'stop the turn'));
+  keep.addEventListener('click', () => act('Keeping going: no more alerts this turn', 'spend-mute', 'mute the spend alerts'));
+  return el;
+}
+
+/** Keep going was picked on a turn's spend card, here or on another device: settle all of that turn's cards. */
+export function settleSpend(log, data) {
+  for (const el of log.querySelectorAll(`.scard[data-turn="${Number(data.turn)}"]`)) {
+    el.classList.add('answered');
+    for (const b of el.querySelectorAll('button')) b.hidden = true;
+    el.querySelector('[role=status]').textContent = `${data.by} picked Keep going: no more alerts this turn`;
+  }
+}
+
 // ---------- question cards ----------
 
 /** "→ Tabs · keep both" lines for an answer message: the picks, then any text typed with them. */

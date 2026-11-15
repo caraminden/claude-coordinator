@@ -25,7 +25,7 @@ import { payerLine } from './payer.js';
 import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, nowDoing, planEstimate, planTrack, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
-import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, speaker } from './cards.js';
+import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, spendCard } from './cards.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
 export function chatView(chatId, ticket) {
@@ -987,6 +987,10 @@ export function appendEvent(event, scroll = true) {
       card.querySelector('button').remove();
       card.querySelector('[role=status]').textContent = `Continued by ${data.by}`;
     }
+  } else if (event.kind === 'spend') {
+    nodes.push(spendCard(data, event.ticket_id));
+  } else if (event.kind === 'spend_muted') {
+    settleSpend(log, data);
   } else if (event.kind === 'approval_result') {
     // The card itself records who decided, or why it expired.
     view.cards.get(data.id)?.settle(data);

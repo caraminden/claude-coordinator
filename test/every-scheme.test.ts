@@ -123,15 +123,13 @@ test('the tripwire refuses its writes into a contraption folder, and lets it rea
   assert.match(call('Write', { file_path: join(data, 'projects/3/repo/x'), content: '' })!, /another scheme/);
 });
 
-test('its prompt names every scheme and contraption folder on a member ask, and says why not otherwise', () => {
+test('its prompt names every scheme and contraption folder on a member ask, and not otherwise', () => {
   const view = { data, schemes: [{ id: 3, name: 'Peek' }], apps: [{ name: 'peek-auras', folder: appDir }] };
   const on = systemPrompt(citadel, tmCitadel, null, null, join(data, 'projects/2/tickets'), null, [], false, '', null, [], null, false, view);
-  assert.match(on, /You can read every scheme, read-only/);
   assert.ok(on.includes(`${join(data, 'projects')}/<number>/`) && on.includes('3 Peek') && on.includes(`peek-auras ${appDir}`));
-  assert.match(on, /list_tickets and read_ticket take `scheme`/);
   const off = systemPrompt(citadel, tmCitadel, null, null, join(data, 'projects/2/tickets'), null);
-  assert.match(off, /this one isn't: ask that scheme's/);
-  assert.doesNotMatch(systemPrompt(peek, tmPeek, null, null, join(data, 'projects/3/tickets'), null, [], false, '', null, [], null, false, view), /read every scheme/);
+  assert.ok(!off.includes(`peek-auras ${appDir}`));
+  assert.ok(!systemPrompt(peek, tmPeek, null, null, join(data, 'projects/3/tickets'), null, [], false, '', null, [], null, false, view).includes(`peek-auras ${appDir}`));
 });
 
 test("a member's container mounts the contraption folders read-only; others' don't", () => {

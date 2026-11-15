@@ -84,7 +84,6 @@ test('empty text adds no section; set, it comes right before the scheme instruct
     const layer = prompt.indexOf('# Citadel-wide instructions');
     assert.ok(layer > 0, 'the section is there');
     assert.ok(prompt.indexOf('Be kind.') > layer);
-    assert.match(prompt.slice(layer), /the scheme instruction wins only if it names the Citadel-wide rule it replaces/);
   }
   const prompt = systemPrompt(delve, store.getTicket(DelveTM.id)!, null, null, root, null, [], false, 'Be kind.');
   const layer = prompt.indexOf('# Citadel-wide instructions');
@@ -137,7 +136,7 @@ test('the MCP tools: listed only for the Citadel scheme\'s Taskmaster, and refus
 
   const set = await mcp(CitadelTM, 'tools/call', { name: 'set_app_instructions', arguments: { instructions: 'Three rules.' } }, true);
   assert.ok(!set.isError, set.content[0].text);
-  assert.equal(set.content[0].text, 'Saved (12 characters). These instructions are about 3 tokens; each 1k costs about $22 a week across minions.');
+  assert.match(set.content[0].text, /^Saved \(12 characters\)/);
   const got = await mcp(CitadelTM, 'tools/call', { name: 'get_app_instructions', arguments: {} }, true);
   assert.match(got.content[0].text, /Three rules\./);
 

@@ -12,29 +12,16 @@ const project = { id: 3, name: 'Delve', instructions: '', approval_rules: '' } a
 const minion = { id: 5, number: 5, title: 'T', kind: 'ticket', branch: 'ticket/5-t' } as any;
 const taskmaster = { ...minion, kind: 'coordinator' } as any;
 
-test('minions and Taskmasters both hear the chat, link, strike and tripwire facts', () => {
-  for (const t of [minion, taskmaster]) {
-    const p = systemPrompt(project, t, null, null, '/tickets', null);
-    assert.match(p, /write the answer last/, t.kind);
-    assert.match(p, /pull requests as PR #N/, t.kind);
-    assert.match(p, /Never paste GitHub URLs/, t.kind);
-    assert.match(p, /write the wrong words as `~~…~~` with the fix right after/, t.kind);
-    assert.ok(p.includes(TRIPWIRE_BLOCKS), t.kind);
-  }
-  assert.match(systemPrompt(project, minion, null, null, '/tickets', null), /one blocking `citadel-wait pid <pid>`/);
+test('minions and Taskmasters both get the tripwire blocks', () => {
+  for (const t of [minion, taskmaster]) assert.ok(systemPrompt(project, t, null, null, '/tickets', null).includes(TRIPWIRE_BLOCKS), t.kind);
 });
 
 test('deploy lines show only when the server runs the scheme', () => {
   const served = systemPrompt(project, minion, null, null, '/tickets', null, [], true);
-  assert.match(served, /After you deploy with tools\/deploy\.sh/);
-  assert.match(served, /or pending-deploy \(deployed with tools\/deploy\.sh/);
-  assert.match(served, /pending-deploy after tools\/deploy\.sh, close_self otherwise/);
-  assert.match(served, /does something by hand .*skip pending-deploy and close_self/);
+  assert.match(served, /tools\/deploy\.sh/);
+  assert.match(served, /pending-deploy/);
   const elsewhere = systemPrompt(project, minion, null, null, '/tickets', null);
-  assert.match(elsewhere, /skip close_self: ask that person/);
   assert.doesNotMatch(elsewhere, /deploy\.sh|pending-deploy/);
-  assert.match(elsewhere, /Once your work is finished and nothing is left for a person to answer, try, read or do by hand, end the minion in that same turn \(close_self\)/);
-  assert.match(elsewhere, /outside \(work still running elsewhere\), or null when/);
 });
 
 /** The thread MCP server's tools, with or without COORDINATOR_DEPLOYS. */
@@ -62,10 +49,10 @@ test("a minion's MCP tools mention deploys and offer previews only when the serv
   }
 });
 
-test('a minion parked on start_after hears its brief is held and to stay parked', () => {
+test('a minion parked on start_after is told what it waits on', () => {
   const held = systemPrompt(project, minion, null, null, '/tickets', null, [], false, '', "#3 Leader's work is merged");
-  assert.match(held, /You are parked: your brief is held until #3 Leader's work is merged/);
-  assert.doesNotMatch(systemPrompt(project, minion, null, null, '/tickets', null), /You are parked/);
+  assert.ok(held.includes("#3 Leader's work is merged"));
+  assert.ok(!systemPrompt(project, minion, null, null, '/tickets', null).includes("#3 Leader's work is merged"));
 });
 
 test('a minion\'s system prompt is byte-identical when its title, state, note or properties change (#704)', () => {

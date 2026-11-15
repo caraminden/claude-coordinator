@@ -626,7 +626,7 @@ function shipLine(t) {
 
 /** Unpark (#718): the row and header drop parked at once; a refusal puts them back with a toast and a retry. */
 function unpark(t) {
-  const was = { state: t.state, parked_for: t.parked_for };
+  const was = { state: t.state, parked_for: t.parked_for, held_brief: t.held_brief };
   const show = (v) => {
     for (const x of new Set([t, view?.tickets?.get(t.id)])) if (x) Object.assign(x, v);
     renderSidebar();
@@ -634,7 +634,7 @@ function unpark(t) {
   };
   optimistic({
     sets: `unpark:${t.id}`,
-    apply: () => show({ state: null, parked_for: null }),
+    apply: () => show({ state: null, parked_for: null, held_brief: null }),
     send: () => api(`api/tickets/${t.id}/unpark`, { method: 'POST', body: {} }),
     undo: () => t.state === null && show(was),
     label: `unpark ${threadLabel(t)}`,

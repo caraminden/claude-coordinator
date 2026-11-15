@@ -6,7 +6,7 @@
 
 import { frameKey } from './appswitch.js';
 import { h, icon, tintTitleBar } from './base.js';
-import { canBack, canForward, goBack, goForward } from './navstack.js';
+import { canBack, canForward, goBack, goForward, replaceHash } from './navstack.js';
 import { FRAME } from './rail.js';
 
 const frames = new Map();
@@ -82,10 +82,40 @@ if (typeof window !== 'undefined') {
   });
 }
 
-/** Leave the contraption for Citadel's last own view, where the rail's Citadel entry goes (rail.js). */
-function leave() {
+/** Citadel's last own view, where the rail's Citadel entry goes (rail.js; its stored copy before the rail is drawn). */
+function ownView() {
   const back = document.querySelector('.citadel-rail a[data-app=""]');
-  location.hash = (back && new URL(back.href).hash) || '#/';
+  if (back) return new URL(back.href).hash || '#/';
+  const key = `citadel-last-view:${new URL('./', import.meta.url).pathname}`; // rail.js viewKey
+  try { return sessionStorage.getItem(key) ?? localStorage.getItem(key) ?? '#/'; } catch { return '#/'; }
+}
+
+/** Leave the contraption for Citadel's last own view. */
+function leave() {
+  location.hash = ownView();
+}
+
+/**
+ * #765 (Cara 2026-11-15: "Sometimes when I open citadel via the PWA link on my phone, it opens to mandate"): a phone
+ * brings an installed app back as it was left, and once it has closed it in the background Chrome reloads the address
+ * it showed, so Citadel's icon could open on a framed contraption. The tap sends the page no word (Android has no
+ * launchQueue), so an installed Citadel on a phone opens on its own last view when it loads on a contraption's address
+ * (`away` unset) or comes back after `AWAY` ms or more out of sight; a shorter trip (a photo picker, a quick switch) keeps it.
+ */
+export const AWAY = 30_000;
+export const opensOnCitadel = ({ phoneApp, hash, away }) => phoneApp && /^#\/apps\//.test(hash) && (away === undefined || away >= AWAY);
+
+if (typeof window !== 'undefined') {
+  const ua = navigator.userAgent;
+  const phoneApp = matchMedia('(display-mode: standalone)').matches
+    && (/Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)); // rail.js isAndroid, isIOS
+  // Before core.js routes: no frame is made, and Back doesn't lead into it.
+  if (opensOnCitadel({ phoneApp, hash: location.hash })) replaceHash(ownView());
+  let hiddenAt = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) hiddenAt = Date.now();
+    else if (hiddenAt && opensOnCitadel({ phoneApp, hash: location.hash, away: Date.now() - hiddenAt })) replaceHash(ownView());
+  });
 }
 
 /** Show contraption `name` (its frame made on first visit), at address `src` if given: an open frame reloads there. */

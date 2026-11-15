@@ -220,8 +220,9 @@ test('the window controls keep the base colour for a see-through background and 
       if (!document.querySelector('meta[name=theme-color]')) {
         for (const [s, c] of [['light', '#f6f5f2'], ['dark', '#161514']]) document.head.insertAdjacentHTML('beforeend', '<meta name="theme-color" content="' + c + '" media="(prefers-color-scheme: ' + s + '), (display-mode: window-controls-overlay) and (prefers-color-scheme: ' + s + ')">');
       }
+      // frames.js passes the colour a frame's page reports, its bar's computed background.
       const el = ${bg === null ? 'null' : `document.body.appendChild(Object.assign(document.createElement('div'), { style: 'background: ${bg}' }))`};
-      tintTitleBar(el);
+      tintTitleBar(el && getComputedStyle(el).backgroundColor);
       return ${meta};
     })()`);
     assert.equal(await tint('transparent'), baseColour, 'a transparent background leaves the base colour, not black');

@@ -113,18 +113,18 @@ export function icon(name) {
 
 /**
  * In the desktop app (#637) the window controls sit on the page's theme colour (app.js's metas), so a
- * contraption's top bar colours them (frames.js); null puts the plain colour back. A canvas pixel turns any
- * computed colour into the hex a theme colour surely takes; a see-through one keeps the plain colour (#694).
+ * contraption's top bar colours them (frames.js, with its computed background colour); null puts the plain colour back.
+ * A canvas pixel turns any CSS colour into the hex a theme colour surely takes; a see-through one keeps the plain colour (#694).
  */
 let pixel = null;
-export function tintTitleBar(el) {
+export function tintTitleBar(color) {
   for (const m of document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')) {
     m.dataset.base ??= m.content;
-    if (!el || !matchMedia(m.media).matches) { m.content = m.dataset.base; continue; }
+    if (!color || !matchMedia(m.media).matches) { m.content = m.dataset.base; continue; }
     pixel ??= h('canvas', { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true });
     pixel.clearRect(0, 0, 1, 1);
     pixel.fillStyle = m.dataset.base;
-    pixel.fillStyle = getComputedStyle(el).backgroundColor;
+    pixel.fillStyle = color;
     pixel.fillRect(0, 0, 1, 1);
     const [r, g, b, a] = pixel.getImageData(0, 0, 1, 1).data;
     m.content = a < 255 ? m.dataset.base : `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;

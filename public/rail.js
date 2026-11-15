@@ -17,12 +17,29 @@ import { optimistic } from './ui/optimistic.js';
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
 const inContraption = import.meta.url.includes('/apps/_citadel/');
-// Citadel's own root: "/c/" live, "/preview/N/c/" in a preview; from a contraption, the host's /c/ (src/http.ts ownPath).
-const root = new URL(inContraption ? '../../c/' : './', import.meta.url);
-// Inside Citadel's frame (frames.js): Citadel's rail is the rail, and this page's switcher opens it.
-const host = (() => {
-  try { return inContraption && window.parent !== window ? window.parent.citadelRail ?? null : null; } catch { return null; }
-})();
+// Citadel's own root: "/c/" live, "/preview/N/c/" in a preview; from a contraption, the host's /c/ (src/http.ts ownPath),
+// or with contraptions on their own hosts (src/apps.ts), Citadel's address as /apps/_citadel/api/mine gives it.
+let root = new URL(inContraption ? '../../c/' : './', import.meta.url);
+
+/**
+ * Citadel and a contraption's page may be on different origins (src/apps.ts, APPS_DOMAIN), so they talk only by
+ * postMessage, each checking the other window is the one it framed or was framed by. Contraption → Citadel: hello
+ * { installed }, rail { open }, bar (its .cui-topbar, frames.js), key and blur (Alt+`, appswitch.js). Citadel →
+ * contraption: state { hasRail, narrow }, strip { vars }. A contraption's installed window → Citadel's page in its
+ * layer: layer { app }, go { app }; and back: layer-close. Nothing secret goes in one, so the target is '*'.
+ */
+export const FRAME = 'citadel-frame-1';
+const isMessage = (e, from) => !!from && e.source === from && e.data?.protocol === FRAME && typeof e.data.type === 'string';
+const post = (win, type, data = {}) => win?.postMessage({ protocol: FRAME, type, ...data }, '*');
+const framedIn = typeof window === 'object' && window.parent !== window ? window.parent : null;
+
+// Inside Citadel's frame (frames.js): Citadel's rail is the rail, and this page's switcher opens it. Its state comes from Citadel.
+let hostState = { hasRail: false };
+const host = inContraption && framedIn ? {
+  openRail: () => post(framedIn, 'rail', { open: true }),
+  closeRail: () => post(framedIn, 'rail', { open: false }),
+  hasRail: () => hostState.hasRail,
+} : null;
 /** The contraption showing: this page's own, or in Citadel the one framed (null in Citadel's own views). */
 const showing = () => (inContraption ? location.pathname.match(/\/apps\/([^/]+)\//) : location.hash.match(/^#\/apps\/([^/]+)$/))?.[1] ?? null;
 
@@ -37,9 +54,9 @@ const showing = () => (inContraption ? location.pathname.match(/\/apps\/([^/]+)\
 export function railItems(mine, current, citadel = '/', inCitadel = false) {
   if (!mine?.length) return [];
   const items = mine.map((c) => {
-    const base = `/apps/${c.name}/`;
     const down = c.up === false;
-    const icon = !c.icon || down ? null : /^(\/apps\/|https?:)/.test(c.icon) ? c.icon : base + c.icon.replace(/^\//, '');
+    // Through Citadel UI's own route (src/apps.ts kit), so a page never loads another contraption's host.
+    const icon = !c.icon || down ? null : /^https?:/.test(c.icon) ? c.icon : `/apps/_citadel/icon/${c.name}`;
     return { name: c.name, title: c.title, href: `${inCitadel ? '' : citadel}#/apps/${c.name}`, icon, current: c.name === current, down };
   });
   return [{ name: null, title: 'Citadel', href: citadel, icon: `${citadel}icon.svg`, current: !items.some((i) => i.current) }, ...items];
@@ -61,13 +78,12 @@ let shown = 0; // bumped by each show and hide, so a fetch that finishes after s
 let opener = null; // where focus was before the switcher opened
 let slot = null; // the contraption's own container for it (mountRail), else it is fixed to the left edge
 let edgeTaken = false; // drawers.js has a left drawer, so the left edge is its (leaveEdge)
-// Framed, it's Citadel's window that is narrow or not: the frame is the rail's width narrower.
-const narrow = typeof matchMedia === 'function' ? (host ? window.parent : window).matchMedia(NARROW) : null;
+// Framed, it's Citadel's window that is narrow or not (the frame is the rail's width narrower), as Citadel's state says.
+const narrow = host ? Object.assign(new EventTarget(), { matches: false }) : typeof matchMedia === 'function' ? matchMedia(NARROW) : null;
 const installed = typeof matchMedia === 'function' && matchMedia('(display-mode: standalone), (display-mode: window-controls-overlay)').matches;
-// Citadel's page in a contraption's layer (below): picking that contraption puts the layer away.
-const layerHost = (() => {
-  try { return !inContraption && window.parent !== window ? window.parent.citadelLayer ?? null : null; } catch { return null; }
-})();
+// Citadel's page in a contraption's layer (below): the contraption under it, whose entry puts the layer away (its layer message).
+const inLayer = !inContraption && !!framedIn;
+let layerApp;
 
 let layer = null; // a contraption's installed window: Citadel's page over it, kept once opened (#311)
 let layerOpener = null;
@@ -75,24 +91,20 @@ let layerOpener = null;
 /** In a contraption's installed window: show Citadel's page over this one at `item`, in the same window. */
 function openLayer(item) {
   closeRail();
+  // Citadel's entry goes back to Citadel's last own view, as its own rail's does: Citadel's page knows which (go).
+  const go = (f) => { post(f.contentWindow, 'layer', { app: showing() }); post(f.contentWindow, 'go', { app: item.name }); };
   const frame = layer?.firstChild;
   if (!frame) {
     layer = document.createElement('div');
     layer.className = 'citadel-layer';
     const f = document.createElement('iframe');
     f.title = 'Citadel';
-    const back = !item.name && storedView();
-    f.src = back ? `${item.href.split('#')[0]}${back}` : item.href;
+    f.src = item.href;
+    f.addEventListener('load', () => go(f));
     layer.append(f);
     document.documentElement.append(layer); // beside <body>, which goes inert under it
   } else {
-    let to = item.name ? `#/apps/${item.name}` : '#/';
-    try {
-      // Citadel's entry goes back to Citadel's last own view, as its own rail's does.
-      const back = !item.name && frame.contentDocument.querySelector('.citadel-rail a[data-app=""]');
-      if (back) to = new URL(back.href).hash || '#/';
-    } catch {}
-    frame.contentWindow.location.hash = to;
+    go(frame);
     layer.hidden = false;
   }
   if (!document.body.inert) layerOpener = document.activeElement;
@@ -112,6 +124,13 @@ function closeLayer() {
 
 /** Whether the rail is showing (so the phone's swipe past the left panel has somewhere to go). */
 export const hasRail = () => (host ? host.hasRail() && narrow.matches : !!nav);
+
+/** Citadel: tell its contraption frames whether its rail is there to lend, and whether its window is narrow. */
+const frameWindows = () => [...document.querySelectorAll('#frames iframe')].map((f) => f.contentWindow);
+function tellFrames(to = frameWindows()) {
+  if (inContraption) return;
+  for (const w of to) post(w, 'state', { hasRail: !!nav, narrow: !!narrow?.matches });
+}
 
 /** drawers.js: a swipe from the left edge pulls out its left drawer, and only past that the switcher (false: not any more). */
 export function leaveEdge(taken = true) {
@@ -206,6 +225,8 @@ let installPrompt = null; // beforeinstallprompt, kept for the button: a contrap
 const installedKey = (name) => `citadel-installed:${name}`;
 const knownInstalled = (name) => { try { return localStorage.getItem(installedKey(name)) === '1'; } catch { return false; } };
 const markInstalled = (name, on) => { try { if (on) localStorage.setItem(installedKey(name), '1'); else localStorage.removeItem(installedKey(name)); } catch {} };
+// Framed in Citadel, a contraption's page shares what its own window saw (hello), since its storage is its origin's.
+if (typeof window === 'object' && host) post(framedIn, 'hello', { installed: knownInstalled(showing()) });
 if (typeof window === 'object' && inContraption && !host) {
   const me = showing();
   if (me && installed) markInstalled(me, true);
@@ -322,6 +343,7 @@ function clearRail() {
   for (const el of [nav, backdrop, handle]) el?.remove();
   nav = backdrop = handle = null;
   document.documentElement.classList.remove('has-citadel-rail');
+  tellFrames();
 }
 
 function makeBackdrop() {
@@ -337,15 +359,26 @@ const ICON_TRIES = 8; // about two minutes: a restart, not an icon that's gone
 let recheck = 0; // a timer while an app is greyed out, so it comes back once it's up (#311)
 let drawn = ''; // the entries drawn (but which is current, syncRail's), to redraw only when a recheck finds them changed
 const entries = (items) => JSON.stringify(items.map(({ current, ...i }) => i));
+let person = null; // a contraption's page: who is signed in, for Alt+` (appswitch.js)
+// Citadel's own answers (drag to reorder) only where Citadel is this page's origin: a contraption's own host can't reach them.
+const atCitadel = () => root.origin === location.origin;
 
-/** The rail's entries, or null when Citadel didn't answer (no answer, or a 5xx from it or its proxy while it restarts). */
+/**
+ * The rail's entries, or null when Citadel didn't answer (no answer, or a 5xx from it or its proxy while it restarts).
+ * A contraption's page asks its own host (src/apps.ts kit), which also says who is signed in and where Citadel is.
+ */
 const fetchItems = async () => {
   try {
-    const res = await fetch(new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
+    const res = await fetch(inContraption ? '/apps/_citadel/api/mine' : new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
     if (res.status >= 500) return null;
-    const mine = res.ok ? await res.json() : [];
+    let mine = res.ok ? await res.json() : [];
+    if (inContraption) {
+      person = mine?.name ?? null;
+      if (mine?.citadel) root = new URL(mine.citadel);
+      mine = mine?.apps ?? [];
+    }
     // A drop still saving: the rail keeps it, though this answer may predate it.
-    return railItems(dragged ? inOrder(mine, (c) => c.name, dragged) : mine, showing(), root.pathname, !inContraption);
+    return railItems(dragged ? inOrder(mine, (c) => c.name, dragged) : mine, showing(), inContraption ? root.href : root.pathname, !inContraption);
   } catch {
     return null;
   }
@@ -401,11 +434,9 @@ export async function showRail() {
 let switching = false;
 /** A contraption's own page: Alt+` switches apps here too (appswitch.js, served beside this file). */
 function startSwitch() {
-  if (switching || !inContraption || host) return;
+  if (switching || !inContraption || host || !person) return;
   switching = true;
-  Promise.all([import('./appswitch.js'), fetch(new URL('api/me', root), { headers: { Accept: 'application/json' } }).then((r) => (r.ok ? r.json() : null))])
-    .then(([m, me]) => (me?.name ? m.initAppSwitch(me.name) : (switching = false)))
-    .catch(() => (switching = false));
+  import('./appswitch.js').then((m) => m.initAppSwitch(person), () => (switching = false));
 }
 
 function drawRail(items) {
@@ -448,9 +479,9 @@ function drawRail(items) {
       if (a.classList.contains('current')) e.preventDefault();
       closeRail();
       if (e.defaultPrevented) return;
-      if (layerHost && (a.dataset.app || null) === layerHost.app) {
+      if (inLayer && layerApp !== undefined && (a.dataset.app || null) === layerApp) {
         e.preventDefault();
-        layerHost.close();
+        post(framedIn, 'layer-close');
       } else if (inContraption && opensApart(item, installed)) {
         e.preventDefault();
         openLayer(item);
@@ -460,7 +491,7 @@ function drawRail(items) {
   });
   nav.append(installButton());
   // Press and hold an app (or drag it with a mouse) to move it; Citadel stays first (#649).
-  dragReorder(nav, { items: appLinks, onDrop: reorderApps });
+  if (atCitadel()) dragReorder(nav, { items: appLinks, onDrop: reorderApps });
   syncRail();
   syncInstall();
   if (slot) {
@@ -471,6 +502,7 @@ function drawRail(items) {
   document.body.append(backdrop, nav);
   document.documentElement.classList.add('has-citadel-rail');
   addHandle();
+  tellFrames();
   return true;
 }
 
@@ -542,13 +574,39 @@ if (typeof document !== 'undefined') {
     closeRail();
     syncRail();
   });
-  // A framed contraption's rail.js reaches Citadel's rail through this.
-  if (!inContraption) window.citadelRail = { openRail, closeRail, hasRail };
-  // Citadel's page in this contraption's layer reaches it through this.
-  else if (!host) window.citadelLayer = { app: showing(), close: closeLayer };
-  // Framed: Citadel fits this page's top bar to the title bar strip now, before its first paint where it can (frames.js).
-  if (host) try { window.parent.citadelFrameFit?.(); } catch {}
+  addEventListener('message', (e) => {
+    const d = e.data;
+    if (!inContraption) {
+      // Citadel: a framed contraption's rail.js lends Citadel's rail through these.
+      const frame = [...document.querySelectorAll('#frames iframe')].find((f) => f.contentWindow === e.source);
+      if (isMessage(e, frame?.contentWindow)) {
+        const name = frame.dataset.app;
+        if (d.type === 'hello') {
+          if (name && typeof d.installed === 'boolean' && d.installed !== knownInstalled(name)) { markInstalled(name, d.installed); syncInstall(); }
+          tellFrames([e.source]);
+        } else if (d.type === 'rail') d.open ? openRail() : closeRail();
+      } else if (inLayer && isMessage(e, framedIn)) {
+        // Citadel's page in a contraption's installed window: which contraption is under it, and where to go.
+        const app = d.app === null || (typeof d.app === 'string' && /^[a-z0-9-]+$/.test(d.app)) ? d.app : undefined;
+        if (app === undefined) return;
+        if (d.type === 'layer') layerApp = app;
+        else if (d.type === 'go') location.hash = app ? `#/apps/${app}` : lastView;
+      }
+    } else if (host && isMessage(e, framedIn) && d.type === 'state') {
+      // A framed contraption: Citadel's rail and window, as Citadel says.
+      hostState = { hasRail: !!d.hasRail };
+      if (narrow.matches !== !!d.narrow) {
+        narrow.matches = !!d.narrow;
+        narrow.dispatchEvent(new Event('change'));
+      }
+      reportBar();
+    } else if (host && isMessage(e, framedIn) && d.type === 'strip') {
+      // The title bar strip's room, for a page whose .cui-topbar runs up into it (frames.js fit).
+      for (const k of STRIP_VARS) if (Number.isFinite(d.vars?.[k])) document.documentElement.style.setProperty(`--citadel-${k}`, `${d.vars[k]}px`);
+    } else if (!host && layer && isMessage(e, layer.firstChild?.contentWindow) && d.type === 'layer-close') closeLayer();
+  });
   narrow?.addEventListener('change', () => {
+    tellFrames();
     if (host && handle) handle.hidden = !narrow.matches;
     closeRail();
     // Lent out from its slot on a phone: back into the slot on a wide screen.
@@ -557,6 +615,58 @@ if (typeof document !== 'undefined') {
       slot.append(nav);
     }
   });
+}
+
+const STRIP_VARS = ['strip-h', 'strip-start', 'strip-end', 'strip-row', 'safe-top'];
+// What counts as a control on the bar (base.css's no-drag list): the window's drag regions leave holes over these.
+const CONTROLS = 'a, button, input, select, textarea, summary, label, [tabindex]';
+let watchedBar;
+let barQueued = false;
+
+/**
+ * A framed contraption: tell Citadel about this page's .cui-topbar (frames.js fit): where it and its controls are, its
+ * colour and the page's title, again whenever it changes, so Citadel can fit it to the title bar strip.
+ * shortcut: a bar drawn after the page's load counts from the next resize or Citadel state; observe the body if one does.
+ */
+function reportBar() {
+  const bar = document.querySelector('.cui-topbar');
+  const box = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; };
+  post(framedIn, 'bar', {
+    title: document.title,
+    bar: bar ? box(bar) : null,
+    controls: bar ? [...bar.querySelectorAll(CONTROLS)].filter((el) => el.getClientRects().length).map(box) : [],
+    color: bar ? getComputedStyle(bar).backgroundColor : null,
+  });
+  if (bar === watchedBar) return;
+  watchedBar = bar;
+  if (!bar) return;
+  const again = () => {
+    if (barQueued) return;
+    barQueued = true;
+    requestAnimationFrame(() => { barQueued = false; reportBar(); });
+  };
+  new MutationObserver(again).observe(bar, { subtree: true, childList: true, attributes: true, characterData: true });
+  new ResizeObserver(again).observe(bar);
+  document.addEventListener('scroll', again, { capture: true, passive: true });
+  addEventListener('resize', again);
+  document.fonts?.ready.then(again);
+}
+
+/** A framed contraption: Alt+` and the keys that follow while Alt is held are Citadel's switcher's (appswitch.js), so they go to it. */
+function forwardKeys() {
+  let switching = false;
+  const on = (e) => {
+    if (!switching && !(e.type === 'keydown' && e.code === 'Backquote' && e.altKey && !e.ctrlKey && !e.metaKey)) return;
+    if (!switching && document.querySelector('dialog:modal')) return;
+    switching = !(e.type === 'keyup' && !e.altKey);
+    e.preventDefault();
+    e.stopPropagation();
+    const { type, code, key, altKey, shiftKey, ctrlKey, metaKey, isComposing } = e;
+    post(framedIn, 'key', { event: { type, code, key, altKey, shiftKey, ctrlKey, metaKey, isComposing } });
+  };
+  addEventListener('keydown', on, true);
+  addEventListener('keyup', on, true);
+  addEventListener('blur', () => { switching = false; post(framedIn, 'blur'); });
 }
 
 /** The switcher as a list (a phone, or a wide slot), for the rail matched by `r`. */
@@ -622,6 +732,14 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 }
 @media (prefers-reduced-motion: reduce) { .citadel-rail { transition: none; } }`);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+}
+
+// A framed contraption reports its bar and passes Alt+` on from the start.
+if (typeof document !== 'undefined' && host) {
+  reportBar();
+  forwardKeys();
+  // Leaving the page: the next one may have no bar (or no rail.js to say so).
+  addEventListener('pagehide', () => post(framedIn, 'bar', { title: '', bar: null, controls: [], color: null }));
 }
 
 // Last, so the styles above are defined when a framed page draws its handle straight away.

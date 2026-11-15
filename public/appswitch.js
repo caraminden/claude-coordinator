@@ -3,8 +3,8 @@
 // tap of ` moves on through the apps, most recently used first, and Shift+` moves back; releasing Alt
 // switches to the one highlighted, Esc cancels, a click on a tile switches at once. One quick Alt+`
 // flips to the app you were last in. The apps are the rail's (rail.js), so with no contraption enabled
-// there is no rail and Alt+` does nothing. Caught in Citadel's window and inside every contraption's
-// frame (frames.js; same origin), so it works wherever you are in Citadel. A contraption's own page (its
+// there is no rail and Alt+` does nothing. Caught in Citadel's window, and passed on from inside every
+// contraption's frame (rail.js forwardKeys, frames.js frameKey: it may be another origin), so it works wherever you are in Citadel. A contraption's own page (its
 // installed window or a tab) gets it from the kit's rail.js too (#311, Josh 2026-11-04: "Yes, everywhere").
 // Tab is left alone.
 
@@ -59,7 +59,6 @@ let person = null;
 let state = null;
 let box = null;
 let cancelled = false; // Esc while Alt is held: its release is still the switcher's
-const hooked = new WeakSet(); // documents: a frame's window object stays the same across its navigations
 
 const storeKey = () => `citadel-app-switch:${person}`;
 function recent() {
@@ -191,23 +190,19 @@ function draw() {
   box.querySelector('[role=status]').textContent = `${state.order[state.index].title}, ${state.index + 1} of ${state.order.length}`;
 }
 
-/** Listen in a window: Citadel's, or a contraption frame's (again after each navigation in it). */
-function hook(win) {
-  if (!win || hooked.has(win.document)) return;
-  hooked.add(win.document);
-  win.addEventListener('keydown', onKey, true);
-  win.addEventListener('keyup', onKey, true);
-  // Focus left the browser window mid-switch (the system's own Alt-Tab, say): no keyup will come.
-  win.addEventListener('blur', () => setTimeout(() => { if (state && !document.hasFocus()) shut(); }));
+// Focus left the browser window mid-switch (the system's own Alt-Tab, say): no keyup will come.
+const onBlur = () => setTimeout(() => { if (state && !document.hasFocus()) shut(); });
+
+/** A key a contraption's frame passed on (rail.js forwardKeys) as { type, code, key, altKey, … }, or null: it lost focus. */
+export function frameKey(k) {
+  if (!k) return onBlur();
+  onKey({ type: k.type, code: k.code, key: k.key, altKey: !!k.altKey, shiftKey: !!k.shiftKey, ctrlKey: !!k.ctrlKey, metaKey: !!k.metaKey, isComposing: !!k.isComposing, preventDefault() {}, stopPropagation() {} });
 }
 
 if (typeof document !== 'undefined') {
-  hook(window);
-  // A contraption's frame (frames.js) loads, or loads a new page: listen in it. Same origin, no sandbox.
-  document.addEventListener('load', (e) => {
-    if (e.target.tagName !== 'IFRAME' || !e.target.closest('#frames')) return;
-    try { hook(e.target.contentWindow); } catch {}
-  }, true);
+  addEventListener('keydown', onKey, true);
+  addEventListener('keyup', onKey, true);
+  addEventListener('blur', onBlur);
   addEventListener('hashchange', () => {
     shut();
     record();

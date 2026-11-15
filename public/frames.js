@@ -4,8 +4,10 @@
 // once opened, hidden while you're elsewhere, so switching back keeps your place in it; Citadel's page
 // stays under it (inert), scroll and all. The framed page's own rail.js draws no rail and lends Citadel's.
 
+import { frameKey } from './appswitch.js';
 import { h, icon, tintTitleBar } from './base.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
+import { FRAME } from './rail.js';
 
 const frames = new Map();
 let box = null;
@@ -13,40 +15,39 @@ let probe = null; // the title bar strip's area (style.css), to measure
 let nav = null; // Citadel's ‹ › ×, over the frame's end
 let strip = null; // an app with no .cui-topbar: its icon and name in the title bar strip, beside ‹ › ×
 let drag = null; // the frame's .cui-topbar as the window's drag regions (mirrorBar)
-let watched = null; // the bar whose changes re-run fit
-let watchers = [];
-let queued = false;
+const bars = new WeakMap(); // frame → its page's last bar message (rail.js reportBar): it may be on another origin
 
 /**
  * The top bar (#666, Josh 2026-11-13: "Citadel part, then each app adopts"). An app whose page has a .cui-topbar
  * (Citadel UI) runs up into the title bar strip, told the strip's room through --citadel-strip-*; Citadel's ‹ › ×
  * sit over its end. An app without one stays under the strip, which shows the app's name and ‹ › × instead of
- * Citadel's page beneath. Called by the frame's own rail.js as it starts, on each load, and as the window changes.
+ * Citadel's page beneath. The frame's page tells its bar (rail.js reportBar) as it starts and as the bar changes; this
+ * fits it on each message, on each load and as the window changes, and tells the page the strip's room back.
  */
 function fit() {
   const frame = [...frames.values()].find((f) => !f.hidden);
   if (!frame || !framed()) return;
-  let doc = null;
-  try { doc = frame.contentDocument; } catch {}
-  // shortcut: a bar the app draws after its load event counts from the next resize or visit; observe the page if one does.
-  const bar = doc?.querySelector('.cui-topbar') ?? null;
+  const got = bars.get(frame);
+  const bar = got?.bar ?? null;
   document.documentElement.classList.toggle('frame-topbar', !!bar);
   const name = frame.dataset.app;
   const entry = document.querySelector(`.citadel-rail a[data-app="${CSS.escape(name)}"]`);
   strip.replaceChildren(
-    h('img', { src: entry?.querySelector('img')?.src ?? `/apps/${name}/icon.svg`, alt: '' }),
-    h('b', {}, entry?.querySelector('.label')?.textContent || doc?.title || name));
+    h('img', { src: entry?.querySelector('img')?.src ?? `/apps/_citadel/icon/${name}`, alt: '' }),
+    h('b', {}, entry?.querySelector('.label')?.textContent || got?.title || name));
   // In the installed app the window controls take the bar's colour, or the strip's.
-  tintTitleBar(bar);
-  watch(bar);
-  mirrorBar(bar, frame);
+  tintTitleBar(bar && got.color);
+  mirrorBar(got, frame);
   if (!bar) return;
   const area = probe.getBoundingClientRect();
   const left = box.getBoundingClientRect().left;
   const end = nav.getBoundingClientRect();
   const vars = { 'strip-h': area.height, 'strip-start': Math.max(0, area.left - left), 'strip-end': innerWidth - end.left, 'strip-row': end.height, 'safe-top': area.top };
-  for (const [k, v] of Object.entries(vars)) doc.documentElement.style.setProperty(`--citadel-${k}`, `${v}px`);
+  frame.contentWindow.postMessage({ protocol: FRAME, type: 'strip', vars }, '*');
 }
+
+/** A rectangle from a frame's message, or null if it isn't one. */
+const rect = (r) => (r && ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(r[k])) ? r : null);
 /**
  * The installed app's window takes its drag regions from this page only, never from a frame (#667): the frame's
  * own app-region did nothing, so a click on its bar's buttons dragged the window, unless Citadel's page beneath
@@ -54,43 +55,31 @@ function fit() {
  * controls (base.css's list). Later regions win, so #frames, after Citadel's page, overrides the page's regions
  * beneath; the box sits before .frame-nav, so ‹ › × stay clickable.
  */
-function mirrorBar(bar, frame) {
-  drag.hidden = !bar;
-  if (!bar) return drag.replaceChildren();
+function mirrorBar(got, frame) {
+  const r = rect(got?.bar);
+  drag.hidden = !r;
+  if (!r) return drag.replaceChildren();
   const fr = frame.getBoundingClientRect();
-  const r = bar.getBoundingClientRect();
   const place = (el, b, x, y) => (Object.assign(el.style, { left: `${x + b.left}px`, top: `${y + b.top}px`, width: `${b.width}px`, height: `${b.height}px` }), el);
   place(drag, r, fr.left, fr.top);
-  const controls = [...bar.querySelectorAll('a, button, input, select, textarea, summary, label, [tabindex]')].filter((el) => el.getClientRects().length);
-  drag.replaceChildren(...controls.map((el) => place(h('div'), el.getBoundingClientRect(), -r.left, -r.top)));
-}
-
-/** Re-fit when the bar changes under the same window size: a button shown or hidden, a label that grows, the page scrolled. */
-function watch(bar) {
-  if (bar === watched) return;
-  for (const w of watchers) w.disconnect();
-  watched = bar;
-  watchers = [];
-  if (!bar) return;
-  const again = () => {
-    if (queued) return;
-    queued = true;
-    requestAnimationFrame(() => { queued = false; fit(); });
-  };
-  const mo = new MutationObserver(again);
-  mo.observe(bar, { subtree: true, childList: true, attributes: true, characterData: true });
-  const ro = new ResizeObserver(again);
-  ro.observe(bar);
-  const doc = bar.ownerDocument;
-  doc.addEventListener('scroll', again, { capture: true, passive: true });
-  doc.fonts?.ready.then(again);
-  watchers = [mo, ro, { disconnect: () => doc.removeEventListener('scroll', again, { capture: true }) }];
+  const controls = Array.isArray(got.controls) ? got.controls.map(rect).filter(Boolean) : [];
+  drag.replaceChildren(...controls.map((c) => place(h('div'), c, -r.left, -r.top)));
 }
 
 if (typeof window !== 'undefined') {
-  window.citadelFrameFit = fit;
   addEventListener('resize', fit);
   navigator.windowControlsOverlay?.addEventListener('geometrychange', fit);
+  // A frame's page (rail.js): its bar, and Alt+` while it has the keys (appswitch.js). Only from Citadel's own frames.
+  addEventListener('message', (e) => {
+    const frame = [...frames.values()].find((f) => f.contentWindow === e.source);
+    const d = e.data;
+    if (!frame || d?.protocol !== FRAME) return;
+    if (d.type === 'bar') {
+      bars.set(frame, { title: typeof d.title === 'string' ? d.title : '', bar: rect(d.bar), controls: d.controls, color: typeof d.color === 'string' ? d.color : null });
+      if (!frame.hidden) fit();
+    } else if (d.type === 'key' && d.event && typeof d.event === 'object') frameKey(d.event);
+    else if (d.type === 'blur') frameKey(null);
+  });
 }
 
 /** Leave the contraption for Citadel's last own view, where the rail's Citadel entry goes (rail.js). */
@@ -141,7 +130,6 @@ export const framed = () => document.documentElement.classList.contains('framed'
 export function dropFrames() {
   setFramed(false);
   box?.remove();
-  watch(null);
   box = probe = nav = strip = drag = null;
   frames.clear();
 }

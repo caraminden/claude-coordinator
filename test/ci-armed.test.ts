@@ -1,0 +1,141 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import { armedKey, armForCi, ciFinished, type Armed } from '../src/ci-armed.ts';
+import { Store } from '../src/db.ts';
+import { GithubWatcher, type Check, type PrSnapshot } from '../src/github.ts';
+
+// Armed for CI (#715): a card or a Taskmaster message goes out when CI passes on the pushed commit, with no turn.
+const root = mkdtempSync(join(tmpdir(), 'ci-armed-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+const check = (name: string, status: Check['status']): Check => ({ name, status, url: `https://ci/${name}` });
+const pr = (headSha: string, fields: Partial<PrSnapshot> = {}): PrSnapshot =>
+  ({ number: 12, url: 'https://github.com/o/r/pull/12', state: 'OPEN', headSha, closedAt: null, closedBy: null, checks: [check('build', 'passed')], remarks: [], ...fields });
+const card = { questions: [{ question: 'Merge PR #12?', multiSelect: false, options: [{ label: 'Merge it', recommended: true }, { label: 'Wait' }] }], kind: 'merge' as const };
+
+/** A minion on a branch in a repo whose CI runs on pull requests (`prCi`), with a fake runner that records what it's told. */
+function setup(name: string, prCi = true) {
+  const dir = join(root, name);
+  mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+  writeFileSync(join(dir, '.github', 'workflows', 'ci.yml'), prCi ? 'on:\n  pull_request:\n  push:\n' : 'on:\n  push:\n    branches: ["land/**"]\n');
+  git(dir, 'init', '-q', '-b', 'ticket/1-t');
+  git(dir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'one');
+  const sha = git(dir, 'rev-parse', 'HEAD');
+  const store = new Store(join(root, `${name}.db`));
+  const project = store.createProject('P', null);
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(t.id, dir, 'ticket/1-t');
+  const ticket = store.getTicket(t.id)!;
+  const log = { events: [] as [string, any][], relays: [] as string[], notified: [] as any[], running: false };
+  const runner = {
+    emit: (_id: number, kind: string, data: any) => (log.events.push([kind, data]), { id: log.events.length }),
+    broadcastTicket: () => {},
+    isRunning: () => log.running,
+    queued: () => 0,
+    relay: (_from: number, _to: number, _author: string, text: string) => (log.relays.push(text), false),
+  };
+  const app = { store, runner, dataDir: join(root, `${name}-data`), notify: (_id: number, n: any) => log.notified.push(n) } as any;
+  return { dir, sha, store, ticket, app, log };
+}
+
+test('arming holds a card on HEAD, says to push, and a second arm on the same commit adds to it', async () => {
+  const { sha, store, ticket, app, log } = setup('arm');
+  const said = await armForCi(app, ticket, { card });
+  assert.match(said!, new RegExp(`CI passes on ${sha.slice(0, 7)}`));
+  assert.match(said!, /push it/, 'origin has no copy of HEAD yet');
+  await armForCi(app, ticket, { coordinator: { text: 'ready to merge', urgent: false } });
+  const armed = store.getSetting<Armed>(armedKey(ticket.id))!;
+  assert.equal(armed.sha, sha);
+  assert.deepEqual(armed.card, card);
+  assert.equal(armed.coordinator!.text, 'ready to merge');
+  assert.equal(log.events.length, 0, 'nothing posted yet');
+});
+
+test("arming is refused where PRs run no CI, or CI already failed on HEAD; CI already green means post now", async () => {
+  const none = setup('nopr', false);
+  await assert.rejects(armForCi(none.app, none.ticket, { card }), /doesn't run on pull requests/);
+  const red = setup('red');
+  red.store.addGithubSeen(red.ticket.id, [`pr12:ci:${red.sha}:failed`], true);
+  await assert.rejects(armForCi(red.app, red.ticket, { card }), /already failed/);
+  const green = setup('green');
+  green.store.addGithubSeen(green.ticket.id, [`pr12:ci:${green.sha}:passed`], true);
+  assert.equal(await armForCi(green.app, green.ticket, { card }), null);
+  assert.equal(green.store.getSetting(armedKey(green.ticket.id)), null, 'nothing armed: the caller posts it');
+});
+
+test('CI passing on the armed commit posts the card and tells the Taskmaster, with no turn, once', async () => {
+  const { sha, store, ticket, app, log } = setup('fire');
+  await armForCi(app, ticket, { card, coordinator: { text: 'PR #12 is green', urgent: false } });
+  const got = await ciFinished(app, ticket, pr(sha), 'passed');
+  assert.equal(got!.fired, true);
+  assert.match(got!.note, /card you armed is posted: #\/p\/\d+\/t\/\d+\?e=1/);
+  const question = log.events.find(([k]) => k === 'question')![1];
+  assert.deepEqual(question.questions, card.questions);
+  assert.equal(question.kind, 'merge');
+  assert.deepEqual(log.relays, ['PR #12 is green']);
+  assert.equal(store.getTicket(ticket.id)!.state, null, "a card is people's turn");
+  assert.match(store.getTicket(ticket.id)!.note!, /CI passed on \w{7}: card posted/);
+  assert.equal(await ciFinished(app, ticket, pr(sha), 'passed'), null, 'used up');
+});
+
+test('a message alone leaves the minion ready for a person', async () => {
+  const { sha, store, ticket, app } = setup('msg');
+  await armForCi(app, ticket, { coordinator: { text: 'ready to merge', urgent: false } });
+  assert.equal((await ciFinished(app, ticket, pr(sha), 'passed'))!.fired, true);
+  assert.equal(store.getTicket(ticket.id)!.state, 'ready');
+});
+
+test("CI failing, CI on another head or a running turn drops what was armed and says so", async () => {
+  for (const [name, head, result, running, why] of [
+    ['fail', null, 'failed', false, /CI failed/],
+    ['moved', 'f00dfeed', 'passed', false, /head is now f00dfee/],
+    ['busy', null, 'passed', true, /a turn was running/],
+  ] as const) {
+    const s = setup(name);
+    s.log.running = running;
+    await armForCi(s.app, s.ticket, { card });
+    const got = await ciFinished(s.app, s.ticket, pr(head ?? s.sha), result);
+    assert.equal(got!.fired, false, name);
+    assert.match(got!.note, why);
+    assert.equal(s.log.events.filter(([k]) => k === 'question').length, 0, `${name}: no card`);
+    assert.equal(s.store.getSetting(armedKey(s.ticket.id)), null, `${name}: dropped`);
+  }
+});
+
+test("the watcher sends a fired CI line as held mail and wakes for the rest; a dropped one wakes with the note", async () => {
+  const { sha, store, ticket } = setup('watch');
+  let snapshot = pr(sha, { checks: [check('build', 'pending')] });
+  const sent: { text: string; fyi: boolean; quiet?: boolean }[] = [];
+  const w = new GithubWatcher(store, (_id, text, fyi, quiet) => sent.push({ text, fyi, quiet }), async () => ({ pr: snapshot, self: 'cara' }));
+  let answer: { fired: boolean; note: string } | null = { fired: true, note: 'The card you armed is posted.' };
+  w.onCi = async () => answer;
+  await w.poll(ticket, root, 'o/r'); // the first look
+  snapshot = pr(sha, { remarks: [{ key: 'comment:1', kind: 'comment', author: 'josh', bot: false, association: 'COLLABORATOR', body: 'nice', url: 'https://x/1', createdAt: Date.now() }] });
+  await w.poll(ticket, root, 'o/r');
+  assert.equal(sent.length, 2);
+  assert.match(sent[0].text, /^CI passed on .*\nThe card you armed is posted\.$/);
+  assert.equal(sent[0].quiet, true, 'held mail, no turn');
+  assert.match(sent[1].text, /josh commented/);
+  assert.notEqual(sent[1].quiet, true);
+
+  answer = { fired: false, note: "The card you armed wasn't sent: CI failed." };
+  snapshot = pr('beef', { checks: [check('build', 'passed')] });
+  await w.poll(ticket, root, 'o/r');
+  assert.match(sent[2].text, /^CI passed on beef.*\nThe card you armed wasn't sent/);
+  assert.equal(sent[2].quiet, false);
+  assert.equal(sent[2].fyi, false, 'it needs action now');
+});
+
+test('a fired arm on the first look at a PR still lands as held mail', async () => {
+  const { sha, store, ticket } = setup('base');
+  const sent: { text: string; quiet?: boolean }[] = [];
+  const w = new GithubWatcher(store, (_id, text, _fyi, quiet) => sent.push({ text, quiet }), async () => ({ pr: pr(sha), self: 'cara' }));
+  w.onCi = async () => ({ fired: true, note: 'The card you armed is posted.' });
+  await w.poll(ticket, root, 'o/r');
+  assert.deepEqual(sent, [{ text: 'The card you armed is posted.', quiet: true }]);
+});

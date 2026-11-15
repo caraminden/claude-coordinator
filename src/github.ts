@@ -91,6 +91,8 @@ export interface Decision {
   fyi: boolean;
   /** Every message is a notice nobody can act on (CI stuck waiting for a runner): it is left as held mail and starts no turn. */
   quiet: boolean;
+  /** CI's verdict on the head, the first time it's handled (baseline too), and its message's index (-1: none sent). */
+  ci?: { result: 'passed' | 'failed'; line: number };
 }
 
 const ts = (s: string | null | undefined) => (s ? Date.parse(s) : null);
@@ -148,7 +150,10 @@ export function decide(
   if (opts.baseline) handled.push('baseline');
 
   const result = pr.state === 'OPEN' ? verdict(pr.checks) : null;
+  let ci: Decision['ci'];
   if (result === 'failed' || result === 'passed') {
+    const sent = messages.length;
+    if (!seen.has(`ci:${pr.headSha}:${result}`)) ci = { result, line: opts.baseline ? -1 : sent };
     consider(`ci:${pr.headSha}:${result}`, () => {
       if (result === 'passed') return `CI passed on ${short(pr.headSha)} in PR #${pr.number} (${pr.checks.length} check${pr.checks.length === 1 ? '' : 's'}).`;
       const failed = pr.checks.filter((c) => c.status === 'failed');
@@ -208,7 +213,7 @@ export function decide(
       return pr.state === 'MERGED' ? `PR #${pr.number} was merged${by}.` : `PR #${pr.number} was closed${by} without merging.`;
     }, pr.state === 'MERGED');
   }
-  return { messages, handled, fyi: fyi && messages.length > 0, quiet: quiet && messages.length > 0 };
+  return { messages, handled, fyi: fyi && messages.length > 0, quiet: quiet && messages.length > 0, ...(ci ? { ci } : {}) };
 }
 
 /** Turn spans from a ticket's start and end markers, oldest first. A start with no end yet runs to `openEnd`. */
@@ -385,6 +390,8 @@ export class GithubWatcher {
   as: (repoDir: string) => GithubEnv = () => undefined;
   /** What each poll saw of a minion's PR (null: none), read as `as`: its CI runs in flight become its wait (#546). */
   onPr: (ticketId: number, repo: string, as: GithubEnv, pr: PrSnapshot | null) => void = () => {};
+  /** CI finished on a minion's PR head (#715): `fired` when what it armed went out (the CI line goes to held mail), else a note for the wake. */
+  onCi: (ticket: Ticket, pr: PrSnapshot, result: 'passed' | 'failed') => Promise<{ fired: boolean; note: string } | null> = async () => null;
 
   constructor(store: Store, send: (ticketId: number, text: string, fyi: boolean, quiet?: boolean) => void, fetch = fetchSnapshot) {
     this.store = store;
@@ -494,9 +501,21 @@ export class GithubWatcher {
     for (const c of pr.checks) if (c.queued) queued[c.name] = head.queued[c.name] ?? now;
     head.queued = queued;
     const stuck = Object.keys(queued).filter((name) => now - queued[name] >= STUCK_MS);
-    const { messages, handled, fyi, quiet } = decide(pr, seen, { baseline, self: selves, spans, headFor: now - head.at, stuck });
+    const decision = decide(pr, seen, { baseline, self: selves, spans, headFor: now - head.at, stuck });
+    const { messages, handled } = decision;
+    let { fyi, quiet } = decision;
     // Recorded before sending, so a crash in between drops a message rather than repeating it forever.
     if (handled.length) this.store.addGithubSeen(ticket.id, handled.map((k) => prefix + k), messages.length > 0);
+    const armed = decision.ci && (await this.onCi(ticket, pr, decision.ci.result));
+    if (armed?.fired) {
+      // Its card or message is out, so the CI line is news for the next turn, not a wake.
+      const line = decision.ci!.line >= 0 ? messages.splice(decision.ci!.line, 1)[0] : null;
+      this.send(ticket.id, [line, armed.note].filter(Boolean).join('\n'), true, true);
+    } else if (armed) {
+      if (decision.ci!.line >= 0) messages[decision.ci!.line] += `\n${armed.note}`;
+      else messages.push(armed.note);
+      fyi = quiet = false;
+    }
     if (messages.length) this.send(ticket.id, messages.join('\n\n'), fyi, quiet);
     if (pr.state === 'MERGED' && handled.some((k) => k.startsWith('state:'))) this.onMerged(repoDir);
 

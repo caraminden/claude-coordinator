@@ -18,6 +18,7 @@ import { watchLoopLag } from './src/loop-lag.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
+import { ciFinished } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
@@ -923,6 +924,8 @@ runner.onStatusTrailer = (id, fields) => {
     runner.emit(id, 'note', { text: `The reply's status line was refused: ${err.message}` });
   }
 };
+// What a minion armed for CI goes out when CI passes, with no turn (#715).
+github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.

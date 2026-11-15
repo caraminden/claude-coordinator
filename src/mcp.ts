@@ -131,6 +131,12 @@ const DIRECT_TO = {
     'Only when someone other than this chat\'s own people (its owner and whoever is working with it) has to answer, such as an admin\'s permission or another member\'s call: their login (a member of this scheme; a wrong name is refused with the list). It shows in their Needs-you list in every scheme they open and pings only their devices; they answer it in place. Any member can still answer it in this chat, and the answer starts your next turn as any card\'s does. Never for an ordinary question to the person you work for: leave it out and the card goes to everyone in this chat.',
 };
 
+const WHEN_CI_PASSES = {
+  type: 'boolean',
+  description:
+    'true: hold it until CI passes on the commit you pushed (your HEAD), then the server posts it with no turn for you; the CI line reaches you as held mail. For a step that only relays green CI (a merge card, "ready to merge" to the Taskmaster) in a scheme whose PRs run CI. Leave it out when you must look at CI\'s results yourself first (screenshots, test counts), or the scheme lands with land.sh (no PR CI: refused). Push first. CI failing, a new push or a turn still running drops it, and you\'re woken as usual.',
+};
+
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
@@ -178,6 +184,7 @@ const ASK_QUESTION = {
         type: 'string', maxLength: 500,
         description: 'With to and no questions: a one-line notice for that person instead of a question (at most 500 characters). They see it with a "Got it" button, and nothing comes back to you.',
       },
+      when_ci_passes: WHEN_CI_PASSES,
     },
   },
 };
@@ -1091,7 +1098,7 @@ const THREAD_TOOLS = [
     name: 'message_coordinator',
     description:
       "Send a message to this scheme's Taskmaster, waking it by default: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff. Status reports, landed notes with no ask and for-your-tracking notes need nothing from it now: send them with wake: false, which shows in its chat at once and reaches it on its next turn, whoever wakes it. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
-    inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now (a status report, a landed note with no ask). Default true: it runs now, or after its current turn' }, urgent: URGENT }, required: ['text'] },
+    inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now (a status report, a landed note with no ask). Default true: it runs now, or after its current turn' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text'] },
   },
   {
     name: 'wake_when_live',
@@ -1439,7 +1446,9 @@ async function runTool(name: string, args: any): Promise<string> {
         return `The notice for ${args.to} is in the chat; its link is ${href}. Nothing comes back from it, so keep working.`;
       }
       if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice)');
-      const { id: questionId, href } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct });
+      const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
+      const { id: questionId, href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci });
+      if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
       return `The question card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the card below](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'settle_question': {
@@ -1505,7 +1514,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Updated. ${cancelled}${ticketLine(t)}${tagNote(args)}`;
     }
     case 'message_coordinator': {
-      const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}) });
+      const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
+      if (r.armed) return `${r.armed} End your turn with state outside.`;
       if (r.held) return `Held, not delivered: ${HELD}`;
       if (r.mail) return 'Left as held mail: the Taskmaster reads it on its next turn, whoever wakes it. Do not resend it.';
       return r.cold ? COLD('the Taskmaster') : 'Sent. The Taskmaster runs it now, or after its current turn.';

@@ -9,6 +9,7 @@ import { adminAskRefusal, lendsMachine, managesMachine } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
 import { cardHref } from '../card-links.ts';
+import { armForCi, postCard, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
@@ -30,7 +31,6 @@ import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { machineNotes, patchMachine } from './machines.ts';
-import { ensureCoordinator } from './projects.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -444,8 +444,6 @@ export const ticketRoutes: Route[] = [
     method: 'POST', path: '/api/tickets/:ticket/questions', who: ['self'], refuse: 'Only the minion itself can ask in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
-      const { id } = ticket;
-      const { runner } = app;
       // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
       const body = await readJson(req);
       // Addressed to one person (#687): only their Needs-you list and devices get it. With no questions it's a notice, answered with Got it.
@@ -453,14 +451,12 @@ export const ticketRoutes: Route[] = [
       const notice = to && body.questions == null ? str(body.notice, 'Notice', 500) : null;
       const questions = notice ? [] : await cleanQuestions(app, ticket, body.questions);
       // A card asking for the go to merge or land says so, for the minions list's chip (#575).
-      const kind = oneOf(body.kind ?? null, ['merge'], 'kind');
-      const questionId = randomBytes(6).toString('hex');
-      const event = runner.emit(id, 'question', {
-        id: questionId, questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}),
-      });
-      runner.broadcastTicket(id);
-      app.notify(id, { kind: 'question', questions: notice ? [{ question: notice }] : questions, eventId: event.id, ...(to ? { to } : {}) });
-      return json(res, 201, { id: questionId, href: cardHref(ticket, event.id) });
+      const kind = oneOf(body.kind ?? null, ['merge'], 'kind') as 'merge' | null;
+      const card = { questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}) };
+      // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
+      const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
+      if (armed) return json(res, 202, { armed });
+      return json(res, 201, postCard(app, ticket, card));
     },
   },
   {
@@ -780,15 +776,13 @@ export const ticketRoutes: Route[] = [
     method: 'POST', path: '/api/tickets/:ticket/coordinator', who: ['minion'], refuse: 'Only a minion can message its Taskmaster',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
-      const { id } = ticket;
-      const { store, runner } = app;
       // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
       const body = await readJson(req);
       const text = str(body.text, 'Message', 10_000);
-      const coordinator = await ensureCoordinator(app, store.getProject(ticket.project_id)!);
-      const held = runner.relay(id, coordinator.id, `#${ticket.number} ${ticket.title}`, text, body.urgent === true, body.wake !== false);
+      const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { coordinator: { text, urgent: body.urgent === true } }) : null;
+      if (armed) return json(res, 202, { sent: false, armed });
+      const held = await tellTaskmaster(app, ticket, text, body.urgent === true, body.wake !== false);
       if (held === true) return json(res, 202, { sent: false, held: true });
-      runner.emit(id, 'note', { text: `${held ? 'Left held mail for' : 'Sent'} the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 202, { sent: true, ...(held === 'cold' ? { cold: true } : held === 'mail' ? { mail: true } : {}) });
     },
   },

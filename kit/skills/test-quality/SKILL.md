@@ -62,12 +62,12 @@ in review.
   the behaviour a prompt drives. Prompt, copy and doc prose stay free to change.
 - **Waits are gates.** Wait on an event, a file, or an injected clock or timeout. A real sleep or
   timeout over 100 ms in a test means the code needs a knob for it.
-- **A one-off's tests leave with it.** Mark the one-off code and its tests with the same
-  `one-off:` comment and delete them in one commit.
+- **A one-off's tests leave with it.** The one-off's `shortcut:` comment names its test, so
+  whoever deletes the code deletes the test in the same commit.
 - **Harnesses are shared.** Server boot, spawned tools, fake services and browsers come from the
   repo's test helpers; a second copy moves into them.
 - **Fixtures live in the temp root.** Paths and ids a test makes up sit under its temp folder or
-  use values that can't exist on the host (ids from 900000). A test green on CI and red on the
+  use values that can't exist on the host. A test green on CI and red on the
   box is a host-path fixture until shown otherwise.
 
 ## Properties where the code has a shape

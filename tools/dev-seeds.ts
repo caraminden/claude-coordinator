@@ -209,8 +209,12 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
         ['Rename the inbox', { state: 'pending-deploy', note: 'deployed, live after the restart' }, 'chore'],
         ['Build 7: new rail', { build: 7, note: 'two of four parts merged' }, 'feature'],
         ['Rail settings', { build: 7, status: 'running', last_activity: 'Writing the settings page… 1/3' }, 'feature'],
+        ['Export to CSV', { state: 'parked', note: 'on hold until Cara picks a format' }, 'feature'],
       ];
-      for (const [title, fields, type] of rows) minion(c, title, fields, type);
+      const made = rows.map(([title, fields, type]) => minion(c, title, fields, type));
+      // Release notes waits on wake_when_live (a commit that never goes live), so it sits under Waiting, not Parked (#718).
+      const waits = c.store.getSetting<object[]>('wake-when-live') ?? [];
+      c.store.setSetting('wake-when-live', [...waits, { ticket: made[2].id, commit: '0'.repeat(40), reason: 'waiting on #12 going live', since: null }]);
       return `#/p/${c.project.id}`;
     },
   },

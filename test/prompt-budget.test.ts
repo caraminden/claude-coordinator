@@ -7,7 +7,7 @@ import { systemPrompt } from '../src/prompts.ts';
 // Budgets are characters (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760). Raising one is a
 // one-line edit here with the reason in the commit message; then refresh the baseline with
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
-const BUDGET = { minion: 38_200, taskmaster: 40_000 };
+const BUDGET = { minion: 38_200, taskmaster: 39_000 };
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).
 const app = 'x'.repeat(11_664);
@@ -58,7 +58,8 @@ for (const role of ['minion', 'taskmaster'] as const) {
 
 // Build branches (#592): the build minion's steps and the Taskmaster's test for a build fit the same budgets.
 test("a build minion's and a Taskmaster's prompt with builds on stay within the budgets too", () => {
-  const owner = systemPrompt(project, { ...minion, build: 7 }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], { build: 7, branch: null, owner: true }, true);
+  // With an open PR too, the longest minion prompt (#760: the PR line's details come only then).
+  const owner = systemPrompt(project, { ...minion, build: 7 }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], { build: 7, branch: null, owner: true }, true, null, null, true);
   const taskmaster = systemPrompt(project, { ...minion, kind: 'coordinator' }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], null, true);
   assert.ok(owner.length <= BUDGET.minion, `build minion: ${owner.length} > ${BUDGET.minion}`);
   assert.ok(taskmaster.length <= BUDGET.taskmaster, `Taskmaster: ${taskmaster.length} > ${BUDGET.taskmaster}`);
@@ -101,4 +102,15 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
     'Longest now:',
     ...sizes.slice(0, 5).map((x) => `  ${x.n} ${x.f}`),
   ].join('\n'));
+});
+
+// #760: a minion hears about ci-failures and dispatched-workflow watching only while its branch has an open PR.
+test('the PR line says more only with an open PR', () => {
+  const args = ['/shared/929', '/shared/project', '/tickets', '/memory', [], true, app] as const;
+  const without = systemPrompt(project, minion, ...args);
+  const withPr = systemPrompt(project, minion, ...args, null, [], null, false, null, null, true);
+  assert.match(without, /When you open a GitHub pull request .*set state outside and end the turn\./);
+  assert.doesNotMatch(without, /ci-failures/);
+  assert.match(withPr, /When your branch has an open GitHub pull request.*ci-failures/);
+  assert.doesNotMatch(withPr, /When you open a GitHub pull request/);
 });

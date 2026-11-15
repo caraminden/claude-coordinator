@@ -535,6 +535,8 @@ export class Runner {
   noTurns = false;
   /** The commit the server runs now (server.ts: the waiters' head), to tell whether a scheme deploys here. */
   liveHead: () => string | null = () => null;
+  /** Whether the minion's branch has an open GitHub PR, as the GitHub watcher last saw it: its prompt's PR line says more then (#760). */
+  openPr: (ticketId: number) => boolean = () => false;
   /** Whether a scheme's chats are indexed for search_memory (server.ts, #331). */
   memoryScheme: (projectId: number) => boolean = () => false;
   /** A ticket was dismissed (its preview goes with it). */
@@ -2159,7 +2161,7 @@ export class Runner {
     // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
     const everyScheme = this.everySchemeFor(project, ticket, asker);
     const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
-    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket)));
+    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id)));
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
     // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
     let tmp: string | null = null;

@@ -725,6 +725,7 @@ github.onPr = (id, repo, as, pr) => {
   else prs.delete(id);
   ciRuns.pr(id, repo, as, pr);
 };
+runner.openPr = (id) => prs.get(id)?.state === 'OPEN';
 if (!BOOT_CHECK) github.start();
 /** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log. */
 async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false): Promise<boolean> {

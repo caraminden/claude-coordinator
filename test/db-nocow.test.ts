@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
-import { hostOps, moveToNoCow, type NoCowOps } from '../src/db-nocow.ts';
+import { hostOps, moveToNoCow, RETRY_AFTER_MS, type NoCowOps } from '../src/db-nocow.ts';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { Store } from '../src/db.ts';
 
 // #761: the live database moves into a no-COW file at a start, once. Whatever goes wrong partway, the old file
@@ -55,7 +57,7 @@ test('moves the database into a no-COW file, keeps the old one as a backup, and 
   const rows = settings(db);
   const oldIno = statSync(db).ino;
   const ops = fakeOps();
-  const r = moveToNoCow(db, ops, new Date('2026-11-15T18:01:02Z'));
+  const r = moveToNoCow(db, ops, { now: new Date('2026-11-15T18:01:02Z') });
   assert.equal(r.moved, true, r.note);
   assert.equal(ops.noCow(db), true);
   assert.notEqual(statSync(db).ino, oldIno);
@@ -113,6 +115,10 @@ for (const [name, ops, marked] of [
     assert.deepEqual(files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')), []);
     assert.equal(existsSync(`${db}.nocow-failed`), marked);
     assert.match(moveToNoCow(db, fakeOps()).note, /an earlier try failed/);
+    // A day on, it tries again.
+    const later = new Date(Date.now() + RETRY_AFTER_MS + 1000);
+    assert.equal(moveToNoCow(db, fakeOps(), { now: later }).moved, true);
+    assert.ok(!existsSync(`${db}.nocow-failed`));
   });
 }
 
@@ -124,12 +130,61 @@ test('waits, with no marker, for disk space and for other processes to let go', 
   assert.equal(moveToNoCow(db, fakeOps()).moved, true);
 });
 
+test('kills a copy that runs past its budget, and leaves the old file in place', () => {
+  const db = stopped(400);
+  const ino = statSync(db).ino;
+  const rows = settings(db);
+  const r = moveToNoCow(db, fakeOps(), { budgetMs: 50 });
+  assert.equal(r.moved, false);
+  assert.match(r.note, /the copy took over 0.05 s/);
+  assert.equal(statSync(db).ino, ino);
+  assert.equal(settings(db), rows);
+  assert.deepEqual(files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')), []);
+  assert.ok(existsSync(`${db}.nocow-failed`));
+});
+
+test('waits, with no marker, while a reader holds a transaction open', () => {
+  const db = stopped();
+  const store = new Store(db);
+  store.autoCheckpoint(false);
+  store.setSetting('in-wal', 1);
+  const reader = new DatabaseSync(db, { readOnly: true });
+  reader.exec('BEGIN');
+  reader.prepare('SELECT count(*) FROM settings').get();
+  store.setSetting('after-reader', 1);
+  store.db.close();
+  const ino = statSync(db).ino;
+  const r = moveToNoCow(db, fakeOps());
+  reader.exec('COMMIT');
+  reader.close();
+  assert.equal(r.moved, false);
+  assert.match(r.note, /a reader held the WAL checkpoint|WAL still holds pages/);
+  assert.equal(statSync(db).ino, ino);
+  assert.ok(!existsSync(`${db}.nocow-failed`));
+  assert.equal(moveToNoCow(db, fakeOps()).moved, true);
+  assert.equal(new Store(db).getSetting('after-reader'), 1);
+});
+
+test('finds another process that has the file open, and waits for it', async () => {
+  const db = stopped();
+  const child = spawn(process.execPath, ['-e', `const { DatabaseSync } = require('node:sqlite'); const d = new DatabaseSync(process.argv[1]); d.prepare('SELECT 1').get(); console.log('open'); setInterval(() => {}, 1000);`, db], { stdio: ['ignore', 'pipe', 'inherit'] });
+  try {
+    await once(child.stdout!, 'data');
+    assert.ok(hostOps.openBy(db).includes(child.pid!));
+    assert.match(moveToNoCow(db, fakeOps({ openBy: hostOps.openBy })).note, new RegExp(`open in process ${child.pid}`));
+  } finally {
+    child.kill('SIGKILL');
+    await once(child, 'exit');
+  }
+  assert.equal(moveToNoCow(db, fakeOps({ openBy: hostOps.openBy })).moved, true);
+});
+
 test('clears what a start killed partway left: the temp copy and a backup link to the file in use', () => {
   const db = stopped();
   writeFileSync(`${db}.nocow-tmp`, 'half a copy');
   writeFileSync(`${db}.nocow-tmp-journal`, 'its journal');
   linkSync(db, `${db}.backup-cow-20261114-000000`);
-  const r = moveToNoCow(db, fakeOps(), new Date('2026-11-15T18:01:02Z'));
+  const r = moveToNoCow(db, fakeOps(), { now: new Date('2026-11-15T18:01:02Z') });
   assert.equal(r.moved, true, r.note);
   assert.deepEqual(files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')), ['coordinator.db.backup-cow-20261115-180102']);
 });

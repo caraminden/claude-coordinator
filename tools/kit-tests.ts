@@ -2,10 +2,10 @@
 // kit/ and light paths alone. Worked out from the code each time, never a kept list, so a new test that reads the kit
 // is in it at once:
 //   - a test file that names kit/ in its code (comments don't count), or
-//   - one that imports, itself or through a non-test helper under test/, a file in src/ or server.ts that names it.
-// 148 of 253 test files on 2026-11-15, most through test/helpers.ts.
-// shortcut: imports are followed one step into src/, not through it (205 of 253 test files reach a kit-reading module
-// that way). Follow them all if a kit land ever breaks main.
+//   - one that imports, itself or through a non-test helper under test/, a file in src/, tools/ or server.ts that names it.
+// About 150 of 280 test files (2026-11-15), most through test/helpers.ts; `tools/citadel-node tools/kit-tests.ts` lists them.
+// shortcut: imports are followed one step into src/ and tools/, not through them (about 57 more test files reach a
+// kit-reading module that way). Follow them all if a kit land ever breaks main.
 // Prints one path per line, from the repo root (the current directory).
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
@@ -15,7 +15,7 @@ const namesKit = (f: string) => /['"`/]kit['"`/]|\bkit\//.test(code(f));
 const imports = (f: string) =>
   [...code(f).matchAll(/(?:from|import\()\s*['"](\.{1,2}\/[^'"]+)['"]/g)].map((m) => normalize(join(dirname(f), m[1])));
 
-const sources = [...(existsSync('src') ? readdirSync('src') : []).map((f) => `src/${f}`), 'server.ts'].filter((f) => /\.(ts|js|mjs)$/.test(f) && existsSync(f));
+const sources = [...['src', 'tools'].flatMap((d) => (existsSync(d) ? readdirSync(d).map((f) => `${d}/${f}`) : [])), 'server.ts'].filter((f) => /\.(ts|js|mjs)$/.test(f) && existsSync(f));
 const kitSources = new Set(sources.filter(namesKit));
 const seen = new Map<string, boolean>();
 const reaches = (f: string): boolean => {

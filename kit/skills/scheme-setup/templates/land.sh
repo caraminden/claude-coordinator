@@ -124,7 +124,7 @@ lane_of() {
   while read -r -a words || [ "${#words[@]}" -gt 0 ]; do
     l=${words[0]:-}
     [ -n "$l" ] && [[ $l != \#* ]] || continue
-    [[ $l =~ ^[a-z][a-z0-9_]*$ ]] || l=full
+    [[ $l =~ ^[a-z][a-z0-9_]*$ && $l != wait && $l != limit ]] || l=full # CHECK_WAIT and CHECK_LIMIT are this script's own
     for i in "${words[@]:1}"; do [[ $i != \#* ]] || break; lanes+=("$l") pats+=("$i"); done
   done < <(git show "$3:$LANES" 2>/dev/null)
   while IFS= read -r f; do

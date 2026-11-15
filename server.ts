@@ -104,7 +104,7 @@ pinTurnFiles(DATA_DIR);
 // The front end as it was when this server started, or last reloaded on SIGHUP. Serving this copy,
 // not the files on disk, keeps pages in step with the running server: a deploy that changes the
 // server swaps both at the restart, so a tab never gets a new front end that calls API routes the old
-// server doesn't have yet. A deploy that changes only public/ sends SIGHUP instead (tools/deploy.sh).
+// server doesn't have yet. A deploy that changes only public/ or light paths sends SIGHUP instead (tools/deploy.sh).
 let ASSETS = new Map<string, Buffer>();
 // Fingerprint of the front end, so open tabs can tell they are stale after a deploy.
 let ASSET_VERSION = '';
@@ -1106,7 +1106,8 @@ process.on('SIGHUP', () => {
     () => {
       console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
       if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION });
-      // tools/deploy.sh sends SIGHUP only for a change to public/ alone, so the checkout's HEAD is now live.
+      // tools/deploy.sh sends SIGHUP only for a change to public/ or light paths alone (tools/lanes), so the checkout's
+      // HEAD is now live; deploy.sh waits for /api/health to report it.
       app.liveCommit = checkoutHead();
       if (!BOOT_CHECK) liveOn(app.liveCommit);
     },

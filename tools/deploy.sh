@@ -523,10 +523,8 @@ deploy() {
       false
     fi
   fi
-  # The server's code is the same, so the front end's version is too; a light change leaves a refusing deploy's note.
-  if [ "$kind" = light ]; then
-    version=$(health version)
-  else
+  # A light change has no server code to check, and leaves a refusing deploy's note where it is.
+  if [ "$kind" != light ]; then
     queue_phase "deploying: boot check since $(date +%H:%M)"
     say "boot check: the new code on a spare port with a copy of the database"
     # A limit from outside (#553): boot-check.ts's own is a timer, which a blocking call in the new code defeats, and a
@@ -567,12 +565,13 @@ deploy() {
     mark queued
     for _ in $(seq 10); do
       sleep 1
-      if [ "$(health version)" = "$version" ]; then
+      # Light: the front end is unchanged, so only the server's live commit says the reload took.
+      if { [ "$kind" = light ] && [ "$(health commit)" = "$new" ]; } || { [ "$kind" != light ] && [ "$(health version)" = "$version" ]; }; then
         mark live
         git_live tag -f last-good "$new" >/dev/null
         rm -f "$STATE/bad"
-        local what="the server reloaded the front end ($version); open tabs reload when idle" pushed
-        [ "$kind" != light ] || what="docs and config only, nothing to reload"
+        local what="docs and config only, nothing to reload" pushed
+        [ "$kind" = light ] || what="the server reloaded the front end ($version); open tabs reload when idle"
         say "live now: $what. No restart."
         local kind=ok
         pushed=$(push_github "$new") || kind=warn
@@ -580,7 +579,7 @@ deploy() {
         return 0
       fi
     done
-    say "the server did not pick up the new front end on SIGHUP; queuing a restart instead"
+    say "the server did not pick up the new $([ "$kind" = light ] && echo commit || echo 'front end') on SIGHUP; queuing a restart instead"
   fi
 
   # The restart runs after this turn ends, so remember who to tell how it went, and which commit was this deploy's.

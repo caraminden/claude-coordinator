@@ -259,7 +259,7 @@ export interface App {
   dataDir: string;
   preview: boolean;
   machinesUrl: URL | null;
-  /** The commit the server runs: its boot commit, moved on by each front-end-only reload (SIGHUP). */
+  /** The commit the server runs: its boot commit, moved on by each SIGHUP reload (a front-end-only or light deploy). */
   liveCommit: string | null;
   readonly assetVersion: string;
   broadcast(msg: object): void;

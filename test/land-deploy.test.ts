@@ -11,9 +11,10 @@ import { land, env, git, setup } from './land-fixture.ts';
 // The real deploy.sh and run-tests.sh on main, a boot check that passes, and stand-ins for systemd: the
 // queued "restart" waits for the lock, then counts as live and checked (it tags last-good, as the real one does). run() runs a script with them; runs() lists
 // where the tests ran.
-// health: more for /api/health to say, a function asked on each request (reload: 'sighup' has the systemctl stand-in
-// take a SIGHUP, noting it in <dir>/sighups).
-async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>, health: () => Record<string, unknown> = () => ({})) {
+// health: more for /api/health to say, a function asked on each request with whether a SIGHUP came yet (reload: 'sighup'
+// has the systemctl stand-in take one, noting it in <dir>/sighups; after it the stand-in reports the live checkout's HEAD,
+// as the real server does).
+async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>, health: (hup: boolean) => Record<string, unknown> = () => ({})) {
   const r = setup();
   for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
@@ -32,7 +33,11 @@ lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/restart.loc
 (flock -w 20 "$lock" true && echo got >${JSON.stringify(restarted)} && git -C "$DEPLOY_LIVE" tag -f last-good HEAD) 7>&- >/dev/null 2>&1 &
 `);
   for (const f of ['systemctl', 'systemd-run']) chmodSync(join(bin, f), 0o755);
-  const server = createServer((_, res) => res.end(JSON.stringify({ ok: true, commit: existsSync(restarted) ? git(r.source, 'rev-parse', 'main') : base, ...health() })));
+  const sighups = join(r.dir, 'sighups');
+  const server = createServer((_, res) => {
+    const hup = existsSync(sighups);
+    res.end(JSON.stringify({ ok: true, commit: existsSync(restarted) ? git(r.source, 'rev-parse', 'main') : hup ? git(r.live, 'rev-parse', 'HEAD') : base, ...health(hup) }));
+  });
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
   try {
     const url = `http://127.0.0.1:${(server.address() as any).port}`;
@@ -60,18 +65,22 @@ test('the real deploy.sh takes the lock land.sh holds, lets go of it once the re
 // The light lane (#753): a land touching only light paths in tools/lanes runs no tests anywhere, starts no CI, and the
 // real deploy.sh skips the boot check and goes live by SIGHUP, with no restart.
 let running = '';
+// Main gets a map with docs/ light, the server runs it, and the worktree commits a doc.
+const lightLand = (r: ReturnType<typeof setup>) => {
+  copyFileSync(join(import.meta.dirname, '..', 'tools', 'lane.sh'), join(r.source, 'tools', 'lane.sh'));
+  writeFileSync(join(r.source, 'tools', 'lanes'), 'light docs/*\n');
+  writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "process.exit(1);\n"); // would refuse, if it ran
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'the map');
+  git(r.live, 'pull', '-q', '--ff-only');
+  git(r.wt, 'rebase', '-q', 'main');
+  running = git(r.source, 'rev-parse', 'main'); // the server already runs the map's commit, as after its own deploy
+  mkdirSync(join(r.wt, 'docs'));
+  r.commit(r.wt, 'docs/a.md', 'mine\n');
+};
 test('a light land runs no tests and no boot check, and goes live without a restart (#753)', () =>
   withRealDeploy(async (r, run, runs) => {
-    copyFileSync(join(import.meta.dirname, '..', 'tools', 'lane.sh'), join(r.source, 'tools', 'lane.sh'));
-    writeFileSync(join(r.source, 'tools', 'lanes'), 'light docs/*\n');
-    writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "process.exit(1);\n"); // would refuse, if it ran
-    git(r.source, 'add', '-A');
-    git(r.source, 'commit', '-qm', 'the map');
-    git(r.live, 'pull', '-q', '--ff-only');
-    git(r.wt, 'rebase', '-q', 'main');
-    running = git(r.source, 'rev-parse', 'main'); // the server already runs the map's commit, as after its own deploy
-    mkdirSync(join(r.wt, 'docs'));
-    r.commit(r.wt, 'docs/a.md', 'mine\n');
+    lightLand(r);
     const res = await run(land, r.wt);
     assert.match(res.stderr, /lane: light \(tools\/lanes; the path that decided it: docs\/a\.md\)/);
     assert.match(res.stderr, /no tests and no CI/);
@@ -81,6 +90,17 @@ test('a light land runs no tests and no boot check, and goes live without a rest
     assert.equal(readFileSync(join(r.dir, 'sighups'), 'utf8').trim().split('\n').length, 1);
     assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
     assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'));
+  }, (hup) => ({ reload: 'sighup', version: 'v1', ...(running && !hup && { commit: running }) })));
+
+// The front end's version doesn't move on a light change, so only the live commit says the reload took: a server still
+// on the old commit after the SIGHUP gets a restart, never a "live now" (#753 review).
+test("a light land whose SIGHUP the server doesn't take queues a restart rather than calling it live (#753)", () =>
+  withRealDeploy(async (r, run) => {
+    lightLand(r);
+    const res = await run(land, r.wt);
+    assert.match(res.stderr, /the server did not pick up the new commit on SIGHUP; queuing a restart instead/);
+    assert.doesNotMatch(res.stderr, /live now: docs and config only/);
+    assert.match(res.stderr, /live now: the server restarted on/);
   }, () => ({ reload: 'sighup', version: 'v1', ...(running && { commit: running }) })));
 
 // A killed deploy must not leave its test run or boot check holding the lock (ultra review A4), and the boot check

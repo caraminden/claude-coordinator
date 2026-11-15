@@ -18,7 +18,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSyn
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { callLine, CODEX_NOTE, codexModelFor, toCodexPreamble } from './codex.ts';
+import { callLine, CODEX_NOTE, codexModelFor, saveGenerated, toCodexPreamble } from './codex.ts';
 import { codexLock, LOCK_ENV, startTime } from './codex-lock.ts';
 
 export const QUIET_MS = 30 * 60 * 1000;
@@ -339,17 +339,14 @@ export async function main(argv: string[], env: Record<string, string | undefine
         return;
       case 'imageGeneration': {
         // Codex saves the file in its own folder (savedPath), outside the worktree: copy it in so the reply can link it.
-        // shortcut: the field names (revisedPrompt, savedPath, result as base64) come from the app-server schema, not a captured turn; check them on the first real one.
+        // shortcut: the field names (revisedPrompt, savedPath, result as base64) match 0.166.0's app-server schema (#733), not a captured turn; check them on the first real one.
         use(item, 'GenerateImage', { prompt: String(item.revisedPrompt ?? item.prompt ?? '') });
         if (!done) return;
         try {
           const dir = join(cwd, 'generated');
           mkdirSync(dir, { recursive: true });
-          const from = typeof item.savedPath === 'string' && existsSync(item.savedPath) ? item.savedPath : '';
-          const to = join(dir, from ? basename(from) : `${String(item.id).replace(/[^\w.-]/g, '_')}.png`);
-          if (from) cpSync(from, to);
-          else if (typeof item.result === 'string' && item.result) writeFileSync(to, Buffer.from(item.result, 'base64'));
-          else throw new Error(item.status === 'completed' ? 'Codex gave no image file' : `image generation ${item.status ?? 'failed'}`);
+          const to = join(dir, typeof item.savedPath === 'string' && item.savedPath ? basename(item.savedPath) : `${String(item.id).replace(/[^\w.-]/g, '_')}.png`);
+          saveGenerated(item, to);
           result(item.id, `Saved ${to}`, false);
           log(`Saved ${to}`, true);
         } catch (e) {

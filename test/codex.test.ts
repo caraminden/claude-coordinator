@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
 import { Containers } from '../src/containers.ts';
-import { images, notReady, overPace, REQUIREMENTS, review, usageLine } from '../src/codex-review.ts';
+import { IMAGE_INSTRUCTIONS, images, notReady, outPath, overPace, REQUIREMENTS, review, usageLine } from '../src/codex-review.ts';
 import { startTime } from '../src/codex-lock.ts';
 import { jsonLines } from './helpers.ts';
 // @ts-expect-error: a plain .mjs, shipped into the image as is.
@@ -204,6 +204,7 @@ const log = (m) => appendFileSync(${JSON.stringify(fakeLog)}, JSON.stringify(m) 
 log({ argv: process.argv.slice(2) });
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
 const mode = process.env.FAKE_CODEX;
+let imageRun = false;
 require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
   const m = JSON.parse(line);
   log(m);
@@ -212,12 +213,26 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
     if (mode === 'no-limits') return send({ id: m.id, error: { code: -32600, message: 'not signed in with ChatGPT' } });
     const resetsAt = Math.round(Date.now() / 1000) + 3600;
     const used = mode === 'over' ? 85 : 12;
-    send({ id: m.id, result: { rateLimits: { primary: { usedPercent: used, windowDurationMins: 300, resetsAt }, secondary: { usedPercent: 30, windowDurationMins: 10080, resetsAt: resetsAt + 86400 * 3 } } } });
+    const rateLimits = { primary: { usedPercent: used, windowDurationMins: 300, resetsAt }, secondary: { usedPercent: 30, windowDurationMins: 10080, resetsAt: resetsAt + 86400 * 3 } };
+    // An image limit of its own (#733): far past pace in mode image-over.
+    const images = { primary: { usedPercent: mode === 'image-over' ? 95 : 1, windowDurationMins: 300, resetsAt } };
+    send({ id: m.id, result: { rateLimits, rateLimitsByLimitId: { codex: rateLimits, images } } });
   }
-  if (m.method === 'thread/start') send({ id: m.id, result: { thread: { id: 'th1' } } });
+  if (m.method === 'thread/start') {
+    imageRun = String(m.params.developerInstructions).includes('image_gen');
+    send({ id: m.id, result: { thread: { id: 'th1' } } });
+  }
   if (m.method === 'turn/start') {
     send({ id: m.id, result: { turn: { id: 'tu1' } } });
     if (mode === 'hang') return;
+    // An image run (#733): one imageGeneration item, saved by Codex (FAKE_SAVED) or inline, or refused for its limit.
+    if (imageRun && String(mode).startsWith('image')) {
+      const item = mode === 'image-limit'
+        ? { type: 'imageGeneration', id: 'ig_1', status: 'failed', failure: { type: 'usageLimitExceeded', limitId: 'images', resetsAt: 1700000000 } }
+        : { type: 'imageGeneration', id: 'ig_1', status: 'completed', revisedPrompt: 'a red dot', result: Buffer.from('inline png').toString('base64'), savedPath: process.env.FAKE_SAVED || '/nowhere/ig_1.png' };
+      send({ method: 'item/completed', params: { threadId: 'th1', turnId: 'tu1', item } });
+      return send({ method: 'turn/completed', params: { threadId: 'th1', turn: { id: 'tu1', status: 'completed', error: null } } });
+    }
     send({ id: 900, method: 'item/commandExecution/requestApproval', params: { threadId: 'th1', turnId: 'tu1', itemId: 'i1' } });
   }
   if (m.id === 900) {
@@ -282,6 +297,64 @@ test('images go to Codex after the brief, as local image inputs (#408)', async (
     { type: 'localImage', path: '/w/a.png' },
     { type: 'localImage', path: '/s/b.webp' },
   ]);
+});
+
+test('an image run starts a thread with no shell and image instructions, names the refs for image_gen, and writes the picture to out (#733)', async () => {
+  rmSync(fakeLog, { force: true });
+  const out = join(root, 'gen-inline.png');
+  const r = await review('a red dot', { cwd: root, timeoutMs: 10_000, images: ['/w/ref.png'], imageGen: { out, transparent: true }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image' } });
+  assert.deepEqual(r, { code: 0, text: `Wrote ${out}`, usage: '5-hour 12%, weekly 30%' });
+  assert.equal(readFileSync(out, 'utf8'), 'inline png', "Codex's saved file is gone, so the inline picture is written");
+  const msgs = logged();
+  assert.ok(msgs[0].argv.includes('features.shell_tool=false'));
+  const start = msgs.find((m) => m.method === 'thread/start').params;
+  assert.equal(start.developerInstructions, IMAGE_INSTRUCTIONS);
+  assert.equal(start.sandbox, 'read-only');
+  const input = msgs.find((m) => m.method === 'turn/start').params.input;
+  assert.equal(input.length, 1, 'refs are named in the text, not attached');
+  assert.match(input[0].text, /transparent_background: true/);
+  assert.match(input[0].text, /\/w\/ref\.png/);
+  assert.match(input[0].text, /a red dot/);
+  // The file Codex saved wins over the inline copy.
+  const saved = join(root, 'codex-saved.png');
+  writeFileSync(saved, 'saved png');
+  const out2 = join(root, 'gen-saved.png');
+  assert.equal((await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out: out2, transparent: false }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image', FAKE_SAVED: saved } })).code, 0);
+  assert.equal(readFileSync(out2, 'utf8'), 'saved png');
+});
+
+test("an image run skips (exit 4) when an image limit is over pace, and says when a used-up image limit resets (#733)", async () => {
+  const out = join(root, 'gen-none.png');
+  const over = await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out, transparent: false }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image-over' } });
+  assert.equal(over.code, 4);
+  assert.match(over.text, /^Skipped to save your Codex plan/);
+  // A review ignores the image limit.
+  assert.equal((await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image-over' } })).code, 0);
+  const used = await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out, transparent: false }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image-limit' } });
+  assert.equal(used.code, 1);
+  assert.match(used.text, /image generation limit is used up until Nov 14, 2023, \d+:\d+ [AP]M P[SD]T/);
+  assert.equal(readdirSync(root).includes('gen-none.png'), false);
+});
+
+test("--out is a .png inside the worktree or the shared folders, never over a file unless overwrite (#733)", () => {
+  const w = join(root, 'out-worktree');
+  const shared = join(root, 'out-shared');
+  const outside = join(root, 'out-outside');
+  for (const d of [w, shared, outside]) mkdirSync(d, { recursive: true });
+  symlinkSync(outside, join(w, 'escape'));
+  writeFileSync(join(w, 'old.png'), 'x');
+  const env = { COORDINATOR_SHARED_DIR: shared };
+  assert.deepEqual(outPath('art/new.png', w, false, env), { path: join(w, 'art', 'new.png') });
+  assert.ok(readdirSync(w).includes('art'), 'its folder is made');
+  assert.deepEqual(outPath(join(shared, 'a.PNG'), w, false, env), { path: join(shared, 'a.PNG') });
+  assert.deepEqual(outPath('old.png', w, true, env), { path: join(w, 'old.png') });
+  const why = (p: string | undefined) => (outPath(p, w, false, env) as { error: string }).error;
+  assert.match(why('old.png'), /already exists/);
+  assert.match(why('a.jpg'), /must end in \.png/);
+  assert.match(why(join(outside, 'a.png')), /outside/);
+  assert.match(why('../x.png'), /outside/);
+  assert.match(why('escape/a.png'), /outside/, 'a link out of the worktree is judged by where it points');
+  assert.match(why(undefined), /needs a path/);
 });
 
 test("--image takes only image files in the review's folder or the turn's shared folders (#408)", () => {
@@ -443,7 +516,7 @@ const unhooked = source.replace(`export const REQUIREMENTS = '${REQUIREMENTS}';`
 assert.notEqual(unhooked, source, "the pinned driver's REQUIREMENTS line moved: update the test's rewrite");
 writeFileSync(driver, unhooked);
 // With what it imports, as pinnedCopy lays them beside it.
-writeFileSync(join(turnDir, 'pin', 'codex-lock.ts'), readFileSync(join(import.meta.dirname, '..', 'src', 'codex-lock.ts')));
+for (const dep of ['codex-lock.ts', 'codex.ts']) writeFileSync(join(turnDir, 'pin', dep), readFileSync(join(import.meta.dirname, '..', 'src', dep)));
 mkdirSync(join(turnDir, 'pin', 'kit', 'agents'), { recursive: true });
 writeFileSync(join(turnDir, 'pin', 'kit', 'agents', 'reviewer.md'), 'the reviewer rules');
 const podBin = join(root, 'podbin');
@@ -515,9 +588,9 @@ test("a host turn's review runs in the Codex container the runner named, read-on
   assert.equal(call.kitSeen, 'the reviewer rules');
   assert.equal(call.env.HOME, '/home/u', "the container's environment, not the host turn's");
   assert.equal(call.env.FAKE_PODMAN, undefined);
-  // Its files sit in the person's mounted turns folder: the driver and its lock, the tripwire, and a review-mode config.
+  // Its files sit in the person's mounted turns folder: the driver with its lock and image helper, the tripwire, and a review-mode config.
   assert.ok(call.script.startsWith(personTurns + '/review-'), call.script);
-  assert.deepEqual(call.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'kit', 'tripwire.ts']);
+  assert.deepEqual(call.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'codex.ts', 'kit', 'tripwire.ts']);
   assert.deepEqual(call.cfg, { script: join(dirname(call.script), 'tripwire.ts'), config }, 'the container turns\' review mode: no container, no turn mode');
   assert.equal(call.writable, false, 'read-only, as the runner writes it');
   assert.deepEqual(readdirSync(personTurns), [], 'the copy goes once the review ends');

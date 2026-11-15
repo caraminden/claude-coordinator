@@ -1260,7 +1260,8 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/4/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/5-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_CODEX_IMAGES": "1"
    }
   },
   "settings": {
@@ -1453,7 +1454,8 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/5/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/6-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_CODEX_IMAGES": "1"
    }
   },
   "settings": {
@@ -2085,7 +2087,8 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/8/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/9-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_CODEX_IMAGES": "1"
    }
   },
   "settings": {
@@ -2488,7 +2491,8 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/10/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/11-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_CODEX_IMAGES": "1"
    }
   },
   "settings": {

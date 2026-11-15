@@ -1,6 +1,7 @@
 // MCP server (stdio, newline-delimited JSON-RPC) that gives a project's coordinator
 // ticket tools to manage the project's other tickets through the coordinator API.
 // Started by claude from the coordinator's --mcp-config; configured by environment.
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { APP_NAME } from './appname.ts';
@@ -819,16 +820,25 @@ const IMAGE_PROPS = {
   refs: { type: 'array', items: { type: 'string' }, maxItems: 8, description: 'Optional: reference images (png, jpeg or webp paths) for style or subject' },
   overwrite: MEDIA_OVERWRITE,
 };
+/**
+ * Every generative media tool opens with this (Cara, 2026-11-14: "image via code should ABSOLUTELY be the default
+ * unless using a system (like I described for making spell alerts) or explicitly asking for a generative model").
+ * test/media-tools.test.ts pins it.
+ */
+export const NOT_DEFAULT = 'Not the default: images are drawn with code (SVG, canvas, a script). Call this only when a person explicitly asks for a generative model, or a scheme system calls for one.';
+const NOT_DEFAULT_AUDIO = 'Not the default: sound is made with code (Web Audio, a synth script), as images are. Call this only when a person explicitly asks for a generative model, or a scheme system calls for one.';
+/** Which generative tool makes what (Cara, 2026-11-14, "Codex for raster images"). */
+const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan, when it is offered; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex isn\'t offered or refused for pace.';
 const MEDIA_TOOL_LIST = [
-  { name: 'generate_image', description: `Make an image from a prompt. ${MEDIA_COMMON}${IMAGE_MODELS}`, inputSchema: { type: 'object', properties: IMAGE_PROPS, required: ['prompt', 'out'] } },
+  { name: 'generate_image', description: `${NOT_DEFAULT} Then: make an image from a prompt through OpenRouter. ${IMAGE_ROUTING} ${MEDIA_COMMON}${IMAGE_MODELS}`, inputSchema: { type: 'object', properties: IMAGE_PROPS, required: ['prompt', 'out'] } },
   {
     name: 'edit_image',
-    description: `Change an existing image as the prompt says (the result goes to out; the original stays). ${MEDIA_COMMON}${IMAGE_MODELS}`,
+    description: `${NOT_DEFAULT} Then: change an existing image as the prompt says, through OpenRouter (the result goes to out; the original stays). ${IMAGE_ROUTING} ${MEDIA_COMMON}${IMAGE_MODELS}`,
     inputSchema: { type: 'object', properties: { image: { type: 'string', description: 'The image to edit: a png, jpeg or webp path' }, ...IMAGE_PROPS }, required: ['image', 'prompt', 'out'] },
   },
   {
     name: 'generate_audio',
-    description: `Make a sound effect or a short music clip from a prompt. ${MEDIA_COMMON} Models: effects default to bytedance-seed/seed-audio-1-0 (priced by the second), music to google/lyria-3-clip-preview (about $0.04 a clip).`,
+    description: `${NOT_DEFAULT_AUDIO} Then: make a sound effect or a short music clip from a prompt through OpenRouter. ${MEDIA_COMMON} Models: effects default to bytedance-seed/seed-audio-1-0 (priced by the second), music to google/lyria-3-clip-preview (about $0.04 a clip).`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -843,6 +853,49 @@ const MEDIA_TOOL_LIST = [
     },
   },
 ];
+
+/** A PNG through Codex's built-in image_gen on the person's own ChatGPT login (#733): offered only when they have a Codex login a turn can reach. */
+const CODEX_IMAGES = process.env.COORDINATOR_CODEX_IMAGES === '1';
+const CODEX_IMAGE_TOOL = {
+  name: 'generate_image_codex',
+  description: `${NOT_DEFAULT} Then: make or edit a PNG with Codex's built-in image generation (OpenAI gpt-image) on the ChatGPT plan of the person this turn runs for, with no per-image charge. For a raster image this is the generative tool to use; SVG and sound go to OpenRouter's generate_image and generate_audio, and so does a PNG when this one refuses because the person's Codex use is over pace (it reads their 5-hour and weekly limits first and leaves the rest for their own work). To edit, pass the image in refs and say what to change. No size or aspect setting: say the shape you want in the prompt. Writes the .png and returns its absolute path: link it as ![caption](/abs/path). Takes a minute or two. One take first; more only when asked or when it misses.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      prompt: { type: 'string', maxLength: 8000, description: 'What to draw, or for an edit what to change' },
+      out: { type: 'string', description: 'Where to write it, a .png inside your worktree or a shared folder (relative paths start in your worktree)' },
+      refs: { type: 'array', items: { type: 'string' }, maxItems: 5, description: 'Optional: images (png, jpg, gif or webp paths in your worktree or the shared folders) to edit or to take style or subject from' },
+      transparent: { type: 'boolean', description: 'Optional: a transparent background (default false)' },
+      overwrite: MEDIA_OVERWRITE,
+    },
+    required: ['prompt', 'out'],
+  },
+};
+
+/** generate_image_codex: one --image-gen run of citadel-codex-review (src/codex-review.ts), which reaches the person's Codex as their reviews do. */
+async function codexImage(args: any): Promise<string> {
+  if (typeof args.prompt !== 'string' || !args.prompt.trim()) throw new Error('prompt is required');
+  if (typeof args.out !== 'string' || !args.out) throw new Error('out is required: a .png path');
+  const refs = args.refs ?? [];
+  if (!Array.isArray(refs) || refs.some((r: unknown) => typeof r !== 'string' || !r)) throw new Error('refs must be a list of image paths');
+  const argv = ['--image-gen', '--timeout', '600', '--out', args.out, ...(args.transparent === true ? ['--transparent'] : []), ...(args.overwrite === true ? ['--overwrite'] : []), ...refs.flatMap((r: string) => ['--image', r])];
+  const r = await new Promise<{ code: number | null; out: string; err: string }>((done) => {
+    const child = spawn('citadel-codex-review', argv, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (b) => (out += b));
+    child.stderr.on('data', (b) => (err = (err + b).slice(-4000)));
+    child.on('error', (e) => done({ code: null, out, err: e.message }));
+    child.on('close', (code) => done({ code, out, err }));
+    child.stdin.on('error', () => {});
+    child.stdin.end(args.prompt);
+  });
+  const usage = /^Codex usage: .*$/m.exec(r.err)?.[0];
+  const why = r.err.replace(/^Codex usage: .*$/m, '').replace(/^citadel-codex-review: /gm, '').trim();
+  if (r.code === 0) return `${r.out.trim()} with Codex on this person's ChatGPT plan.${usage ? ` ${usage}.` : ''}`;
+  if (r.code === 4) throw new Error(`${why} Use generate_image (OpenRouter) for this one if it is offered.`);
+  throw new Error(`Codex couldn't make the image${r.code === null ? '' : ` (exit ${r.code})`}: ${why || 'no reason given'}`);
+}
 
 /** create_ticket's duplicate check (#488): open minions the server marks as twins of the new one's title and brief (src/memory.ts TWIN_SCORE). A search that fails checks nothing. */
 async function openTwins(title: string, message: string): Promise<{ number: number; title: string; status: string; score: number; owner: string | null }[]> {
@@ -1445,6 +1498,8 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('POST', `/api/tickets/${TICKET}/openrouter`, { tool: name, args });
       return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.`;
     }
+    case 'generate_image_codex':
+      return codexImage(args);
     case 'search_memory': {
       if (typeof args.query !== 'string' || !args.query.trim()) throw new Error('query is required');
       const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
@@ -1747,7 +1802,7 @@ function toolListAll() {
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

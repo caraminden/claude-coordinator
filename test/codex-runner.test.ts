@@ -49,7 +49,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : null;
   // The turn's Codex config, which names the container a host turn's Codex review runs in (#398).
   const codex = process.env.CITADEL_CODEX_TRIPWIRE ? JSON.parse(readFileSync(process.env.CITADEL_CODEX_TRIPWIRE, 'utf8')) : null;
-  record({ resume, model, text, codex });
+  record({ resume, model, text, codex, codexImages: process.env.COORDINATOR_CODEX_IMAGES ?? null });
   if (existsSync(${JSON.stringify(mode)}) && readFileSync(${JSON.stringify(mode)}, 'utf8') === 'claude-limit') {
     // Five to six hours out, whenever it runs (a fixed time of day comes round moments away once a day, #569), and well clear of the Codex fake's two.
     const h = new Date(Date.now() + 6 * 60 * 60 * 1000).getUTCHours();
@@ -214,6 +214,7 @@ test("a Codex pick by someone without Codex runs on Claude's default, saying why
   signedIn = true;
   assert.equal(turnStarts()[0].who, 'claude');
   assert.equal(turnStarts()[0].model, null, "no Codex model reaches claude");
+  assert.equal(turnStarts()[0].codexImages, null, 'no Codex images without a Codex sign-in');
   assert.ok(notes(t.id).some((n) => n.includes('set to GPT-6 Luna, but you are not signed in to Codex')));
 });
 
@@ -285,7 +286,7 @@ test("switching on carries a minion waiting out Claude's limit on at once, on Co
   rmSync(mode, { force: true });
 });
 
-test("the server login's host turns name its Codex container for their Codex reviews and wake it; nobody else's turn does (#398)", async () => {
+test("the server login's host turns name its Codex container for their Codex reviews and images and wake it; nobody else's turn does (#398, #733)", async () => {
   rmSync(seen, { force: true });
   rmSync(mode, { force: true });
   const r = runner();
@@ -297,6 +298,7 @@ test("the server login's host turns name its Codex container for their Codex rev
   const host = calls().find((c) => c.who === 'claude');
   assert.deepEqual(host.codex.container, { name: caraPlace.container, turnsDir: caraPlace.turnsDir, env: caraPlace.env });
   assert.equal(host.codex.mode, undefined, 'the review-mode config, as container turns get it');
+  assert.equal(host.codexImages, '1', 'generate_image_codex goes through the same container');
   assert.deepEqual(woken, [cara.id]);
 
   caraContainer = false;
@@ -304,6 +306,7 @@ test("the server login's host turns name its Codex container for their Codex rev
     r.send(t.id, 'Cara', 'again, before her Codex sign-in');
     await until(() => turnStarts().length === 2 && idle(t.id)());
     assert.equal(calls().filter((c) => c.who === 'claude')[1].codex.container, undefined);
+    assert.equal(calls().filter((c) => c.who === 'claude')[1].codexImages, null, 'a host turn with no Codex container gets no Codex images');
   } finally {
     caraContainer = true;
   }
@@ -312,6 +315,7 @@ test("the server login's host turns name its Codex container for their Codex rev
   r.send(j.id, 'Josh', 'his turn, in his own container');
   await until(() => turnStarts().length === 3 && idle(j.id)());
   assert.equal(calls().filter((c) => c.who === 'claude')[2].codex.container, undefined);
+  assert.equal(calls().filter((c) => c.who === 'claude')[2].codexImages, '1', 'a container turn runs Codex where it is');
   assert.deepEqual(woken, [cara.id]);
 });
 

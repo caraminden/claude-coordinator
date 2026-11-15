@@ -9,6 +9,12 @@
 // --image (#408) attaches a screenshot or art sheet for Codex to see, from the review's folder or the
 // turn's shared folders only (images()).
 //
+//   citadel-codex-review --image-gen --out path.png [--transparent] [--overwrite] [--image ref]... < prompt
+//
+// --image-gen (#733) makes one picture with Codex's built-in image_gen (gpt-image) on the same login, lock,
+// pace check and container hop, for the generate_image_codex MCP tool: --image is then a reference or the
+// image to edit, and --out a .png inside the worktree or the shared folders (outPath()).
+//
 // Exits 0 with the review on stdout, 3 when it can't run here, 4 when it's skipped to save the
 // person's Codex usage (overPace), 1 when the turn fails, 124 on timeout.
 // It refuses to start without the managed tripwire hook (deploy/claude-container/codex), so Codex
@@ -20,6 +26,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { saveGenerated } from './codex.ts';
 import { codexLock } from './codex-lock.ts';
 
 export const REQUIREMENTS = '/etc/codex/requirements.toml';
@@ -45,6 +52,13 @@ export function notReady(env: Record<string, string | undefined> = process.env, 
 }
 
 export const DEVELOPER_INSTRUCTIONS = 'You are a read-only reviewer for Citadel, of code or of the work in the images attached to the brief. Read the code with shell commands (git, rg, sed, cat); never edit, create or delete a file, and never run tests, builds, installs or network commands. A Citadel tripwire blocks some commands and says why: take that as final and carry on without it. Reply with the review only, in the format the brief asks for.';
+
+export const IMAGE_INSTRUCTIONS = 'You make one picture for Citadel with your built-in image_gen tool, on behalf of the person whose login this is. Call image_gen exactly once, with the prompt, transparent_background and referenced_image_paths the message gives, unchanged. Run no shell commands and write, copy or move no files yourself: Codex saves the picture in its own folder and Citadel copies it out. Then reply with one short line saying it is done, or why image_gen failed.';
+
+/** The message an --image-gen run sends: the person's prompt and the image_gen arguments, spelled out. */
+export function imageBrief(prompt: string, transparent: boolean, refs: string[]): string {
+  return `Call image_gen once with:\n- transparent_background: ${transparent}\n- referenced_image_paths: ${refs.length ? JSON.stringify(refs) : 'none'}\n- prompt (between the lines, verbatim):\n-----\n${prompt}\n-----`;
+}
 
 export interface RateWindow {
   usedPercent: number;
@@ -116,6 +130,29 @@ export function images(args: string[], cwd: string, env: Record<string, string |
   return { paths };
 }
 
+/**
+ * Where an --image-gen run writes its .png, resolved, or why it can't (#733): inside `cwd` (the worktree) or
+ * the turn's shared folders, as images() checks a reference, and not over a file unless `overwrite`.
+ */
+export function outPath(p: string | undefined, cwd: string, overwrite: boolean, env: Record<string, string | undefined> = process.env): { path: string } | { error: string } {
+  if (!p) return { error: '--out needs a path' };
+  if (extname(p).toLowerCase() !== '.png') return { error: `${p} must end in .png: Codex makes PNGs` };
+  const path = resolve(cwd, p);
+  const roots = [cwd, env.COORDINATOR_SHARED_DIR, env.COORDINATOR_FILES_DIR].flatMap((d) => (d ? [resolve(d)] : []));
+  const within = (rs: string[], dir: string) => rs.some((r) => { const rel = relative(r, dir); return !rel.startsWith('..') && !isAbsolute(rel); });
+  const outside = `${p} is outside this worktree and the shared folders`;
+  if (!within(roots, dirname(path))) return { error: outside };
+  if (existsSync(path) && !overwrite) return { error: `${p} already exists (pass overwrite to replace it)` };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    // A symlinked folder could lead out of the roots: check where it really is.
+    if (!within(roots.flatMap((r) => (existsSync(r) ? [realpathSync(r)] : [])), realpathSync(dirname(path)))) return { error: outside };
+  } catch (err: any) {
+    return { error: `can't make the folder for ${p}: ${err.message}` };
+  }
+  return { path };
+}
+
 /** "5-hour 12%, weekly 30%": the person's Codex usage, for the self-review report line. */
 export function usageLine(limits: RateLimits | null | undefined): string {
   return [limits?.primary, limits?.secondary].filter((w): w is RateWindow => !!w && typeof w.usedPercent === 'number').map((w) => `${windowName(w)} ${w.usedPercent}%`).join(', ');
@@ -139,12 +176,23 @@ export async function review(brief: string, opts: ReviewOptions & { onWait?: () 
   }
 }
 
-interface ReviewOptions { cwd: string; timeoutMs: number; images?: string[]; bin?: string; env?: Record<string, string | undefined>; now?: () => number }
+interface ReviewOptions {
+  cwd: string;
+  timeoutMs: number;
+  images?: string[];
+  bin?: string;
+  env?: Record<string, string | undefined>;
+  now?: () => number;
+  /** An --image-gen run (#733): the brief is the prompt, `images` its references, and the picture goes to `out`. */
+  imageGen?: { out: string; transparent: boolean };
+}
 
 function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; text: string; usage: string }> {
   const bin = opts.bin ?? 'codex';
   // file: the login stays in ~/.codex/auth.json (there's no keyring in a container); no history: CODEX_HOME grows fast otherwise.
-  const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"'], { cwd: opts.cwd, env: opts.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const gen = opts.imageGen;
+  // An image run needs no shell: off, so Codex can only call image_gen.
+  const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"', ...(gen ? ['-c', 'features.shell_tool=false'] : [])], { cwd: opts.cwd, env: opts.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] });
   let nextId = 1;
   const waiting = new Map<number, (msg: any) => void>();
   const send = (msg: object) => child.stdin.write(JSON.stringify(msg) + '\n');
@@ -158,6 +206,7 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
   child.stderr.on('data', (b) => (stderr = (stderr + b).slice(-4000)));
   return new Promise((resolve) => {
     let last = '';
+    let saved = '';
     let limits: RateLimits | null = null;
     const errors: string[] = [];
     let done = false;
@@ -171,9 +220,9 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
       child.once('exit', () => clearTimeout(hard));
       resolve({ code, text, usage: usageLine(limits) });
     };
-    const timer = setTimeout(() => finish(124, `Codex didn't finish the review within ${Math.round(opts.timeoutMs / 1000)} s.${last ? `\nIts last message:\n${last}` : ''}`), opts.timeoutMs);
+    const timer = setTimeout(() => finish(124, `Codex didn't finish the ${gen ? 'image' : 'review'} within ${Math.round(opts.timeoutMs / 1000)} s.${last ? `\nIts last message:\n${last}` : ''}`), opts.timeoutMs);
     child.on('error', (err) => finish(3, `Couldn't start ${bin}: ${err.message}`));
-    child.on('exit', (code) => finish(1, `codex app-server exited (${code}) before the review finished.${tail(stderr)}`));
+    child.on('exit', (code) => finish(1, `codex app-server exited (${code}) before the ${gen ? 'image' : 'review'} finished.${tail(stderr)}`));
     let buf = '';
     child.stdout.on('data', (chunk) => {
       buf += chunk;
@@ -199,11 +248,21 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
           limits = msg.params?.rateLimits ?? limits;
         } else if (msg.method === 'item/completed' && msg.params?.item?.type === 'agentMessage') {
           last = String(msg.params.item.text ?? '');
+        } else if (gen && msg.method === 'item/completed' && msg.params?.item?.type === 'imageGeneration') {
+          try {
+            saveGenerated(msg.params.item, gen.out);
+            saved = gen.out;
+          } catch (err: any) {
+            errors.push(err.message);
+          }
         } else if (msg.method === 'error' && !msg.params?.willRetry) {
           errors.push(String(msg.params?.error?.message ?? 'unknown error'));
         } else if (msg.method === 'turn/completed') {
           const turn = msg.params?.turn ?? {};
-          if (turn.status === 'completed' && last) finish(0, last);
+          if (gen) {
+            if (saved) finish(0, `Wrote ${saved}`);
+            else finish(1, `Codex made no image: ${errors.join('; ') || turn.error?.message || `the turn ended ${turn.status ?? 'without a status'}`}${last ? `\nIts last message:\n${last}` : ''}`);
+          } else if (turn.status === 'completed' && last) finish(0, last);
           else finish(1, `The Codex turn ended ${turn.status ?? 'without a status'}: ${turn.error?.message ?? errors.join('; ')}${last ? `\nIts last message:\n${last}` : ''}`.trim());
         }
       }
@@ -214,10 +273,14 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
       // An account without ChatGPT limits (or an older backend) can't answer: review anyway.
       const read = await Promise.race([call('account/rateLimits/read', { excludeResetCreditDetails: true }), new Promise((r) => setTimeout(r, 15_000).unref())]).catch(() => null) as any;
       limits = read?.rateLimitsByLimitId?.codex ?? read?.rateLimits ?? null;
-      const why = overPace(limits, opts.now?.());
+      // shortcut: an image run also paces against any limit whose id names images (a failed generation carries its own limitId); the id isn't documented, so check it on a real read.
+      const imageLimits = gen ? Object.entries(read?.rateLimitsByLimitId ?? {}).filter(([id]) => /image/i.test(id)).map(([, l]) => l as RateLimits) : [];
+      const why = [limits, ...imageLimits].map((l) => overPace(l, opts.now?.())).find(Boolean);
       if (why) return finish(4, `Skipped to save your Codex plan: ${why}.`);
-      const { thread } = await call('thread/start', { cwd: opts.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, developerInstructions: DEVELOPER_INSTRUCTIONS });
-      await call('turn/start', { threadId: thread.id, input: [{ type: 'text', text: brief, text_elements: [] }, ...(opts.images ?? []).map((path) => ({ type: 'localImage', path }))] });
+      const { thread } = await call('thread/start', { cwd: opts.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, developerInstructions: gen ? IMAGE_INSTRUCTIONS : DEVELOPER_INSTRUCTIONS });
+      // An image run names its references for image_gen to read, rather than attaching them to the chat.
+      const input = gen ? [{ type: 'text', text: imageBrief(brief, gen.transparent, opts.images ?? []), text_elements: [] }] : [{ type: 'text', text: brief, text_elements: [] }, ...(opts.images ?? []).map((path) => ({ type: 'localImage', path }))];
+      await call('turn/start', { threadId: thread.id, input });
     })().catch((err) => finish(1, `${err.message}${tail(stderr)}`));
   });
 }
@@ -379,13 +442,23 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const timeoutMs = (t >= 0 ? Number(args[t + 1]) : 900) * 1000;
   const brief = readFileSync(0, 'utf8').trim();
   if (!brief || !(timeoutMs > 0)) {
-    process.stderr.write('usage: citadel-codex-review [--timeout seconds] [--image path]... < brief.md   (or --check)\n');
+    process.stderr.write('usage: citadel-codex-review [--timeout seconds] [--image path]... < brief.md   (or --check, or --image-gen --out path.png [--transparent] [--overwrite] [--image ref]... < prompt)\n');
     process.exit(2);
+  }
+  let imageGen: ReviewOptions['imageGen'];
+  if (args.includes('--image-gen')) {
+    const o = args.indexOf('--out');
+    const out = outPath(o >= 0 ? args[o + 1] : undefined, process.cwd(), args.includes('--overwrite'));
+    if ('error' in out) {
+      process.stderr.write(`citadel-codex-review: ${out.error}\n`);
+      process.exit(2);
+    }
+    imageGen = { out: out.path, transparent: args.includes('--transparent') };
   }
   // For the record of what the lock costs (#636): the tool result keeps this line.
   const onWaited = (ms: number) => ms >= 1000 && process.stderr.write(`citadel-codex-review: waited ${Math.round(ms / 1000)} s for this person's Codex lock.\n`);
   const onWait = () => process.stderr.write("citadel-codex-review: waiting for this person's other Codex run.\n");
-  const r = await review(brief, { cwd: process.cwd(), timeoutMs, images: imgs.paths, bin: process.env.CITADEL_CODEX_BIN, onWait, onWaited });
+  const r = await review(brief, { cwd: process.cwd(), timeoutMs, images: imgs.paths, bin: process.env.CITADEL_CODEX_BIN, onWait, onWaited, imageGen });
   (r.code ? process.stderr : process.stdout).write(r.text + '\n');
   if (r.usage) process.stderr.write(`Codex usage: ${r.usage}\n`);
   process.exit(r.code);

@@ -58,6 +58,8 @@ const adds: [string, Partial<TurnFacts>, Record<string, string>][] = [
   ['memory', { memory: true }, { COORDINATOR_MEMORY: '1' }],
   // A minion whose person connected OpenRouter is offered the media tools (#717).
   ['media', { media: true }, { COORDINATOR_MEDIA: '1' }],
+  // A minion whose person has a reachable Codex login is offered generate_image_codex (#733).
+  ['codex images', { codexImages: true }, { COORDINATOR_CODEX_IMAGES: '1' }],
   ['the typer', { typer: { id: 7, login: 'josh' } }, { CITADEL_PERSON_ID: '7', CITADEL_PERSON_LOGIN: 'josh' }],
   ['home contraptions', { homeContraptions: ['a', 'b'] }, { COORDINATOR_HOME_CONTRAPTIONS: 'a,b' }],
   // A minion turn that got machines is offered propose_machine_notes for them (#617).

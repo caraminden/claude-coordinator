@@ -2250,6 +2250,8 @@ export class Runner {
         env: { server: process.env, coordinator, heavy, github: github?.env ?? null },
         memory: this.memoryScheme(project.id),
         media: !!this.mediaFor?.(person),
+        // A Codex turn has image_gen itself; a host turn reaches Codex only through the person's Codex container.
+        codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
         everyScheme,

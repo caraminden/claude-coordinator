@@ -244,10 +244,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .shelf .sub.fold > summary::before { content: '▸'; }
 .shelf .sub.fold[open] > summary::before { content: '▾'; }
 .shelf .sub.fold > summary .count { font-weight: normal; }
-.view-all { display: flex; justify-content: space-between; text-decoration: none; color: var(--accent); font-size: 0.9em; padding: 0.3rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
-.view-all:hover, .view-all.active { border-color: var(--accent); }
-.view-all .count, .chip .count { color: var(--muted); }
-.chip .count { margin-left: 0.35em; }
+.chip .count { color: var(--muted); margin-left: 0.35em; }
 .artifact-item { display: flex; gap: 0.5rem; align-items: center; text-decoration: none; padding: 0.3rem 0.4rem; border-radius: 6px; min-width: 0; }
 .artifact-item:hover { background: var(--panel); }
 .artifact-item.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }

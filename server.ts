@@ -683,7 +683,7 @@ if (!BOOT_CHECK || PREVIEW) {
 }
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
-const github = new GithubWatcher(store, (ticketId, text, fyi) => runner.send(ticketId, GITHUB_NAME, text, [], fyi ? { fyi } : {}));
+const github = new GithubWatcher(store, (ticketId, text, fyi, quiet) => (quiet ? runner.leaveMail(ticketId, GITHUB_NAME, text) : runner.send(ticketId, GITHUB_NAME, text, [], fyi ? { fyi } : {})));
 github.as = githubOf;
 github.onPr = (id, repo, as, pr) => {
   if (pr) prs.set(id, pr);

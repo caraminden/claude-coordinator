@@ -786,10 +786,10 @@ export const ticketRoutes: Route[] = [
       const body = await readJson(req);
       const text = str(body.text, 'Message', 10_000);
       const coordinator = await ensureCoordinator(app, store.getProject(ticket.project_id)!);
-      const held = runner.relay(id, coordinator.id, `#${ticket.number} ${ticket.title}`, text, body.urgent === true);
+      const held = runner.relay(id, coordinator.id, `#${ticket.number} ${ticket.title}`, text, body.urgent === true, body.wake !== false);
       if (held === true) return json(res, 202, { sent: false, held: true });
       runner.emit(id, 'note', { text: `${held ? 'Left held mail for' : 'Sent'} the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
-      return json(res, 202, { sent: true, ...(held ? { cold: true } : {}) });
+      return json(res, 202, { sent: true, ...(held === 'cold' ? { cold: true } : held === 'mail' ? { mail: true } : {}) });
     },
   },
   {

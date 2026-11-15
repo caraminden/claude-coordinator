@@ -1607,11 +1607,11 @@ export class Runner {
    * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
    * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
    */
-  relay(minionId: number, to: number, author: string, text: string, urgent = false): boolean | 'cold' {
+  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true): boolean | 'cold' | 'mail' {
     const minion = this.store.getTicket(minionId)!;
     const from = to === minionId ? this.store.getCoordinator(minion.project_id)?.id : minionId;
-    const { held, cold } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, false, urgent);
-    if (!held) return cold ? 'cold' : false;
+    const { held, cold } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent);
+    if (!held) return cold ? 'cold' : !wake ? 'mail' : false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
     const note = held === 1
       ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`

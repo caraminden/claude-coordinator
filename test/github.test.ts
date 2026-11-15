@@ -322,6 +322,34 @@ test('a draft marked ready for review gets the full window before a no-checks nu
   assert.match(sent[0], /^CI hasn't started on abc1234 in PR #12: no checks after 10 minutes\. /);
 });
 
+test('a stuck-runner ping is quiet (held mail, no turn); anything beside it wakes as before', () => {
+  const waiting = [check('build', 'passed'), { ...check('desktop', 'pending'), queued: true as const }];
+  assert.equal(decide(pr({ checks: waiting }), new Set(['baseline']), opts({ stuck: ['desktop'] })).quiet, true);
+  assert.equal(decide(pr({ checks: [check('build', 'failed')] }), new Set(['baseline']), opts()).quiet, false);
+  assert.equal(decide(pr({ checks: waiting }), new Set(['baseline']), opts()).quiet, false, 'nothing sent: not quiet');
+});
+
+test('the watcher passes a stuck ping on as quiet, and the verdict after it as a real message', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const store = new Store(join(root, 'quiet.db'));
+  const project = store.createProject('P', null);
+  const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(ticket.id, root, 'ticket/1-t');
+  const tk = store.getTicket(ticket.id)!;
+  let snapshot = pr({ hasCi: true, checks: [{ ...check('desktop', 'pending'), queued: true }] });
+  const sent: [string, boolean | undefined][] = [];
+  const w = new GithubWatcher(store, (_id, text, _fyi, quiet) => sent.push([text, quiet]), async () => ({ pr: snapshot, self: 'cara' }));
+  await w.poll(tk, root, 'o/r');
+  t.mock.timers.tick(STUCK_MS);
+  await w.poll(tk, root, 'o/r');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0][0], /is stuck/);
+  assert.equal(sent[0][1], true);
+  snapshot = pr({ hasCi: true, checks: [check('desktop', 'failed')] });
+  await w.poll(tk, root, 'o/r');
+  assert.equal(sent[1][1], false);
+});
+
 test('only merges and passed CI are notices that need no action (#619)', () => {
   const fyi = (p: PrSnapshot) => decide(p, new Set(), opts()).fyi;
   assert.equal(fyi(pr({ state: 'MERGED', closedAt: T, closedBy: 'josh' })), true);

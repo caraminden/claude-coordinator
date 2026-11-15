@@ -89,6 +89,8 @@ export interface Decision {
   handled: string[];
   /** Every message is news that needs no action (merged, CI passed), so it leaves a pending close_self be (#619). */
   fyi: boolean;
+  /** Every message is a notice nobody can act on (CI stuck waiting for a runner): it is left as held mail and starts no turn. */
+  quiet: boolean;
 }
 
 const ts = (s: string | null | undefined) => (s ? Date.parse(s) : null);
@@ -131,15 +133,17 @@ export function decide(
   const messages: string[] = [];
   const handled: string[] = [];
   let fyi = true;
+  let quiet = true;
   const own = (login: string | null, at: number | null) =>
     at !== null && (selves === null || selves.includes(login?.toLowerCase() ?? '')) && during(opts.spans, at);
-  const consider = (key: string, message: () => string | null, news = false) => {
+  const consider = (key: string, message: () => string | null, news = false, silent = false) => {
     if (seen.has(key)) return;
     handled.push(key);
     seen.add(key);
     const text = opts.baseline ? null : message();
     if (text) messages.push(text);
     if (text && !news) fyi = false;
+    if (text && !silent) quiet = false;
   };
   if (opts.baseline) handled.push('baseline');
 
@@ -178,7 +182,7 @@ export function decide(
     consider(`stuck:${pr.headSha}`, () => {
       const names = stuck.map((c) => c.name).join(', ');
       return `CI on ${short(pr.headSha)} in PR #${pr.number} is stuck: ${stuck.length === 1 ? `${names} has` : `${stuck.length} checks (${names}) have`} waited ${STUCK_MS / 60_000} minutes for a runner. That isn't a test failure; you'll still hear when CI finishes.`;
-    });
+    }, false, true);
   }
 
   for (const r of [...pr.remarks].sort((a, b) => a.createdAt - b.createdAt)) {
@@ -204,7 +208,7 @@ export function decide(
       return pr.state === 'MERGED' ? `PR #${pr.number} was merged${by}.` : `PR #${pr.number} was closed${by} without merging.`;
     }, pr.state === 'MERGED');
   }
-  return { messages, handled, fyi: fyi && messages.length > 0 };
+  return { messages, handled, fyi: fyi && messages.length > 0, quiet: quiet && messages.length > 0 };
 }
 
 /** Turn spans from a ticket's start and end markers, oldest first. A start with no end yet runs to `openEnd`. */
@@ -367,7 +371,7 @@ interface Schedule {
 /** Polls the open PRs of a project's tickets, one gh call at a time, and sends what's new into each ticket. */
 export class GithubWatcher {
   private store: Store;
-  private send: (ticketId: number, text: string, fyi: boolean) => void;
+  private send: (ticketId: number, text: string, fyi: boolean, quiet?: boolean) => void;
   private fetch: typeof fetchSnapshot;
   private schedule = new Map<number, Schedule>();
   /** Each scheme's origin, read again after REPO_MS (scheme-repo.ts may set a new one); a failed read isn't kept. */
@@ -382,7 +386,7 @@ export class GithubWatcher {
   /** What each poll saw of a minion's PR (null: none), read as `as`: its CI runs in flight become its wait (#546). */
   onPr: (ticketId: number, repo: string, as: GithubEnv, pr: PrSnapshot | null) => void = () => {};
 
-  constructor(store: Store, send: (ticketId: number, text: string, fyi: boolean) => void, fetch = fetchSnapshot) {
+  constructor(store: Store, send: (ticketId: number, text: string, fyi: boolean, quiet?: boolean) => void, fetch = fetchSnapshot) {
     this.store = store;
     this.send = send;
     this.fetch = fetch;
@@ -490,10 +494,10 @@ export class GithubWatcher {
     for (const c of pr.checks) if (c.queued) queued[c.name] = head.queued[c.name] ?? now;
     head.queued = queued;
     const stuck = Object.keys(queued).filter((name) => now - queued[name] >= STUCK_MS);
-    const { messages, handled, fyi } = decide(pr, seen, { baseline, self: selves, spans, headFor: now - head.at, stuck });
+    const { messages, handled, fyi, quiet } = decide(pr, seen, { baseline, self: selves, spans, headFor: now - head.at, stuck });
     // Recorded before sending, so a crash in between drops a message rather than repeating it forever.
     if (handled.length) this.store.addGithubSeen(ticket.id, handled.map((k) => prefix + k), messages.length > 0);
-    if (messages.length) this.send(ticket.id, messages.join('\n\n'), fyi);
+    if (messages.length) this.send(ticket.id, messages.join('\n\n'), fyi, quiet);
     if (pr.state === 'MERGED' && handled.some((k) => k.startsWith('state:'))) this.onMerged(repoDir);
 
     const open = pr.state === 'OPEN';

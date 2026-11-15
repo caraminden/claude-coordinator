@@ -85,6 +85,22 @@ test("a minion's message to a cold Taskmaster is held as mail and rides along wi
   assert.equal(store.getSetting(`cold:${tm.id}`), null, 'delivered: the cap has nothing left to wake');
 });
 
+test("a minion's wake: false message to a warm Taskmaster starts no turn and rides along with its next one", async () => {
+  const tm = ticket('coordinator', 0);
+  const minion = ticket('ticket', 0, tm.project_id);
+  assert.equal(runner.relay(minion.id, tm.id, `#${minion.number} M`, '#9 landed, nothing for you', false, false), 'mail');
+  assert.equal(lastMessage(tm.id).mail, true);
+  assert.equal(runner.isRunning(tm.id), false, 'a status note must not wake it');
+  assert.equal(runner.queued(tm.id), 0);
+  assert.equal(store.getSetting(`cold:${tm.id}`), null, 'not cold mail: no cap wakes it');
+
+  const before = promptCount();
+  runner.send(tm.id, 'Cara', 'anything new?');
+  await until('the turn', async () => promptCount() > before);
+  assert.deepEqual(lastPrompt(), ['[Cara]: anything new?', `[Held mail from #${minion.number} M, sent 2026-11-08 14:05 UTC]: #9 landed, nothing for you`]);
+  await idle(tm.id);
+});
+
 test("the Taskmaster's message to a cold minion is held; urgent wakes it, the held one along", async () => {
   const tm = ticket('coordinator', 0);
   const minion = ticket('ticket', 90 * 60_000, tm.project_id);

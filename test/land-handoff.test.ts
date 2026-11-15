@@ -256,40 +256,62 @@ test('a deploy that rolls back after a clean land posts the shipped line, then w
   assert.ok(!s.did.some((x) => x.startsWith('close')), s.did.join('\n'));
 });
 
-test('deployApps waits behind a running deploy, retries a start that lost the race once, and fails a deploy of another commit', async () => {
+test('deployApps waits behind a running deploy, retries a refused start once, and fails a deploy of another commit', async () => {
   // An auto-deploy of the older main runs for two checks: this one starts after it, so the landed commit goes out.
   const behind = fakeDeploys(() => ({ state: 'deployed', to: 'abc1234aaaa' }), { app: 2 });
   assert.deepEqual(await deployApps(5, ['app'], 'abc1234', behind.ops), [{ name: 'app', ok: true, line: 'Deployed app at abc1234aa, healthy.' }]);
   assert.deepEqual(behind.started, ['app for 5']);
 
-  // An auto-deploy starts between the check and this start: the refused start waits for it, then starts once more.
-  let racing = false;
+  // Auto-deploy holds its start (409) before its deploy shows as running: the refused start waits, then starts once more.
   const raced: string[] = [];
+  let deployed: any = null;
   const race: DeployOps = {
-    running: () => racing,
+    running: () => false,
     start: async (name) => {
-      if (!raced.length && !racing) {
-        racing = true;
+      if (!raced.length) {
         raced.push('refused');
-        throw new Error(`${name} is being installed or deployed already`);
+        throw new Error(`${name} is being deployed already`);
       }
       raced.push('started');
+      deployed = { state: 'deployed', to: 'abc1234', said: [], log: '' };
     },
-    last: async () => ({ state: 'deployed', to: 'abc1234', said: [], log: '' }),
-    sleep: async () => { racing = false; },
+    last: async () => deployed,
+    sleep: async () => {},
   };
   assert.equal((await deployApps(5, ['app'], 'abc1234', race))[0].ok, true);
   assert.deepEqual(raced, ['refused', 'started']);
 
   // GitHub's main was behind (land.sh's push failed): the deploy went to the older commit, which isn't a ship.
   const stale = fakeDeploys(() => ({ state: 'deployed', to: '0ld0ld0aaaa' }));
+  stale.ops.has = async () => false;
   const [r] = await deployApps(5, ['app'], 'abc1234', stale.ops);
   assert.equal(r.ok, false);
-  assert.match(r.line, /deployed 0ld0ld0aa, not the landed abc1234: GitHub's main didn't have it yet/);
+  assert.match(r.line, /deployed 0ld0ld0aa, which doesn't hold the landed abc1234: GitHub's main didn't have it yet/);
 
-  // A start refused for a reason other than a running deploy (no repo, services off) fails at once, with its reason.
+  // A start refused for good (no repo, services off) fails after its one retry, with its reason.
   const refused: DeployOps = { running: () => false, start: async () => { throw new Error('Mandate has no repo set'); }, last: async () => null, sleep: async () => {} };
   assert.deepEqual(await deployApps(5, ['mandate'], 'abc1234', refused), [{ name: 'mandate', ok: false, line: "mandate's deploy couldn't start: Mandate has no repo set" }]);
+});
+
+test('deployApps counts a deploy of a newer main as shipped, and skips an app already running a commit that holds the land', async () => {
+  // Another land pushed past this one before its deploy fetched: the newer commit holds it, so it shipped.
+  const newer = fakeDeploys(() => ({ state: 'deployed', to: 'ccc9999aaaa' }));
+  const asked: string[] = [];
+  newer.ops.has = async (name, landed, to) => (asked.push(`${name} ${landed} in ${to}`), landed === 'abc1234' && to === 'ccc9999aaaa');
+  assert.deepEqual(await deployApps(5, ['app'], 'abc1234', newer.ops), [{ name: 'app', ok: true, line: 'Deployed app at ccc9999aa, healthy.' }]);
+  assert.ok(asked.includes('app abc1234 in ccc9999aaaa'), asked.join('\n'));
+
+  // A batch's lands share one commit: the first deploys it, the rest find it running and start nothing.
+  const batch = fakeDeploys(() => ({ state: 'deployed', to: 'abc1234ffff' }));
+  for (const id of [5, 6, 7]) assert.equal((await deployApps(id, ['app'], 'abc1234', batch.ops))[0].line, 'Deployed app at abc1234ff, healthy.');
+  assert.deepEqual(batch.started, ['app for 5'], 'one deploy for the batch');
+
+  // A last deploy that rolled back (or ran an older commit) is no reason to skip.
+  const after = fakeDeploys(() => ({ state: 'deployed', to: 'abc1234ffff' }));
+  await after.ops.start('app', 1);
+  (await after.ops.last('app'))!.state = 'rolled back';
+  await deployApps(5, ['app'], 'abc1234', after.ops);
+  assert.deepEqual(after.started, ['app for 1', 'app for 5']);
 });
 
 test('landResult reads deploy.sh\'s lines; outputTail keeps the last lines', () => {

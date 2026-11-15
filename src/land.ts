@@ -251,6 +251,8 @@ export interface DeployOps {
   start(name: string, ticketId: number): Promise<unknown>;
   /** Its last deploy, as deploy_contraption's status reads it. */
   last(name: string): Promise<{ state: string; to: string | null; said: string[]; tail?: string; log: string } | null>;
+  /** Whether `deployed` holds `landed` in the app's checkout (git merge-base --is-ancestor); without it, only the same commit does. */
+  has?(name: string, landed: string, deployed: string): Promise<boolean>;
   sleep?(ms: number): Promise<void>;
   now?(): number;
 }
@@ -261,25 +263,34 @@ const DEPLOY_WAIT_MS = 60 * 60_000;
 /**
  * Deploy each of the scheme's apps after a clean land and wait for the outcome (#712): behind a deploy already
  * running (an auto-deploy of an older main, most often), then one of its own, so the landed commit is what goes out.
- * `commit` is the one land.sh moved main to: a deploy that went to another (GitHub didn't have it yet) didn't ship it.
+ * `commit` is the one land.sh moved main to. An app already deployed at a commit holding it (a batch's other lands,
+ * a newer land's deploy) isn't deployed again; a deploy that went to a commit without it (GitHub didn't have it yet) didn't ship it.
  */
 export async function deployApps(ticketId: number, names: string[], commit: string | undefined, ops: DeployOps): Promise<AppDeploy[]> {
   const sleep = ops.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const now = ops.now ?? Date.now;
+  const holds = async (name: string, to: string | null) => !!(commit && to && (to.startsWith(commit) || (await ops.has?.(name, commit, to).catch(() => false))));
+  const healthy = (name: string, to: string | null) => `Deployed ${name}${to ? ` at ${to.slice(0, 9)}` : ''}, healthy.`;
   const out: AppDeploy[] = [];
   apps: for (const name of names) {
     const until = now() + DEPLOY_WAIT_MS;
     for (let tries = 0; ; tries++) {
       while (ops.running(name) && now() < until) await sleep(3000);
+      const before = await ops.last(name);
+      if (before?.state === 'deployed' && (await holds(name, before.to))) {
+        out.push({ name, ok: true, line: healthy(name, before.to) });
+        continue apps;
+      }
       try {
         await ops.start(name, ticketId);
         break;
       } catch (err: any) {
-        // Another deploy started between the check and this start: wait for it, then start this commit's once more.
-        if (tries || !ops.running(name)) {
+        // Another deploy started between the check and this start (auto-deploy's own, still starting): wait, then try once more.
+        if (tries) {
           out.push({ name, ok: false, line: `${name}'s deploy couldn't start: ${String(err?.message ?? err).trim()}` });
           continue apps;
         }
+        await sleep(3000);
       }
     }
     let d = await ops.last(name);
@@ -293,8 +304,8 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
     if (!d) out.push({ name, ok: false, line: `${name}'s deploy left no record.` });
     else if (d.state === 'running') out.push({ name, ok: false, line: `${name}'s deploy is still running after an hour: call deploy_contraption with follow: true to see how it ends.`, detail });
     else if (d.state !== 'deployed') out.push({ name, ok: false, line: `${name}'s deploy ${d.state}: ${why}`, detail });
-    else if (commit && d.to && !d.to.startsWith(commit)) out.push({ name, ok: false, line: `${name} deployed ${d.to.slice(0, 9)}, not the landed ${commit}: GitHub's main didn't have it yet (land.sh's output says whether its push failed).`, detail });
-    else out.push({ name, ok: true, line: `Deployed ${name}${d.to ? ` at ${d.to.slice(0, 9)}` : ''}, healthy.` });
+    else if (commit && !(await holds(name, d.to))) out.push({ name, ok: false, line: `${name} deployed ${d.to?.slice(0, 9) ?? 'nothing'}, which doesn't hold the landed ${commit}: GitHub's main didn't have it yet (land.sh's output says whether its push failed).`, detail });
+    else out.push({ name, ok: true, line: healthy(name, d.to) });
   }
   return out;
 }

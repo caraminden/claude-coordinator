@@ -733,7 +733,7 @@ const landHandoffs = new LandHandoffs({
     return true;
   },
   liveAlready: async (id) => (await waiters.pendingLive()).includes(id),
-  // A clean land on main deploys the scheme's home contraptions (#712), through auto-deploy's start so the two never race.
+  // A clean land on main deploys the scheme's home contraptions on main (#712), through auto-deploy's start, which marks the commit tried.
   apps: (id) => {
     const t = store.getTicket(id);
     if (!t || services.opts.off) return [];
@@ -757,6 +757,10 @@ const landHandoffs = new LandHandoffs({
       return startDeploy(app, row, by, null, uid);
     },
     last: (name) => services.lastDeploy(name),
+    has: (name, landed, deployed) => {
+      const row = store.getContraption(name);
+      return new Promise((done) => (row ? execFile('git', ['merge-base', '--is-ancestor', landed, deployed], { cwd: services.folder(row), timeout: 30_000 }, (err) => done(!err)) : done(false)));
+    },
   },
 });
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', () => landHandoffs.poll()), 5_000).unref();

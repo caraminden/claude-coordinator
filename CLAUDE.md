@@ -21,6 +21,11 @@ directly; there are no dependencies and no build step.
 - `src/backup.html` and `src/backup.ts` (the /backup chat with the Taskmaster, for when the front end breaks) are
   frozen on purpose: leave them out of restyles and refactors; `test/backup.test.ts` pins the page's hash.
 
+## Plugins
+
+- An empty or short LSP result in a turn's first ~30 s means the server is still indexing: retry, it doesn't mean "no usages".
+- UI minions can pick DevTools (`tools/plugins/devtools`) from the Plugins picker to open a page and read its console.
+
 ## Compact instructions
 
 When this conversation is compacted, keep each person's asks and decisions in their own words

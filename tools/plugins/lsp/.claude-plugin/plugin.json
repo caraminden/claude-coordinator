@@ -1,0 +1,23 @@
+{
+  "name": "lsp",
+  "version": "1.0.0",
+  "description": "TypeScript 7 code intelligence (its own LSP server), run through a pinned mise x so nothing is installed on the host.",
+  "license": "Apache-2.0",
+  "lspServers": {
+    "typescript": {
+      "command": "mise",
+      "args": ["x", "npm:typescript@7.0.2", "--", "tsc", "--lsp", "--stdio"],
+      "extensionToLanguage": {
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".mts": "typescript",
+        ".cts": "typescript",
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".mjs": "javascript",
+        ".cjs": "javascript"
+      },
+      "diagnostics": false
+    }
+  }
+}

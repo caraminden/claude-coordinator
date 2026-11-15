@@ -1,0 +1,12 @@
+{
+  "name": "devtools",
+  "version": "1.0.0",
+  "description": "Chrome DevTools MCP, run through a pinned mise x so nothing is installed on the host.",
+  "license": "Apache-2.0",
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/launch.sh"]
+    }
+  }
+}

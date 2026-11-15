@@ -31,6 +31,8 @@ test('Pacific times: PST in winter, PDT in summer, an offset or Z is taken as gi
   assert.equal(parseWakeTime('2026-11-18 09:00Z'), Date.UTC(2026, 10, 18, 9, 0));
   assert.ok(Number.isNaN(parseWakeTime('tomorrow')));
   assert.ok(Number.isNaN(parseWakeTime('2026-11-31 09:00')));
+  assert.ok(Number.isNaN(parseWakeTime('2026-11-18 09:99')));
+  assert.ok(Number.isNaN(parseWakeTime('2026-11-18 24:00')));
   assert.equal(pacificTime(Date.UTC(2026, 10, 18, 17, 0)), 'Wed 18 Nov, 09:00 PST');
 });
 
@@ -71,10 +73,41 @@ test('a time in the past, too far out, a bad time and the 21st wake are refused'
   assert.throws(() => w.add(id, T0 + 5000, 'x', 'Cara'), /20 wakes/);
 });
 
-test('a wake that comes due mid-turn goes through runner.send, which queues it for the turn end', async () => {
-  // The runner's own queueing holds a send for a running turn (send() pushes to queues and only starts a turn when idle).
+test('the timer itself delivers, and a wake that came due mid-turn is queued behind the turn and read after it', async () => {
   const { Runner } = await import('../src/runner.ts');
-  assert.match(String(Runner.prototype.send), /isRunning\(ticketId\)/);
+  const { chmodSync, writeFileSync } = await import('node:fs');
+  const fake = join(root, 'claude-fake');
+  writeFileSync(fake, `#!${process.execPath}
+require('node:readline').createInterface({ input: process.stdin }).once('line', () => setTimeout(() => {
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
+  process.exit(0);
+}, 400));
+`);
+  chmodSync(fake, 0o755);
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const id = minion();
+  store.setTicketDir(id, root, null);
+  const wakes = new TimedWakes(store, (t, text) => runner.send(t, 'Citadel', text));
+  runner.send(id, 'Cara', 'first');
+  assert.ok(runner.isRunning(id));
+  wakes.add(id, Date.now() + 100, 'mid-turn wake', 'Cara'); // real clock, real timer: it comes due while the turn runs
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(runner.queued(id), 1);
+  while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  const said = store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).text);
+  assert.equal(said.length, 2);
+  assert.match(said[1], /mid-turn wake/);
+});
+
+test('boot catches up: arm() sends an overdue wake with no call to fire()', async () => {
+  const id = minion();
+  const now = { t: T0 };
+  make(now).add(id, T0 + 1000, 'overdue', 'Cara');
+  now.t += 5000;
+  sent.length = 0;
+  make(now).arm();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(sent.length, 1);
 });
 
 test('cancel removes a wake, only from its own chat; a dismissed minion\'s wake is dropped unsent', () => {

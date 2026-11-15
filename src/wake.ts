@@ -537,7 +537,8 @@ export function parseWakeTime(text: string): number {
   if (!m) return NaN;
   const [y, mo, d, h = '0', mi = '0', s = '0'] = m.slice(1, 7).map((x) => Number(x ?? 0));
   const local = Date.UTC(y, mo - 1, d, h, mi, s);
-  if (new Date(local).getUTCMonth() !== mo - 1) return NaN; // 31 Nov and the like
+  if (new Date(local).getUTCMonth() !== mo - 1 || h > 23 || mi > 59 || s > 59) return NaN; // 31 Nov, 24:00, 09:99
+  if (m[7] && Number(m[7].slice(-2)) > 59) return NaN;
   if (m[7]) return m[7].toUpperCase() === 'Z' ? local : local - (m[7][0] === '-' ? -1 : 1) * (Number(m[7].slice(1, 3)) * 60 + Number(m[7].slice(-2))) * 60_000;
   // Pacific: guess the zone's offset at that instant, then correct once (the guess can sit across a DST change).
   const offset = (t: number) => {

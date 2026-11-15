@@ -73,9 +73,12 @@ export function landAsync(cwd: string, extra: Record<string, string>, limit: num
 export const tickets = (state: string) => (existsSync(join(state, 'queue')) ? readdirSync(join(state, 'queue')).filter((f) => /^\d+$/.test(f)).sort() : []);
 export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq')) ? Number(readFileSync(join(state, 'queue', '.seq'), 'utf8')) : 0);
 
-// The CI gate (#523): GitHub is a bare repo as origin and a stand-in gh. The stand-in knows one run, id 7, of whatever
-// commit a land/<branch> points at there, in the state FAKE_CI names; FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>",
-// which GitHub still answers with for FAKE_LAG polls after the push; FAKE_STEP is the step a red run failed in.
+// The CI gate (#523): GitHub is a bare repo as origin and a stand-in gh. Each push of land/<branch> starts a run (one
+// per runners check, which comes before each push): id 7 in the state FAKE_CI names, a second one (#769's fresh run),
+// id 8, in FAKE_CI_RERUN's. The newest run stays listed for the commit once the branch is gone, as on GitHub.
+// FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
+// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has
+// (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun).
 export function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
   git(r.dir, 'init', '-q', '--bare', hub);
@@ -93,20 +96,36 @@ case "$*" in
     [ "\${FAKE_CI:-}" != garbage ] || { echo '<html><body>Bad gateway</body></html>'; exit 0; }
     lag=0
     if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
-    if [ "$lag" = 0 ] && [ -n "$(git -C "${hub}" for-each-ref --points-at "$sha" refs/heads/land/ 2>/dev/null)" ]; then
-      case \${FAKE_CI:-green} in
-        green) printf '7\\tcompleted\\tsuccess\\thttps://ci/7\\n' ;;
-        red) printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n' ;;
-        cancelled) printf '7\\tcompleted\\tcancelled\\thttps://ci/7\\n' ;;
-        queued) printf '7\\tqueued\\t-\\thttps://ci/7\\n' ;;
-        running) printf '7\\tin_progress\\t-\\thttps://ci/7\\n' ;;
+    n=$(grep -c '/actions/runners ' "${calls}") id=$((6 + n)) st=\${FAKE_CI:-green}
+    [ "$n" -lt 2 ] || st=\${FAKE_CI_RERUN:-$st}
+    if [ "$lag" = 0 ] && [ "$n" -gt 0 ] && { [ -n "$(git -C "${hub}" for-each-ref --points-at "$sha" refs/heads/land/ 2>/dev/null)" ] || [ -z "\${FAKE_OLD_RUN:-}" ]; }; then
+      case $st in
+        green) printf '%s\\tcompleted\\tsuccess\\thttps://ci/%s\\n' $id $id ;;
+        red) printf '%s\\tcompleted\\tfailure\\thttps://ci/%s\\n' $id $id ;;
+        cancelled) printf '%s\\tcompleted\\tcancelled\\thttps://ci/%s\\n' $id $id ;;
+        queued) printf '%s\\tqueued\\t-\\thttps://ci/%s\\n' $id $id ;;
+        running) printf '%s\\tin_progress\\t-\\thttps://ci/%s\\n' $id $id ;;
       esac
     elif [ "\${FAKE_OLD_RUN%% *}" = "$sha" ]; then
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
   *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; echo "\${FAKE_RUNNERS:-1}" ;;
-  *"/actions/runs/7/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
-  "run view "*) printf 'test\\tthe full suite\\t2026 run-tests: test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n'; echo "not ok 1 - the red test's output" ;;
+  *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
+  "run view "*)
+    echo "not ok 1 - the red test's output (run $3)"
+    p='test\\tthe full suite\\t2026 run-tests:'
+    case \${FAKE_LOG:-mixed} in
+      many) printf '%b 7 test files failed: too many for load, so none is rerun\\n' "$p" ;;
+      *)
+        printf '%b 2 test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p"
+        printf '%b test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
+        if [ "\${FAKE_LOG:-mixed}" = flakes ]; then
+          printf '%b test/busy.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
+        else
+          printf '%b test/real.test.ts: failed again alone: a real failure\\n' "$p"
+        fi ;;
+    esac
+    printf '%b the run still fails\\n' "$p" ;;
 esac
 `);
   chmodSync(join(bin, 'gh'), 0o755);

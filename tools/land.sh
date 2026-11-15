@@ -370,7 +370,10 @@ bad_check() {
 # can't know its commit until this one moves main), so letting go of it would speed nobody up. The wait is bounded
 # instead: no runner online, GitHub not answering, a job no runner starts within LAND_CI_START seconds or a run not
 # done within LAND_CI_TIMEOUT all fall back, loudly, to the run on perigee (also LAND_CI=0, for when CI itself is
-# broken). A red run is red: it refuses, and never falls back.
+# broken). A red run refuses, and never falls back, with one exception (#769): a red in which every failed test file
+# passed when run-tests.sh reran it alone gets one fresh CI run of the same commit, and only a fully green one lands.
+# That reverses Cara's 2026-11-10 "Keep failing, log it" for CI: she picked "2 Rerun CI on flake-only red" on #767's
+# card, 2026-11-15 (docs/adr/0006-rerun-ci-on-flake-only-red.md).
 tip=$(git rev-parse HEAD)
 short=$(git rev-parse --short HEAD)
 # The lane (#753, tools/lanes as main has it): light runs no tests and no CI, and deploy.sh restarts nothing for it;
@@ -514,15 +517,57 @@ ci_gate() {
   esac
 }
 
+# A red run's failed log into $failed, its last lines on stderr, and run-tests.sh's flake labels into the retro log
+# (they can't reach it from the desktop, so they are written from its output here).
+ci_failed() {
+  local f load
+  failed=$(hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null) || failed=''
+  tail -n 40 <<<"$failed" >&2
+  while read -r f load; do
+    retro_log "flake · $f · load $load · $branch · in CI"
+  done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
+}
+# The failed files, comma-separated, when $failed says every one of them passed alone (#769); fails otherwise. It
+# counts on run-tests.sh's own lines: "<n> test file(s) failed; rerunning each alone…" and then one label per file.
+# Without that line (more than its max_reruns files, a hang, a leak, a run that never got to the tests) it is no flake.
+flake_only() {
+  local n files
+  n=$(sed -n 's/.*run-tests: \([0-9][0-9]*\) test file(s) failed; rerunning each alone.*/\1/p' <<<"$failed" | tail -n 1)
+  [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
+  files=$(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*/\1/p' <<<"$failed" | sort -u)
+  [ -n "$files" ] && [ "$(wc -l <<<"$files")" = "$n" ] || return 1
+  sed ':a;N;$!ba;s/\n/, /g' <<<"$files"
+}
+
 # The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
 trap 'land_timing $? || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 fellback=
 rc=0
+failed=''
+reran=''
 land_mark ci ci
 if [ "$lane" = light ]; then
   rc=light
 else
   ci_gate || rc=$?
+  # One fresh run, never more, for a red of flakes only (#769). The scratch branch goes first so the push starts a new
+  # run (pushing a commit a branch already has starts none); ci_gate then passes over the red one as stale, so it is
+  # never read as the answer. A no-answer this time falls back to the run here, which must be green too.
+  if [ "$rc" = 1 ]; then
+    ci_failed
+    if reran=$(flake_only); then
+      say "only flakes failed ($reran); running CI once more on $short, the land needs a fully green run"
+      hub git push -q "$REMOTE" ":refs/heads/$CI_REF" >/dev/null 2>&1 || true
+      ci_id='' ci_pushed=''
+      rc=0
+      ci_gate || rc=$?
+      case $rc in 0) result=green ;; 1) result=red ;; *) result='no answer' ;; esac
+      retro_log "flake rerun · $branch · $reran · $result"
+      [ "$rc" != 1 ] || ci_failed
+    else
+      reran=''
+    fi
+  fi
 fi
 land_mark gate
 if [ "$rc" = light ]; then
@@ -532,12 +577,7 @@ elif [ "$rc" = 0 ]; then
   ci_done
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then
-  failed=$(hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null) || true
-  tail -n 40 <<<"$failed" >&2
-  # run-tests.sh's flake lines can't reach the retro log from the desktop, so they are written from its output here.
-  while read -r f load; do
-    retro_log "flake · $f · load $load · $branch · in CI"
-  done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
+  [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red of flakes only ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else
   ci_done

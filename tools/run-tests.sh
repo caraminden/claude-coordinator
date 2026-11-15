@@ -9,9 +9,12 @@
 # #506 took away the idle-priority brake one run could fill it. CITADEL_TEST_CONCURRENCY overrides the number (npm test
 # reads it too).
 #
-# A red run stays red (Cara, 2026-11-10, "Keep failing, log it"). When it fails, each failed file runs again alone,
+# A red run stays red here (Cara, 2026-11-10, "Keep failing, log it"). When it fails, each failed file runs again alone,
 # once, only to label it: one that passes alone is a likely flake from load, and gets a `flake` line with the load
 # average in the scheme's retro log (retro-log/<date>/land.md) so flaky files get counted. A hang is never rerun.
+# The labels are what land.sh's CI gate reads (Cara, 2026-11-15, #767's card: "2 Rerun CI on flake-only red"): when
+# every failed file in a CI run passed alone, it asks CI for one fresh run, which must be fully green to land. So the
+# "<n> test file(s) failed; rerunning" line and the per-file labels below are its input: test/land.test.ts pins them.
 # The reruns hold the deploy lock too, and a waiting land gives up after 15 minutes: DEPLOY_RERUN_TIMEOUT limits
 # each in seconds (default 120), DEPLOY_RERUN_BUDGET all of them together (default 300); a file left over is not rerun.
 #
@@ -172,5 +175,5 @@ for f in "${files[@]}"; do
     *) say "$f: failed again alone: a real failure" ;;
   esac
 done
-say "the run still fails: a rerun only labels flakes, it never turns a red run green"
+say "the run still fails: a rerun alone only labels flakes and never turns a red run green; in CI, land.sh decides whether a red of flakes only gets one fresh run"
 exit "$rc"

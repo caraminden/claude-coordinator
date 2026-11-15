@@ -300,16 +300,75 @@ test('red CI refuses with main untouched, shows the failed log, and never falls 
   r.commit(r.wt, 'b.txt', 'mine\n');
   const main = git(r.source, 'rev-parse', 'main');
   const shared = join(r.dir, 'shared');
-  const res = c.run({ FAKE_CI: 'red', COORDINATOR_SHARED_DIR: shared });
+  const res = c.run({ FAKE_CI: 'red', COORDINATOR_SHARED_DIR: shared }); // a flake and a real failure
   assert.equal(res.status, 1);
   assert.match(landLog(shared), /· flake · test\/slow\.test\.ts · load 31\.5 · ticket\/1-x · in CI$/m, 'a flake CI labelled reaches the retro log');
   assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy - · live - · refused at ci$/m);
-  assert.match(res.stderr, /the red test's output\n.*tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched/s);
-  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.match(res.stderr, /the red test's output \(run 7\)\n.*real\.test\.ts: failed again alone.*\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|once more/);
+  assert.doesNotMatch(landLog(shared), /flake rerun/, 'a real failure gets no fresh run');
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1, 'one run only');
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   assert.equal(c.localRuns(), 0);
   assert.equal(c.refs(), '');
   assert.equal(r.note(), null);
+});
+
+// #769 (Cara, 2026-11-15, #767's card: "2 Rerun CI on flake-only red"): a red in which every failed file passed alone
+// gets one fresh run of the same commit, and only a fully green one lands.
+test('a red of flakes only gets one fresh CI run, and lands when that run is green', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more on \w+, the land needs a fully green run\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'a second push, so a new run');
+  assert.match(landLog(shared), /· flake rerun · ticket\/1-x · test\/busy\.test\.ts, test\/slow\.test\.ts · green$/m);
+  assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy \d+ · live \d+ · landed$/m);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  assert.equal(c.localRuns(), 0);
+  assert.equal(c.refs(), '', 'nothing is left on GitHub');
+});
+
+test('a red of flakes only whose fresh run is red again refuses, whatever its labels say, and is not run a third time', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared }); // both runs red, both of flakes only
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /running CI once more.*the red test's output \(run 8\).*tests failed on the rebased branch in CI again \(https:\/\/ci\/8\), on the one fresh run after a red of flakes only \(test\/busy\.test\.ts, test\/slow\.test\.ts\), so main is untouched/s);
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'two runs, never three');
+  assert.equal(res.stderr.match(/once more/g)!.length, 1);
+  assert.match(landLog(shared), /· flake rerun · ticket\/1-x · test\/busy\.test\.ts, test\/slow\.test\.ts · red$/m);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.equal(c.localRuns(), 0);
+  assert.equal(c.refs(), '');
+});
+
+test('a red with no rerun labels (too many files failed) refuses at once, and a fresh run that gets no answer falls back to the run here', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  let res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'many' });
+  assert.equal(res.status, 1);
+  assert.doesNotMatch(res.stderr, /once more/);
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1);
+
+  const r2 = setup();
+  const c2 = ci(r2);
+  r2.commit(r2.wt, 'b.txt', 'mine\n');
+  const shared = join(r2.dir, 'shared');
+  res = c2.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'queued', LAND_CI_START: '1', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /running CI once more.*CI FALLBACK: no runner started the job within 1s/s);
+  assert.match(landLog(shared), /· flake rerun · ticket\/1-x · .* · no answer$/m);
+  assert.equal(c2.localRuns(), 1, 'the fallback suite here had to pass');
 });
 
 test('when CI cannot answer, it says so loudly, logs it, runs the suite here and lands', async (t) => {

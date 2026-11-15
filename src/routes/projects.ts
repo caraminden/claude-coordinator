@@ -10,6 +10,7 @@ import { askerKey, buildOwnerKey, EFFORTS, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRU
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { directCards, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
+import { pickFor } from '../../public/model-table.js';
 import { inOrder } from '../../public/reorder.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
@@ -120,17 +121,23 @@ async function twinNote(app: App, projectId: number, id: number, text: string) {
   } catch {}
 }
 
+/** The refusal when a Taskmaster's create names no model or effort (#698). */
+const MODEL_REQUIRED = (tool: string) => `${tool} needs a model and an effort, picked on purpose from the model table in your prompt by the kind of work (e.g. model: "claude-opus-5-5", effort: "medium"); there is no default.`;
+
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
-function scheduleFields(app: App, projectId: number, body: any, all: boolean) {
+function scheduleFields(app: App, projectId: number, body: any, all: boolean, taskmaster = false) {
   const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null } = {};
   if (all || body.name !== undefined) out.name = str(body.name, 'Name', 80);
   if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
   if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
   // Each run's minion gets this type; checked against the registry now so a run can't fail on it later.
   if (all || body.type !== undefined) out.type = app.store.props.check(projectId, { type: body.type ?? 'chore' }).type?.[0] ?? 'chore';
-  // What each run starts with; null (or left out on create) is the scheme's default.
-  if (all || body.model !== undefined) out.model = oneOf(body.model ?? null, MODELS, 'Model');
-  if (all || body.effort !== undefined) out.effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
+  // What each run starts with (#698): always named. The Taskmaster gives both; a person's create without them gets the table's pick for the type.
+  if (taskmaster && all && (body.model == null || body.effort == null)) throw new HttpError(400, MODEL_REQUIRED('schedule_minion'));
+  if (!all && (body.model === null || body.effort === null)) throw new HttpError(400, 'A schedule always names its model and effort: pass one from the model table instead of null');
+  const table = all ? pickFor(out.type) : null;
+  if (all || body.model !== undefined) out.model = oneOf(body.model ?? table!.model, MODELS, 'Model');
+  if (all || body.effort !== undefined) out.effort = oneOf(body.effort ?? table!.effort, EFFORTS, 'Effort');
   return out;
 }
 
@@ -677,8 +684,10 @@ export const projectRoutes: Route[] = [
       // the thread renames itself once it knows what the work is.
       const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
       // Insert first so concurrent creates get distinct ids, then build the working dir.
-      const model = oneOf(body.model ?? null, MODELS, 'Model');
-      const effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
+      // Every start names its model and effort (#698): the Taskmaster picks them from its table, a person's start with none gets the table's pick for its type below.
+      if (caller && (body.model == null || body.effort == null)) throw new HttpError(400, MODEL_REQUIRED('create_ticket'));
+      let model = oneOf(body.model ?? null, MODELS, 'Model');
+      let effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
       const workflow = body.workflow == null ? 0 : workflowSwitch(body.workflow);
       let plugins = '';
       try {
@@ -704,6 +713,9 @@ export const projectRoutes: Route[] = [
       if (caller && !planned.type?.length) {
         throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
       }
+      const table = pickFor(planned.type?.[0]);
+      model ??= table.model;
+      effort ??= table.effort;
       // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
       let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
       let leader: Ticket | undefined;
@@ -881,8 +893,8 @@ export const projectRoutes: Route[] = [
   },
   {
     method: 'POST', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,
-    async handler({ req, res, app, session, project }) {
-      const fields = scheduleFields(app, project.id, await readJson(req), true);
+    async handler({ req, res, app, session, caller, project }) {
+      const fields = scheduleFields(app, project.id, await readJson(req), true, !!caller);
       const s = app.store.schedules.create({ project_id: project.id, ...(fields as Required<typeof fields>), created_by: session.name });
       app.broadcast({ type: 'schedules', projectId: project.id });
       return json(res, 201, scheduleView(app, s));

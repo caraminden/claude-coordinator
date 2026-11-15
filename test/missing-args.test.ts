@@ -200,12 +200,12 @@ test('a brief naming a shared file that does not exist yet is refused; one askin
   const missing = join(shared, 'handoffs', 'not-yet.md');
   const count = () => store.listTickets(Citadel.id).length;
   const before = count();
-  const r = await tool(TM, 'coordinator', 'create_ticket', { title: 'Brief', properties: { type: 'chore' }, message: `Read ${missing} first; it is your whole brief.` }, env);
+  const r = await tool(TM, 'coordinator', 'create_ticket', { title: 'Brief', properties: { type: 'chore' }, model: 'claude-sonnet-5-5', effort: 'medium', message: `Read ${missing} first; it is your whole brief.` }, env);
   refused(r, new RegExp(`${missing.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} does not exist yet\\. Start this minion once it is written, or drop the path`));
   assert.equal(count(), before, 'no minion was made');
   refused(await tool(TM, 'coordinator', 'message_ticket', { ticket_id: Minion.number, text: `See \`${missing}\`.` }, env), /does not exist yet\. Send this once it is written/);
   // Present, or asked for: it goes through.
-  const ok = await tool(TM, 'coordinator', 'create_ticket', { title: 'Brief two', properties: { type: 'chore' }, message: `Read ${join(shared, 'handoffs', 'there.md')}. When done, write your report to ${missing}.` }, env);
+  const ok = await tool(TM, 'coordinator', 'create_ticket', { title: 'Brief two', properties: { type: 'chore' }, model: 'claude-sonnet-5-5', effort: 'medium', message: `Read ${join(shared, 'handoffs', 'there.md')}. When done, write your report to ${missing}.` }, env);
   assert.ok(!ok.isError, ok.text);
   assert.ok(!(await tool(TM, 'coordinator', 'message_ticket', { ticket_id: Minion.number, text: `Create ${missing} with the plan.` }, env)).isError);
 });

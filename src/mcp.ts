@@ -62,20 +62,26 @@ const BUILD = {
   description: 'The major build this work is assigned to, e.g. 8 for Build 8; the minions list groups the build\'s minions together. null takes it out of a build.',
 };
 
-// The same lists as MODELS and EFFORTS in db.ts; the server checks them again.
+// The same lists as MODELS and EFFORTS in db.ts; the server checks them again. Required on create (#698;
+// Cara, 2026-11-14: "we should ALWAYS make an intentional choice about model"): the table is in the Taskmaster's prompt.
+const MODEL_IDS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'];
+const EFFORT_IDS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODEL = {
-  type: ['string', 'null'],
-  enum: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna', null],
-  description: "The model for the minion's turns, as in its composer. Leave it out (or null) for Claude Code's default, which suits most minions. By type: chore or read-only check claude-sonnet-5-5; ordinary design, judgment research, ideation, big refactors and first-repro-failed bugs claude-opus-5-5 (high); known-shape middle work (clear-repro bug, small clear-spec feature, follow-up, handoff, deploy, doc edit) claude-opus-5-5 at medium; claude-fable-5-2 only for architecture shaping a big multi-part feature or major build, security and risk reviews of a high-risk change, and bugs where a fix failed to hold or that are intermittent; everything else Opus high. The gpt-6 ones are Codex, only for a person who asked for it.",
+  type: 'string',
+  enum: MODEL_IDS,
+  description: "The model for the minion's turns, as in its composer. Required: pick it on purpose from the model table in your prompt, by the kind of work (mostly its type). The gpt-6 ones are Codex, only for a person who asked for it.",
 };
 const EFFORT = {
-  type: ['string', 'null'],
-  enum: ['low', 'medium', 'high', 'xhigh', 'max', null],
-  description: "The effort for the minion's turns, as in its composer. Leave it out (or null) for the scheme's default effort. By type: chore medium, read-only check low, Opus-tier hard work high, known-shape middle work medium (with claude-opus-5-5), Fable-tier work medium (with claude-fable-5-2), everything else high. xhigh only after a Fable run failed twice or a person asks; never max.",
+  type: 'string',
+  enum: EFFORT_IDS,
+  description: "The effort for the minion's turns, as in its composer. Required: the effort the model table pairs with your model for this kind of work. xhigh only after a Fable run failed twice or a person asks; never max.",
 };
-// What a schedule's runs start with (#387): Sonnet or medium suits a mechanical checkup.
-const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with; null (or left out) for the default. Sonnet suits a mechanical checkup.' };
-const SCHEDULE_EFFORT = { ...EFFORT, description: "The effort each run starts with; null (or left out) for the scheme's default effort." };
+// update_ticket can still put a minion back on Claude Code's default (Opus 5.5 at high) with null.
+const MODEL_CHANGE = { type: ['string', 'null'], enum: [...MODEL_IDS, null], description: "The model for the minion's next turns, as in its composer; null for Claude Code's default (Opus 5.5 at high)." };
+const EFFORT_CHANGE = { type: ['string', 'null'], enum: [...EFFORT_IDS, null], description: "The effort for the minion's next turns, as in its composer; null for the scheme's default effort." };
+// What a schedule's runs start with (#387), from the same table: a mechanical checkup is a read-only check.
+const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with. Required: pick it from the model table in your prompt; a mechanical checkup is a read-only check (claude-sonnet-5-5).' };
+const SCHEDULE_EFFORT = { ...EFFORT, description: 'The effort each run starts with. Required: the one the model table pairs with your model (a read-only check: low).' };
 const WORKFLOW = {
   type: ['boolean', 'null'],
   description: "true lets the minion's turns call Claude Code's Workflow tool (scripted fan-out of agents), as in its composer; off by default, since it adds about 2k tokens to every API call. Set it when creating the minion: flipping it later breaks its prompt cache once.",
@@ -370,7 +376,7 @@ const TOOLS = [
         not_duplicate: { type: 'boolean', description: 'true when create_ticket refused because open minions looked like the same work, and you checked they are not' },
       },
       // properties is asked for but not required, so a client holding an older schema isn't refused before the fallback below.
-      required: ['title', 'message'],
+      required: ['title', 'message', 'model', 'effort'],
     },
   },
   {
@@ -408,7 +414,7 @@ const TOOLS = [
     description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL, effort: EFFORT, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
+      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
       required: ['ticket_id'],
     },
   },
@@ -441,7 +447,7 @@ const TOOLS = [
         model: SCHEDULE_MODEL,
         effort: SCHEDULE_EFFORT,
       },
-      required: ['name', 'cron', 'brief'],
+      required: ['name', 'cron', 'brief', 'model', 'effort'],
     },
   },
   {
@@ -1603,7 +1609,8 @@ function scheduleLine(s: any): string {
   const at = (ms: number) => new Date(ms).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
   const next = s.paused ? 'paused' : `next ${at(s.next_run_at)}`;
   const last = s.last_run_at ? `last run ${at(s.last_run_at)}${s.last_number != null ? ` (#${s.last_number})` : ''}` : 'no run yet';
-  const runsAs = `model ${s.model ?? 'default'}, effort ${s.effort ?? "the scheme's default"}`;
+  // A schedule from before #698 may name neither; its runs take the model table's pick for its type (src/schedules.ts runMinion).
+  const runsAs = `model ${s.model ?? `the table's pick for a ${s.type}`}, effort ${s.effort ?? `the table's pick for a ${s.type}`}`;
   return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}; ${next}; ${last}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 

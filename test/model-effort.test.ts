@@ -71,9 +71,15 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   assert.equal(set.data.model, 'claude-sonnet-5-5');
   assert.equal(set.data.effort, 'low');
 
+  // A person's start that names neither (#698) gets the model table's pick: its type's, else the fallback.
+  const { FALLBACK, BY_TYPE } = await import('../public/model-table.js');
   const plain = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Plain', message: 'hi' } });
-  assert.equal(plain.data.effort, null);
+  assert.deepEqual([plain.data.model, plain.data.effort], [FALLBACK.model, FALLBACK.effort]);
   assert.equal(plain.data.default_effort, 'high');
+  const chore = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Chore', message: 'hi', properties: { type: 'chore' } } });
+  assert.deepEqual([chore.data.model, chore.data.effort], [BY_TYPE.chore.model, BY_TYPE.chore.effort]);
+  const half = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Half', message: 'hi', model: 'claude-fable-5-2' } });
+  assert.deepEqual([half.data.model, half.data.effort], ['claude-fable-5-2', FALLBACK.effort], 'a model named keeps it; the effort still comes from the table');
   assert.equal(plain.data.properties.assigned, 'Cara', 'a new minion is its starter\'s (#197)');
   const nobodys = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Nobody', message: 'hi', properties: { assigned: null } } });
   assert.equal(nobodys.data.properties.assigned, undefined, 'unless it says otherwise');
@@ -198,7 +204,8 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
   const { MODELS } = await import('../src/db.ts');
   for (const id of ['claude-fable-5-1', 'claude-fable-5-2']) assert.ok((MODELS as readonly string[]).includes(id), `MODELS has ${id}`);
 
-  // The MCP server's own list, as a client sees it: every tool that takes a model offers exactly MODELS and null.
+  // The MCP server's own list, as a client sees it: every tool that takes a model offers exactly MODELS; only update_ticket
+  // offers null (back to the default), and the creates require a model and effort (#698).
   const mcp = spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' },
     stdio: ['pipe', 'pipe', 'inherit'],
@@ -212,7 +219,11 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
     const withModel = (await listed).tools.filter((t: any) => t.inputSchema.properties?.model);
     assert.ok(withModel.some((t: any) => t.name === 'create_ticket') && withModel.some((t: any) => t.name === 'update_ticket'), 'create_ticket and update_ticket take a model');
-    for (const t of withModel) assert.deepEqual(t.inputSchema.properties.model.enum, [...MODELS, null], `${t.name}'s model enum`);
+    for (const t of withModel) assert.deepEqual(t.inputSchema.properties.model.enum, t.name === 'update_ticket' ? [...MODELS, null] : [...MODELS], `${t.name}'s model enum`);
+    for (const name of ['create_ticket', 'schedule_minion']) {
+      const t = withModel.find((x: any) => x.name === name);
+      assert.ok(['model', 'effort'].every((k) => t.inputSchema.required.includes(k)), `${name} requires a model and effort`);
+    }
   } finally {
     mcp.kill();
   }
@@ -222,5 +233,7 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
   const { readFileSync } = await import('node:fs');
   const composer = readFileSync(join(repo, 'public/composer.js'), 'utf8');
   const listIds = (name: string) => [...composer.match(new RegExp(`const ${name} = \\[([^;]*?)\\n\\];`))![1].matchAll(/\['([^']+)', '[^']+'\]/g)].map((m) => m[1]);
-  assert.deepEqual([...listIds('MODELS'), ...listIds('CODEX_MODELS')], [...MODELS], 'the composer offers exactly the server list');
+  const { CLAUDE_MODELS } = await import('../public/model-table.js');
+  assert.match(composer, /const MODELS = CLAUDE_MODELS;/, 'the composer offers the model table\'s Claude models');
+  assert.deepEqual([...CLAUDE_MODELS.map(([id]) => id), ...listIds('CODEX_MODELS')], [...MODELS], 'the composer offers exactly the server list');
 });

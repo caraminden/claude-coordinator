@@ -185,7 +185,7 @@ test('admin-only routes refuse a Taskmaster turn asked for by someone outside th
     assert.equal((await as('POST', '/api/host-check', { what: 'units', unit: 'citadel-*' })).status, 200, `units for ${name}`);
   }
   // A minion made on Rachel's ask is Rachel's ask too, so its messages back can't stand in for an admin's.
-  const made = await as('POST', `/api/projects/${Citadel.id}/tickets`, { message: 'look into it', properties: { type: 'bug' } });
+  const made = await as('POST', `/api/projects/${Citadel.id}/tickets`, { message: 'look into it', properties: { type: 'bug' }, model: 'claude-opus-5-5', effort: 'medium' });
   assert.equal(made.status, 201, JSON.stringify(made.body));
   assert.equal(store.turnAsker(made.body.id), Rachel.id);
   assert.equal(store.appInstructions().text, '');

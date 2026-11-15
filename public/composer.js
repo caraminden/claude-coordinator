@@ -7,6 +7,7 @@ import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
 import { optimistic } from './ui/optimistic.js';
 import { pastedFiles } from './paste.js';
+import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 
 // ---------- drafts ----------
 
@@ -493,20 +494,14 @@ export function alertNote(text) {
 
 // ---------- model and effort ----------
 
-const MODELS = [
-  ['claude-opus-5-5', 'Opus 5.5'],
-  ['claude-sonnet-5-5', 'Sonnet 5.5'],
-  ['claude-haiku-5-5', 'Haiku 5.5'],
-  ['claude-fable-5-1', 'Fable 5.1'],
-  ['claude-fable-5-2', 'Fable 5.2'],
-];
+const MODELS = CLAUDE_MODELS;
 // Codex's (#337, src/codex.ts CODEX_MODELS): one-off picks, for people whose own container is signed in to Codex.
 const CODEX_MODELS = [
   ['gpt-6-astra', 'GPT-6 Astra'],
   ['gpt-6.1-sol', 'GPT-6.1 Sol'],
   ['gpt-6-luna', 'GPT-6 Luna'],
 ];
-const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const EFFORTS = EFFORT_LEVELS;
 export const modelName = (id) => [...MODELS, ...CODEX_MODELS].find(([m]) => m === id)?.[1] ?? id;
 /** Why Codex can't be picked here, briefly, or null. */
 function codexBlocked() {

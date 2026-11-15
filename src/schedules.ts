@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Project, Store, User } from './db.ts';
 import type { Runner } from './runner.ts';
 import { HttpError } from './http.ts';
+import { pickFor } from '../public/model-table.js';
 
 export interface Schedule {
   id: number;
@@ -247,7 +248,9 @@ export function pinForOwner(store: Pick<Store, 'getTicket' | 'getProject' | 'get
 
 /** The minion a run starts: its title, type and model and effort (null: the scheme's defaults), assigned to the schedule's maker while they're around. */
 export function runMinion(s: Schedule, maker: Pick<User, 'name' | 'disabled_at'> | undefined) {
-  return { title: s.name, model: s.model, effort: s.effort, props: { type: s.type, ...(maker && !maker.disabled_at ? { assigned: maker.name } : {}) } };
+  // A schedule made before #698 may name neither: its runs take the model table's pick for its type.
+  const table = pickFor(s.type);
+  return { title: s.name, model: s.model ?? table.model, effort: s.effort ?? table.effort, props: { type: s.type, ...(maker && !maker.disabled_at ? { assigned: maker.name } : {}) } };
 }
 
 /** The first message of a run's minion: what it is, how to file itself away when there is nothing to report, then the brief. */

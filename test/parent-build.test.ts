@@ -62,15 +62,25 @@ test('a new minion rides its parent\'s build unless the create sets one', async 
     const res = await fetch(srv.base + path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
     return { status: res.status, body: await res.json() };
   };
-  const create = (extra: object) => as(DelveTM.id, 'POST', `/api/projects/${Delve.id}/tickets`, { message: 'do it', properties: { type: 'chore' }, ...extra });
+  const create = (extra: object) => as(DelveTM.id, 'POST', `/api/projects/${Delve.id}/tickets`, { message: 'do it', properties: { type: 'chore' }, model: 'claude-sonnet-5-5', effort: 'medium', ...extra });
   const made = async (extra: object) => {
     const r = await create(extra);
     assert.equal(r.status, 201, JSON.stringify(r.body));
     return { ...store.getTicket(r.body.id)!, props: r.body.properties as Record<string, unknown> };
   };
 
+  // A Taskmaster's create names its model and effort on purpose (#698): leaving either out is refused, with no minion made.
+  const minionsBefore = store.listTickets(Delve.id).length;
+  for (const missing of [{ model: undefined }, { effort: null }]) {
+    const r = await create(missing);
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /needs a model and an effort/);
+  }
+  assert.equal(store.listTickets(Delve.id).length, minionsBefore);
+
   // No parent and no relay: as before.
   let t = await made({});
+  assert.deepEqual([t.model, t.effort], ['claude-sonnet-5-5', 'medium']);
   assert.deepEqual([t.parent, t.build, t.props.build], [null, null, undefined]);
 
   // parent with a build: the child gets it, as the column and Delve's build property, and shows from #1.

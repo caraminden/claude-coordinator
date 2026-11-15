@@ -167,7 +167,7 @@ test("a scheduled run's minion is pinned for the scheme's owner alone, an unpin 
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM ticket_pins WHERE ticket_id = ?').get(orphan.id)!.n, 0, 'no owner, no pin for anyone');
 });
 
-test("a run starts with its schedule's model and effort, null being the scheme's default (#387)", () => {
+test("a run starts with its schedule's model and effort; a schedule from before #698 with none takes the model table's pick for its type", () => {
   const store = new Store(':memory:');
   const p = store.createProject('One', null).id;
   const base = { project_id: p, name: 'Upstream check', cron: '0 9 1 * *', brief: 'b', type: 'chore', created_by: 'Cara' };
@@ -175,7 +175,8 @@ test("a run starts with its schedule's model and effort, null being the scheme's
   assert.deepEqual([plain.model, plain.effort], [null, null]);
   const cheap = store.schedules.create({ ...base, model: 'claude-sonnet-5-5', effort: 'medium' });
   assert.deepEqual(runMinion(cheap, { name: 'Cara', disabled_at: null }), { title: 'Upstream check', model: 'claude-sonnet-5-5', effort: 'medium', props: { type: 'chore', assigned: 'Cara' } });
-  assert.deepEqual(runMinion(plain, undefined), { title: 'Upstream check', model: null, effort: null, props: { type: 'chore' } });
+  assert.deepEqual(runMinion(plain, undefined), { title: 'Upstream check', model: 'claude-sonnet-5-5', effort: 'medium', props: { type: 'chore' } });
+  assert.deepEqual([runMinion({ ...plain, type: 'other' }, undefined)].map((m) => [m.model, m.effort]), [['claude-opus-5-5', 'medium']], 'no type to go by: the fallback');
   // A change to one leaves the other; null goes back to the default.
   assert.deepEqual([store.schedules.update(cheap.id, { effort: 'low' })].map((s) => [s.model, s.effort]), [['claude-sonnet-5-5', 'low']]);
   assert.deepEqual([store.schedules.update(cheap.id, { model: null })].map((s) => [s.model, s.effort]), [[null, 'low']]);

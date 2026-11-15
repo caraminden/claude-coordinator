@@ -308,7 +308,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
       });
       try {
         const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_ticket', arguments: { properties: { type: 'feature' }, ...args } } }) + '\n');
+        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_ticket', arguments: { properties: { type: 'feature' }, model: 'claude-opus-5-5', effort: 'high', ...args } } }) + '\n');
         const r = await reply;
         return r.result?.content?.[0]?.text ?? JSON.stringify(r);
       } finally {

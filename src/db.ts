@@ -2555,8 +2555,11 @@ export class Store {
 
   /** The first event id created at or after `at`, by halving over ids (they grow with time), or one past the last: events has no index on time. */
   eventIdAt(at: number): number {
-    const ends = this.db.prepare('SELECT MIN(id) AS lo, MAX(id) AS hi FROM events').get() as { lo: number | null; hi: number | null };
-    if (ends.hi == null) return 1;
+    // Two one-row lookups on the primary key: the one-query MIN(id), MAX(id) scanned the whole events table (0.7-1.3 s of stall).
+    const first = this.db.prepare('SELECT id FROM events ORDER BY id LIMIT 1').get() as { id: number } | undefined;
+    const last = this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined;
+    if (!first || !last) return 1;
+    const ends = { lo: first.id, hi: last.id };
     const next = this.db.prepare('SELECT id, created_at FROM events WHERE id >= ? ORDER BY id LIMIT 1');
     let lo = Number(ends.lo), hi = Number(ends.hi) + 1;
     while (lo < hi) {

@@ -19,8 +19,13 @@ const MIN = 60_000;
 export const CHECKS = [20 * MIN, 60 * MIN, 24 * 60 * MIN];
 /** A window cut shorter than this by the next deploy says too little to compare. */
 export const MIN_WINDOW = 5 * MIN;
-/** Event-loop stalls in a restart's first minutes are the boot's own work, not the change's. */
-export const BOOT_QUIET_MS = 2 * MIN;
+/**
+ * Event-loop stalls in a restart's first minutes are the boot's own work (afterRestore, the card refresh, resumed turns),
+ * not the change's: a restart's startup ran stalls up to 8 minutes in (#734).
+ */
+export const BOOT_QUIET_MS = 10 * MIN;
+/** A stall whose stacks name this file is the watch's own query, never the change's. */
+const OWN_STALL = 'src/deploy-watch.ts';
 
 /** One kind of reading: worse means at least `floor` after and at least double the window before. */
 export interface Signal { key: string; name: string; floor: number }
@@ -129,6 +134,7 @@ export class DeployWatch {
     try {
       const now = this.now();
       if (kind === 'loop-lag' && now - (this.d.bootAt ?? 0) < BOOT_QUIET_MS) return;
+      if (kind === 'loop-lag' && detail.includes(OWN_STALL)) return;
       this.d.store.addHealthEvent(kind, now, this.d.head(), detail);
     } catch (err: any) {
       console.error(`Recording a ${kind} health reading failed: ${err?.message ?? err}`);

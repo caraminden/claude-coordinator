@@ -221,9 +221,26 @@ test('event-loop stalls in the first minutes after boot are not recorded', () =>
   const { store, clock, watch } = setup();
   const w = new DeployWatch({ ...(watch() as any).d, bootAt: clock.now });
   w.record('loop-lag', 'stalled 900 ms');
+  clock.now += 8 * MIN;
+  w.record('loop-lag', 'stalled 800 ms: restart warm-up (afterRestore) still running');
+  assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 0, 'a restart\'s warm-up runs minutes in');
   clock.now += 3 * MIN;
-  w.record('loop-lag', 'stalled 800 ms');
+  w.record('loop-lag', 'Running: 90% all < newCode (src/new.ts:1)');
+  assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 1, 'new code stalling after warm-up still counts');
+});
+
+test('a stall in the watch\'s own query is not recorded, at any time', () => {
+  const { store, watch } = setup();
+  const w = watch() as any;
+  w.record('loop-lag', 'Running: 92% get < eventIdAt (src/db.ts:2557) < turnOutcomes (src/db.ts:2575) < compare (src/deploy-watch.ts:185)');
+  assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 0);
+  w.record('loop-lag', 'Running: 90% all < listEvents (src/db.ts:2153) < handler (src/routes/tickets.ts:553)');
   assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 1);
+});
+
+test('eventIdAt finds the first event at or after a time', () => {
+  const { store } = setup();
+  assert.equal(store.eventIdAt(5), 1, 'no events');
 });
 
 test('health_events keeps at most HEALTH_MAX_ROWS rows', () => {

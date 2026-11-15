@@ -75,18 +75,20 @@ test('a turn posts one card and one push per stage it passes', async () => {
   assert.deepEqual(pushes.filter((p) => p.ticket === id).map((p) => p.eventId), got.map((c) => c.id));
 });
 
-test('Keep going mutes the rest of the turn, and the next turn alerts again', async () => {
+test('Keep going mutes the rest of its own turn only, and the next turn alerts again', async () => {
   rmSync(go, { force: true });
   writeFileSync(script, JSON.stringify({ before: 3, after: 8 }));
   const id = minion();
   runner.send(id, 'Cara', 'go');
   await until(() => cards(id).length === 1, 'the $25 card');
-  assert.equal(runner.muteSpend(id, 'Josh'), true);
+  const started = runner.turnStartedAt(id)!;
+  assert.equal(runner.muteSpend(id, 'Josh', started - 1), false); // an earlier turn's card
+  assert.equal(runner.muteSpend(id, 'Josh', started), true);
   assert.deepEqual(cards(id, 'spend_muted').map((c) => c.by), ['Josh']);
   writeFileSync(go, '');
   await until(() => !runner.isRunning(id), 'the turn to end');
   assert.equal(cards(id).length, 1);
-  assert.equal(runner.muteSpend(id, 'Josh'), false); // no turn running
+  assert.equal(runner.muteSpend(id, 'Josh', started), false); // no turn running
 
   writeFileSync(script, JSON.stringify({ before: 3, after: 0 }));
   runner.send(id, 'Cara', 'again'); // it waits its turn on the minion's lane, so isRunning isn't true at once

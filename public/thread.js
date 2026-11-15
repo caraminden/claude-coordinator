@@ -386,6 +386,8 @@ export function renderTicketHead() {
   const chat = el.closest('.chat');
   chat?.classList.toggle('dismissed', t.status === 'closed');
   chat?.classList.toggle('turn-running', t.status === 'running');
+  // A spend card's buttons are for its own turn only (#723).
+  for (const card of chat?.querySelectorAll('.scard') ?? []) card.classList.toggle('stale', Number(card.dataset.turn) !== t.turnStartedAt);
   // Whose chat it is, so you know at a glance who you're talking to (#360, style.css).
   chat?.classList.toggle('role-taskmaster', coord);
   chat?.classList.toggle('role-minion', !coord);
@@ -988,7 +990,7 @@ export function appendEvent(event, scroll = true) {
       card.querySelector('[role=status]').textContent = `Continued by ${data.by}`;
     }
   } else if (event.kind === 'spend') {
-    nodes.push(spendCard(data, event.ticket_id));
+    nodes.push(spendCard(data, event.ticket_id, view.ticket?.turnStartedAt));
   } else if (event.kind === 'spend_muted') {
     settleSpend(log, data);
   } else if (event.kind === 'approval_result') {

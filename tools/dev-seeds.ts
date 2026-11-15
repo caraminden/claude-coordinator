@@ -162,7 +162,7 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
     },
   },
   'spend-alert': {
-    about: 'a minion mid-turn whose turn passed $25: the spend alert card with Stop and Keep going (#723)',
+    about: 'a minion mid-turn whose turn passed $25: the spend alert card with Stop and Keep going (#723); no real turn runs, so its buttons stay hidden as on an earlier turn',
     seed(c) {
       const t = minion(c, 'Rework the land queue', { status: 'running', last_activity: 'Reviewing the diff… 4/5' });
       const w = chat(c, t, 12);

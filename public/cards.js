@@ -299,13 +299,14 @@ export function loopCard(data) {
 
 /**
  * A running turn passed a spend stage (#723): its estimated cost, Stop (the chat's own stop) and Keep going (no more
- * alerts this turn). The buttons show only while a turn runs (cards.css); a `spend_muted` event settles every card of its turn.
+ * alerts this turn). The buttons show only while its own turn runs (`stale` from thread.js, cards.css), and both name
+ * that turn so the server refuses them on a later one; a `spend_muted` event settles every card of its turn.
  */
-export function spendCard(data, ticketId) {
+export function spendCard(data, ticketId, current) {
   const status = h('span', { class: 'muted', role: 'status' });
   const stop = h('button', { type: 'button', class: 'small secondary' }, 'Stop');
   const keep = h('button', { type: 'button', class: 'small' }, 'Keep going');
-  const el = h('div', { class: 'qcard scard', 'data-turn': data.turn },
+  const el = h('div', { class: `qcard scard${data.turn === current ? '' : ' stale'}`, 'data-turn': data.turn },
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, `Over $${data.stage}`), data.text),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), stop, keep));
   const act = (word, path, label) => optimistic({
@@ -315,7 +316,7 @@ export function spendCard(data, ticketId) {
       stop.hidden = keep.hidden = true;
       status.textContent = word;
     },
-    send: () => api(`api/tickets/${ticketId}/${path}`, { method: 'POST', body: {} }),
+    send: () => api(`api/tickets/${ticketId}/${path}`, { method: 'POST', body: { turn: data.turn } }),
     undo: () => {
       el.classList.remove('answered');
       stop.hidden = keep.hidden = false;
@@ -323,7 +324,7 @@ export function spendCard(data, ticketId) {
     },
     label,
   });
-  stop.addEventListener('click', () => act('Stopping…', 'stop', 'stop the turn'));
+  stop.addEventListener('click', () => act('Stopping…', 'spend-stop', 'stop the turn'));
   keep.addEventListener('click', () => act('Keeping going: no more alerts this turn', 'spend-mute', 'mute the spend alerts'));
   return el;
 }

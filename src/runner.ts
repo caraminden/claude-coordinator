@@ -722,7 +722,7 @@ export class Runner {
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
-      turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
+      turnStartedAt: this.turnStartedAt(ticket.id),
       step_ratio: ratio,
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
@@ -1856,6 +1856,11 @@ export class Runner {
     return coordinator ? [minion.id, coordinator.id] : [minion.id];
   }
 
+  /** When the running turn started, or null: what a spend card names to act on its own turn only (#723). */
+  turnStartedAt(ticketId: number): number | null {
+    return this.turns.get(ticketId)?.startedAt ?? null;
+  }
+
   stop(ticketId: number): boolean {
     const live = this.turns.get(ticketId);
     if (!live) {
@@ -2783,9 +2788,10 @@ export class Runner {
   }
 
   /** Keep going (#723): no more spend alerts for the running turn. False when no turn is running. */
-  muteSpend(ticketId: number, by: string): boolean {
+  muteSpend(ticketId: number, by: string, startedAt: number): boolean {
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
-    if (!this.turns.has(ticketId) || !turn?.startedAt) return false;
+    // An earlier turn's card can't mute this one: it's refused unless it names the running turn's start.
+    if (!this.turns.has(ticketId) || !turn?.startedAt || turn.startedAt !== startedAt) return false;
     if (turn.spend?.muted) return true;
     const spend = this.spends.get(ticketId);
     if (spend?.startedAt === turn.startedAt) spend.meter.muted = by;

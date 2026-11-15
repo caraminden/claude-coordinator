@@ -38,10 +38,13 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 .qcard .row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85em; }
 .qcard .opt:disabled { opacity: 1; color: var(--ink); cursor: default; }
 .qcard.answered .opt:not(.picked) { opacity: 0.5; }
-/* Spend alert cards (#723): a running turn's estimated cost; Stop and Keep going only while a turn runs */
+/* Spend alert cards (#723): a running turn's estimated cost; Stop and Keep going only while its own turn runs */
 .scard { border-color: color-mix(in srgb, var(--waiting) 50%, var(--line)); }
+.scard .qtitle { margin-bottom: 0; }
 .scard .chip { color: var(--waiting); border-color: color-mix(in srgb, var(--waiting) 45%, var(--line)); text-transform: none; }
-.chat:not(.turn-running) .scard .row button { display: none; }
+.chat:not(.turn-running) .scard .row button, .scard.stale .row button { display: none; }
+/* With no buttons and no status, the row goes too, so the card's bottom padding matches its top. */
+:is(.chat:not(.turn-running) .scard, .scard.stale) .row:has(> [role=status]:empty) { display: none; }
 /* Approval cards: the command (or tool input) people approve, shown as it will run */
 .acard { border-color: color-mix(in srgb, var(--waiting) 50%, var(--line)); }
 .acard > .who, .acard .chip { color: var(--waiting); }

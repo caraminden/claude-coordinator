@@ -769,12 +769,21 @@ export const ticketRoutes: Route[] = [
       return json(res, 200, { stopped: runner.stop(id) });
     },
   },
-  // Keep going on a spend alert card (#723): no more alerts for the running turn.
+  // A spend alert card's Stop and Keep going (#723): each names its turn's start, so a card left over from an earlier
+  // turn can't stop or mute a later one.
+  {
+    method: 'POST', path: '/api/tickets/:ticket/spend-stop', who: ['person'],
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      const turn = Number((await readJson(req))?.turn);
+      return json(res, 200, { stopped: app.runner.turnStartedAt(ticket.id) === turn && app.runner.stop(ticket.id) });
+    },
+  },
   {
     method: 'POST', path: '/api/tickets/:ticket/spend-mute', who: ['person'],
     async handler(ctx) {
-      const { res, app, session, ticket } = ctx;
-      return json(res, 200, { muted: app.runner.muteSpend(ticket.id, session.name) });
+      const { req, res, app, session, ticket } = ctx;
+      return json(res, 200, { muted: app.runner.muteSpend(ticket.id, session.name, Number((await readJson(req))?.turn)) });
     },
   },
   // A Taskmaster's fresh session (#406): a person asks for one (the chat's button), or the Taskmaster's turn hands off (fresh_session).

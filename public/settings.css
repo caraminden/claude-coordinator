@@ -186,8 +186,8 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .account-card .kv dd { margin: 0; overflow-wrap: anywhere; }
 .account-card a.button { padding: 0.45rem 0.9rem; font-size: 1em; }
 .account-card a.button:not(.secondary) { background: var(--accent); color: var(--on-accent); }
-.openrouter-form, .openrouter-cap { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: flex-end; }
-.openrouter-form label, .openrouter-cap label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9em; }
+.openrouter-form, .openrouter-cap { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: flex-end; margin-bottom: 0.75rem; }
+.openrouter-form label, .openrouter-cap label { display: flex; flex-direction: column; gap: 0.2rem; margin: 0; font-size: 0.9em; }
 .openrouter-form input[type=password] { width: min(22rem, 100%); }
 .openrouter-card .cap-input { width: 6rem; }
 .link-chip { font-size: 0.75rem; font-weight: 500; line-height: 1.3; padding: 0.15rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }

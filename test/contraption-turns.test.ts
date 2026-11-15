@@ -235,7 +235,8 @@ test('a turn has only the contraption\'s MCP and no built-in tools, settings, CL
   assert.equal(settings.hooks, undefined, 'no hooks without agents');
   assert.equal(settings.autoCompactWindow, 40_000);
   assert.equal(settings.autoMemoryEnabled, false);
-  assert.equal(run.system, 'You are the Acolyte.');
+  // The app's own text, then the tools' full names (#763): a bare name, as apps' prompts write them, is no tool.
+  assert.equal(run.system, 'You are the Acolyte.\n\nYour tools\' full names are mcp__mandate__<tool>. Where these instructions name a tool without that prefix, such as `x`, call it by its full name (mcp__mandate__x): a bare name fails with "No such tool available".');
   assert.equal(run.cwd, join(data, 'contraption-scratch', 'mandate', String(cara.id)));
   assert.deepEqual(run.cwdFiles, []);
   assert.equal(run.prompt, 'Move my dentist to Thursday.', 'the prompt goes on stdin, never in argv');
@@ -590,13 +591,13 @@ test('a turn gets the person\'s online machines and a note on them, unless it as
     let run = lastRun();
     assert.deepEqual(Object.keys(JSON.parse(run.mcp).mcpServers), ['mandate', 'perigee-godot']);
     assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate', 'mcp__perigee-godot']);
-    assert.match(run.system, /^You grade\.\n\nConnected machines: perigee-godot[\s\S]*Never restart it\./);
+    assert.match(run.system, /^You grade\.\n\nYour tools' full names are mcp__mandate__<tool>, mcp__perigee-godot__<tool>\. [^\n]*\(mcp__mandate__x\)[^\n]*\n\nConnected machines: perigee-godot[\s\S]*Never restart it\./);
 
     await turn(mandate, { session: 'blind', system: 'You grade.', mcp: [{ name: 'mandate', path: '/mcp' }], machines: false });
     run = lastRun();
     assert.deepEqual(Object.keys(JSON.parse(run.mcp).mcpServers), ['mandate']);
     assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate']);
-    assert.equal(run.system, 'You grade.');
+    assert.match(run.system, /^You grade\.\n\nYour tools' full names are mcp__mandate__<tool>\. [^\n]*$/);
   } finally {
     turns.machines = () => [];
   }

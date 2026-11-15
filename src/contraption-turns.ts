@@ -58,6 +58,16 @@ export function machinesPrompt(machines: PersonMachine[]): string {
   ].join('\n\n');
 }
 
+/**
+ * The naming rule for a turn's MCP tools (#763): an app's own prompt tends to name them bare (`reference`), and now and
+ * then the model calls one that way, which Claude Code refuses with "No such tool available".
+ */
+export function toolNamesPrompt(servers: string[]): string {
+  if (!servers.length) return '';
+  const full = servers.map((s) => `mcp__${s}__<tool>`).join(', ');
+  return `Your tools' full names are ${full}. Where these instructions name a tool without that prefix, such as \`x\`, call it by its full name (mcp__${servers[0]}__x): a bare name fails with "No such tool available".`;
+}
+
 export type TurnErrorCode = 'not_enabled' | 'no_plan' | 'limit' | 'busy' | 'timeout' | 'canceled' | 'bad_request' | 'failed';
 
 export class TurnError extends Error {
@@ -495,7 +505,7 @@ export class ContraptionTurns {
     // Citadel's own media server (#732), over HTTP on the address machine proxies use, with the turn's token.
     if (req.media) config.mcpServers[MEDIA_SERVER] = { type: 'http', url: `${this.apiUrl()}/api/contraption-media/mcp`, headers: { Authorization: `Bearer ${live.token}` } };
     secret('mcp.json', JSON.stringify(config));
-    const system = [req.system, machinesPrompt(machines)].filter(Boolean).join('\n\n');
+    const system = [req.system, codex ? '' : toolNamesPrompt(Object.keys(config.mcpServers)), machinesPrompt(machines)].filter(Boolean).join('\n\n');
     if (system) secret('system.md', system);
     let hook = null;
     if (req.agents) {

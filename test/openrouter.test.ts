@@ -44,6 +44,7 @@ const MODEL_LIST = [
   { id: 'bytedance-seed/seed-audio-1-0', pricing: { prompt: '0', completion: '0.0025' }, description: 'Seed Audio' },
   { id: 'google/lyria-3-clip-preview', pricing: { prompt: '0', completion: '0' }, description: '30 second duration clips are priced at $0.04 per clip. Lyria 3...' },
   { id: 'nobody/unpriced', pricing: { prompt: '0', completion: '0' }, description: 'No price here' },
+  { id: 'google/some-tts', pricing: { prompt: '0.000001', completion: '0.000009' }, description: 'Speech, priced per token' },
 ];
 // 128 kbps MPEG-1 Layer III: 16000 bytes is one second.
 const MP3 = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(15996)]);
@@ -213,12 +214,28 @@ test('a sound effect is costed by its length; music comes from the stream with i
   assert.deepEqual(rows().map((r) => [r.kind, r.status, r.estimate_usd]), [['effect', 'ok', 0.15], ['music', 'ok', 0.04]]);
 });
 
+test('a speech model priced per token is refused; a clip longer than a minute is booked at its full length', async () => {
+  const long = Buffer.concat(Array.from({ length: 90 }, () => MP3));
+  const { or, fake, ctx } = await setup({ answer: { '/audio/speech': () => new Response(long, { headers: { 'content-type': 'audio/mpeg' } }) } });
+  await assert.rejects(or.tool('generate_audio', { kind: 'effect', prompt: 'hello', out: 'hi.mp3', model: 'google/some-tts' }, ctx), /price/);
+  assert.ok(!fake.calls.some((c) => c.url === '/audio/speech'));
+  const fx = await or.tool('generate_audio', { kind: 'effect', prompt: 'a long storm', out: 'storm.mp3' }, ctx);
+  assert.ok(Math.abs(fx.cost_usd - 0.225) < 1e-9);
+});
+
 test('outputs and inputs stay inside the minion\'s folders', async () => {
   const { or, cwd, ctx } = await setup();
   await assert.rejects(or.tool('generate_image', { prompt: 'x', out: '../escape.png' }, ctx), /inside your working directory/);
   await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'x.exe' }, ctx), /out ends in/);
   symlinkSync(tmpdir(), join(cwd, 'link'));
   await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'link/x.png' }, ctx), /inside your working directory/);
+  await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'link/or-new-dir/x.png' }, ctx), /inside your working directory/);
+  assert.ok(!existsSync(join(tmpdir(), 'or-new-dir')));
+  mkdirSync(join(cwd, 'sub'));
+  symlinkSync(join(tmpdir(), 'or-note-escape.json'), join(cwd, 'sub/n.png.json'));
+  await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'sub/n.png' }, ctx), /isn't a plain file/);
+  writeFileSync(join(cwd, 'old.png.json'), '{}');
+  await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'old.png' }, ctx), /already there/);
   await assert.rejects(or.tool('edit_image', { prompt: 'x', out: 'e.png', image: '/etc/hostname' }, ctx), /no png, jpeg or webp/);
   writeFileSync(join(cwd, 'base.png'), PNG);
   const r = await or.tool('edit_image', { prompt: 'make it night', out: 'night.png', image: 'base.png', resolution: '1K' }, ctx);
@@ -232,6 +249,10 @@ test('worst-case prices: per image by resolution, per token, per clip; an MP3\'s
   assert.ok(Math.abs(imageEstimate(GPT_IMAGE, { n: 1, refs: 2, promptChars: 100 })! - (0.24 + 0.032 + 0.0005)) < 1e-9);
   assert.equal(imageEstimate([{ pricing: [{ billable: 'input_text', unit: 'token', cost_usd: 1 }] }], { n: 1, refs: 0, promptChars: 1 }), null);
   assert.ok(Math.abs(imageEstimate([{ pricing: [{ billable: 'output_image', unit: 'megapixel', cost_usd: 0.01 }] }], { resolution: '2K', n: 2, refs: 0, promptChars: 1 })! - 0.0838) < 1e-9);
+  // A unit this can't count, or one endpoint OpenRouter might route to with no image price, is no price at all.
+  assert.equal(imageEstimate([{ pricing: [{ billable: 'output_image', unit: 'second', cost_usd: 0.1 }] }], { n: 1, refs: 0, promptChars: 1 }), null);
+  assert.equal(imageEstimate([...KLEIN, { pricing: [] }], { n: 1, refs: 0, promptChars: 1 }), null);
+  assert.equal(imageEstimate([{ pricing: [{ billable: 'output_image', unit: 'request', cost_usd: 0.02 }] }], { n: 2, refs: 0, promptChars: 1 }), 0.04);
   assert.equal(perRequestPrice(MODEL_LIST[1]), 0.04);
   assert.equal(perRequestPrice({ description: 'Full songs at $0.08 per song.' }), 0.08);
   assert.equal(perRequestPrice(MODEL_LIST[2]), null);

@@ -2,7 +2,7 @@
 // generate_audio tools, plus a text client nothing calls yet. Only the server talks to OpenRouter: the key
 // never reaches a turn. Every call is a row in openrouter_calls, reserved at its worst-case price before
 // the request goes out, so a call that could pass the person's cap is refused before any money moves.
-import { lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { resolveFile } from './artifacts.ts';
@@ -45,20 +45,24 @@ const INPUT_IMAGE_TOKENS = 2000;
 const INPUT_IMAGE_MEGAPIXELS = 4.2;
 /** An effect is priced per second of audio, and no model is asked for more than a minute. */
 const EFFECT_SECONDS = 60;
+// The models list gives a speech model's price with no unit, and some are per token: only these are known per second.
+const PER_SECOND_AUDIO = new Set([MODELS.effect]);
 
 interface PriceLine { billable: string; unit: string; cost_usd: number; variant?: string }
 export interface ImageEndpoint { pricing?: PriceLine[]; supported_parameters?: Record<string, { type: string; values?: string[]; min?: number; max?: number }> }
 
 /**
- * The most an image call could cost across `endpoints` (OpenRouter may route to any), or null when no
- * endpoint prices its output images. A price per variant uses the asked resolution, or the dearest.
+ * The most an image call could cost across `endpoints` (OpenRouter may route to any), or null when one
+ * doesn't price its output images or prices by a unit this can't count. A price per variant uses the
+ * asked resolution, or the dearest.
  */
 export function imageEstimate(endpoints: ImageEndpoint[], o: { resolution?: string; n: number; refs: number; promptChars: number }): number | null {
   const res = o.resolution?.toLowerCase();
   let worst: number | null = null;
   for (const ep of endpoints) {
     const lines = (ep.pricing ?? []).filter((p) => Number.isFinite(Number(p.cost_usd)) && Number(p.cost_usd) >= 0);
-    if (!lines.some((p) => p.billable === 'output_image')) continue;
+    if (!lines.some((p) => p.billable === 'output_image')) return null;
+    if (lines.some((p) => !['image', 'megapixel', 'token', 'request'].includes(p.unit))) return null;
     let total = 0;
     for (const billable of new Set(lines.map((p) => p.billable))) {
       let these = lines.filter((p) => p.billable === billable);
@@ -66,10 +70,9 @@ export function imageEstimate(endpoints: ImageEndpoint[], o: { resolution?: stri
       const out = billable === 'output_image';
       const each = Math.max(...these.map((p) => {
         const mp = MEGAPIXELS[(p.variant ?? res ?? '4k').toLowerCase()] ?? MEGAPIXELS['4k'];
-        const units = p.unit === 'image' ? 1
-          : p.unit === 'megapixel' ? (out ? mp : INPUT_IMAGE_MEGAPIXELS)
+        const units = p.unit === 'megapixel' ? (out ? mp : INPUT_IMAGE_MEGAPIXELS)
           : p.unit === 'token' ? (out ? OUTPUT_IMAGE_TOKENS : billable === 'input_text' ? o.promptChars : INPUT_IMAGE_TOKENS)
-          : 0;
+          : 1;
         return Number(p.cost_usd) * units;
       }));
       total += each * (out ? o.n : billable === 'input_text' ? 1 : o.refs);
@@ -380,7 +383,7 @@ export class OpenRouter {
   /** A sound effect through the speech endpoint: raw MP3 back, no cost in the answer. */
   private async effect(userId: number, key: string, cap: number, ctx: ToolContext, model: string, input: string) {
     const m = await this.model(model);
-    const perSecond = Number(m.pricing?.completion);
+    const perSecond = PER_SECOND_AUDIO.has(model) ? Number(m.pricing?.completion) : 0;
     const estimate = model.endsWith(':free') ? 0 : perSecond > 0 ? perSecond * EFFECT_SECONDS : perRequestPrice(m);
     const id = this.reserve(userId, cap, ctx, 'effect', model, estimate);
     return this.settled(userId, id, estimate!, async () => {
@@ -388,7 +391,7 @@ export class OpenRouter {
       const bytes = Buffer.from(await res.arrayBuffer());
       if (!bytes.length) throw new Error('the answer had no audio');
       const seconds = mp3Seconds(bytes);
-      const cost = await this.generationCost(key, res.headers.get('x-generation-id')) ?? (perSecond > 0 && seconds !== null ? perSecond * Math.min(seconds, EFFECT_SECONDS) : null);
+      const cost = await this.generationCost(key, res.headers.get('x-generation-id')) ?? (perSecond > 0 && seconds !== null ? perSecond * seconds : null);
       return { value: bytes, cost };
     });
   }
@@ -465,27 +468,35 @@ function outPath(out: unknown, roots: string[], exts: Set<string>): string {
   if (!exts.has(extname(file).toLowerCase())) throw new HttpError(400, `out ends in ${[...exts].join(', ')}`);
   const root = roots.find((r) => file.startsWith(resolve(r) + sep));
   if (!root) throw new HttpError(400, 'out must be inside your working directory or a shared folder');
-  // Make its folder, then check the real folder (symlinks followed) is still inside.
-  mkdirSync(dirname(file), { recursive: true });
+  // Check the real folder (symlinks followed) is still inside, before making the missing part of it and after.
   const realRoot = realpathSync(root);
-  const realDir = realpathSync(dirname(file));
-  if (realDir !== realRoot && !realDir.startsWith(realRoot + sep)) throw new HttpError(400, 'out must be inside your working directory or a shared folder');
-  return join(realDir, basename(file));
+  const inside = (dir: string) => {
+    const real = realpathSync(dir);
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new HttpError(400, 'out must be inside your working directory or a shared folder');
+    return real;
+  };
+  let have = dirname(file);
+  while (!existsSync(have)) have = dirname(have);
+  inside(have);
+  mkdirSync(dirname(file), { recursive: true });
+  return join(inside(dirname(file)), basename(file));
 }
 
-/** The i-th of n files for `out` (name-1.png, name-2.png when n > 1), refused if it's there and overwrite isn't set, or is a link. */
+/** The i-th of n files for `out` (name-1.png, name-2.png when n > 1), refused if it or its .json note is there and overwrite isn't set, or is a link. */
 function target(out: string, n: number, i: number, overwrite: boolean): string {
   const ext = extname(out);
   const file = n > 1 ? `${out.slice(0, -ext.length)}-${i + 1}${ext}` : out;
-  const st = (() => {
-    try {
-      return lstatSync(file);
-    } catch {
-      return null;
-    }
-  })();
-  if (st && (st.isSymbolicLink() || !st.isFile())) throw new HttpError(400, `${file} is there and isn't a plain file`);
-  if (st && !overwrite) throw new HttpError(409, `${file} is already there: pick another out, or pass overwrite: true`);
+  for (const f of [file, `${file}.json`]) {
+    const st = (() => {
+      try {
+        return lstatSync(f);
+      } catch {
+        return null;
+      }
+    })();
+    if (st && (st.isSymbolicLink() || !st.isFile())) throw new HttpError(400, `${f} is there and isn't a plain file`);
+    if (st && !overwrite) throw new HttpError(409, `${f} is already there: pick another out, or pass overwrite: true`);
+  }
   return file;
 }
 

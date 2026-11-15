@@ -244,14 +244,14 @@ test('deploy: false, a merge into a build, or a scheme with no app deploys nothi
 });
 
 test('a deploy that rolls back after a clean land posts the shipped line, then wakes the minion with its log and leaves it open', async () => {
-  const d = fakeDeploys(() => ({ state: 'rolled back', to: 'abc1234', said: ['Fetched', 'Health check failed: /health answered 500', 'Rolled back to 0ld0ld0'] }));
+  const d = fakeDeploys(() => ({ state: 'rolled back', to: 'abc1234', said: ['Fetching o/peek main.', 'Failed: Not healthy after 60s: /health not answering', 'Rolling back to 0ld0ld0.', 'Rolled back: 0ld0ld0 runs again.'] }));
   const s = setup('app-fail', { apps: ['peek-auras'], deployOps: d.ops });
   await s.land(APP_LAND);
   await s.handoffs.poll();
-  assert.match(s.notes[0], /Landed\. peek-auras's deploy rolled back: Rolled back to 0ld0ld0$/);
+  assert.match(s.notes[0], /Landed\. peek-auras's deploy rolled back: Not healthy after 60s: \/health not answering$/);
   assert.equal(s.sent.length, 1);
   assert.match(s.sent[0], /^Your handed-off land went through \(abc1234 "#9: aura fix", landed\), but the deploy after it didn't go live:/);
-  assert.match(s.sent[0], /- Health check failed: \/health answered 500\n- Rolled back to 0ld0ld0\nLog: \/logs\/peek-auras\.log\nLast lines of the log:\nbuild output/);
+  assert.match(s.sent[0], /didn't go live:\n\n.*\nLog: \/logs\/peek-auras\.log\nLast lines of the log:\nbuild output\n/, 'the log tail once, not its lines twice');
   assert.equal(s.ticket.state, null, 'open for the minion to fix');
   assert.ok(!s.did.some((x) => x.startsWith('close')), s.did.join('\n'));
 });

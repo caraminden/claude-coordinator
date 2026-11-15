@@ -287,10 +287,12 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
       await sleep(3000);
       d = await ops.last(name);
     }
-    const detail = d ? [...d.said.map((l) => `- ${l}`), `Log: ${d.log}`, ...(d.tail ? ['Last lines of the log:', d.tail] : [])].join('\n') : undefined;
+    // The log's tail holds its said lines and the build's output between them.
+    const detail = d ? [`Log: ${d.log}`, ...(d.tail ? ['Last lines of the log:', d.tail] : d.said.map((l) => `- ${l}`))].join('\n') : undefined;
+    const why = d?.said.find((l) => l.startsWith('Failed: '))?.slice(8) ?? d?.said.at(-1) ?? 'no reason given';
     if (!d) out.push({ name, ok: false, line: `${name}'s deploy left no record.` });
     else if (d.state === 'running') out.push({ name, ok: false, line: `${name}'s deploy is still running after an hour: call deploy_contraption with follow: true to see how it ends.`, detail });
-    else if (d.state !== 'deployed') out.push({ name, ok: false, line: `${name}'s deploy ${d.state}: ${d.said.at(-1) ?? 'no reason given'}`, detail });
+    else if (d.state !== 'deployed') out.push({ name, ok: false, line: `${name}'s deploy ${d.state}: ${why}`, detail });
     else if (commit && d.to && !d.to.startsWith(commit)) out.push({ name, ok: false, line: `${name} deployed ${d.to.slice(0, 9)}, not the landed ${commit}: GitHub's main didn't have it yet (land.sh's output says whether its push failed).`, detail });
     else out.push({ name, ok: true, line: `Deployed ${name}${d.to ? ` at ${d.to.slice(0, 9)}` : ''}, healthy.` });
   }

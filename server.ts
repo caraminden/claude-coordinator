@@ -16,7 +16,7 @@ import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { UltraReviews } from './src/ultrareview.ts';
-import { Auth, type Nonces, type Session } from './src/auth.ts';
+import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { Store, type Artifact, type Project, type User } from './src/db.ts';
@@ -57,7 +57,7 @@ import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { TimerAlerts } from './src/timer-alerts.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
-import { ticketRoutes } from './src/routes/tickets.ts';
+import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
@@ -880,6 +880,17 @@ const app: App = {
     return ASSET_VERSION;
   },
   broadcast, notify, newMinion, startChained: startChain, ticketBranch, builds, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
+};
+// A reply's status trailer (#711) goes through set_thread_status's checks; one they refuse is noted, and the state stays cleared.
+runner.onStatusTrailer = (id, fields) => {
+  const ticket = store.getTicket(id);
+  if (!ticket) return;
+  try {
+    setLabels(app, ticket, fields, AGENT_NAME, id);
+  } catch (err: any) {
+    console.log(`[status] minion ${id}: refused a status trailer, ${err.message}`);
+    runner.emit(id, 'note', { text: `The reply's status line was refused: ${err.message}` });
+  }
 };
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes]);
 

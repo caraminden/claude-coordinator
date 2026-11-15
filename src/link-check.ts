@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
 import { explainCards, explainMisplaced, explainStale, misplacedCards, staleCards, unlinkedCards } from './card-links.ts';
 import { explainStrays, readRefs, strayRefs } from './scheme-refs.ts';
+import { takeStatus } from './status-trailer.ts';
 import { CODE, explain, misusedWords } from './wording.ts';
 
 export interface LinkCheckConfig {
@@ -94,15 +95,17 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   // stop_hook_active is also set by any other Stop hook's block (the kit's job check), which once
   // let a broken link through (#243).
   const prompt = String(input.prompt_id ?? '');
-  if (!input.last_assistant_message || (cfg.nudged ? readMarker(cfg.nudged) === prompt : input.stop_hook_active)) return null;
-  const broken = await brokenLinks(input.last_assistant_message, cfg);
-  const misused = misusedWords(input.last_assistant_message);
+  // The status line (#711) is hidden from the chat, and its note can't hold a link: only what people read is checked.
+  const reply = takeStatus(input.last_assistant_message ?? '').text;
+  if (!reply || (cfg.nudged ? readMarker(cfg.nudged) === prompt : input.stop_hook_active)) return null;
+  const broken = await brokenLinks(reply, cfg);
+  const misused = misusedWords(reply);
   const refs = readRefs(cfg.refs);
-  const strays = refs ? strayRefs(input.last_assistant_message, refs) : [];
-  const cards = refs?.cards ? unlinkedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
-  const misplaced = refs?.cards ? misplacedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
-  const stale = refs?.settled ? staleCards(input.last_assistant_message, refs.settled) : [];
-  const rolled = await handRolledPages(input.last_assistant_message, cfg);
+  const strays = refs ? strayRefs(reply, refs) : [];
+  const cards = refs?.cards ? unlinkedCards(reply, refs.cards, refs.self ?? null) : [];
+  const misplaced = refs?.cards ? misplacedCards(reply, refs.cards, refs.self ?? null) : [];
+  const stale = refs?.settled ? staleCards(reply, refs.settled) : [];
+  const rolled = await handRolledPages(reply, cfg);
   if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length) return null;
   if (cfg.nudged) {
     try {

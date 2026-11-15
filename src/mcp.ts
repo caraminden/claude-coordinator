@@ -1045,7 +1045,7 @@ const THREAD_TOOLS = [
   {
     name: 'set_thread_status',
     description:
-      "Label this minion for the scheme's minions list: its short title, build and where things stand (its kind of work is the `type` property: set_properties). Leave out what should stay. Call it once you know the short ask, and at the end of a turn whenever the state or note changes.",
+      "Label this minion for the scheme's minions list: its short title, build and where things stand (its kind of work is the `type` property: set_properties). Leave out what should stay. Call it once you know the short ask, and for a change mid-turn; the end of a turn's state and note go in your final reply's status line instead.",
     inputSchema: { type: 'object', properties: { title: TITLE, state: stateSchema(DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
   },
   ASK_QUESTION,

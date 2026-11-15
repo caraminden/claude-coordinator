@@ -29,6 +29,7 @@ import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_C
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
+import { takeStatus, type StatusFields } from './status-trailer.ts';
 import { appFolder } from './app-services.ts';
 import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
 import { GLOBAL_OWNER } from './properties.ts';
@@ -619,6 +620,10 @@ export class Runner {
   }
   /** Called when a turn fails (not when someone stops it), with the error shown in the chat and its event, if it has one. */
   onTurnError: (ticketId: number, text: string, eventId?: number) => void = () => {};
+  /** Applies a turn's status trailer (src/status-trailer.ts) as set_thread_status would; the server wires it to the PATCH route's checks. */
+  onStatusTrailer: (ticketId: number, fields: StatusFields) => void = () => {};
+  /** The running turn's last status trailer, applied when its result comes in. */
+  private statuses = new Map<number, StatusFields>();
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
@@ -2433,6 +2438,7 @@ export class Runner {
     const signal = exit ? exit.signal : 'SIGKILL';
     const startError = exit?.error ? `Could not start claude: ${exit.error}` : null;
     if (startError && stopped) this.emit(ticketId, 'error', { text: startError });
+    this.statuses.delete(ticketId);
     const sawResult = !!turn?.result;
     const resultIsError = !!turn?.result?.error;
     const resultError = turn?.result?.error ? turn.result.text : null;
@@ -2636,6 +2642,12 @@ export class Runner {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
     if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
+    if (ev.type === 'assistant' && !ev.parent_tool_use_id && Array.isArray(ev.message?.content)) ev = this.stripStatus(ticketId, ev);
+    if (ev.type === 'result') {
+      const status = this.statuses.get(ticketId);
+      this.statuses.delete(ticketId);
+      if (status && !ev.is_error) this.onStatusTrailer(ticketId, status);
+    }
     // Likewise the model: remembered from turns that ran without one chosen.
     const t = ev.type === 'system' && ev.subtype === 'init' && typeof ev.model === 'string' ? this.store.getTicket(ticketId) : null;
     if (t && !t.model && ev.model !== t.last_model) {
@@ -2672,6 +2684,24 @@ export class Runner {
       this.onFilesMayChange(ticketId);
     }
     this.notePushes(ticketId, ev);
+  }
+
+  /** A main-thread message without its status trailers, remembering the last good one for the turn's end; a bad one is noted once. */
+  private stripStatus(ticketId: number, ev: any): any {
+    let changed = false;
+    const content = ev.message.content.flatMap((b: any) => {
+      if (b?.type !== 'text' || typeof b.text !== 'string') return [b];
+      const { text, status, bad } = takeStatus(b.text);
+      if (text === b.text) return [b];
+      changed = true;
+      if (status) this.statuses.set(ticketId, status);
+      if (bad) {
+        console.log(`[status] minion ${ticketId}: ignored a status trailer, ${bad}`);
+        this.emit(ticketId, 'note', { text: `The reply's status line was ignored (${bad}), so the state stays as it was.` });
+      }
+      return text ? [{ ...b, text }] : [];
+    });
+    return changed ? { ...ev, message: { ...ev.message, content } } : ev;
   }
 
   /**

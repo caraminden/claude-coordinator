@@ -53,6 +53,13 @@ test('a file outside the folders the chat can show blocks too', async () => {
   assert.match(v?.reason ?? '', /outside the folders the chat can show/);
 });
 
+test('the hidden status line (#711) is not checked, the reply above it is', async () => {
+  const status = `<!-- status: {"state":"ready","note":"see [x](${root}/outside/x.png)"} -->`;
+  assert.equal(await reply(`Shipped.\n${status}`), null);
+  assert.equal(await reply(status), null);
+  assert.equal((await reply(`[x](${root}/outside/x.png)\n${status}`))?.decision, 'block');
+});
+
 test('web links, in-app routes, code and non-file links are left alone', async () => {
   assert.equal(await reply('[a](https://x.dev/missing.png) [b](#/p/2/t/3) [src](src/runner.ts) [dir](docs/)'), null);
   assert.equal(await reply('Write `![caption](../shared/1/x.png)` like this:\n```md\n[t](nope/gone.html)\n```\nand stop.'), null);

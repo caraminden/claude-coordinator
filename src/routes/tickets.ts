@@ -33,6 +33,64 @@ import { machineNotes, patchMachine } from './machines.ts';
 import { ensureCoordinator } from './projects.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
+/**
+ * Set a minion's label fields from a PATCH body or a reply's status trailer (#711): any of title, state, note, replies,
+ * build, model, effort, workflow and plugin_dirs, with their checks (a bad one throws HttpError). `name` is who set
+ * them and `caller` the agent's ticket, if an agent did. Returns why a pending close_self was cancelled, if it was.
+ */
+export function setLabels(app: App, ticket: Ticket, body: any, name: string, caller: number | null): string | null {
+  const { id } = ticket;
+  const { store, runner } = app;
+  // Any of title, state, note, replies, build, model, effort, workflow and plugin_dirs; null (or "") clears all but the title.
+  const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs'>> = {};
+  if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
+  if (body.workflow !== undefined) fields.workflow = workflowSwitch(body.workflow, ticket);
+  if (body.plugin_dirs !== undefined) fields.plugin_dirs = pluginPicks(store, ticket, body.plugin_dirs);
+  if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
+  if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
+  if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
+  if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
+  if (body.build !== undefined) fields.build = buildNumber(body.build);
+  if (body.replies !== undefined) fields.replies = replyList(body.replies);
+  // Complete always says what's left (#547; Josh, 2026-11-11): its note comes with it, and stays while it holds.
+  const clearsNote = ticket.state === 'complete' && body.state === undefined && body.note !== undefined;
+  if ((body.state === 'complete' || clearsNote) && !fields.note) {
+    throw new HttpError(400, 'State complete needs a note in the same call saying what is left: "nothing left", or what people should read now ("read: the PR #12 report"), at most 60 characters. Link the files themselves in your reply');
+  }
+  // shortcut: an old session's retired tag (#254) sets its type through type's aliases (process → chore, idea → ideation); remove after a release.
+  if (body.tag && ticket.kind === 'ticket') {
+    store.props.set('minion', id, ticket.project_id, { type: body.tag }, name);
+    runner.broadcastTicket(id);
+  }
+  // The view's replies are a list; compare the stored JSON.
+  const stored = store.getTicket(id)!;
+  for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];
+  let closeCancelled: string | null = null;
+  if (Object.keys(fields).length) {
+    store.updateTicket(id, fields);
+    if (fields.state === 'pending-deploy') runner.deployPending(id);
+    if (fields.state) closeCancelled = runner.closeCancelled(id, caller !== id);
+    if ('build' in fields) store.props.setBuild(id, fields.build ?? null, name);
+    const who = caller === id ? 'Claude' : name;
+    if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });
+    const next = runner.isRunning(id) ? 'from the next turn' : 'from now on';
+    if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
+    if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
+    if ('workflow' in fields) runner.emit(id, 'note', { text: `${who} turned the Workflow tool ${fields.workflow ? 'on' : 'off'} for this minion ${next}.` });
+    if ('plugin_dirs' in fields) {
+      const text = fields.plugin_dirs ? `set this minion's extra plugin folders to ${lines(fields.plugin_dirs).join(', ')}` : "took this minion's extra plugin folders off";
+      runner.emit(id, 'note', { text: `${who} ${text} ${next}.` });
+    }
+    runner.broadcastTicket(id);
+    // A result or a blocker is worth a ping; whoever set it by hand already knows.
+    if (fields.state && NOTIFY_STATES[fields.state]) {
+      const after = store.getTicket(id)!;
+      app.notify(id, { kind: 'state', state: after.state, note: after.note }, caller ? null : name);
+    }
+  }
+  return closeCancelled;
+}
+
 function pluginPicks(store: App['store'], ticket: { kind: string; project_id: number }, v: unknown): string {
   if (ticket.kind === 'coordinator') throw new HttpError(400, 'Only minions pick plugin folders');
   try {
@@ -242,57 +300,8 @@ export const ticketRoutes: Route[] = [
     method: 'PATCH', path: '/api/tickets/:ticket', who: ['person', 'taskmaster', 'minion'],
     async handler(ctx) {
       const { req, res, app, session, caller, ticket } = ctx;
-      const { id } = ticket;
-      const { store, runner } = app;
-      // Any of title, state, note, replies, build, model, effort, workflow and plugin_dirs; null (or "") clears all but the title.
-      const body = await readJson(req);
-      const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs'>> = {};
-      if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
-      if (body.workflow !== undefined) fields.workflow = workflowSwitch(body.workflow, ticket);
-      if (body.plugin_dirs !== undefined) fields.plugin_dirs = pluginPicks(store, ticket, body.plugin_dirs);
-      if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
-      if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
-      if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
-      if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
-      if (body.build !== undefined) fields.build = buildNumber(body.build);
-      if (body.replies !== undefined) fields.replies = replyList(body.replies);
-      // Complete always says what's left (#547; Josh, 2026-11-11): its note comes with it, and stays while it holds.
-      const clearsNote = ticket.state === 'complete' && body.state === undefined && body.note !== undefined;
-      if ((body.state === 'complete' || clearsNote) && !fields.note) {
-        throw new HttpError(400, 'State complete needs a note in the same call saying what is left: "nothing left", or what people should read now ("read: the PR #12 report"), at most 60 characters. Link the files themselves in your reply');
-      }
-      // shortcut: an old session's retired tag (#254) sets its type through type's aliases (process → chore, idea → ideation); remove after a release.
-      if (body.tag && ticket.kind === 'ticket') {
-        store.props.set('minion', id, ticket.project_id, { type: body.tag }, session.name);
-        runner.broadcastTicket(id);
-      }
-      // The view's replies are a list; compare the stored JSON.
-      const stored = store.getTicket(id)!;
-      for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];
-      let closeCancelled: string | null = null;
-      if (Object.keys(fields).length) {
-        store.updateTicket(id, fields);
-        if (fields.state === 'pending-deploy') runner.deployPending(id);
-        if (fields.state) closeCancelled = runner.closeCancelled(id, caller?.id !== id);
-        if ('build' in fields) store.props.setBuild(id, fields.build ?? null, session.name);
-        const who = caller?.id === id ? 'Claude' : session.name;
-        if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });
-        const next = runner.isRunning(id) ? 'from the next turn' : 'from now on';
-        if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
-        if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
-        if ('workflow' in fields) runner.emit(id, 'note', { text: `${who} turned the Workflow tool ${fields.workflow ? 'on' : 'off'} for this minion ${next}.` });
-        if ('plugin_dirs' in fields) {
-          const text = fields.plugin_dirs ? `set this minion's extra plugin folders to ${lines(fields.plugin_dirs).join(', ')}` : "took this minion's extra plugin folders off";
-          runner.emit(id, 'note', { text: `${who} ${text} ${next}.` });
-        }
-        runner.broadcastTicket(id);
-        // A result or a blocker is worth a ping; whoever set it by hand already knows.
-        if (fields.state && NOTIFY_STATES[fields.state]) {
-          const after = store.getTicket(id)!;
-          app.notify(id, { kind: 'state', state: after.state, note: after.note }, caller ? null : session.name);
-        }
-      }
-      return json(res, 200, { ...ticketView(app, id), ...(closeCancelled && { close_cancelled: closeCancelled }) });
+      const closeCancelled = setLabels(app, ticket, await readJson(req), session.name, caller?.id ?? null);
+      return json(res, 200, { ...ticketView(app, ticket.id), ...(closeCancelled && { close_cancelled: closeCancelled }) });
     },
   },
   {

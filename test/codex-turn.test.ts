@@ -125,6 +125,15 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
     note('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 100, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, secondary: null } });
     return note('turn/completed', { turn: { id: 'tu1', status: 'failed', error: { message: 'usage limit', codexErrorInfo: 'usageLimitExceeded' } } });
   }
+  if (mode === 'image') {
+    const f = process.env.HOME + '/gen.png';
+    require('node:fs').writeFileSync(f, 'PNG');
+    note('item/started', { item: { type: 'imageGeneration', id: 'g1', status: 'inProgress', revisedPrompt: 'a red dot' } });
+    note('item/completed', { item: { type: 'imageGeneration', id: 'g1', status: 'completed', revisedPrompt: 'a red dot', savedPath: f, result: '' } });
+    note('item/completed', { item: { type: 'imageGeneration', id: 'g2', status: 'completed', result: Buffer.from('B64').toString('base64') } });
+    note('item/completed', { item: { type: 'imageGeneration', id: 'g3', status: 'failed' } });
+    return note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
+  }
   note('item/started', { item: { type: 'agentMessage', id: 'm1', text: '' } });
   note('item/agentMessage/delta', { itemId: 'm1', delta: 'Look' });
   note('item/completed', { item: { type: 'agentMessage', id: 'm1', text: 'Looking.' } });
@@ -144,7 +153,7 @@ chmodSync(fake, 0o755);
 
 type Run = { code: number | null; events: any[]; calls: any[] };
 /** Run the shim with Claude's args; `input` lines go to stdin, the last after the first result unless `keepOpen`. */
-function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: object; sigterm?: boolean; env?: object; lockedMs?: number; lockPid?: string; killAfterMs?: number } = {}): Promise<Run> {
+function run(args: string[], opts: { cwd?: string; fake?: string; lines?: object[]; steer?: object; sigterm?: boolean; env?: object; lockedMs?: number; lockPid?: string; killAfterMs?: number } = {}): Promise<Run> {
   rmSync(fakeLog, { force: true });
   const home = join(root, `home-${Math.random().toString(36).slice(2)}`);
   mkdirSync(home);
@@ -165,7 +174,7 @@ function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: ob
     mkdirSync(lock, { recursive: true });
     writeFileSync(join(lock, 'pid'), opts.lockPid);
   }
-  const child = spawn(process.execPath, [SHIM, ...args], { cwd: root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: join(home, '.codex'), CITADEL_CODEX_BIN: fake, FAKE: opts.fake ?? '', COORDINATOR_TOKEN: 'tok', ...opts.env }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(process.execPath, [SHIM, ...args], { cwd: opts.cwd ?? root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: join(home, '.codex'), CITADEL_CODEX_BIN: fake, FAKE: opts.fake ?? '', COORDINATOR_TOKEN: 'tok', ...opts.env }, stdio: ['pipe', 'pipe', 'inherit'] });
   const events: any[] = [];
   let buf = '';
   child.stdout.on('data', (d) => {
@@ -325,4 +334,17 @@ test("the kit's skills install once: a turn starting beside another leaves an in
   assert.deepEqual(readdirSync(skills).sort(), ['.citadel-kit', 'citadel-alpha']);
   assert.equal(readFileSync(join(skills, 'citadel-alpha', 'refs', 'a.md'), 'utf8'), 'v2');
   assert.equal(existsSync(join(skills, 'citadel-alpha', 'in-use')), false);
+});
+
+test("Codex's generated images show as GenerateImage and are copied into the worktree's generated/ folder", async () => {
+  const dir = join(root, 'img');
+  mkdirSync(dir);
+  const r = await run(['-p'], { fake: 'image', cwd: dir } as any);
+  const uses = r.events.filter((e) => e.message?.content?.[0]?.name === 'GenerateImage');
+  assert.deepEqual(uses.map((e) => e.message.content[0].input.prompt), ['a red dot', '', '']);
+  const results = r.events.filter((e) => e.message?.content?.[0]?.type === 'tool_result').map((e) => e.message.content[0]);
+  assert.deepEqual(results.map((x) => x.is_error), [false, false, true]);
+  assert.match(results[0].content, /generated\/gen\.png$/);
+  assert.equal(readFileSync(join(dir, 'generated', 'gen.png'), 'utf8'), 'PNG');
+  assert.equal(readFileSync(join(dir, 'generated', 'g2.png'), 'utf8'), 'B64');
 });

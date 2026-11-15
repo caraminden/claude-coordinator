@@ -130,6 +130,7 @@ You are running as Codex (OpenAI) inside Citadel, in place of Claude Code. The i
 - Skills ("use the citadel:… skill"): the citadel-… skills in your skills list are the same skills; open the SKILL.md and follow it.
 - MCP tools keep their names (mcp__thread__set_thread_status is the thread server's set_thread_status). Call them as the instructions say.
 - Citadel's tripwire checks every shell command, patch and tool call. When it blocks one, it says why: take that as final. Calls that would need a person's Approve / Deny card are blocked here; ask with ask_question instead, or say what you needed.
+- Images you generate (image_gen) are copied into the worktree's generated/ folder; the tool result gives the absolute path. Link it in your reply as ![caption](/abs/path) so people see it.
 - There is no interactive terminal: run commands to completion (no tty, no write_stdin).`;
 
 /** What a turn says when it waits over a few seconds for the person's Codex lock (src/codex-lock.ts). */

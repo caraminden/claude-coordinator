@@ -337,6 +337,27 @@ export async function main(argv: string[], env: Record<string, string | undefine
         use(item, 'Read', { file_path: String(item.path ?? '') });
         if (done) result(item.id, '[image]', false);
         return;
+      case 'imageGeneration': {
+        // Codex saves the file in its own folder (savedPath), outside the worktree: copy it in so the reply can link it.
+        // shortcut: the field names (revisedPrompt, savedPath, result as base64) come from the app-server schema, not a captured turn; check them on the first real one.
+        use(item, 'GenerateImage', { prompt: String(item.revisedPrompt ?? item.prompt ?? '') });
+        if (!done) return;
+        try {
+          const dir = join(cwd, 'generated');
+          mkdirSync(dir, { recursive: true });
+          const from = typeof item.savedPath === 'string' && existsSync(item.savedPath) ? item.savedPath : '';
+          const to = join(dir, from ? basename(from) : `${String(item.id).replace(/[^\w.-]/g, '_')}.png`);
+          if (from) cpSync(from, to);
+          else if (typeof item.result === 'string' && item.result) writeFileSync(to, Buffer.from(item.result, 'base64'));
+          else throw new Error(item.status === 'completed' ? 'Codex gave no image file' : `image generation ${item.status ?? 'failed'}`);
+          result(item.id, `Saved ${to}`, false);
+          log(`Saved ${to}`, true);
+        } catch (e) {
+          result(item.id, (e as Error).message, true);
+          log((e as Error).message, true);
+        }
+        return;
+      }
     }
   };
   let hookCalls = 0;

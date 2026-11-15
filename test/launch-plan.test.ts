@@ -56,6 +56,8 @@ test("the environment is the server's filtered one plus the turn's own, and noth
 const adds: [string, Partial<TurnFacts>, Record<string, string>][] = [
   ['deploys', { deploys: true }, { COORDINATOR_DEPLOYS: '1' }],
   ['memory', { memory: true }, { COORDINATOR_MEMORY: '1' }],
+  // A minion whose person connected OpenRouter is offered the media tools (#717).
+  ['media', { media: true }, { COORDINATOR_MEDIA: '1' }],
   ['the typer', { typer: { id: 7, login: 'josh' } }, { CITADEL_PERSON_ID: '7', CITADEL_PERSON_LOGIN: 'josh' }],
   ['home contraptions', { homeContraptions: ['a', 'b'] }, { COORDINATOR_HOME_CONTRAPTIONS: 'a,b' }],
   // A minion turn that got machines is offered propose_machine_notes for them (#617).

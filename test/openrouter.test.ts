@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
+import { agentToken, bootServer } from './helpers.ts';
 import { imageEstimate, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt } from '../src/openrouter.ts';
 
 // OpenRouter (#717): each person's own key and monthly cap. Every call is booked at its worst case
@@ -236,4 +240,69 @@ test('worst-case prices: per image by resolution, per token, per clip; an MP3\'s
   assert.equal(mp3Seconds(id3), 1);
   assert.equal(mp3Seconds(Buffer.from('not audio')), null);
   assert.match(resetsAt(Date.UTC(2026, 10, 14)), /^Nov 30, 4 PM PST$/);
+});
+
+test('through the server: a person connects on their account page and their minion makes an image with the MCP tool', async () => {
+  // OpenRouter faked over HTTP, answering as the fake above.
+  const fake = fakeOpenRouter();
+  const orServer = createServer(async (req, res) => {
+    let body = '';
+    for await (const c of req) body += c;
+    const r = await fake.fetch(`https://or.test${req.url}`, { method: req.method, headers: { authorization: req.headers.authorization ?? '' }, body: body || undefined });
+    res.writeHead(r.status, { 'content-type': r.headers.get('content-type') ?? 'application/json' }).end(Buffer.from(await r.arrayBuffer()));
+  });
+  await new Promise<void>((ok) => orServer.listen(0, '127.0.0.1', ok));
+  after(() => orServer.close());
+
+  const boot = mkdtempSync(join(tmpdir(), 'openrouter-boot-'));
+  const data = join(boot, 'data');
+  const wt = join(boot, 'wt');
+  mkdirSync(data, { recursive: true });
+  mkdirSync(wt);
+  const s = new Store(join(data, 'coordinator.db'));
+  const scheme = s.createProject('Art', null);
+  const owner = s.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const minion = s.createTicket({ project_id: scheme.id, kind: 'ticket', title: 'Art', permission_mode: 'default', created_by: 'Cara' });
+  s.setTicketDir(minion.id, wt, null);
+  s.updateTicket(minion.id, { person_id: owner.id });
+  s.db.close();
+
+  const srv = await bootServer({ root: boot, env: { OPENROUTER_BASE_URL: `http://127.0.0.1:${(orServer.address() as { port: number }).port}/api/v1` } });
+  const mcp = async (media: boolean, method: string, params: object = {}) => {
+    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+      env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, minion.id), COORDINATOR_PROJECT: String(scheme.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: media ? '1' : '', COORDINATOR_MEMORY: '' },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    try {
+      const reply = new Promise<any>((ok) => createInterface({ input: child.stdout }).once('line', (l) => ok(JSON.parse(l))));
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
+      return (await reply).result;
+    } finally {
+      child.kill();
+    }
+  };
+  try {
+    assert.equal((await srv.call('/api/me/openrouter')).data.connected, false);
+    assert.equal((await srv.call('/api/me/openrouter', { key: 'sk-or-v1-wrong', cap: 5 })).status, 400);
+    const linked = await srv.call('/api/me/openrouter', { key: KEY, cap: 5 });
+    assert.equal(linked.status, 200);
+    assert.equal(linked.data.cap_usd, 5);
+    assert.equal((await srv.call('/api/me/openrouter', { cap: 3 }, 'PATCH')).data.cap_usd, 3);
+    assert.ok(!JSON.stringify((await srv.call('/api/me/openrouter')).data).includes(KEY.slice(-12)), 'the key never comes back out');
+
+    const names = async (media: boolean) => (await mcp(media, 'tools/list')).tools.map((t: any) => t.name);
+    assert.deepEqual((await names(true)).filter((n: string) => /image|audio/.test(n)), ['generate_image', 'edit_image', 'generate_audio']);
+    assert.ok(!(await names(false)).includes('generate_image'));
+    const made = await mcp(true, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a cat', out: 'art/cat.png', resolution: '1K' } });
+    assert.match(made.content[0].text, /^Wrote .*art\/cat\.png with black-forest-labs\/flux-3-image-klein for \$0\.0091; \$2\.99 left this month\.$/);
+    assert.deepEqual(readFileSync(join(wt, 'art', 'cat.png')), PNG);
+    assert.equal((await srv.call(`/api/tickets/${minion.id}/openrouter`, { tool: 'generate_image', args: { prompt: 'x', out: 'y.png' } })).status, 403, 'a person can\'t call it as the minion');
+
+    await srv.call('/api/me/openrouter', undefined, 'DELETE');
+    const gone = await mcp(true, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a dog', out: 'dog.png' } });
+    assert.ok(gone.isError);
+    assert.match(gone.content[0].text, /OpenRouter/);
+  } finally {
+    await srv.stop();
+  }
 });

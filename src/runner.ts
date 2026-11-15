@@ -561,6 +561,8 @@ export class Runner {
   approvals: Approvals;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null) => TurnPlace | { refused: string };
+  /** Whether `person` has OpenRouter connected, so the turn's minion is offered the media tools (src/openrouter.ts, #717). */
+  mediaFor?: (person: number | null) => boolean;
   /** Why a person's turns can't run on Codex (#337), or null when they can: their own container, signed in to Codex. */
   codexReady?: (person: number) => string | null;
   /** Where the server login's Codex turns run: its own container (#341), or null before there is one. */
@@ -2226,6 +2228,7 @@ export class Runner {
         codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
         env: { server: process.env, coordinator, heavy, github: github?.env ?? null },
         memory: this.memoryScheme(project.id),
+        media: !!this.mediaFor?.(person),
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
         everyScheme,

@@ -402,6 +402,8 @@ export interface TurnFacts {
   deploys: boolean;
   /** Its scheme has semantic memory. */
   memory: boolean;
+  /** The person it runs for has OpenRouter connected: a minion is offered the media tools (#717). */
+  media?: boolean;
   /** The one person whose own typed message it answers (#295). */
   typer: { id: number; login: string } | null;
   /** The contraptions its scheme is home to (#266). */
@@ -547,6 +549,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
   if (facts.deploys) env.COORDINATOR_DEPLOYS = '1';
   if (facts.memory) env.COORDINATOR_MEMORY = '1';
+  if (facts.media && ticket.kind !== 'coordinator') env.COORDINATOR_MEDIA = '1';
   // The person's own GitHub token (or none, so it can't push).
   if (facts.env.github) env = { ...env, ...facts.env.github };
   // Grunts on a Fable turn default to Opus, not Fable (#705, Cara 2026-11-14: "No Fable for helper Grunts"):

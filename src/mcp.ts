@@ -789,6 +789,48 @@ const SEARCH_MEMORY = {
   },
 };
 
+/** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): offered only when they've connected one on their account page. */
+const MEDIA = process.env.COORDINATOR_MEDIA === '1';
+const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. Spend like it is the person\'s own money, because it is: one take at the default first, more takes or a dearer model only when asked or when the first misses.';
+const IMAGE_MODELS = ' Models: leave model out for black-forest-labs/flux-3-image-klein (about $0.01 an image at 1K), or recraft/recraft-v4.1-vector when out ends in .svg. For readable text in the image or careful edits, google/gemini-nano-banana-2.1 or openai/gpt-image-2, which cost several times more.';
+const MEDIA_OUT = 'Where to write it, inside your worktree or a shared folder (relative paths start in your worktree). With n over 1 the files are numbered: art-1.png, art-2.png';
+const MEDIA_MODEL = { type: 'string', description: 'Optional: an OpenRouter model id. Leave it out for the cheap default' };
+const MEDIA_OVERWRITE = { type: 'boolean', description: 'Replace a file that already exists (default false: refused)' };
+const IMAGE_PROPS = {
+  prompt: { type: 'string', maxLength: 8000, description: 'What to draw' },
+  out: { type: 'string', description: `${MEDIA_OUT}. .png or .webp, or .svg for a vector model` },
+  model: MEDIA_MODEL,
+  resolution: { type: 'string', description: "Optional: one of the model's sizes, like 1K or 2K (an unknown one is refused with the list)" },
+  aspect_ratio: { type: 'string', description: 'Optional: like 1:1, 16:9 or 9:16 (an unknown one is refused with the list)' },
+  n: { type: 'integer', minimum: 1, maximum: 4, description: 'How many takes (default 1)' },
+  refs: { type: 'array', items: { type: 'string' }, maxItems: 8, description: 'Optional: reference images (png, jpeg or webp paths) for style or subject' },
+  overwrite: MEDIA_OVERWRITE,
+};
+const MEDIA_TOOL_LIST = [
+  { name: 'generate_image', description: `Make an image from a prompt. ${MEDIA_COMMON}${IMAGE_MODELS}`, inputSchema: { type: 'object', properties: IMAGE_PROPS, required: ['prompt', 'out'] } },
+  {
+    name: 'edit_image',
+    description: `Change an existing image as the prompt says (the result goes to out; the original stays). ${MEDIA_COMMON}${IMAGE_MODELS}`,
+    inputSchema: { type: 'object', properties: { image: { type: 'string', description: 'The image to edit: a png, jpeg or webp path' }, ...IMAGE_PROPS }, required: ['image', 'prompt', 'out'] },
+  },
+  {
+    name: 'generate_audio',
+    description: `Make a sound effect or a short music clip from a prompt. ${MEDIA_COMMON} Models: effects default to bytedance-seed/seed-audio-1-0 (priced by the second), music to google/lyria-3-clip-preview (about $0.04 a clip).`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['effect', 'music'], description: 'effect: a short sound (.mp3); music: a clip of about 30 seconds (.mp3 or .wav)' },
+        prompt: { type: 'string', maxLength: 8000, description: 'What it should sound like' },
+        out: { type: 'string', description: `${MEDIA_OUT.replace(/\. With n.*/, '')}. .mp3, or .wav for music` },
+        seconds: { type: 'number', description: 'Optional, effects: roughly how long, up to 60' },
+        model: MEDIA_MODEL,
+        overwrite: MEDIA_OVERWRITE,
+      },
+      required: ['kind', 'prompt', 'out'],
+    },
+  },
+];
+
 /** create_ticket's duplicate check (#488): open minions the server marks as twins of the new one's title and brief (src/memory.ts TWIN_SCORE). A search that fails checks nothing. */
 async function openTwins(title: string, message: string): Promise<{ number: number; title: string; status: string; score: number; owner: string | null }[]> {
   const q = new URLSearchParams({ q: `${title}\n${message}`.slice(0, 1000), scope: 'minions', limit: '3' });
@@ -1384,6 +1426,12 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call(clear === true ? 'DELETE' : 'PUT', path, clear === true ? undefined : fields);
       return `Mandate answered ${r.status}: ${typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer)}`;
     }
+    case 'generate_image':
+    case 'edit_image':
+    case 'generate_audio': {
+      const r = await call('POST', `/api/tickets/${TICKET}/openrouter`, { tool: name, args });
+      return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.`;
+    }
     case 'search_memory': {
       if (typeof args.query !== 'string' || !args.query.trim()) throw new Error('query is required');
       const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
@@ -1679,7 +1727,7 @@ function toolListAll() {
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
-  return [...THREAD_TOOLS, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

@@ -336,6 +336,7 @@ runner.onMessage = (id) => landings.talked(id);
 runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);
+runner.mediaFor = (person) => openrouter.connected(person);
 runner.githubFor = (person, dir) => githubLink.forTurn(person ? store.getUser(person) ?? null : null, dir);
 
 // ---------- push notifications ----------

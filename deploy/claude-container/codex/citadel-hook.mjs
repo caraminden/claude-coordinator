@@ -85,6 +85,8 @@ async function check(input, cfgFile) {
   const isImageGen = ['image_gen', 'image_gen.imagegen', 'image_genimagegen'].includes(tool);
   // image_gen reads its reference images: each is checked as a read.
   const imageGen = () => {
+    // Fail closed if the arguments come in another shape (a string, a wrapper key): the refs could hide in it unchecked.
+    if (typeof ti !== 'object' || Array.isArray(ti) || typeof ti.prompt !== 'string') deny('This image_gen call\'s arguments are not the expected { prompt, ... } object, so the tripwire cannot check what it reads.');
     const refs = ti.referenced_image_paths ?? [];
     if (!Array.isArray(refs)) deny('image_gen\'s referenced_image_paths is not a list, so the tripwire cannot check what it reads.');
     for (const p of refs) stop(tripwire({ tool_name: 'Read', tool_input: { file_path: at(String(p)) }, cwd }, { ...config, ask: false }));

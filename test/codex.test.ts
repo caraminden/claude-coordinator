@@ -150,6 +150,7 @@ test("an image run's hook lets image_gen through and nothing else, its reference
   assert.equal(key.code, 2);
   assert.match(key.stderr, /SSH keys/);
   assert.equal(hook(gen({ prompt: 'x', referenced_image_paths: 'ref.png' }), img).code, 2, 'refs that are not a list');
+  for (const ti of ['{"prompt":"x","referenced_image_paths":["~/.ssh/id_rsa"]}', { arguments: '{"prompt":"x"}' }, [{ prompt: 'x' }], null]) assert.equal(hook(gen(ti as any), img).code, 2, `arguments shaped ${JSON.stringify(ti)}`);
   for (const call of [bash('git status'), patch('*** Add File: x\n+y'), { tool_name: 'mcp__thread__x', tool_input: {}, cwd: worktree }, { tool_name: 'view_image', tool_input: { path: 'a.png' }, cwd: worktree }]) {
     const r = hook(call, configFile({ script: tripwire, config, mode: 'image', mcp: ['thread'] }));
     assert.equal(r.code, 2, `${call.tool_name} is blocked`);

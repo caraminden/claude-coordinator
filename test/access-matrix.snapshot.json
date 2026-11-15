@@ -1832,6 +1832,16 @@
   "m1": "404 This worktree has no tools/land.sh: land the way the scheme instructions say",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/land/handoff": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can land its branch",
+  "member": "403 Only the minion itself can land its branch",
+  "outsider": "403 Only the minion itself can land its branch",
+  "tmA": "403 Only the minion itself can land its branch",
+  "tmB": "403 Only the minion itself can land its branch",
+  "m1": "404 This worktree has no tools/land.sh: land the way the scheme instructions say",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/machine-notes": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can propose a machine's notes in its chat",
@@ -2293,6 +2303,16 @@
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:taskmasterA/land": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can land its branch",
+  "member": "403 Only the minion itself can land its branch",
+  "outsider": "403 Only the minion itself can land its branch",
+  "tmA": "403 Only the minion itself can land its branch",
+  "tmB": "403 Only the minion itself can land its branch",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/land/handoff": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can land its branch",
   "member": "403 Only the minion itself can land its branch",

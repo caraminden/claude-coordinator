@@ -389,6 +389,9 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 :is(.chat.role-taskmaster .msg:is(.reply, .narration), .msg.from-tm, .msg.from-minion) { background: color-mix(in srgb, var(--tone) var(--tint), var(--panel)); border-color: color-mix(in srgb, var(--tone) 30%, var(--line)); }
 /* A relayed message is dashed (Cara, 2026-11-14, picked "A: Sender's tint, dashed"), so it reads apart from the agent's own replies. */
 .msg.user:is(.from-tm, .from-minion) { border-style: dashed; border-color: color-mix(in srgb, var(--tone) 60%, var(--line)); }
+/* A person's own message carries a thin neutral stripe down its left edge (Cara, 2026-11-14, picked "Left stripe
+   instead" when asked about shading them), so it reads apart from the plain minion replies. GitHub's has its own. */
+.msg.user:not(.from-tm, .from-minion, .github) { border-left: 3px solid var(--muted); border-radius: 3px 10px 10px 3px; }
 /* A dismissed minion's message box is tinted grey, so it reads as dismissed before you type. */
 .chat.dismissed .composer textarea { background: color-mix(in srgb, var(--closed) 18%, var(--panel)); border-color: color-mix(in srgb, var(--closed) 45%, var(--control-line)); }
 

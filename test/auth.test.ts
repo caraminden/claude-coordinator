@@ -120,3 +120,35 @@ test("a removed person's id is never handed to the next person, so their old coo
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a contraption host's sign-in token works once, for its app only, for a minute (#709)", () => {
+  const auth = new Auth('a-password-long-enough', 'x'.repeat(32));
+  const now = Date.now();
+  const t = auth.appToken('mandate', 7, now);
+  assert.equal(auth.redeemAppToken(t, 'peek', now), null, 'another app');
+  assert.equal(auth.redeemAppToken(t, 'mandate', now + 61_000), null, 'stale');
+  assert.equal(auth.redeemAppToken(t, 'mandate', now), 7);
+  assert.equal(auth.redeemAppToken(t, 'mandate', now), null, 'spent');
+  assert.equal(auth.redeemAppToken(auth.appToken('mandate', 7, now).replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')), 'mandate', now), null, 'forged');
+  // Another server secret's token, or a cookie passed off as a token, is refused.
+  assert.equal(new Auth('a-password-long-enough', 'y'.repeat(32)).redeemAppToken(auth.appToken('mandate', 7, now), 'mandate', now), null);
+  assert.equal(auth.redeemAppToken(auth.issueAppCookie('mandate', { id: 7 }, false).split(';')[0].slice('cc_app='.length), 'mandate', now), null);
+});
+
+test("a contraption host's cookie signs its person in on that app only, and is never a Citadel session (#709)", () => {
+  const people = new Map<number, any>([[7, { id: 7, name: 'Josh' }]]);
+  const users = { getUser: (id: number) => people.get(id), findUser: () => undefined, isAdmin: () => false } as any;
+  const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, users);
+  const secure = auth.issueAppCookie('mandate', { id: 7 }, true);
+  assert.match(secure, /^cc_app=[^;]+; Path=\/; HttpOnly; Max-Age=15552000; SameSite=None; Secure; Partitioned$/);
+  assert.match(auth.issueAppCookie('mandate', { id: 7 }, false), /; SameSite=Lax$/);
+  const req = (cookie: string) => ({ headers: { cookie } }) as any;
+  const jar = secure.split(';')[0];
+  assert.equal(auth.appSession(req(jar), 'mandate')?.name, 'Josh');
+  assert.equal(auth.appSession(req(jar), 'peek'), null, 'another app');
+  assert.equal(auth.session(req(jar.replace('cc_app=', 'cc_session='))), null, 'not a Citadel session');
+  assert.equal(auth.appSession(req(auth.issueCookie({ id: 7, name: 'Josh' }, false).split(';')[0].replace('cc_session=', 'cc_app=')), 'mandate'), null, 'nor the other way');
+  assert.equal(auth.appRenewal('mandate', auth.appSession(req(jar), 'mandate'), true), null, 'a new one is left alone');
+  people.set(7, { id: 7, name: 'Josh', disabled_at: 'now' });
+  assert.equal(auth.appSession(req(jar), 'mandate'), null, 'disabled');
+});

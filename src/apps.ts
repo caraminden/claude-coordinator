@@ -193,11 +193,12 @@ export class AppProxy {
   }
 
   /** On Citadel's host with APPS_DOMAIN set: a page under /apps/<name>/ goes to the contraption's own host, signed in. */
-  private moved(req: IncomingMessage, row: ContraptionRow, path: string): Refusal {
+  private moved(req: IncomingMessage, row: ContraptionRow, path: string, open: boolean): Refusal {
     const there = this.origin(req, row.name);
     if (!isPage(req)) return { status: 404, reason: 'Not Found', headers: text, body: `${row.title} has moved to ${there}${path}` };
     const session = this.who(req, null);
-    if (!session) return redirect(`/c/?next=${encodeURIComponent(path)}`);
+    // An open path's page needs no sign-in there either.
+    if (!session) return redirect(open ? `${there}${path}` : `/c/?next=${encodeURIComponent(path)}`);
     if (!this.contraptions.enabled(row.name, session.uid!)) return { status: 403, reason: 'Forbidden', headers: html, body: page(row.title, `You don't have access to ${row.title}.`) };
     return redirect(`${there}/_citadel/enter?t=${this.auth.appToken(row.name, session.uid!)}&next=${encodeURIComponent(path)}`, handoff);
   }
@@ -221,7 +222,10 @@ export class AppProxy {
     }
     if (!m[2]) return redirect(`/apps/${row.name}/${url.search}`, {});
     const path = url.pathname + url.search;
-    if (host === null && this.domain) return this.moved(req, row, path);
+    const open = isOpenPath(JSON.parse(row.open_paths) as string[], m[2]);
+    // Citadel's host still passes an open path's websockets and fetches (Peek Auras' PC link dials /apps/peek-auras/link
+    // there): they carry no login or identity, and no page of the contraption's opens on Citadel's origin.
+    if (host === null && this.domain && !(open && !isPage(req))) return this.moved(req, row, path, open);
 
     // The login cookies stay with Citadel; the contraption's own cookies go through.
     const headers: OutgoingHttpHeaders = { ...req.headers };
@@ -229,7 +233,7 @@ export class AppProxy {
     if (cookies.length) headers.cookie = cookies.join('; ');
     else delete headers.cookie;
 
-    if (isOpenPath(JSON.parse(row.open_paths) as string[], m[2])) return { row, path, headers, uid: null };
+    if (open) return { row, path, headers, uid: null };
 
     const session = this.who(req, host);
     if (!session) {

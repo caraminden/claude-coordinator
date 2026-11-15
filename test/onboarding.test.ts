@@ -54,6 +54,14 @@ before(async () => {
 
 const project = (onboarding: Project['onboarding'], onboarding_mode: Project['onboarding_mode'] = 'first-run') => ({ name: 'Lanternfall', onboarding, onboarding_mode }) as Project;
 
+test('the onboarding section is in the prompt only while setup is under way', () => {
+  for (const step of ONBOARDING) {
+    const text = onboardingPrompt(project(step), '/shared');
+    if (step === 'done' || step === 'skipped') assert.equal(text, '', step);
+    else assert.notEqual(text, '', step);
+  }
+});
+
 test('both plans name a skills survey for the stack, with every scheme\'s survey reports listed for the three-month check (#357)', () => {
   const data = join(root, 'surveys');
   const report = (id: number, name: string) => {

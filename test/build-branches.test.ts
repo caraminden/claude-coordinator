@@ -16,6 +16,11 @@ test('build lines are given only to a minion in a build with its branch made, an
   assert.deepEqual(buildLines(null), []);
   assert.deepEqual(buildLines({ build: 7, branch: null, owner: false }), [], 'no branch yet (or Delve): nothing');
   assert.ok(buildLines({ build: 7, branch: 'build/7', owner: false }).length > 0);
+  const owner = (branch: string | null, preview?: string) => buildLines({ build: 7, branch, owner: true, preview }).join('\n');
+  assert.ok(owner(null).includes('git branch build/7 main'), 'the build minion makes the branch first');
+  assert.ok(!owner('build/7').includes('git branch build/7 main'), 'made already');
+  assert.ok(owner('build/7', 'https://x.example/p/').includes('https://x.example/p/'));
+  assert.ok(!buildLines({ build: 7, branch: 'build/7', owner: false, preview: 'https://x.example/p/' }).join('\n').includes('https://x.example/p/'), 'feeders get no preview link');
   assert.ok(!prompt(null).includes('Build 7'), 'no role, no lines');
   assert.ok(prompt(null, true, 'coordinator').includes(BUILDS_LINE));
   assert.ok(!prompt(null, false, 'coordinator').includes(BUILDS_LINE));

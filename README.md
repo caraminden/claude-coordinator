@@ -367,9 +367,12 @@ person). A turn for someone who hasn't linked gets no GitHub login at all, so it
 commits but can't push, and says so. Without the OAuth App, turns use the box's
 own `gh` login as before. To set it up, once:
 
-1. On github.com: Settings → Developer settings → OAuth Apps → New OAuth App.
-   Homepage `https://cara.apps.webplatformisbestplatform.net`, callback
-   `https://cara.apps.webplatformisbestplatform.net/api/github/callback`.
+1. On github.com: Settings → Developer settings → [OAuth Apps](https://github.com/settings/developers) → New OAuth App.
+   Homepage `https://cara.apps.webplatformisbestplatform.net`, and a redirect URI per hostname people
+   reach Citadel at (up to 10; #489): `https://cara.apps.webplatformisbestplatform.net/api/github/callback`
+   and `https://citadel.zip/api/github/callback`. Citadel sends GitHub the one for the hostname the person
+   is on, so a hostname left out fails to link with "redirect_uri mismatch". Leave wildcard matching,
+   "Enable Device Flow" and "Expire user access tokens" off.
 2. Generate a client secret, and add both to `~/.config/claude-coordinator/env`
    as `GITHUB_CLIENT_ID=…` and `GITHUB_CLIENT_SECRET=…`, then restart.
 3. Link your own GitHub too: from then on an unlinked person's turns, the
@@ -385,10 +388,11 @@ limited link reaches. To set it up, once:
 1. [Register a new GitHub App](https://github.com/settings/apps/new). Homepage
    `https://cara.apps.webplatformisbestplatform.net`, callback URL
    `https://cara.apps.webplatformisbestplatform.net/api/github/callback` (add one per hostname people
-   reach Citadel at, up to 10). Setup URL
+   reach Citadel at, up to 10, as for the OAuth App). Setup URL
    `https://cara.apps.webplatformisbestplatform.net/api/github/installed`, with **Redirect on update**
    ticked: installing the App links nothing, so this brings people back from GitHub and, if they have
-   no link yet, straight on to Link GitHub (limited). Leave "Request user authorization (OAuth) during
+   no link yet, straight on to Link GitHub (limited). It takes one URL, so someone who installs the App
+   from another hostname comes back on this one and may have to sign in there once. Leave "Request user authorization (OAuth) during
    installation" and "Enable Device Flow" off. Untick **Expire user authorization tokens**: GitHub's refresh kills the old
    token at once, which would cut off a person's other running turns
    ([refreshing user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)).

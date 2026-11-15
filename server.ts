@@ -453,8 +453,10 @@ if (!BOOT_CHECK && !PREVIEW) {
   });
   setTimeout(sweepBuild, 10 * 60_000).unref();
   setInterval(sweepBuild, 24 * 60 * 60_000).unref();
-  // Contraption turns' media files past 30 days (#732).
-  setInterval(() => void safely('contraption media sweep', async () => void sweepMedia(join(DATA_DIR, 'contraption-media'))), 24 * 60 * 60_000).unref();
+  // Contraption turns' media files past 30 days (#732); first soon after boot, as deploys restart the server more often than daily.
+  const sweepContraptionMedia = () => void safely('contraption media sweep', async () => void sweepMedia(join(DATA_DIR, 'contraption-media')));
+  setTimeout(sweepContraptionMedia, 10 * 60_000).unref();
+  setInterval(sweepContraptionMedia, 24 * 60 * 60_000).unref();
 }
 
 // Steps' times from before step_times (#571), once, a minute after boot.

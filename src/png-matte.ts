@@ -2,14 +2,23 @@
 // model draws on plain black, and each pixel's opacity becomes its brightest channel, its colour divided
 // back out, so the result laid over black is the picture the model sent. Right for glows and spell
 // effects; dark parts of a subject go see-through, which is why models with real alpha are used first.
+import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { crc32, deflateSync, inflateSync } from 'node:zlib';
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 /** Past this many pixels (about 4K square) it's left alone rather than hold hundreds of MB. */
 const MAX_PIXELS = 4096 * 4096;
 
-/** An 8-bit RGB or RGBA, non-interlaced PNG's pixels as RGBA, or null for anything else. */
+/** An 8-bit RGB or RGBA, non-interlaced PNG's pixels as RGBA, or null for anything else (a broken one included). */
 export function decodePng(buf: Buffer): { width: number; height: number; rgba: Buffer } | null {
+  try {
+    return decode(buf);
+  } catch {
+    return null;
+  }
+}
+
+function decode(buf: Buffer): { width: number; height: number; rgba: Buffer } | null {
   if (buf.length < 33 || !buf.subarray(0, 8).equals(SIGNATURE)) return null;
   let width = 0, height = 0, channels = 0;
   const idat: Buffer[] = [];
@@ -89,3 +98,15 @@ export function matteBlack(png: Buffer): Buffer | null {
   }
   return encodePng(img.width, img.height, px);
 }
+
+/** matteBlack in a worker thread: a 4K image takes over a second, which would stall every request on the server. */
+export function matteBlackOff(png: Buffer): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL(import.meta.url), { workerData: { citadelMatte: png } });
+    worker.once('message', (m: Uint8Array | null) => resolve(m && Buffer.from(m.buffer, m.byteOffset, m.byteLength)));
+    worker.once('error', reject);
+    worker.once('exit', (code) => reject(new Error(`the matte worker stopped (${code})`))); // a no-op once it answered
+  });
+}
+
+if (!isMainThread && workerData?.citadelMatte) parentPort!.postMessage(matteBlack(Buffer.from(workerData.citadelMatte)));

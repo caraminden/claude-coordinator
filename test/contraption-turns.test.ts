@@ -115,9 +115,11 @@ take().then((m) => {
     // A media turn (#732): calls Citadel's media server as claude would, with the URL and token it was given.
     const srv = JSON.parse(read(opt('--mcp-config'))).mcpServers.citadel;
     const rpc = (body) => fetch(srv.url, { method: 'POST', headers: { ...srv.headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', ...body }) });
+    out({ type: 'assistant', message: { id: 'm0', content: [{ type: 'tool_use', id: 'img1', name: 'mcp__citadel__generate_image', input: {} }] } });
     return rpc({ method: 'notifications/initialized' })
       .then((r) => rpc({ id: 1, method: 'tools/call', params: { name: 'generate_image', arguments: { prompt: 'a frost glow', out: 'frost.png' } } }).then((c) => c.json()).then((c) => [r.status, c]))
       .then(([note, c]) => {
+        out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'img1', is_error: c.result.isError, content: c.result.content }] } });
         out({ type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: note + ' ' + c.result.content[0].text }] } });
         out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: '', usage: {} });
       });
@@ -698,11 +700,23 @@ test('the API is only for a contraption\'s own server on this machine, with its 
   const blocks = (await res.text()).trim().split('\n\n').map((b) => ({ event: b.split('\n')[0].replace('event: ', ''), data: JSON.parse(b.split('\n')[1].replace('data: ', '')) }));
   const media = blocks.filter((b) => b.event === 'media');
   assert.equal(media.length, 1);
+  assert.deepEqual(blocks.map((b) => b.event).filter((e) => e === 'media' || e === 'tool_result'), ['media', 'tool_result'], 'the app hears of the call before its result');
   assert.equal(media[0].data.ok, false);
   assert.equal(media[0].data.code, 'openrouter_not_connected');
   assert.match(blocks.filter((b) => b.event === 'text').map((b) => b.data.delta).join(''), /^202 openrouter_not_connected: /);
   assert.deepEqual(await (await api(`/api/contraptions/media?person=${me.id}`)).json(), { files: [] });
   assert.equal((await api(`/api/contraptions/media/frost.png?person=${me.id}`)).status, 404);
+  const folder = join(srv.data, 'contraption-media', 'mandate', String(me.id), 'auras');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'glow.png'), 'GLOW');
+  writeFileSync(join(folder, 'glow.png.json'), '{"model":"m"}');
+  assert.deepEqual((await (await api(`/api/contraptions/media?person=${me.id}`)).json()).files.map((f: any) => f.path), ['auras/glow.png']);
+  const got = await api(`/api/contraptions/media/auras/glow.png?person=${me.id}`);
+  assert.equal(got.headers.get('content-type'), 'image/png');
+  assert.equal(await got.text(), 'GLOW');
+  assert.deepEqual(await (await api(`/api/contraptions/media/auras/glow.png.json?person=${me.id}`)).json(), { model: 'm' });
+  assert.equal((await api(`/api/contraptions/media/auras/glow.png?person=${me.id}`, { method: 'DELETE' })).status, 200);
+  assert.deepEqual(readdirSync(folder), [], 'the file and its note');
   assert.equal((await api(`/api/contraptions/media/..%2F..%2Fcoordinator.db?person=${me.id}`)).status, 400);
   assert.equal((await api('/api/contraptions/media?person=999')).status, 403);
   const standing = () => api(`/api/contraptions/openrouter?person=${me.id}`).then((r) => r.json());

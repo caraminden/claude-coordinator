@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { crc32, deflateSync } from 'node:zlib';
-import { decodePng, encodePng, matteBlack } from '../src/png-matte.ts';
+import { decodePng, encodePng, matteBlack, matteBlackOff } from '../src/png-matte.ts';
 
 // The black-to-alpha matte (#732): opacity from the brightest channel, colour divided back out.
 
@@ -53,4 +53,12 @@ test('anything the matte cannot read is left for the caller to keep as sent', ()
   const ihdr16 = rgbPng(1, [[0, 1, 2, 3]]);
   ihdr16[24] = 16; // bit depth 16 (the CRC no longer matches; the reader doesn't check it)
   assert.equal(decodePng(ihdr16), null);
+  const shortHeader = Buffer.concat([rgbPng(1, [[0, 1, 2, 3]]).subarray(0, 8), Buffer.from([0, 0, 0, 4]), Buffer.from('IHDR'), Buffer.alloc(8 + 21)]);
+  assert.equal(decodePng(shortHeader), null, 'a broken header is unreadable, not a throw');
+});
+
+test('the matte off the server\'s thread gives the same pixels', async () => {
+  const png = encodePng(2, 1, Buffer.from([0, 0, 0, 255, 128, 0, 0, 255]));
+  assert.deepEqual(await matteBlackOff(png), matteBlack(png));
+  assert.equal(await matteBlackOff(Buffer.from('nope')), null);
 });

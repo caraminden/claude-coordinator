@@ -9,7 +9,7 @@ import { resolveFile } from './artifacts.ts';
 import type { Credentials } from './credentials.ts';
 import type { OpenrouterCallKind, Store } from './db.ts';
 import { HttpError } from './http.ts';
-import { matteBlack } from './png-matte.ts';
+import { matteBlackOff } from './png-matte.ts';
 
 type Fetch = typeof fetch;
 
@@ -370,11 +370,12 @@ export class OpenRouter {
     if (clear === 'native' && format !== 'png' && format !== 'webp') throw new HttpError(400, 'A transparent background needs out to end in .png or .webp');
     if (clear === 'matte' && format !== 'png') throw new HttpError(400, `${model} has no transparent background of its own, so Citadel mattes it from black: out must end in .png (or pick a model with one, like bytedance-seed/seedream-5-0-flash)`);
     const files = Array.from({ length: n }, (_, i) => target(out, n, i, args.overwrite === true));
-    const estimate = imageEstimate(endpoints, { resolution: args.resolution, n, refs: refs.length, promptChars: prompt.length });
+    const sent = clear === 'matte' ? `${prompt}\n\n${BLACK_BACKGROUND}` : prompt;
+    const estimate = imageEstimate(endpoints, { resolution: args.resolution, n, refs: refs.length, promptChars: sent.length });
     const id = this.reserve(userId, cap, ctx, 'image', model, estimate);
     const { value: images, cost } = await this.settled(userId, id, estimate!, async () => {
       const res = await this.request(key, 'POST', '/images', {
-        model, n, prompt: clear === 'matte' ? `${prompt}\n\n${BLACK_BACKGROUND}` : prompt,
+        model, n, prompt: sent,
         ...(clear === 'native' ? { background: 'transparent' } : {}),
         ...(args.resolution ? { resolution: args.resolution } : {}),
         ...(args.aspect_ratio ? { aspect_ratio: args.aspect_ratio } : {}),
@@ -388,9 +389,10 @@ export class OpenRouter {
     });
     const paths: string[] = [];
     const warnings: string[] = [];
-    images.slice(0, n).forEach((img, i) => {
+    for (const [i, img] of images.slice(0, n).entries()) {
       const raw = Buffer.from(img.b64_json!, 'base64');
-      const matted = clear === 'matte' ? matteBlack(raw) : null;
+      // A worker that fails keeps the paid-for image as sent, with the warning below.
+      const matted = clear === 'matte' ? await matteBlackOff(raw).catch(() => null) : null;
       if (clear === 'matte' && !matted) warnings.push(`${basename(files[i])} came back in a form the matte can't read (${img.media_type ?? 'unknown'}), so it keeps its black background`);
       // Write what came back under its own extension (a jpeg asked for as .png stays a jpeg); a matted one is a png.
       const got = matted ? '.png' : MEDIA_TYPES[img.media_type ?? ''];
@@ -405,7 +407,7 @@ export class OpenRouter {
         ...(clear ? { background: clear === 'native' ? 'transparent (native)' : matted ? 'transparent (matte)' : 'black (the matte could not read it)' } : {}),
       });
       paths.push(file);
-    });
+    }
     this.store.setOpenrouterCallPath(id, paths.join('\n'));
     return { paths, cost_usd: cost, left_usd: this.left(userId, cap), model, ...(warnings.length ? { warnings } : {}) };
   }

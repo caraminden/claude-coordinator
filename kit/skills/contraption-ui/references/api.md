@@ -336,7 +336,7 @@ A turn with `media: true` gets three tools from a server Citadel adds, named `ci
 `generate_audio` (`kind: "effect"` or `"music"`). They're the same tools minions have, run on the
 Citadel server with the OpenRouter key the turn's `person` connected on their account page and
 booked against their monthly cap: a call that would pass the cap, or could cost over $0.50, is
-refused before anything is spent. The key never reaches the turn, the agent or your app (tested).
+refused before anything is spent. The key never reaches the turn, the agent or your app.
 They're offered even to a person who never connected OpenRouter, so the agent can say why it can't
 make anything; every call is then refused with `openrouter_not_connected` (tested).
 
@@ -353,7 +353,7 @@ for (`400` bad `person`, `403` not enabled):
 |---|---|
 | `GET /api/contraptions/media?person=3` | `{ files: [{ path, bytes, modified }] }`, newest first, notes left out (tested) |
 | `GET /api/contraptions/media/<path>?person=3` | The bytes with their content type; `<path>.json` is the note. `400` for a path outside the folder, `404` for none (tested) |
-| `DELETE /api/contraptions/media/<path>?person=3` | `{ ok: true }`, the file and its note gone |
+| `DELETE /api/contraptions/media/<path>?person=3` | `{ ok: true }`, the file and its note gone (tested) |
 
 Files are swept 30 days after they were written. Copy what a person keeps into your own storage:
 the folder is a work bench, not a library.

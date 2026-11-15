@@ -15,7 +15,7 @@ const run = promisify(execFile);
 const NAMES = new Set(['target', 'node_modules']);
 // Lowest best-effort IO class and lowest CPU priority, so a sweep never hogs the box. Not the idle
 // class: under steady IO it can starve, holding the minion's lane (and a reopen) behind it.
-export const LOW = ['ionice', '-c2', '-n7', 'nice', '-n19'];
+const LOW = ['ionice', '-c2', '-n7', 'nice', '-n19'];
 
 /** The worktree a minion of `projectId` must have for its build output to be cleared: nothing else is ever touched. */
 export function ticketWorktree(dataDir: string, projectId: number, ticketId: number): string {

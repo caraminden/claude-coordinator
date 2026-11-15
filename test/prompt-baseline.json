@@ -26,7 +26,7 @@
   "For a dev copy of Citadel, run `citadel-dev-copy start` (a c": 910,
   "While your own background job runs (tests, a build, a dev se": 372,
   "Heavy builds and full test suites (a whole-workspace `cargo ": 729,
-  "Once your change is live, or deployed and waiting in pending": 903,
+  "Once your change is live, or deployed and waiting in pending": 936,
   "You cannot message other minions directly. When something ne": 369,
   "A proposal always ends in an action: when your turn suggests": 315,
   "When you are proven wrong in a disagreement with the Taskmas": 271,

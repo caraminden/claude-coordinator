@@ -10,7 +10,7 @@ and write down what goes wrong, with proof. Ideas from vercel-labs/agent-browser
 - A dev copy or preview, on a copy of the data, at a port you picked and checked free. Never the
   live app: you'll create, edit and delete things.
 - A headless browser you started (Citadel's tests use Playwright's `chrome-headless-shell` over
-  the DevTools protocol, `test/browser.ts`), at desktop (1280 px) and phone (390 px) widths.
+  the DevTools protocol, `test/browser.ts`), at desktop (1440 px) and phone (390 px) widths.
 - A findings file in your temp folder, appended to as you go, so an interrupted turn loses nothing.
 
 ## Go through it

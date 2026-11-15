@@ -40,7 +40,8 @@ Each passes whatever the code does. Fix any you write; flag any you review.
   pure (serialising a map, hashing, anything that reads the clock).
 - **Vacuity**: a filter, guard or early return skips nearly every case, or the loop runs over an
   empty fixture, so the test ran nothing.
-- **No assertion**, or only "didn't throw" or "is defined".
+- **No assertion**, or only "didn't throw" or "is defined". A probe that only prints is one:
+  give it an assertion, mark it ignored with the reason, or delete it.
 - **A swallowed failure**: an empty catch around the act, the assertion only inside a catch, an
   async assertion without `await` (the test ends before it runs), a callback that never fires.
 - **A disabled or always-true assertion**: commented out, or `true` asserted true.
@@ -71,8 +72,6 @@ in review.
   element exists.
 - **A comparison isn't a test.** When you try variants (thresholds, signal votes), the numbers go
   in the decisions log; only the shipped variant gets a test.
-- **A probe that only prints isn't a test.** Give it an assertion, mark it ignored with the
-  reason, or delete it.
 - **Consumers test their use, not the kit.** An app's browser tests cover how it uses a shared
   module; the module's own tests cover the module.
 - **Expensive fixtures are shared per file** (a worker pool, a booted engine), unless the test

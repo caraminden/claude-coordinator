@@ -9,7 +9,7 @@ The disclosed half of two sections in [`SKILL.md`](SKILL.md): "Testing a skill" 
 - Give the Grunt the task only, never your hypothesis or the expected answer.
 - **Record** what it did and its reasons, word for word. Those reasons are what the guidance answers.
 - Run on the model that will run the skill: the session's model for a session skill, the Grunt's for a Grunt brief.
-- **Reps** are fresh Grunts, 3 to 5 per variant. Past four, the fan-out rule in `citadel:subagents` applies: each writes to a file and returns three lines.
+- **Reps** are fresh Grunts, 3 to 5 per variant, so they are a fan-out (`citadel:subagents`): each writes to a file and returns three lines.
 
 ## Match the form to the failure
 

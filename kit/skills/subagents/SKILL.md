@@ -20,16 +20,19 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
 - Models: Agent calls set `model` too. A general-purpose Grunt gets `sonnet` by default (reading,
   research legwork, regeneration, reviewer passes); `haiku` for bulk reads; the
   `citadel:check-runner` agent runs on `haiku` at `low` effort (its answer is a verdict). Only a
-  Grunt that judges (`citadel:critic`, `citadel:fresh-eyes`, `citadel:finding-checker`) inherits
-  the session's model: on Delve's art critic Opus caught about 9 of 13 of Cara's notes, Sonnet 5.
+  Grunt that judges (`citadel:fresh-eyes`, `citadel:finding-checker`) inherits the session's
+  model: on Delve's art critic Opus caught about 9 of 13 of Cara's notes, Sonnet 5. The
+  `citadel:critic` takes its model and effort from its rubric (`citadel:critique`).
   The exception: on a high-risk self-review `citadel:reviewer` and `citadel:finding-checker` run
   on `fable` (`claude-fable-5-2`) at `medium`, set per call. On a Fable turn, a Grunt with no
   `model` on its call or its definition runs on Opus, not Fable, the judging Grunts included
   (#705): Citadel launches Fable turns with `CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5`. A call's
   own `model` and a definition's `model:` still win, `model: inherit` too (so a Grunt definition
   that should follow this default leaves `model:` out), and a Grunt that must run on Fable names
-  `fable` on the call. A Grunt doing known-shape middle work (a clear-repro bug fix, a small clear-spec change, a follow-up) can run `opus` at `medium`; one that
-  stalls or whose fix doesn't hold moves to high.
+  `fable` on the call. A Grunt doing known-shape middle work (a clear-repro bug fix, a small clear-spec change, a
+  follow-up) runs `sonnet` at `medium`; one that stalls or whose fix doesn't hold moves to `opus`
+  at `medium`, then high (Cara, 2026-11-14, "Widen to known-shape work"; the minions' tier in
+  `public/model-table.js`).
 - Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work
   in obra/superpowers' subagent-driven-development. Use `haiku` only when the brief holds
   everything the Grunt needs.

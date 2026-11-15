@@ -74,8 +74,7 @@ when look variants belong in the real app instead, in [`prototypes.md`](prototyp
    phone look (Cara often reviews on her phone): it opens, and mocks scale down to fit, never
    scrolling sideways. Check the console for errors, even room above and below every box, and click
    every control once; a new look also runs the tells in `looks.md`. A mocked screen with no
-   scheme look to wear passes `citadel:contraption-ui`'s First look squint check: three hues or
-   more besides the status tones.
+   scheme look to wear passes `citadel:contraption-ui`'s First look squint check.
 6. **Reader-test a design doc** before anyone sees it: a Grunt with no context answers the 5 to 10
    questions its readers would ask from the doc alone, and you fix where it missed. The brief and
    what counts as a pass: [`reader-test.md`](reader-test.md). Review pages skip it unless their notes carry

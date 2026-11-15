@@ -30,7 +30,7 @@ change touches. Ideas from Emil Kowalski's `break-ui` (credited in `THIRD_PARTY.
 
 ## Where to look
 
-Screenshot each at desktop (1280 px) and phone (390 px), plus 320 px for anything in a column, dark
+Screenshot each at desktop (1440 px) and phone (390 px), plus 320 px for anything in a column, dark
 mode, and 200% zoom (text grows, fixed boxes don't). What usually breaks, and the usual fix:
 
 | You see | Fix |

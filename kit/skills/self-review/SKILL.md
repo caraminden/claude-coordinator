@@ -138,9 +138,8 @@ them are "The rules" in `citadel:contraption-ui`.
 - An action reachable only on `:hover` or only by dragging; meaning carried by a colour alone.
 - `outline: none` with no `:focus-visible` ring; animating `width`, `height`, `top`, `left` or a margin; a
   loop that isn't a spinner or skeleton; a duration not from `--citadel-motion`; a state change
-  finished in `transitionend` or `animationend`; `transition: all`, `ease-in`, `scale(0)`, keyframes
-  on something that can be retriggered, motion on a keyboard action, hover motion outside
-  `@media (hover: hover)` (why: `contraption-ui`'s `references/motion.md`).
+  finished in `transitionend` or `animationend`; anything on the "Flag on sight" list in
+  `contraption-ui`'s `references/motion.md`.
 - A fixed `height` or `overflow: hidden` on a box of text (the status line's one-line cut is
   fine); `100vh`; a long URL, id or table that
   can push a phone page sideways; an `<img>` with no size or `aspect-ratio`.

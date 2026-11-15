@@ -863,6 +863,8 @@ export const ticketRoutes: Route[] = [
         if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, 'A high-risk change lands only on a person\'s go: name who gave it and when in go, or ask with a merge card first');
         h.go = str(body.go, 'Go', 200);
       }
+      if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');
+      if (body.deploy === false) h.deploy = false;
       let args: string[];
       try {
         args = landArgs(body, ticket.cwd);

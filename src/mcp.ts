@@ -720,7 +720,7 @@ const PUBLISH_RELEASE = {
 /** Deploying a contraption from its repo: for Citadel's Taskmaster on an admin's turn, and a contraption's home scheme. */
 const DEPLOY_CONTRAPTION = {
   name: 'deploy_contraption',
-  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: clone its folder, or fetch and fast-forward its branch (refused if the folder has local changes or other commits), run the build steps in its citadel-app.json (niced, with a time limit), rewrite its units and restart it, then check its health. Before the restart it waits up to 3 minutes for the contraption's running agent turns to end (holding new ones until it is healthy again); past that it restarts anyway and names the turns it cut. If anything after the fast-forward fails, it rolls back to the commit before, builds that and restarts it. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Once deployed it checks the app has a rail icon (filling an empty one from its web manifest) and installs as its own app, and lists what's missing first as To do: a deploy never fails on those, but they are work to finish. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${HOME_CONTRAPTIONS.join(', ')}.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
+  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: clone its folder, or fetch and fast-forward its branch (refused if the folder has local changes or other commits), run the build steps in its citadel-app.json (niced, with a time limit), rewrite its units and restart it, then check its health. Before the restart it waits up to 3 minutes for the contraption's running agent turns to end (holding new ones until it is healthy again); past that it restarts anyway and names the turns it cut. If anything after the fast-forward fails, it rolls back to the commit before, builds that and restarts it. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Once deployed it checks the app has a rail icon (filling an empty one from its web manifest) and installs as its own app, and lists what's missing first as To do: a deploy never fails on those, but they are work to finish. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${HOME_CONTRAPTIONS.join(', ')}. A land handed off with hand_off_land deploys them already: call this only to redeploy outside a land.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -1106,7 +1106,7 @@ const THREAD_TOOLS = [
   {
     name: 'hand_off_land',
     description:
-      `Hand your land to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed. Commit everything first: uncommitted changes are refused at once. On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}. If it fails (a conflict, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state. Same arguments as tools/land.sh's forms.`,
+      `Hand your land to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed. Commit everything first: uncommitted changes are refused at once. On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${HOME_CONTRAPTIONS.length ? ` A land on main first deploys ${HOME_CONTRAPTIONS.join(', ')} and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy after a land; pass deploy: false when the change has nothing to serve.` : ''} If it fails (a conflict, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state. Same arguments as tools/land.sh's forms.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1115,6 +1115,7 @@ const THREAD_TOOLS = [
         risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
         go: { type: 'string', maxLength: 200, description: 'With risk high, required: who gave the go to land and when, e.g. "Cara, 3:05 PM PST"' },
         ...LAND_PROPS,
+        ...(HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: `false: don't deploy ${HOME_CONTRAPTIONS.join(', ')} after the land, for a change with nothing to serve (a PC-only build, say). Default true` } } : {}),
       },
       required: ['summary', 'risk', 'risk_reason'],
     },
@@ -1520,10 +1521,10 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};
-      for (const k of ['summary', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build'] as const) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ['summary', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build', 'deploy'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       await call('POST', `/api/tickets/${TICKET}/land/handoff`, body);
-      return 'Handed off: the server runs tools/land.sh now, behind any landings in line. End your turn now with a short reply and set no state: the server posts the shipped line and dismisses this minion (or sets pending-deploy) on a clean land, or wakes you with the end of its output if it fails.';
+      return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state: the server posts the shipped line and dismisses this minion (or sets pending-deploy) on a clean land, or wakes you with the end of its output if it fails.';
     }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).

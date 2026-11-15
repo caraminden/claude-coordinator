@@ -34,3 +34,7 @@ original minion with the context if more work needs to happen or if issues are e
 - The scheme instructions' "Shipping fixes" steps 3 to 5 now point at the tool (the Taskmaster edits them).
 - Exit 75 still wakes the minion once the runners are back, to hand off again; the server doesn't retry by
   itself.
+- #712 (Cara, 2026-11-14, on its card: "Build it as briefed"): in a scheme that owns contraptions, a clean land
+  on main deploys them before the shipped line, through auto-deploy's start (one try per commit, never two at
+  once), and waits for the outcome. The line says whether each went live; a failed deploy wakes the minion with
+  its log; `deploy: false` on the hand-off skips it. A land into a build branch deploys nothing.

@@ -441,7 +441,10 @@ worktree as the `land` tool does (a host job under `run/landings/<minion>/`, whi
 outlives the restart it queues), and polls it every 5 s (`LandHandoffs` in
 `src/land.ts`). On exit 0 it posts the shipped line (commit, the minion's summary and
 risk label, live or waiting) and dismisses the minion, or sets pending-deploy when the
-restart is still to come. Exit 75 parks it until the scheme's runners are back. Any
+restart is still to come. In a scheme that owns contraptions, a clean land on `main`
+first deploys them (#712, through auto-deploy's start, `deployApps` in `src/land.ts`) and
+waits: the shipped line says whether each went live, a failed one wakes the minion with
+its log, and `deploy: false` on the hand-off skips it. Exit 75 parks it until the scheme's runners are back. Any
 other exit, a cut-off run included, wakes the minion with the end of the output. A
 message for the minion while its land waits (a person's or a relay, not a GitHub
 notice) keeps it open: it is told the result instead of dismissed. A build minion's

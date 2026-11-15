@@ -36,6 +36,8 @@ export interface Handoff {
   reason: string;
   /** With risk high: who gave the go, and when. */
   go?: string;
+  /** False: the scheme's apps aren't deployed after the land (#712), for a change with nothing to serve. */
+  deploy?: false;
 }
 
 /** At most this many test files in one call: a feeder names the few its change touched. */
@@ -231,6 +233,70 @@ export function outputTail(output: string, lines = 60, max = 6000): string {
   return tail.length > max ? `…${tail.slice(-max)}` : tail;
 }
 
+/** One home contraption's deploy after a clean land (#712), as the shipped line tells it. */
+export interface AppDeploy {
+  name: string;
+  ok: boolean;
+  /** One line for the shipped line: deployed and healthy, or what went wrong. */
+  line: string;
+  /** With a failure: the deploy's steps and the end of its log, for the wake message. */
+  detail?: string;
+}
+
+/** How deployApps reaches the contraption deploys (server.ts: auto-deploy's deployNow and the app services). */
+export interface DeployOps {
+  /** Whether a deploy of the app runs now. */
+  running(name: string): boolean;
+  /** Start its deploy for the minion, as deploy_contraption would; throws when it can't start. */
+  start(name: string, ticketId: number): Promise<unknown>;
+  /** Its last deploy, as deploy_contraption's status reads it. */
+  last(name: string): Promise<{ state: string; to: string | null; said: string[]; tail?: string; log: string } | null>;
+  sleep?(ms: number): Promise<void>;
+  now?(): number;
+}
+
+/** A deploy is followed this long, as deploy_contraption waits; past that the minion is told it still runs. */
+const DEPLOY_WAIT_MS = 60 * 60_000;
+
+/**
+ * Deploy each of the scheme's apps after a clean land and wait for the outcome (#712): behind a deploy already
+ * running (an auto-deploy of an older main, most often), then one of its own, so the landed commit is what goes out.
+ * `commit` is the one land.sh moved main to: a deploy that went to another (GitHub didn't have it yet) didn't ship it.
+ */
+export async function deployApps(ticketId: number, names: string[], commit: string | undefined, ops: DeployOps): Promise<AppDeploy[]> {
+  const sleep = ops.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  const now = ops.now ?? Date.now;
+  const out: AppDeploy[] = [];
+  apps: for (const name of names) {
+    const until = now() + DEPLOY_WAIT_MS;
+    for (let tries = 0; ; tries++) {
+      while (ops.running(name) && now() < until) await sleep(3000);
+      try {
+        await ops.start(name, ticketId);
+        break;
+      } catch (err: any) {
+        // Another deploy started between the check and this start: wait for it, then start this commit's once more.
+        if (tries || !ops.running(name)) {
+          out.push({ name, ok: false, line: `${name}'s deploy couldn't start: ${String(err?.message ?? err).trim()}` });
+          continue apps;
+        }
+      }
+    }
+    let d = await ops.last(name);
+    while (d?.state === 'running' && now() < until) {
+      await sleep(3000);
+      d = await ops.last(name);
+    }
+    const detail = d ? [...d.said.map((l) => `- ${l}`), `Log: ${d.log}`, ...(d.tail ? ['Last lines of the log:', d.tail] : [])].join('\n') : undefined;
+    if (!d) out.push({ name, ok: false, line: `${name}'s deploy left no record.` });
+    else if (d.state === 'running') out.push({ name, ok: false, line: `${name}'s deploy is still running after an hour: call deploy_contraption with follow: true to see how it ends.`, detail });
+    else if (d.state !== 'deployed') out.push({ name, ok: false, line: `${name}'s deploy ${d.state}: ${d.said.at(-1) ?? 'no reason given'}`, detail });
+    else if (commit && d.to && !d.to.startsWith(commit)) out.push({ name, ok: false, line: `${name} deployed ${d.to.slice(0, 9)}, not the landed ${commit}: GitHub's main didn't have it yet (land.sh's output says whether its push failed).`, detail });
+    else out.push({ name, ok: true, line: `Deployed ${name}${d.to ? ` at ${d.to.slice(0, 9)}` : ''}, healthy.` });
+  }
+  return out;
+}
+
 export interface HandoffDeps {
   landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log'>;
   store: { getTicket(id: number): { status: string; state: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
@@ -252,11 +318,14 @@ export interface HandoffDeps {
   runnersBack(id: number, reason: string): boolean;
   /** Whether the server already runs this minion's branch (a restart that went live before land.sh's end was read). */
   liveAlready(id: number): Promise<boolean>;
+  /** The minion's scheme's apps a clean land on main deploys (#712): its home contraptions; none where deploys can't run. */
+  apps?(id: number): string[];
+  deployOps?: DeployOps;
 }
 
 /**
- * Reports handed-off landings once land.sh ends (#706), with no model call on a clean land: the shipped line,
- * then a dismissal (live now) or pending-deploy (live after the restart, which dismisses it). A failed land wakes
+ * Reports handed-off landings once land.sh ends (#706), with no model call on a clean land: the scheme's apps
+ * deployed and waited for (#712), the shipped line, then a dismissal (live now) or pending-deploy (live after the restart, which dismisses it). A failed land wakes
  * the minion with the end of land.sh's output, so it fixes it with its own context and hands off again.
  * poll() runs every few seconds and once at boot, so a land that ended across a restart is still reported.
  */
@@ -306,13 +375,30 @@ export class LandHandoffs {
     const what = r.commit ? `${r.commit} "${r.subject}"` : into ? `into ${into}` : 'the branch';
     const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build lands.` : 'Landed.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
-    runner.emit(id, 'note', { text: `Shipped ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}` });
+    // On main, the scheme's apps go out now rather than at auto-deploy's next quiet spell (#712), and the line says how.
+    const apps = !into && h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
+    if (apps.length) {
+      store.updateTicket(id, { note: `landed: deploying ${apps.join(', ')}` });
+      runner.broadcastTicket(id);
+    }
+    const deploys = apps.length ? await deployApps(id, apps, r.commit, this.d.deployOps!) : [];
+    const failed = deploys.filter((d) => !d.ok);
+    runner.emit(id, 'note', { text: `Shipped ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;
     if (r.kind === 'restart') {
       store.updateTicket(id, { state: 'pending-deploy', note: 'deployed, live after the restart' });
       runner.deployPending(id);
       runner.broadcastTicket(id);
+    }
+    // The land shipped but an app didn't go live: the minion fixes it with its own context.
+    if (failed.length) {
+      if (r.kind !== 'restart') {
+        store.updateTicket(id, { state: null, note: null });
+        runner.broadcastTicket(id);
+      }
+      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}), but the deploy after it didn't go live:\n\n${failed.map((f) => (f.detail ? `${f.line}\n${f.detail}` : f.line)).join('\n\n')}\n\nFix the cause and hand the fix off with hand_off_land, which deploys again (deploy_contraption redeploys main as it is). close_self once nothing is left.`);
+      return;
     }
     // Someone wrote while it was in line (a person, a relay): the minion answers them before it goes.
     if (this.d.landings.wasTalked(id)) {

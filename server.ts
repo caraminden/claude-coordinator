@@ -733,6 +733,21 @@ const landHandoffs = new LandHandoffs({
     return true;
   },
   liveAlready: async (id) => (await waiters.pendingLive()).includes(id),
+  // A clean land on main deploys the scheme's home contraptions (#712), through auto-deploy's start so the two never race.
+  apps: (id) => {
+    const t = store.getTicket(id);
+    if (!t || services.opts.off) return [];
+    return store.listContraptions().filter((c) => c.home_scheme === t.project_id && c.repo && (c.branch ?? 'main') === 'main').map((c) => c.name);
+  },
+  deployOps: {
+    running: (name) => !!services.running(name),
+    start: (name, id) => {
+      const t = store.getTicket(id);
+      if (!t) throw new Error(`minion ${id} is gone`);
+      return autoDeploy.deployNow(t.project_id, `app:${name}`, `#${t.number}`, store.turnAsker(id));
+    },
+    last: (name) => services.lastDeploy(name),
+  },
 });
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', () => landHandoffs.poll()), 5_000).unref();
 // GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).

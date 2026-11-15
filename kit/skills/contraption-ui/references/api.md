@@ -575,7 +575,9 @@ The service restarts 5 s after any exit and starts with the box. Citadel never r
 your `DATA_DIR` beyond creating it when missing.
 
 **Deploying.** An admin sets `repo`, `branch` and `folder` and installs the service once. After
-that your home scheme's Taskmaster and minions have `deploy_contraption`. It deploys what is on
+that your home scheme's Taskmaster and minions have `deploy_contraption`. A land handed off
+with `hand_off_land` deploys it by itself and reports the outcome, and auto-deploy covers main
+5 minutes after it last moved, so the tool is for redeploys outside a land. It deploys what is on
 GitHub, so push first. A deploy (tested):
 
 1. clones the repo if the folder is missing; otherwise fetches and fast-forwards the branch, and

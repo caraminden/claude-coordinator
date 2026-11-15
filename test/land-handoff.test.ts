@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { LandHandoffs, Landings, landResult, outputTail, type HandoffDeps } from '../src/land.ts';
+import { deployApps, LandHandoffs, Landings, landResult, outputTail, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
 
 // #706: a minion hands its land to the server and ends its turn. The server runs land.sh, and on a clean land posts
@@ -19,7 +19,7 @@ const LIVE = 'land: main is now at abc1234 "#9: usage bar"\ndeploy: live now: th
 const RESTART = 'land: main is now at def5678 "#9: server bit"\ndeploy: restart queued as citadel-restart: running turns carry on through it, and it reports here\ndeploy: not live yet after 75 s; the restart reports here when it is\n';
 
 /** A Landings in a data dir of its own, a minion worktree whose land.sh prints `out` and exits `code`, and fake deps that record what the server did. */
-function setup(name: string, opts: { running?: boolean; kept?: string | null; runners?: boolean; liveAlready?: boolean } = {}) {
+function setup(name: string, opts: { running?: boolean; kept?: string | null; runners?: boolean; liveAlready?: boolean; apps?: string[]; deployOps?: DeployOps } = {}) {
   const data = join(root, name, 'data');
   const cwd = join(root, name, 'wt');
   mkdirSync(join(cwd, 'tools'), { recursive: true });
@@ -46,10 +46,11 @@ function setup(name: string, opts: { running?: boolean; kept?: string | null; ru
     from: 'Citadel',
     runnersBack: (_id, reason) => { did.push(`runnersBack: ${reason}`); return opts.runners ?? true; },
     liveAlready: async () => !!opts.liveAlready,
+    ...(opts.deployOps ? { apps: () => opts.apps ?? [], deployOps: opts.deployOps } : {}),
   };
-  const land = async (out: string, code = 0, h: object = H) => {
+  const land = async (out: string, code = 0, h: object = H, args: string[] = []) => {
     writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%b' ${JSON.stringify(out)}\nexit ${code}\n`);
-    assert.ok(landings.handOff(1, cwd, { PATH: process.env.PATH! }, [], { ...H, ...h }));
+    assert.ok(landings.handOff(1, cwd, { PATH: process.env.PATH! }, args, { ...H, ...h }));
     await until('land.sh ends', () => landings.get(1)?.code !== null);
   };
   return { landings, ticket, did, sent, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
@@ -196,6 +197,101 @@ test('a land that ended across a restart is reported by the next server, and one
   assert.match(cut.sent[0], /ended without an exit code/);
 });
 
+// #712: in a scheme that owns contraptions, a clean land on main deploys them and waits, and the shipped line says how it went.
+const APP_LAND = 'land: main is now at abc1234 "#9: aura fix"\nland: pushed main to origin\n';
+
+/** Fake contraption deploys: each start becomes the app's last deploy, ending as `outcome` says (state, and the commit it went to). */
+function fakeDeploys(outcome: (name: string) => { state: string; to: string | null; said?: string[] }, busy: Record<string, number> = {}) {
+  const started: string[] = [];
+  const last: Record<string, any> = {};
+  const ops: DeployOps = {
+    running: (name) => (busy[name] ?? 0) > 0,
+    start: async (name, id) => {
+      if ((busy[name] ?? 0) > 0) throw new Error(`${name} is being installed or deployed already`);
+      started.push(`${name} for ${id}`);
+      const o = outcome(name);
+      last[name] = { said: ['Fetched', 'Built'], log: `/logs/${name}.log`, tail: 'build output', ...o };
+    },
+    last: async (name) => last[name] ?? null,
+    sleep: async () => {
+      for (const k of Object.keys(busy)) busy[k]--;
+    },
+  };
+  return { ops, started };
+}
+
+test('a clean land in a scheme with an app deploys it, waits, and says it went live in the shipped line before dismissing', async () => {
+  const d = fakeDeploys(() => ({ state: 'deployed', to: 'abc1234ffff0000' }));
+  const s = setup('app-live', { apps: ['peek-auras'], deployOps: d.ops });
+  await s.land(APP_LAND);
+  await s.handoffs.poll();
+  assert.deepEqual(d.started, ['peek-auras for 1']);
+  assert.deepEqual(s.notes, ['Shipped abc1234 "#9: aura fix": Usage bar in the top bar. Risk low: front end only. Landed. Deployed peek-auras at abc1234ff, healthy.']);
+  assert.equal(s.sent.length, 0, 'no model call');
+  assert.ok(s.did.some((x) => x.startsWith('close: Landed')), s.did.join('\n'));
+});
+
+test('deploy: false, a merge into a build, or a scheme with no app deploys nothing', async () => {
+  for (const [name, h, args, apps] of [['app-off', { deploy: false }, [], ['peek-auras']], ['app-build', {}, ['--into', 'build/3', 'test/a.test.ts'], ['peek-auras']], ['app-none', {}, [], []]] as const) {
+    const d = fakeDeploys(() => ({ state: 'deployed', to: 'abc1234' }));
+    const s = setup(name, { apps: [...apps], deployOps: d.ops });
+    await s.land(APP_LAND, 0, h, [...args]);
+    await s.handoffs.poll();
+    assert.deepEqual(d.started, [], name);
+    assert.doesNotMatch(s.notes[0], /Deployed/, name);
+    assert.ok(s.did.some((x) => x.startsWith('close: ')), name);
+  }
+});
+
+test('a deploy that rolls back after a clean land posts the shipped line, then wakes the minion with its log and leaves it open', async () => {
+  const d = fakeDeploys(() => ({ state: 'rolled back', to: 'abc1234', said: ['Fetched', 'Health check failed: /health answered 500', 'Rolled back to 0ld0ld0'] }));
+  const s = setup('app-fail', { apps: ['peek-auras'], deployOps: d.ops });
+  await s.land(APP_LAND);
+  await s.handoffs.poll();
+  assert.match(s.notes[0], /Landed\. peek-auras's deploy rolled back: Rolled back to 0ld0ld0$/);
+  assert.equal(s.sent.length, 1);
+  assert.match(s.sent[0], /^Your handed-off land went through \(abc1234 "#9: aura fix", landed\), but the deploy after it didn't go live:/);
+  assert.match(s.sent[0], /- Health check failed: \/health answered 500\n- Rolled back to 0ld0ld0\nLog: \/logs\/peek-auras\.log\nLast lines of the log:\nbuild output/);
+  assert.equal(s.ticket.state, null, 'open for the minion to fix');
+  assert.ok(!s.did.some((x) => x.startsWith('close')), s.did.join('\n'));
+});
+
+test('deployApps waits behind a running deploy, retries a start that lost the race once, and fails a deploy of another commit', async () => {
+  // An auto-deploy of the older main runs for two checks: this one starts after it, so the landed commit goes out.
+  const behind = fakeDeploys(() => ({ state: 'deployed', to: 'abc1234aaaa' }), { app: 2 });
+  assert.deepEqual(await deployApps(5, ['app'], 'abc1234', behind.ops), [{ name: 'app', ok: true, line: 'Deployed app at abc1234aa, healthy.' }]);
+  assert.deepEqual(behind.started, ['app for 5']);
+
+  // An auto-deploy starts between the check and this start: the refused start waits for it, then starts once more.
+  let racing = false;
+  const raced: string[] = [];
+  const race: DeployOps = {
+    running: () => racing,
+    start: async (name) => {
+      if (!raced.length && !racing) {
+        racing = true;
+        raced.push('refused');
+        throw new Error(`${name} is being installed or deployed already`);
+      }
+      raced.push('started');
+    },
+    last: async () => ({ state: 'deployed', to: 'abc1234', said: [], log: '' }),
+    sleep: async () => { racing = false; },
+  };
+  assert.equal((await deployApps(5, ['app'], 'abc1234', race))[0].ok, true);
+  assert.deepEqual(raced, ['refused', 'started']);
+
+  // GitHub's main was behind (land.sh's push failed): the deploy went to the older commit, which isn't a ship.
+  const stale = fakeDeploys(() => ({ state: 'deployed', to: '0ld0ld0aaaa' }));
+  const [r] = await deployApps(5, ['app'], 'abc1234', stale.ops);
+  assert.equal(r.ok, false);
+  assert.match(r.line, /deployed 0ld0ld0aa, not the landed abc1234: GitHub's main didn't have it yet/);
+
+  // A start refused for a reason other than a running deploy (no repo, services off) fails at once, with its reason.
+  const refused: DeployOps = { running: () => false, start: async () => { throw new Error('Mandate has no repo set'); }, last: async () => null, sleep: async () => {} };
+  assert.deepEqual(await deployApps(5, ['mandate'], 'abc1234', refused), [{ name: 'mandate', ok: false, line: "mandate's deploy couldn't start: Mandate has no repo set" }]);
+});
+
 test('landResult reads deploy.sh\'s lines; outputTail keeps the last lines', () => {
   assert.deepEqual(landResult(LIVE, 0), { kind: 'live', commit: 'abc1234', subject: '#9: usage bar' });
   assert.equal(landResult(RESTART, 0).kind, 'restart');
@@ -244,6 +340,7 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.equal(full.status, 400, "a build minion's take-in of main stays in its turn");
     assert.match((await full.json()).error, /--full yourself/);
 
+    assert.equal((await handOff({ ...body, deploy: 'no' })).status, 400, 'deploy is true or false');
     assert.equal((await handOff(body)).status, 202);
     assert.equal(store.getTicket(minion.id)!.state, 'outside');
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);

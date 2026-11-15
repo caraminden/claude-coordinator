@@ -341,7 +341,7 @@ test('a check leaves the event loop free while git and gh run (#526)', async () 
     assert.equal(await w.check(), 0);
     assert.ok(performance.now() - began >= 400, 'the check did ask the slow gh');
     await new Promise((r) => setTimeout(r, 30)); // a beat after it, so a stall that ended with the check is counted
-    assert.ok(gap < 500, `the event loop stalled for ${Math.round(gap)} ms during the check`);
+    assert.ok(gap < 200, `the event loop stalled for ${Math.round(gap)} ms during the check`);
   } finally {
     clearInterval(beat);
     process.env.PATH = path;

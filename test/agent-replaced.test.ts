@@ -47,7 +47,7 @@ async function run(args: string[]) {
   proc.stderr!.on('data', (d) => (out += d));
   await until('it is told', () => /another agent/.test(out), 10_000);
   // Before, it reconnected after 1 s.
-  await new Promise((r) => setTimeout(r, 1300));
+  await new Promise((r) => setTimeout(r, 1600));
   return { connects: app.state.connects, out };
 }
 

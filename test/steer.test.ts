@@ -248,11 +248,14 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
   const exited = new Promise((res) => reader.on('exit', res));
   await until(() => out.includes('ready')); // the reader is spinning before the first steer goes in
   // Each steer waits until the wrapper has passed it on (it writes steer.sent then), so every write is read against.
-  for (let i = 0; i < 6; i++) {
-    r.send(t.id, 'Cara', `steer ${i}`, [], {}, true);
-    await until(() => seen(t.dir).length === i + 2);
+  try {
+    for (let i = 0; i < 6; i++) {
+      r.send(t.id, 'Cara', `steer ${i}`, [], {}, true);
+      await until(() => seen(t.dir).length === i + 2);
+    }
+  } finally {
+    writeFileSync(sentFile + '.stop', ''); // the reader spins until this exists, even when a steer never arrives
   }
-  writeFileSync(sentFile + '.stop', '');
   await exited;
   const { reads, bad } = JSON.parse(out.replace('ready\n', ''));
   assert.ok(reads > 0, 'the reader saw steer.sent');

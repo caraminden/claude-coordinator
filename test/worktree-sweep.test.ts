@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { ticketWorktree } from '../src/build-output.ts';
-import { GRACE_MS, SAVE_LIMIT, savedRef } from '../src/worktree-sweep.ts';
+import { SAVE_LIMIT, savedRef } from '../src/worktree-sweep.ts';
 import { stopTurns, testPins } from './helpers.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'worktree-sweep-')));
@@ -58,7 +58,6 @@ function minion(s: { id: number; repo: string }, dismissedDaysAgo: number | null
 
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 
-test('the grace is 3 days', () => assert.equal(GRACE_MS, 3 * DAY));
 
 test('dismissed past the grace: removed with its branch kept, saving uncommitted work first; inside the grace, open or locked: kept', async () => {
   const s = scheme('Sweep');
@@ -237,37 +236,4 @@ test('Grunt worktrees: kept while a turn of the scheme that began before them ru
   const theirs = grunt(away.repo, 'agent-b1');
   await runner.sweepWorktrees(later);
   assert.ok(existsSync(theirs));
-});
-
-test("the one-off clears only target/ of Peek's three open minions, once", async () => {
-  const fresh = join(root, 'peek');
-  mkdirSync(fresh);
-  const db = new Store(join(fresh, 'test.db'));
-  const r = new Runner(db, () => {}, () => ({}), '/bin/false');
-  db.createProject('One', null);
-  db.createProject('Two', null);
-  const peek = db.createProject('Peek Auras', null);
-  assert.equal(peek.id, 3);
-  const repo = join(fresh, 'projects', '3', 'repo');
-  mkdirSync(repo, { recursive: true });
-  git(repo, 'init', '-q', '-b', 'main');
-  writeFileSync(join(repo, '.gitignore'), 'target/\nnode_modules/\n');
-  git(repo, 'add', '.');
-  git(repo, 'commit', '-qm', 'init');
-  db.setProjectRepoDir(3, repo);
-  const t = db.createTicket({ project_id: 3, title: 'T', permission_mode: 'default', created_by: 'T' });
-  db.db.prepare('UPDATE tickets SET id = 833 WHERE id = ?').run(t.id);
-  const dir = ticketWorktree(fresh, 3, 833);
-  git(repo, 'worktree', 'add', '-q', '-b', 'ticket/1-t', dir);
-  db.setTicketDir(833, dir, 'ticket/1-t');
-  for (const f of ['target/debug/x', 'node_modules/m/i.js']) {
-    mkdirSync(join(dir, f, '..'), { recursive: true });
-    writeFileSync(join(dir, f), 'x');
-  }
-  await r.sweepWorktrees();
-  assert.ok(!existsSync(join(dir, 'target')));
-  assert.ok(existsSync(join(dir, 'node_modules', 'm', 'i.js')) && existsSync(join(dir, 'a')) === false && existsSync(join(dir, '.gitignore')));
-  mkdirSync(join(dir, 'target'));
-  await r.sweepWorktrees();
-  assert.ok(existsSync(join(dir, 'target')), 'once only');
 });

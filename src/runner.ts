@@ -22,7 +22,7 @@ import { isAuthFailure, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
-import { clearBuildOutput, diskUsage, findBuildOutput, low, size, ticketWorktree } from './build-output.ts';
+import { clearBuildOutput, low, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
@@ -876,7 +876,6 @@ export class Runner {
     if (this.sweepingWorktrees) return done;
     this.sweepingWorktrees = true;
     try {
-      await this.oneOffTargets();
       for (const p of this.store.listProjects()) {
         // Only a repo in this data folder: a dev copy's rows point at the live repos, whose turns it can't see.
         if (!p.repo_dir || resolve(p.repo_dir) !== join(projectDir(this.dataDir, p.id), 'repo') || !existsSync(p.repo_dir)) continue;
@@ -973,42 +972,6 @@ export class Runner {
         keep(what, `could not remove: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
       }
     }
-  }
-
-  /**
-   * Josh's go (2026-11-13, #660): three Peek Auras minions still open kept a target/ from before Peek's
-   * shared build cache, 14 GB. Their target/ only, once, if still a wholly ignored folder and idle.
-   * shortcut: a one-off by id, a no-op once its setting is set; delete it with any later edit here.
-   */
-  private async oneOffTargets() {
-    const key = 'oneoff:660-peek-targets';
-    if (this.store.getSetting(key)) return;
-    const peek = this.store.getProject(3);
-    if (peek?.name !== 'Peek Auras') return this.store.setSetting(key, 'not this data');
-    // Mid-turn: try again at the next sweep.
-    let busy = false;
-    for (const id of [833, 807, 1195]) {
-      const t = this.store.getTicket(id);
-      const dir = ticketWorktree(this.dataDir, 3, id);
-      if (t?.project_id !== 3 || resolve(t.cwd) !== dir) continue;
-      if (this.turns.has(id) || this.lanes.busy(id)) {
-        busy = true;
-        continue;
-      }
-      await this.lanes.run(id, 'one-off target/ clear', async () => {
-        if (this.turns.has(id)) return void (busy = true);
-        const target = (await findBuildOutput(dir).catch(() => [])).find((d) => d === join(dir, 'target'));
-        if (!target) return;
-        const bytes = await diskUsage([target]);
-        await low(['rm', '-rf', '--one-file-system', '--', target]);
-        const text = `Removed this minion's old target/ build folder (${size(bytes)}), from before the shared build cache (Josh's go, #660).`;
-        console.log(`Peek Auras #${t.number}: ${text}`);
-        this.emit(id, 'note', { text });
-        const coordinator = this.store.getCoordinator(3);
-        if (coordinator) this.emit(coordinator.id, 'note', { text: `#${t.number}: ${text}` });
-      });
-    }
-    if (!busy) this.store.setSetting(key, new Date(Date.now()).toISOString());
   }
 
   /**

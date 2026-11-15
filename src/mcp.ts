@@ -122,9 +122,8 @@ const TICKET_ID = { type: 'integer', description: 'Minion number in this scheme,
 const DIRECT_TO = {
   type: 'string',
   description:
-    'Address the card to one person, by login (a member of this scheme; a wrong name is refused with the list). It shows in their Needs-you list in every scheme they open and pings only their devices; they answer it in place, without a turn of anyone else\'s. Any member can still answer it in this chat. The answer comes back here as a message from them: at once while this chat ran in the last 55 minutes, else as held mail that joins your next turn or wakes you within 3 hours (urgent wakes you regardless). Use it to ask a person something instead of relaying the question through another chat or Taskmaster. Leave out for a card to everyone in this chat.',
+    'Only when someone other than this chat\'s own people (its owner and whoever is working with it) has to answer, such as an admin\'s permission or another member\'s call: their login (a member of this scheme; a wrong name is refused with the list). It shows in their Needs-you list in every scheme they open and pings only their devices; they answer it in place. Any member can still answer it in this chat, and the answer starts your next turn as any card\'s does. Never for an ordinary question to the person you work for: leave it out and the card goes to everyone in this chat.',
 };
-const DIRECT_URGENT = { type: 'boolean', description: 'With to: wake this chat with the answer even when it has gone cold (idle over 55 minutes). Only when you are blocked on it.' };
 
 const ASK_QUESTION = {
   name: 'ask_question',
@@ -169,7 +168,6 @@ const ASK_QUESTION = {
       },
       kind: { type: 'string', enum: ['merge'], description: '"merge" when the card asks people for the go to merge or land a change (the self-review\'s high-risk card): the minions list then labels it "merge". Leave out otherwise.' },
       to: DIRECT_TO,
-      urgent: DIRECT_URGENT,
       notice: {
         type: 'string', maxLength: 500,
         description: 'With to and no questions: a one-line notice for that person instead of a question (at most 500 characters). They see it with a "Got it" button, and nothing comes back to you.',
@@ -198,7 +196,6 @@ const PROPOSE_PLAN = {
       summary: { type: 'string', maxLength: 200, description: 'One line on what the plan builds, at most 200 characters, e.g. "Usage bar in the top bar, fed by the turn stats"' },
       plan: { type: 'string', maxLength: 20000, description: 'The whole plan in markdown: what you will change and how, what you will not do, and how you will test it. At most 20,000 characters' },
       to: DIRECT_TO,
-      urgent: DIRECT_URGENT,
     },
     required: ['summary', 'plan'],
   },
@@ -1413,14 +1410,14 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}${tagNote(args)}`;
     case 'ask_question': {
-      const direct = { ...(args.to ? { to: args.to } : {}), ...(args.urgent === true ? { urgent: true } : {}) };
+      const direct = args.to ? { to: args.to } : {};
       if (args.to && args.questions == null) {
         const { href } = await call('POST', `/api/tickets/${TICKET}/questions`, { ...direct, notice: args.notice });
         return `The notice for ${args.to} is in the chat; its link is ${href}. Nothing comes back from it, so keep working.`;
       }
       if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice)');
       const { id: questionId, href } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct });
-      return `The question card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the card below](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to} (held mail if this chat has gone cold by then${args.urgent === true ? ', but this card is urgent, so it wakes you' : ''})` : 'the next message'}.`;
+      return `The question card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the card below](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'settle_question': {
       const { settled } = await call('POST', `/api/tickets/${TICKET}/settle`, { questionId: args.question_id ?? null });
@@ -1474,8 +1471,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
     case 'propose_plan': {
-      const { href } = await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}), ...(args.urgent === true ? { urgent: true } : {}) });
-      return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to} (held mail if this chat has gone cold by then${args.urgent === true ? ', but this card is urgent, so it wakes you' : ''})` : 'the next message'}.`;
+      const { href } = await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
+      return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'set_thread_status':
       if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');

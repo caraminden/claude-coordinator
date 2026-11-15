@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { bootServer, jsonLines, until, stopProcs, stopTurns } from './helpers.ts';
 
@@ -106,7 +107,7 @@ test('a card answer reaches the minion as the pick plus the text typed with it, 
   assert.ok(prompts.includes('Text only?\\n→ In their own words: neither'), prompts);
 });
 
-test('a card addressed to one person (#687): to must be a member; a notice takes Got it and sends nothing back; an answer still reaches the asker', async () => {
+test('a card addressed to one person (#687): to must be a member; a notice takes Got it and sends nothing back; an answer wakes the asker, cold or not (#702)', async () => {
   const opts = [{ label: 'A', recommended: true }, { label: 'B' }];
   const post = (body: unknown) => call(`/api/tickets/${ticket.id}/questions`, { method: 'POST', token: live(), body });
   await assert.rejects(post({ to: 'nobody', questions: [{ question: 'Who?', options: opts }] }), /400 to must be a member of this scheme: cara/);
@@ -125,7 +126,11 @@ test('a card addressed to one person (#687): to must be a member; a notice takes
   assert.equal(events.filter((e: any) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === notice.id).length, 0, 'nothing sent back');
   await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: notice.id } }), /409 Cara already marked this seen/);
 
-  const { id } = await post({ to: 'cara', urgent: true, questions: [{ question: 'Direct?', options: opts }] });
+  // #702: the answer wakes the asker even once it has gone cold (its last turn ended over 55 minutes ago).
+  const { id } = await post({ to: 'cara', questions: [{ question: 'Direct?', options: opts }] });
+  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  db.prepare('UPDATE turns SET ended_at = ended_at - ? WHERE ticket_id = ?').run(2 * 3_600_000, ticket.id);
+  db.close();
   await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['B'], other: '' }] } });
   await until('the answer\'s turn', () => turns().length > turnsBefore);
   await idle(ticket.id);

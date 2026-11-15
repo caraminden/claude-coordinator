@@ -68,7 +68,8 @@ export function inboxCount(store: Store, approvals: Approvals, projectId: number
 
 /**
  * Cards addressed to `person` from their other schemes (#687; Cara, 2026-11-14, "Keep, add cross-scheme"): every
- * scheme's Needs-you list shows them, to answer in place, though only the asking scheme's count includes them.
+ * scheme's Needs-you list shows them as rows linking to the card in its chat (#697), though only the asking scheme's
+ * count includes them.
  */
 export function directCards(store: Store, projectId: number, person: string): InboxItem[] {
   const user = store.findUser('name', person);

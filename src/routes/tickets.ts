@@ -112,12 +112,12 @@ function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
 }
 
 /**
- * Hand a person's answer to a card back to the asking chat. A direct card's answer (#687) keeps held mail's
- * 55-minute rule unless the card was urgent (Runner.answerCard); any other runs now, as a typed message does.
+ * Hand a person's answer to a card back to the asking chat: it runs now, as a typed message does, whoever answers
+ * and whether or not the card was addressed (`to`), so a cold asker wakes too (Cara, 2026-11-14: "normal cards in
+ * your own minions should initiate a response from that minion"; #702 undid #687's held mail for answers).
  */
-function deliverAnswer(app: App, ticketId: number, card: { to?: string; urgent?: boolean }, author: string, text: string, extra: object) {
-  if (card.to) app.runner.answerCard(ticketId, author, text, extra, !!card.urgent);
-  else app.runner.send(ticketId, author, text, [], extra);
+function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object) {
+  app.runner.send(ticketId, author, text, [], extra);
 }
 
 /** A person's picks for each question of a card: chosen option labels, plus optional free text. */
@@ -446,7 +446,7 @@ export const ticketRoutes: Route[] = [
       const kind = oneOf(body.kind ?? null, ['merge'], 'kind');
       const questionId = randomBytes(6).toString('hex');
       const event = runner.emit(id, 'question', {
-        id: questionId, questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(to && body.urgent === true && !notice ? { urgent: true } : {}),
+        id: questionId, questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}),
       });
       runner.broadcastTicket(id);
       app.notify(id, { kind: 'question', questions: notice ? [{ question: notice }] : questions, eventId: event.id, ...(to ? { to } : {}) });
@@ -527,7 +527,7 @@ export const ticketRoutes: Route[] = [
         const picked = selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
-      deliverAnswer(app, id, data, session.name, `My answers to your question card:\n\n${text}`, { answer: { questionId: body.questionId, answers } });
+      deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, { answer: { questionId: body.questionId, answers } });
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },
@@ -543,7 +543,7 @@ export const ticketRoutes: Route[] = [
       const plan = str(body.plan, 'Plan', 20_000);
       const summary = str(body.summary, 'Summary', 200);
       const to = addressee(app, ticket, body.to);
-      const event = postPlan(app, id, { summary, plan, ...(to ? { to, ...(body.urgent === true ? { urgent: true } : {}) } : {}) });
+      const event = postPlan(app, id, { summary, plan, ...(to ? { to } : {}) });
       return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id) });
     },
   },
@@ -601,7 +601,7 @@ export const ticketRoutes: Route[] = [
       const result = { status: body.verdict === 'approve' ? 'approved' : card.machine ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });
       runner.emit(id, 'plan_result', { id: card.id, ...result });
-      deliverAnswer(app, id, card, session.name, card.machine
+      deliverAnswer(app, id, session.name, card.machine
         ? notes === null
           ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`
           : `Rejected your proposed notes for ${card.machine.name}; they are unchanged.${notes ? `\n\n${notes}` : ''}`

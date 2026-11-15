@@ -3,10 +3,16 @@
 // like Delve's "area: balance"), then the types of work, then later builds in ascending order.
 // Threads in a build sit in its section whatever their type or properties, by their build field.
 // A thread outside a build that carries a promoted value sits in the first such group, not its type's.
-// Parked threads leave their build or group for one Parked section at the bottom (above Dismissed).
+// Resting threads leave their build or group (Cara, 2026-11-14: "Lets move the deploying tickets to their own category at
+// the top below Pinned? and then waiting goes above Parked"): Deploying on top, then Waiting (parked, but something wakes
+// it by itself: start_after, wake_when_live, runners back) and Parked (only a person or the Taskmaster wakes it) at the bottom.
 
-/** Parked and resting there: a running, stuck or approval-waiting thread shows where it would otherwise. */
-const isParked = (t) => t.state === 'parked' && !t.approvals && !['running', 'error'].includes(t.status) && (t.status !== 'new' || !!t.parked_for);
+/** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise. */
+const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status);
+const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
+const isDeploying = (t) => t.state === 'pending-deploy' && resting(t);
+/** Parked until something wakes it by itself. */
+const wakesItself = (t) => !!(t.parked_for || t.wakes_on);
 
 /**
  * [{ key, build?, current?, type?, group?, rows }] for open threads, empty sections left out. `types` are
@@ -15,7 +21,8 @@ const isParked = (t) => t.state === 'parked' && !t.approvals && !['running', 'er
  */
 export function threadSections(all, types, groups = []) {
   const parked = all.filter(isParked);
-  const open = all.filter((t) => !isParked(t));
+  const deploying = all.filter(isDeploying);
+  const open = all.filter((t) => !isParked(t) && !isDeploying(t));
   const buildOf = (t) => t.build ?? 0;
   const builds = [...new Set(open.map(buildOf).filter(Boolean))].sort((a, b) => a - b);
   const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i === 0, rows: open.filter((t) => buildOf(t) === build) });
@@ -28,8 +35,8 @@ export function threadSections(all, types, groups = []) {
   const promoted = groups.map((group, i) => ({ key: `group-${i}`, group, rows: loose.filter((t) => promotedTo.get(t) === group) }));
   const typeOf = (t) => (types.includes(t.properties?.type) ? t.properties.type : 'other');
   const kinds = types.map((type) => ({ key: type, type, rows: loose.filter((t) => !promotedTo.get(t) && typeOf(t) === type) }));
-  return [...builds.slice(0, 1).map(buildSection), ...promoted, ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1)),
-    { key: 'parked', rows: parked }]
+  return [{ key: 'deploying', rows: deploying }, ...builds.slice(0, 1).map(buildSection), ...promoted, ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1)),
+    { key: 'waiting', rows: parked.filter(wakesItself) }, { key: 'parked', rows: parked.filter((t) => !wakesItself(t)) }]
     .filter((s) => s.rows.length);
 }
 

@@ -34,10 +34,25 @@ test('parked minions leave their build or type for a Parked section at the botto
   ]), [['build-8', true, [4]], ['bug', false, [2]], ['design', false, [7]], ['ideation', false, [6]], ['build-9', false, [5]], ['parked', false, [1, 3]]]);
 });
 
-test('a minion parked on start_after counts as parked before it ever runs; a new one without a chain does not (#261)', () => {
+test('a minion parked on start_after rests (under Waiting) before it ever runs; a new one without a chain does not (#261)', () => {
   assert.deepEqual(shape([
     m(1, 'bug', { state: 'parked', status: 'new', parked_for: "#3 Leader's work is merged" }), m(2, 'bug', { state: 'parked', status: 'new' }),
-  ]), [['bug', false, [2]], ['parked', false, [1]]]);
+  ]), [['bug', false, [2]], ['waiting', false, [1]]]);
+});
+
+test('Deploying sits on top; Waiting (something wakes it by itself) sits above Parked (#718)', () => {
+  assert.deepEqual(shape([
+    m(1, 'bug', { state: 'parked', status: 'idle' }),
+    m(2, 'bug', { state: 'parked', status: 'idle', wakes_on: 'Waiting on #9 going live' }),
+    m(3, 'feature', { state: 'pending-deploy', status: 'idle', build: 7 }),
+    m(4, 'feature', { build: 7 }),
+    m(5, 'chore', { state: 'parked', status: 'new', parked_for: "#4 T's work is merged" }),
+    // Running again (or stuck) after its deploy: back in its own section until it rests.
+    m(6, 'chore', { state: 'pending-deploy', status: 'running' }),
+    m(7, 'design', { state: 'pending-deploy', status: 'idle' }),
+    // CI and other outside waits stay in their type or build: only deploying moved.
+    m(8, 'bug', { state: 'outside', status: 'idle' }),
+  ]), [['deploying', false, [3, 7]], ['build-7', true, [4]], ['bug', false, [8]], ['chore', false, [6]], ['waiting', false, [2, 5]], ['parked', false, [1]]]);
 });
 
 test("promoted groups come after the current build, in the scheme's order, the first match winning", () => {

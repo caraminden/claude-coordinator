@@ -49,6 +49,7 @@
 .g-ideation > h3 { color: hsl(45 75% 42%); }
 .g-promoted > h3 { color: hsl(150 50% 34%); }
 .g-parked > h3 { color: var(--muted); }
+.g-waiting > h3, .g-deploying > h3 { color: var(--held); }
 .g-pinned > h3 { color: var(--accent); }
 .thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto auto; column-gap: 0; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
 .thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }

@@ -257,6 +257,12 @@ test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ti
     assert.match((await said(c)).at(-1).text, /^Taskmaster unparked you|unparked you/);
     assert.notEqual((await view(c)).state, 'parked');
     await settled(c);
+
+    // A minion that waits on wake_when_live says so in its view (wakes_on), so the list shows it under Waiting.
+    const e = await parkedMinion('E');
+    assert.equal((await view(e)).wakes_on, null, 'parked by hand: nothing wakes it');
+    assert.equal((await call(`/api/tickets/${e}/wake`, { reason: 'the fix in #9 goes live' })).status, 201);
+    assert.equal((await view(e)).wakes_on, 'the fix in #9 goes live');
   } finally {
     await stop();
   }

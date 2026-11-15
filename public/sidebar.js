@@ -229,6 +229,9 @@ function buildHeading(s) {
       view.buildPreviews ? [' · ', h('a', { href: `../preview/build/${b.build}/`, target: '_blank', rel: 'noopener', title: `build/${b.build}'s tip on a copy of the data` }, 'Preview')] : '') : ''];
 }
 
+/** The resting sections' headings (threadgroups.js threadSections). */
+const REST = { deploying: 'Deploying', waiting: 'Waiting', parked: 'Parked' };
+
 export function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
@@ -245,7 +248,7 @@ export function renderSidebar() {
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
   const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project)).map((s) =>
     h('section', { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
-      h('h3', {}, s.build ? buildHeading(s) : s.key === 'parked' ? 'Parked' : s.group ? groupHeading(s.group) : TYPES[s.type].section),
+      h('h3', {}, s.build ? buildHeading(s) : s.key in REST ? REST[s.key] : s.group ? groupHeading(s.group) : TYPES[s.type].section),
       s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t))));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.map((t) => [t.id, t]));

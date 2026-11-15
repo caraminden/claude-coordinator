@@ -50,7 +50,7 @@ import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
-import { addRunnerWaiter, CiHealth, type Run } from './src/ci-health.ts';
+import { addRunnerWaiter, CiHealth, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
@@ -355,6 +355,7 @@ runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'erro
 const startChain = (c: Chain, why: string) => startChained(c, why, { store, runner, waiters });
 waiters.start = (c, why) => void startChain(c, why).catch((err) => console.error(`Starting chained #${c.ticket} failed:`, err));
 runner.heldFor = (id) => waiters.heldFor(id);
+runner.wakesOn = (id) => (waiters.list().find((w) => w.ticket === id) ?? runnerWaiters(store).find((w) => w.ticket === id))?.reason ?? null;
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {
   const t = store.getTicket(c.ticket);

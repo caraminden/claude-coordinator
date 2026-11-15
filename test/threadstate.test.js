@@ -25,7 +25,9 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     [{ status: 'running' }, [1, 'work', 'working', 'pulse']],
     [{ status: 'running', steps: { done: 3, total: 7 } }, [1, 'work', '3/7', 'pulse']],
     [{ status: 'new' }, [1, 'work', 'working', 'pulse']],
-    [{ status: 'new', parked_for: 12, state: 'parked' }, [4, 'idle', 'parked']],
+    // Parked until something wakes it by itself is waiting, violet, above grey parked (#718).
+    [{ status: 'new', parked_for: 12, state: 'parked' }, [3, 'wait', 'waiting']],
+    [{ state: 'parked', wakes_on: 'Waiting on #9 going live' }, [3, 'wait', 'waiting']],
     [{ state: 'outside' }, [2, 'wait', 'waiting']],
     [{ state: 'pending-deploy', steps: { done: 6, total: 6 } }, [2, 'wait', 'deploying 6/6']],
     [{ state: 'blocked' }, [2, 'broken', 'blocked']],
@@ -34,6 +36,11 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     [{ status: 'closed', state: 'ready' }, [5, 'idle', 'dismissed']],
   ];
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
+});
+
+test('rowState: a waiting minion says what wakes it in its label (#718)', () => {
+  assert.equal(rowState(t({ state: 'parked', status: 'new', parked_for: "#3 T's work is merged" }), null, NOW).label, "Waiting: starts when #3 T's work is merged");
+  assert.equal(rowState(t({ state: 'parked', wakes_on: 'the fix in #9 goes live' }), null, NOW).label, 'Waiting: the fix in #9 goes live');
 });
 
 test('rowState: a complete minion says what is left in its label (#547)', () => {
@@ -73,6 +80,7 @@ test('rowState: a minion that hit the usage limit counts down, then becomes your
 test('byUrgency: needs-you first with the longest wait on top, then working, waiting, parked; newest first within those', () => {
   const rows = [
     t({ id: 'parked', state: 'parked' }),
+    t({ id: 'parked-until', state: 'parked', wakes_on: 'live' }),
     t({ id: 'working-old', status: 'running', updated_at: NOW - HOUR }),
     t({ id: 'reply-new', updated_at: NOW - MIN }),
     t({ id: 'waiting', state: 'outside' }),
@@ -82,7 +90,7 @@ test('byUrgency: needs-you first with the longest wait on top, then working, wai
     t({ id: 'card', pending_card_at: NOW - 2 * HOUR, updated_at: NOW - MIN }),
   ];
   const order = rows.sort((a, b) => byUrgency(a, b, null, NOW)).map((r) => r.id);
-  assert.deepEqual(order, ['reply-old', 'card', 'reply-new', 'working-new', 'working-old', 'waiting', 'parked']);
+  assert.deepEqual(order, ['reply-old', 'card', 'reply-new', 'working-new', 'working-old', 'waiting', 'parked-until', 'parked']);
 });
 
 test('SHIP: every stage has a colour family, and only a branch has no badge', () => {

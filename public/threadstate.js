@@ -3,7 +3,7 @@
 import { STATES } from './base.js';
 import { waitFam, waitShows } from './wait.js';
 
-/** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked. */
+/** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. */
 export function byUrgency(a, b, usage, now = Date.now()) {
   const sa = rowState(a, usage, now), sb = rowState(b, usage, now);
   if (sa.rank !== sb.rank) return sa.rank - sb.rank;
@@ -21,7 +21,7 @@ export const rowUnread = (t, st, seen) => !seen && (st.rank === 0 || (st.rank ==
 /**
  * A thread's state pill, coloured by family (one meaning each): you (amber, your move, with how
  * long it has waited), done (green), broken (red), work (blue, with steps done), wait (violet: the
- * usage reset, a deploy, CI), idle (grey: parked, dismissed). `cell` is the pill's text and `pulse`
+ * usage reset, a deploy, CI, parked until something wakes it), idle (grey: parked, dismissed). `cell` is the pill's text and `pulse`
  * says it gets the working dot.
  */
 export function rowState(t, usage, now = Date.now()) {
@@ -44,6 +44,8 @@ function baseState(t, usage, now) {
   if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
   if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };
   const state = STATES[t.state];
+  // Parked until something wakes it by itself (start_after, wake_when_live, runners back) reads as waiting, not grey (Cara, 2026-11-14).
+  if (t.state === 'parked' && (t.parked_for || t.wakes_on)) return { rank: 3, fam: 'wait', cell: 'waiting', label: `Waiting: ${t.parked_for ? `starts when ${t.parked_for}` : t.wakes_on}` };
   if (t.state === 'parked') return { rank: 4, fam: 'idle', cell: 'parked', label: state.label };
   if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, fam: 'wait', cell: `${t.state === 'outside' ? 'waiting' : 'deploying'}${steps}`, counted: !!steps, label: state.label };
   if (t.state === 'blocked') return { rank: 2, fam: 'broken', cell: 'blocked', label: state.label };

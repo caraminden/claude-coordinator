@@ -438,16 +438,20 @@ test('stop and restart drain the contraption\'s turns first and say how long the
 test('a deploy that doesn\'t come up healthy rolls back, and says so when the roll back doesn\'t either', async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
-  r.push({ 'citadel-app.json': appManifest([]) });
-  const svc = await listening();
+  r.push({ 'citadel-app.json': appManifest([], { health: '/health' }) });
+  // The app keeps its port and stops answering its health path. Closing the port instead left it free for the
+  // 6 s of health checks, and another test file's server that was handed it answered them (#758).
+  let up = true;
+  const svc = createHttpServer((_req, res) => res.writeHead(up ? 200 : 503).end());
+  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
   // In a finally: a server left listening keeps the file, and the deploy lock, running forever (#377).
   try {
-    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     services.deploy(c, 'Cara');
     const first = await done(name);
     assert.equal(first.state, 'deployed', first.said.join('\n'));
-    svc.close();
-    r.push({ 'citadel-app.json': appManifest(['true']) });
+    up = false;
+    r.push({ 'citadel-app.json': appManifest(['true'], { health: '/health' }) });
     services.deploy(c, 'Cara');
     const d = await done(name);
     assert.equal(d.state, 'failed', d.said.join('\n'));
@@ -455,6 +459,7 @@ test('a deploy that doesn\'t come up healthy rolls back, and says so when the ro
     assert.ok(d.said.some((l) => /Rolling back failed too: Not healthy/.test(l)), d.said.join('\n'));
   } finally {
     svc.close();
+    svc.closeAllConnections();
   }
 });
 

@@ -166,6 +166,11 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   await until('the turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(received.length, n);
+  // The message waited for the parked minion (#718); Unpark wakes it, quietly too.
+  await call('Cara', `/api/tickets/${t.id}/unpark`, { method: 'POST', body: {} });
+  await until('the turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(received.length, n);
 
   // A failed turn: everyone, with Claude's own words on what went wrong.
   await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: 'please fail' } });

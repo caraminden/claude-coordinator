@@ -196,7 +196,7 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   assert.equal(await w.check(), 0);
   assert.equal(held.length, 1, 'told once');
   assert.equal((await w.follow(leader.id, 'merged')).state, 'unshipped', 'nothing new can chain on it');
-  assert.match(w.heldFor(follower)!, /^#\d+ T's work is merged, and #\d+ T was dismissed without it, so only Start now starts you$/);
+  assert.match(w.heldFor(follower)!, /^#\d+ T's work is merged, and #\d+ T was dismissed without it, so only Unpark starts you$/);
 
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   assert.equal(await w.check(), 1);
@@ -602,7 +602,7 @@ test("Start now hears when the brief couldn't be sent, and the brief stays held 
   assert.ok(w.claim(id), 'held again');
 });
 
-test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or Start now starts it, a message only gets an answer; a brief is marked as one', async () => {
+test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or Unpark starts it, a message is held for that start; a brief is marked as one', async () => {
   const { base, cookie, proc } = await bootServer({ root });
   procs.push(proc);
   const call = async (path: string, body?: unknown) => {
@@ -639,32 +639,42 @@ test('through the server: start_after parks the minion with its brief held; the 
   assert.ok(next.data.notes.some((n: string) => n.startsWith('Parked: it starts by itself')));
   assert.deepEqual(await said(next.data.id), [], 'its brief is held');
 
+  // A note left for it is held (#718) and doesn't hold up the start: it goes in after the brief.
+  assert.equal((await call(`/api/tickets/${next.data.id}/messages`, { text: 'note for later' })).data.held, 'parked');
+
   // No repo, so the leader's dismissal is what it waits for.
   await idle(leader.id);
   assert.equal((await call(`/api/tickets/${leader.id}/status`, { status: 'closed' })).status, 200);
-  for (const end = Date.now() + 5000; !(await said(next.data.id)).length; await new Promise((r) => setTimeout(r, 20))) {
+  for (const end = Date.now() + 5000; (await said(next.data.id)).length < 2; await new Promise((r) => setTimeout(r, 20))) {
     if (Date.now() > end) throw new Error('The chained minion never started');
   }
-  assert.deepEqual(await said(next.data.id), ['brief for Next']);
-  assert.deepEqual(await briefs(next.data.id), [true]);
+  assert.deepEqual(await said(next.data.id), ['note for later', 'brief for Next']);
+  assert.deepEqual(await briefs(next.data.id), [false, true]);
 
-  // #261: writing to a chained minion before its leader is done gets an answer, and it stays parked
-  // with its brief held (Cara, 2026-11-01: "Answer, keep it parked"); Start now starts it, brief and all.
+  // #718 (Cara, 2026-11-14: "Parked minions should not wake on being sent a message"): writing to a chained
+  // minion before its leader is done is held, unread, and starts no turn (#261's answer-and-stay-parked is
+  // gone); Unpark starts it, brief first and the held message after it.
   const later = (await create('Later', { start_after: next.data.number })).data;
   assert.equal(later.note, `starts when #${next.data.number} is live`);
   assert.equal(later.parked_for, `#${next.data.number} Next's work is live`);
   assert.equal((await call(`/api/tickets/${leader.id}/start`, {})).status, 409, 'only a parked chained minion starts early');
-  await call(`/api/tickets/${later.id}/messages`, { text: 'what is this?' });
-  assert.deepEqual(await said(later.id), ['what is this?'], 'its brief is still held');
-  await idle(later.id);
+  assert.equal((await call(`/api/tickets/${leader.id}/unpark`, {})).status, 409, 'only a parked minion unparks');
+  const sent = await call(`/api/tickets/${later.id}/messages`, { text: 'what is this?' });
+  assert.equal(sent.status, 202);
+  assert.equal(sent.data.held, 'parked');
+  assert.deepEqual(await said(later.id), ['what is this?'], 'shown in the chat as held');
+  assert.equal((await messages(later.id))[0].parked, true);
   const parked = (await call(`/api/tickets/${later.id}`)).data.ticket;
-  assert.equal(parked.state, 'parked', 'its turn left it parked');
+  assert.notEqual(parked.status, 'running', 'no turn for it');
+  assert.equal(parked.state, 'parked');
   assert.equal(parked.parked_for, `#${next.data.number} Next's work is live`);
-  const started = await call(`/api/tickets/${later.id}/start`, {});
+  const started = await call(`/api/tickets/${later.id}/unpark`, {});
   assert.equal(started.status, 200);
   assert.equal(started.data.parked_for, null);
+  assert.notEqual(started.data.state, 'parked');
   assert.deepEqual(await said(later.id), ['what is this?', 'brief for Later']);
   assert.deepEqual(await briefs(later.id), [false, true]);
+  assert.equal((await call(`/api/tickets/${later.id}/unpark`, {})).status, 409, 'unparked once');
   assert.equal((await call(`/api/tickets/${later.id}/start`, {})).status, 409, 'started once');
   await idle(later.id);
   await idle(next.data.id);

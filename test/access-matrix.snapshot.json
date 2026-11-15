@@ -2022,6 +2022,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/unpark": {
+  "anon": "401 Not logged in",
+  "person": "409 #1 isn't parked",
+  "member": "409 #1 isn't parked",
+  "outsider": "404 No such minion",
+  "tmA": "409 #1 isn't parked",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/unqueue": {
   "anon": "401 Not logged in",
   "person": "409 That message is no longer queued",
@@ -2499,6 +2509,16 @@
   "outsider": "404 No such minion",
   "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
   "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/unpark": {
+  "anon": "401 Not logged in",
+  "person": "400 The Taskmaster is never parked",
+  "member": "400 The Taskmaster is never parked",
+  "outsider": "404 No such minion",
+  "tmA": "403 The Taskmaster cannot act on itself",
+  "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

@@ -229,7 +229,7 @@ Body up to 4,000,000 bytes:
 | `session` | yes | `^[\w.:@-]{1,100}$`, your name for the conversation, per person |
 | `prompt` | yes | Non-blank text |
 | `fresh` | | `true` starts a new conversation under the same name; default `false` |
-| `system` | | Text appended to the agent's system prompt; default none |
+| `system` | | Text appended to the agent's system prompt; default none. Name your tools in it in full (`mcp__<server>__<tool>`): the agent can only call them by that name, and Citadel adds a line saying so after your text |
 | `model` | | `^[\w.\[\]-]{1,60}$`; default the registry's `default_model`, else Claude Code's default. Per call, so each turn may pick its own |
 | `compactWindow` | | Tokens before the conversation compacts: 10,000 to 1,000,000, default 40,000 |
 | `mcp` | | Up to 10 servers: `name` (`^[A-Za-z0-9_-]{1,40}$`, unique), `path` (on your port, starting with `/`, at most 200 printable characters), `headers` (an object of header names matching `^[A-Za-z0-9-]{1,100}$` to values of at most 8,192 characters with no line breaks) |

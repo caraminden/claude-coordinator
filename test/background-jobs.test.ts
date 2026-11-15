@@ -122,13 +122,14 @@ test('the activity gate skips a quiet slot at no cost, then runs once enough min
   minion(store, project.id);
   minion(store, project.id);
   const now = Date.now();
+  store.schedules.ran(sch.id, { error: 'an older slot that failed' }, now - 60_000);
   await runs.run(store.schedules.get(sch.id)!, now);
   let s = store.schedules.get(sch.id)!;
   assert.deepEqual([made, sends.length, notes.length], [[], 0, 0], 'no minion, no brief, no note');
   assert.deepEqual([s.last_run_at, s.last_ticket_id], [null, null]);
   assert.ok(s.next_run_at! > now, 'the next slot counts from now');
   assert.match(s.last_skip ?? '', /^Skipped .+ P[SD]T: 2 minions since .+ \(needs 3\)$/);
-  assert.equal(s.last_error, null, 'a skip is not a failure');
+  assert.equal(s.last_error, null, 'a skip is not a failure, and clears the stale one');
 
   // The third minion reaches the threshold: it runs, clears the skip, and its brief carries the window.
   minion(store, project.id);

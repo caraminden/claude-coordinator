@@ -245,7 +245,8 @@ export class Schedules {
       const done = !!s.once;
       this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : next, id);
     } else if ('skip' in outcome) {
-      this.db.prepare('UPDATE schedules SET last_skip = ?, next_run_at = ? WHERE id = ?').run(outcome.skip, next, id);
+      // The gate was reached, so an older "didn't start" is stale.
+      this.db.prepare('UPDATE schedules SET last_skip = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(outcome.skip, next, id);
     } else {
       this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next, id);
     }

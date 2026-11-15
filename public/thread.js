@@ -452,7 +452,8 @@ export function renderTicketHead() {
   // that matters now. Everything else waits behind ⋯.
   // Find's box is put back in the redrawn bar, which drops the caret from it: keep it there.
   const had = el.contains(document.activeElement) ? document.activeElement : null;
-  const main = phone ? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen|start)\b/.test(a.className)) : null;
+  // A parked minion's one button is Unpark (#718); Dismiss waits behind ⋯ then.
+  const main = phone ? actions.find((a) => a?.classList?.contains('act-unpark')) ?? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen)\b/.test(a.className)) : null;
   // A search in progress keeps the menu open: its box is in there.
   const menuOpen = phone && (menuFor === t.id || !!view.findEl?.querySelector('.chat-find')?.value);
   const more = h('button', { type: 'button', class: 'nav-btn head-more', title: 'More', 'aria-label': 'More', 'aria-expanded': String(menuOpen), onclick: () => {

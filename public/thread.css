@@ -40,10 +40,10 @@
 .ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
 /* The minion header's Stop, Dismiss and Reopen, tinted by what they do so the minion's state reads at a glance (#166). */
-button.secondary:is(.act-stop, .act-dismiss, .act-reopen) { color: var(--act); border-color: color-mix(in srgb, var(--act) 55%, var(--control-line)); background: color-mix(in srgb, var(--act) 9%, transparent); font-weight: 600; }
+button.secondary:is(.act-stop, .act-dismiss, .act-reopen, .act-unpark) { color: var(--act); border-color: color-mix(in srgb, var(--act) 55%, var(--control-line)); background: color-mix(in srgb, var(--act) 9%, transparent); font-weight: 600; }
 button.secondary.act-stop { --act: var(--error); }
 button.secondary.act-dismiss { --act: var(--waiting); }
-button.secondary.act-reopen { --act: var(--done); }
+button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
 /* Back, Forward and ×: one square size, the icon centred; tap-sized on phones. */
 .ticket-head { --head-btn: 1.9rem; }
 @media (max-width: 800px) { .ticket-head { --head-btn: 2.5rem; } }

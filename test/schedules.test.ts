@@ -131,8 +131,8 @@ test("a run's brief names the schedule and ends with the brief", () => {
   const store = new Store(':memory:');
   const p = store.createProject('One', null).id;
   const s = store.schedules.create({ project_id: p, name: 'Nightly', cron: '0 3 * * *', brief: 'Is main healthy?', type: 'chore', created_by: 'Cara' });
-  const text = runBrief(s, 'Oct 29, 2026, 3:00 AM');
-  assert.match(text, /^Scheduled run of "Nightly" \(Every day at 03:00/);
+  const text = runBrief(s, 'Oct 29, 2026, 3:00 AM', 'Last real run: never; since then 4 minions in this scheme.');
+  assert.match(text, /^Scheduled run of "Nightly" \(Every day at 03:00.*\nLast real run: never; since then 4 minions in this scheme\.\n/);
   assert.ok(text.endsWith('\n\nIs main healthy?'));
 });
 
@@ -183,10 +183,12 @@ test("a run starts with its schedule's model and effort; a schedule from before 
 test('a schedules table from before model and effort gets both columns, its rows keeping the defaults (#387)', () => {
   const db = new DatabaseSync(':memory:');
   db.exec('CREATE TABLE projects (id INTEGER PRIMARY KEY); INSERT INTO projects (id) VALUES (1);');
-  db.exec(SCHEDULES_SCHEMA.replace('  model TEXT,\n  effort TEXT,\n', ''));
+  db.exec(SCHEDULES_SCHEMA.replace('  model TEXT,\n  effort TEXT,\n', '').replace(/  min_minions[^]*once INTEGER NOT NULL DEFAULT 0,\n/, ''));
   assert.ok(!(db.prepare('PRAGMA table_info(schedules)').all() as { name: string }[]).some((c) => c.name === 'model'), 'the old shape has no model');
   db.prepare("INSERT INTO schedules (project_id, name, cron, brief, created_by, created_at) VALUES (1, 'Old', '@daily', 'b', 'Cara', 0)").run();
   const old = new Schedules(db).list(1)[0];
   assert.deepEqual([old.name, old.model, old.effort], ['Old', null, null]);
+  // And the activity gate's and one-off's (#745), its rows always running, in their own scheme, every time.
+  assert.deepEqual([old.min_minions, old.gate_scope, old.last_skip, old.once], [null, 'scheme', null, 0]);
   new Schedules(db); // a second start finds them there
 });

@@ -96,6 +96,12 @@ const EFFORT_CHANGE = { type: ['string', 'null'], enum: [...EFFORT_IDS, null], d
 // What a schedule's runs start with (#387), from the same table: a mechanical checkup is a read-only check.
 const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with. Required: pick it from the model table in your prompt; a mechanical checkup is a read-only check (claude-sonnet-5-5).' };
 const SCHEDULE_EFFORT = { ...EFFORT, description: 'The effort each run starts with. Required: the one the model table pairs with your model (a read-only check: low).' };
+// The activity gate and one-offs (#745).
+const SCHEDULE_GATE = {
+  min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
+  gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },
+  once: { type: 'boolean', description: 'Pause after the first real run (skips not counted): set it for a one-off such as a dated read-back' },
+};
 const WORKFLOW = {
   type: ['boolean', 'null'],
   description: "true lets the minion's turns call Claude Code's Workflow tool (scripted fan-out of agents), as in its composer; off by default, since it adds about 2k tokens to every API call. Set it when creating the minion: flipping it later breaks its prompt cache once.",
@@ -458,7 +464,7 @@ const TOOLS = [
   {
     name: 'schedule_minion',
     description:
-      "Schedule a minion: on each run the server starts a fresh minion (its own worktree, a clean context) with the brief as its first message. Runs with nothing to report dismiss themselves; runs that find something stay open in state ready. Times are the server's (America/Los_Angeles). People see schedules, and pause or delete them, from the clock in the Minions header.",
+      "Schedule a minion: on each run the server starts a fresh minion (its own worktree, a clean context) with the brief as its first message. Runs with nothing to report dismiss themselves; runs that find something stay open in state ready. Times are the server's (America/Los_Angeles). People see schedules, and pause or delete them, from the clock in the Minions header. With min_minions set, a due slot is skipped at no cost (no minion, no note) unless that many minions were made since the last real run, so the cron says how often it may check and the gate says whether it's worth a run. A one-off (a dated cron such as a read-back) sets once, or its date comes round again next year.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -468,6 +474,7 @@ const TOOLS = [
         type: { type: 'string', description: 'The `type` property each run gets (default chore)' },
         model: SCHEDULE_MODEL,
         effort: SCHEDULE_EFFORT,
+        ...SCHEDULE_GATE,
       },
       required: ['name', 'cron', 'brief', 'model', 'effort'],
     },
@@ -485,6 +492,7 @@ const TOOLS = [
         type: { type: 'string' },
         model: SCHEDULE_MODEL,
         effort: SCHEDULE_EFFORT,
+        ...SCHEDULE_GATE,
         paused: { type: 'boolean', description: 'true pauses it, false resumes it' },
       },
       required: ['schedule_id'],
@@ -1731,12 +1739,12 @@ async function runTool(name: string, args: any): Promise<string> {
       return schedules.length ? schedules.map(scheduleLine).join('\n') : 'Nothing scheduled.';
     }
     case 'schedule_minion': {
-      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort });
+      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once });
       return `Scheduled. ${scheduleLine(s)}`;
     }
     case 'update_schedule': {
       const { schedule_id, ...patch } = args;
-      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'paused'], 'update_schedule');
+      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'min_minions', 'gate_scope', 'once', 'paused'], 'update_schedule');
       return `Updated. ${scheduleLine(await call('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
     }
     case 'delete_schedule':
@@ -1774,7 +1782,8 @@ function scheduleLine(s: any): string {
   const last = s.last_run_at ? `last run ${at(s.last_run_at)}${s.last_number != null ? ` (#${s.last_number})` : ''}` : 'no run yet';
   // A schedule from before #698 may name neither; its runs take the model table's pick for its type (src/schedules.ts runMinion).
   const runsAs = `model ${s.model ?? `the table's pick for a ${s.type}`}, effort ${s.effort ?? `the table's pick for a ${s.type}`}`;
-  return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}; ${next}; ${last}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
+  const gate = s.min_minions != null ? `; skips under ${s.min_minions} minions${s.gate_scope === 'all' ? ' across all schemes' : ''}` : '';
+  return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
 /** list_tickets and read_ticket with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */

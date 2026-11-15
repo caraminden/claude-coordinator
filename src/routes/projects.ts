@@ -126,7 +126,7 @@ const MODEL_REQUIRED = (tool: string) => `${tool} needs a model and an effort, p
 
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
 function scheduleFields(app: App, projectId: number, body: any, all: boolean, taskmaster = false) {
-  const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null } = {};
+  const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null; min_minions?: number | null; gate_scope?: 'scheme' | 'all'; once?: boolean } = {};
   if (all || body.name !== undefined) out.name = str(body.name, 'Name', 80);
   if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
   if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
@@ -138,6 +138,16 @@ function scheduleFields(app: App, projectId: number, body: any, all: boolean, ta
   const table = all ? pickFor(out.type) : null;
   if (all || body.model !== undefined) out.model = oneOf(body.model ?? table!.model, MODELS, 'Model');
   if (all || body.effort !== undefined) out.effort = oneOf(body.effort ?? table!.effort, EFFORTS, 'Effort');
+  // The activity gate and one-offs (#745); left out, a new schedule always runs, in its own scheme, every time.
+  if (body.min_minions !== undefined) {
+    if (body.min_minions !== null && !(Number.isInteger(body.min_minions) && body.min_minions >= 1 && body.min_minions <= 10_000)) throw new HttpError(400, 'min_minions must be a whole number from 1 to 10000, or null to always run');
+    out.min_minions = body.min_minions;
+  }
+  if (body.gate_scope !== undefined) out.gate_scope = (oneOf(body.gate_scope, ['scheme', 'all'], 'gate_scope') ?? 'scheme') as 'scheme' | 'all';
+  if (body.once !== undefined) {
+    if (typeof body.once !== 'boolean') throw new HttpError(400, 'once must be true or false');
+    out.once = body.once;
+  }
   return out;
 }
 

@@ -113,6 +113,12 @@ test("the Taskmaster's schedule tools", async () => {
   const id = Number((await tool('list_schedules', {})).match(/^\[(\d+)\]/)![1]);
   assert.match(await tool('update_schedule', { schedule_id: id, paused: true }), /; paused; no run yet$/);
   assert.match(await tool('update_schedule', { schedule_id: id, model: 'claude-opus-5-5', effort: 'medium' }), /, model claude-opus-5-5, effort medium; paused;/);
+  // The activity gate and one-offs (#745).
+  assert.match(await tool('update_schedule', { schedule_id: id, min_minions: 40, gate_scope: 'all', once: true }), /effort medium; skips under 40 minions across all schemes; runs once; paused;/);
+  assert.match(await tool('update_schedule', { schedule_id: id, min_minions: 0 }), /min_minions must be a whole number/);
+  assert.match(await tool('update_schedule', { schedule_id: id, gate_scope: 'everywhere' }), /gate_scope must be one of: scheme, all/);
+  assert.match(await tool('update_schedule', { schedule_id: id, once: 'yes' }), /once must be true or false/);
+  assert.doesNotMatch(await tool('update_schedule', { schedule_id: id, min_minions: null, once: false }), /skips under|runs once/);
   assert.equal(await tool('delete_schedule', { schedule_id: id }), 'Deleted.');
   mcp.kill();
 });

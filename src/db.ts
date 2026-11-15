@@ -1028,6 +1028,7 @@ export const SCHEMA_HISTORY = [
   [49, 'push_subscriptions.everything (#690)'],
   [50, 'openrouter_calls (#717)'],
   [51, 'health_events (#724)'],
+  [52, 'schedules.min_minions, gate_scope, last_skip, once (#745)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

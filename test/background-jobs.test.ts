@@ -23,8 +23,8 @@ function setup() {
   const sent: object[] = [];
   return { store, project, sent, broadcast: (m: object) => void sent.push(m) };
 }
-const minion = (store: Store, projectId: number, title = 'work') =>
-  store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: 'Cara' });
+const minion = (store: Store, projectId: number, title = 'work', by = 'Cara') =>
+  store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: by });
 
 // ---------- scheduled runs ----------
 
@@ -36,10 +36,10 @@ function scheduled() {
   const waits = { limit: new Set<number>(), net: new Set<number>() };
   const runs = new ScheduledRuns({
     store: s.store,
-    newMinion: async (project, m) => {
+    newMinion: async (project, m, by) => {
       if (m.title === 'broken') throw new Error('no worktree');
       made.push(m.title);
-      const t = minion(s.store, project.id, m.title);
+      const t = minion(s.store, project.id, m.title, by);
       return { id: t.id, number: t.number! };
     },
     runner: { emit: (id: number, kind: string, data: unknown) => void notes.push({ id, kind, data }), send: (id: number, from: string, text: string) => void sends.push({ id, from, text }),
@@ -101,6 +101,90 @@ test('a slot is skipped while the last run waits on a usage limit or the network
   waits.net.clear();
   await runs.run(store.schedules.get(sch.id)!);
   assert.deepEqual(made, ['Hourly']);
+});
+
+// The activity gate (#745): a due slot spends a minion only when enough happened since the last real run.
+const DAY = 86_400_000;
+/** A gated schedule made `daysAgo` days back, due now. */
+function gated(store: Store, projectId: number, extra: object = {}, daysAgo = 7) {
+  const t0 = Date.now() - daysAgo * DAY;
+  return store.schedules.create({ project_id: projectId, name: 'Weekly audit', cron: '* * * * *', brief: 'b', type: 'chore', created_by: 'Cara', min_minions: 3, ...extra }, t0);
+}
+/** A person's minion made at `at`. */
+function madeAt(store: Store, projectId: number, at: number) {
+  const t = minion(store, projectId);
+  store.db.prepare('UPDATE tickets SET created_at = ? WHERE id = ?').run(at, t.id);
+}
+
+test('the activity gate skips a quiet slot at no cost, then runs once enough minions were made since the last real run', async () => {
+  const { store, project, runs, made, sends, notes } = scheduled();
+  const sch = gated(store, project.id);
+  minion(store, project.id);
+  minion(store, project.id);
+  const now = Date.now();
+  await runs.run(store.schedules.get(sch.id)!, now);
+  let s = store.schedules.get(sch.id)!;
+  assert.deepEqual([made, sends.length, notes.length], [[], 0, 0], 'no minion, no brief, no note');
+  assert.deepEqual([s.last_run_at, s.last_ticket_id], [null, null]);
+  assert.ok(s.next_run_at! > now, 'the next slot counts from now');
+  assert.match(s.last_skip ?? '', /^Skipped .+ P[SD]T: 2 minions since .+ \(needs 3\)$/);
+  assert.equal(s.last_error, null, 'a skip is not a failure');
+
+  // The third minion reaches the threshold: it runs, clears the skip, and its brief carries the window.
+  minion(store, project.id);
+  await runs.run(store.schedules.get(sch.id)!, now + 60_000);
+  s = store.schedules.get(sch.id)!;
+  assert.deepEqual(made, ['Weekly audit']);
+  assert.deepEqual([s.last_skip, s.last_run_at], [null, now + 60_000]);
+  assert.match(sends[0].text, /\nLast real run: never \(scheduled .+ P[SD]T\); since then 3 minions in this scheme\.\n/);
+
+  // The next window opens at that run: a skip later doesn't move it, so minions made before the skip still count.
+  madeAt(store, project.id, now + 90_000);
+  await runs.run(store.schedules.get(sch.id)!, now + 120_000);
+  assert.match(store.schedules.get(sch.id)!.last_skip ?? '', /: 1 minion since/);
+  assert.equal(store.schedules.get(sch.id)!.last_run_at, now + 60_000, 'a skip leaves the last real run');
+  madeAt(store, project.id, now + 150_000);
+  madeAt(store, project.id, now + 160_000);
+  await runs.run(store.schedules.get(sch.id)!, now + 180_000);
+  assert.deepEqual(made, ['Weekly audit', 'Weekly audit'], 'the minion from before the skip counts toward the run after it');
+  assert.match(sends[1].text, new RegExp(`Last real run: .+ P[SD]T \\(#${store.getTicket(s.last_ticket_id!)!.number}\\); since then 3 minions in this scheme`));
+});
+
+test("the gate doesn't count Taskmasters or minions Citadel started, and counts other schemes only with gate_scope all", async () => {
+  const { store, project, runs, made } = scheduled();
+  const other = store.createProject('elsewhere', null);
+  for (const p of [project.id, other.id]) store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  for (let i = 0; i < 3; i++) {
+    minion(store, project.id, 'scheduled run', 'Citadel');
+    minion(store, other.id);
+  }
+  const own = gated(store, project.id, { min_minions: 1 });
+  await runs.run(own);
+  assert.deepEqual(made, []);
+  assert.match(store.schedules.get(own.id)!.last_skip ?? '', /: 0 minions since/);
+  const sweep = gated(store, project.id, { gate_scope: 'all' });
+  // 3 minions elsewhere, not 4 or 5: neither Taskmaster counts.
+  await runs.run(gated(store, project.id, { gate_scope: 'all', min_minions: 4 }));
+  assert.deepEqual(made, []);
+  await runs.run(sweep);
+  assert.deepEqual(made, ['Weekly audit'], "the other scheme's three minions count for a sweep");
+});
+
+test('a schedule with no gate runs as before, and a one-off pauses after its real run but not after a skip', async () => {
+  const { store, project, runs, made } = scheduled();
+  await runs.run(gated(store, project.id, { min_minions: null }));
+  assert.deepEqual(made, ['Weekly audit'], 'no gate, no count needed');
+
+  const once = gated(store, project.id, { once: true, name: 'Read-back' }, 0.001);
+  await runs.run(store.schedules.get(once.id)!);
+  let s = store.schedules.get(once.id)!;
+  assert.deepEqual([s.paused, s.last_skip != null], [0, true], 'a skip is not its run');
+  assert.ok(s.next_run_at);
+  for (let i = 0; i < 3; i++) minion(store, project.id);
+  await runs.run(s);
+  s = store.schedules.get(once.id)!;
+  assert.deepEqual([made.at(-1), s.paused, s.next_run_at], ['Read-back', 1, null]);
+  assert.ok(s.last_ticket_id, 'its last run stays visible');
 });
 
 test("a run's turns are its maker's while they're around, and the owner's (nobody's) once they're disabled or gone (C3)", async () => {

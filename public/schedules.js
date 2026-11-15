@@ -7,6 +7,7 @@ import { optimistic } from './ui/optimistic.js';
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 function scheduleRow(s) {
+  let row;
   const last = s.last_number != null
     ? h('a', { href: `#/p/${s.project_id}/t/${s.last_number}` }, `#${s.last_number}`, ' ', ago(s.last_run_at))
     : s.last_run_at ? ago(s.last_run_at) : '';
@@ -16,15 +17,57 @@ function scheduleRow(s) {
     : s.last_run_at ? ['ok', 'OK', 'Its last run started']
     : ['neutral', 'New', 'It has not run yet'];
   const cron = `${s.when} (server time) · cron: ${s.cron}`;
-  return h('li', { class: `schedule${s.paused ? ' paused' : ''}` },
+  return row = h('li', { class: `schedule${s.paused ? ' paused' : ''}` },
     h('div', { class: 'row' }, h('strong', { class: 'name' }, s.name), h('span', { class: 'spacer' }),
       h('span', { class: 'cui-chip state-chip', 'data-tone': tone, title: tip }, word)),
     h('div', { class: 'muted small', title: cron }, s.paused ? ['Would run ', s.when] : ['Next ', h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at)), ' · ', s.when]),
     h('div', { class: 'muted small' }, runsAs(s), s.last_run_at || s.last_number != null ? ['last run ', last] : 'not run yet'),
+    s.last_skip ? h('div', { class: 'muted small', title: 'The activity gate skipped this slot: no minion was made' }, s.last_skip) : '',
     s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
+    gateFields(s, () => row),
     h('div', { class: 'row schedule-actions' },
       h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('li')) }, s.paused ? 'Resume' : 'Pause'),
       h('button', { type: 'button', class: 'secondary small', onclick: (e) => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && remove(s, e.currentTarget.closest('li')) }, 'Delete')));
+}
+
+/**
+ * The activity gate and one-off (#745): "Skip unless N minions since the last run" (blank always runs), whose minions
+ * it counts once N is set, and Run once. Each change shows at once and saves behind.
+ */
+function gateFields(s, row) {
+  const scope = h('select', { class: 'small', 'aria-label': 'Whose minions count', onchange: (e) => save(s, row(), { gate_scope: e.target.value }) },
+    h('option', { value: 'scheme', selected: s.gate_scope !== 'all' }, 'in this scheme'),
+    h('option', { value: 'all', selected: s.gate_scope === 'all' }, 'in all schemes'));
+  const n = h('input', {
+    type: 'number', min: 1, max: 10000, step: 1, inputmode: 'numeric', placeholder: 'any', value: s.min_minions ?? '', 'aria-label': 'Minions needed',
+    onchange: (e) => {
+      const v = e.target.value.trim();
+      if (v !== '' && !(Number.isInteger(Number(v)) && Number(v) >= 1)) return e.target.reportValidity();
+      save(s, row(), { min_minions: v === '' ? null : Number(v) });
+    },
+  });
+  return h('div', { class: 'schedule-gate small' },
+    h('label', { title: 'Each due slot checks first: with fewer minions made since its last real run, it skips at no cost' }, 'Skip unless ', n, ' minions since the last run'),
+    s.min_minions != null ? scope : '',
+    h('label', { title: 'Pause after its first real run, for a one-off' }, h('input', { type: 'checkbox', checked: !!s.once, onchange: (e) => save(s, row(), { once: e.target.checked }) }), ' Run once'));
+}
+
+/** Save a gate change: the row redraws with it at once, and a refusal puts the old values back. */
+function save(s, row, patch) {
+  const was = Object.fromEntries(Object.keys(patch).map((k) => [k, s[k]]));
+  const show = (values) => {
+    Object.assign(s, values);
+    const next = scheduleRow(s);
+    if (row.isConnected) row.replaceWith(next);
+    row = next;
+  };
+  optimistic({
+    key: `schedule:${s.id}`,
+    apply: () => show(patch),
+    send: () => api(`api/schedules/${s.id}`, { method: 'PATCH', body: patch }),
+    undo: () => show(was),
+    label: `change the schedule "${s.name}"`,
+  });
 }
 
 // Both show at once and send behind; the server's broadcast then redraws the list, and a refusal puts the row back.

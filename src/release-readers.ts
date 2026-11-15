@@ -765,10 +765,13 @@ export interface LandDeps {
   now?: () => number;
 }
 
+/** A land's place in the line as a number: landing (no place) is 0, "next" 1, "2nd" 2, and so on. */
+export const placeRank = (brief: string | undefined): number => (brief == null ? 0 : brief === 'next' ? 1 : parseInt(brief, 10) || 1);
+
 /** Where a land stands from land.sh's `queue:` lines: in line for the lock (its place), or landing. */
 export function landProgress(output: string, since: number): Progress {
   const last = output.split('\n').filter((l) => l.startsWith('queue: ')).at(-1) ?? '';
-  const place = /^queue: (\d+(?:st|nd|rd|th)) in line for the land lock/.exec(last)?.[1];
+  const place = /^queue: (next|\d+(?:st|nd|rd|th)) in line for the land lock/.exec(last)?.[1];
   if (place) {
     const text = `in line to land (${place})`;
     return { stage: 'land', since, usual: null, waitingOn: text, text, brief: place };
@@ -806,6 +809,9 @@ export class LandsInFlight {
   attach(views: Omit<TargetView, 'testCopies'>[]) {
     const now = (this.d.now ?? Date.now)();
     const landing = this.d.landings.handoffs().map((id) => ({ id, run: this.d.landings.get(id) })).filter((x) => x.run?.code === null);
+    // Rows go the way the line does (the ones landing first, then each place in turn), whatever order the hand-offs came in.
+    const rank = new Map(landing.map((x) => [x.id, placeRank(landProgress(x.run!.output, 0).brief)]));
+    landing.sort((a, b) => rank.get(a.id)! - rank.get(b.id)! || a.id - b.id);
     const ids = new Set(landing.map((x) => x.id));
     for (const id of this.seen.keys()) if (!ids.has(id)) this.seen.delete(id);
     for (const id of this.files.keys()) if (!ids.has(id)) this.files.delete(id);

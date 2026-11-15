@@ -9,7 +9,7 @@ import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, LandsInFlight, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, LandsInFlight, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { CITADEL_TARGET, named, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
@@ -915,6 +915,38 @@ test('landProgress: in line for the lock with its place, then landing', () => {
   const got = landProgress('queue: 2nd in line for the land lock, about 9 min\nqueue: got the land lock\n', 5);
   assert.deepEqual([got.waitingOn, got.text], [null, 'landing: tests, then onto main']);
   assert.equal(landProgress('', 5).waitingOn, null, 'no queue lines yet: landing');
+});
+
+test('landProgress: "next in line" is a place too, and rows rank landing first, then each place (#766)', () => {
+  const next = landProgress('queue: next in line for the land lock (ahead: outside 3)\n', 5);
+  assert.deepEqual([next.waitingOn, next.brief], ['in line to land (next)', 'next']);
+  assert.deepEqual(['', 'next', '2nd', '5th'].map((b) => placeRank(b === '' ? undefined : b)), [0, 1, 2, 5]);
+});
+
+test('handed-off lands list in line order, not minion-number order (#766)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `land-repo-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  landOne(repo, Date.now(), 'README.md');
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek');
+  store.setProjectRepoDir(p.id, repo);
+  const outs = new Map<number, string>();
+  const places = ['', 'queue: 2nd in line for the land lock\n', 'queue: 5th in line for the land lock\n', 'queue: 4th in line for the land lock\n', 'queue: 3rd in line for the land lock\n'];
+  const ids: number[] = [];
+  places.forEach((o, i) => {
+    const x = store.createTicket({ project_id: p.id, title: `Change ${i}`, permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(x.id, root, `ticket/${i}-c`);
+    ids.push(x.id);
+    outs.set(x.id, o);
+  });
+  const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
+  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => ids, get: (id) => ({ output: outs.get(id)!, code: null }) }, now: () => 1000 });
+  const vs = [{ target: { id: ci.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }];
+  lands.attach(vs as never); // files not read yet: it goes on the first target, in this order either way
+  const got = (vs[0].next as { changes: { title: string; brief?: string }[] } | null)?.changes ?? [];
+  assert.deepEqual(got.map((c) => c.brief ?? 'landing'), ['landing', '2nd', '3rd', '4th', '5th']);
+  assert.deepEqual(got.map((c) => c.title), ['Change 0', 'Change 1', 'Change 4', 'Change 3', 'Change 2']);
 });
 
 test('a handed-off land is on its targets from the hand-off: in line, then landing, ahead of what is on main (#764)', async () => {

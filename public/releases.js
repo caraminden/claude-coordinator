@@ -359,7 +359,7 @@ function changeList(projectId, tv) {
     if (c) {
       return h('li', { class: cls }, pos, h('div', { class: 'body' },
         h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
-        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...(i > 0 && c.stage === 'line' ? [waiting()] : changeNow(n, c))),
+        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...(i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? [waiting()] : changeNow(n, c))),
         tryIt(projectId, tv, c)));
     }
     return h('li', { class: cls }, pos, h('div', { class: 'body' },

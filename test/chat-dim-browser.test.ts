@@ -2,6 +2,7 @@
 // on after the chat showed, for as long as the catch-up fetch and a Taskmaster's "While you were away" recap
 // took, which is seconds on a big database. Citadel's real front end (public/index.html) in headless
 // Chromium (test/browser.ts), with fetch answered in the page so nothing reaches a server.
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -86,6 +87,9 @@ for (const [who, hash] of [['a Taskmaster', '#/p/1'], ['a minion', '#/p/1/t/7']]
     const page = await browser.page(`${base}${hash}`, { width: 1280, height: 800 });
     await waitFor(page, 'the chat to draw', drawn);
     await waitFor(page, 'the dim to clear', `!(${dimmed})`);
+    // It cleared while the catch-up was still held, and the chat shows at full opacity.
+    assert.equal(await page.eval(`document.getElementById('log').textContent.includes('caught up')`), false, 'the catch-up was held');
+    assert.equal(await page.eval(`getComputedStyle(document.querySelector('#app .split > :last-child, #app > :not(.split)')).opacity`), '1');
     // The held fetches still land once the server answers.
     await page.eval('release()');
     await waitFor(page, 'the caught-up message', `document.getElementById('log').textContent.includes('caught up')`);

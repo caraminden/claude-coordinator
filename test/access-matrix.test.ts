@@ -196,10 +196,12 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
   const block = (k: string) => Object.fromEntries(Object.keys(callers).filter((who) => who in got[k] && !UNDECIDED.has(`${k} as ${who}`)).map((who) => [who, got[k][who]]));
   for (const u of UNDECIDED) assert.ok(got[u.split(' as ')[0]]?.[u.split(' as ')[1]], `${u} is probed no more: drop it from UNDECIDED`);
   const sorted = Object.fromEntries(Object.keys(got).sort((a, b) => byPath(a).localeCompare(byPath(b))).map((k) => [k, block(k)]));
-  if (process.env.UPDATE_ACCESS_MATRIX === '1' || !existsSync(SNAPSHOT)) {
+  if (process.env.UPDATE_ACCESS_MATRIX === '1') {
     writeFileSync(SNAPSHOT, JSON.stringify(sorted, null, 1) + '\n');
     return;
   }
+  // A deleted snapshot fails rather than quietly writing today's answers as the new truth.
+  assert.ok(existsSync(SNAPSHOT), `${SNAPSHOT} is missing: restore it from git, or write it with UPDATE_ACCESS_MATRIX=1 and read every answer before committing`);
   const want: Record<string, Record<string, string>> = JSON.parse(readFileSync(SNAPSHOT, 'utf8'));
   const diffs = [...new Set([...Object.keys(want), ...Object.keys(sorted)])]
     .flatMap((k) => Object.keys({ ...want[k], ...sorted[k] }).map((who) => [k, who, want[k]?.[who], sorted[k]?.[who]] as const))

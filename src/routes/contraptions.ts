@@ -512,7 +512,7 @@ export const contraptionRoutes: Route[] = [
         const paths = saveAskFiles(shared, c.name, person.login, files);
         const ask = askMessage(c, scheme, person, member, kind, text!, paths, item);
         // Under the person's own name, so the turn runs as them (runner.turnPerson goes by author); never typed, so never a go to merge.
-        app.runner.send(t.id, person.name, ask.text, [], { asker: person.id, ask: { kind, contraption: c.title, person: person.name, member, summary, ...(item ? { item } : {}) } });
+        app.runner.send(t.id, person.name, ask.text, [], { asker: person.id, hold: true, ask: { kind, contraption: c.title, person: person.name, member, summary, ...(item ? { item } : {}) } });
         return json(res, 202, { scheme: scheme.name, minion: t.number, member, proposal: false, files: paths });
       }
       const taskmaster = await ensureCoordinator(app, scheme);

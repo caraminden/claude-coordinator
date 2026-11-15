@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, join, sep } from 'node:path';
 import { cleanPluginPicks, lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
 import { adminAskRefusal, lendsMachine, managesMachine } from '../access.ts';
+import { APP_NAME } from '../appname.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
 import { cardHref } from '../card-links.ts';
@@ -65,6 +66,9 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   // The view's replies are a list; compare the stored JSON.
   const stored = store.getTicket(id)!;
   for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];
+  // Clearing a parked minion's state unparks it (#718): update_ticket's way for the Taskmaster. Not the minion's own.
+  const unparks = 'state' in fields && fields.state === null && caller !== id && runner.parked(stored);
+  if (unparks) delete fields.state;
   let closeCancelled: string | null = null;
   if (Object.keys(fields).length) {
     store.updateTicket(id, fields);
@@ -87,6 +91,12 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
       const after = store.getTicket(id)!;
       app.notify(id, { kind: 'state', state: after.state, note: after.note }, caller ? null : name);
     }
+  }
+  if (unparks) {
+    unparkTicket(app, stored, name, caller ? APP_NAME : name).catch((err) => {
+      runner.emit(id, 'note', { text: `Unparking failed: ${err.message}` });
+      runner.broadcastTicket(id);
+    });
   }
   return closeCancelled;
 }
@@ -176,7 +186,28 @@ function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
  * your own minions should initiate a response from that minion"; #702 undid #687's held mail for answers).
  */
 function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object) {
+  // A card's answer wakes a parked minion too (#718): answering is as deliberate as Unpark.
   app.runner.send(ticketId, author, text, [], extra);
+}
+
+/**
+ * Unpark (#718; Cara, 2026-11-14: "there should be an "unpark" button ... The taskmaster should still be able to choose
+ * to unpark them"). A minion chained on start_after starts now, its brief first; one in state parked has the state
+ * cleared and, unless a message follows (`quiet`), starts a turn. What was held for it rides along either way.
+ * `author` is whom the waking message comes from: the person who pressed Unpark, or the app for the Taskmaster.
+ */
+export async function unparkTicket(app: App, ticket: Ticket, by: string, author: string, quiet = false): Promise<void> {
+  if (ticket.kind === 'coordinator') throw new HttpError(400, `The ${AGENT_NAME} is never parked`);
+  if (ticket.status === 'closed') throw new HttpError(409, `#${ticket.number} is dismissed: reopen it instead`);
+  if (app.runner.heldFor(ticket.id)) {
+    const chained = app.waiters.claim(ticket.id); // released by startChained as it sends the brief
+    if (!chained) throw new HttpError(409, `#${ticket.number} is starting already`);
+    await app.startChained(chained, `${by} unparked it before its leader's work was in`);
+    // Its brief is sent: what comes next goes to that turn, not held (the turn clears the state as it starts).
+    if (!app.runner.heldFor(ticket.id) && app.store.getTicket(ticket.id)?.state === 'parked') app.store.updateTicket(ticket.id, { state: null });
+    return;
+  }
+  if (!app.runner.unpark(ticket.id, by, author, quiet)) throw new HttpError(409, `#${ticket.number} isn't parked`);
 }
 
 /** A person's picks for each question of a card: chosen option labels, plus optional free text. */
@@ -385,18 +416,25 @@ export const ticketRoutes: Route[] = [
       let held: unknown;
       await sendOnce(id, sendId, async () => {
         const files = await messageFiles(app, ticket, body.files);
+        // message_ticket with unpark (#718): the Taskmaster unparks it, and this message is what wakes it.
+        // Urgent as well, so a cold minion doesn't take it as held mail.
+        const unparks = !!caller && body.unpark === true && runner.parked(ticket);
+        if (unparks) await unparkTicket(app, ticket, session.name, APP_NAME, true);
         // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
         if (caller && ticket.kind !== 'coordinator') {
-          held = runner.relay(id, id, session.name, text, body.urgent === true);
+          held = runner.relay(id, id, session.name, text, body.urgent === true || unparks);
           return;
         }
         // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
         // Only here is a message a person's own typed words, the one kind that can be a go to merge (#201).
         // Its sendId goes on the message too, so the chat swaps in the server's copy for that exact message.
-        runner.send(id, session.name, text, await saveImages(app, ticket, body.images), { ...(caller ? {} : { typed: true }), ...(sendId ? { sendId } : {}) }, !caller && body.after !== true, files);
+        // A parked minion keeps it for its next turn (#718).
+        const r = runner.send(id, session.name, text, await saveImages(app, ticket, body.images), { ...(caller ? {} : { typed: true }), ...(sendId ? { sendId } : {}), hold: true }, !caller && body.after !== true, files);
+        if (r === 'parked') held = 'parked';
       });
-      if (held !== undefined) return json(res, 202, { ...ticketView(app, id), held });
+      if (held !== undefined && held !== 'parked') return json(res, 202, { ...ticketView(app, id), held });
       personWrote(ctx);
+      if (held === 'parked') return json(res, 202, { ...ticketView(app, id), held });
       return json(res, 202, ticketView(app, id));
     },
   },
@@ -435,7 +473,7 @@ export const ticketRoutes: Route[] = [
       // Named as the ticket would write it: relative to its working directory, else in full.
       const path = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
       const { about, text } = commentMessage(path, str(body.text, 'Comment', 10_000), quote);
-      runner.send(id, session.name, text, [], { comment: { path: body.path, about } });
+      runner.send(id, session.name, text, [], { comment: { path: body.path, about }, hold: true });
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },
@@ -734,6 +772,15 @@ export const ticketRoutes: Route[] = [
         : app.runner.requestFresh(ticket.id, `${session.name} asked for it`);
       if (why) throw new HttpError(409, why);
       return json(res, 202, ticketView(app, ticket.id));
+    },
+  },
+  // Unpark (#718): the chat header's button and update_ticket's state change; for a chained minion, as Start now.
+  {
+    method: 'POST', path: '/api/tickets/:ticket/unpark', who: ['person', 'taskmaster'],
+    async handler(ctx) {
+      const { res, app, session, caller, ticket } = ctx;
+      await unparkTicket(app, ticket, session.name, caller ? APP_NAME : session.name);
+      return json(res, 200, ticketView(app, ticket.id));
     },
   },
   // Start now (#261): a minion parked on start_after starts before its leader's work is in, its held brief first.

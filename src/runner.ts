@@ -106,6 +106,7 @@ export interface QueuedMessage {
   asker?: number | null; // whose ask it is (Store.turnAsker), taken when it was sent; null for no person's
   fresh?: 'handoff' | 'compact'; // a Taskmaster's fresh-start step (#406), which runs alone
   fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
+  parked?: string; // held for a parked minion (#718): when it was sent, "2026-11-14 18:02" UTC
 }
 
 /**
@@ -1501,9 +1502,14 @@ export class Runner {
    * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
    * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean } & object = {}, steer = false, files: MessageFile[] = []) {
+  /**
+   * `hold` (#718): a message from a person, the Taskmaster or another minion, which a parked minion with no turn
+   * running keeps for its next turn instead of starting one ('parked'). Wakes (wake_when_live, a chained start,
+   * runners back, a card's answer, GitHub) leave it off and start a turn as before.
+   */
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; hold?: boolean } & object = {}, steer = false, files: MessageFile[] = []): 'parked' | void {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
-    const { asker: askedBy, fyi, ...shown } = extra;
+    const { asker: askedBy, fyi, hold, ...shown } = extra;
     extra = shown;
     if (!fyi) this.onMessage?.(ticketId);
     const ticket = this.store.getTicket(ticketId);
@@ -1524,10 +1530,11 @@ export class Runner {
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
     // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
     const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.stopped && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
+    const parked = !!(hold && !live && ticket && this.parked(ticket));
     // The chat shows it masked; the turn still gets it as typed, for a key someone hands over on purpose.
     const row = this.emit(ticketId, 'user_message', {
       author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}),
-      ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
+      ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}), ...(parked ? { mail: true, parked: true } : {}),
     });
     const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(fyi ? { fyi: true } : {}), asker };
     // A person's typed "merge it" stands for the whole scheme until its PR merges (#260), whenever a turn reads it.
@@ -1536,6 +1543,14 @@ export class Runner {
     if (this.store.getTicket(ticketId)?.replies) {
       this.store.updateTicket(ticketId, { replies: null });
       this.broadcastTicket(ticketId);
+    }
+    if (parked) {
+      // With the held mail, in order: whatever next wakes it (Unpark, a wake, its chained start) reads it after its own message.
+      const list = this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [];
+      list.push({ ...msg, parked: new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ') });
+      this.store.setSetting(mailKey(ticketId), list);
+      this.broadcastTicket(ticketId);
+      return 'parked';
     }
     if (steers) {
       const line = promptMessage([msg]);
@@ -1607,11 +1622,11 @@ export class Runner {
    * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
    * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
    */
-  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true): boolean | 'cold' | 'mail' {
+  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true): boolean | 'cold' | 'mail' | 'parked' {
     const minion = this.store.getTicket(minionId)!;
     const from = to === minionId ? this.store.getCoordinator(minion.project_id)?.id : minionId;
-    const { held, cold } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent);
-    if (!held) return cold ? 'cold' : !wake ? 'mail' : false;
+    const { held, cold, parked } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent);
+    if (!held) return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
     const note = held === 1
       ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`
@@ -1661,18 +1676,21 @@ export class Runner {
   }
 
   /** Count a message against the loop at `key`: send it (steering a running turn with `steer`; as held mail with `mail`), or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
-  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false, urgent = false): { held: number; left: number; cold: boolean } {
+  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false, urgent = false): { held: number; left: number; cold: boolean; parked?: true } {
     const loop = this.store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
     const now = this.now();
     loop.sent = loop.sent.filter((t) => now - t < windowMs);
     if (!loop.held.length && loop.sent.length < limit) {
       loop.sent.push(now);
       this.store.setSetting(key, loop);
-      // Every message through here is machine-made, so a cold receiver gets it as mail unless it's urgent (#413).
-      const cold = !mail && !urgent && this.cold(to);
+      // Every message through here is machine-made, so a cold receiver gets it as mail unless it's urgent (#413);
+      // a parked one holds it whatever (#718), urgent too: only an unpark wakes it.
+      const receiver = this.store.getTicket(to);
+      const parked = !mail && !this.isRunning(to) && !!receiver && this.parked(receiver);
+      const cold = !mail && !urgent && !parked && this.cold(to);
       if (mail || cold) this.mail(to, author, text, from, cold);
-      else this.send(to, author, text, [], { from }, steer);
-      return { held: 0, left: limit - loop.sent.length, cold };
+      else this.send(to, author, text, [], { from, hold: true }, steer);
+      return { held: 0, left: limit - loop.sent.length, cold, ...(parked ? { parked: true as const } : {}) };
     }
     loop.held.push({ to, author, text, from, asker: this.personOf?.(author, from) ?? null, ...(mail ? { mail: true as const } : {}) });
     this.store.setSetting(key, loop);
@@ -1691,6 +1709,35 @@ export class Runner {
     return !!ended && this.now() - ended > COLD_MS;
   }
 
+  /** Parked (#718): on hold on purpose (state parked) or waiting on start_after, and not dismissed. A message to it is held. */
+  parked(t: Ticket): boolean {
+    return t.kind !== 'coordinator' && t.status !== 'closed' && (t.state === 'parked' || !!this.heldFor(t.id));
+  }
+
+  /** Messages held for this minion's next turn (#718's parked ones and held mail). */
+  heldCount(ticketId: number): number {
+    return this.store.getSetting<QueuedMessage[]>(mailKey(ticketId))?.length ?? 0;
+  }
+
+  /**
+   * Unpark a minion in state parked (#718): the state clears now, and unless `quiet` (a message wakes it instead) a
+   * turn starts that reads what was held for it, with a message from `author` (a person's name runs it as them, as a
+   * card's answer does). A chained minion starts with its brief instead (routes/tickets.ts unparkTicket). False when
+   * it isn't in state parked.
+   */
+  unpark(ticketId: number, by: string, author: string, quiet = false): boolean {
+    const t = this.store.getTicket(ticketId);
+    if (!t || t.kind === 'coordinator' || t.status === 'closed' || t.state !== 'parked') return false;
+    this.store.updateTicket(ticketId, { state: null });
+    this.emit(ticketId, 'note', { text: `${by} unparked this minion.` });
+    this.broadcastTicket(ticketId);
+    if (quiet || this.isRunning(ticketId)) return true;
+    const n = this.heldCount(ticketId);
+    const held = n ? `${n === 1 ? 'The message' : `The ${n} messages`} left for you while you were parked ${n === 1 ? 'follows' : 'follow'}.` : 'Nothing was left for you while you were parked.';
+    this.send(ticketId, author, `${author === by ? 'Unparked' : `${by} unparked`} you. ${held} Pick up where you left off.`);
+    return true;
+  }
+
   /**
    * Mail held for a cold session wakes it once the first has waited COLD_HOLD_MAX_MS, or at once if the
    * session went fresh meanwhile (nothing left to re-read), but never a dismissed minion. A person's
@@ -1702,6 +1749,8 @@ export class Runner {
       for (const t of this.store.listTickets(p.id)) {
         const since = this.store.getSetting<number>(coldKey(t.id));
         if (!since || (t.session_id && now - since < COLD_HOLD_MAX_MS)) continue;
+        // A parked minion's mail waits for its unpark or wake, however long (#718).
+        if (this.parked(t)) continue;
         if (this.isRunning(t.id) || this.lanes.busy(t.id)) continue;
         const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
         this.store.deleteSetting(coldKey(t.id));
@@ -1777,7 +1826,7 @@ export class Runner {
       // Only the Taskmaster's messages to its minion steer; Taskmasters' to each other queue.
       for (const m of loop.held) {
         if (m.mail) this.mail(m.to, m.author, m.text, m.from);
-        else this.send(m.to, m.author, m.text, [], { from: m.from, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, ticket.kind !== 'coordinator' && m.to === ticketId);
+        else this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, ticket.kind !== 'coordinator' && m.to === ticketId);
       }
       total += n;
     }

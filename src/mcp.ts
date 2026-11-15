@@ -367,7 +367,7 @@ const TOOLS = [
         message: { type: 'string', maxLength: 100000, description: 'First message to the new minion, at most 100,000 characters' },
         start_after: {
           type: 'integer',
-          description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. A message to it gets an answer and it stays parked; message_ticket with start_now starts it early.",
+          description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. Messages to it are held until it starts, then read with its brief; message_ticket with unpark starts it early.",
         },
         start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
         parent: {
@@ -388,14 +388,15 @@ const TOOLS = [
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A minion idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within 3 hours), unless it is urgent. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A parked minion (state parked, or chained on start_after) holds it unread until it is unparked or woken, unless you pass unpark. A minion idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within 3 hours), unless it is urgent. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
     inputSchema: {
       type: 'object',
       properties: {
         ticket_id: TICKET_ID,
         text: { type: 'string', maxLength: 10000, description: 'The message, at most 10,000 characters (`message` is accepted too)' },
         urgent: URGENT,
-        start_now: { type: 'boolean', description: 'For a minion parked on start_after: true starts it now, its held brief first, then this message. Without it, the message gets an answer and the minion stays parked.' },
+        unpark: { type: 'boolean', description: 'For a parked minion: true unparks it and this message wakes it, with everything held for it (a minion chained on start_after starts now, its brief first). Only when people want it running now; without it the message waits for its unpark or wake.' },
+        start_now: { type: 'boolean', description: 'Old name for unpark.' },
       },
       required: ['ticket_id', 'text'],
     },
@@ -418,7 +419,7 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. (The branch keeps its original name.)",
+    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. State null on a parked minion unparks it: a turn starts that reads what was held for it (a chained one starts now). (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
@@ -1423,10 +1424,11 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'message_ticket': {
       const ticketId = await id(args);
       sharedFilesExist(args.text ?? args.message, 'Send this');
-      // Already started (its leader just shipped) or never parked: say so, and deliver the message anyway.
-      const early = args.start_now === true ? await call('POST', `/api/tickets/${ticketId}/start`, {}).then(() => 'Started early, its brief first. ', (e) => `Not started early: ${e.message}. `) : '';
-      const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}) });
-      return early + (t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`);
+      // Unpark (#718; start_now is its old name): the server unparks it first if it's parked, and this message wakes it.
+      const unpark = args.unpark === true || args.start_now === true;
+      const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}), ...(unpark ? { unpark: true } : {}) });
+      if (t.held === 'parked') return `Held for #${t.number}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken (its deploy wait or chained start). Do not resend it; message_ticket with unpark wakes it now.\n${ticketLine(t)}`;
+      return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
       const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });

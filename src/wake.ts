@@ -301,7 +301,7 @@ export class LiveWaiters {
     const leader = c && this.store.getTicket(c.after);
     if (!c) return null;
     const who = `#${leader?.number ?? c.after} ${leader?.title ?? ''}`;
-    return c.held ? `${who}'s work is ${c.when}, and ${who} was dismissed without it, so only Start now starts you` : `${who}'s work is ${c.when}`;
+    return c.held ? `${who}'s work is ${c.when}, and ${who} was dismissed without it, so only Unpark starts you` : `${who}'s work is ${c.when}`;
   }
 
   /** `ticket`'s held brief, kept in the chain, for a start about to run (Start now); null when none, or one already runs. */

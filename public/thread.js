@@ -408,9 +408,10 @@ export function renderTicketHead() {
   if (t.preview && t.status !== 'closed') {
     actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`../preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
   }
-  // Parked on start_after (#261): a message only gets an answer; this starts the work, its held brief first.
-  if (t.parked_for && t.status !== 'closed' && t.status !== 'running') {
-    actions.push(h('button', { class: 'secondary act-start', title: 'Start it now with its held brief, without waiting for its leader\'s work', onclick: () => api(`api/tickets/${t.id}/start`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Start now'));
+  // Parked (#718): messages wait unread until this, which wakes it with them (one chained on start_after starts, its brief first).
+  if ((t.parked_for || t.state === 'parked') && !coord && t.status !== 'closed' && t.status !== 'running') {
+    const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while parked';
+    actions.push(h('button', { class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unpark'));
   }
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (t.status === 'running' || t.limit_resume_at) {
@@ -615,6 +616,23 @@ function shipLine(t) {
 }
 
 /** Dismiss (closed) or reopen (idle) a minion: shown at once in its head and the list, put back if the server says no. */
+/** Unpark (#718): the row and header drop parked at once; a refusal puts them back with a toast and a retry. */
+function unpark(t) {
+  const was = { state: t.state, parked_for: t.parked_for };
+  const show = (v) => {
+    for (const x of new Set([t, view?.tickets?.get(t.id)])) if (x) Object.assign(x, v);
+    renderSidebar();
+    if (view?.id === t.id) renderTicketHead();
+  };
+  optimistic({
+    sets: `unpark:${t.id}`,
+    apply: () => show({ state: null, parked_for: null }),
+    send: () => api(`api/tickets/${t.id}/unpark`, { method: 'POST', body: {} }),
+    undo: () => t.state === null && show(was),
+    label: `unpark ${threadLabel(t)}`,
+  }).catch(() => {});
+}
+
 function setStatus(t, status) {
   const was = t.status;
   const show = (s) => {
@@ -913,7 +931,7 @@ export function appendEvent(event, scroll = true) {
       if (data.author === me && !data.comment) bubble.sent = { text: data.text ?? '', images: data.images ?? [], files: data.files ?? [] };
       stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
-      if (data.mail) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: data.cold ? 'Held because this chat was idle over 55 minutes, so waking it would re-read its whole context: it is read on the next turn, with a person\'s message or within 3 hours' : "Sent without waking: it is read on this Taskmaster's next turn, whoever starts it" }, 'held mail'));
+      if (data.mail) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: data.parked ? 'Held because this minion is parked: it reads it on its next turn, when someone unparks it or what it waits for comes in' : data.cold ? 'Held because this chat was idle over 55 minutes, so waking it would re-read its whole context: it is read on the next turn, with a person\'s message or within 3 hours' : "Sent without waking: it is read on this Taskmaster's next turn, whoever starts it" }, data.parked ? 'held: parked' : 'held mail'));
       markQueued(bubble, view.ticket);
       nodes.push(bubble);
     }

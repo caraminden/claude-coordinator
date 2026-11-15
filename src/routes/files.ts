@@ -533,7 +533,7 @@ export const fileRoutes: Route[] = [
       const to = ticket ?? (linker && app.store.getTicket(linker.ticket_id)) ?? app.store.getCoordinator(project.id);
       if (!to) throw new HttpError(404, 'No minion or Taskmaster to send this to');
       const { about, text } = commentMessage(to.cwd && abs.startsWith(to.cwd + sep) ? abs.slice(to.cwd.length + 1) : abs, str(body.text, 'Answer', 10_000));
-      app.runner.send(to.id, session.name, text, [], { comment: { path: abs, about } });
+      app.runner.send(to.id, session.name, text, [], { comment: { path: abs, about }, hold: true });
       app.runner.personWrote(to.id);
       // As in the chat: writing to the Taskmaster continues the loop guard for every minion of the scheme.
       for (const t of to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]) app.runner.continueLoop(t.id, session.name);

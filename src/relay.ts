@@ -109,6 +109,6 @@ async function schemeHook({ req, res, app, params }: Ctx, from: ContraptionRow, 
   }
   const title = app.store.getSetting<string>(titleKey(schemeId, person, hook.key));
   const what = title ? `"${title.replace(/\s+/g, ' ')}"` : 'an item';
-  app.runner.send(ticket.id, MANDATE_NAME, `${user.name} ${hook.event} ${what} (key ${m[2]})`, [], { asker: null });
+  app.runner.send(ticket.id, MANDATE_NAME, `${user.name} ${hook.event} ${what} (key ${m[2]})`, [], { asker: null, hold: true });
   json(res, 200, { delivered: true });
 }

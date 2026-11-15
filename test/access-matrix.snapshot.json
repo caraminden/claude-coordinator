@@ -139,6 +139,16 @@
   "m1": "400 kind must be one of build, report, release",
   "m2": "400 kind must be one of build, report, release"
  },
+ "POST /api/client-errors": {
+  "anon": "401 Not logged in",
+  "person": "202",
+  "member": "202",
+  "outsider": "202",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/contraption-read/nope": {
   "anon": "401 Not logged in",
   "person": "403 Only a minion or Taskmaster reads a person's contraption data",

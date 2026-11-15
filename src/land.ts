@@ -10,7 +10,7 @@
 // (tests, a dev copy) or when systemd-run fails, it runs as the server's child, which a restart would
 // cut off: only those count toward the runner's interruptible().
 import { createHash } from 'node:crypto';
-import { readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { HostJobs } from './host-job.ts';
 
@@ -26,6 +26,17 @@ const MAX_OUTPUT = 64 * 1024;
 const KEEP_MS = 14 * 24 * 3600_000;
 /** Said when the wrapper ended without writing a code: its unit was stopped, or a restart cut off a child. */
 export const NO_CODE = '\n[land.sh ended without an exit code: it was stopped, or a restart cut it off. Check `git log main`.]';
+
+const HANDOFF = 'handoff.json';
+
+/** What the minion says about the change it hands off (hand_off_land), for the shipped line. */
+export interface Handoff {
+  summary: string;
+  risk: 'low' | 'medium' | 'high';
+  reason: string;
+  /** With risk high: who gave the go, and when. */
+  go?: string;
+}
 
 /** At most this many test files in one call: a feeder names the few its change touched. */
 const MAX_FILES = 200;
@@ -108,6 +119,59 @@ export class Landings {
     return { output: '', code: null };
   }
 
+  /**
+   * Start land.sh as a hand-off (#706): the minion ends its turn and the server reports how it went
+   * (LandHandoffs). The hand-off sits in the landing's folder, so a restart mid-land (the deploy's own,
+   * most often) still reports it. False when a landing already runs for this minion.
+   */
+  handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff): boolean {
+    const now = this.get(ticketId);
+    if (now && now.code === null) return false;
+    this.start(ticketId, cwd, env, args);
+    writeFileSync(join(this.dir(ticketId), HANDOFF), JSON.stringify({ ...h, args }));
+    return true;
+  }
+
+  /** Minions whose handed-off landing isn't reported yet. */
+  handoffs(): number[] {
+    try {
+      return readdirSync(this.root).filter((n) => /^\d+$/.test(n) && existsSync(join(this.root, n, HANDOFF))).map(Number);
+    } catch {
+      return [];
+    }
+  }
+
+  handoff(ticketId: number): (Handoff & { args: string[] }) | null {
+    try {
+      return JSON.parse(readFileSync(join(this.dir(ticketId), HANDOFF), 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Reported: it no longer counts as a hand-off. */
+  settled(ticketId: number) {
+    try {
+      renameSync(join(this.dir(ticketId), HANDOFF), join(this.dir(ticketId), 'handoff.done.json'));
+    } catch {
+      // Already settled.
+    }
+  }
+
+  /** A person wrote to the minion: if its land is handed off, a clean land then leaves it open for them. */
+  talked(ticketId: number) {
+    if (existsSync(join(this.dir(ticketId), HANDOFF))) writeFileSync(join(this.dir(ticketId), 'talked'), '');
+  }
+
+  wasTalked(ticketId: number): boolean {
+    return existsSync(join(this.dir(ticketId), 'talked'));
+  }
+
+  /** Where a landing's whole output is. */
+  log(ticketId: number): string {
+    return join(this.dir(ticketId), 'output.log');
+  }
+
   /** Landings running as the server's child: the ones a restart would cut off. */
   running(): number {
     return this.jobs.running();
@@ -134,5 +198,145 @@ export class Landings {
         // Still running, or never started: left alone.
       }
     }
+  }
+}
+
+/** What a finished land.sh run means for the minion that handed it off. */
+export interface LandResult {
+  /** live: deployed and live now; restart: deployed, live after a queued restart; landed: done with no deploy
+   * (another scheme's land.sh, or a merge into a build); no-ci: exit 75, CI gave no verdict; failed: anything else. */
+  kind: 'live' | 'restart' | 'landed' | 'no-ci' | 'failed';
+  /** The commit main moved to and its subject, from land.sh's "main is now at" line. */
+  commit?: string;
+  subject?: string;
+}
+
+export function landResult(output: string, code: number): LandResult {
+  if (code === 75) return { kind: 'no-ci' };
+  if (code !== 0) return { kind: 'failed' };
+  const at = [...output.matchAll(/main is now at ([0-9a-f]{7,40}) "(.*)"/g)].pop();
+  const commit = at ? { commit: at[1], subject: at[2] } : {};
+  // deploy.sh's lines: "live now:" (front end reloaded, or the restart went live), "nothing to deploy: the server
+  // already runs" (live already), "restart queued" / "a restart is already queued" / "not live yet" (waiting on it).
+  if (/live now:|nothing to deploy: the server already runs/.test(output)) return { kind: 'live', ...commit };
+  if (/restart queued|restart is already queued|not live yet/.test(output)) return { kind: 'restart', ...commit };
+  return { kind: 'landed', ...commit };
+}
+
+/** The end of land.sh's output for a wake message: its last lines, not the whole 64 KB. */
+export function outputTail(output: string, lines = 60, max = 6000): string {
+  const tail = output.trimEnd().split('\n').slice(-lines).join('\n');
+  return tail.length > max ? `…${tail.slice(-max)}` : tail;
+}
+
+export interface HandoffDeps {
+  landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log'>;
+  store: { getTicket(id: number): { status: string; state: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
+  runner: {
+    emit(id: number, kind: string, data: unknown): unknown;
+    send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean }): void;
+    close(id: number, text: string): Promise<void>;
+    closeAfterTurn(id: number, reason: string | null): boolean;
+    keptOpen(id: number, atCall?: boolean): string | null;
+    isRunning(id: number): boolean;
+    queued(id: number): number;
+    deployPending(id: number): void;
+    deployLive(id: number): boolean;
+    broadcastTicket(id: number): void;
+  };
+  /** Who the server's messages are from. */
+  from: string;
+  /** Park the minion until its scheme's CI runners are back; false when it has none to watch. */
+  runnersBack(id: number, reason: string): boolean;
+  /** Whether the server already runs this minion's branch (a restart that went live before land.sh's end was read). */
+  liveAlready(id: number): Promise<boolean>;
+}
+
+/**
+ * Reports handed-off landings once land.sh ends (#706), with no model call on a clean land: the shipped line,
+ * then a dismissal (live now) or pending-deploy (live after the restart, which dismisses it). A failed land wakes
+ * the minion with the end of land.sh's output, so it fixes it with its own context and hands off again.
+ * poll() runs every few seconds and once at boot, so a land that ended across a restart is still reported.
+ */
+export class LandHandoffs {
+  private busy = new Set<number>();
+  private readonly d: HandoffDeps;
+
+  constructor(d: HandoffDeps) {
+    this.d = d;
+  }
+
+  async poll() {
+    for (const id of this.d.landings.handoffs()) {
+      if (this.busy.has(id)) continue;
+      const run = this.d.landings.get(id);
+      const h = this.d.landings.handoff(id);
+      if (!h || !run || run.code === null) continue;
+      this.busy.add(id);
+      try {
+        await this.settle(id, run, h);
+        this.d.landings.settled(id);
+      } catch (err: any) {
+        console.error(`Reporting minion ${id}'s land failed: ${err?.message ?? err}`);
+      } finally {
+        this.busy.delete(id);
+      }
+    }
+  }
+
+  private async settle(id: number, run: Landing, h: Handoff & { args: string[] }) {
+    const { store, runner, from } = this.d;
+    const r = landResult(run.output, run.code!);
+    const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
+    if (r.kind === 'failed' || (r.kind === 'no-ci' && !this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))) {
+      runner.send(id, from, `Your handed-off land didn't go through: tools/land.sh exited ${run.code} (main only moved if its output says so). Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`);
+      return;
+    }
+    if (r.kind === 'no-ci') {
+      store.updateTicket(id, { state: 'parked', note: 'land parked: waiting for CI runners' });
+      runner.broadcastTicket(id);
+      runner.emit(id, 'note', { text: `The land parked: CI gave no verdict (land.sh exit 75), most likely because the runners' machine is off. This minion is woken once the scheme's runners are back, to hand it off again.` });
+      return;
+    }
+    const into = h.args[0] === '--into' ? h.args[1] : null;
+    const what = r.commit ? `${r.commit} "${r.subject}"` : into ? `into ${into}` : 'the branch';
+    const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build lands.` : 'Landed.';
+    const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
+    runner.emit(id, 'note', { text: `Shipped ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}` });
+    const t = store.getTicket(id);
+    if (!t || t.status === 'closed') return;
+    if (r.kind === 'restart') {
+      store.updateTicket(id, { state: 'pending-deploy', note: 'deployed, live after the restart' });
+      runner.deployPending(id);
+      runner.broadcastTicket(id);
+    }
+    // A person wrote while it was in line: the minion answers them before it goes.
+    if (this.d.landings.wasTalked(id)) {
+      if (r.kind !== 'restart') {
+        store.updateTicket(id, { state: null, note: null });
+        runner.broadcastTicket(id);
+      }
+      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`);
+      return;
+    }
+    if (r.kind === 'restart') {
+      // Its restart may have gone live before this read land.sh's end: then no live report will come for it.
+      if (await this.d.liveAlready(id)) runner.deployLive(id);
+      return;
+    }
+    const kept = runner.keptOpen(id, true);
+    if (kept) {
+      store.updateTicket(id, { state: null, note: null });
+      runner.broadcastTicket(id);
+      runner.emit(id, 'note', { text: `It landed, but ${kept}, so this minion stays open.` });
+      return;
+    }
+    const why = r.kind === 'live' ? 'Landed and live' : 'Landed';
+    if (runner.isRunning(id) || runner.queued(id)) {
+      if (!runner.closeAfterTurn(id, `${why}.`)) runner.emit(id, 'note', { text: `${why}; this minion has a turn running or queued, so it stays open.` });
+      return;
+    }
+    store.updateTicket(id, { state: null, note: null });
+    await runner.close(id, `${why}, so the server dismissed this minion.`);
   }
 }

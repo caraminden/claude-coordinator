@@ -1032,6 +1032,15 @@ function labelFields(args: any) {
 const TAG_RETIRED = 'tag is retired: set `type` with set_properties (or create_ticket\'s properties) instead. Until then an old tag still sets the type when none is given.';
 const tagNote = (args: any) => (args.tag ? `\n${TAG_RETIRED}` : '');
 
+/** land.sh's forms, for the land and hand_off_land tools (landArgs in src/land.ts checks them). */
+const LAND_PROPS = {
+  into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "A feeder's merge into its build, or the build minion's merge of main: the build branch, build/<n> (land.sh --into build/<n>). With files, or with full: true" },
+  files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files this change touched, as paths in your worktree (e.g. test/land-tool.test.ts); only these run. None only for a docs-only change' },
+  full: { type: 'boolean', description: 'With into, no files: the build minion takes main in and the whole suite runs (land.sh --into build/<n> --full)' },
+  build: { type: 'boolean', description: "The build minion's land of its build on main, with its branch at the build's tip (land.sh --build). Nothing else with it" },
+  fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: lands it anyway (LAND_FIX=1 for land.sh)' },
+};
+
 const THREAD_TOOLS = [
   {
     name: 'set_thread_status',
@@ -1094,21 +1103,28 @@ const THREAD_TOOLS = [
     description: `Park until this scheme's CI runners are back: after land.sh exits 75 (CI gave no verdict, nearly always because the machine the runners run on is off), call this, set state parked and end your turn. ${APP_NAME} checks the scheme's GitHub runners every 5 minutes and messages you once one labelled <scheme-slug>-ci, <scheme-slug>-ci-linux or <scheme-slug>-desktop is online, so you can run land again. If it can't read the runners with the scheme's GitHub login, it says so at its next check instead. Woken once, then forgotten; a second call replaces the first.`,
     inputSchema: { type: 'object', properties: { reason: { type: 'string', maxLength: 1000, description: 'What to do once they are back (at most 1,000 characters); it comes back in the wake message, e.g. "run tools/land.sh again"' } }, required: ['reason'] },
   },
+  {
+    name: 'hand_off_land',
+    description:
+      `Hand your land to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed. Commit everything first: uncommitted changes are refused at once. On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}. If it fails (a conflict, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state. Same arguments as tools/land.sh's forms.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', maxLength: 300, description: 'What ships, in one line, for the shipped line (at most 300 characters)' },
+        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label" },
+        risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
+        go: { type: 'string', maxLength: 200, description: 'With risk high, required: who gave the go to land and when, e.g. "Cara, 3:05 PM PST"' },
+        ...LAND_PROPS,
+      },
+      required: ['summary', 'risk', 'risk_reason'],
+    },
+  },
   ...(IN_CONTAINER
     ? [{
       name: 'land',
       description:
-        `Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. ${DEPLOYS ? 'It rebases onto main, runs the tests, fast-forwards main and deploys' : "It lands the branch as the scheme's land.sh does"}, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place). With no arguments it is a plain \`tools/land.sh\`. A build's minions pass its forms: \`tools/land.sh --into build/<n> <test files>\` is { into: "build/<n>", files: [...] }, \`tools/land.sh --into build/<n> --full\` is { into: "build/<n>", full: true }, and \`tools/land.sh --build\` is { build: true }. A call made while your last landing still runs waits on that one, whatever its arguments.`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "A feeder's merge into its build, or the build minion's merge of main: the build branch, build/<n> (land.sh --into build/<n>). With files, or with full: true" },
-          files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files this change touched, as paths in your worktree (e.g. test/land-tool.test.ts); only these run. None only for a docs-only change' },
-          full: { type: 'boolean', description: 'With into, no files: the build minion takes main in and the whole suite runs (land.sh --into build/<n> --full)' },
-          build: { type: 'boolean', description: "The build minion's land of its build on main, with its branch at the build's tip (land.sh --build). Nothing else with it" },
-          fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: lands it anyway (LAND_FIX=1 for land.sh)' },
-        },
-      },
+        `Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't. To land and end your turn, use hand_off_land; this one is for when you need land.sh's output in this turn. Commit everything first. ${DEPLOYS ? 'It rebases onto main, runs the tests, fast-forwards main and deploys' : "It lands the branch as the scheme's land.sh does"}, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place). With no arguments it is a plain \`tools/land.sh\`. A build's minions pass its forms: \`tools/land.sh --into build/<n> <test files>\` is { into: "build/<n>", files: [...] }, \`tools/land.sh --into build/<n> --full\` is { into: "build/<n>", full: true }, and \`tools/land.sh --build\` is { build: true }. A call made while your last landing still runs waits on that one, whatever its arguments.`,
+      inputSchema: { type: 'object', properties: LAND_PROPS },
     }]
     : []),
   ...(DEPLOYS
@@ -1500,6 +1516,13 @@ async function runTool(name: string, args: any): Promise<string> {
       const body: Record<string, unknown> = {};
       for (const k of ['what', 'sql', 'unit', 'lines', 'since', 'grep'] as const) if (args[k] !== undefined) body[k] = args[k];
       return (await call('POST', '/api/host-check', body)).output;
+    }
+    case 'hand_off_land': {
+      const body: Record<string, unknown> = {};
+      for (const k of ['summary', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build'] as const) if (args[k] !== undefined) body[k] = args[k];
+      if (args.fix === true) body.fix = true;
+      await call('POST', `/api/tickets/${TICKET}/land/handoff`, body);
+      return 'Handed off: the server runs tools/land.sh now, behind any landings in line. End your turn now with a short reply and set no state: the server posts the shipped line and dismisses this minion (or sets pending-deploy) on a clean land, or wakes you with the end of its output if it fails.';
     }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).

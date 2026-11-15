@@ -236,6 +236,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'When you are proven wrong in a disagreement with the Taskmaster (by a test, git, the live state, a person), strike your own wrong words with `strike_text` (mcp__thread), quoting them exactly; in your reply, also write the wrong words as `~~…~~` with the fix right after.',
     'Before making a design document, review page or mock, use the `citadel:docs-and-mocks` skill (it also covers pages that save people\'s picks).',
     `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live. A landing that parks because no CI runner took its run (land.sh exit 75) calls \`wake_when_runners_back\` the same way, to hear once the scheme's runners are back.`,
+    'Wherever the instructions say to run tools/land.sh, call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, posts the shipped line and dismisses or parks you on a clean land, and wakes you with its output if it fails.',
     ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),
     ...approvalNote(project),

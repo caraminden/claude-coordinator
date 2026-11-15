@@ -1,5 +1,6 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { isAbsolute, join, sep } from 'node:path';
@@ -15,7 +16,7 @@ import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
 import { hostCheck } from '../host-check.ts';
-import { landArgs } from '../land.ts';
+import { landArgs, type Handoff } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
 import { repoSlug } from '../prlinks.ts';
@@ -838,6 +839,36 @@ export const ticketRoutes: Route[] = [
         throw new HttpError(400, err.message);
       }
       return json(res, 202, app.landings.start(ticket.id, ticket.cwd, env, args));
+    },
+  },
+  {
+    // hand_off_land (#706): the server runs tools/land.sh and reports it (LandHandoffs in src/land.ts), so the minion ends its turn now.
+    method: 'POST', path: '/api/tickets/:ticket/land/handoff', who: ['minion'], refuse: 'Only the minion itself can land its branch',
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      const body = (await readJson(req)) ?? {};
+      if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree lands with tools/land.sh');
+      if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
+      const h: Handoff = { summary: str(body.summary, 'Summary', 300), risk: oneOf(body.risk || undefined, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300) };
+      if (h.risk === 'high') {
+        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, 'A high-risk change lands only on a person\'s go: name who gave it and when in go, or ask with a merge card first');
+        h.go = str(body.go, 'Go', 200);
+      }
+      let args: string[];
+      try {
+        args = landArgs(body, ticket.cwd);
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      // As land.sh's own first check, but now, before the minion ends its turn on a land that would refuse at once.
+      const dirty = await new Promise<string>((done) => execFile('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ticket.cwd! }, (err, out) => done(err ? `git status failed: ${err.message}` : out.trim())));
+      if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);
+      const env = app.runner.hostEnv(ticket, String(req.headers.authorization).replace(/^Bearer /, ''));
+      if (body.fix === true) env.LAND_FIX = '1';
+      if (!app.landings.handOff(ticket.id, ticket.cwd, env, args, h)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
+      app.store.updateTicket(ticket.id, { state: 'outside', note: 'landing: handed to the server' });
+      app.runner.broadcastTicket(ticket.id);
+      return json(res, 202, { ok: true });
     },
   },
   {

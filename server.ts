@@ -13,7 +13,7 @@ import { versionIcons } from './src/icons.ts';
 import { claudeRefusal, lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { CodexLink } from './src/codex-link.ts';
-import { Landings } from './src/land.ts';
+import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
@@ -47,9 +47,9 @@ import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
-import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
+import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
-import { CiHealth, type Run } from './src/ci-health.ts';
+import { addRunnerWaiter, CiHealth, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
@@ -324,6 +324,7 @@ setInterval(() => presence.sweep(), 15_000).unref();
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
+runner.onPersonWrote = (id) => landings.talked(id);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
 // run in units of their own as landings do; only ones that fell back to a child count.
 runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running();
@@ -720,6 +721,18 @@ const ciHealth = new CiHealth(store, {
   },
 });
 if (!BOOT_CHECK) ciHealth.start();
+// Handed-off lands (#706): the server reports each once its land.sh ends, with no turn on a clean land (src/land.ts).
+const landHandoffs = new LandHandoffs({
+  landings, store, runner, from: APP_NAME,
+  runnersBack: (id, reason) => {
+    const project = store.getProject(store.getTicket(id)?.project_id ?? 0);
+    if (!project || !repoSlug(project.repo_url ?? null) || !runnerLabel(project.name)) return false;
+    addRunnerWaiter(store, id, reason);
+    return true;
+  },
+  liveAlready: async (id) => (await waiters.pendingLive()).includes(id),
+});
+if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', () => landHandoffs.poll()), 5_000).unref();
 // GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).
 const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined), log: (line) => console.log(line) });
 if (!BOOT_CHECK) setInterval(() => void artifactSweep.tick().catch((err) => console.error(`Artifact sweep: ${err?.message ?? err}`)), 60 * 60_000).unref();

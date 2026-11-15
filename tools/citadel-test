@@ -5,6 +5,8 @@
 # limit (default 300 s), and prints a line of counts, then each failure's file, name and assertion diff, and the leak
 # guard's complaint if any. The full output goes to $TMPDIR/citadel-test.log; --full prints it too. --name keeps the
 # tests whose name matches (node's --test-name-pattern). Exits with the tests' status, 124 at the time limit.
+# It also runs the repo-wide tests in tools/always-tests.txt (a change anywhere can break them), counted as "+N
+# repo-wide"; --name does not filter those (they run in a second pass).
 # The full suite is the land gate's job (tools/land.sh), so it refuses to run without files or on a folder.
 set -uo pipefail
 say() { echo "citadel-test: $*" >&2; }
@@ -34,6 +36,18 @@ for f in "${files[@]}"; do
   [ -f "$f" ] || { say "no such file: $f"; exit 2; }
 done
 
+# The repo-wide tests: the list's files not already named. CITADEL_TEST_ALWAYS points at another list (test/citadel-test.test.ts).
+extra=()
+while IFS= read -r line; do
+  case $line in ''|'#'*) continue ;; esac
+  [ -f "$root/$line" ] || { say "tools/always-tests.txt names $line, which doesn't exist"; exit 2; }
+  dup=; for f in "${files[@]}"; do [ "$(realpath "$f")" = "$(realpath "$root/$line")" ] && dup=1; done
+  [ -n "$dup" ] || extra+=("$root/$line")
+done <"${CITADEL_TEST_ALWAYS:-$root/tools/always-tests.txt}"
+# With --name the pattern would skip the repo-wide files' tests, so they run apart; otherwise they join the run.
+second=(); export CITADEL_TEST_EXTRA=0
+if [ ${#opts[@]} -gt 0 ]; then second=("${extra[@]}"); else files+=("${extra[@]}"); export CITADEL_TEST_EXTRA=${#extra[@]}; fi
+
 log=${TMPDIR:-/tmp}/citadel-test.log
 err=$(mktemp) out=$(mktemp)
 trap 'rm -f "$err" "$out"' EXIT
@@ -44,6 +58,15 @@ timeout -k 10 "$limit" "$root/tools/citadel-node" --test --test-force-exit --tes
   --test-reporter=spec --test-reporter-destination="$log" --test-reporter="$reporter" --test-reporter-destination=stdout \
   "${opts[@]}" "${files[@]}" >"$out" 2>"$err"
 status=$?
+if [ ${#second[@]} -gt 0 ] && [ $status -ne 124 ]; then
+  out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2"' EXIT
+  timeout -k 10 "$limit" "$root/tools/citadel-node" --test --test-force-exit --test-global-setup="$root/test/leak-guard.ts" \
+    --test-reporter=spec --test-reporter-destination="$log.2" --test-reporter="$reporter" --test-reporter-destination=stdout \
+    "${second[@]}" >"$out2" 2>>"$err"
+  s2=$?; cat "$log.2" >>"$log"; rm -f "$log.2"
+  { echo; echo "repo-wide tests (--name doesn't filter them):"; cat "$out2"; } >>"$out"
+  [ $status -eq 0 ] && status=$s2
+fi
 cat "$err" >>"$log"
 [ -n "$full" ] && cat "$log" && echo
 cat "$out"

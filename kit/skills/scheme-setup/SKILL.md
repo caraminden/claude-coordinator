@@ -109,7 +109,7 @@ exception is Real-hardware ledger: only a native-app scheme has that line.
 | How a change ships | The shipping answer in one line, and the pusher of main | self-review, guard.sh, pre-push | never none: ask (above) |
 | UI rules | Where the UI rules live. Your own prompt carries the scheme instructions: name their UI section if they have one | retro | retro checks no UI rules |
 | Glossary | Path of the glossary file | domain-modeling, diagnosing-bugs, improve-codebase-architecture | domain-modeling creates `GLOSSARY.md` when first needed |
-| Decisions log (ADRs) | Path and format | bug-fixing, domain-modeling, fresh-eyes, retro, improve-codebase-architecture | first ADR goes in `docs/adr/` |
+| Decisions log (ADRs) | Path and format. A single file that every minion appends to (not one file per decision) gets `<path> merge=union` in `.gitattributes`, so two appends rebase without a conflict; only for an append-only log, never JSON or code (union would corrupt it) | bug-fixing, domain-modeling, fresh-eyes, retro, improve-codebase-architecture | first ADR goes in `docs/adr/` |
 | Retros | Retro folder | retro | `docs/retros/` |
 | Bug classes of its own | The stack's recurring bug kinds beyond bug-fixing's (a Godot signal wired twice, a stale save version) | bug-fixing | bug-fixing's classes only |
 | Agent instructions | Prompts, guides and tool descriptions an agent reads beyond the kit, `CLAUDE.md`, `AGENTS.md` and `.claude/` (an app's system prompt, a guides folder) | self-review (Agent instructions lens) | those alone |

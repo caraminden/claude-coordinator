@@ -1,0 +1,7 @@
+# Test files tools/citadel-test adds to every run, whatever files it is given (#768). Put a test here when it is fast
+# and pins a repo-wide snapshot or budget that a change anywhere can break (a route, an MCP tool, a prompt line, a
+# schema bump, a pipeline path), so the failure shows before the land, not in it. One path per line.
+test/access-matrix.test.ts
+test/prompt-budget.test.ts
+test/schema-compat.test.ts
+test/pipeline-files.test.ts

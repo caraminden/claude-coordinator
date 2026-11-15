@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { after, test } from 'node:test';
 import { scriptEnv } from './script-env.ts';
 
@@ -20,9 +20,12 @@ function file(name: string, body: string): string {
   return path;
 }
 
-function run(args: string[]): Promise<{ code: number | null; out: string; ms: number }> {
+const noList = join(tmp, 'none.txt');
+writeFileSync(noList, '# no repo-wide files\n');
+
+function run(args: string[], always = noList): Promise<{ code: number | null; out: string; ms: number }> {
   const start = Date.now();
-  const child = spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined }), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (b) => (out += b));
   child.stderr.on('data', (b) => (out += b));
@@ -90,5 +93,39 @@ test('no files, or a folder, is refused: the full suite is the land gate\'s', as
     const r = await run(args);
     assert.equal(r.code, 2, r.out);
     assert.match(r.out, /land gate's job/);
+  }
+});
+
+// #768: the repo-wide tests ride along, so their failures show before the land.
+test('the repo-wide list is added, counted, deduplicated, and a failure in it fails the run', async () => {
+  const wide = file('wide.test.ts', `test('wide', () => {});\ntest('wide2', () => {});`);
+  const mine = file('mine.test.ts', `test('mine', () => {});`);
+  const list = join(tmp, 'list.txt');
+  writeFileSync(list, `# comment\n\n${relative(repo, wide)}\n`);
+  let r = await run([mine], list);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /^✔ 3 passed, 0 failed \(\+1 repo-wide files\) in/);
+  r = await run([mine, wide], list);
+  assert.match(r.out, /^✔ 3 passed, 0 failed \(\+0 repo-wide|^✔ 3 passed, 0 failed in/, 'a file named twice runs once');
+  const bad = file('bad.test.ts', `test('broken', () => { throw new Error('repo-wide break'); });`);
+  writeFileSync(list, `${relative(repo, bad)}\n`);
+  r = await run([mine], list);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /bad\.test\.ts.*broken/);
+});
+
+test('--name filters only the file given; the repo-wide files run apart, unfiltered', async () => {
+  const wide = file('wide2.test.ts', `test('alpha', () => {});\ntest('beta', () => {});`);
+  const mine = file('mine2.test.ts', `test('keep me', () => {});\ntest('not me', () => { throw new Error('ran'); });`);
+  const list = join(tmp, 'list2.txt');
+  writeFileSync(list, `${relative(repo, wide)}\n`);
+  const r = await run([mine, '--name', 'keep'], list);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /^✔ 1 passed, 0 failed in[^]*repo-wide tests[^]*✔ 2 passed, 0 failed in/);
+});
+
+test('the real list names files that exist', () => {
+  for (const l of readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8').split('\n')) {
+    if (l && !l.startsWith('#')) assert.ok(existsSync(join(repo, l)), l);
   }
 });

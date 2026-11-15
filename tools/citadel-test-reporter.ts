@@ -62,7 +62,7 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
     const c = total?.counts ?? { passed, failed: failures.length, cancelled: 0, skipped: 0, todo: 0 };
     const skipped = c.skipped + c.todo;
     const failed = c.failed + c.cancelled;
-    const counts = `${c.passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}`;
+    const counts = `${c.passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}${process.env.CITADEL_TEST_EXTRA && process.env.CITADEL_TEST_EXTRA !== '0' ? ` (+${process.env.CITADEL_TEST_EXTRA} repo-wide files)` : ''}`;
     let text = still
       ? `✖ stopped before the end (${counts} by then). Still running:\n${still
           .map((t) => {

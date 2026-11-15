@@ -10,7 +10,8 @@ import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
 import { agentToken, bootServer } from './helpers.ts';
-import { imageEstimate, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt } from '../src/openrouter.ts';
+import { imageEstimate, mediaCode, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt } from '../src/openrouter.ts';
+import { decodePng, encodePng } from '../src/png-matte.ts';
 
 // OpenRouter (#717): each person's own key and monthly cap. Every call is booked at its worst case
 // before the request, so a call that could pass the cap never reaches OpenRouter, and the key never
@@ -42,7 +43,7 @@ const GPT_IMAGE = [{
 }];
 const MODEL_LIST = [
   { id: 'bytedance-seed/seed-audio-1-0', pricing: { prompt: '0', completion: '0.0025' }, description: 'Seed Audio' },
-  { id: 'google/lyria-3-clip-preview', pricing: { prompt: '0', completion: '0' }, description: '30 second duration clips are priced at $0.04 per clip. Lyria 3...' },
+  { id: 'google/lyria-3-clip-preview', pricing: { prompt: '0', completion: '0' }, description: '30 second duration clips are priced at $0.04 per clip. Lyria 3...', supported_parameters: ['seed'] },
   { id: 'nobody/unpriced', pricing: { prompt: '0', completion: '0' }, description: 'No price here' },
   { id: 'google/some-tts', pricing: { prompt: '0.000001', completion: '0.000009' }, description: 'Speech, priced per token' },
 ];
@@ -326,4 +327,77 @@ test('through the server: a person connects on their account page and their mini
   } finally {
     await srv.stop();
   }
+});
+
+// A transparent background (#732): native where every endpoint lists it, else a matte over black.
+const SEEDREAM = [{ ...KLEIN[0], supported_parameters: { ...KLEIN[0].supported_parameters, background: { type: 'enum', values: ['transparent', 'opaque'] } } }];
+const realPng = () => encodePng(2, 1, Buffer.from([0, 0, 0, 255, 128, 0, 0, 255]));
+const imageAnswer = (bytes: Buffer) => () => Response.json({ id: 'gen-1', data: [{ b64_json: bytes.toString('base64'), media_type: 'image/png' }], usage: { cost: 0.0091 } });
+
+test('transparent on a model without it: black is asked for and taken out on the server; the note says so', async () => {
+  const { or, fake, cwd, ctx } = await setup({ answer: { '/images': imageAnswer(realPng()) } });
+  const r = await or.tool('generate_image', { prompt: 'a frost glow', out: 'glow.png', background: 'transparent' }, ctx);
+  const sent = fake.calls.find((c) => c.url === '/images')!.body;
+  assert.match(sent.prompt, /^a frost glow\n\n.*black/s);
+  assert.equal(sent.background, undefined);
+  assert.deepEqual([...decodePng(readFileSync(join(cwd, 'glow.png')))!.rgba], [0, 0, 0, 0, 255, 0, 0, 128]);
+  assert.equal(JSON.parse(readFileSync(join(cwd, 'glow.png.json'), 'utf8')).background, 'transparent (matte)');
+  assert.equal(r.warnings, undefined);
+  await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'x.webp', background: 'transparent' }, ctx), (e: HttpError) => e.status === 400 && /\.png/.test(e.message));
+  await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'x.png', background: 'white' }, ctx), /"transparent" or left out/);
+  assert.equal(fake.calls.filter((c) => c.url === '/images').length, 1);
+});
+
+test('transparent on a model without it whose answer the matte cannot read keeps the image and warns', async () => {
+  const { or, cwd, ctx } = await setup();
+  const r = await or.tool('generate_image', { prompt: 'x', out: 'x.png', background: 'transparent' }, ctx);
+  assert.deepEqual(readFileSync(join(cwd, 'x.png')), PNG);
+  assert.match(r.warnings![0], /keeps its black background/);
+  assert.equal(JSON.parse(readFileSync(join(cwd, 'x.png.json'), 'utf8')).background, 'black (the matte could not read it)');
+});
+
+test('transparent on a model with it is passed through, untouched', async () => {
+  const { or, fake, cwd, ctx } = await setup({ answer: { '/images/models/bytedance-seed/seedream-5-0-flash/endpoints': () => Response.json({ endpoints: SEEDREAM }) } });
+  await or.tool('generate_image', { prompt: 'an ice shard icon', out: 'ice.png', model: 'bytedance-seed/seedream-5-0-flash', background: 'transparent' }, ctx);
+  const sent = fake.calls.find((c) => c.url === '/images')!.body;
+  assert.equal(sent.prompt, 'an ice shard icon');
+  assert.equal(sent.background, 'transparent');
+  assert.deepEqual(readFileSync(join(cwd, 'ice.png')), PNG);
+  assert.equal(JSON.parse(readFileSync(join(cwd, 'ice.png.json'), 'utf8')).background, 'transparent (native)');
+});
+
+test('a music seed goes to a model that lists one; an effect model or a bad seed is refused before anything is spent', async () => {
+  const { or, fake, cwd, ctx } = await setup();
+  await or.tool('generate_audio', { kind: 'music', prompt: 'calm', out: 'calm.mp3', seed: 42 }, ctx);
+  assert.equal(fake.calls.find((c) => c.url === '/chat/completions')!.body.seed, 42);
+  assert.equal(JSON.parse(readFileSync(join(cwd, 'calm.mp3.json'), 'utf8')).seed, 42);
+  await assert.rejects(or.tool('generate_audio', { kind: 'effect', prompt: 'x', out: 'x.mp3', seed: 1 }, ctx), /takes no seed/);
+  await assert.rejects(or.tool('generate_audio', { kind: 'music', prompt: 'x', out: 'y.mp3', seed: -1 }, ctx), /whole number/);
+  await assert.rejects(or.tool('generate_audio', { kind: 'music', prompt: 'x', out: 'z.mp3', seed: 1.5 }, ctx), /whole number/);
+  assert.ok(!fake.calls.some((c) => c.url === '/audio/speech'));
+  assert.equal(fake.calls.filter((c) => c.url === '/chat/completions').length, 1);
+});
+
+test('refusals carry a stable code for apps; a call with no minion or scheme is still booked', async () => {
+  const code = (p: Promise<unknown>) => p.then(() => 'ok', mediaCode);
+  const fake = fakeOpenRouter();
+  const loose = new OpenRouter(store, creds, fake.fetch, 'https://or.test/api/v1');
+  store.deleteCredential(josh.id, 'openrouter');
+  assert.equal(await code(loose.tool('generate_image', { prompt: 'x', out: 'x.png' }, { userId: josh.id, ticketId: null, projectId: null, roots: [root] })), 'openrouter_not_connected');
+
+  let { or, ctx } = await setup({ cap: 0.01 });
+  assert.equal(await code(or.tool('generate_image', { prompt: 'x', out: 'x.png', resolution: '4K' }, ctx)), 'over_cap');
+  ({ or, ctx } = await setup({ cap: 100 }));
+  assert.equal(await code(or.tool('generate_image', { prompt: 'x', out: 'x.png', model: 'openai/gpt-image-2', n: 4 }, ctx)), 'over_call_limit');
+  assert.equal(await code(or.tool('generate_image', { prompt: 'x', out: '../x.png' }, ctx)), 'bad_request');
+  ({ or, ctx } = await setup({ answer: { '/images': () => Response.json({ error: { message: 'Insufficient credits' } }, { status: 402 }) } }));
+  assert.equal(await code(or.tool('generate_image', { prompt: 'x', out: 'x.png' }, ctx)), 'openrouter_refused');
+  ({ or, ctx } = await setup({ answer: { '/images': () => Promise.reject(new TypeError('fetch failed')) } }));
+  assert.equal(await code(or.tool('generate_image', { prompt: 'x', out: 'x.png' }, ctx)), 'failed');
+  ({ or, ctx } = await setup({ answer: { '/images': () => Response.json({ error: { message: 'User not found' } }, { status: 401 }) } }));
+  assert.equal(await code(or.tool('generate_image', { prompt: 'x', out: 'x.png' }, ctx)), 'openrouter_key_refused');
+
+  ({ or, ctx } = await setup());
+  await or.tool('generate_image', { prompt: 'x', out: 'x.png' }, { ...ctx, ticketId: null, projectId: null });
+  assert.deepEqual(rows().map((r) => [r.ticket_id, r.project_id, r.status]), [[null, null, 'ok']]);
 });

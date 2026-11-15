@@ -111,6 +111,17 @@ take().then((m) => {
     out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: 'Done.', usage: {} });
     return;
   }
+  if (prompt.includes('draw')) {
+    // A media turn (#732): calls Citadel's media server as claude would, with the URL and token it was given.
+    const srv = JSON.parse(read(opt('--mcp-config'))).mcpServers.citadel;
+    const rpc = (body) => fetch(srv.url, { method: 'POST', headers: { ...srv.headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', ...body }) });
+    return rpc({ method: 'notifications/initialized' })
+      .then((r) => rpc({ id: 1, method: 'tools/call', params: { name: 'generate_image', arguments: { prompt: 'a frost glow', out: 'frost.png' } } }).then((c) => c.json()).then((c) => [r.status, c]))
+      .then(([note, c]) => {
+        out({ type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: note + ' ' + c.result.content[0].text }] } });
+        out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: '', usage: {} });
+      });
+  }
   out({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } });
   out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Moved ' } } });
   out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'it' } } });
@@ -589,6 +600,25 @@ test('a turn gets the person\'s online machines and a note on them, unless it as
   }
 });
 
+test('a turn that asks for media (#732) gets Citadel\'s own media server with its turn token; others never see it', async () => {
+  turns.apiUrl = () => 'http://127.0.0.1:4321'; // server.ts sets Citadel's own address
+  await turn(mandate, { session: 'media', mcp: [{ name: 'mandate', path: '/mcp' }], media: true, machines: false });
+  turns.apiUrl = () => '';
+  let run = lastRun();
+  const servers = JSON.parse(run.mcp).mcpServers;
+  assert.deepEqual(Object.keys(servers), ['mandate', 'citadel']);
+  assert.equal(servers.citadel.url, 'http://127.0.0.1:4321/api/contraption-media/mcp');
+  assert.match(servers.citadel.headers.Authorization, /^Bearer cmt_/);
+  assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate', 'mcp__citadel']);
+  // The token only works while its turn runs.
+  assert.equal(turns.mediaTurn(servers.citadel.headers.Authorization.slice(7)), null);
+
+  await turn(mandate, { session: 'media', mcp: [{ name: 'mandate', path: '/mcp' }], machines: false });
+  run = lastRun();
+  assert.deepEqual(Object.keys(JSON.parse(run.mcp).mcpServers), ['mandate']);
+  assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate']);
+});
+
 test('requests are checked before anything runs', () => {
   const bad = (body: object) => assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'p', ...body }, mandate), (e: any) => e.code === 'bad_request');
   bad({ person: 'one' });
@@ -602,12 +632,16 @@ test('requests are checked before anything runs', () => {
   bad({ agents: { max: 50 } });
   bad({ webSearch: 'yes' });
   bad({ machines: 'no' });
+  bad({ media: 'yes' });
+  bad({ media: true, mcp: [{ name: 'citadel', path: '/mcp' }] }); // the name media takes
   bad({ compactWindow: 5 });
   bad({ timeoutSec: 0 });
   bad({ timeoutSec: 901 }); // a running turn holds back Citadel's restarts
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p', agents: false }, mandate).agents, false);
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).webSearch, false, 'off unless asked');
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).machines, true, 'on unless turned off');
+  assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).media, false, 'off unless asked');
+  assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p', mcp: [{ name: 'citadel', path: '/mcp' }] }, mandate).mcp.length, 1, 'an app server may be called citadel without media');
   assert.deepEqual(parseTurn({ person: 1, session: 's', prompt: 'p', agents: { max: 3 } }, mandate).agents, { max: 3, model: null });
 });
 
@@ -659,6 +693,27 @@ test('the API is only for a contraption\'s own server on this machine, with its 
   assert.equal((await steer({ text: 'Hi.' })).status, 400);
   assert.equal((await api(`/api/contraptions/sessions/acolyte?person=${me.id}`, { method: 'DELETE' })).status, 200);
   assert.deepEqual(await (await api(`/api/contraptions/sessions?person=${me.id}`)).json(), []);
+  // Media (#732): a person with no OpenRouter gets the coded refusal in the stream and the agent's text; nothing is written.
+  res = await api('/api/contraptions/turns', { method: 'POST', body: JSON.stringify({ person: me.id, session: 'artist', prompt: 'draw', media: true }) });
+  const blocks = (await res.text()).trim().split('\n\n').map((b) => ({ event: b.split('\n')[0].replace('event: ', ''), data: JSON.parse(b.split('\n')[1].replace('data: ', '')) }));
+  const media = blocks.filter((b) => b.event === 'media');
+  assert.equal(media.length, 1);
+  assert.equal(media[0].data.ok, false);
+  assert.equal(media[0].data.code, 'openrouter_not_connected');
+  assert.match(blocks.filter((b) => b.event === 'text').map((b) => b.data.delta).join(''), /^202 openrouter_not_connected: /);
+  assert.deepEqual(await (await api(`/api/contraptions/media?person=${me.id}`)).json(), { files: [] });
+  assert.equal((await api(`/api/contraptions/media/frost.png?person=${me.id}`)).status, 404);
+  assert.equal((await api(`/api/contraptions/media/..%2F..%2Fcoordinator.db?person=${me.id}`)).status, 400);
+  assert.equal((await api('/api/contraptions/media?person=999')).status, 403);
+  const standing = () => api(`/api/contraptions/openrouter?person=${me.id}`).then((r) => r.json());
+  assert.deepEqual(await standing(), { connected: false, account_url: null }, 'no scheme yet to hold an account page');
+  const scheme = (await srv.call('/api/projects', { name: 'Peek', source: 'none' })).data;
+  assert.deepEqual(await standing(), { connected: false, account_url: `/c/#/p/${scheme.id}/account` });
+  // The media server takes only a running media turn's token.
+  const mcp = (headers: Record<string, string>) => fetch(srv.base + '/api/contraption-media/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' });
+  assert.equal((await mcp({})).status, 401);
+  assert.equal((await mcp({ Authorization: 'Bearer cmt_nope' })).status, 401);
+  assert.equal((await mcp({ Authorization: `Bearer ${key}` })).status, 401, 'nor the contraption key');
   // Turns run in the server's own process: the health check counts them for a restart to wait on.
   assert.equal((await (await fetch(`${srv.base}/api/health`)).json()).interruptible, 0);
 });

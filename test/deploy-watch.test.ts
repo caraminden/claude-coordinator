@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +8,7 @@ import vm from 'node:vm';
 import { HEALTH_MAX_ROWS, Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
 import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, gitCommits, RATE, subjectTicket } from '../src/deploy-watch.ts';
+import { git } from './git.ts';
 
 // The post-deploy watch (#724): readings before and after each deploy, a wake for whoever shipped a regression.
 const root = mkdtempSync(join(tmpdir(), 'deploy-watch-'));
@@ -185,19 +185,18 @@ test('a window cut under five minutes by the next deploy compares nothing', asyn
 test("git attribution: a Shipped note on a build's merge owns the commits merged in with it", async () => {
   const { store, a, b, scheme } = setup();
   const dir = mkdtempSync(join(root, 'git-'));
-  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: dir, encoding: 'utf8' }).trim();
-  git('init', '-q', '-b', 'main');
-  git('commit', '-q', '--allow-empty', '-m', 'base');
-  const prev = git('rev-parse', 'HEAD');
-  git('checkout', '-q', '-b', 'build/1');
-  git('commit', '-q', '--allow-empty', '-m', 'Build work one');
-  git('commit', '-q', '--allow-empty', '-m', 'Build work two');
-  git('checkout', '-q', 'main');
-  git('commit', '-q', '--allow-empty', '-m', 'Something on main meanwhile');
-  git('merge', '-q', '--no-ff', '-m', 'Merge build/1', 'build/1');
-  const merge = git('rev-parse', 'HEAD');
-  git('commit', '-q', '--allow-empty', '-m', `#${a.number}: A's fix`);
-  const head = git('rev-parse', 'HEAD');
+  git(dir, 'init', '-q', '-b', 'main');
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'base');
+  const prev = git(dir, 'rev-parse', 'HEAD');
+  git(dir, 'checkout', '-q', '-b', 'build/1');
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'Build work one');
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'Build work two');
+  git(dir, 'checkout', '-q', 'main');
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'Something on main meanwhile');
+  git(dir, 'merge', '-q', '--no-ff', '-m', 'Merge build/1', 'build/1');
+  const merge = git(dir, 'rev-parse', 'HEAD');
+  git(dir, 'commit', '-q', '--allow-empty', '-m', `#${a.number}: A's fix`);
+  const head = git(dir, 'rev-parse', 'HEAD');
   store.addEvent(b.id, 'note', { text: `Shipped ${merge.slice(0, 8)} "Build 1": live after the restart.` });
   const w = new DeployWatch({ store, commits: gitCommits(dir), wake() {}, mail() {}, scheme: () => scheme, head: () => head, dbPath: '' });
   const { suspects, unowned } = await w.suspects({ commit: head, prev, at: Date.now(), due: [], len: 0 });

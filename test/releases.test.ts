@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import type { Ship } from '../src/branch.ts';
 import { Store } from '../src/db.ts';
 import { CITADEL_TARGET, CitadelServer, previewCopies, Releases } from '../src/releases.ts';
 import { Waits } from '../src/waits.ts';
+import { git, gitAt, makeRepo } from './git.ts';
 
 // src/releases.ts (#625): the release monitor's data, Citadel's own server read from the land line, ship stages and wait-usual.
 const root = mkdtempSync(join(tmpdir(), 'releases-'));
@@ -177,22 +178,17 @@ test('an idle target has no next release; no scheme yet, no target', () => {
   assert.deepEqual(none.read(), []);
 });
 
-const git = (cwd: string, args: string[], date?: number) => execFileSync('git', args, {
-  cwd, encoding: 'utf8',
-  env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...(date && { GIT_COMMITTER_DATE: `@${Math.floor(date / 1000)} +0000`, GIT_AUTHOR_DATE: `@${Math.floor(date / 1000)} +0000` }) },
-}).trim();
 
 test('live writes one row per new head, with the minions whose branch tips landed and their stage times', async () => {
   const w = world();
   const repo = join(root, `repo-${dirs}`);
-  mkdirSync(repo);
-  git(repo, ['init', '-q', '-b', 'main']);
-  git(repo, ['commit', '-q', '--allow-empty', '-m', 'base'], Date.now() - 3_600_000);
-  const base = git(repo, ['rev-parse', 'HEAD']);
+  makeRepo(repo);
+  gitAt(Date.now() - 3_600_000, repo, 'commit', '-q', '--allow-empty', '-m', 'base');
+  const base = git(repo, 'rev-parse', 'HEAD');
   w.store.setProjectRepoDir(w.citadel.id, repo);
   // A minion created after base whose branch still sits at base: began there, no work of its own.
   const idle = w.minion('Idle');
-  git(repo, ['branch', idle.branch, base]);
+  git(repo, 'branch', idle.branch, base);
 
   w.setHead(base);
   await w.server.live(base);
@@ -220,11 +216,11 @@ test('live writes one row per new head, with the minions whose branch tips lande
   w.ships.set(a.id, 'deploying');
   w.waits.poll();
   w.server.read();
-  git(repo, ['checkout', '-q', '-b', a.branch]);
-  git(repo, ['commit', '-q', '--allow-empty', '-m', 'A'], Date.now());
-  git(repo, ['checkout', '-q', 'main']);
-  git(repo, ['merge', '-q', '--ff-only', a.branch]);
-  const head = git(repo, ['rev-parse', 'HEAD']);
+  git(repo, 'checkout', '-q', '-b', a.branch);
+  gitAt(Date.now(), repo, 'commit', '-q', '--allow-empty', '-m', 'A');
+  git(repo, 'checkout', '-q', 'main');
+  git(repo, 'merge', '-q', '--ff-only', a.branch);
+  const head = git(repo, 'rev-parse', 'HEAD');
 
   // A new server (the restart) reads the stage times back from the setting.
   const again = new CitadelServer({ store: w.store, scheme: () => w.store.getProject(w.citadel.id) ?? null, head: () => head, line: () => [], ticketFor: () => null, wait: () => null, ship: () => null, usual: () => null, interruptible: () => 0, now: () => now + 40_000 });

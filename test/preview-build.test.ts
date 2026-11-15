@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Previews } from '../src/previews.ts';
 import { listeningPort, PASSWORD, SECRET, stopProcs, stopTurns } from './helpers.ts';
+import { git } from './git.ts';
 
 // A build's preview (src/previews.ts, build branches): /preview/build/<n>/ serves the tip of build/<n>
 // in the scheme whose code this server runs, from a worktree the live server keeps of its own.
@@ -19,16 +20,15 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const git = (args: string[], cwd = scheme) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@x', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
 // The scheme's repo: it holds the commit this server runs (so it is this server's own scheme), and build/7 at it.
 const scheme = join(root, 'scheme');
 mkdirSync(scheme);
-git(['init', '-q', '-b', 'main']);
-git(['fetch', '-q', repo, 'HEAD']);
-const live = git(['rev-parse', 'FETCH_HEAD']);
-git(['branch', 'main', live]);
-git(['branch', 'build/7', live]);
+git(scheme, 'init', '-q', '-b', 'main');
+git(scheme, 'fetch', '-q', repo, 'HEAD');
+const live = git(scheme, 'rev-parse', 'FETCH_HEAD');
+git(scheme, 'branch', 'main', live);
+git(scheme, 'branch', 'build/7', live);
 
 const data = join(root, 'data');
 mkdirSync(data);
@@ -75,14 +75,14 @@ test('a page load starts the preview from build/<n>, in a worktree of its own th
   const h = await health();
   assert.equal(h.preview, true);
   assert.equal(h.commit, live);
-  assert.equal(git(['rev-parse', 'HEAD'], worktree), live);
+  assert.equal(git(worktree, 'rev-parse', 'HEAD'), live);
   // Detached: a feeder's fold can still move build/7.
-  assert.throws(() => git(['symbolic-ref', '-q', 'HEAD'], worktree));
+  assert.throws(() => git(worktree, 'symbolic-ref', '-q', 'HEAD'));
 });
 
 test('the first page load after the tip moved restarts it on the new commit', async () => {
-  const moved = git(['commit-tree', `${live}^{tree}`, '-p', live, '-m', 'A feeder folded in']);
-  git(['update-ref', 'refs/heads/build/7', moved]);
+  const moved = git(scheme, 'commit-tree', `${live}^{tree}`, '-p', live, '-m', 'A feeder folded in');
+  git(scheme, 'update-ref', 'refs/heads/build/7', moved);
   // Anything but a page load keeps the running one.
   assert.equal((await health()).commit, live);
   assert.equal((await page('/preview/build/7/')).status, 302);
@@ -90,11 +90,11 @@ test('the first page load after the tip moved restarts it on the new commit', as
 });
 
 test('a branch deleted while its preview boots leaves nothing running and no worktree', async () => {
-  git(['branch', 'build/11', live]);
+  git(scheme, 'branch', 'build/11', live);
   const booting = page('/preview/build/11/');
   // Past its tip check, well inside the boot (checkout, copy, spawn and health checks: hundreds of ms).
   await new Promise((r) => setTimeout(r, 50));
-  git(['branch', '-D', 'build/11']);
+  git(scheme, 'branch', '-D', 'build/11');
   assert.equal((await page('/preview/build/11/')).status, 404);
   await booting;
   assert.equal(existsSync(join(data, 'projects', String(project.id), 'build-previews', '11')), false);
@@ -109,11 +109,11 @@ test('a minion preview route never reads "build" as a ticket id', async () => {
 });
 
 test('once build/<n> is deleted, the preview stops and its worktree and copy of the data go', async () => {
-  git(['branch', '-D', 'build/7']);
+  git(scheme, 'branch', '-D', 'build/7');
   assert.equal((await page('/preview/build/7/')).status, 404);
   assert.equal(existsSync(worktree), false);
   assert.equal(existsSync(join(data, 'previews', 'build-7')), false);
-  assert.doesNotMatch(git(['worktree', 'list']), /build-previews/);
+  assert.doesNotMatch(git(scheme, 'worktree', 'list'), /build-previews/);
 });
 
 test("the sweep removes a build's worktree whose branch went, without a page load", async () => {
@@ -125,13 +125,13 @@ test("the sweep removes a build's worktree whose branch went, without a page loa
   const previews = new Previews(s, dir);
   previews.buildScheme = () => s.getProject(p.id)!;
   const gone = join(dir, 'projects', String(p.id), 'build-previews', '9');
-  git(['worktree', 'add', '-q', '--detach', gone, live]);
+  git(scheme, 'worktree', 'add', '-q', '--detach', gone, live);
   const kept = join(dir, 'projects', String(p.id), 'build-previews', '10');
-  git(['branch', 'build/10', live]);
-  git(['worktree', 'add', '-q', '--detach', kept, live]);
+  git(scheme, 'branch', 'build/10', live);
+  git(scheme, 'worktree', 'add', '-q', '--detach', kept, live);
   await previews.sweep();
   assert.equal(existsSync(gone), false);
   assert.equal(existsSync(kept), true);
-  assert.doesNotMatch(git(['worktree', 'list']), /build-previews\/9/);
+  assert.doesNotMatch(git(scheme, 'worktree', 'list'), /build-previews\/9/);
   s.db.close();
 });

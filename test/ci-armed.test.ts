@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,12 +6,12 @@ import { after, test } from 'node:test';
 import { armedKey, armForCi, ciFinished, type Armed } from '../src/ci-armed.ts';
 import { Store } from '../src/db.ts';
 import { GithubWatcher, type Check, type PrSnapshot } from '../src/github.ts';
+import { git } from './git.ts';
 
 // Armed for CI (#715): a card or a Taskmaster message goes out when CI passes on the pushed commit, with no turn.
 const root = mkdtempSync(join(tmpdir(), 'ci-armed-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const check = (name: string, status: Check['status']): Check => ({ name, status, url: `https://ci/${name}` });
 const pr = (headSha: string, fields: Partial<PrSnapshot> = {}): PrSnapshot =>
   ({ number: 12, url: 'https://github.com/o/r/pull/12', state: 'OPEN', headSha, closedAt: null, closedBy: null, checks: [check('build', 'passed')], remarks: [], ...fields });
@@ -24,7 +23,7 @@ function setup(name: string, prCi = true) {
   mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
   writeFileSync(join(dir, '.github', 'workflows', 'ci.yml'), prCi ? 'on:\n  pull_request:\n  push:\n' : 'on:\n  push:\n    branches: ["land/**"]\n');
   git(dir, 'init', '-q', '-b', 'ticket/1-t');
-  git(dir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'one');
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'one');
   const sha = git(dir, 'rev-parse', 'HEAD');
   const store = new Store(join(root, `${name}.db`));
   const project = store.createProject('P', null);

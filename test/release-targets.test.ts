@@ -12,16 +12,12 @@ import type { Want } from '../src/ci-mirror.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { CITADEL_TARGET, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, shipsOn, TargetFinder, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
+import { git, gitAt } from './git.ts';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
 const root = mkdtempSync(join(tmpdir(), 'release-targets-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 let n = 0;
-
-const git = (cwd: string, args: string[], date?: number) => execFileSync('git', args, {
-  cwd, encoding: 'utf8',
-  env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', ...(date && { GIT_COMMITTER_DATE: `@${Math.floor(date / 1000)} +0000`, GIT_AUTHOR_DATE: `@${Math.floor(date / 1000)} +0000` }) },
-}).trim();
 
 // Shaped like Mandate's android-release.yml, Peek Auras' windows.yml and Mandate's android.yml (a debug APK: a test copy, not a target).
 const APK = `name: android-release
@@ -121,11 +117,11 @@ test('the finder reads a scheme clone: a new scheme whose repo has a release wor
   const store = new Store(join(root, `f-${++n}.db`));
   const repo = join(root, `repo-${n}`);
   mkdirSync(join(repo, '.github/workflows'), { recursive: true });
-  git(repo, ['init', '-q', '-b', 'main']);
+  git(repo, 'init', '-q', '-b', 'main');
   writeFileSync(join(repo, '.github/workflows/windows.yml'), WINDOWS);
   writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ start: ['x'], targets: [{ id: 'ci:windows:release', name: 'PC' }] }));
-  git(repo, ['add', '-A']);
-  git(repo, ['commit', '-q', '-m', 'ci']);
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'ci');
   const finder = new TargetFinder({ store, own: () => null, apkFeed: (name) => join(root, 'feeds', name) });
   await finder.scan();
   assert.deepEqual(finder.list(), []);
@@ -152,10 +148,10 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   const store = new Store(join(root, `c-${++n}.db`));
   const repo = join(root, `app-repo-${n}`), folder = join(root, `app-folder-${n}`);
   mkdirSync(repo);
-  git(repo, ['init', '-q', '-b', 'main']);
-  git(repo, ['commit', '-q', '--allow-empty', '-m', 'base'], Date.now() - 7_200_000);
-  const base = git(repo, ['rev-parse', 'HEAD']);
-  git(root, ['clone', '-q', repo, folder]);
+  git(repo, 'init', '-q', '-b', 'main');
+  gitAt(Date.now() - 7_200_000, repo, 'commit', '-q', '--allow-empty', '-m', 'base');
+  const base = git(repo, 'rev-parse', 'HEAD');
+  git(root, 'clone', '-q', repo, folder);
   const p = store.createProject('Mandate', 'https://github.com/o/mandate');
   store.setProjectRepoDir(p.id, repo);
   store.createContraption({ name: 'mandate', title: 'Mandate', icon: null, port: 9, home_scheme: p.id, open_paths: '[]', relay_paths: '[]', repo: 'o/mandate', branch: null, folder, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
@@ -175,10 +171,10 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   // A minion lands two commits; its branch tip is main's.
   const t = store.createTicket({ project_id: p.id, title: 'Snooze', permission_mode: 'default', created_by: 'Josh' });
   store.setTicketDir(t.id, root, 'ticket/1-snooze');
-  git(repo, ['commit', '-q', '--allow-empty', '-m', 'one'], Date.now() - 3_600_000);
-  git(repo, ['commit', '-q', '--allow-empty', '-m', 'two'], Date.now());
-  const tip = git(repo, ['rev-parse', 'HEAD']);
-  git(repo, ['branch', 'ticket/1-snooze', tip]);
+  gitAt(Date.now() - 3_600_000, repo, 'commit', '-q', '--allow-empty', '-m', 'one');
+  gitAt(Date.now(), repo, 'commit', '-q', '--allow-empty', '-m', 'two');
+  const tip = git(repo, 'rev-parse', 'HEAD');
+  git(repo, 'branch', 'ticket/1-snooze', tip);
   await reader.refresh();
   [v] = reader.read();
   assert.equal(v.next?.stage, 'call');
@@ -201,7 +197,7 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   for (let i = 0; i < 6; i++) store.addContraptionDeploy({ name: 'mandate', from_sha: base, to_sha: 'bad', by: 'Cara', started_at: now - 8e6, finished_at: now - 8e6, outcome: 'rolled back', stages: '{}', changes: '[]' });
   // A deploy starts and fast-forwards the folder before it builds: the old commit still serves, and main's changes stay its.
   running = { name: 'mandate', state: 'running', by: '#12', repo: 'o/mandate', branch: 'main', from: base, to: tip, started_at: now - 70_000, finished_at: null, said: ['Build: npm ci'], todo: [], log: '', stages: { build: now - 70_000 } };
-  git(folder, ['pull', '-q', '--ff-only']);
+  git(folder, 'pull', '-q', '--ff-only');
   await reader.refresh();
   [v] = reader.read();
   assert.equal(v.current?.version, base);
@@ -347,10 +343,10 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   const store = new Store(join(root, `c-${++n}.db`));
   const repo = join(root, `apk-repo-${n}`);
   mkdirSync(join(repo, 'android/app'), { recursive: true });
-  git(repo, ['init', '-q', '-b', 'main']);
+  git(repo, 'init', '-q', '-b', 'main');
   writeFileSync(join(repo, 'android/app/build.gradle'), 'defaultConfig {\n  versionCode 5\n  versionName "1.4"\n}\n');
-  git(repo, ['add', '.']);
-  git(repo, ['commit', '-q', '-m', 'v5']);
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-q', '-m', 'v5');
   const p = store.createProject('Mandate', 'https://github.com/o/mandate');
   store.setProjectRepoDir(p.id, repo);
   const t: Found = { id: 'apk:android-release', projectId: p.id, name: 'Android', kind: 'apk', link: '/apps/mandate/android/', branch: 'main', workflow: '.github/workflows/android-release.yml', contraption: 'mandate' };
@@ -369,12 +365,12 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
 
   // A minion bumps the version on main: nobody has started a release run yet.
   writeFileSync(join(repo, 'android/app/build.gradle'), 'defaultConfig {\n  versionCode 6\n  versionName "1.5"\n}\n');
-  git(repo, ['commit', '-q', '-am', 'v6']);
+  git(repo, 'commit', '-q', '-am', 'v6');
   await reader.refresh();
   [v] = reader.read();
   const notStarted = "1.5 is on main, but its release run hasn't started: the Deploy button starts it, or auto-deploy once main sits still for 5 minutes";
   assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta, v.next?.number], ['sign', notStarted, null, 6]);
-  const bumped = git(repo, ['rev-parse', 'HEAD']).toString().trim();
+  const bumped = git(repo, 'rev-parse', 'HEAD').toString().trim();
   assert.deepEqual(reader.pending(t), { step: 'dispatch', head: bumped }, 'runs signed before latest.json was written are not this release');
 
   // Someone starts one: with nothing moving, the runs are read again once the idle interval has passed; it signs on CI.
@@ -416,9 +412,9 @@ test('the Main reader: each head of main is a release with the minions it took i
   const store = new Store(join(root, `c-${++n}.db`));
   const repo = join(root, `main-repo-${n}`);
   mkdirSync(repo);
-  git(repo, ['init', '-q', '-b', 'main']);
-  git(repo, ['commit', '-q', '--allow-empty', '-m', 'base'], Date.now() - 7_200_000);
-  const base = git(repo, ['rev-parse', 'HEAD']);
+  git(repo, 'init', '-q', '-b', 'main');
+  gitAt(Date.now() - 7_200_000, repo, 'commit', '-q', '--allow-empty', '-m', 'base');
+  const base = git(repo, 'rev-parse', 'HEAD');
   const p = store.createProject('Delve', 'https://github.com/o/delve');
   store.setProjectRepoDir(p.id, repo);
   const t: Found = { id: 'main', projectId: p.id, name: 'Main', kind: 'main', link: null, branch: 'main' };
@@ -450,9 +446,9 @@ test('the Main reader: each head of main is a release with the minions it took i
 
   // Torches merges: main moves, and its row takes in the minion whose tip is on it.
   prs.delete(b.id);
-  git(repo, ['commit', '-q', '--allow-empty', '-m', 'torches']);
-  const tip = git(repo, ['rev-parse', 'HEAD']);
-  git(repo, ['branch', 'ticket/2-torches', tip]);
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'torches');
+  const tip = git(repo, 'rev-parse', 'HEAD');
+  git(repo, 'branch', 'ticket/2-torches', tip);
   await reader.refresh();
   [v] = reader.read();
   assert.equal(v.current?.version, tip);
@@ -579,10 +575,10 @@ test('the APK reader keeps each scheme\'s target apart, and holds off a second r
   const store = new Store(join(root, `c-${++n}.db`));
   const repo = join(root, `apk-repo-${++n}`);
   mkdirSync(join(repo, 'app'), { recursive: true });
-  git(repo, ['init', '-q', '-b', 'main']);
+  git(repo, 'init', '-q', '-b', 'main');
   writeFileSync(join(repo, 'app/build.gradle'), 'versionCode 9\n');
-  git(repo, ['add', '.']);
-  git(repo, ['commit', '-q', '-m', 'v9']);
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-q', '-m', 'v9');
   const a = store.createProject('A', 'https://github.com/o/a');
   const b = store.createProject('B', 'https://github.com/o/b');
   store.setProjectRepoDir(a.id, repo);

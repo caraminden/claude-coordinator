@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +7,7 @@ import { Store } from '../src/db.ts';
 import { ticketWorktree } from '../src/build-output.ts';
 import { SAVE_LIMIT, savedRef } from '../src/worktree-sweep.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { git } from './git.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'worktree-sweep-')));
 after(async () => {
@@ -19,7 +19,6 @@ const { Runner } = await import('../src/runner.ts');
 testPins();
 
 const DAY = 86_400_000;
-const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
 const has = (repo: string, ref: string) => { try { git(repo, 'rev-parse', '--verify', '--quiet', ref); return true; } catch { return false; } };
 
 const data = join(root, 'data');

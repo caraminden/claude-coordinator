@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { deployApps, LandHandoffs, Landings, landResult, outputTail, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
+import { git } from './git.ts';
 
 // #706: a minion hands its land to the server and ends its turn. The server runs land.sh, and on a clean land posts
 // the shipped line and dismisses or parks the minion with no model call; on a failure it wakes the minion with the
@@ -339,10 +339,9 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     const cwd = join(srv.root, 'wt');
     mkdirSync(join(cwd, 'tools'), { recursive: true });
     writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%b' ${JSON.stringify(LIVE)}\n`);
-    const git = (...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' });
-    git('init', '-q');
-    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '.');
-    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+    git(cwd, 'init', '-q');
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'init');
     store.setTicketDir(minion.id, cwd, null);
     const token = agentToken(srv.data, minion.id);
     const handOff = (body: object) => fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -352,7 +351,7 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     const dirty = await handOff(body);
     assert.equal(dirty.status, 409);
     assert.match((await dirty.json()).error, /uncommitted changes/);
-    git('checkout', '--', 'tools/land.sh');
+    git(cwd, 'checkout', '--', 'tools/land.sh');
     assert.equal((await handOff({ ...body, risk: undefined })).status, 400);
     const high = await handOff({ ...body, risk: 'high' });
     assert.equal(high.status, 400);

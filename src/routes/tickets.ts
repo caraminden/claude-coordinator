@@ -423,6 +423,12 @@ export const ticketRoutes: Route[] = [
         // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
         if (caller && ticket.kind !== 'coordinator') {
           held = runner.relay(id, id, session.name, text, body.urgent === true || unparks);
+          // The loop guard held the message meant to wake it: it stays parked, so Unpark still shows.
+          if (unparks && held === true && ticket.state === 'parked' && !runner.isRunning(id)) {
+            app.store.updateTicket(id, { state: 'parked' });
+            runner.emit(id, 'note', { text: 'The loop guard held the message that unparked it, so it stays parked.' });
+            runner.broadcastTicket(id);
+          }
           return;
         }
         // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".

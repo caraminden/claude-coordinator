@@ -616,7 +616,6 @@ function shipLine(t) {
     h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, stage.badge || 'on branch'));
 }
 
-/** Dismiss (closed) or reopen (idle) a minion: shown at once in its head and the list, put back if the server says no. */
 /** Unpark (#718): the row and header drop parked at once; a refusal puts them back with a toast and a retry. */
 function unpark(t) {
   const was = { state: t.state, parked_for: t.parked_for };
@@ -634,6 +633,7 @@ function unpark(t) {
   }).catch(() => {});
 }
 
+/** Dismiss (closed) or reopen (idle) a minion: shown at once in its head and the list, put back if the server says no. */
 function setStatus(t, status) {
   const was = t.status;
   const show = (s) => {

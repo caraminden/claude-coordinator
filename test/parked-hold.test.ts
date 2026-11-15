@@ -11,7 +11,7 @@ import { after, test } from 'node:test';
 import { APP_NAME } from '../src/appname.ts';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { COLD_HOLD_MAX_MS, Runner } from '../src/runner.ts';
+import { COLD_HOLD_MAX_MS, LOOP_LIMIT, Runner } from '../src/runner.ts';
 import { LiveWaiters, startChained } from '../src/wake.ts';
 import { bootServer, jsonLines, lines, PASSWORD, SECRET, stopTurns, testPins, until } from './helpers.ts';
 testPins();
@@ -106,6 +106,13 @@ test("the Taskmaster's message to a parked minion is held, urgent too", async ()
   assertHeld(m.id, 1);
   assert.equal(runner.relay(m.id, m.id, 'Taskmaster', 'now please', true), 'parked', 'urgent does not wake a parked minion: only unpark does');
   assertHeld(m.id, 2);
+});
+
+test('notes left for a parked minion never pause the loop guard', () => {
+  const m = minion();
+  for (let i = 0; i < LOOP_LIMIT + 2; i++) assert.equal(runner.relay(m.id, m.id, 'Taskmaster', `note ${i}`), 'parked');
+  assertHeld(m.id, LOOP_LIMIT + 2);
+  assert.ok(!store.listEvents(m.id).some((e) => e.kind === 'loop_paused'));
 });
 
 test("another minion's message to a parked minion is held", () => {
@@ -226,6 +233,19 @@ test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ti
     assert.equal(last.text, 'go now');
     assert.ok(!last.parked, 'this one woke it');
     await settled(b);
+
+    // The loop guard holding the message meant to unpark it leaves it parked, Unpark still there.
+    const d = (await call(`/api/projects/${p.id}/tickets`, { title: 'D', message: 'brief for D' })).data.id as number;
+    await settled(d);
+    for (let i = 0; i < 6; i++) {
+      await call(`/api/tickets/${d}/messages`, { text: `do ${i}` }, undefined, taskmaster);
+      await settled(d);
+    }
+    assert.equal((await call(`/api/tickets/${d}`, { state: 'parked' }, 'PATCH')).status, 200);
+    const guarded = await call(`/api/tickets/${d}/messages`, { text: 'go now', unpark: true }, undefined, taskmaster);
+    assert.equal(guarded.data.held, true, 'the loop guard held it');
+    assert.equal((await view(d)).state, 'parked');
+    assert.notEqual((await view(d)).status, 'running');
 
     // update_ticket clearing the state unparks too: a turn starts.
     const c = await parkedMinion('C');

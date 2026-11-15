@@ -1680,17 +1680,21 @@ export class Runner {
     const loop = this.store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
     const now = this.now();
     loop.sent = loop.sent.filter((t) => now - t < windowMs);
+    // A parked receiver holds it whatever (#718), urgent too: only an unpark wakes it. It wakes nothing, so it
+    // isn't counted: notes left for a parked minion never pause the loop.
+    const receiver = this.store.getTicket(to);
+    if (!mail && !this.isRunning(to) && receiver && this.parked(receiver)) {
+      this.send(to, author, text, [], { from, hold: true }, steer);
+      return { held: 0, left: limit - loop.sent.length, cold: false, parked: true };
+    }
     if (!loop.held.length && loop.sent.length < limit) {
       loop.sent.push(now);
       this.store.setSetting(key, loop);
-      // Every message through here is machine-made, so a cold receiver gets it as mail unless it's urgent (#413);
-      // a parked one holds it whatever (#718), urgent too: only an unpark wakes it.
-      const receiver = this.store.getTicket(to);
-      const parked = !mail && !this.isRunning(to) && !!receiver && this.parked(receiver);
-      const cold = !mail && !urgent && !parked && this.cold(to);
+      // Every message through here is machine-made, so a cold receiver gets it as mail unless it's urgent (#413).
+      const cold = !mail && !urgent && this.cold(to);
       if (mail || cold) this.mail(to, author, text, from, cold);
       else this.send(to, author, text, [], { from, hold: true }, steer);
-      return { held: 0, left: limit - loop.sent.length, cold, ...(parked ? { parked: true as const } : {}) };
+      return { held: 0, left: limit - loop.sent.length, cold };
     }
     loop.held.push({ to, author, text, from, asker: this.personOf?.(author, from) ?? null, ...(mail ? { mail: true as const } : {}) });
     this.store.setSetting(key, loop);

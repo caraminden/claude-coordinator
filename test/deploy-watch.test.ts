@@ -240,7 +240,21 @@ test('a stall in the watch\'s own query is not recorded, at any time', () => {
 
 test('eventIdAt finds the first event at or after a time', () => {
   const { store } = setup();
+  const db = (store as any).db;
+  db.exec('DELETE FROM events');
   assert.equal(store.eventIdAt(5), 1, 'no events');
+  // Five events at known times, two sharing one, so the halving has to land on the first of a tie.
+  const ids = [100, 200, 200, 300, 400].map((at) => {
+    const { id } = store.addEvent(1, 'note', { text: `at ${at}` });
+    db.prepare('UPDATE events SET created_at = ? WHERE id = ?').run(at, id);
+    return Number(id);
+  });
+  assert.equal(store.eventIdAt(50), ids[0], 'before the first event');
+  assert.equal(store.eventIdAt(100), ids[0], 'exactly on the first event');
+  assert.equal(store.eventIdAt(200), ids[1], 'exactly on a tie: the first of the two');
+  assert.equal(store.eventIdAt(300), ids[3], 'exactly on an event');
+  assert.equal(store.eventIdAt(250), ids[3], 'between two events');
+  assert.equal(store.eventIdAt(401), ids[4] + 1, 'after the last event: one past it');
 });
 
 test('health_events keeps at most HEALTH_MAX_ROWS rows', () => {

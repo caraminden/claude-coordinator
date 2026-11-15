@@ -64,7 +64,11 @@ test('a turn longer than the limit comes whole, running or not', () => {
   const page = historyPage(store, t.id, { limit: 20 });
   assert.deepEqual(page.events.map((e) => e.id), running);
   assert.equal(page.more, true);
-  assert.ok(old.length);
+  // Paging back gives the long turn whole, then the short first turn, then nothing more.
+  const back = historyPage(store, t.id, { before: running[0], limit: 20 });
+  assert.deepEqual([back.events.map((e) => e.id), back.more], [long, true]);
+  const first = historyPage(store, t.id, { before: long[0], limit: 20 });
+  assert.deepEqual([first.events.map((e) => e.id), first.more], [old, false]);
 });
 
 test('notes after a long last turn come with that turn, so the newest page is never just them (#288)', () => {

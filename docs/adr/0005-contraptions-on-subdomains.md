@@ -49,14 +49,21 @@ previews, tests) keeps the old same-origin serving. `src/apps.ts` has the routin
   API refuses a write whose `Origin` isn't its own host, `/backup/send` checks Origin too, nothing answers
   with CORS headers (so a cross-origin read fails), and the main host's websockets only go to `/apps/`.
   A new main-host route that writes on a GET, or a CORS header, would reopen this.
+  A contraption's page can also set a cookie named `cc_session` or `cc_app` for the whole domain
+  (`document.cookie`; the proxy only filters its server's `Set-Cookie`). Readers try every cookie of the
+  name and keep the first that verifies, so a junk one can't lock someone out; one the contraption's
+  author got signed for themselves could still sign the person in as them. Accepted: contraptions are
+  written by the members, and the cure (`__Host-` cookies) needs HTTPS everywhere and signs everyone out.
 - **Relative links to Citadel or another app keep working.** A page load on an app host of a path that
   isn't its own app (Mandate's `/c/#/p/5/t/12` with `target="_top"`, its `/c/?next=` sign-in, `/apps/toc/`)
   goes to Citadel's host at the apex, which shows it or hands it to that app's host. Someone on
   `cara.apps.webplatformisbestplatform.net` who follows one lands on `citadel.zip`, which shares no
   cookie with it, so they may sign in there once.
 - **Open paths still pass on Citadel's host** for non-page requests (websockets and fetches carry no
-  login or identity): Peek Auras' PC link dials `wss://<citadel host>/apps/peek-auras/link`. An open
-  path's page load goes to the app host like any other.
+  login or identity): Peek Auras' PC link dials `wss://<citadel host>/apps/peek-auras/link`. Their
+  answers there carry `Content-Security-Policy: sandbox`, so one can't open as a document on Citadel's
+  origin (an `<object>` asks with `Accept: */*`, not as a page). An open path's page load goes to the
+  app host like any other, for anyone, signed in or not.
 - **Signing out of Citadel doesn't sign the apps out.** `cc_app` lives until it expires, as `cc_session`
   does today: neither has server-side revocation. Disabling a person still refuses both at once.
 - **A contraption must allow being framed by Citadel.** One that sends `X-Frame-Options: SAMEORIGIN` or

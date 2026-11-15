@@ -28,7 +28,7 @@ import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
 import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { type Chain, githubPrs, LiveWaiters, runsRepo, startChained } from './src/wake.ts';
+import { type Chain, githubPrs, LiveWaiters, pacificTime, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
@@ -255,6 +255,9 @@ function ownScheme(): Project | null {
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
 waiters.prs = githubPrs(githubOf);
+// wake_at (#722): a message in the asker's own chat at its time; armed now, it sends the ones missed while the server was down.
+const timedWakes = new TimedWakes(store, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
+if (!BOOT_CHECK) timedWakes.arm();
 mainSync.as = githubOf;
 runner.liveHead = () => waiters.head;
 // Semantic memory (#331): llama-server on this box embeds the chats (deploy/citadel-embed.service).
@@ -359,7 +362,10 @@ runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'erro
 const startChain = (c: Chain, why: string) => startChained(c, why, { store, runner, waiters });
 waiters.start = (c, why) => void startChain(c, why).catch((err) => console.error(`Starting chained #${c.ticket} failed:`, err));
 runner.heldFor = (id) => waiters.heldFor(id);
-runner.wakesOn = (id) => waiters.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? null;
+runner.wakesOn = (id) => {
+  const timed = timedWakes.next(id);
+  return waiters.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
+};
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {
   const t = store.getTicket(c.ticket);
@@ -910,7 +916,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
   get assetVersion() {

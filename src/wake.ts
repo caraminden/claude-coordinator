@@ -515,3 +515,112 @@ export async function startChained(c: Chain, why: string, { store, runner, waite
   await sent;
   if (failed) throw (failed as { err: unknown }).err; // the lane only logs it: Start now's caller hears it
 }
+
+// wake_at (#722): a minion or Taskmaster asks to be messaged, in its own chat, at a time. The list is in the settings
+// table like the waiters, so it outlives a restart; one timer waits for the nearest, and boot catches up on any missed.
+const TIMED = 'timed-wakes';
+export const MAX_WAKES = 20;
+export const MAX_AHEAD_MS = 90 * 86_400_000;
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+export interface TimedWake { id: number; ticket: number; at: number; note: string; setBy: string }
+
+/** `ms` as "Tue 18 Nov, 09:00 PST": every time people read is Pacific. */
+export function pacificTime(ms: number): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).formatToParts(ms).map((x) => [x.type, x.value]));
+  return `${p.weekday} ${p.day} ${p.month}, ${p.hour}:${p.minute} ${p.timeZoneName}`;
+}
+
+/** An ISO time ("2026-11-18 09:00", "…T09:00:00Z", "…-08:00") as ms; without an offset it is Pacific. NaN when it isn't a time. */
+export function parseWakeTime(text: string): number {
+  const m = /^(\d{4})-(\d\d)-(\d\d)(?:[T ](\d\d):(\d\d)(?::(\d\d))?)?\s*(Z|[+-]\d\d:?\d\d)?$/i.exec(text.trim());
+  if (!m) return NaN;
+  const [y, mo, d, h = '0', mi = '0', s = '0'] = m.slice(1, 7).map((x) => Number(x ?? 0));
+  const local = Date.UTC(y, mo - 1, d, h, mi, s);
+  if (new Date(local).getUTCMonth() !== mo - 1) return NaN; // 31 Nov and the like
+  if (m[7]) return m[7].toUpperCase() === 'Z' ? local : local - (m[7][0] === '-' ? -1 : 1) * (Number(m[7].slice(1, 3)) * 60 + Number(m[7].slice(-2))) * 60_000;
+  // Pacific: guess the zone's offset at that instant, then correct once (the guess can sit across a DST change).
+  const offset = (t: number) => {
+    const z = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'longOffset' }).formatToParts(t).find((x) => x.type === 'timeZoneName')!.value; // "GMT-08:00"
+    const [, sign, hh, mm] = /GMT([+-])(\d\d):(\d\d)/.exec(z)!;
+    return (sign === '-' ? -1 : 1) * (Number(hh) * 60 + Number(mm)) * 60_000;
+  };
+  return local - offset(local - offset(local));
+}
+
+export class TimedWakes {
+  private store: Store;
+  private send: (ticketId: number, text: string) => void;
+  now: () => number;
+  private timer: NodeJS.Timeout | null = null;
+
+  constructor(store: Store, send: (ticketId: number, text: string) => void, now: () => number = Date.now) {
+    this.store = store;
+    this.send = send;
+    this.now = now;
+  }
+
+  list(ticket?: number): TimedWake[] {
+    const all = this.store.getSetting<TimedWake[]>(TIMED) ?? [];
+    return ticket === undefined ? all : all.filter((w) => w.ticket === ticket);
+  }
+
+  /** The soonest wake of `ticket`, for its list note, or null. */
+  next(ticket: number): TimedWake | null {
+    return this.list(ticket).sort((a, b) => a.at - b.at)[0] ?? null;
+  }
+
+  /** Set a wake; throws a message the caller can pass on when the time is past, too far out, or the chat has too many. */
+  add(ticket: number, at: number, note: string, setBy: string): TimedWake {
+    const now = this.now();
+    if (!Number.isFinite(at)) throw new Error('That is not a time: use "2026-11-18 09:00" (Pacific unless it ends in Z or an offset like -08:00).');
+    if (at <= now) throw new Error(`${pacificTime(at)} is already past (it is ${pacificTime(now)}). Give a later time.`);
+    if (at > now + MAX_AHEAD_MS) throw new Error(`${pacificTime(at)} is more than 90 days away. Set a wake nearer the date, or ask a person.`);
+    if (this.list(ticket).length >= MAX_WAKES) throw new Error(`This chat already has ${MAX_WAKES} wakes pending: cancel one first.`);
+    const all = this.list();
+    const w = { id: Math.max(0, ...all.map((o) => o.id)) + 1, ticket, at, note, setBy };
+    this.store.setSetting(TIMED, [...all, w]);
+    this.arm();
+    return w;
+  }
+
+  /** Cancel one of `ticket`'s wakes; false when it is gone (already fired, or never its own). */
+  cancel(ticket: number, id: number): boolean {
+    const all = this.list();
+    if (!all.some((w) => w.id === id && w.ticket === ticket)) return false;
+    this.store.setSetting(TIMED, all.filter((w) => w.id !== id));
+    this.arm();
+    return true;
+  }
+
+  /** Send every wake that is due (a dismissed minion's is dropped unsent), then wait for the next. */
+  fire(): number {
+    const now = this.now();
+    const all = this.list();
+    const due = all.filter((w) => w.at <= now);
+    // Dropped before sending, so a send that throws can't send twice.
+    if (due.length) this.store.setSetting(TIMED, all.filter((w) => w.at > now));
+    for (const w of due) {
+      const t = this.store.getTicket(w.ticket);
+      if (!t || t.status === 'closed') continue;
+      try {
+        // The runner queues a send for a chat mid-turn, so it is read after that turn ends.
+        this.send(w.ticket, `Wake you set for ${pacificTime(w.at)}: ${w.note}`);
+      } catch (err) {
+        console.error(`Waking #${w.ticket} (wake_at) failed:`, err);
+      }
+    }
+    this.arm();
+    return due.length;
+  }
+
+  /** One timer, to the nearest wake (capped: setTimeout can't count past 24 days). At boot this also sends the ones missed while down. */
+  arm(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const soonest = Math.min(...this.list().map((w) => w.at));
+    if (!Number.isFinite(soonest)) return;
+    this.timer = setTimeout(() => this.fire(), Math.min(Math.max(soonest - this.now(), 0), MAX_TIMER_MS));
+    this.timer.unref();
+  }
+}

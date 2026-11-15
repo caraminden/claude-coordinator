@@ -33,6 +33,7 @@ import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { machineNotes, patchMachine } from './machines.ts';
+import { pacificTime, parseWakeTime } from '../wake.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -989,6 +990,33 @@ export const ticketRoutes: Route[] = [
       const waiting = await waiters.add(id, commit, reason);
       app.runner.broadcastTicket(id); // a parked row moves to Waiting (#718)
       return json(res, 201, { waiting, commit, head: waiters.head, merged: !!elsewhere });
+    },
+  },
+  {
+    // wake_at (#722): the minion or Taskmaster itself sets, lists or cancels timed wakes in its own chat.
+    method: 'POST', path: '/api/tickets/:ticket/wake-at', who: ['self'], refuse: 'Only the minion or Taskmaster itself can set a wake in its chat',
+    async handler(ctx) {
+      const { req, res, ticket, app, session } = ctx;
+      const { timedWakes: wakes, runner } = app;
+      const body = await readJson(req);
+      const view = (list = wakes.list(ticket.id)) => list.map((w) => ({ id: w.id, at: w.at, when: pacificTime(w.at), note: w.note }));
+      if (body.cancel != null) {
+        const w = wakes.list(ticket.id).find((o) => o.id === Number(body.cancel));
+        if (!w || !wakes.cancel(ticket.id, w.id)) throw new HttpError(404, `No pending wake ${Number(body.cancel)} in this chat`);
+        runner.emit(ticket.id, 'note', { text: `Wake cancelled: ${pacificTime(w.at)}: ${w.note}` });
+        return json(res, 200, { cancelled: w.id, wakes: view() });
+      }
+      if (body.at == null) return json(res, 200, { wakes: view() });
+      const note = str(body.note, 'Note', 1000);
+      let w;
+      try {
+        w = wakes.add(ticket.id, parseWakeTime(String(body.at)), note, session.name);
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      // The row people see until it fires; the wake itself arrives as a message.
+      runner.emit(ticket.id, 'note', { text: `Wake set for ${pacificTime(w.at)}: ${note}` });
+      return json(res, 200, { set: view([w])[0], wakes: view() });
     },
   },
   {

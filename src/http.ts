@@ -28,7 +28,7 @@ import type { Runner } from './runner.ts';
 import type { Schedule } from './schedules.ts';
 import type { Embed } from './memory.ts';
 import type { UltraReviews } from './ultrareview.ts';
-import type { Chain, LiveWaiters } from './wake.ts';
+import type { Chain, LiveWaiters, TimedWakes } from './wake.ts';
 
 /** An answer with a status: what any route or module throws to refuse a request. */
 export class HttpError extends Error {
@@ -207,6 +207,8 @@ export interface App {
   runner: Runner;
   auth: Auth;
   waiters: LiveWaiters;
+  /** wake_at's timed wakes (#722). */
+  timedWakes: TimedWakes;
   previews: Previews | null;
   /** The release monitor's data: each scheme's targets and test copies (src/releases.ts, #625). */
   releases: Releases;

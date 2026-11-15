@@ -39,6 +39,19 @@ const WAKE_PROPS = {
   commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
   reason: { type: 'string', maxLength: 1000, description: 'What to do once it is live (at most 1,000 characters); it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
 };
+/** wake_at (#722): a timed message to your own chat; with neither `at` nor `cancel` it lists the pending ones. */
+const WAKE_AT = {
+  name: 'wake_at',
+  description: `Set a timer: at \`at\` ${APP_NAME} sends \`note\` into this same chat as a message and you take a turn on it (one waiting on a turn in progress comes after it). For work "on or after a date". Up to 20 pending, at most 90 days out. Without \`at\` or \`cancel\` it lists them. Not for waking another minion.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      at: { type: 'string', description: 'When, e.g. "2026-11-18 09:00": Pacific unless it ends in Z or an offset like -08:00. The reply echoes it in PST/PDT' },
+      note: { type: 'string', maxLength: 1000, description: 'What to do then (at most 1,000 characters); it comes back as the message' },
+      cancel: { type: 'number', description: 'The id of a pending wake to cancel' },
+    },
+  },
+};
 const TITLE = { type: 'string', maxLength: 120, description: 'The short ask, about 30 characters (at most 120), e.g. "Usage bar in the top bar". No number, type, build or emoji.' };
 /** A minion or ticket state; without `deploys`, pending-deploy is left out. */
 const stateSchema = (deploys: boolean) => ({
@@ -1626,6 +1639,13 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
       return `Waiting for ${what}: ${APP_NAME} sends ${ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
     }
+    case 'wake_at': {
+      const r = await call('POST', `/api/tickets/${TICKET}/wake-at`, { at: args.at ?? null, note: args.note, cancel: args.cancel ?? null });
+      const lines = r.wakes.map((w: any) => `#${w.id} ${w.when}: ${w.note}`);
+      if (r.set) return `Wake set for ${r.set.when}: ${APP_NAME} sends you the note then.\n${lines.join('\n')}`;
+      if (r.cancelled) return `Cancelled #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
+      return lines.length ? `Pending wakes:\n${lines.join('\n')}` : 'No wakes pending.';
+    }
     case 'wake_when_runners_back': {
       const r = await call('POST', `/api/tickets/${TICKET}/wake-runners`, { reason: args.reason });
       return `Waiting for a runner labelled ${r.label} or ${r.label}-linux to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state parked and end your turn.`;
@@ -1726,8 +1746,8 @@ function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
-  return [...THREAD_TOOLS, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

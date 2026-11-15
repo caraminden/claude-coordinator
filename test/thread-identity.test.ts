@@ -131,6 +131,17 @@ test('wake_when_runners_back posts to its own internal id, which its token may d
   assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake-runners`));
 });
 
+test('wake_at posts to its own internal id, which its token may do (#722)', async () => {
+  calls.length = 0;
+  respond = () => [200, { set: { id: 1, when: 'Wed 18 Nov, 09:00 PST' }, wakes: [{ id: 1, when: 'Wed 18 Nov, 09:00 PST', note: 'start it' }] }];
+  const r = await tool('wake_at', { at: '2026-11-18 09:00', note: 'start it' });
+  assert.ok(!r.isError, r.content[0].text);
+  assert.match(r.content[0].text, /Wake set for Wed 18 Nov, 09:00 PST/);
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/wake-at`]);
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/wake-at`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake-at`));
+});
+
 test('close_self says when it cleared state ready (#480)', async () => {
   respond = () => [202, { cleared: true }];
   const r = await tool('close_self', {});

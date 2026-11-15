@@ -378,7 +378,7 @@ const fetchItems = async () => {
       mine = mine?.apps ?? [];
     }
     // A drop still saving: the rail keeps it, though this answer may predate it.
-    return railItems(dragged ? inOrder(mine, (c) => c.name, dragged) : mine, showing(), inContraption ? root.href : root.pathname, !inContraption);
+    return railItems(dragged ? inOrder(mine, (c) => c.name, dragged) : mine, showing(), atCitadel() ? root.pathname : root.href, !inContraption);
   } catch {
     return null;
   }

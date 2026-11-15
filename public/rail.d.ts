@@ -3,6 +3,12 @@
 // module's exports). How a page includes it: kit/skills/contraption-ui/rail-and-drawers.md.
 // Loaded as a <script type="module">, it draws the rail by itself, unless <html data-citadel-rail="slot">.
 
+/**
+ * The protocol name on every message between Citadel's page and a framed contraption's rail.js (postMessage,
+ * `{ protocol: FRAME, type, ... }`): the two are on different origins (#709), so they talk only this way.
+ */
+export const FRAME: 'citadel-frame-1';
+
 /** A contraption as GET /api/contraptions/mine lists it. */
 export interface MyContraption {
   name: string;

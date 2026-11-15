@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { seal, sealKey, unseal } from './credentials.ts';
 import type { ContraptionRow, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
+import { inOrder } from '../public/reorder.js';
 
 /** Where the live server's key folders go, unless CITADEL_CONTRAPTIONS_DIR says otherwise; another DATA_DIR keeps its own under it. */
 export const DEFAULT_CONTRAPTIONS_DIR = join(homedir(), '.config', 'citadel', 'contraptions');
@@ -153,6 +154,12 @@ export class Contraptions {
     const c = this.byKey(/^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1]);
     if (!c) throw new HttpError(401, 'Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer');
     return c;
+  }
+
+  /** The contraptions enabled for a person in their rail order, each with whether it is up: the rail's list (GET /api/contraptions/mine). */
+  mine(uid: number) {
+    return Promise.all(inOrder(this.store.contraptionsFor(uid), (c) => c.name, this.store.listOrder(uid, 'apps'))
+      .map(async (c) => ({ name: c.name, title: c.title, icon: c.icon, up: await this.up(c) })));
   }
 
   /**

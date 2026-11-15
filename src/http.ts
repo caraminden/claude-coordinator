@@ -47,6 +47,11 @@ export const SECURITY_HEADERS = {
   'Referrer-Policy': 'same-origin',
 };
 
+/** With APPS_DOMAIN (src/apps.ts): Citadel's pages frame contraptions on their own hosts, and a contraption's installed window frames Citadel's. */
+export function framedWithApps(domain: string) {
+  SECURITY_HEADERS['Content-Security-Policy'] = SECURITY_HEADERS['Content-Security-Policy'].replace("frame-ancestors 'self'", `frame-src 'self' *.${domain}; frame-ancestors 'self' *.${domain}`);
+}
+
 // Responses to browsers that accept gzip. Caddy passes bodies through as they are, and a long
 // thread's history is megabytes of JSON that gzips about 4x.
 export const acceptsGzip = new WeakSet<ServerResponse>();

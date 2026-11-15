@@ -11,6 +11,10 @@ const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number)
 const INVITE_DAYS = 7;
 
 export const COOKIE = 'cc_session';
+/** A contraption host's own login (<name>.<APPS_DOMAIN>, src/apps.ts): never cc_session, which stays on Citadel's hosts. */
+export const APP_COOKIE = 'cc_app';
+/** How long a sign-in handoff token to a contraption's host lasts; it is good for one use. */
+const APP_TOKEN_MS = 60_000;
 const SESSION_DAYS = 180;
 /** A session older than this gets a fresh cookie on its next request, so only SESSION_DAYS unused signs someone out. */
 const RENEW_DAYS = 7;
@@ -204,6 +208,69 @@ export class Auth {
     const given = Buffer.from(sig);
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
     return parseInt(exp, 36) * 1000 > now ? scope : null;
+  }
+
+  /** A signed `prefix:` payload's object, or null if forged or not JSON. The prefix keeps one kind from passing as another. */
+  private unseal(prefix: string, value: string): Record<string, unknown> | null {
+    const [payload, sig] = value.split('.');
+    if (!payload || !sig) return null;
+    const expected = Buffer.from(this.sign(`${prefix}:${payload}`));
+    const given = Buffer.from(sig);
+    if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+    try {
+      const o = JSON.parse(Buffer.from(payload, 'base64url').toString());
+      return o && typeof o === 'object' ? o : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private seal(prefix: string, o: object): string {
+    const payload = Buffer.from(JSON.stringify(o)).toString('base64url');
+    return `${payload}.${this.sign(`${prefix}:${payload}`)}`;
+  }
+
+  /** Spent handoff tokens' nonces, until they expire. A restart forgets them, which still leaves at most APP_TOKEN_MS. */
+  private spent = new Map<string, number>();
+
+  /** A one-time token that signs `uid` in on contraption `app`'s own host for the next minute (src/apps.ts, /_citadel/enter). */
+  appToken(app: string, uid: number, now = Date.now()): string {
+    return this.seal('app-enter', { a: app, u: uid, n: randomBytes(12).toString('base64url'), e: now + APP_TOKEN_MS });
+  }
+
+  /** The user id an unspent, unexpired handoff token for `app` names (spending it), or null. */
+  redeemAppToken(token: string, app: string, now = Date.now()): number | null {
+    const t = this.unseal('app-enter', token);
+    if (!t || t.a !== app || typeof t.u !== 'number' || typeof t.n !== 'string' || typeof t.e !== 'number' || t.e <= now) return null;
+    for (const [n, e] of this.spent) if (e <= now) this.spent.delete(n);
+    if (this.spent.has(t.n)) return null;
+    this.spent.set(t.n, t.e);
+    return t.u;
+  }
+
+  /**
+   * The cookie that keeps a person signed in on contraption `app`'s host. Over HTTPS it is SameSite=None and
+   * Partitioned (CHIPS), so it works in Citadel's frame from either Citadel host, the cross-site one included;
+   * src/apps.ts refuses cross-origin writes in its place. Over plain HTTP (a dev copy) browsers refuse None, so Lax.
+   */
+  issueAppCookie(app: string, user: { id: number }, secure: boolean): string {
+    const value = this.seal('app', { a: app, u: user.id, e: Date.now() + SESSION_DAYS * 86400_000 });
+    return `${APP_COOKIE}=${value}; Path=/; HttpOnly; Max-Age=${SESSION_DAYS * 86400}; ${secure ? 'SameSite=None; Secure; Partitioned' : 'SameSite=Lax'}`;
+  }
+
+  /** The person contraption `app`'s host cookie signs in, read from their row as session() does, or null. */
+  appSession(req: IncomingMessage, app: string): Session | null {
+    const match = (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${APP_COOKIE}=`));
+    const s = match && this.unseal('app', match.slice(APP_COOKIE.length + 1));
+    if (!s || s.a !== app || typeof s.u !== 'number' || typeof s.e !== 'number' || s.e <= Date.now() || !this.users) return null;
+    const user = this.users.getUser(s.u);
+    return user && !user.disabled_at ? { name: user.name, uid: user.id, admin: this.users.isAdmin(user), exp: s.e } : null;
+  }
+
+  /** A fresh host cookie for a contraption session over RENEW_DAYS old, else null (as renewal). */
+  appRenewal(app: string, session: Session | null, secure: boolean): string | null {
+    if (!session || session.uid === undefined) return null;
+    return session.exp - Date.now() < (SESSION_DAYS - RENEW_DAYS) * 86400_000 ? this.issueAppCookie(app, { id: session.uid }, secure) : null;
   }
 
   private agentSession(req: IncomingMessage): Session | null {

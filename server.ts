@@ -32,7 +32,7 @@ import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
+import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
 import { CiStore } from './src/ci-store.ts';
@@ -81,6 +81,8 @@ let boundPort = PORT;
 // Where machines' agents connect, if not the app's own address: a URL on a private network (the
 // tailnet), served by a second listener that takes nothing but agents. The main listener then
 // refuses agents, so a leaked token is no use from the public internet.
+/** Contraptions each on their own host, <name>.<APPS_DOMAIN> (src/apps.ts); unset serves them at /apps/<name>/ here. */
+const APPS_DOMAIN = process.env.APPS_DOMAIN?.trim().toLowerCase() || null;
 const MACHINES_URL = process.env.MACHINES_URL ? new URL(process.env.MACHINES_URL) : null;
 const DEFAULT_DATA_DIR = join(homedir(), '.local/share/claude-coordinator');
 const DATA_DIR = process.env.DATA_DIR ?? DEFAULT_DATA_DIR;
@@ -897,13 +899,23 @@ const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticke
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;
 
-// Contraptions' own services under /apps/<name>/ (src/apps.ts).
-const apps = new AppProxy(store, contraptions, auth);
+// Contraptions' own services under /apps/<name>/, on their own hosts with APPS_DOMAIN (src/apps.ts).
+const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN);
+if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
+// Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
+const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
 
-// Only /apps/ requests are upgraded (contraptions' websockets); anything else asking is served as usual.
-const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') }, async (req, res) => {
+// Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets); anything else asking is served as usual.
+const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') || apps.onAppHost(req) }, async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
+    // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
+    if (apps.onAppHost(req)) {
+      const path = (req.url ?? '/').split('?')[0];
+      if (KIT_FILE.test(path) && (req.method === 'GET' || req.method === 'HEAD')) await serveStatic(req, res, path.slice('/apps/_citadel'.length), true);
+      else apps.serve(req, res);
+      return;
+    }
     const own = ownPath(req.url ?? '/');
     if (own && 'redirect' in own) {
       if (req.method === 'GET' || req.method === 'HEAD') return void res.writeHead(302, { Location: own.redirect }).end();
@@ -920,8 +932,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       const renewed = auth.renewal(session, isSecure(req));
       if (renewed) res.setHeader('Set-Cookie', renewed);
       await routes(app, req, res, url, session);
-    } else if (/^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/.test(url.pathname)) {
-      // The app rail, phone drawers (and their types), the Alt+` switcher and drag to reorder the rail loads, colours and Citadel UI (public/ui/) for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
+    } else if (KIT_FILE.test(url.pathname)) {
+      // The app rail, phone drawers (and their types), the Alt+` switcher and drag to reorder the rail loads, colours and Citadel UI (public/ui/).
       await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length), true);
     } else if (url.pathname.startsWith('/apps/')) {
       apps.serve(req, res);

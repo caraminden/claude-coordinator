@@ -294,9 +294,13 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   const home = process.env.HOME!;
   for (const m of spec.mounts) {
     for (const bad of ['.ssh', '.config/gh', '.config/claude-coordinator', '.claude/.credentials.json', 'coordinator.db', 'state.db']) assert.ok(!m.src.includes(bad), `${m.src} mounts ${bad}`);
-    assert.ok(m.volume || m.src === m.dst || (m.src === '/dev/null' && m.ro), `${m.src} sits at its own path`);
+    assert.ok(m.volume || m.src === m.dst || m.dst === '/etc/codex' || (m.src === '/dev/null' && m.ro), `${m.src} sits at its own path`);
   }
   assert.ok(!spec.mounts.some((m) => !m.volume && m.src === join(home, '.claude')), "the server's own Claude folder stays out");
+  // Codex's hook comes from the code the server runs, not the image's copy, so a long-running container gets a deployed fix (#748).
+  const hook = join(import.meta.dirname, '..', 'deploy', 'claude-container', 'codex');
+  assert.deepEqual(spec.mounts.filter((m) => m.dst === '/etc/codex'), [{ src: hook, dst: '/etc/codex', ro: true }]);
+  assert.ok(existsSync(join(hook, 'citadel-hook.mjs')));
   // The code the server runs is readable, never writable (#621).
   const checkout = join(import.meta.dirname, '..');
   assert.deepEqual(spec.mounts.filter((m) => m.src === checkout), [{ src: checkout, dst: checkout, ro: true }]);

@@ -220,6 +220,10 @@ export class ClaudeLink {
       { src: this.turnsDir(uid), dst: this.turnsDir(uid) },
       { src: dirname(resolveClaude(this.claudeBin)), dst: dirname(resolveClaude(this.claudeBin)), ro: true },
     ];
+    // Codex's hook and requirements from the code this server runs, over the image's copy: a container that runs for days
+    // (a busy one is never replaced) still gets the deployed hook, not the one it was built with (#748). A folder, not a file:
+    // a deploy replaces the file's inode, which a file mount would keep showing the old one of.
+    mounts.push({ src: join(CONTAINERFILE_DIR, 'codex'), dst: '/etc/codex', ro: true });
     for (const d of TOOL_DIRS) if (existsSync(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
     // The code this server runs, read-only, so a member's turn checks the live checkout as a host turn does (#621). A dev
     // copy runs from a worktree, already mounted writable under projects/.

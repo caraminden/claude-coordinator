@@ -741,10 +741,20 @@ const landHandoffs = new LandHandoffs({
   },
   deployOps: {
     running: (name) => !!services.running(name),
-    start: (name, id) => {
+    start: async (name, id) => {
       const t = store.getTicket(id);
       if (!t) throw new Error(`minion ${id} is gone`);
-      return autoDeploy.deployNow(t.project_id, `app:${name}`, `#${t.number}`, store.turnAsker(id));
+      const by = `#${t.number}`;
+      const uid = store.turnAsker(id);
+      try {
+        return await autoDeploy.deployNow(t.project_id, `app:${name}`, by, uid);
+      } catch (err) {
+        if (!(err instanceof HttpError && err.status === 404)) throw err;
+      }
+      // Not among the release targets yet (a contraption added since their last scan, or a clone git can't read): straight to its deploy.
+      const row = store.getContraption(name);
+      if (!row) throw new Error(`no contraption ${name}`);
+      return startDeploy(app, row, by, null, uid);
     },
     last: (name) => services.lastDeploy(name),
   },

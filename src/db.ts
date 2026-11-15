@@ -206,6 +206,8 @@ export interface RepoCollaborator {
 }
 
 /** One of a person's linked accounts (src/credentials.ts); `secret` is still encrypted. */
+export type OpenrouterCallKind = 'image' | 'effect' | 'music' | 'text';
+
 export interface CredentialRow {
   user_id: number;
   kind: string;
@@ -742,6 +744,24 @@ CREATE TABLE IF NOT EXISTS credentials (
   failed_at INTEGER,
   PRIMARY KEY (user_id, kind)
 );
+-- Each person's OpenRouter calls (src/openrouter.ts, #717): booked pending at their worst-case price before the
+-- request, then ok at the real cost, failed (refused, nothing billed) or unknown (may have been billed: counted at
+-- the estimate). The monthly cap sums them. No foreign keys: the spend outlives a closed minion.
+CREATE TABLE IF NOT EXISTS openrouter_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  ticket_id INTEGER,
+  project_id INTEGER,
+  model TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  estimate_usd REAL NOT NULL,
+  cost_usd REAL,
+  status TEXT NOT NULL,
+  path TEXT,
+  created_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS openrouter_calls_user ON openrouter_calls(user_id, created_at);
 -- What Citadel did on GitHub for a scheme member (src/repo-access.ts, #310): state added or invited is
 -- Citadel's own doing, undone when they leave; existing was there before, so leaving leaves it. No foreign
 -- keys: the row outlives a removed person or scheme so the collaborator it made can still be taken off.
@@ -995,6 +1015,7 @@ export const SCHEMA_HISTORY = [
   [47, 'projects.ci_quiet (#678)'],
   [48, 'personal_instructions (#688)'],
   [49, 'push_subscriptions.everything (#690)'],
+  [50, 'openrouter_calls (#717)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1444,6 +1465,31 @@ export class Store {
 
   deleteCredential(userId: number, kind: string) {
     this.db.prepare('DELETE FROM credentials WHERE user_id = ? AND kind = ?').run(userId, kind);
+  }
+
+  /** What a person's OpenRouter calls since `since` count against their cap: real costs, and estimates where it isn't known. */
+  openrouterSpent(userId: number, since: number): number {
+    const row = this.db.prepare(`SELECT COALESCE(SUM(CASE status WHEN 'ok' THEN cost_usd WHEN 'failed' THEN 0 ELSE estimate_usd END), 0) AS spent
+      FROM openrouter_calls WHERE user_id = ? AND created_at >= ?`).get(userId, since) as { spent: number };
+    return row.spent;
+  }
+
+  addOpenrouterCall(c: { user_id: number; ticket_id: number | null; project_id: number | null; model: string; kind: OpenrouterCallKind; estimate_usd: number }): number {
+    return Number(this.db.prepare(`INSERT INTO openrouter_calls (user_id, ticket_id, project_id, model, kind, estimate_usd, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`).run(c.user_id, c.ticket_id, c.project_id, c.model, c.kind, c.estimate_usd, Date.now()).lastInsertRowid);
+  }
+
+  finishOpenrouterCall(id: number, status: 'ok' | 'failed' | 'unknown', cost: number | null) {
+    this.db.prepare('UPDATE openrouter_calls SET status = ?, cost_usd = ?, finished_at = ? WHERE id = ?').run(status, cost, Date.now(), id);
+  }
+
+  setOpenrouterCallPath(id: number, path: string) {
+    this.db.prepare('UPDATE openrouter_calls SET path = ? WHERE id = ?').run(path, id);
+  }
+
+  /** At boot, calls still pending died with the last server: they may have been billed, so they count at their estimate. */
+  sweepOpenrouterCalls() {
+    this.db.prepare(`UPDATE openrouter_calls SET status = 'unknown', finished_at = ? WHERE status = 'pending'`).run(Date.now());
   }
 
   /** Schemes from before owners (and any whose owner is gone) become this admin's. */

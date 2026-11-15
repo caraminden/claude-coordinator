@@ -5,7 +5,7 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import type { Store } from './db.ts';
 
-export type CredentialKind = 'github' | 'claude_runner';
+export type CredentialKind = 'github' | 'claude_runner' | 'openrouter';
 
 export interface Credential<M> {
   /** null when it couldn't be decrypted (SESSION_SECRET changed): treat it as needing linking again. */

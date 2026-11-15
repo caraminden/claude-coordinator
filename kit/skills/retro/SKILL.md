@@ -29,7 +29,7 @@ Create either file when it is first needed.
 1. **Gather evidence.** Collect the PR diff and the spec's open Proposals, the
    conversation (what was asked, corrected or complained about), every subagent report,
    every hook failure, and the steps that took longest. The kit's hooks log each tripwire or
-   guard.sh refusal, red test, failed push and refused stop to the scheme's shared folder:
+   guard.sh refusal, red test, failed push, refused stop and `process` line (what sent a self-review the wrong way) to the scheme's shared folder:
    `grep -l '<your branch>' "$COORDINATOR_SHARED_DIR"/retro-log/*/*.md` finds your sessions'
    logs. land.sh's rebase conflicts (`land conflict` lines naming the files) and its likely
    flakes (`flake` lines: a test file that failed in the land or deploy run and passed alone,

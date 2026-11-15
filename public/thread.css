@@ -371,22 +371,22 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 
 .chat { min-width: 0; }
 /* Who spoke (#693; Cara, 2026-11-14: "instead of having the background of taskmasters be purple, we had their chat
-   bubbles be purple, and the chat bubbles of minions can be the orange"): every chat sits on the same ground, and
-   an agent's bubbles carry its colour, collapsed ones too: a Taskmaster's violet, a minion's orange. A message
-   one agent sent another (.from-tm, .from-minion) takes its sender's colour; people's own stay plain. Its tint keeps
-   muted text at 4.5:1 in both modes. --chat-tone is the chat's agent, for other surfaces to follow. */
-.chat { --chat-tone: var(--accent); }
-.chat.role-taskmaster { --chat-tone: var(--held); }
+   bubbles be purple, and the chat bubbles of minions can be the orange"): every chat sits on the same ground, and a
+   Taskmaster's replies and narration are violet, collapsed ones too. A minion's own replies are plain again (Cara,
+   2026-11-14: "the orange on minions is a bit strange after having gotten used to orange meaning a message between
+   minions, can we make the minion chats white?"), so orange now means only a message between agents: one an agent
+   sent another (.from-tm, .from-minion) takes its sender's colour; people's own stay plain. Tints keep muted text
+   at 4.5:1 in both modes. */
 /* The Taskmaster's row in the minions list keeps a violet ground (Cara, 2026-11-14: "Keep it violet"). */
 :root { --tm-bg: color-mix(in srgb, var(--held) 8%, var(--bg)); }
 @media (prefers-color-scheme: dark) { :root { --tm-bg: color-mix(in srgb, var(--held) 12%, var(--bg)); } }
-.msg:is(.reply, .narration) { --tone: var(--chat-tone, var(--accent)); }
+.chat.role-taskmaster .msg:is(.reply, .narration) { --tone: var(--held); }
 .msg.from-tm { --tone: var(--held); }
 .msg.from-minion { --tone: var(--accent); }
 .msg { --tint: 9%; }
 /* Dark needs more to show: 12%, and violet 14%, the most that keeps muted text at 4.5:1. */
 @media (prefers-color-scheme: dark) { .msg { --tint: 12%; } .chat.role-taskmaster .msg:is(.reply, .narration), .msg.from-tm { --tint: 14%; } }
-.msg:is(.reply, .narration, .from-tm, .from-minion) { background: color-mix(in srgb, var(--tone) var(--tint), var(--panel)); border-color: color-mix(in srgb, var(--tone) 30%, var(--line)); }
+:is(.chat.role-taskmaster .msg:is(.reply, .narration), .msg.from-tm, .msg.from-minion) { background: color-mix(in srgb, var(--tone) var(--tint), var(--panel)); border-color: color-mix(in srgb, var(--tone) 30%, var(--line)); }
 /* A relayed message is dashed (Cara, 2026-11-14, picked "A: Sender's tint, dashed"), so it reads apart from the agent's own replies. */
 .msg.user:is(.from-tm, .from-minion) { border-style: dashed; border-color: color-mix(in srgb, var(--tone) 60%, var(--line)); }
 /* A dismissed minion's message box is tinted grey, so it reads as dismissed before you type. */

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
-import { systemPrompt } from '../src/prompts.ts';
+import { systemPrompt, titleLine } from '../src/prompts.ts';
 import { TRIPWIRE_BLOCKS } from '../src/tripwire-blocks.ts';
 
 // How the app behaves (the chat, links, the tripwire) is the same in every scheme, so the built-in
@@ -66,4 +66,13 @@ test('a minion parked on start_after hears its brief is held and to stay parked'
   const held = systemPrompt(project, minion, null, null, '/tickets', null, [], false, '', "#3 Leader's work is merged");
   assert.match(held, /You are parked: your brief is held until #3 Leader's work is merged/);
   assert.doesNotMatch(systemPrompt(project, minion, null, null, '/tickets', null), /You are parked/);
+});
+
+test('a minion\'s system prompt is byte-identical when its title, state, note or properties change (#704)', () => {
+  const render = (t: any) => systemPrompt(project, t, '/shared/5', '/shared/project', '/tickets', '/memory', [], true, 'App rule.');
+  const before = render(minion);
+  const after = render({ ...minion, title: 'A completely new title', state: 'ready', note: 'waiting on a pick', replies: ['Merge it'], props: { type: 'bug', stage: 'review' } });
+  assert.equal(after, before);
+  assert.ok(!before.includes('"T"'));
+  assert.match(titleLine({ ...minion, title: 'New' }), /#5 "New"/);
 });

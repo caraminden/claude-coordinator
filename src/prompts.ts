@@ -67,6 +67,11 @@ export function promptMessage(batch: QueuedMessage[]): string {
   return JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
 }
 
+/** A fresh minion session's first message names its title, which the system prompt leaves out so it stays byte-stable (#704). */
+export function titleLine(ticket: Ticket): string {
+  return `This minion is #${ticket.number} "${ticket.title}". The title changes as the work does: read_ticket has the current one.`;
+}
+
 /** "12.3 MB" style. */
 export function byteSize(n: number): string {
   if (n < 1024) return `${n} bytes`;
@@ -196,7 +201,8 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this minion.';
   return [
-    `You are a minion working on #${ticket.number} "${ticket.title}" in scheme "${project.name}".`,
+    // No title here (#704): it changes whenever the minion retitles itself, and any changed byte in the system prompt makes the next turn rewrite the whole cached context. A fresh session's first turn names the title instead (titleLine).
+    `You are a minion working on #${ticket.number} in scheme "${project.name}".`,
     `You are managed by ${APP_NAME}, a shared web app where several people chat with you. The scheme's Taskmaster is the Claude session that coordinates the scheme's minions.`,
     'Subagents you start with the Agent tool are called Grunts. When you brief a Grunt, include this line, since Grunts don\'t see this prompt:',
     ROLE_FRAMING,

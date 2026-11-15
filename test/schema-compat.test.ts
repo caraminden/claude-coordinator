@@ -18,7 +18,7 @@ const resolves = (ref: string) => spawnSync('git', ['-C', repo, 'rev-parse', '-q
 const prev = ['last-good', 'origin/main'].find(resolves);
 const prevDir = join(root, 'prev');
 mkdirSync(prevDir);
-if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src | tar -x -C "$3"', 'sh', repo, prev, prevDir]);
+if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src public | tar -x -C "$3"', 'sh', repo, prev, prevDir]);
 const loadPrev = async () => {
   assert.ok(prev, 'no last-good tag or origin/main to find the last release by: fetch origin');
   return import(join(prevDir, 'src', 'db.ts'));

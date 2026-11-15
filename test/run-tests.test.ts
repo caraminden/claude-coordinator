@@ -313,3 +313,50 @@ test("CI's checkout has origin/main and no main: the tier is decided against ori
   assert.deepEqual(ran(r.dir), ['product']);
   assert.match(r.log, /^run-tests: tier product/);
 });
+
+// The kit lane (#753): a change to kit/ (and light paths) alone runs only the test files that read the kit, as
+// tools/kit-tests.ts finds them: naming kit/ itself, or importing a src/ file that does.
+FIXTURES['kitname.test.mjs'] = `${RAN('kitname')}const where = 'kit/skills';\n`;
+FIXTURES['viasrc.test.mjs'] = `import { k } from '../src/skills.mjs';\n${RAN('viasrc')}`;
+const ranKit = (dir: string) => ['pipe', 'product', 'kitname', 'viasrc'].filter((n) => existsSync(join(dir, `ran-${n}`)));
+function kitRepo(change?: (dir: string) => void) {
+  return (dir: string) => {
+    for (const f of ['lane.sh', 'kit-tests.ts']) copyFileSync(join(tools, f), join(dir, 'tools', f));
+    writeFileSync(join(dir, 'tools', 'lanes'), 'full kit/templates/*\nlight docs/*\nkit kit/*\n');
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'skills.mjs'), "export const k = ['kit', 'skills'].join('/');\n");
+    mkdirSync(join(dir, 'kit', 'skills', 'x'), { recursive: true });
+    writeFileSync(join(dir, 'kit', 'skills', 'x', 'SKILL.md'), 'v1\n');
+    tierRepo(change)(dir);
+  };
+}
+const FOUR = ['pipe.test.mjs', 'product.test.mjs', 'kitname.test.mjs', 'viasrc.test.mjs'];
+
+test('a kit-only change runs only the test files that read the kit, and says how many (#753)', async () => {
+  const r = await run(FOUR, {}, kitRepo((dir) => {
+    writeFileSync(join(dir, 'kit', 'skills', 'x', 'SKILL.md'), 'v2\n');
+    mkdirSync(join(dir, 'docs'));
+    writeFileSync(join(dir, 'docs', 'note.md'), 'a light file beside it\n');
+  }));
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(ranKit(r.dir), ['kitname', 'viasrc']);
+  assert.match(r.log, /^run-tests: kit lane: only the 2 test file\(s\) that read the kit \(tools\/kit-tests\.ts\)$/m);
+});
+
+test('a kit change with anything outside the kit lane runs them all (#753)', async () => {
+  for (const change of [
+    (dir: string) => { writeFileSync(join(dir, 'kit', 'skills', 'x', 'SKILL.md'), 'v2\n'); writeFileSync(join(dir, 'public', 'app.js'), 'v2\n'); },
+    (dir: string) => writeFileSync(join(dir, 'kit', 'templates', 'land.sh'), 'v2\n'), // a pipeline file, and full in the map
+  ]) {
+    const r = await run(FOUR, {}, kitRepo(change));
+    assert.equal(r.code, 0, r.log);
+    assert.ok(ranKit(r.dir).includes('product'), r.log);
+    assert.doesNotMatch(r.log, /kit lane/);
+  }
+});
+
+test('main itself (the nightly, a deploy) never takes the kit lane (#753)', async () => {
+  const r = await run(FOUR, {}, kitRepo());
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(ranKit(r.dir), ['pipe', 'product', 'kitname', 'viasrc']);
+});

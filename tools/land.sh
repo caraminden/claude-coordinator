@@ -373,6 +373,13 @@ bad_check() {
 # broken). A red run is red: it refuses, and never falls back.
 tip=$(git rev-parse HEAD)
 short=$(git rev-parse --short HEAD)
+# The lane (#753, tools/lanes as main has it): light runs no tests and no CI, and deploy.sh restarts nothing for it;
+# kit runs CI as usual, where tools/run-tests.sh picks the test files that read the kit. Lands into a build stay full.
+lane=full
+if [ "$mode" = land ]; then
+  read -r lane lane_why < <(git diff --no-renames --name-only "$old" "$tip" | "$tools/lane.sh" "$old") || lane=full
+  [ "$lane" = full ] || say "lane: $lane (tools/lanes; the path that decided it: $lane_why)"
+fi
 
 # The deploy's boot check, before a CI run is spent (#646). Only while <state>/refusing is there: deploy.sh leaves it
 # ("<when> <why>") when its boot check fails and removes it when one passes. On Nov 13 nine landings each waited in
@@ -399,7 +406,8 @@ preflight() {
   [ "$rc" != 124 ] && [ "$rc" != 137 ] || refuse "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-420} s), so no CI run was spent and $untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
   refuse "deploy has been refusing since $since: $why, and $short fails the same check here (its output is above), so no CI run was spent and $untouched; $branch keeps the rebased work. If the cause is in your change, fix it and land again. If it isn't, landings are blocked until the fix for it lands (that fix passes this check and lands as usual): tell the Taskmaster, and don't retry until then"
 }
-[ "$mode" = into ] || [ "$mode" = full ] || preflight
+# A light land deploys without the boot check, so a refusing deploy doesn't hold it up.
+[ "$mode" = into ] || [ "$mode" = full ] || [ "$lane" = light ] || preflight
 
 # The end of --into: build/<n> moves to what was tested, unless something moved it meanwhile (the compare-and-swap).
 merge_into() {
@@ -511,9 +519,16 @@ trap 'land_timing $? || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 fellback=
 rc=0
 land_mark ci ci
-ci_gate || rc=$?
+if [ "$lane" = light ]; then
+  rc=light
+else
+  ci_gate || rc=$?
+fi
 land_mark gate
-if [ "$rc" = 0 ]; then
+if [ "$rc" = light ]; then
+  say "no tests and no CI: nothing in this change is read by a test or the server (tools/lanes)"
+  tested=$tip
+elif [ "$rc" = 0 ]; then
   ci_done
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then

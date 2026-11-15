@@ -88,6 +88,32 @@ if [ -r "$list" ]; then
   fi
 fi
 
+# The kit lane (#753, tools/lanes): a change to kit/ and light paths alone runs only the test files that read the kit
+# (tools/kit-tests.ts), of those picked above. Against the same main as the tiers; the map is main's.
+kit_lane() {
+  local base lane
+  base=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null) || return 1
+  read -r lane _ < <(git diff --no-renames --name-only "$base" HEAD | "$tools/lane.sh" "$base") || return 1
+  [ "$lane" = kit ]
+}
+if [ -r tools/lanes ] && kit_lane; then
+  kit=() kept=()
+  mapfile -t kit < <("$tools/citadel-node" "$tools/kit-tests.ts" 2>/dev/null)
+  if [ "${#kit[@]}" -gt 0 ]; then
+    if [ "${targets[*]}" = test/ ]; then
+      kept=("${kit[@]}")
+    else
+      for f in "${targets[@]}"; do [[ " ${kit[*]} " == *" $f "* ]] && kept+=("$f"); done
+    fi
+  fi
+  if [ "${#kept[@]}" -gt 0 ]; then
+    echo "run-tests: kit lane: only the ${#kept[@]} test file(s) that read the kit (tools/kit-tests.ts)" >>"$log"
+    targets=("${kept[@]}")
+  else
+    echo "run-tests: kit lane, but tools/kit-tests.ts picked none: running them all" >>"$log"
+  fi
+fi
+
 progress=${log%.log}.progress
 unset CITADEL_TEST_PROGRESS # the reruns below count nothing
 rm -f "$progress" "$progress.tmp"

@@ -1,0 +1,11 @@
+# Citadel's land lanes (#753; the design: specs/land-lanes.md in the scheme's shared folder).
+#   <lane> <pattern>...   A changed path takes the lane of the first line with a pattern that matches it (bash patterns,
+#                         where * also matches /); a path no line matches is full. tools/lane.sh reads this file.
+# light: nothing reads these, no test and no server code (checked by grep 2026-11-15), so a land touching only them runs
+#   no tests, starts no CI and restarts nothing. A test that starts reading one makes it full: take its line out.
+# kit: a land touching only kit/ (and light paths) runs only the test files that read the kit (tools/kit-tests.ts).
+#   The land template other schemes copy stays full: Citadel's own land tests read it.
+# Read from main's copy, so a change to this file is judged by the old one; this file and tools/lane.sh are full.
+full  kit/skills/scheme-setup/templates/*
+light docs/* .claude/* CLAUDE.md README.md .github/pull_request_template.md
+kit   kit/*

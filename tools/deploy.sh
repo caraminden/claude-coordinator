@@ -72,13 +72,15 @@ health() {
     node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[process.argv[1]]??"")}catch{}})' "$1" || true
 }
 
-# frontend if every file changed between two commits is under public/, none if nothing changed,
-# server otherwise (and whenever the running commit is unknown).
+# frontend if every file changed between two commits is under public/, none if nothing changed, light if every one
+# is in tools/lanes' light lane as <from> has it (#753: no test or server code reads them), server otherwise (and
+# whenever the running commit is unknown).
 change_kind() {
   local dir=$1 from=$2 to=$3 files
   if [ -z "$from" ] || ! git -C "$dir" cat-file -e "$from^{commit}" 2>/dev/null; then echo server; return; fi
-  files=$(git -C "$dir" diff --name-only "$from" "$to")
+  files=$(git -C "$dir" diff --no-renames --name-only "$from" "$to")
   if [ -z "$files" ]; then echo none
+  elif [ -x "$dir/tools/lane.sh" ] && [ "$(cd "$dir" && tools/lane.sh "$from" <<<"$files" | cut -d' ' -f1)" = light ]; then echo light
   elif grep -qv '^public/' <<<"$files"; then echo server
   else echo frontend; fi
 }
@@ -503,7 +505,9 @@ deploy() {
   trap undo ERR
   # DEPLOY_TESTED: the commit tools/land.sh just tested, so the same commit isn't tested twice under the lock;
   # a stray file here (an untracked test) wasn't in that run, so then it tests again.
-  if [ "${DEPLOY_TESTED:-}" = "$new" ] && [ -z "$(git_live status --porcelain --ignored)" ]; then
+  if [ "$kind" = light ]; then
+    say "skipping the tests and the boot check: nothing changed but docs and config no test or server code reads"
+  elif [ "${DEPLOY_TESTED:-}" = "$new" ] && [ -z "$(git_live status --porcelain --ignored)" ]; then
     say "skipping the tests: land.sh just ran them on $(short "$new")"
   else
     say "running the tests"
@@ -519,39 +523,46 @@ deploy() {
       false
     fi
   fi
-  queue_phase "deploying: boot check since $(date +%H:%M)"
-  say "boot check: the new code on a spare port with a copy of the database"
-  # A limit from outside (#553): boot-check.ts's own is a timer, which a blocking call in the new code defeats, and a
-  # check that never returns would hold the lock until a person killed it. timeout stops the check's whole process
-  # group, the server and browser it started included. In the background with a wait, so a TERM here runs undo at
-  # once (it stops the check) rather than after the check ends. Not as `node`: ananicy would idle it
-  # (deploy/priority.md); no lock fd, as with the tests.
-  local boot_rc=0 boot_since=$SECONDS
-  timeout -k 10 "$BOOT_TIMEOUT" "$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" >"$STATE/boot.out" 9>&- 7>&- &
-  boot_pid=$!
-  wait "$boot_pid" || boot_rc=$?
-  boot_pid=
-  version=$(cat "$STATE/boot.out")
-  if [ "$boot_rc" != 0 ]; then
-    # 124: timeout stopped it. 137 only past the limit (its KILL after a TERM that didn't take): sooner, something else killed it.
-    # For the landings behind (#646): land.sh runs this check before its CI run while the file is there. The first
-    # failure's time stays.
-    local hung=
-    if [ "$boot_rc" = 124 ] || { [ "$boot_rc" = 137 ] && [ $((SECONDS - boot_since)) -ge "$BOOT_TIMEOUT" ]; }; then hung=1; fi
-    [ -s "$STATE/refusing" ] || echo "$(date +%s) the boot check $([ -n "$hung" ] && echo hung || echo failed) on $(git_live rev-parse --short "$new")" >"$STATE/refusing" || true
-    if [ -n "$hung" ]; then
-      say "the boot check hung: stopped after $BOOT_TIMEOUT s, far past its own limit. That is not a verdict on the change (a failed check says what broke): run it again, and if it hangs again, look for a call in the new code that blocks the server's start. Nothing deployed"
-    else
-      say "boot check failed; nothing deployed"
+  # The server's code is the same, so the front end's version is too; a light change leaves a refusing deploy's note.
+  if [ "$kind" = light ]; then
+    version=$(health version)
+  else
+    queue_phase "deploying: boot check since $(date +%H:%M)"
+    say "boot check: the new code on a spare port with a copy of the database"
+    # A limit from outside (#553): boot-check.ts's own is a timer, which a blocking call in the new code defeats, and a
+    # check that never returns would hold the lock until a person killed it. timeout stops the check's whole process
+    # group, the server and browser it started included. In the background with a wait, so a TERM here runs undo at
+    # once (it stops the check) rather than after the check ends. Not as `node`: ananicy would idle it
+    # (deploy/priority.md); no lock fd, as with the tests.
+    local boot_rc=0 boot_since=$SECONDS
+    timeout -k 10 "$BOOT_TIMEOUT" "$LIVE/tools/citadel-node" "$LIVE/tools/boot-check.ts" "$LIVE" "$DB" >"$STATE/boot.out" 9>&- 7>&- &
+    boot_pid=$!
+    wait "$boot_pid" || boot_rc=$?
+    boot_pid=
+    version=$(cat "$STATE/boot.out")
+    if [ "$boot_rc" != 0 ]; then
+      # 124: timeout stopped it. 137 only past the limit (its KILL after a TERM that didn't take): sooner, something else killed it.
+      # For the landings behind (#646): land.sh runs this check before its CI run while the file is there. The first
+      # failure's time stays.
+      local hung=
+      if [ "$boot_rc" = 124 ] || { [ "$boot_rc" = 137 ] && [ $((SECONDS - boot_since)) -ge "$BOOT_TIMEOUT" ]; }; then hung=1; fi
+      [ -s "$STATE/refusing" ] || echo "$(date +%s) the boot check $([ -n "$hung" ] && echo hung || echo failed) on $(git_live rev-parse --short "$new")" >"$STATE/refusing" || true
+      if [ -n "$hung" ]; then
+        say "the boot check hung: stopped after $BOOT_TIMEOUT s, far past its own limit. That is not a verdict on the change (a failed check says what broke): run it again, and if it hangs again, look for a call in the new code that blocks the server's start. Nothing deployed"
+      else
+        say "boot check failed; nothing deployed"
+      fi
+      false
     fi
-    false
+    rm -f "$STATE/refusing"
   fi
   trap - ERR INT TERM HUP
-  rm -f "$STATE/unchecked" "$STATE/refusing"
+  rm -f "$STATE/unchecked"
   kit_land_drift "$prev" "$new" || true
 
   queue_phase "deploying: going live"
-  if [ "$kind" = frontend ] && [ "$(health reload)" = sighup ]; then
+  # SIGHUP for light too: it re-reads an unchanged public/ and takes the checkout's HEAD as live, so no restart.
+  if { [ "$kind" = frontend ] || [ "$kind" = light ]; } && [ "$(health reload)" = sighup ]; then
     systemctl --user kill -s HUP --kill-whom=main "$SERVICE"
     mark queued
     for _ in $(seq 10); do
@@ -560,10 +571,12 @@ deploy() {
         mark live
         git_live tag -f last-good "$new" >/dev/null
         rm -f "$STATE/bad"
-        say "live now: the server reloaded the front end ($version); open tabs reload when idle. No restart."
-        local pushed kind=ok
+        local what="the server reloaded the front end ($version); open tabs reload when idle" pushed
+        [ "$kind" != light ] || what="docs and config only, nothing to reload"
+        say "live now: $what. No restart."
+        local kind=ok
         pushed=$(push_github "$new") || kind=warn
-        report_me "Deployed $(short "$new"): the server reloaded the front end, no restart.$pushed" "$kind"
+        report_me "Deployed $(short "$new"): ${what%%;*}, no restart.$pushed" "$kind"
         return 0
       fi
     done

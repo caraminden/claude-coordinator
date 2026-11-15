@@ -161,6 +161,38 @@ test('green CI on the exact rebased commit lands it without a test run here, and
   assert.equal(r.note(), 'locked=1 held=yes');
 });
 
+// #753: the lane comes from tools/lanes as main has it. Light asks GitHub nothing and runs no test; kit and the rest
+// wait for CI as before (tools/run-tests.sh picks the kit's test files there); a branch can't loosen its own lane.
+test('a light land asks GitHub nothing and runs no test; kit, unlisted paths and a loosened map still wait for CI', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.source, 'tools/lanes', 'light docs/*\nkit kit/*\n');
+  git(r.wt, 'rebase', '-q', 'main');
+  mkdirSync(join(r.wt, 'docs'));
+  mkdirSync(join(r.wt, 'kit'));
+  r.commit(r.wt, 'docs/a.md', 'mine\n');
+  let res = c.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  assert.match(res.stderr, /lane: light .*no tests and no CI/s);
+  assert.equal(c.calls(), '', 'not a word to GitHub');
+  assert.equal(c.localRuns(), 0);
+  assert.equal(r.note(), 'locked=1 held=yes', 'and it deployed');
+  for (const [file, lane] of [['kit/x.md', /lane: kit \(/], ['b.txt', null], ['tools/lanes', null]] as const) {
+    r.commit(r.wt, file, file === 'tools/lanes' ? 'light *\n' : 'two\n');
+    const before = c.calls().length;
+    res = c.run();
+    assert.equal(res.status, 0, res.stderr);
+    if (lane) assert.match(res.stderr, lane);
+    else assert.doesNotMatch(res.stderr, /lane: /);
+    assert.match(res.stderr, /waiting for CI on .*CI passed on/s, file);
+    assert.ok(c.calls().length > before);
+  }
+  // The loosened map is main's now, and judges the next land.
+  r.commit(r.wt, 'b.txt', 'three\n');
+  assert.match(c.run().stderr, /lane: light \(tools\/lanes; the path that decided it: b\.txt\)/);
+});
+
 // #565: one line per landing with how long each phase took, landed or refused.
 const timings = (shared: string) => landLog(shared).split('\n').filter((l) => l.includes(' · timing · '));
 test('a landing leaves one timing line with every phase; CI that answers fills the CI fields', () => {

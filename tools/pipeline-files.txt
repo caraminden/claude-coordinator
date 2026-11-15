@@ -10,6 +10,9 @@ tools/deploy.sh
 tools/deploy-queue.sh
 tools/kit-land-drift.sh
 tools/run-tests.sh
+tools/lanes
+tools/lane.sh
+tools/kit-tests.ts
 tools/citadel-wait
 tools/citadel-heavy
 tools/boot-check.ts
@@ -25,6 +28,7 @@ test/land-fixture.ts
 test/land-recover-fixture.ts
 test/scheme-setup-land-fixture.ts
 test/land.test.ts
+test/lane.test.ts
 test/land-build.test.ts
 test/land-queue.test.ts
 test/land-deploy.test.ts

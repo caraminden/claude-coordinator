@@ -196,6 +196,38 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
   assert.equal(kind('', c), 'server', 'an unknown running commit restarts');
 });
 
+test("deploy.sh tells a light change (tools/lanes, as the running commit has it) from the rest, and needs no restart for it (#753)", () => {
+  const g = join(root, 'light');
+  const git = (...args: string[]) => execFileSync('git', ['-C', g, ...args], { encoding: 'utf8' }).trim();
+  mkdirSync(join(g, 'tools'), { recursive: true });
+  mkdirSync(join(g, 'docs'));
+  mkdirSync(join(g, 'public'));
+  git('init', '-q');
+  git('config', 'user.email', 't@t');
+  git('config', 'user.name', 't');
+  const commit = (file: string, text = String(Math.random())) => {
+    writeFileSync(join(g, file), text);
+    git('add', '-A');
+    git('commit', '-qm', file);
+    return git('rev-parse', 'HEAD');
+  };
+  const bare = commit('docs/a.md'); // no map yet
+  cpSync(join(repo, 'tools', 'lane.sh'), join(g, 'tools', 'lane.sh'));
+  const mapped = commit('tools/lanes', 'light docs/*\n');
+  const docs = commit('docs/a.md');
+  const front = commit('public/app.js');
+  const both = commit('docs/b.md');
+  const kind = (from: string, to: string) =>
+    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', g, from, to], { encoding: 'utf8', env: hostEnv }).trim();
+  assert.equal(kind(mapped, docs), 'light');
+  assert.equal(kind(docs, front), 'frontend');
+  assert.equal(kind(mapped, both), 'server', 'light with public/ is not light, and restarts as before');
+  assert.equal(kind(bare, docs), 'server', 'the running commit had no map, and the map itself is full');
+  git('mv', 'public/app.js', 'docs/app.md');
+  git('commit', '-qm', 'rename');
+  assert.equal(kind(both, git('rev-parse', 'HEAD')), 'server', 'a file renamed into docs/ counts where it came from too');
+});
+
 // A command on PATH that notes each call's arguments, then runs the real one: how a test sees which wait deploy.sh asked
 // for without timing it (a bound on time goes red on a loaded box).
 function noting(bin: string, cmd: string, log: string) {

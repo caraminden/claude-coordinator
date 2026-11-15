@@ -4,10 +4,10 @@ import { test } from 'node:test';
 import { systemPrompt } from '../src/prompts.ts';
 
 // The starting prompt's size budget (#415): every API call re-reads it, so it only grows by decision.
-// Budgets are characters (about 4 per token), today's size plus 10% on 2026-11-08. Raising one is a
+// Budgets are characters (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760). Raising one is a
 // one-line edit here with the reason in the commit message; then refresh the baseline with
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
-const BUDGET = { minion: 41_500, taskmaster: 41_300 };
+const BUDGET = { minion: 38_200, taskmaster: 40_000 };
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).
 const app = 'x'.repeat(11_664);

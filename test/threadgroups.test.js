@@ -99,3 +99,9 @@ test('recap sections: changed minions only, newest first, by what they need', as
     [['you', [3, 2]], ['work', [4]], ['wait', [6]], ['closed', [5]]]);
   assert.deepEqual(recapSections(tickets, 200, {}, stateOf), []);
 });
+
+test('a dismissed minion whose change is still on its way stays under Deploying until live (#764)', () => {
+  const release = { name: 'Build 997', target: 'Peek for Windows', stage: 'CI' };
+  assert.deepEqual(shape([m(1, 'bug', { status: 'closed', release }), m(2, 'bug'), m(3, 'feature', { status: 'closed', release, server_work: { kind: 'land' } })]),
+    [['deploying', false, [1]], ['feature', false, [3]], ['bug', false, [2]]]);
+});

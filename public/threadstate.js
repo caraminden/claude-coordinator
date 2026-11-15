@@ -68,14 +68,20 @@ function baseState(t, usage, now) {
   // A minion parked on start_after is new (it hasn't run) but not working (#261).
   const by = workingBy(t);
   if (by === 'turn') return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, label: workingLabel(t) };
-  if (by === 'server') return { rank: 1, fam: 'work', cell: 'landing', pulse: true, server: true, label: serverLabel(t.wait) };
+  // On its way in a release (#764, releases.js pendingRelease): the release's name where "landing" or "deploying" would be.
+  const rel = t.release;
+  const relLabel = rel ? `${rel.target} ${rel.name}: ${rel.stage}${rel.text ? `, ${rel.text}` : ''}` : '';
+  if (by === 'server') return { rank: 1, fam: 'work', cell: rel?.name ?? 'landing', pulse: true, server: true, label: rel ? `${serverLabel(t.wait)} · ${relLabel}` : serverLabel(t.wait) };
   if (t.status === 'error' && t.state === 'limited') return limitState(t, waited, usage, now);
   if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
+  // Dismissed once landed, its change not live yet (on main waiting for CI, a deploy): still on its way.
+  if (t.status === 'closed' && rel) return { rank: 2, fam: 'wait', cell: rel.name, label: `On its way: ${relLabel}` };
   if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };
   const state = STATES[t.state];
   // Parked until something wakes it by itself (start_after, wake_when_live, runners back) reads as waiting, not grey (Cara, 2026-11-14).
   if (t.state === 'parked' && t.wakes_on) return { rank: 3, fam: 'wait', cell: 'waiting', label: `Waiting: ${t.parked_for ? `starts when ${t.wakes_on}` : t.wakes_on}` };
   if (t.state === 'parked') return { rank: 4, fam: 'idle', cell: 'parked', label: state.label };
+  if (t.state === 'pending-deploy' && rel) return { rank: 2, fam: 'wait', cell: rel.name, label: `${state.label} · ${relLabel}` };
   if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, fam: 'wait', cell: `${t.state === 'outside' ? 'waiting' : 'deploying'}${steps}`, counted: !!steps, label: state.label };
   if (t.state === 'blocked') return { rank: 2, fam: 'broken', cell: 'blocked', label: state.label };
   // An open question or plan card is the more specific ask than ready, try it or reply; timed from when it was posted.

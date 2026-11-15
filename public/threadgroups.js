@@ -10,7 +10,8 @@
 /** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
-const isDeploying = (t) => t.state === 'pending-deploy' && resting(t);
+/** Deploying: pending-deploy, or dismissed with its change still on its way in a release (#764, `release` from releases.js). */
+const isDeploying = (t) => (t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t);
 /** Parked until something wakes it by itself (the server's wakes_on; a held start_after chain has none). */
 const wakesItself = (t) => !!t.wakes_on;
 

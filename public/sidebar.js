@@ -12,6 +12,7 @@ import { presenceChip } from './presence.js';
 import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
+import { pendingRelease } from './releases.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
 import { CLAUDE_MODELS, EFFORT_LEVELS, guessType, pickFor } from './model-table.js';
@@ -235,7 +236,11 @@ const REST = { deploying: 'Deploying', waiting: 'Waiting', parked: 'Parked' };
 export function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
-  const all = [...view.tickets.values()];
+  // Each minion's change on its way in a release (#764): its row says which, and a dismissed one stays under Deploying till it's live.
+  const all = [...view.tickets.values()].map((t) => {
+    const release = pendingRelease(t);
+    return release ? { ...t, release } : t;
+  });
   document.getElementById('coordinator-row')?.replaceChildren(threadRow(view.coordinator, `#/p/${view.projectId}`));
   renderPropFilter();
   // The property filter narrows open and dismissed minions alike; the Taskmaster always shows.
@@ -244,14 +249,14 @@ export function renderSidebar() {
   // Its count depends on which minions you've seen, which changes with the rows.
   renderInbox();
   if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
-  const open = tickets.filter((t) => t.status !== 'closed');
-  const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
+  const open = tickets.filter((t) => t.status !== 'closed' || t.release);
+  const closed = tickets.filter((t) => t.status === 'closed' && !t.release).sort((a, b) => b.updated_at - a.updated_at);
   const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project)).map((s) =>
     h('section', { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
       h('h3', {}, s.build ? buildHeading(s) : s.key in REST ? REST[s.key] : s.group ? groupHeading(s.group) : TYPES[s.type].section),
       s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t))));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
-  const byId = new Map(open.map((t) => [t.id, t]));
+  const byId = new Map(open.filter((t) => t.status !== 'closed').map((t) => [t.id, t]));
   const pinned = (view.pins ?? []).map((id) => byId.get(id)).filter(Boolean);
   const pinnedGroup = pinned.length ? h('section', { class: 'thread-group g-pinned' }, h('h3', {}, 'Pinned'), pinned.map((t) => threadRow(t))) : '';
   let closedGroup = '';

@@ -30,9 +30,10 @@ export async function loadReleases() {
   member = new Set(got[1].schemes.map((s) => s.projectId));
   loaded = true;
   redraw();
+  return rowsChanged();
 }
 
-/** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. */
+/** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
 export function onReleases(msg) {
   if (!loaded) return;
   const s = msg.releases;
@@ -42,6 +43,7 @@ export function onReleases(msg) {
   else schemes.delete(msg.projectId);
   if (!had && schemes.has(msg.projectId)) return loadReleases();
   redraw();
+  return rowsChanged();
 }
 
 function redraw() {
@@ -99,7 +101,8 @@ const etaTitle = (eta, since) => (eta <= Date.now() && since
  * What people call a release (Cara, 2026-11-12: "a numbered build/release system instead of commit hashes"): "Release 14",
  * "#14" where space is short; a try that never went live has no number, so it's "a failed try".
  */
-const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : `Release ${r.number}`) : r.outcome === 'signed' ? 'a signed build' : r.outcome === 'live' ? 'an earlier release' : 'a failed try');
+// A target with its own names (#764: Peek's "Build 997") sends `name`; the rest are "Release <n>".
+const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : r.name ?? `Release ${r.number}`) : r.outcome === 'signed' ? 'a signed build' : r.outcome === 'live' ? 'an earlier release' : 'a failed try');
 /** The commit or version name behind it, shown small on its card for whoever wants it (no hover: Cara, 2026-11-12, "if you want more info, click"). */
 const releaseDetail = (r) => (r.version ? (isSha(r.version) ? `commit ${r.version.slice(0, 7)}` : `version ${r.version}`) : '');
 
@@ -245,7 +248,7 @@ function targetCard(projectId, tv, alone) {
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
       cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
     deployBar(projectId, tv),
-    h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : 'Next release'),
+    h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : n?.name ?? 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
       h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta, true))),
@@ -517,6 +520,27 @@ export function releaseChip(t) {
       h('span', { class: 'muted' }, `folded into Build ${t.build}`), h('span', { 'aria-hidden': 'true' }, '›'));
   }
   return null;
+}
+
+// ---------- minion rows ----------
+
+/** The release minion `t`'s change is on its way in (#764): its name ("Build 997", "Next build"), target and stage; null when none. */
+export function pendingRelease(t) {
+  if (!t || !loaded) return null;
+  for (const tv of schemes.get(t.project_id)?.targets ?? []) {
+    const c = tv.next?.changes.find((x) => x.ticketId === t.id);
+    if (c) return { name: tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? 'Next release', target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text };
+  }
+  return null;
+}
+
+/** Each minion's pending release as rows show it, so a releases event redraws the list only when one changed. */
+let rowsKey = '';
+function rowsChanged() {
+  const key = JSON.stringify([...schemes.values()].flatMap((s) => s.targets.flatMap((tv) => (tv.next?.changes ?? []).map((c) => [c.ticketId, tv.next.number, tv.next.name, c.stage, c.waitingOn ?? c.text]))));
+  const changed = key !== rowsKey;
+  rowsKey = key;
+  return changed;
 }
 
 // ---------- live ----------

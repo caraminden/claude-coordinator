@@ -305,3 +305,13 @@ test("rowBar: the server's land draws the landing's track as a turn's wait does 
   const bar = rowBar(row, rowState(row, null, NOW));
   assert.equal(bar.wait.stage, 'test');
 });
+
+test('rowState: a minion on its way in a release shows that release where landing or deploying would (#764)', () => {
+  const release = { name: 'Build 997', target: 'Peek for Windows', stage: 'CI', text: 'on main: it goes out with the next build CI ships' };
+  assert.deepEqual(pill({ server_work: { kind: 'land' }, release }), [1, 'work', 'Build 997', 'pulse']);
+  assert.deepEqual(pill({ state: 'pending-deploy', release }), [2, 'wait', 'Build 997']);
+  // Dismissed once landed, still not live: waiting colour, not grey "dismissed".
+  assert.deepEqual(pill({ status: 'closed', state: 'ready', release: { ...release, name: 'Next build' } }), [2, 'wait', 'Next build']);
+  assert.equal(rowState(t({ status: 'closed', release }), null, NOW).label, 'On its way: Peek for Windows Build 997: CI, on main: it goes out with the next build CI ships');
+  assert.match(rowState(t({ server_work: { kind: 'land' }, release }), null, NOW).label, / · Peek for Windows Build 997: CI/);
+});

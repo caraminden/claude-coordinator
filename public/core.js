@@ -295,7 +295,7 @@ function connectStream(catchUp = false) {
       }
       assetVersion ??= msg.version;
       // Each connect's own hello (it carries usage; a deploy's broadcast one doesn't), so a reconnect catches up (#626).
-      if ('usage' in msg) loadReleases();
+      if ('usage' in msg) loadReleases().then((rows) => rows && view?.kind === 'project' && renderSidebar());
       if (msg.stream) {
         presenceHello(msg.stream);
         if (view?.kind === 'project') renderSidebar();
@@ -328,7 +328,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
-    if (msg.type === 'releases') onReleases(msg);
+    if (msg.type === 'releases') Promise.resolve(onReleases(msg)).then((rows) => rows && view?.kind === 'project' && renderSidebar());
     if (msg.type === 'presence' && onPresenceMsg(msg)) {
       renderSidebar();
       if (view.id) renderTicketHead();

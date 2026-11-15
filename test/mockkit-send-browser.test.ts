@@ -3,14 +3,12 @@
 // reload; a changed pick sends again; a failed send rolls back with a toast and Retry.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page, serve, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
-const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
+const skip = !bin && skipMessage;
 const starter = join(import.meta.dirname, '..', 'kit', 'skills', 'docs-and-mocks', 'starter');
 
 // `fail` makes the next send reject; the stubbed bridge counts and records every post in window.posts.
@@ -36,28 +34,26 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 </main>
 <script>mock.picks({ options: [{ v: 'pick', label: 'Pick this', done: 'Picked' }] }); mock.ready.then(() => setTimeout(() => (window.ready = true), 50));</script>`;
 
-let server: Server;
+let app: App;
 let browser: Browser;
 let base = '';
 
 before(async () => {
   if (skip) return;
-  server = createServer((req, res) => {
-    const path = new URL(req.url ?? '/', 'http://x').pathname;
-    if (path === '/') return res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
+  app = await serve((path, res) => {
+    if (path === '/') return void res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
     if (path === '/mockkit.js' || path === '/mockkit.css') {
-      return res.writeHead(200, { 'content-type': path.endsWith('js') ? 'text/javascript' : 'text/css' }).end(readFileSync(join(starter, path)));
+      return void res.writeHead(200, { 'content-type': path.endsWith('js') ? 'text/javascript' : 'text/css' }).end(readFileSync(join(starter, path)));
     }
     res.writeHead(404).end();
   });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  base = app.base;
   browser = await launch(bin!);
 });
 
 after(async () => {
   await browser?.close();
-  await new Promise((r) => (server ? server.close(r) : r(null)));
+  await app?.close();
 });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

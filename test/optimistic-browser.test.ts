@@ -2,16 +2,13 @@
 // (2026-11-08, "assume things will work instantly, but recover later if there was an issue"). Each send is a
 // promise the test settles by hand (window.reqs), so the order and overlap of sends is seen, not timed.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { themeCss } from '../src/theme.ts';
-import { chromium, launch, type Browser, type Page } from './browser.ts';
+import { chromium, launch, type Browser, type Page, serveUi, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
-const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
+const skip = !bin && skipMessage;
 const pub = join(import.meta.dirname, '..', 'public');
 
 // act(id, key): an action on item `id` that marks it done at once, sends a request the test settles by hand
@@ -50,28 +47,20 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   window.ready = true;
 </script>`;
 
-let server: Server;
+let app: App;
 let browser: Browser;
 let base = '';
 
 before(async () => {
   if (skip) return;
-  server = createServer((req, res) => {
-    const path = new URL(req.url ?? '/', 'http://x').pathname;
-    if (path === '/') return res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
-    if (path === '/theme.css') return res.writeHead(200, { 'content-type': 'text/css' }).end(themeCss(readFileSync(join(pub, 'style.css'), 'utf8')));
-    const m = /^\/ui\/([a-z-]+\.(js|css))$/.exec(path);
-    if (!m) return res.writeHead(404).end();
-    res.writeHead(200, { 'content-type': m[2] === 'js' ? 'text/javascript' : 'text/css' }).end(readFileSync(join(pub, 'ui', m[1])));
-  });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  app = await serveUi(PAGE);
+  base = app.base;
   browser = await launch(bin!);
 });
 
 after(async () => {
   await browser?.close();
-  await new Promise((r) => (server ? server.close(r) : r(null)));
+  await app?.close();
 });
 
 const open = (opts?: Parameters<Browser['page']>[1]) => browser.page(base, opts);

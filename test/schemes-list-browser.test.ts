@@ -4,15 +4,12 @@
 // Citadel's real front end (public/index.html) in headless Chromium (test/browser.ts), with fetch answered
 // in the page so nothing reaches a server.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { extname, join, normalize } from 'node:path';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
-const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
+const skip = !bin && skipMessage;
 const pub = join(import.meta.dirname, '..', 'public');
 
 // Runs before app.js: a fake server for the API. `failProjects` fails that many fetches of api/projects with
@@ -51,37 +48,20 @@ const STUB = `<script>
   window.EventSource = class { close() {} };
 </script>`;
 
-let server: Server;
+let app: App;
 let browser: Browser;
 let base = '';
 
 before(async () => {
   if (skip) return;
-  const types: Record<string, string> = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
-  server = createServer((req, res) => {
-    const path = new URL(req.url ?? '/', 'http://x').pathname;
-    if (path === '/') {
-      const html = readFileSync(join(pub, 'index.html'), 'utf8').replace('<head>', `<head>${STUB}`);
-      return res.writeHead(200, { 'content-type': 'text/html' }).end(html);
-    }
-    const file = normalize(join(pub, path));
-    if (!file.startsWith(pub)) return res.writeHead(404).end();
-    let body: Buffer;
-    try {
-      body = readFileSync(file);
-    } catch {
-      return res.writeHead(404).end();
-    }
-    res.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream' }).end(body);
-  });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  app = await serveApp({ stub: STUB });
+  base = app.base;
   browser = await launch(bin!);
 });
 
 after(async () => {
   await browser?.close();
-  await new Promise((r) => (server ? server.close(r) : r(null)));
+  await app?.close();
 });
 
 const names = (page: Page) => page.eval<string[]>(`[...document.querySelectorAll('#schemes-shelf .scheme-row')].map((r) => r.textContent)`);

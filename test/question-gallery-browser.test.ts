@@ -4,15 +4,13 @@
 // anywhere on a picture tile selects it and opens the file viewer,
 // whose bar steps between the card's pictures and picks one, and only the card's Send sends.
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { extname, join, normalize } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
-const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
+const skip = !bin && skipMessage;
 const pub = join(import.meta.dirname, '..', 'public');
 
 const opts = (n: number) => ['Garden', 'Forest', 'Desert'].slice(0, n).map((label, i) => ({ label, description: `${label} palette`, image: `takes/${label.toLowerCase()}.svg`, recommended: i === 0 }));
@@ -71,40 +69,28 @@ const STUB = `<script>
 const PICTURE = (fill: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600"><rect width="900" height="600" fill="${fill}"/><circle cx="450" cy="300" r="160" fill="#40573a"/></svg>`;
 const FILLS: Record<string, string> = { garden: '#b8c9ad', forest: '#6f8f6a', desert: '#e3c99a' };
 
-let server: Server;
+let app: App;
 let browser: Browser;
 let base = '';
 
 before(async () => {
   if (skip) return;
-  const types: Record<string, string> = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
-  server = createServer((req, res) => {
-    const url = new URL(req.url ?? '/', 'http://x');
-    if (url.pathname === '/') {
-      const html = readFileSync(join(pub, 'index.html'), 'utf8').replace('<head>', `<head>${STUB}`);
-      return res.writeHead(200, { 'content-type': 'text/html' }).end(html);
-    }
+  app = await serveApp({
+    stub: STUB,
     // The pictures themselves load as <img src>, past the page's fetch.
-    const pic = /\/file$/.test(url.pathname) && /(\w+)\.svg$/.exec(url.searchParams.get('path') ?? '');
-    if (pic) return res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(PICTURE(FILLS[pic[1]] ?? '#ccc'));
-    const file = normalize(join(pub, url.pathname));
-    if (!file.startsWith(pub)) return res.writeHead(404).end();
-    let body: Buffer;
-    try {
-      body = readFileSync(file);
-    } catch {
-      return res.writeHead(404).end();
-    }
-    res.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream' }).end(body);
+    extra: (url, res) => {
+      const pic = /\/file$/.test(url.pathname) && /(\w+)\.svg$/.exec(url.searchParams.get('path') ?? '');
+      if (pic) res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(PICTURE(FILLS[pic[1]] ?? '#ccc'));
+      return !!pic;
+    },
   });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  base = app.base;
   browser = await launch(bin!);
 });
 
 after(async () => {
   await browser?.close();
-  await new Promise((r) => (server ? server.close(r) : r(null)));
+  await app?.close();
 });
 
 const viewerOpen = `!!document.querySelector('dialog.viewer[open] .gallery-controls')`;

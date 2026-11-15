@@ -2,10 +2,13 @@
 // protocol on a pipe as tools/boot-check.ts does: no dependency, no port to clash with anyone's.
 // Uses Playwright's chrome-headless-shell from ~/.cache/ms-playwright; `chromium()` is null without one.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { createServer, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { extname, join, normalize } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
+import { themeCss } from '../src/theme.ts';
 
 export function chromium(): string | null {
   const cache = join(homedir(), '.cache', 'ms-playwright');
@@ -120,4 +123,60 @@ export async function waitFor(page: Page, what: string, expression: string) {
   for (const end = Date.now() + 10_000; !(await page.eval(expression).catch(() => false)); await new Promise((r) => setTimeout(r, 25))) {
     if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
   }
+}
+
+/** The `skip` message of every browser test, for `{ skip: !chromium() && skipMessage }`. */
+export const skipMessage = 'no headless Chromium in ~/.cache/ms-playwright';
+
+export interface App {
+  /** `http://127.0.0.1:<port>/` */
+  base: string;
+  close(): Promise<void>;
+}
+
+/** A server on a free local port that answers every request with `handler`. */
+export async function serve(handler: (path: string, res: ServerResponse, url: URL) => void): Promise<App> {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://x');
+    handler(url.pathname, res, url);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  return { base: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`, close: () => new Promise<void>((r) => server.close(() => r())) };
+}
+
+const pub = join(import.meta.dirname, '..', 'public');
+const types: Record<string, string> = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+
+/**
+ * public/ served as it is, with `stub` (a `<script>` for the page's fetch and EventSource) put in index.html's head.
+ * `extra` answers first: return true once it has replied.
+ */
+export function serveApp({ stub, extra }: { stub: string; extra?: (url: URL, res: ServerResponse) => boolean }): Promise<App> {
+  return serve((path, res, url) => {
+    if (extra?.(url, res)) return;
+    if (path === '/') {
+      const html = readFileSync(join(pub, 'index.html'), 'utf8').replace('<head>', `<head>${stub}`);
+      return void res.writeHead(200, { 'content-type': 'text/html' }).end(html);
+    }
+    const file = normalize(join(pub, path));
+    if (!file.startsWith(pub)) return void res.writeHead(404).end();
+    let body: Buffer;
+    try {
+      body = readFileSync(file);
+    } catch {
+      return void res.writeHead(404).end();
+    }
+    res.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream' }).end(body);
+  });
+}
+
+/** A page of Citadel UI's own: `page` at /, the theme at /theme.css and public/ui/*.js and *.css. */
+export function serveUi(page: string): Promise<App> {
+  return serve((path, res) => {
+    if (path === '/') return void res.writeHead(200, { 'content-type': 'text/html' }).end(page);
+    if (path === '/theme.css') return void res.writeHead(200, { 'content-type': 'text/css' }).end(themeCss(readFileSync(join(pub, 'style.css'), 'utf8')));
+    const m = /^\/ui\/([a-z-]+\.(js|css))$/.exec(path);
+    if (!m) return void res.writeHead(404).end();
+    res.writeHead(200, { 'content-type': m[2] === 'js' ? 'text/javascript' : 'text/css' }).end(readFileSync(join(pub, 'ui', m[1])));
+  });
 }

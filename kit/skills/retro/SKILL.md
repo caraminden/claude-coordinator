@@ -1,6 +1,6 @@
 ---
 name: retro
-description: The retrospective that closes a milestone. It covers what the spec left Claude to invent, what the skills, agents, hooks and tools got wrong, stale or slow, and the few edits that fix them, landed in the milestone's own PR. Use when a milestone PR is ready for review, when someone asks how the process went, or when a skill, agent or doc sent a session the wrong way.
+description: The retrospective that closes a milestone. It covers what the spec left Claude to invent, what the skills, agents, hooks and tools got wrong, stale or slow, and the few edits that fix them, landed in the milestone's own PR. Use when a milestone PR is ready for review, when a major build is ready for its go card, for a scheduled monthly retro, or when someone asks how the process went.
 ---
 
 # Retro
@@ -19,8 +19,10 @@ Create either file when it is first needed.
   ready, and that reply carries the top three findings, even when it is meant to be short:
   they are part of the result.
 - Someone asks how the work went.
-- A skill, agent, hook or doc sent a session the wrong way. That is a one-finding retro:
-  same steps, smaller.
+- A major build is ready for its go card (the build minion's step 5). The retro is committed to the build
+  branch, in the retro folder CLAUDE.md's Project facts name; there is no milestone PR.
+- A scheduled monthly retro (its brief names the window). It lands by the scheme's usual route for a
+  doc change; there is no milestone PR.
 
 ## Steps
 

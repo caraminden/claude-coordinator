@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { answerCheck, answerHook, proposalLine, readTurn } from '../kit/hooks/answer-check.ts';
+import { answerCheck, answerHook, processLine, proposalLine, readTurn } from '../kit/hooks/answer-check.ts';
 
 // Fixture transcripts in Claude Code's JSONL shape: the prompt carries promptId, assistant entries don't.
 const prompt = (text: string, promptId = 'p1') => ({ type: 'user', promptId, message: { role: 'user', content: [{ type: 'text', text }] } });
@@ -127,4 +127,27 @@ test('answer hook: logs each hit as a would-refuse line and refuses nothing; the
   assert.equal(plain.stdout, '');
   assert.equal(lines().length, before + 2);
   assert.equal(script({ transcript_path: '/nonexistent/t.jsonl', last_assistant_message: undefined }).status, 0, 'fails open');
+});
+
+test('process line: a Process: line at the start of a line is logged as a process line; none and mid-line are not', () => {
+  const shared = mkdtempSync(join(tmpdir(), 'answer-proc-'));
+  const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared };
+  const logged = () => {
+    try {
+      return readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).flatMap((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8').split('\n').filter((l) => l.includes(' · process · ')));
+    } catch {
+      return [];
+    }
+  };
+  const run = (text: string, sid: string, over: object = {}) => answerHook({ session_id: sid, last_assistant_message: text, ...over }, env);
+  run(`${ANSWER}\n\nRisk: low: one line.\nProcess: the X skill said Y`, 'a');
+  assert.equal(logged().length, 1);
+  assert.match(logged()[0], / · process · the X skill said Y$/);
+  run(`${ANSWER}\nProcess: none`, 'b');
+  run(`${ANSWER}\nProcess: none.`, 'b2');
+  assert.equal(logged().length, 1, 'none logs nothing');
+  run(`${ANSWER} The rule says Process: the skill Y is quoted.`, 'c');
+  assert.equal(logged().length, 1, 'mid-line logs nothing');
+  assert.equal(processLine('Process: none'), null);
+  assert.equal(processLine('Process:  the Z doc  '), 'the Z doc');
 });

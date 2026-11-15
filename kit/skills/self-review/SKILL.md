@@ -118,7 +118,8 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   (`ui-screenshots critic: pass (round 1)`). Every claim in it and in the reply meets "Evidence before claims" in
   `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
-  wrong way, and how>` or `Process: none`. Anything but none is a one-finding `citadel:retro`.
+  wrong way, and how>` or `Process: none`. Anything
+  but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
 - **High:** stop before merging. Post the same line, the findings you fixed in one line each,
   and an `ask_question` card with `kind: "merge"`, "Merge and ship this high-risk change?" (Merge and ship /
   Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,

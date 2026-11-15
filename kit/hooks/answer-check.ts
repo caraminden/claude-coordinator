@@ -8,7 +8,8 @@
  *    propose_plan, or message to the Taskmaster or a minion.
  * A trial: each hit writes one `would refuse` line to the retro log and refuses nothing. The weekly
  * process digest counts them and how many were false alarms; refusal turns on only for a check with
- * under one false alarm in five. A turn a person's message reached mid-turn (a steer) is skipped:
+ * under one false alarm in five. A `Process:` line in the final text (self-review's, not `none`) is also
+ * logged, as a `process` line. A turn a person's message reached mid-turn (a steer) is skipped:
  * its short end may be the steer cutting it off, not a broken rule (#280).
  */
 import { readFileSync } from 'node:fs';
@@ -106,6 +107,12 @@ export function answerCheck(turn: Turn): string[] {
   return hits;
 }
 
+/** The text of a `Process:` line (self-review's last line) at the start of a line, or null for none or no such line. */
+export function processLine(text: string): string | null {
+  const m = text.match(/^Process:[ \t]*(.*\S)[ \t]*$/m);
+  return m && !/^none\b\.?$/i.test(m[1]) ? m[1] : null;
+}
+
 /**
  * Runs the checks for one Stop of a Citadel turn and logs each hit; returns the hits. Never refuses.
  * job-check.ts calls it, only for a stop it lets through: a refused stop isn't the turn's end.
@@ -119,5 +126,8 @@ export function answerHook(input: any, env = process.env): string[] {
   if (typeof input?.last_assistant_message === 'string' && input.last_assistant_message.trim()) turn.finalText = input.last_assistant_message;
   const hits = answerCheck(turn);
   for (const hit of hits) note(input, 'would refuse', hit, env);
+  // self-review's Process: line goes to the log for the process digest, whatever the checks said.
+  const process = turn.steered ? null : processLine(turn.finalText);
+  if (process) note(input, 'process', process, env);
   return hits;
 }

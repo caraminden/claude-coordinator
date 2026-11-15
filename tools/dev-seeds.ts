@@ -161,6 +161,19 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t);
     },
   },
+  'spend-alert': {
+    about: 'a minion mid-turn whose turn passed $25: the spend alert card with Stop and Keep going (#723)',
+    seed(c) {
+      const t = minion(c, 'Rework the land queue', { status: 'running', last_activity: 'Reviewing the diff… 4/5' });
+      const w = chat(c, t, 12);
+      w.asked('Rework the land queue so two lands never wait on each other\'s tests.');
+      w.init();
+      w.said('Three Grunts are reviewing the queue code in parallel; I\'ll merge what they find.');
+      w.call('Agent', { description: 'Review the land queue', prompt: 'Review tools/land.sh…' }, null);
+      const e = w.put('spend', { text: 'This turn has used about $26 in 48 min.', usd: 26, stage: 25, turn: Date.now() - 48 * 60_000 });
+      return route(c, t, e);
+    },
+  },
   starting: {
     about: 'a minion just created: its first turn is setting up and it has no task list yet (#696)',
     seed(c) {

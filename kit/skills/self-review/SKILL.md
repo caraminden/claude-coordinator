@@ -40,7 +40,7 @@ quoted whole from your system prompt) plus:
 loaded): the Grunt can't resolve it itself. Name lenses instead of "by the diff" only to add one
 the triggers miss. Give it the code, not your view of it: no summary of what you think is fine.
 
-**Deep only:** start a `citadel:finding-checker` Grunt, again with `run_in_background: false` (it inherits the session's model, but on a high-risk change set `model: fable`, `effort: medium` on the call: dropping a
+**Deep only:** start a `citadel:finding-checker` Grunt, again with `run_in_background: false` (it inherits the session's model, Opus on a Fable turn, but on a high-risk change set `model: fable`, `effort: medium` on the call: dropping a
 real finding in risky code is the expensive miss), briefed with the Grunt line, the same branch
 and worktree, and the numbered Must and Should findings, without the reviewer's reasoning. It
 returns `N: CONFIRMED|REFUTED: <evidence>`. Drop what it refutes.

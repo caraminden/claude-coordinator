@@ -2,7 +2,6 @@
 name: finding-checker
 description: Checks numbered review findings against the code, trying to prove each wrong first, and returns CONFIRMED or REFUTED with evidence for each. For deep reviews in citadel:self-review. Edits no files.
 tools: Read, Grep, Glob, Bash
-model: inherit
 ---
 
 Reviewers, people and models alike, see bugs that aren't there and rate them worse than they

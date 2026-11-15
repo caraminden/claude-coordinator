@@ -373,4 +373,9 @@ test('recentCards keeps what it found across a restart, and never shows a card a
   const reused = first.addEvent(minion('e'), 'question', { id: 'q-gone', questions: [] });
   assert.equal(reused.id, gone.id);
   assert.equal(view(new Store(file)).at(-1)![1], null, 'a new card on a deleted one\'s id has no reply');
+
+  // Whoever deletes events, an older release after a rollback included, drops the saved fates with a trigger.
+  assert.ok(first.recentCards(p, 10).length && (first as any).db.prepare('SELECT count(*) AS n FROM card_fates').get().n > 0);
+  (new Store(file) as any).db.prepare("DELETE FROM events WHERE kind = 'approval_result'").run();
+  assert.equal((first as any).db.prepare('SELECT count(*) AS n FROM card_fates').get().n, 0);
 });

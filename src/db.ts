@@ -478,6 +478,11 @@ CREATE TABLE IF NOT EXISTS card_fates (
   result TEXT,
   up_to INTEGER NOT NULL
 );
+-- Any deleted event drops every saved fate, whichever release deletes it (after a rollback an older one does, and the
+-- ids it frees get reused): the fates are read again from the chats.
+CREATE TRIGGER IF NOT EXISTS card_fates_events_deleted AFTER DELETE ON events
+WHEN EXISTS (SELECT 1 FROM card_fates LIMIT 1)
+BEGIN DELETE FROM card_fates; END;
 CREATE TABLE IF NOT EXISTS artifacts (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),

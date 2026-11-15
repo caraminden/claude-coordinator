@@ -42,6 +42,22 @@ Everything else stays out, and these are never findings:
   or its commit message says why it is safe to drop.
 - Changed logic that no test exercises goes to the Tests lens.
 
+### Always: readers of what changed
+
+The diff shows what was written; the code that reads it often sits outside the diff. For each
+thing the diff removes, renames or gives a new meaning (a CSS rule, property, class or custom
+property; an exported function or its return shape; a DB column or JSON field; a route; an
+element id; a setting key), grep the repo outside the diff for its name and check that each
+reader still works on what it now gets. Count the indirect reads too: `getComputedStyle` on a
+selector whose rule changed, `querySelector`/`closest` on a class, `dataset`, and keys built from
+strings (grep the stable part of the name). Keep it to a few targeted greps per name. A finding
+names the reader's file:line and what it now gets wrong.
+
+Example: #693 removed `.chat.role-taskmaster`'s background in `public/thread.css`.
+`tintTitleBar` in `public/base.js`, untouched by the diff, still read that element's computed
+background for the desktop app's title bar; it now got a transparent colour, wrote `#000000`,
+and turned the window controls black.
+
 ### Always: no check-gaming
 
 A diff that weakens a check is Must fix unless the ask or the commit message says why:
@@ -58,7 +74,8 @@ A diff that weakens a check is Must fix unless the ask or the commit message say
 ### Always: audit before you conclude
 
 Before the findings, in at most four lines: the files you read in full, with the caller counts;
-each lens you ran, as `issue` or `clean`; and what you could not verify, and why. Found
+the readers you checked, as `name: N readers`; each lens you ran, as `issue` or `clean`; and what
+you could not verify, and why. Found
 nothing? Write `No findings.` Never invent one to fill the list.
 
 ### Pick by the diff

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { test } from 'node:test';
 import { land, env, git, setup } from './land-fixture.ts';
+import { until } from './wait.ts';
 
 // The real deploy.sh and run-tests.sh on main, a boot check that passes, and stand-ins for systemd: the
 // queued "restart" waits for the lock, then counts as live and checked (it tags last-good, as the real one does). run() runs a script with them; runs() lists
@@ -179,11 +180,12 @@ test('deploy.sh told DEPLOY_LOCKED without the lock on fd 9 takes the lock itsel
 test('a land killed while the deploy tests the live checkout puts the checkout and main back', async () => {
   const r = setup();
   for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
-  // Run in the live checkout (the deploy's own test run), it says so and takes a few seconds.
-  writeFileSync(join(r.source, 'test', 'slow.test.mjs'), `import { realpathSync, writeFileSync } from 'node:fs';
+  // Run in the live checkout (the deploy's own test run), it says so and waits for the test to write the release file,
+  // so a slow box can't finish it before the SIGTERM.
+  writeFileSync(join(r.source, 'test', 'slow.test.mjs'), `import { existsSync, realpathSync, writeFileSync } from 'node:fs';
 if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(process.env.DEPLOY_LIVE)) {
   writeFileSync(process.env.KILL_MARK + '.started', '');
-  await new Promise((r) => setTimeout(r, 3000));
+  for (const end = Date.now() + 60000; !existsSync(process.env.KILL_MARK + '.release') && Date.now() < end;) await new Promise((r) => setTimeout(r, 50));
   writeFileSync(process.env.KILL_MARK + '.done', '');
 }
 `);
@@ -206,17 +208,14 @@ if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(proces
   let stderr = '';
   child.stderr!.on('data', (d) => (stderr += d));
   const exited = new Promise((ok) => child.once('exit', ok));
-  const until = async (file: string) => {
-    for (const end = Date.now() + 60_000; !existsSync(file); await new Promise((ok) => setTimeout(ok, 50))) {
-      if (Date.now() > end) throw new Error(`no ${file}:\n${stderr}`);
-    }
-  };
-  await until(`${mark}.started`);
+  const reach = (file: string) => until(`${file}`, () => existsSync(file), 60_000, () => stderr);
+  await reach(`${mark}.started`);
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'), 'main had moved');
   assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'), 'the live checkout had pulled it');
   process.kill(-child.pid!, 'SIGTERM');
   await exited;
-  await until(`${mark}.done`); // the test run itself (in a process group of its own) ends by itself
+  writeFileSync(`${mark}.release`, ''); // now the test may finish
+  await reach(`${mark}.done`); // the test run itself (in a process group of its own) ends by itself
   assert.equal(git(r.live, 'rev-parse', 'HEAD'), base, `the live checkout is back:\n${stderr}`);
   assert.equal(git(r.source, 'rev-parse', 'main'), base, `main is back:\n${stderr}`);
   assert.match(stderr, /putting the checkout back/);

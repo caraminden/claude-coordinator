@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { scriptEnv } from './script-env.ts';
+import { git } from './git.ts';
 
 // tools/run-tests.sh on throwaway fixture suites. A red full run reruns each failed file alone, once, only to label
 // it: "passed alone" is a likely flake with a retro-log line, and the run still fails (Cara, 2026-11-10, "Keep
@@ -237,8 +238,6 @@ test('leaves a process', () => {
 const RAN = (name: string) => `import test from 'node:test';\nimport { writeFileSync } from 'node:fs';\ntest('${name}', () => writeFileSync('ran-${name}', ''));\n`;
 FIXTURES['pipe.test.mjs'] = RAN('pipe');
 FIXTURES['product.test.mjs'] = RAN('product');
-const genv = { ...env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
-const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env: genv, encoding: 'utf8' });
 function tierRepo(change?: (dir: string) => void, mainName = 'main') {
   return (dir: string) => {
     writeFileSync(join(dir, 'tools', 'pipeline-files.txt'), '# the pipeline\r\n  tools/land.sh \r\nkit/templates/ # a folder\ntest/pipe.test.mjs\n');

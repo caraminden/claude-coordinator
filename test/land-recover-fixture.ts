@@ -1,11 +1,14 @@
 // The throwaway pipeline land-recover.test.ts and land-boot-check.test.ts share.
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after } from 'node:test';
 import { scriptEnv } from './script-env.ts';
+import { git } from './git.ts';
+import { until as waitUntil } from './wait.ts';
+export { git };
 
 // A bad commit can't stay on main (#553, the pipeline failure drill): the real land.sh and deploy.sh on a throwaway
 // pipeline, with a boot check and a service that fail on request, and a queued restart that really runs
@@ -19,11 +22,7 @@ const env = {
   DEPLOY_HEALTHY_WAIT: '2', DEPLOY_SETTLE: '1', DEPLOY_QUEUE_STALL: '120', DEPLOY_QUEUE_POLL: '1', DEPLOY_IDLE_TRIES: '30', DEPLOY_TEST_TIMEOUT: '120', DEPLOY_BACKUPS: '3',
   GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null',
 };
-export const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
-const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
-export async function until(what: string, cond: () => boolean, ms = 60_000) {
-  for (const end = Date.now() + ms; !cond(); await sleep(50)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-}
+export const until = (what: string, cond: () => boolean, ms = 60_000) => waitUntil(what, cond, ms);
 
 let n = 0;
 export async function pipe(t: { after: (fn: () => void) => void }, worktrees: number) {

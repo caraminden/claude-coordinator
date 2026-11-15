@@ -5,13 +5,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { root, env, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
+import { until } from './wait.ts';
 
 // The line for the deploy lock (tools/deploy-queue.sh, #502). The kernel grants a flock in no order, so ten
 // landings waiting on it at once (2026-11-10) meant some lost every round and timed out.
-const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
-async function until(what: string, cond: () => boolean, ms = 30_000) {
-  for (const end = Date.now() + ms; !cond(); await sleep(20)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-}
 
 test('ten landings started together land in the order they arrived, each told its place in line', async () => {
   const r = setup();

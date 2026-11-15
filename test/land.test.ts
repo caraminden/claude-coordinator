@@ -1,10 +1,11 @@
 // tools/land.sh itself: the rebase, its test run or CI gate, conflicts and refusals.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { land, env, git, setup, landAsync, tickets, issued, ci } from './land-fixture.ts';
+import { until } from './wait.ts';
 
 test('rebases onto main, tests, fast-forwards main, and deploys holding the lock', () => {
   const r = setup();
@@ -382,11 +383,8 @@ test('a refused landing lets go of the deploy lock before it cleans up on GitHub
   let stderr = '';
   let ended = false;
   const landing = landAsync(r.wt, { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', FAKE_CI: 'red' }, 50_000, (e) => (stderr = e)).finally(() => (ended = true));
-  const until = async (what: string, cond: () => boolean, ms: number) => {
-    for (const end = Date.now() + ms; !cond(); await new Promise((ok) => setTimeout(ok, 20))) if (Date.now() > end) throw new Error(`timed out waiting for ${what}: ${stderr}`);
-  };
-  await until('the refusal', () => /tests failed on the rebased branch in CI/.test(stderr), 30_000);
-  await until('the lock to be free', () => spawnSync('flock', ['-n', lock, 'true']).status === 0, 4_000);
+  await until('the refusal', () => /tests failed on the rebased branch in CI/.test(stderr), 30_000, () => stderr);
+  await until('the lock to be free', () => spawnSync('flock', ['-n', lock, 'true']).status === 0, 4_000, () => stderr);
   assert.ok(!ended, 'freed while the cleanup still runs');
   const res = await landing;
   assert.equal(res.status, 1, res.stderr);

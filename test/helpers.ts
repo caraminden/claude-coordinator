@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
 import { pinTurnFiles, type TurnPins } from '../src/turn-launch.ts';
+import { until } from './wait.ts';
 
 /**
  * The pinned turn files (src/turn-launch.ts) for a test that starts turns or builds their hooks: server.ts
@@ -97,16 +98,7 @@ export function agentToken(data: string, id: number): string {
   return new Auth(PASSWORD, SECRET).agentToken(id, row ? JSON.parse(row.value).current ?? undefined : undefined);
 }
 
-/** Poll `fn` every 50 ms until it returns something truthy, or fail after `ms`. */
-export async function until<T>(what: string, fn: () => Promise<T | undefined | null | false> | T | undefined | null | false, ms = 30_000): Promise<T> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
+export { until };
 
 export type Booted = {
   base: string;

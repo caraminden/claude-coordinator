@@ -1,10 +1,13 @@
 // The throwaway repos and helpers scheme-setup-land.test.ts and scheme-setup-land-ci.test.ts share.
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after } from 'node:test';
 import { scriptEnv } from './script-env.ts';
+import { git } from './git.ts';
+import { until } from './wait.ts';
+export { git };
 
 // The scheme-setup kit skill's land.sh template, on throwaway repos: a scheme repo on main with the
 // template's pre-push hook active, a bare origin, and a minion worktree that lands through it.
@@ -13,7 +16,6 @@ export const root = mkdtempSync(join(tmpdir(), 'scheme-land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // COORDINATOR_CONTAINER: the template refuses in a container turn (#577), and these tests run there too.
 export const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined }), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
-export const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 export let n = 0;
 // local: the scheme's tools/land.local.sh, which the template sources (none: no such file).
@@ -58,9 +60,7 @@ export const landLockFree = (r: ReturnType<typeof setup>) =>
 // #502). The kernel grants a flock in no order, so several landings waiting on it at once (2026-11-10)
 // meant some lost every round and timed out. Fake work: the check waits for a file named in $GATE.
 export const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
-export async function until(what: string, cond: () => boolean, ms = 30_000) {
-  for (const end = Date.now() + ms; !cond(); await sleep(20)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-}
+export { until };
 const gated = 'until [ -e "$GATE" ]; do sleep 0.05; done';
 export function queueSetup(branches: number, check = gated, config: Record<string, string> = {}, files = (i: number) => `f${i}.txt`, local?: string) {
   const r = setup(check, config, local);

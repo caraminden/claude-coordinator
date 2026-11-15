@@ -10,7 +10,8 @@ import { copyFile, lstat, mkdtemp, readdir, realpath, rename, rm, stat } from 'n
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { diskUsage, low } from './build-output.ts';
+import { diskUsage, low, LOW } from './build-output.ts';
+import { gitOut } from './git.ts';
 import { identity } from './scheme-repo.ts';
 
 const DAY = 24 * 60 * 60_000;
@@ -23,7 +24,12 @@ export const SAVE_LIMIT = 200 * 2 ** 20;
 
 export const savedRef = (key: string) => `refs/citadel/saved/${key}`;
 
-const git = async (args: string[], cwd: string, env?: NodeJS.ProcessEnv) => (await low(['git', ...args], { cwd, env: env && { ...process.env, ...env } })).stdout.trim();
+/** git's trimmed output; throws when it fails (these callers catch), with no short timeout: a save adds a whole worktree. */
+const git = async (args: string[], cwd: string, env?: NodeJS.ProcessEnv) => {
+  const out = await gitOut(args, cwd, { env, prefix: LOW, timeout: 10 * 60_000, maxBuffer: 1 << 30 });
+  if (out === null) throw new Error(`git ${args[0]} failed in ${cwd}`);
+  return out;
+};
 
 /** Whether `dir` is a git checkout of its own (not a folder inside another repo's checkout). */
 export async function ownCheckout(dir: string): Promise<boolean> {

@@ -19,6 +19,7 @@ import { githubRepo } from './github.ts';
 import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { catchUpTicketDir } from './workspace.ts';
+import { pacificWeekday } from './pacific.ts';
 
 const run = promisify(execFile);
 /** A PR lookup's answer: tests' stand-ins answer at once. */
@@ -533,10 +534,7 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 export interface TimedWake { id: number; ticket: number; at: number; note: string; setBy: string }
 
 /** `ms` as "Tue 18 Nov, 09:00 PST": every time people read is Pacific. */
-export function pacificTime(ms: number): string {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).formatToParts(ms).map((x) => [x.type, x.value]));
-  return `${p.weekday} ${p.day} ${p.month}, ${p.hour}:${p.minute} ${p.timeZoneName}`;
-}
+export const pacificTime = pacificWeekday;
 
 /** An ISO time ("2026-11-18 09:00", "…T09:00:00Z", "…-08:00") as ms; without an offset it is Pacific. NaN when it isn't a time. */
 export function parseWakeTime(text: string): number {

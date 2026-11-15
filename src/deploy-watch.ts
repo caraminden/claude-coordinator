@@ -11,6 +11,7 @@
 // a later deploy's trouble is never blamed on this one (that deploy's own checks cover it).
 import { execFile } from 'node:child_process';
 import type { Project, Store } from './db.ts';
+import { pacific } from './pacific.ts';
 
 /** Settings key: the commit last seen live, and the deploys still being watched. */
 export const WATCH_KEY = 'deploy-watch';
@@ -89,9 +90,14 @@ export function gitCommits(dir: string): WatchDeps['commits'] {
     );
 }
 
-/** A clock time as people read it (Pacific). */
-export function pacific(ms: number): string {
-  return new Date(ms).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+/**
+ * The minion number a main subject names: "#N", "WIP #N" or "WIP: #N" at the start, else the last trailing "(#N)".
+ * Same rules as `sub ticket` in tools/land.sh (keep the two in step).
+ */
+export function subjectTicket(subject: string): string {
+  const lead = /^(?:WIP:? )?#(\d+)\b/.exec(subject);
+  if (lead) return lead[1];
+  return [...subject.matchAll(/#(\d+)\)/g)].pop()?.[1] ?? '';
 }
 
 function span(ms: number): string {
@@ -235,7 +241,7 @@ export class DeployWatch {
     }
     const scheme = this.d.scheme();
     const unowned = pending.filter((c) => {
-      const n = /^(?:WIP\s+)?#(\d+)\b/.exec(c.subject)?.[1];
+      const n = subjectTicket(c.subject);
       const t = n && scheme ? store.getTicketByNumber(scheme.id, Number(n)) : undefined;
       return !(t && own(t.id, c));
     });

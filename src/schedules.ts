@@ -5,6 +5,7 @@ import type { Project, Store, User } from './db.ts';
 import type { Runner } from './runner.ts';
 import { HttpError } from './http.ts';
 import { pickFor } from '../public/model-table.js';
+import { pacific } from './pacific.ts';
 
 export interface Schedule {
   id: number;
@@ -290,8 +291,7 @@ export function runMinion(s: Schedule, maker: Pick<User, 'name' | 'disabled_at'>
   return { title: s.name, model: s.model ?? table.model, effort: s.effort ?? table.effort, props: { type: s.type, ...(maker && !maker.disabled_at ? { assigned: maker.name } : {}) } };
 }
 
-/** A time people read: Pacific, labelled (Josh, 2026-11-12), e.g. "Nov 14, 06:30 PST". */
-export const pacific = (ms: number) => new Date(ms).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
+export { pacific };
 
 /** The run's window, for its brief: when the last real run was and how many minions were made since (#745). */
 export function runWindow(s: Schedule, lastNumber: number | null, minions: number): string {

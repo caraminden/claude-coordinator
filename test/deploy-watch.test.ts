@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import vm from 'node:vm';
 import { HEALTH_MAX_ROWS, Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
-import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, gitCommits, RATE } from '../src/deploy-watch.ts';
+import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, gitCommits, RATE, subjectTicket } from '../src/deploy-watch.ts';
 
 // The post-deploy watch (#724): readings before and after each deploy, a wake for whoever shipped a regression.
 const root = mkdtempSync(join(tmpdir(), 'deploy-watch-'));
@@ -338,4 +338,14 @@ test('offline-machine session answers after a deploy are not server faults and n
   clock.now = at + 20 * MIN;
   await w.tick();
   assert.deepEqual([woken, mailed], [[], []]);
+});
+
+test('subjectTicket reads a subject the way tools/land.sh does: a leading #N, WIP #N or WIP: #N, else the last trailing (#N)', () => {
+  assert.equal(subjectTicket('#12: fix it'), '12');
+  assert.equal(subjectTicket('WIP #13: step'), '13');
+  assert.equal(subjectTicket('WIP: #14 step'), '14');
+  assert.equal(subjectTicket('Code health: drop the rules (#622)'), '622');
+  assert.equal(subjectTicket('Revert "x (#5)" (#622)'), '622');
+  assert.equal(subjectTicket('#7: follows #8) oddly (#9)'), '7');
+  assert.equal(subjectTicket('no ticket here'), '');
 });

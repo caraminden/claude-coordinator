@@ -2,12 +2,10 @@
 // how many feeders are folded in and how many are still open, and how far build/<n> is behind main. All
 // git facts, read in the scheme's checkout, cached per scheme and broadcast when they change. A scheme
 // with no build/<n> branch has none, so the list shows its builds as before.
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { emptyBranch } from './branch.ts';
 import { buildOwnerKey, type Store } from './db.ts';
+import { gitOut } from './git.ts';
 
-const run = promisify(execFile);
 
 export interface BuildSummary {
   build: number;
@@ -21,13 +19,7 @@ export interface BuildSummary {
   owner: number | null;
 }
 
-async function git(args: string[], cwd: string): Promise<string | null> {
-  try {
-    return (await run('git', args, { cwd, timeout: 15_000 })).stdout.trim();
-  } catch {
-    return null;
-  }
-}
+const git = gitOut;
 
 /** Every build branch in the repo: local build/<n>, else origin's, keyed by n. */
 async function buildRefs(repoDir: string): Promise<Map<number, string>> {

@@ -10,6 +10,7 @@ import type { Credentials } from './credentials.ts';
 import type { OpenrouterCallKind, Store } from './db.ts';
 import { HttpError } from './http.ts';
 import { matteBlackOff } from './png-matte.ts';
+import { pacific } from './pacific.ts';
 
 type Fetch = typeof fetch;
 
@@ -111,8 +112,7 @@ export const monthStart = (now = Date.now()) => {
 /** When the cap resets, in Pacific time: the next UTC month, which starts the afternoon before. */
 export function resetsAt(now = Date.now()): string {
   const d = new Date(now);
-  return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', timeZoneName: 'short' })
-    .format(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+  return pacific(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
 }
 
 const money = (n: number) => `$${n.toFixed(n < 1 ? 3 : 2)}`;

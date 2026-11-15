@@ -261,7 +261,7 @@ test('worst-case prices: per image by resolution, per token, per clip; an MP3\'s
   const id3 = Buffer.concat([Buffer.from('ID3'), Buffer.from([4, 0, 0, 0, 0, 0, 10]), Buffer.alloc(10), MP3]);
   assert.equal(mp3Seconds(id3), 1);
   assert.equal(mp3Seconds(Buffer.from('not audio')), null);
-  assert.match(resetsAt(Date.UTC(2026, 10, 14)), /^Nov 30, 4 PM PST$/);
+  assert.match(resetsAt(Date.UTC(2026, 10, 14)), /^Nov 30, 16:00 PST$/);
 });
 
 test('through the server: a person connects on their account page and their minion makes an image with the MCP tool', async () => {

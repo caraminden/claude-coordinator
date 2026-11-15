@@ -28,6 +28,7 @@ import { schemeLabels } from './ci-runner.ts';
 import type { Project, Store, Ticket, User } from './db.ts';
 import { repoSlug } from './prlinks.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
+import { pacific } from './pacific.ts';
 
 const run = promisify(execFile);
 
@@ -102,10 +103,6 @@ const workflowFile = (r: Run) => (r.path ?? '').split('/').pop() || r.name;
 /** When dispatched runs started counting (#678), so the deploy that brought them told none from before. */
 const DISPATCH_SINCE = 'ci-health:dispatch-since';
 
-/** "Nov 14, 03:42 PST": times people read are Pacific. */
-export function pacific(t: number): string {
-  return new Date(t).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short' });
-}
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** "Nov 5 18:31" in the server's zone. Always dated: a title that dropped it for today would change at midnight and re-send the alert (#509). */

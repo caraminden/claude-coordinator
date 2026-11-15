@@ -5,11 +5,10 @@
 // they run its code, else to the scheme, so a scheme with no target still lists them.
 // Served at GET /api/releases and sent as a `releases` event per scheme when its part changes. Importing it
 // starts nothing: server.ts calls poll() and live().
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { DeployInfo } from './auto-deploy.ts';
 import type { Ship } from './branch.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
+import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
 import { landPhase, ordinal, TRACK, type LandTicket, type Wait } from './waits.ts';
 
@@ -241,15 +240,8 @@ export class Releases {
   }
 }
 
-const run = promisify(execFile);
-/** git's output, or null when it failed. */
-export async function git(args: string[], cwd: string): Promise<string | null> {
-  try {
-    return (await run('git', args, { cwd, timeout: 15_000, maxBuffer: 16 * 1024 * 1024 })).stdout;
-  } catch {
-    return null;
-  }
-}
+/** git's output as it came (untrimmed: file contents), or null when it failed. */
+export const git = (args: string[], cwd: string) => gitOut(args, cwd, { trim: false });
 
 export const CITADEL_TARGET = 'citadel-server';
 /** When each change in flight first reached each stage: { [ticket id]: { [stage]: ms } }. Kept, as the restart that makes it live restarts this server. */

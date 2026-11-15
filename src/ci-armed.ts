@@ -1,11 +1,11 @@
 // Armed for CI (#715): a minion leaves a card or a Taskmaster message to go out once CI passes on the commit it pushed,
 // so "CI passed" starts no turn just to relay it. CI failing, CI on another head or a turn still running falls back to
 // today's wake, with a line saying what wasn't sent. Schemes that land with land.sh run no PR CI, so they can't arm.
-import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cardHref } from './card-links.ts';
+import { gitOut } from './git.ts';
 import type { Ticket, TicketState } from './db.ts';
 import { runsOnPullRequest, type PrSnapshot } from './github.ts';
 import { HttpError, type App } from './http.ts';
@@ -40,8 +40,7 @@ export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urg
   return held;
 }
 
-const git = (cwd: string, args: string[]) =>
-  new Promise<string | null>((done) => execFile('git', args, { cwd }, (err, out) => done(err ? null : out.trim())));
+const git = (cwd: string, args: string[]) => gitOut(args, cwd);
 
 async function prCi(cwd: string): Promise<boolean> {
   const dir = join(cwd, '.github', 'workflows');

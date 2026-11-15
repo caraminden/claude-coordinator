@@ -196,12 +196,23 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
   assert.equal(kind('', c), 'server', 'an unknown running commit restarts');
 });
 
+// A command on PATH that notes each call's arguments, then runs the real one: how a test sees which wait deploy.sh asked
+// for without timing it (a bound on time goes red on a loaded box).
+function noting(bin: string, cmd: string, log: string) {
+  const real = execFileSync('sh', ['-c', `command -v ${cmd}`], { encoding: 'utf8' }).trim();
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, cmd), `#!/bin/sh\necho "$*" >>'${log}'\nexec '${real}' "$@"\n`, { mode: 0o755 });
+  return () => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []);
+}
+
 test('deploy.sh waits only for turns a restart would cut off; a server from before units counts every running turn', async () => {
   // Async, so the stand-in server below (in this process) can answer.
   // DEPLOY_SERVICE names no unit, so the service reads as down; extra PATH entries stand in for systemctl.
   // Each /api/health ask gives up after 0.3 s, not health's 3 s: the silent server below costs two asks per count.
+  const noted = join(root, 'count-bin');
+  const curls = noting(noted, 'curl', join(root, 'count-curl.log'));
   const count = async (url: string, path = '') =>
-    (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...hostEnv, PATH: `${path}${process.env.PATH}`, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db'), DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_TEST_HEALTH_TIMEOUT: '0.3' } })).stdout.trim();
+    (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...hostEnv, PATH: `${path}${noted}:${process.env.PATH}`, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db'), DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_TEST_HEALTH_TIMEOUT: '0.3' } })).stdout.trim();
   assert.equal(await count(base), '0');
   assert.equal(await count('http://127.0.0.1:9'), '0', 'a server that is down has no turns to cut off');
   // One that doesn't answer while its unit is up is slow or stuck, not down: keep waiting (#468 S10-6).
@@ -209,19 +220,12 @@ test('deploy.sh waits only for turns a restart would cut off; a server from befo
   mkdirSync(active, { recursive: true });
   writeFileSync(join(active, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   assert.equal(await count('http://127.0.0.1:9', `${active}:`), '?', 'refused while its unit is active');
-  const heldFor: number[] = []; // how long each ask waited before curl hung up
-  const silent = createHttpServer((req) => { // takes the request, never answers
-    const at = performance.now();
-    req.socket.on('close', () => heldFor.push(performance.now() - at));
-  });
+  const silent = createHttpServer(() => {}); // takes the request, never answers
   await new Promise<void>((r) => silent.listen(0, '127.0.0.1', r));
   try {
     const url = `http://127.0.0.1:${(silent.address() as any).port}`;
     assert.equal(await count(url, `${active}:`), '?', 'a server too slow to answer is not counted as having no turns');
     assert.equal(await count(url), '0', 'nor is one whose unit is down kept waiting on');
-    for (const end = Date.now() + 2000; heldFor.length < 4 && Date.now() < end;) await new Promise((r) => setTimeout(r, 20));
-    assert.equal(heldFor.length, 4, 'two asks per count');
-    assert.ok(heldFor.every((ms) => ms < 2000), `each ask gave up after DEPLOY_TEST_HEALTH_TIMEOUT, not 3 s: ${heldFor.map(Math.round)} ms`);
   } finally {
     silent.closeAllConnections();
     silent.close();
@@ -236,6 +240,8 @@ test('deploy.sh waits only for turns a restart would cut off; a server from befo
     store.updateTicket(running.id, { status: 'idle' });
     old.close();
   }
+  const asks = curls().filter((a) => a.includes('/api/health'));
+  assert.ok(asks.length >= 6 && asks.every((a) => a.includes('--max-time 0.3')), `every ask waits DEPLOY_TEST_HEALTH_TIMEOUT s: ${asks.join(' | ')}`);
 });
 
 // #584: the restart's waiting lines say which turns, so people know whom to ask and what --now would cut off.
@@ -510,6 +516,7 @@ test('deploy.sh retries a report the server never got, but not one it may alread
   const tries = join(root, 'curl-tries');
   writeFileSync(join(bin, 'curl'), `#!/bin/sh\necho >>'${tries}'\ncase "$*" in *tok-secret*) echo "$*" >>'${leaked}' ;; esac\nexec '${curl}' "$@"\n`, { mode: 0o755 });
   const tried = () => (existsSync(tries) ? readFileSync(tries, 'utf8').length : 0);
+  const sleeps = noting(bin, 'sleep', join(root, 'report-sleeps'));
   // 0.1 s between tries in place of the 1, 2, 4 s backoff.
   const post = (url: string, env: object = {}) => promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'post-report', url, 'tok-secret', '7', 'ok', 'Deployed abc1234'], { encoding: 'utf8', env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, DEPLOY_TEST_REPORT_PAUSE: '0.1', ...env } });
   // Dropped unanswered, then a 503: neither got the report in, so it goes again, with the same body.
@@ -522,7 +529,7 @@ test('deploy.sh retries a report the server never got, but not one it may alread
     assert.ok(!existsSync(leaked), 'and is not on curl\'s command line');
     assert.ok(flaky.seen.every((s) => s.url === '/api/tickets/7/deploy' && JSON.parse(s.body).text === 'Deployed abc1234'));
     assert.doesNotMatch(r.stderr, /could not post/);
-    assert.ok(flaky.seen[2].at - flaky.seen[0].at < 2000, 'paused DEPLOY_TEST_REPORT_PAUSE between tries, not the 1 + 2 s backoff');
+    assert.deepEqual(sleeps(), ['0.1', '0.1'], 'paused DEPLOY_TEST_REPORT_PAUSE s between tries, not the 1, 2 s backoff');
   } finally {
     flaky.close();
   }
@@ -538,7 +545,9 @@ test('deploy.sh retries a report the server never got, but not one it may alread
   // A connection never made in time is a report the server never got: it goes again.
   const t0 = performance.now();
   const triedBefore = tried();
-  const r = await post('http://10.255.255.1:9', { DEPLOY_REPORT_WAIT: '0.5', DEPLOY_REPORT_RETRY: '2' });
+  const slept = sleeps().length;
+  const r = await post('http://10.255.255.1:9', { DEPLOY_REPORT_WAIT: '0.5', DEPLOY_REPORT_RETRY: '2', DEPLOY_TEST_REPORT_PAUSE: '' });
+  assert.equal(sleeps()[slept], '1', "the knob unset, the first pause is the backoff's 1 s");
   assert.match(r.stderr, /could not post the report to minion 7's chat \(curl exit (28|7)\)/);
   assert.doesNotMatch(r.stderr, /no answer from the server/);
   // bash's SECONDS counts whole wall-clock seconds, so 2 s of retries end after 1 to 2 s (#564: 2.05 s of 3 when started
@@ -572,6 +581,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   const pidFile = join(root, `${name}-mainpid`);
   writeFileSync(pidFile, '100');
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "$*" >>'${log}'\n[ "$2" = show ] && cat '${pidFile}'\nexit 0\n`, { mode: 0o755 });
+  const sleeps = noting(bin, 'sleep', join(root, `${name}-sleeps`));
   const restarts = () => (existsSync(log) ? String(readFileSync(log, 'utf8').split(' restart ').length - 1) : '0');
   let n = 0;
   const state = join(live, '.git', 'cc-deploy');
@@ -604,7 +614,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
     }).then((o) => ({ status: 0, stderr: o.stderr }), (e) => ({ status: e.code as number, stderr: e.stderr as string }));
     const reports = srv.seen.filter((s) => s.url === '/api/tickets/9/deploy').map((s) => ({ ...JSON.parse(s.body), at: s.at }));
     const healthAt = srv.seen.filter((s) => s.url === '/api/health').map((s) => s.at);
-    return { ...r, good, target, reports, healthAt, phases: [...phases], lockHeldAtReport, together: () => together, noteLeft: existsSync(join(state, 'restart')), head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()) };
+    return { ...r, good, target, reports, healthAt, phases: [...phases], lockHeldAtReport, together: () => together, noteLeft: existsSync(join(state, 'restart')), head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()), sleeps: sleeps() };
   } finally {
     srv.close();
   }
@@ -633,8 +643,8 @@ test('the restart checks health again a little after the first OK, and rolls bac
   assert.equal(r.reports.length, 1);
   assert.equal(r.reports[0].ok, false);
   assert.match(r.reports[0].text, /answered healthy on it, then stopped answering or was restarted within 0\.5 s\. Rolled back to last-good/);
-  // Asks 2 to 4 are the second check's three, DEPLOY_TEST_HEALTH_POLL apart (1 s apart unset).
-  assert.ok(r.healthAt[3] - r.healthAt[1] < 1500, `the second check asked every DEPLOY_TEST_HEALTH_POLL s: ${r.healthAt.map(Math.round)}`);
+  // healthy() pauses DEPLOY_TEST_HEALTH_POLL s before each ask (1 s unset); the second check comes DEPLOY_SETTLE s after the first.
+  assert.ok(r.sleeps.includes('0.1') && r.sleeps.includes('0.5') && !r.sleeps.includes('1'), r.sleeps.join(' '));
   // The drill's F4 (#553): waiting landings see the restart move, and its reports go out together, not one by one.
   assert.equal(r.phases.length, 3, r.phases.join(' | '));
   assert.match(r.phases[0], /^restarting citadel-test on [0-9a-f]{7} since \d\d:\d\d$/);

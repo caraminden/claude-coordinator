@@ -9,6 +9,7 @@
 // - the share of turns that failed, from the turns table and error events.
 // The windows before and after are the same length: the check's offset, cut short where the next deploy went live, so
 // a later deploy's trouble is never blamed on this one (that deploy's own checks cover it).
+import { execFile } from 'node:child_process';
 import type { Project, Store } from './db.ts';
 
 /** Settings key: the commit last seen live, and the deploys still being watched. */
@@ -24,7 +25,8 @@ export const BOOT_QUIET_MS = 2 * MIN;
 /** One kind of reading: worse means at least `floor` after and at least double the window before. */
 export interface Signal { key: string; name: string; floor: number }
 export const SIGNALS: Signal[] = [
-  { key: 'client-error', name: 'front-end errors', floor: 5 },
+  // 3, not 5: the route keeps one report per person per error each 10 minutes, so one person adds at most 2 in 20 minutes.
+  { key: 'client-error', name: 'front-end errors', floor: 3 },
   { key: 'server-5xx', name: 'server 5xx answers', floor: 5 },
   { key: 'fallback', name: 'jobs run inside the server (systemd-run fallbacks)', floor: 3 },
   { key: 'loop-lag', name: 'event-loop stalls over half a second', floor: 5 },
@@ -67,6 +69,19 @@ export interface WatchDeps {
   now?: () => number;
   /** When this process started (ms), for BOOT_QUIET_MS. */
   bootAt?: number;
+}
+
+/**
+ * WatchDeps.commits from the git checkout in `dir`: oldest first, parents before children, merges included, since a
+ * land's Shipped note can name a merge (a build's tip) and owns the commits before it.
+ */
+export function gitCommits(dir: string): WatchDeps['commits'] {
+  return (prev, head) =>
+    new Promise((done) =>
+      execFile('git', ['log', '--reverse', '--topo-order', '--format=%H%x09%s', `${prev}..${head}`], { cwd: dir, timeout: 30_000, maxBuffer: 16 << 20 }, (err, out) =>
+        done(err ? null : out.split('\n').filter(Boolean).map((l) => ({ sha: l.slice(0, l.indexOf('\t')), subject: l.slice(l.indexOf('\t') + 1) }))),
+      ),
+    );
 }
 
 /** A clock time as people read it (Pacific). */

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import vm from 'node:vm';
 import { HEALTH_MAX_ROWS, Store } from '../src/db.ts';
-import { ClientErrors, DEDUPE_MS, DeployWatch, RATE } from '../src/deploy-watch.ts';
+import { ClientErrors, DEDUPE_MS, DeployWatch, gitCommits, RATE } from '../src/deploy-watch.ts';
 
 // The post-deploy watch (#724): readings before and after each deploy, a wake for whoever shipped a regression.
 const root = mkdtempSync(join(tmpdir(), 'deploy-watch-'));
@@ -99,7 +100,7 @@ test('a doubling under the floor, or a rise short of double, is ignored', async 
   clock.now += 60 * MIN;
   const at = clock.now;
   deploy(sha('1'), [{ sha: sha('1'), subject: 'x' }]);
-  errors(4, at + MIN); // 0 → 4: doubled, but under 5
+  errors(2, at + MIN); // 0 → 2: doubled, but under 3
   for (let i = 0; i < 4; i++) store.addHealthEvent('server-5xx', at - 10 * MIN + i, null, 'GET /api/x: boom');
   for (let i = 0; i < 7; i++) store.addHealthEvent('server-5xx', at + MIN + i, null, 'GET /api/x: boom'); // 4 → 7: not double
   for (let i = 0; i < 2; i++) store.addHealthEvent('fallback', at + MIN + i, null, 'A turn: no slice'); // under 3
@@ -178,6 +179,32 @@ test('a window cut under five minutes by the next deploy compares nothing', asyn
   clock.now = first + 25 * 60 * MIN;
   await w.tick();
   assert.equal(woken.some((x) => x.id === a.id), false);
+});
+
+test("git attribution: a Shipped note on a build's merge owns the commits merged in with it", async () => {
+  const { store, a, b, scheme } = setup();
+  const dir = mkdtempSync(join(root, 'git-'));
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: dir, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git('commit', '-q', '--allow-empty', '-m', 'base');
+  const prev = git('rev-parse', 'HEAD');
+  git('checkout', '-q', '-b', 'build/1');
+  git('commit', '-q', '--allow-empty', '-m', 'Build work one');
+  git('commit', '-q', '--allow-empty', '-m', 'Build work two');
+  git('checkout', '-q', 'main');
+  git('commit', '-q', '--allow-empty', '-m', 'Something on main meanwhile');
+  git('merge', '-q', '--no-ff', '-m', 'Merge build/1', 'build/1');
+  const merge = git('rev-parse', 'HEAD');
+  git('commit', '-q', '--allow-empty', '-m', `#${a.number}: A's fix`);
+  const head = git('rev-parse', 'HEAD');
+  store.addEvent(b.id, 'note', { text: `Shipped ${merge.slice(0, 8)} "Build 1": live after the restart.` });
+  const w = new DeployWatch({ store, commits: gitCommits(dir), wake() {}, mail() {}, scheme: () => scheme, head: () => head, dbPath: '' });
+  const { suspects, unowned } = await w.suspects({ commit: head, prev, at: Date.now(), due: [], len: 0 });
+  const by = Object.fromEntries(suspects.map((s) => [s.ticketId, s.commits.map((c) => c.subject)]));
+  assert.deepEqual(by[b.id].sort(), ['Build work one', 'Build work two', 'Merge build/1', 'Something on main meanwhile']);
+  assert.deepEqual(by[a.id], [`#${a.number}: A's fix`]);
+  assert.deepEqual(unowned, []);
+  assert.equal(await gitCommits(dir)('nope', head), null, 'git failing is no list, not a throw');
 });
 
 test('restarting on the same commit is not a deploy; the first commit ever seen starts no watch', () => {

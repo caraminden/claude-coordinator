@@ -50,7 +50,7 @@ test('an MCP call made while the server is down goes through once the next one i
   const port = await freePort();
   const call = threadMcp(port);
   const result = call('set_thread_status', { note: 'still going' });
-  await new Promise((r) => setTimeout(r, 1500));
+  await new Promise((r) => setTimeout(r, 700)); // the first try was refused and the retry (after 500 ms) is pending
   const seen: string[] = [];
   const api = await listen(port, (req, res) => {
     seen.push(`${req.method} ${req.url}`);

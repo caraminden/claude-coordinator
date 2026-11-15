@@ -163,9 +163,9 @@ test("a big restore and save run off the event loop, and a file whose mtime only
   store.updateTicket(t.id, { session_id: 'big' });
   const ticket = store.getTicket(t.id)!;
   const path = join('projects', projectSlug(cwd), 'big.jsonl');
-  // 64 MB of transcript-like lines; the biggest stored on live is 98 MB raw.
+  // 16 MB of transcript-like lines (the asserts below are about where the work runs, not how long it takes).
   const line = JSON.stringify({ type: 'assistant', text: 'x'.repeat(200) }) + '\n';
-  const text = Buffer.from(line.repeat(Math.ceil(64e6 / line.length)));
+  const text = Buffer.from(line.repeat(Math.ceil(16e6 / line.length)));
   const put = () => store.putClaudeState({ path, project_id: project.id, ticket_id: t.id, size: text.length, mtime: 1_700_000_000_123, data: gzipSync(text) });
   const dir = (name: string) => join(root, `config-612-${name}`);
   const file = join(dir('ahead'), path);

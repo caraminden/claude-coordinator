@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, PASSWORD, stopProcs, stopTurns } from './helpers.ts';
+import { listeningPort, PASSWORD, stopProcs, stopTurns, until } from './helpers.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
@@ -63,7 +63,7 @@ before(async () => {
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: data, PREVIEW: '1', CLAUDE_BIN: fakeClaude,
+      PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: data, PREVIEW: '1', CITADEL_RESUME_GAP_MS: '200', CLAUDE_BIN: fakeClaude,
       CLAUDE_CONFIG_DIR: join(root, 'claude-config'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -107,12 +107,10 @@ test('a state change pushes to nobody', async () => {
 });
 
 test('nothing resumes the copied mid-turn minion, and no claude ever ran', async () => {
-  // Live, recover() resumes interrupted turns resumeGapMs (3 s) apart.
-  await new Promise((r) => setTimeout(r, 3500));
+  // Live, recover() resumes interrupted turns resumeGapMs apart (set to 200 ms here; the first would start by then).
+  await new Promise((r) => setTimeout(r, 1500));
   assert.equal(existsSync(marker), false);
-});
-
-test("a running ultra review's folder, named in the copy, is left alone (#468 S08-1)", () => {
+  // And a running ultra review's folder, named in the copy, is left alone (#468 S08-1).
   assert.equal(existsSync(reviewClone), true);
 });
 
@@ -126,6 +124,5 @@ test('a preview exits once the server that started it is gone', async () => {
   const up = () => fetch(`http://127.0.0.1:${port}/api/health`).then((r) => r.ok, () => false);
   assert.equal(await up(), true);
   parent.kill('SIGKILL');
-  await new Promise((r) => setTimeout(r, 3500));
-  assert.equal(await up(), false);
+  await until('the preview to notice its parent is gone', async () => !(await up()), 10_000);
 });

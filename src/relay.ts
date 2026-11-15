@@ -22,7 +22,8 @@ import { titleKey } from './mandate-items.ts';
 const MANDATE_NAME = 'Mandate';
 
 export const RELAY_MAX_BODY = 64 * 1024;
-export const RELAY_TIMEOUT_MS = 10_000;
+/** How long a target gets to answer; CITADEL_RELAY_TIMEOUT_MS lets a test make it short. */
+export const RELAY_TIMEOUT_MS = Number(process.env.CITADEL_RELAY_TIMEOUT_MS) || 10_000;
 
 async function jsonBody(req: Ctx['req']): Promise<Buffer | undefined> {
   if (Number(req.headers['content-length'] ?? 0) > RELAY_MAX_BODY) throw new HttpError(413, `Relayed bodies are limited to ${RELAY_MAX_BODY / 1024} KiB`);
@@ -75,7 +76,7 @@ export async function relay(ctx: Ctx, from: ContraptionRow) {
     answer = Buffer.from(await r.arrayBuffer());
     [status, type] = [r.status, r.headers.get('content-type')];
   } catch (err: any) {
-    if (err?.name === 'TimeoutError') throw new HttpError(504, `${to.title} didn't answer within ${RELAY_TIMEOUT_MS / 1000} s`);
+    if (err?.name === 'TimeoutError') throw new HttpError(504, `${to.title} didn't answer within ${+(RELAY_TIMEOUT_MS / 1000).toFixed(1)} s`);
     throw new HttpError(502, `${to.title} is not answering`);
   }
   res.writeHead(status, type ? { 'Content-Type': type } : {}).end(answer);

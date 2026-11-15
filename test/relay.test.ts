@@ -36,7 +36,7 @@ const error = async (res: Response) => [res.status, (await res.json()).error];
 before(async () => {
   const port = await freePort();
   await new Promise<void>((r) => stub.listen(port, '127.0.0.1', r));
-  srv = await bootServer();
+  srv = await bootServer({ env: { CITADEL_RELAY_TIMEOUT_MS: '400' } });
   const mandate = await srv.call('/api/contraptions', { name: 'mandate', title: 'Mandate', port, relay_paths: ['/app-api/'] });
   assert.equal(mandate.status, 201, JSON.stringify(mandate.data));
   assert.deepEqual(mandate.data.relay_paths, ['/app-api/']);
@@ -127,7 +127,7 @@ test('relay paths are edited like open paths', async () => {
   assert.equal((await srv.call('/api/contraptions', { name: 'relay', title: 'Relay', port: 9999 })).status, 400, 'relay is a reserved name');
 });
 
-test('a target that is down is a 502, one that never answers a 504 after 10 s', { timeout: 30_000 }, async () => {
+test('a target that is down is a 502, one that never answers a 504 once its timeout passes', { timeout: 30_000 }, async () => {
   assert.equal((await relay('mandate/app-api/hang')).status, 504);
   const down = await srv.call('/api/contraptions', { name: 'down', title: 'Down', port: await freePort(), relay_paths: ['/'] });
   assert.equal((await srv.call(`/api/contraptions/down/people/${cara}`, { enabled: true }, 'PUT')).status, 200);

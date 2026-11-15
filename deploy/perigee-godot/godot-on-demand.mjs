@@ -191,14 +191,14 @@ export function lines(stream, onLine, onEnd = () => {}) {
 }
 
 /** The bridge: the machine agent's stdio on one side, the MCP server's on the other. */
-export function bridge(command, cfg = settings(), { input = process.stdin, output = process.stdout, log = (l) => console.error(`godot-on-demand: ${l}`), ensure = () => ensureEditor(cfg, log), keepEveryMs = 60_000 } = {}) {
+export function bridge(command, cfg = settings(), { input = process.stdin, output = process.stdout, log = (l) => console.error(`godot-on-demand: ${l}`), ensure = () => ensureEditor(cfg, log), keepEveryMs = 60_000, stampGapMs = 5_000 } = {}) {
   const child = spawn(command[0], command.slice(1), { stdio: ['pipe', 'pipe', 'inherit'] });
   child.stdin.on('error', () => {});
   const pending = new Set();
   let stamped = 0;
   const stamp = () => {
     const t = Date.now();
-    if (t - stamped < 5_000) return;
+    if (t - stamped < stampGapMs) return;
     stamped = t;
     try {
       touch(cfg, t);

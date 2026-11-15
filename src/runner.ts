@@ -499,7 +499,7 @@ export class Runner {
   /** The clock the loop guard's window runs on; tests move it. */
   now = () => Date.now();
   /** Gap between auto-resumes after a restart, so they don't all start at once. */
-  resumeGapMs = 3000;
+  resumeGapMs = Number(process.env.CITADEL_RESUME_GAP_MS) || 3000; // the env knob lets a test shorten it
   /** After the usage limit resets, before the first minion resumes; then between resumes, so they don't all hit it again at once. */
   limitDelayMs = 60_000;
   limitGapMs = 30_000;

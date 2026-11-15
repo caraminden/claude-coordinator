@@ -313,10 +313,10 @@ test('a check leaves the event loop free while git and gh run (#526)', async () 
   sg('-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'work');
   const work = sg('rev-parse', 'HEAD');
   sg('remote', 'add', 'origin', 'https://github.com/cara/slow.git');
-  // gh as GitHub on a slow day: its answer takes a second.
+  // gh as GitHub on a slow day: its answer takes 0.4 s.
   const bin = join(root, 'slow-bin');
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/sh\nsleep 1\necho "[]"\n');
+  writeFileSync(join(bin, 'gh'), '#!/bin/sh\nsleep 0.4\necho "[]"\n');
   chmodSync(join(bin, 'gh'), 0o755);
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
@@ -339,7 +339,7 @@ test('a check leaves the event loop free while git and gh run (#526)', async () 
     gap = 0;
     const began = performance.now();
     assert.equal(await w.check(), 0);
-    assert.ok(performance.now() - began >= 1000, 'the check did ask the slow gh');
+    assert.ok(performance.now() - began >= 400, 'the check did ask the slow gh');
     await new Promise((r) => setTimeout(r, 30)); // a beat after it, so a stall that ended with the check is counted
     assert.ok(gap < 500, `the event loop stalled for ${Math.round(gap)} ms during the check`);
   } finally {

@@ -236,8 +236,9 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
     const { readFileSync } = require('node:fs');
     const bad = new Set();
     let reads = 0;
-    const stop = Date.now() + 4000;
-    while (Date.now() < stop) {
+    const { existsSync } = require('node:fs');
+    console.log('ready');
+    while (!existsSync(${JSON.stringify(sentFile + '.stop')})) {
       try { const s = readFileSync(${JSON.stringify(sentFile)}, 'utf8'); reads++; if (!/^\\d+$/.test(s)) bad.add(s); } catch {}
     }
     console.log(JSON.stringify({ reads, bad: [...bad] }));
@@ -245,15 +246,17 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
   let out = '';
   reader.stdout.on('data', (d) => (out += d));
   const exited = new Promise((res) => reader.on('exit', res));
-  for (let i = 0; i < 12; i++) {
+  await until(() => out.includes('ready')); // the reader is spinning before the first steer goes in
+  // Each steer waits until the wrapper has passed it on (it writes steer.sent then), so every write is read against.
+  for (let i = 0; i < 6; i++) {
     r.send(t.id, 'Cara', `steer ${i}`, [], {}, true);
-    await new Promise((res) => setTimeout(res, 260));
+    await until(() => seen(t.dir).length === i + 2);
   }
+  writeFileSync(sentFile + '.stop', '');
   await exited;
-  const { reads, bad } = JSON.parse(out);
+  const { reads, bad } = JSON.parse(out.replace('ready\n', ''));
   assert.ok(reads > 0, 'the reader saw steer.sent');
   assert.deepEqual(bad, []);
-  await until(() => seen(t.dir).length === 13);
   writeFileSync(join(t.dir, 'release'), '');
   await until(() => !r.isRunning(t.id));
 });

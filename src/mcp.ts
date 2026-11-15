@@ -1618,7 +1618,25 @@ function scheduleLine(s: any): string {
 const SCHEME_ARG = { scheme: { type: 'integer', description: "Another scheme's number (as your instructions list them), to read its minions instead of this scheme's. Read-only, and only on a turn a Citadel member or admin asked for; leave it out for this scheme." } };
 const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ticket' ? { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, ...SCHEME_ARG } } } : t);
 
+/**
+ * Tools every turn of a role uses (#710): Claude Code defers MCP tools behind ToolSearch, a whole round trip each, and again
+ * after a resume or compaction. `_meta["anthropic/alwaysLoad"]` keeps these in the first prompt. Each 1k tokens of prefix costs
+ * about $20 a week (#699), so test/mcp-always-load.test.ts pins this list.
+ */
+export const ALWAYS_LOAD = {
+  thread: ['set_thread_status', 'set_properties', 'message_coordinator', 'ask_question', 'close_self'],
+  taskmaster: ['create_ticket', 'read_ticket', 'message_ticket', 'list_tickets'],
+};
+const withAlwaysLoad = (tools: any[]) => {
+  const names = ALWAYS_LOAD[ROLE === 'thread' ? 'thread' : 'taskmaster'];
+  return tools.map((t) => (names.includes(t.name) ? { ...t, _meta: { ...t._meta, 'anthropic/alwaysLoad': true } } : t));
+};
+
 function toolList() {
+  return withAlwaysLoad(toolListAll());
+}
+
+function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];

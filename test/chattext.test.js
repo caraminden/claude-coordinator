@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setView } from '../public/base.js';
-import { firstSentence, machineAuthor, shortDuration, shortNote, ticketActionRef } from '../public/chattext.js';
+import { firstSentence, machineAuthor, senderTone, shortDuration, shortNote, ticketActionRef } from '../public/chattext.js';
 import { elapsedText } from '../public/wait.js';
 
 test('ticketActionRef links the minion a Taskmaster tool created, messaged or updated, from its result', () => {
@@ -213,4 +213,13 @@ test('elapsedText (wait.js) counts a running turn in whole seconds, then minutes
     [25 * 3600 * S, '25h 0m'],
   ];
   for (const [ms, want] of rows) assert.equal(elapsedText(ms), want, `${ms}ms`);
+});
+
+test('senderTone: a Taskmaster is violet, a minion orange, a person plain', () => {
+  assert.equal(senderTone('Taskmaster'), 'from-tm');
+  assert.equal(senderTone('Coordinator'), 'from-tm');
+  assert.equal(senderTone('Taskmaster of Delve, for Josh, a Citadel member'), 'from-tm');
+  assert.equal(senderTone('#12 Fix the thing'), 'from-minion');
+  assert.equal(senderTone('Cara'), '');
+  assert.equal(senderTone(undefined), '');
 });

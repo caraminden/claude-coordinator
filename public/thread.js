@@ -19,7 +19,7 @@ import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { releaseChip } from './releases.js';
 import { askHeader } from './askcard.js';
-import { firstSentence, GITHUB_NAME, machineAuthor, shortDuration, shortNote, ticketActionRef } from './chattext.js';
+import { firstSentence, GITHUB_NAME, machineAuthor, senderTone, shortDuration, shortNote, ticketActionRef } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerLine } from './payer.js';
 import { waitingStrip } from './waiting.js';
@@ -1227,7 +1227,7 @@ function syncHeldBrief() {
   if (old?.dataset.key === key) return;
   old?.remove();
   const body = markdown(b.text, view.ticket.id);
-  const el = h('div', { class: 'msg user held-brief', 'data-key': key },
+  const el = h('div', { class: `msg user held-brief ${senderTone(b.from)}`.trim(), 'data-key': key },
     h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} is ${b.when === 'live' ? 'live' : 'merged'}`))),
     body);
   if (b.text.length > 500 || b.text.split('\n').length > 8) {
@@ -1384,7 +1384,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   // except the brief that started the minion: it says what the minion is for.
   const who = machineAuthor(author);
   // Sent by another agent: it takes its sender's colour (#693), a Taskmaster's (this scheme's or another's) or a minion's.
-  const tone = /^(Taskmaster|Coordinator)$|^Taskmaster of /.test(author) ? ' from-tm' : /^#\d+ /.test(author) ? ' from-minion' : '';
+  const tone = senderTone(author) ? ` ${senderTone(author)}` : '';
   if (who && event?.brief) {
     msg.querySelector('.who').textContent = who;
     msg.className += tone;

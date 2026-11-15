@@ -55,6 +55,12 @@ export const COORDINATOR_NAME = 'Coordinator';
 // APP_NAME in src/appname.ts: wake-ups and chained-minion notices.
 export const APP_AUTHOR = 'Citadel';
 
+/** The colour class a message sent by another agent takes (#693): a Taskmaster's (this scheme's or another's) or a minion's; '' for anyone else. */
+export function senderTone(author) {
+  author ??= '';
+  return /^(Taskmaster|Coordinator)$|^Taskmaster of /.test(author) ? 'from-tm' : /^#\d+ /.test(author) ? 'from-minion' : '';
+}
+
 /**
  * Who sent a message that isn't from a person (authors from server.ts), as the collapsed row shows them:
  * the Taskmaster, another scheme's ("Taskmaster of Delve"), a minion ("#12 Title"), the app or

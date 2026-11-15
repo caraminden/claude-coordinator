@@ -229,7 +229,7 @@ export function accountPage() {
   return page(
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
       account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you link your Claude below.']),
-    form, claudeCard(), codexCard(), githubCard());
+    form, claudeCard(), codexCard(), githubCard(), openrouterCard());
 }
 
 /** A plan's week as of its last turn: "41%, resets Mon 9:00 AM", or null before its first turn. */
@@ -358,6 +358,85 @@ function codexCard() {
       h('div', { class: 'row' }, act('Link Codex', 'POST')), override, note);
   };
   api('api/me/codex').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
+  return card;
+}
+
+/** Your own OpenRouter key and monthly cap (#717): minions working for you make images and sounds on it, never past the cap. */
+function openrouterCard() {
+  const card = h('div', { class: 'account-card openrouter-card' }, h('p', { class: 'muted' }, 'Loading OpenRouter…'));
+  const usd = (n) => `$${Number(n).toFixed(2)}`;
+  const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
+  const title = (chip, cls = '') => h('h3', {}, 'OpenRouter', h('span', { class: `link-chip ${cls}` }, chip));
+  const keysPage = () => ext('https://openrouter.ai/settings/keys', 'OpenRouter\'s keys page');
+  const capInput = (value) => h('input', { type: 'number', name: 'cap', min: '1', max: '1000', step: '1', value: String(value), inputmode: 'decimal', class: 'cap-input', 'aria-label': 'Monthly cap in dollars' });
+  // Connecting asks OpenRouter whether the key works, so it shows busy on this card until it answers.
+  const connectForm = (st, again) => {
+    const key = h('input', { type: 'password', name: 'openrouter-key', autocomplete: 'off', spellcheck: 'false', placeholder: 'sk-or-v1-…', required: true });
+    const cap = capInput(st.cap_usd ?? st.default_cap_usd ?? 10);
+    const status = h('span', { class: 'muted small', role: 'status' });
+    const button = h('button', { type: 'submit', class: 'small' }, again ? 'Connect again' : 'Connect');
+    const form = h('form', { class: 'openrouter-form' },
+      h('label', {}, 'Key', key), h('label', {}, 'Monthly cap ($)', cap), h('div', { class: 'row' }, button, status));
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      button.disabled = true;
+      status.textContent = 'Checking the key with OpenRouter…';
+      try {
+        render(await api('api/me/openrouter', { method: 'POST', body: { key: key.value.trim(), cap: Number(cap.value) } }));
+      } catch (err) {
+        status.textContent = err.message;
+        button.disabled = false;
+      }
+    };
+    return form;
+  };
+  const render = (st) => {
+    const note = h('p', { class: 'muted small' }, 'The key is kept encrypted on the server and never shown again, not even to you; minions never see it. ',
+      'For a hard stop on OpenRouter\'s side too, give the key a credit limit on ', keysPage(), '.');
+    if (!st.connected) {
+      return card.replaceChildren(title('Not connected', 'off'),
+        h('p', {}, 'Optional. Connect your own OpenRouter key and minions working for you can make images and sounds (generate_image, edit_image, generate_audio). Each call is paid from your key, and Citadel refuses any call that could take you past your monthly cap.'),
+        h('p', { class: 'small' }, 'Make a key on ', keysPage(), ', then paste it here.'),
+        connectForm(st, false), note);
+    }
+    const disconnect = h('button', {
+      type: 'button', class: 'secondary small',
+      onclick: () => {
+        if (!confirm('Disconnect OpenRouter? Citadel forgets the key; minions working for you can\'t make media until you connect again.')) return;
+        optimistic({ apply: () => render({ connected: false, default_cap_usd: st.cap_usd }), send: () => api('api/me/openrouter', { method: 'DELETE' }), undo: () => render(st), label: 'disconnect OpenRouter' }).then(render, () => {});
+      },
+    }, 'Disconnect');
+    if (st.failed) {
+      return card.replaceChildren(title('Needs connecting again', 'warn'),
+        h('p', {}, 'OpenRouter stopped accepting this key (deleted or disabled there, or the server\'s secret changed). Minions can\'t make media for you until you connect a working key.'),
+        connectForm(st, true), h('div', { class: 'row' }, disconnect), note);
+    }
+    // The cap's new number shows at once; a refusal puts the old one back.
+    const cap = capInput(st.cap_usd);
+    const capForm = h('form', { class: 'openrouter-cap' }, h('label', {}, 'Monthly cap ($)', cap), h('button', { type: 'submit', class: 'small secondary' }, 'Save cap'));
+    capForm.onsubmit = (e) => {
+      e.preventDefault();
+      const next = Math.round(Number(cap.value) * 100) / 100;
+      if (!(next > 0)) return;
+      optimistic({
+        key: 'openrouter-cap', sets: 'openrouter-cap',
+        apply: () => render({ ...st, cap_usd: next, left_usd: Math.max(0, next - st.spent_usd) }),
+        send: () => api('api/me/openrouter', { method: 'PATCH', body: { cap: next } }),
+        undo: () => render(st),
+        label: 'save your OpenRouter cap',
+      }).then(render, () => {});
+    };
+    const orLimit = st.or_limit != null ? `${usd(st.or_limit)}${st.or_limit_reset ? ` (${st.or_limit_reset})` : ''}`
+      : h('span', {}, 'None set: add one on ', keysPage(), ' for a hard stop');
+    return card.replaceChildren(title('Connected', 'ok'),
+      h('dl', { class: 'kv' },
+        h('dt', {}, 'This month'), h('dd', {}, `${usd(st.spent_usd)} of ${usd(st.cap_usd)} spent, ${usd(st.left_usd)} left`),
+        h('dt', {}, 'Cap resets'), h('dd', {}, st.resets),
+        h('dt', {}, 'Limit on OpenRouter'), h('dd', {}, orLimit),
+        h('dt', {}, 'Connected'), h('dd', {}, new Date(st.linked_at).toLocaleDateString(undefined, { dateStyle: 'medium' }))),
+      capForm, h('div', { class: 'row' }, disconnect), note);
+  };
+  api('api/me/openrouter').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
   return card;
 }
 

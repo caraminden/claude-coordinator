@@ -180,6 +180,30 @@ export const peopleRoutes: Route[] = [
       return json(res, 200, await app.github.status(uidOf(session)));
     },
   },
+  // Your own OpenRouter key and monthly cap (src/openrouter.ts, #717): connect (checked with OpenRouter, then sealed),
+  // change the cap, disconnect. The key goes in once and never comes back out.
+  { method: 'GET', path: '/api/me/openrouter', who: ['person'], handler: ({ res, app, session }) => json(res, 200, app.openrouter.status(uidOf(session))) },
+  {
+    method: 'POST', path: '/api/me/openrouter', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const body = (await readJson(req)) ?? {};
+      return json(res, 200, await app.openrouter.connect(uidOf(session), body.key, body.cap));
+    },
+  },
+  {
+    method: 'PATCH', path: '/api/me/openrouter', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const body = (await readJson(req)) ?? {};
+      return json(res, 200, app.openrouter.setCap(uidOf(session), body.cap));
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/me/openrouter', who: ['person'],
+    handler({ res, app, session }) {
+      app.openrouter.unlink(uidOf(session));
+      return json(res, 200, app.openrouter.status(uidOf(session)));
+    },
+  },
   // Linking your own Claude plan (src/claude-link.ts, #213): its state, starting the sign-in, the code
   // Anthropic shows you, and unlinking. Only the one-time code passes through; never a token.
   { method: 'GET', path: '/api/me/claude', who: ['person'], handler: ({ res, app, session }) => json(res, 200, { ...app.claude.status(uidOf(session)), usage: app.runner.usageOf(uidOf(session)) }) },

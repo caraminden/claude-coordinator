@@ -121,7 +121,8 @@ export interface ToolContext {
   roots: string[];
 }
 
-export type MediaTool = 'generate_image' | 'edit_image' | 'generate_audio';
+export const MEDIA_TOOLS = ['generate_image', 'edit_image', 'generate_audio'] as const;
+export type MediaTool = (typeof MEDIA_TOOLS)[number];
 const IMAGE_EXT = new Set(['.png', '.webp', '.svg']);
 const AUDIO_EXT = new Set(['.mp3', '.wav']);
 const INPUT_IMAGE = (p: string) => (/\.(png|jpe?g|webp)$/i.test(p) ? 'image' : null);

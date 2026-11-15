@@ -42,6 +42,7 @@ import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
 import { Credentials } from './src/credentials.ts';
+import { OpenRouter } from './src/openrouter.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
@@ -169,6 +170,8 @@ store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
 // Before anything reads repo_url: a scheme whose repo moved on GitHub follows its checkout's origin (#456).
 await safely('follow repo moves', () => followOrigins(store));
 const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
+// People's own OpenRouter keys (#717). OPENROUTER_BASE_URL points a dev copy or test at a fake.
+const openrouter = new OpenRouter(store, credentials);
 // Only the live data dir writes the real key folders: a dev copy registering "mandate" mustn't overwrite the live one's files.
 const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '',
   process.env.CITADEL_CONTRAPTIONS_DIR || (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
@@ -906,7 +909,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
   get assetVersion() {

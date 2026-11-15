@@ -20,6 +20,7 @@ import { lineDiff } from '../instructions.ts';
 import { hostCheck } from '../host-check.ts';
 import { landArgs, type Handoff } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
+import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
 import { previewPath } from '../previews.ts';
 import { repoSlug } from '../prlinks.ts';
 import { NOTIFY_STATES } from '../push.ts';
@@ -895,6 +896,19 @@ export const ticketRoutes: Route[] = [
         throw new HttpError(400, err.message);
       }
       return json(res, 202, app.landings.start(ticket.id, ticket.cwd, env, args));
+    },
+  },
+  {
+    // generate_image, edit_image and generate_audio (#717): the server calls OpenRouter on the key of the person this
+    // turn runs for (ticket.person_id), booked against their monthly cap; the turn never sees the key.
+    method: 'POST', path: '/api/tickets/:ticket/openrouter', who: ['minion'], refuse: 'Only the minion itself can make media in its folders',
+    async handler({ req, res, app, ticket }) {
+      const body = (await readJson(req)) ?? {};
+      if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree makes media');
+      const tool = oneOf(body.tool, MEDIA_TOOLS, 'tool') as MediaTool | null;
+      if (!tool) throw new HttpError(400, `tool must be one of: ${MEDIA_TOOLS.join(', ')}`);
+      const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
+      return json(res, 200, await app.openrouter.tool(tool, args, { userId: ticket.person_id, ticketId: ticket.id, projectId: ticket.project_id, roots: ticketRoots(app, ticket) }));
     },
   },
   {

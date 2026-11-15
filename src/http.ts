@@ -15,6 +15,7 @@ import type { Builds } from './builds.ts';
 import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket } from './db.ts';
 import type { MachineRelay } from './machines.ts';
 import type { GithubLink } from './github-link.ts';
+import type { OpenRouter } from './openrouter.ts';
 import type { RepoAccess } from './repo-access.ts';
 import type { CiLoad } from './ci-load.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
@@ -227,6 +228,8 @@ export interface App {
   runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
   claude: ClaudeLink;
+  /** People's own OpenRouter keys and caps, and the media tools that spend them (src/openrouter.ts, #717). */
+  openrouter: OpenRouter;
   /** People's own Codex sign-ins, in their Claude container (src/codex-link.ts, #330). */
   codex: CodexLink;
   /** Contraptions' keys and who each is enabled for (src/contraptions.ts). */

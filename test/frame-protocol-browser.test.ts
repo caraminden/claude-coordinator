@@ -40,11 +40,17 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   if (location.search === '?installed') window.matchMedia = (q) => (q.includes('display-mode') ? { matches: true, addEventListener() {} } : media(q));
 </script>
 <header class="cui-topbar"><button>Menu</button></header>
+<script>
+  // ?late: the bar comes with a narrower window, as ToC's phone header does.
+  if (location.search === '?late') document.querySelector('header').classList.remove('cui-topbar');
+</script>
 <script type="module">
   await import('/apps/_citadel/rail.js');
   const tell = (test, value) => parent !== window && parent.postMessage({ test, value }, '*');
   new MutationObserver(() => tell('strip', document.documentElement.style.getPropertyValue('--citadel-strip-h')))
     .observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+  // ?late: a second after its load, the bar arrives with a resize.
+  if (location.search === '?late') setTimeout(() => { document.querySelector('header').classList.add('cui-topbar'); dispatchEvent(new Event('resize')); }, 1000);
   setInterval(() => {
     const h = document.querySelector('.citadel-rail-handle');
     const r = h && !h.hidden && h.getBoundingClientRect();
@@ -101,8 +107,8 @@ after(async () => {
   await new Promise((r) => (server ? server.close(r) : r(null)));
 });
 
-const framer = (opts: { width: number; height?: number; touch?: boolean }) =>
-  browser.page(`${citadel()}/c/framer?src=${encodeURIComponent(`${contraption()}/apps/peek/`)}`, opts);
+const framer = (opts: { width: number; height?: number; touch?: boolean }, query = '') =>
+  browser.page(`${citadel()}/c/framer?src=${encodeURIComponent(`${contraption()}/apps/peek/${query}`)}`, opts);
 
 test("the frame is another origin: Citadel can't read the contraption's page", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 });
@@ -118,6 +124,13 @@ test("a contraption's top bar runs up into Citadel's title bar strip, with a dra
   await waitFor(page, "the strip's height in the contraption", `/^\\d+(\\.\\d+)?px$/.test(window.echo.strip ?? '')`);
   // The strip names the app, from the rail (or the page's own title, in its message).
   assert.equal(await page.eval(`document.querySelector('.frame-strip b').textContent`), 'Peek');
+});
+
+test("a top bar a contraption adds on a resize after its load is fitted too", { skip }, async () => {
+  const page = await framer({ width: 1200, height: 800 }, '?late');
+  await waitFor(page, "the contraption's handle report (the frame is up)", `'handle' in window.echo`);
+  assert.equal(await page.eval<boolean>(`document.documentElement.classList.contains('frame-topbar')`), false, 'no bar yet');
+  await waitFor(page, 'the frame-topbar class', `document.documentElement.classList.contains('frame-topbar')`);
 });
 
 test("Alt+\` inside the contraption's frame opens Citadel's switcher", { skip }, async () => {

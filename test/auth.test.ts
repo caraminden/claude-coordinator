@@ -149,6 +149,10 @@ test("a contraption host's cookie signs its person in on that app only, and is n
   assert.equal(auth.session(req(jar.replace('cc_app=', 'cc_session='))), null, 'not a Citadel session');
   assert.equal(auth.appSession(req(auth.issueCookie({ id: 7, name: 'Josh' }, false).split(';')[0].replace('cc_session=', 'cc_app=')), 'mandate'), null, 'nor the other way');
   assert.equal(auth.appRenewal('mandate', auth.appSession(req(jar), 'mandate'), true), null, 'a new one is left alone');
+  // A sibling host's page can set a same-named cookie for the whole domain, sent first: the real one still counts.
+  const citadel = auth.issueCookie({ id: 7, name: 'Josh' }, false).split(';')[0];
+  assert.equal(auth.session(req(`cc_session=junk.sig; ${citadel}`))?.name, 'Josh');
+  assert.equal(auth.appSession(req(`cc_app=junk; ${jar}`), 'mandate')?.name, 'Josh');
   people.set(7, { id: 7, name: 'Josh', disabled_at: 'now' });
   assert.equal(auth.appSession(req(jar), 'mandate'), null, 'disabled');
 });

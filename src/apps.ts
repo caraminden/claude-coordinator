@@ -42,7 +42,7 @@ const page = (title: string, text: string) =>
 
 type Refusal = { status: number; reason: string; headers: OutgoingHttpHeaders; body: string };
 /** renewed: a fresh session cookie for the person (Auth.renewal), added to the contraption's answer. */
-type Admitted = { row: ContraptionRow; path: string; headers: OutgoingHttpHeaders; uid: number | null; renewed?: string | null };
+type Admitted = { row: ContraptionRow; path: string; headers: OutgoingHttpHeaders; uid: number | null; renewed?: string | null; sandboxed?: boolean };
 
 const html = { 'X-Content-Type-Options': 'nosniff', 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
 const text = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' };
@@ -124,7 +124,7 @@ export class AppProxy {
     const a = host !== null && url.pathname.startsWith('/_citadel/') ? this.enter(req, url, host) : this.admit(req, url, host);
     if ('status' in a) return void res.writeHead(a.status, a.headers).end(a.body);
     this.track(res, a);
-    forward(req, res, a.row.port, a.path, a.headers, this.options(a.row, a.renewed));
+    forward(req, res, a.row.port, a.path, a.headers, this.options(a.row, a.renewed, a.sandboxed));
   }
 
   /** Serve a request that asks to upgrade (a websocket): the same gate, then a tunnel. */
@@ -139,7 +139,7 @@ export class AppProxy {
     const a = this.admit(req, url, appHost(req, this.domain));
     if ('status' in a) return answerRaw(socket, a.status, a.reason, a.headers, a.body);
     this.track(socket, a);
-    forwardUpgrade(req, socket, head, a.row.port, a.path, a.headers, this.options(a.row));
+    forwardUpgrade(req, socket, head, a.row.port, a.path, a.headers, this.options(a.row, null, a.sandboxed));
   }
 
   private track(conn: { destroy(): void; once(e: 'close', f: () => void): unknown }, a: Admitted) {
@@ -148,7 +148,7 @@ export class AppProxy {
     conn.once('close', () => this.open.delete(conn));
   }
 
-  private options(row: ContraptionRow, renewed?: string | null): ForwardOptions {
+  private options(row: ContraptionRow, renewed?: string | null, sandboxed?: boolean): ForwardOptions {
     return {
       what: row.title,
       maxBody: MAX_BODY,
@@ -156,6 +156,8 @@ export class AppProxy {
       answer: (h) => {
         if (h['set-cookie']) h['set-cookie'] = h['set-cookie'].filter((c) => !/^\s*(cc_session|cc_app)=/.test(c) && !/;\s*domain\s*=/i.test(c));
         if (renewed) h['set-cookie'] = [...(h['set-cookie'] ?? []), renewed];
+        // An open path's answer on Citadel's host can't open as a document there (an <object> asks with Accept */*).
+        if (sandboxed) Object.assign(h, { 'content-security-policy': 'sandbox', 'x-content-type-options': 'nosniff' });
       },
     };
   }
@@ -196,9 +198,10 @@ export class AppProxy {
   private moved(req: IncomingMessage, row: ContraptionRow, path: string, open: boolean): Refusal {
     const there = this.origin(req, row.name);
     if (!isPage(req)) return { status: 404, reason: 'Not Found', headers: text, body: `${row.title} has moved to ${there}${path}` };
-    const session = this.who(req, null);
     // An open path's page needs no sign-in there either.
-    if (!session) return redirect(open ? `${there}${path}` : `/c/?next=${encodeURIComponent(path)}`);
+    if (open) return redirect(`${there}${path}`);
+    const session = this.who(req, null);
+    if (!session) return redirect(`/c/?next=${encodeURIComponent(path)}`);
     if (!this.contraptions.enabled(row.name, session.uid!)) return { status: 403, reason: 'Forbidden', headers: html, body: page(row.title, `You don't have access to ${row.title}.`) };
     return redirect(`${there}/_citadel/enter?t=${this.auth.appToken(row.name, session.uid!)}&next=${encodeURIComponent(path)}`, handoff);
   }
@@ -238,7 +241,7 @@ export class AppProxy {
     if (cookies.length) headers.cookie = cookies.join('; ');
     else delete headers.cookie;
 
-    if (open) return { row, path, headers, uid: null };
+    if (open) return { row, path, headers, uid: null, sandboxed: host === null && !!this.domain };
 
     const session = this.who(req, host);
     if (!session) {
@@ -284,6 +287,7 @@ export class AppProxy {
         return void res.writeHead(404, text).end('No icon');
       }
       res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'" });
+      r.on('error', () => res.destroy());
       r.pipe(res);
     });
     up.setTimeout(10_000, () => up.destroy());

@@ -52,6 +52,14 @@ export function looksLikeUrl(name: string): boolean {
   return /^https?\W|\/|^www\./i.test(name);
 }
 
+/**
+ * Every value of cookie `name`, in the order sent. A page on a contraption's host (a sibling of Citadel's) can set a cookie
+ * of the same name for the whole domain, which may come first, so readers try each and keep the first that verifies.
+ */
+function cookies(req: IncomingMessage, name: string): string[] {
+  return (req.headers.cookie ?? '').split(/;\s*/).filter((c) => c.startsWith(`${name}=`)).map((c) => c.slice(name.length + 1));
+}
+
 function sha256(s: string): Buffer {
   return createHash('sha256').update(s).digest();
 }
@@ -260,8 +268,15 @@ export class Auth {
 
   /** The person contraption `app`'s host cookie signs in, read from their row as session() does, or null. */
   appSession(req: IncomingMessage, app: string): Session | null {
-    const match = (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${APP_COOKIE}=`));
-    const s = match && this.unseal('app', match.slice(APP_COOKIE.length + 1));
+    for (const value of cookies(req, APP_COOKIE)) {
+      const s = this.appSessionFrom(value, app);
+      if (s) return s;
+    }
+    return null;
+  }
+
+  private appSessionFrom(value: string, app: string): Session | null {
+    const s = this.unseal('app', value);
     if (!s || s.a !== app || typeof s.u !== 'number' || typeof s.e !== 'number' || s.e <= Date.now() || !this.users) return null;
     const user = this.users.getUser(s.u);
     return user && !user.disabled_at ? { name: user.name, uid: user.id, admin: this.users.isAdmin(user), exp: s.e } : null;
@@ -292,10 +307,15 @@ export class Auth {
 
   session(req: IncomingMessage): Session | null {
     if (req.headers.authorization) return this.agentSession(req);
-    const header = req.headers.cookie ?? '';
-    const match = header.split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`));
-    if (!match) return null;
-    const [payload, sig] = match.slice(COOKIE.length + 1).split('.');
+    for (const value of cookies(req, COOKIE)) {
+      const s = this.sessionFrom(value);
+      if (s) return s;
+    }
+    return null;
+  }
+
+  private sessionFrom(value: string): Session | null {
+    const [payload, sig] = value.split('.');
     if (!payload || !sig) return null;
     const expected = Buffer.from(this.sign(payload));
     const given = Buffer.from(sig);

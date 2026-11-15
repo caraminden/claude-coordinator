@@ -132,8 +132,16 @@ test("an open path still works on Citadel's host for what isn't a page (Peek Aur
   assert.equal(seen.length, before + 1);
   assert.equal(last.headers.cookie, undefined);
   assert.equal(last.headers['x-citadel-identity'], undefined);
-  // Its page opens on its own host, with no sign-in.
+  // What it answers there can't open as a document on Citadel's origin (an <object> asks with Accept */*).
+  const fetched = await ask(citadel, '/apps/stub/link', { Accept: '*/*' });
+  assert.equal(fetched.status, 200);
+  assert.equal(fetched.headers['content-security-policy'], 'sandbox');
+  assert.equal(fetched.headers['x-content-type-options'], 'nosniff');
+  // Its page opens on its own host, with no sign-in, for someone it isn't enabled for too.
   assert.equal((await ask(citadel, '/apps/stub/link', page)).headers.location, `http://${APP}/apps/stub/link`);
+  assert.equal((await ask(citadel, '/apps/stub/link', { ...page, Cookie: olive })).headers.location, `http://${APP}/apps/stub/link`);
+  // On its own host the answer is the contraption's to shape.
+  assert.equal((await ask(APP, '/apps/stub/link', { Accept: '*/*' })).headers['content-security-policy'], undefined);
 });
 
 test("the token signs in once, for this app's host only, and the host checks the cookie stuck before going on", async () => {

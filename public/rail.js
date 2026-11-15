@@ -626,7 +626,7 @@ let barQueued = false;
 /**
  * A framed contraption: tell Citadel about this page's .cui-topbar (frames.js fit): where it and its controls are, its
  * colour and the page's title, again whenever it changes, so Citadel can fit it to the title bar strip.
- * shortcut: a bar drawn after the page's load counts from the next resize or Citadel state; observe the body if one does.
+ * shortcut: a bar drawn after the page's load without a resize counts from the next resize or Citadel state; observe the body if one does.
  */
 function reportBar() {
   const bar = document.querySelector('.cui-topbar');
@@ -637,19 +637,23 @@ function reportBar() {
     controls: bar ? [...bar.querySelectorAll(CONTROLS)].filter((el) => el.getClientRects().length).map(box) : [],
     color: bar ? getComputedStyle(bar).backgroundColor : null,
   });
+  if (watchedBar === undefined) {
+    // From the first report, with or without a bar: a page may add its bar as it narrows (ToC's phone header).
+    document.addEventListener('scroll', reportSoon, { capture: true, passive: true });
+    addEventListener('resize', reportSoon);
+    document.fonts?.ready.then(reportSoon);
+  }
   if (bar === watchedBar) return;
   watchedBar = bar;
   if (!bar) return;
-  const again = () => {
-    if (barQueued) return;
-    barQueued = true;
-    requestAnimationFrame(() => { barQueued = false; reportBar(); });
-  };
-  new MutationObserver(again).observe(bar, { subtree: true, childList: true, attributes: true, characterData: true });
-  new ResizeObserver(again).observe(bar);
-  document.addEventListener('scroll', again, { capture: true, passive: true });
-  addEventListener('resize', again);
-  document.fonts?.ready.then(again);
+  new MutationObserver(reportSoon).observe(bar, { subtree: true, childList: true, attributes: true, characterData: true });
+  new ResizeObserver(reportSoon).observe(bar);
+}
+
+function reportSoon() {
+  if (barQueued) return;
+  barQueued = true;
+  requestAnimationFrame(() => { barQueued = false; reportBar(); });
 }
 
 /** A framed contraption: Alt+` and the keys that follow while Alt is held are Citadel's switcher's (appswitch.js), so they go to it. */

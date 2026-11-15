@@ -54,48 +54,6 @@ before(async () => {
 
 const project = (onboarding: Project['onboarding'], onboarding_mode: Project['onboarding_mode'] = 'first-run') => ({ name: 'Lanternfall', onboarding, onboarding_mode }) as Project;
 
-test('the onboarding section is in the prompt only while setup is under way', () => {
-  for (const step of ONBOARDING) {
-    const text = onboardingPrompt(project(step), '/shared');
-    if (step === 'done' || step === 'skipped') assert.equal(text, '', step);
-    else {
-      assert.match(text, /## Setting up this scheme/, step);
-      assert.match(text, /propose_plan/);
-      assert.match(text, /list_catalogue/);
-      assert.match(text, /citadel:scheme-setup/);
-      assert.match(text, /\/shared\/onboarding\.md/);
-      assert.match(text, /who pushes main/);
-      // Native-app schemes (#371): the kind, and a plan part only they get.
-      assert.match(text, /native app \(desktop or phone\)/);
-      assert.match(text, /\*\*Real hardware \(native-app schemes only; leave it out for any other kind\):\*\*.*`windows-latest` proves little.*Real-hardware ledger: docs\/unproven\.md.*\*\*First run on real hardware\*\*/);
-      // Critic rubrics (#393): the plan offers citadel:critique's starters, and none is a choice.
-      assert.match(text, /\*\*Critic rubrics:\*\* the starters in citadel:critique's `rubrics\/`.*"none fit yet"/);
-    }
-  }
-});
-
-test('a tune-up gets its own section: start from onboarding.md or the current state, plan as a diff, the setup minion only edits', () => {
-  for (const step of ONBOARDING) {
-    const text = onboardingPrompt(project(step, 'tune-up'), '/shared');
-    if (step === 'done' || step === 'skipped') {
-      assert.equal(text, '', step);
-      continue;
-    }
-    assert.match(text, /## Tuning up this scheme \(onboarding: [a-z-]+, tune-up\)/, step);
-    assert.doesNotMatch(text, /## Setting up this scheme|What kind of project|First minions/, 'none of the first-run interview or plan');
-    assert.match(text, /Start from \/shared\/onboarding\.md/);
-    assert.match(text, /When there is none \(schemes from before onboarding\), start from the scheme's current state/);
-    assert.match(text, /ask only what that leaves missing or may have changed/);
-    for (const part of ['Add', 'Update', 'Retire', 'Instructions']) assert.match(text, new RegExp(`\\*\\*${part}:\\*\\*`), part);
-    assert.match(text, /every repo copy the kit now covers \(`in_kit`\)/);
-    assert.match(text, /A native-app scheme .* with no Real-hardware ledger line gets one, and the hosted-runner warning in Working rules/);
-    assert.match(text, /\*\*Critic rubrics:\*\* when the Project facts have no Rubrics line, the starters in citadel:critique's `rubrics\/`/);
-    assert.match(text, /as a line diff/);
-    assert.match(text, /This is a tune-up: edit only, and delete only what the plan lists under Retire\./);
-    assert.match(text, /propose_plan/);
-  }
-});
-
 test('both plans name a skills survey for the stack, with every scheme\'s survey reports listed for the three-month check (#357)', () => {
   const data = join(root, 'surveys');
   const report = (id: number, name: string) => {

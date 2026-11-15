@@ -140,9 +140,12 @@ test("a contraption's Codex turn runs only the contraption's own tools: no shell
 
 test("an image run's hook lets image_gen through and nothing else, its reference images checked as reads (#738)", () => {
   const img = configFile({ script: tripwire, config, mode: 'image' });
-  const gen = (ti: object) => ({ hook_event_name: 'PreToolUse', tool_name: 'image_gen', tool_input: ti, cwd: worktree });
+  // Codex 0.166's real call, as the hook got it live in a container: the tool image_gen.imagegen, named with the dot dropped.
+  const gen = (ti: object, tool_name = 'image_genimagegen') => ({ hook_event_name: 'PreToolUse', tool_name, tool_input: ti, cwd: worktree });
+  for (const name of ['image_gen', 'image_gen.imagegen']) assert.equal(hook(gen({ prompt: 'a red dot' }, name), img).code, 0, name);
+  for (const name of ['image_gen_x', 'mcp__image_gen__imagegen', 'imagegen']) assert.equal(hook(gen({ prompt: 'a red dot' }, name), img).code, 2, name);
   assert.equal(hook(gen({ prompt: 'a red dot' }), img).code, 0);
-  assert.equal(hook(gen({ prompt: 'a red dot', referenced_image_paths: [`${worktree}/ref.png`, 'art/b.png'] }), img).code, 0);
+  assert.equal(hook(gen({ prompt: 'a red dot', transparent_background: true, referenced_image_paths: [`${worktree}/ref.png`, 'art/b.png'] }), img).code, 0);
   const key = hook(gen({ prompt: 'x', referenced_image_paths: [`${home}/.ssh/id_rsa`] }), img);
   assert.equal(key.code, 2);
   assert.match(key.stderr, /SSH keys/);
@@ -250,6 +253,8 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
     // An image run (#733): one imageGeneration item, saved by Codex (FAKE_SAVED) or inline, or refused for its limit.
     // The hook blocked image_gen (#738): no image, only Codex saying so.
     if (imageRun && mode === 'image-refused') {
+      // The app-server's report of the hook's block, in the shape a live run sent it.
+      send({ method: 'hook/completed', params: { threadId: 'th1', turnId: 'tu1', run: { eventName: 'preToolUse', status: 'blocked', entries: [{ kind: 'feedback', text: "[tripwire] image_genimagegen is off: Citadel's Codex image run makes one picture with image_gen and nothing else." }] } } });
       send({ method: 'item/completed', params: { threadId: 'th1', turnId: 'tu1', item: { type: 'agentMessage', id: 'a1', text: "Image generation failed: Citadel's read-only reviewer policy blocked the image_gen tool." } } });
       return send({ method: 'turn/completed', params: { threadId: 'th1', turn: { id: 'tu1', status: 'completed', error: null } } });
     }
@@ -359,7 +364,7 @@ test('an image run starts a thread with no shell and image instructions, names t
   assert.equal(readFileSync(out2, 'utf8'), 'saved png');
 });
 
-test("an image run's Codex gets the turn's tripwire config in image mode, a review the turn's own, and a refusal comes back in Codex's words (#738)", async () => {
+test("an image run's Codex gets the turn's tripwire config in image mode, a review the turn's own, and a block comes back in the hook's words, then Codex's (#738)", async () => {
   const out = join(root, 'gen-mode.png');
   const turnEnv = { ...process.env, CITADEL_CODEX_TRIPWIRE: good };
   rmSync(fakeLog, { force: true });
@@ -373,7 +378,7 @@ test("an image run's Codex gets the turn's tripwire config in image mode, a revi
   assert.equal(logged()[0].tripwire, good, 'a review keeps the turn config: review mode, shell only');
   const refused = await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out: join(root, 'gen-refused.png'), transparent: false }, bin: fakeCodex, env: { ...turnEnv, FAKE_CODEX: 'image-refused' } });
   assert.equal(refused.code, 1);
-  assert.equal(refused.text, "Codex made no image: Image generation failed: Citadel's read-only reviewer policy blocked the image_gen tool.");
+  assert.equal(refused.text, "Codex made no image: [tripwire] image_genimagegen is off: Citadel's Codex image run makes one picture with image_gen and nothing else.\nImage generation failed: Citadel's read-only reviewer policy blocked the image_gen tool.");
 });
 
 test("an image run skips (exit 4) when an image limit is over pace, and says when a used-up image limit resets (#733)", async () => {

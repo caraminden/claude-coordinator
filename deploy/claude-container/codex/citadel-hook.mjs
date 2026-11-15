@@ -81,6 +81,8 @@ async function check(input, cfgFile) {
     if (tool !== 'Bash') deny(`${tool || 'This tool'} is off: Citadel's Codex reviewer is read-only and runs shell commands only.`);
     return stop(tripwire(input, { ...config, ask: false }));
   }
+  // Codex 0.166 names the tool image_gen.imagegen and hands hooks the two run together (seen live, #738).
+  const isImageGen = ['image_gen', 'image_gen.imagegen', 'image_genimagegen'].includes(tool);
   // image_gen reads its reference images: each is checked as a read.
   const imageGen = () => {
     const refs = ti.referenced_image_paths ?? [];
@@ -88,7 +90,7 @@ async function check(input, cfgFile) {
     for (const p of refs) stop(tripwire({ tool_name: 'Read', tool_input: { file_path: at(String(p)) }, cwd }, { ...config, ask: false }));
   };
   if (mode === 'image') {
-    if (tool !== 'image_gen') deny(`${tool || 'This tool'} is off: Citadel's Codex image run makes one picture with image_gen and nothing else.`);
+    if (!isImageGen) deny(`${tool || 'This tool'} is off: Citadel's Codex image run makes one picture with image_gen and nothing else.`);
     return imageGen();
   }
   if (mcpServer && servers.has(mcpServer)) return rule(tool);
@@ -108,7 +110,7 @@ async function check(input, cfgFile) {
     for (const p of paths) stop(tripwire({ tool_name: 'Write', tool_input: { file_path: at(p) }, cwd }, { ...config, ask: false }));
     return;
   }
-  if (tool === 'image_gen') return imageGen();
+  if (isImageGen) return imageGen();
   if (tool === 'view_image') return stop(tripwire({ tool_name: 'Read', tool_input: { file_path: at(String(ti.path ?? '')) }, cwd }, { ...config, ask: false }));
   if (mcpServer) deny(`${tool} is not one of this turn's tools (${[...servers].map((s) => `mcp__${s}`).join(', ') || 'none'}).`);
   // Collaboration (spawn_agent: Grunts), goals and the rest stay off: only the tools above are checked.

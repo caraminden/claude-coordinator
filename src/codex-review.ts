@@ -268,13 +268,16 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
           } catch (err: any) {
             errors.push(err.message);
           }
+        } else if (msg.method === 'hook/completed' && msg.params?.run?.status === 'blocked') {
+          // The hook's own deny reason, word for word, ahead of Codex's paraphrase of it (#738).
+          for (const e of msg.params.run.entries ?? []) if (e?.text) errors.push(String(e.text));
         } else if (msg.method === 'error' && !msg.params?.willRetry) {
           errors.push(String(msg.params?.error?.message ?? 'unknown error'));
         } else if (msg.method === 'turn/completed') {
           const turn = msg.params?.turn ?? {};
           if (gen) {
             if (saved) finish(0, `Wrote ${saved}`);
-            // Codex's own words first (a refusal, the hook's reason as it read it), then the status as a last resort (#738).
+            // The hook's deny reason and errors first, then Codex's own words (a refusal), then the status as a last resort (#738).
             else finish(1, `Codex made no image: ${[...new Set([...errors, turn.error?.message, last].filter(Boolean))].join('\n') || `the turn ended ${turn.status ?? 'without a status'}`}`);
           } else if (turn.status === 'completed' && last) finish(0, last);
           else finish(1, `The Codex turn ended ${turn.status ?? 'without a status'}: ${turn.error?.message ?? errors.join('; ')}${last ? `\nIts last message:\n${last}` : ''}`.trim());

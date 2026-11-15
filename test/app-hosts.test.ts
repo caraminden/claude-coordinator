@@ -1,4 +1,4 @@
-// Contraptions on their own hosts (#709, docs/adr/0004-contraptions-on-subdomains.md): with APPS_DOMAIN set, each is
+// Contraptions on their own hosts (#709, docs/adr/0005-contraptions-on-subdomains.md): with APPS_DOMAIN set, each is
 // served at <name>.<domain>, signed in through a one-time token from Citadel's host, and that host serves nothing of
 // Citadel's. A real server with APPS_DOMAIN=apps.test, asked with Host headers, and a stub contraption behind it.
 import assert from 'node:assert/strict';
@@ -183,6 +183,12 @@ test("a contraption's host serves only that contraption: none of Citadel, nor an
     assert.equal((await ask(APP, path, { Cookie: `${jar}; ${cara}` })).status, 404, path);
   }
   assert.equal((await ask(APP, '/?a=1')).headers.location, '/apps/stub/?a=1');
+  // Links on the contraption's page to Citadel or another app (Mandate's /c/#/p/5/t/12, /c/?next=), opened as pages, go to
+  // Citadel's host, which shows them or sends them on; the contraption's server sees none of it.
+  assert.equal((await ask(APP, '/c/?next=%2Fapps%2Fstub%2F', page)).headers.location, `http://${DOMAIN}/c/?next=%2Fapps%2Fstub%2F`);
+  assert.equal((await ask(APP, '/apps/other/x?y=1', { ...page, Cookie: `${jar}; ${cara}` })).headers.location, `http://${DOMAIN}/apps/other/x?y=1`);
+  assert.equal((await ask(APP, '/c/api/me', { Cookie: `${jar}; ${cara}` })).status, 404, 'a fetch is no page');
+  assert.equal((await ask(APP, '/c/', { ...page, 'Upgrade': 'websocket' })).status, 404, 'nor an upgrade');
   assert.equal((await ask(`nope.${DOMAIN}`, '/apps/nope/', page)).status, 404);
   // Citadel's cookie alone: a page signs in through Citadel's host (its apex), anything else is refused.
   assert.equal((await ask(APP, '/apps/stub/hello', { ...page, Cookie: cara })).headers.location, `http://${DOMAIN}/apps/stub/hello`);

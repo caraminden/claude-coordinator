@@ -2,7 +2,7 @@
 // service, on 127.0.0.1:<port>, behind Citadel's login. /apps/<name>/... goes to http://127.0.0.1:<port>/apps/<name>/...
 // with the prefix kept, so the contraption is configured with its base path and nothing is rewritten.
 //
-// Where it is served (#709, docs/adr/0004-contraptions-on-subdomains.md). With APPS_DOMAIN set (live: citadel.zip)
+// Where it is served (#709, docs/adr/0005-contraptions-on-subdomains.md). With APPS_DOMAIN set (live: citadel.zip)
 // each contraption has its own origin, <name>.<APPS_DOMAIN>, still under /apps/<name>/, so its page can't reach
 // Citadel's API or cc_session. That host serves only its contraption, Citadel UI's files and /_citadel/enter;
 // Citadel's own hosts send /apps/<name>/ there through a one-time sign-in token (Auth.appToken), which the app
@@ -215,7 +215,12 @@ export class AppProxy {
       row = this.store.getContraption(host);
       if (!row) return notFound;
       if (url.pathname === '/') return redirect(`/apps/${row.name}/${url.search}`);
-      if (!m || m[1] !== row.name) return notFound;
+      if (!m || m[1] !== row.name) {
+        // Links on a contraption's page to Citadel or another app are relative (Mandate's /c/#/p/5/t/12, /c/?next=,
+        // /apps/toc/...): a page load of one goes to Citadel's host, which shows it or hands it to that app's host (the
+        // browser keeps the #). Anything else stays a 404: Citadel's API isn't here.
+        return isPage(req) ? redirect(`${this.origin(req, null)}${url.pathname}${url.search}`) : notFound;
+      }
     } else {
       row = (m && this.store.getContraption(m[1])) || undefined;
       if (!m || !row) return notFound;

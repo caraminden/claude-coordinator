@@ -31,8 +31,8 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
   that should follow this default leaves `model:` out), and a Grunt that must run on Fable names
   `fable` on the call. A Grunt doing known-shape middle work (a clear-repro bug fix, a small clear-spec change, a
   follow-up) runs `sonnet` at `medium`; one that stalls or whose fix doesn't hold moves to `opus`
-  at `medium`, then high (Cara, 2026-11-14, "Widen to known-shape work"; the minions' tier in
-  `public/model-table.js`).
+  at `medium`, then high (Cara, 2026-11-14, "Widen to known-shape work", the same tier
+  Citadel's model table gives minions).
 - Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work
   in obra/superpowers' subagent-driven-development. Use `haiku` only when the brief holds
   everything the Grunt needs.

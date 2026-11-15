@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { systemPrompt } from '../src/prompts.ts';
 
@@ -49,7 +49,7 @@ for (const role of ['minion', 'taskmaster'] as const) {
     const size = prompts[role].length;
     assert.ok(size <= BUDGET[role], [
       `A ${role}'s starting prompt is ${size} characters, over its budget of ${BUDGET[role]} (about ${Math.round((size - BUDGET[role]) / 4)} tokens over).`,
-      'Each 1k tokens in it costs about $11 a week. Trim it, or raise the budget in this file with the reason in the commit message.',
+      'Each 1k tokens in it costs about $22 a week. Trim it, or raise the budget in this file with the reason in the commit message.',
       'What grew since test/prompt-baseline.json:',
       ...growth(baseline[role], lineSizes(prompts[role])),
     ].join('\n'));
@@ -74,8 +74,38 @@ test('the growth list names a line that grew and one that is new', () => {
 test('saving instructions says what they cost, the same in the settings page and the Taskmaster tools', async () => {
   const { instructionCost } = await import('../src/prompt-cost.ts');
   const page = (await import('../public/prompt-cost.js')).instructionCost;
-  assert.equal(instructionCost('x'.repeat(11_664)), 'These instructions are about 2.9k tokens; each 1k costs about $11 a week across minions.');
-  assert.equal(instructionCost('x'.repeat(400)), 'These instructions are about 100 tokens; each 1k costs about $11 a week across minions.');
+  assert.equal(instructionCost('x'.repeat(11_664)), 'These instructions are about 2.9k tokens; each 1k costs about $22 a week across minions.');
+  assert.equal(instructionCost('x'.repeat(400)), 'These instructions are about 100 tokens; each 1k costs about $22 a week across minions.');
   assert.equal(instructionCost('  '), '');
   for (const n of [0, 400, 11_664, 16_000]) assert.equal(page('x'.repeat(n)), instructionCost('x'.repeat(n)));
+});
+
+// The kit's skill and agent descriptions (#708): Claude Code lists every one in the prefix each call re-reads,
+// next to the built-in prompt, so they get a budget too. Characters of name + description, today's size
+// plus about 5% on 2026-11-14. This never asks for shorter text: a skill with a longer description is a
+// deliberate decision, made by raising the number with the reason in the commit message.
+const KIT_BUDGET = 8_800;
+
+/** A skill's or agent's `name` and `description` frontmatter, a folded or plain description joined on one line. */
+function listing(file: string): string {
+  const front = readFileSync(file, 'utf8').match(/^---\n([\s\S]*?)\n---/)?.[1] ?? '';
+  const name = front.match(/^name:\s*(.*)$/m)?.[1] ?? '';
+  const desc = front.match(/^description:\s*(?:[>|][-+]?)?\s*((?:.*)(?:\n[ \t]+.*)*)/m)?.[1] ?? '';
+  return `${name}: ${desc.replace(/\s*\n\s*/g, ' ').trim()}`;
+}
+
+test("the kit's skill and agent descriptions stay within their budget", () => {
+  const kit = new URL('../kit/', import.meta.url);
+  const files = [
+    ...readdirSync(new URL('skills/', kit)).map((d) => new URL(`skills/${d}/SKILL.md`, kit)),
+    ...readdirSync(new URL('agents/', kit)).filter((f) => f.endsWith('.md')).map((f) => new URL(`agents/${f}`, kit)),
+  ].filter((f) => existsSync(f));
+  const sizes = files.map((f) => ({ f: f.pathname.split('/kit/')[1], n: listing(f.pathname).length })).sort((a, b) => b.n - a.n);
+  const total = sizes.reduce((s, x) => s + x.n, 0);
+  assert.ok(total <= KIT_BUDGET, [
+    `The kit's skill and agent descriptions are ${total} characters, over their budget of ${KIT_BUDGET} (about ${Math.round((total - KIT_BUDGET) / 4)} tokens over).`,
+    'Every minion API call re-reads them; each 1k tokens costs about $22 a week (#699: reads plus rewrites). A longer description is a deliberate choice: raise KIT_BUDGET in this file with the reason in the commit message.',
+    'Longest now:',
+    ...sizes.slice(0, 5).map((x) => `  ${x.n} ${x.f}`),
+  ].join('\n'));
 });

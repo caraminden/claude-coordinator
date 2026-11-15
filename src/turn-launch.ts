@@ -210,9 +210,17 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
 /**
  * Claude Code settings every turn of every scheme gets, whatever the repo's own .claude/settings.json
  * says (Taskmasters' folders have none): where a turn compacts, in tokens, and how much of a Bash
- * command's output it keeps. Minions compact at about 150k (real compactions land near 82-88% of the window; #703).
+ * command's output it keeps, and the bundled skills that stay out of the prefix (#708). Minions compact at about 150k (real compactions land near 82-88% of the window; #703).
  */
-export const TURN_SETTINGS = { autoCompactWindow: 180_000, bashOutputMaxChars: 12_000 };
+/**
+ * Bundled Claude Code skills that never fired in 19 days of transcripts (#699), set "off" (Claude Code 2.1.323's
+ * skillOverrides: skill name -> "off" | "name-only" | "user-invocable-only"). Each one's listing is read on every call.
+ * plugin-authoring (Delve's mods) and the rest stay on.
+ */
+export const UNUSED_BUNDLED_SKILLS = Object.fromEntries(
+  ['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init'].map((n) => [n, 'off']),
+) as Record<string, 'off'>;
+export const TURN_SETTINGS = { autoCompactWindow: 180_000, bashOutputMaxChars: 12_000, skillOverrides: UNUSED_BUNDLED_SKILLS };
 /** A Taskmaster's compact window (#423): same window as a minion's since #703, kept as its own constant; it hands off past FRESH_CONTEXT_TOKENS anyway. */
 export const TASKMASTER_COMPACT_WINDOW = 180_000;
 /**

@@ -118,6 +118,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -310,6 +318,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -537,6 +553,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Edit(/<ROOT>/repo/**)",
@@ -927,6 +951,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Edit(/<ROOT>/projects/2/tickets/**)",
@@ -1281,6 +1313,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -1466,6 +1506,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -1658,6 +1706,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -1865,6 +1921,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -2074,6 +2138,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -2266,6 +2338,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -2461,6 +2541,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -2656,6 +2744,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
@@ -2843,6 +2939,14 @@
    "disableClaudeAiConnectors": true,
    "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
+   "skillOverrides": {
+    "update-config": "off",
+    "schedule": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "workflow-authoring": "off",
+    "init": "off"
+   },
    "permissions": {
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",

@@ -4,5 +4,5 @@
 export function instructionCost(text) {
   const tokens = Math.round(text.trim().length / 4);
   if (!tokens) return '';
-  return `These instructions are about ${tokens < 1000 ? tokens : `${(tokens / 1000).toFixed(1)}k`} tokens; each 1k costs about $11 a week across minions.`;
+  return `These instructions are about ${tokens < 1000 ? tokens : `${(tokens / 1000).toFixed(1)}k`} tokens; each 1k costs about $22 a week across minions.`;
 }

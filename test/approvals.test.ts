@@ -294,7 +294,11 @@ test('a project without rules or plugins still sends a minion\'s prompts to card
   // Every turn gets the tripwire hook, here able to ask, the claude.ai opt-outs (#138), the shared
   // settings and the merge asks; no rules of the scheme's.
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
-  assert.deepEqual(Object.keys(settings), ['hooks', 'syncClaudeAiSkills', 'disableClaudeAiConnectors', 'autoCompactWindow', 'bashOutputMaxChars', 'permissions']);
+  assert.deepEqual(Object.keys(settings), ['hooks', 'syncClaudeAiSkills', 'disableClaudeAiConnectors', 'autoCompactWindow', 'bashOutputMaxChars', 'skillOverrides', 'permissions']);
+  // Six bundled skills that never fired are off (#708); plugin-authoring and the rest stay on.
+  assert.deepEqual(Object.keys(settings.skillOverrides).sort(), ['init', 'keybindings-help', 'loop', 'schedule', 'update-config', 'workflow-authoring']);
+  assert.ok(Object.values(settings.skillOverrides).every((v) => v === 'off'));
+  assert.equal(settings.skillOverrides['plugin-authoring'], undefined);
   assert.deepEqual(settings.permissions.ask, ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge']);
   assert.ok(settings.permissions.deny.includes(`Read(/${join(homedir(), '.config/gh/hosts.yml')})`), 'the logins stay out of reach (#185)');
   // No folder-wide rule: Claude Code would refuse every Bash read after a cd it can't resolve; the tripwire guards those folders (#485).

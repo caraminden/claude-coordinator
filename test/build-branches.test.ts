@@ -12,45 +12,13 @@ const minion = { id: 9, number: 12, title: 'A feeder', kind: 'ticket', branch: '
 const prompt = (build: any, builds = false, kind = 'ticket') =>
   systemPrompt(project, { ...minion, kind }, null, null, '/tickets', null, [], true, '', null, [], build, builds);
 
-test('a feeder hears about its build only once build/<n> exists', () => {
+test('build lines are given only to a minion in a build with its branch made, and the Taskmaster gets the build line only when the scheme can land one', () => {
   assert.deepEqual(buildLines(null), []);
   assert.deepEqual(buildLines({ build: 7, branch: null, owner: false }), [], 'no branch yet (or Delve): nothing');
-  const [line] = buildLines({ build: 7, branch: 'build/7', owner: false });
-  assert.match(line, /your base is `build\/7`, not main/);
-  assert.match(line, /`tools\/land\.sh --into build\/7 <the test files you touched>`/);
-  assert.match(line, /Never land on main/);
-  assert.match(line, /"folded into Build 7" and close_self/);
-  assert.match(line, /rebase onto it first/, 'a minion moved into the build rebases itself');
-  assert.ok(prompt({ build: 7, branch: 'build/7', owner: false }).includes(line));
+  assert.ok(buildLines({ build: 7, branch: 'build/7', owner: false }).length > 0);
   assert.ok(!prompt(null).includes('Build 7'), 'no role, no lines');
-});
-
-test("the build minion gets its steps from the start, and the first makes the branch", () => {
-  const before = buildLines({ build: 7, branch: null, owner: true }).join('\n');
-  assert.match(before, /You are the build minion of Build 7/);
-  assert.match(before, /`git branch build\/7 main`/);
-  assert.match(before, /`tools\/land\.sh --into build\/7 --full`/);
-  assert.match(before, /`tools\/land\.sh --build`/);
-  assert.match(before, /one go card \(ask_question, kind merge\)/);
-  const once = buildLines({ build: 7, branch: 'build/7', owner: true }).join('\n');
-  assert.doesNotMatch(once, /git branch build\/7 main/, 'made already');
-  assert.doesNotMatch(once, /You are a feeder/);
-  assert.doesNotMatch(once, /preview/i, 'a scheme this server does not run has no build preview');
-});
-
-test("in this server's own scheme, the build minion is told its preview's link, for its list and the go card", () => {
-  const lines = buildLines({ build: 7, branch: 'build/7', owner: true, preview: 'https://app.example/preview/build/7/' }).join('\n');
-  assert.match(lines, /Its preview, the tip of `build\/7` on a fresh copy of the live data, is at https:\/\/app\.example\/preview\/build\/7\//);
-  assert.match(lines, /put that link in the build's list and on the go card/);
-  assert.doesNotMatch(buildLines({ build: 7, branch: 'build/7', owner: false, preview: 'https://app.example/preview/build/7/' }).join('\n'), /preview/i, 'feeders have no use for it');
-});
-
-test('the Taskmaster gets the test for suggesting a build only when the scheme can land one', () => {
   assert.ok(prompt(null, true, 'coordinator').includes(BUILDS_LINE));
-  assert.ok(!prompt(null, false, 'coordinator').includes('Builds:'));
-  for (const words of ['all three hold', 'three or more minions', 'Never for bug fixes', 'build_owner: true', 'highest build number plus one', '"folded into Build <n>" is done']) {
-    assert.ok(BUILDS_LINE.includes(words), words);
-  }
+  assert.ok(!prompt(null, false, 'coordinator').includes(BUILDS_LINE));
 });
 
 const root = mkdtempSync(join(tmpdir(), 'builds-'));

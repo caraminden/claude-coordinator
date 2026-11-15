@@ -3,13 +3,11 @@
 // took, which is seconds on a big database. Citadel's real front end (public/index.html) in headless
 // Chromium (test/browser.ts), with fetch answered in the page so nothing reaches a server.
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 // Runs before app.js: a fake server for the API. The recap and the catch-up (events?after=) wait until
 // the test calls release(), as a slow server would.

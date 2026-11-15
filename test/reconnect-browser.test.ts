@@ -2,13 +2,11 @@
 // "Reconnecting…" chip says why, gone once the stream is back. Citadel's real front end (public/index.html)
 // in headless Chromium (test/browser.ts), with fetch and EventSource faked in the page.
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 // Runs before app.js: a fake API, and an EventSource the test opens and drops (window.streams).
 const STUB = `<script>

@@ -11,7 +11,6 @@ import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessa
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 const opts = (n: number) => ['Garden', 'Forest', 'Desert'].slice(0, n).map((label, i) => ({ label, description: `${label} palette`, image: `takes/${label.toLowerCase()}.svg`, recommended: i === 0 }));
 // Each card is one minion's chat: 7 a picture card, 8 the same answered, 9 text only, 10 pictures with a second question.

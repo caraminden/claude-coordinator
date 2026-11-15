@@ -3,14 +3,11 @@
 // navigator.clipboard and through the hidden-textarea fallback a plain-http address needs; it sits
 // clear of the first line's text; hidden until hover on desktop, always shown on a phone.
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { themeCss } from '../src/theme.ts';
 import { chromium, launch, type Browser, type Page, serveUi, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 /** PowerShell with indentation, both quotes, a backtick and a trailing blank line inside the fence. */
 const CODE = `$ErrorActionPreference = 'Stop'\nif (-not (Test-Path "$env:USERPROFILE\\citadel")) {\n    New-Item -ItemType Directory "$env:USERPROFILE\\citadel" | Out-Null\n\tWrite-Host "it's \`"done\`""\n}\n`;

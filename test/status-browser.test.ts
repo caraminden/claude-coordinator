@@ -6,12 +6,10 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { themeCss } from '../src/theme.ts';
 import { chromium, launch, waitFor, type Browser, type Page, serveUi, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/ui/base.css">

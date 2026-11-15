@@ -3,13 +3,11 @@
 // like Taskmaster rows"). A jump link to a collapsed line opens its row. Citadel's real front end
 // (public/index.html) in headless Chromium (test/browser.ts), with fetch and the stream answered in the page.
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 // Runs before app.js: a fake server with one running minion. Its turn so far: a line, work, a line, work,
 // a Taskmaster message steered in, a line, work, and the newest line. push(n) sends line n live.

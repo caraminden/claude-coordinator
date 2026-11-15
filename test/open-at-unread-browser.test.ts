@@ -10,7 +10,6 @@ import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type Ap
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 // Runs before app.js: a fake server for the API. Twenty messages you've seen, one you haven't (short enough
 // to fit at the bottom), and a long one the catch-up (events?after=) brings once the test calls release().

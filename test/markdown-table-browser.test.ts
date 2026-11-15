@@ -7,12 +7,10 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { themeCss } from '../src/theme.ts';
 import { chromium, launch, type Browser, type Page, serveUi, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 const shots = process.env.TABLE_SHOTS;
 
 const WIDE = `| Setting | What it does | Default |

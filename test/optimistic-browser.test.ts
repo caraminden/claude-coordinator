@@ -4,12 +4,10 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { themeCss } from '../src/theme.ts';
 import { chromium, launch, type Browser, type Page, serveUi, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 // act(id, key): an action on item `id` that marks it done at once, sends a request the test settles by hand
 // (ok(n) / no(n), n its place in window.reqs), and unmarks it on failure. window.log records what happened.

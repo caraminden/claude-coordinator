@@ -10,7 +10,6 @@ import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessa
 
 const bin = chromium();
 const skip = !bin && skipMessage;
-const pub = join(import.meta.dirname, '..', 'public');
 
 // Runs before app.js: a fake server for the API. `failProjects` fails that many fetches of api/projects with
 // the 502 Caddy gives while the server restarts.

@@ -14,7 +14,14 @@ import { after, test } from 'node:test';
 // The snapshot records each file's mode, and the server's umask (077 under its unit) isn't a shell's.
 process.umask(0o022);
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'turn-launch-')));
-after(() => rmSync(root, { recursive: true, force: true }));
+// A late child (the fake systemd-run appending units.jsonl) wrote into root mid-delete under CI load: ENOTEMPTY.
+// So end every process under root, stop following turns and close the database before the delete.
+after(async () => {
+  await stopTurns(root);
+  for (const live of (runner as any).turns.values()) clearInterval(live.timer);
+  store.db.close();
+  rmSync(root, { recursive: true, force: true });
+});
 // A fixed environment, set before anything reads it: a turn inherits HOME, PATH, the locale and every
 // CLAUDE_* and ANTHROPIC_* variable of the server, and a snapshot can't depend on whose shell runs it.
 const { turnEnv } = await import('../src/turn-launch.ts');
@@ -33,7 +40,7 @@ const { Runner } = await import('../src/runner.ts');
 const { codexSwitchKey, codexThreadKey } = await import('../src/codex.ts');
 const { transcriptPath } = await import('../src/sessions.ts');
 const { GLOBAL_OWNER } = await import('../src/properties.ts');
-const { jsonLines, lines, testPins } = await import('./helpers.ts');
+const { jsonLines, lines, stopTurns, testPins } = await import('./helpers.ts');
 testPins(root);
 
 const store = new Store(join(root, 'coordinator.db'));

@@ -5,12 +5,15 @@ import { join } from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_WAKES, pacificTime, parseWakeTime, TimedWakes } from '../src/wake.ts';
-import { testPins } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
 testPins();
 
 // wake_at (#722): timed wakes, in the settings table, sent to the asker's own chat.
 const root = mkdtempSync(join(tmpdir(), 'wake-at-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // the queued wake's turn may still be running its fake claude (under root)
+  rmSync(root, { recursive: true, force: true });
+});
 let store: Store;
 let n = 0;
 let project: { id: number };

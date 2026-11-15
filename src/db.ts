@@ -468,6 +468,16 @@ CREATE INDEX IF NOT EXISTS events_ticket ON events(ticket_id, id);
 CREATE INDEX IF NOT EXISTS events_ticket_kind ON events(ticket_id, kind, id);
 -- A scheme's cards without a seek into every minion's events (recentCards, #759): partial, so no other query's plan can change.
 CREATE INDEX IF NOT EXISTS events_cards ON events(ticket_id, kind) WHERE kind IN ('question', 'plan', 'approval');
+-- What recentCards found of each card, kept across restarts (#762): the first person's reply after it, an approval's result,
+-- and the newest event looked at. The card's minion and own id are kept to tell it from a later card that took a deleted id.
+CREATE TABLE IF NOT EXISTS card_fates (
+  card_id INTEGER PRIMARY KEY,
+  ticket_id INTEGER NOT NULL,
+  cid TEXT,
+  reply TEXT,
+  result TEXT,
+  up_to INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS artifacts (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
@@ -1032,6 +1042,7 @@ export const SCHEMA_HISTORY = [
   [51, 'health_events (#724)'],
   [52, 'schedules.min_minions, gate_scope, last_skip, once (#745)'],
   [53, 'events_cards partial index (#759)'],
+  [54, 'card_fates (#762)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1773,6 +1784,8 @@ export class Store {
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     this.doneCards.clear(); // events.id has no AUTOINCREMENT: a deleted newest card's id can come back as a new card
     this.cardFates.clear();
+    this.savedFates.clear();
+    this.db.prepare('DELETE FROM card_fates').run();
     this.cardRows.clear();
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
@@ -2290,6 +2303,21 @@ export class Store {
       return row ? [{ ...row, number: p.number, tkind: p.tkind, tstatus: p.tstatus }] : [];
     });
     const upTo = (this.db.prepare('SELECT max(id) AS id FROM events').get() as { id: number | null }).id ?? 0;
+    // After a restart the memory is empty: take what was saved, as long as it is of this very card and not newer than the
+    // events (a deleted newest id can come back as another card, #762). Anything else is read again from the card on.
+    const lost = cards.filter((c) => !this.cardFates.has(c.id));
+    if (lost.length) {
+      const saved = new Map((this.db.prepare('SELECT * FROM card_fates WHERE card_id IN (SELECT value FROM json_each(?))')
+        .all(JSON.stringify(lost.map((c) => c.id))) as unknown as (CardFate & { card_id: number; ticket_id: number; cid: string | null; up_to: number })[])
+        .map((r) => [r.card_id, r]));
+      for (const c of lost) {
+        const r = saved.get(c.id);
+        if (r && r.ticket_id === c.ticket_id && r.cid === (c.cid == null ? null : String(c.cid)) && r.up_to >= c.id && r.up_to <= upTo) {
+          this.cardFates.set(c.id, { reply: r.reply, result: r.result, upTo: r.up_to });
+          this.savedFates.set(c.id, { reply: r.reply, result: r.result, upTo: r.up_to });
+        }
+      }
+    }
     const fates = cards.map((c) => this.cardFates.get(c.id) ?? { reply: null, result: null, upTo: c.id });
     // Each chat's messages are read once from its oldest card still waiting, not once per card: 500 cards each
     // scanning the rest of a long chat held the event loop 1-3 s (#622). By kind: left to itself SQLite walked
@@ -2318,10 +2346,37 @@ export class Store {
         fate.upTo = upTo;
       }
     }
+    this.saveFates(cards, fates);
     return cards.map(({ cid, ...c }, i) => {
       this.cardFates.set(c.id, fates[i]);
       return { ...c, reply: fates[i].reply, result: fates[i].result };
     });
+  }
+
+  // The fates as last written to card_fates. A fate is written when it is new or found something, and the newest event it
+  // looked at only now and then (an unsettled card would otherwise write every call): a stale `up_to` only means
+  // the next read after a restart scans a little more.
+  private savedFates = new Map<number, CardFate>();
+  private fatesSavedAt = 0;
+  private saveFates(cards: { id: number; ticket_id: number; cid: unknown }[], fates: CardFate[]) {
+    const now = Date.now();
+    const lagging = now - this.fatesSavedAt > 5 * 60_000;
+    const todo = cards.flatMap((c, i) => {
+      const was = this.savedFates.get(c.id), f = fates[i];
+      return !was || was.reply !== f.reply || was.result !== f.result || (lagging && was.upTo !== f.upTo) ? [{ c, f }] : [];
+    });
+    if (!todo.length) return;
+    if (lagging) this.fatesSavedAt = now;
+    const put = this.db.prepare('INSERT OR REPLACE INTO card_fates (card_id, ticket_id, cid, reply, result, up_to) VALUES (?, ?, ?, ?, ?, ?)');
+    try {
+      this.db.exec('BEGIN');
+      for (const { c, f } of todo) put.run(c.id, c.ticket_id, c.cid == null ? null : String(c.cid), f.reply, f.result, f.upTo);
+      this.db.exec('COMMIT');
+    } catch {
+      try { this.db.exec('ROLLBACK'); } catch { /* no transaction was open */ }
+      return; // not saved: it is read again after a restart
+    }
+    for (const { c, f } of todo) this.savedFates.set(c.id, { ...f });
   }
 
   // What recentCards found of each card, by event id: a reply or result once found stays (events are only appended),
@@ -2402,6 +2457,8 @@ export class Store {
     const deleted = changes.filter((c) => c.data == null).length;
     if (deleted) { // a deleted newest id can come back, below recentCards' `upTo`, as a card
       this.cardFates.clear();
+      this.savedFates.clear();
+      this.db.prepare('DELETE FROM card_fates').run();
       this.cardRows.clear();
     }
     return { changed: changes.length - deleted, deleted };

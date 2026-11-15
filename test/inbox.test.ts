@@ -326,3 +326,51 @@ test('eventsOfKinds reads only those kinds, after an id, oldest first (#759)', (
   assert.deepEqual(store.eventsOfKinds(t, ['user_message', 'question'], q.id).map((e) => e.id), [m.id]);
   assert.deepEqual(store.eventsOfKinds(t, ['note']), []);
 });
+
+test('recentCards keeps what it found across a restart, and never shows a card another fate (#762)', () => {
+  const file = join(root, 'card-fates.sqlite');
+  const first = new Store(file);
+  const p = first.createProject('Citadel', null).id;
+  const minion = (title: string) => first.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const a = minion('a'), b = minion('b');
+  first.addEvent(a, 'question', { id: 'q-1', questions: [] });
+  first.addEvent(a, 'approval', { id: 'ap-1', tool: 'Bash' });
+  first.addEvent(a, 'user_message', { author: 'Cara', text: 'the reply', answer: { questionId: 'q-1', answers: [] } });
+  first.addEvent(a, 'approval_result', { id: 'ap-1', approved: true });
+  first.addEvent(b, 'question', { id: 'q-2', questions: [] });
+  const view = (s: Store) => s.recentCards(p, 10).map((r) => [JSON.parse(r.data).id, r.reply && JSON.parse(r.reply).text, r.result && JSON.parse(r.result).approved]);
+  const before = view(first);
+  assert.deepEqual(before, [['q-1', 'the reply', null], ['ap-1', null, true], ['q-2', null, null]]);
+
+  // A restart: the same file, nothing in memory. The fates come from the file, not from a scan of the chats.
+  const second = new Store(file);
+  assert.equal((second as any).cardFates.size, 0);
+  assert.deepEqual(view(second), before);
+  assert.equal((second as any).db.prepare('SELECT count(*) AS n FROM card_fates').get().n, 3);
+  // …proved by planting a fate the chat doesn't hold: it is taken as saved, so the scan isn't what produced it.
+  (second as any).db.prepare("UPDATE card_fates SET reply = '{\"text\":\"planted\"}' WHERE cid = 'q-2'").run();
+  assert.equal(view(new Store(file))[2][1], 'planted');
+  (second as any).db.prepare("UPDATE card_fates SET reply = NULL WHERE cid = 'q-2'").run();
+
+  // A reply that comes after the restart still shows, and is kept for the next one.
+  second.addEvent(b, 'user_message', { author: 'Cara', text: 'late', answer: { questionId: 'q-2', answers: [] } });
+  assert.equal(view(second)[2][1], 'late');
+  assert.equal(view(new Store(file))[2][1], 'late');
+
+  // A saved fate of another card, or one that outruns the events, is not used.
+  const third = new Store(file);
+  const db = (third as any).db;
+  db.prepare("UPDATE card_fates SET cid = 'someone-else' WHERE cid = 'q-1'").run();
+  db.prepare("UPDATE card_fates SET up_to = 999999 WHERE cid = 'ap-1'").run();
+  assert.deepEqual(view(new Store(file)), [['q-1', 'the reply', null], ['ap-1', null, true], ['q-2', 'late', null]], 'read again from the chats');
+
+  // events.id has no AUTOINCREMENT: a deleted minion's newest id can come back as a new card. The saved fates go with the delete.
+  const d = minion('d');
+  const gone = first.addEvent(d, 'question', { id: 'q-gone', questions: [] });
+  first.addEvent(d, 'user_message', { author: 'Cara', text: 'answered', answer: { questionId: 'q-gone', answers: [] } });
+  assert.equal(view(first).at(-1)![1], 'answered');
+  first.deleteTicket(d);
+  const reused = first.addEvent(minion('e'), 'question', { id: 'q-gone', questions: [] });
+  assert.equal(reused.id, gone.id);
+  assert.equal(view(new Store(file)).at(-1)![1], null, 'a new card on a deleted one\'s id has no reply');
+});

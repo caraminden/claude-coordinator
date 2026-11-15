@@ -88,13 +88,24 @@ Rotating invalidates both at once; your service has to restart to read the new o
 the query string intact; nothing is rewritten. `/apps/<name>` without the slash answers 302 to
 `/apps/<name>/` (tested).
 
+**Your own host** (#709, live): each contraption is served at `<name>.citadel.zip`, still under
+`/apps/<name>/`, so its page is another origin from Citadel's and can't call Citadel's API or see its
+login. That host serves only you, Citadel UI's files (`/apps/_citadel/`) and the sign-in handoff
+(`/_citadel/enter`); `/` goes to `/apps/<name>/`. A page load of `/apps/<name>/` on Citadel's host goes
+there, signed in: a one-time token swapped for your host's own cookie, `cc_app`, so people sign in to
+Citadel once, not per app. A page load on your host of Citadel's paths or another app's (`/c/…`,
+`/apps/toc/…`) goes to Citadel's host; a fetch of one is a 404. Writes and websockets on your host need
+your own `Origin` (403 otherwise). Open paths' non-page requests (websockets, fetches) still work on
+Citadel's host too. Without `APPS_DOMAIN` (dev copies, previews) you're served on Citadel's host as
+before (tested: `test/app-hosts.test.ts`).
+
 On every request, open path or not:
 
 - **Any `X-Citadel-*` header the client sent is removed first**, so a client can never claim an
   identity (tested, on gated paths, open paths and websockets).
-- Citadel's `cc_session` cookie is taken out of `Cookie`; your own cookies pass through. A
-  `Set-Cookie` from you naming `cc_session` is dropped; your other cookies reach the browser
-  (tested). On gated requests Citadel may add its own `Set-Cookie` renewing a session older than 7
+- Citadel's `cc_session` and `cc_app` cookies are taken out of `Cookie`; your own cookies pass
+  through. A `Set-Cookie` from you naming either, or with a `Domain=`, is dropped; your other cookies
+  reach the browser, host-only (tested). On gated requests Citadel may add its own `Set-Cookie` renewing a session older than 7
   days (tested).
 - `Authorization` passes through untouched: it's yours.
 - Request bodies up to 20 MiB; bigger gets 413 (tested). Answers stream as they come: server-sent
@@ -111,7 +122,7 @@ path matches when it equals an open path or sits under it; a path containing `%2
 
 | Situation | Answer (your server sees nothing) |
 |---|---|
-| Not signed in, a `GET` page load (`Accept: text/html`, not an upgrade) | 302 to `/c/?next=<path>`, then back after login |
+| Not signed in, a `GET` page load (`Accept: text/html`, not an upgrade) | 302 to Citadel's `/c/?next=<path>`, then back after login (through the sign-in handoff on your own host) |
 | Not signed in, anything else | 401, `Not logged in` |
 | Signed in, not enabled | 403, an HTML "You don't have access to <title>" page |
 | Citadel can't open your signing key | 503 |
@@ -120,8 +131,9 @@ path matches when it equals an open path or sits under it; a path containing `%2
 All but the 503 are tested. When someone is disabled, their open streams and websockets are closed within about
 2 s (tested).
 
-Your pages share Citadel's origin. Inside Citadel's window they're shown in a same-origin frame
-beside the app rail; installed, they're their own app (references/installing.md).
+Inside Citadel's window your pages are shown in a frame beside the app rail, from your own host
+(Citadel and your page talk by postMessage, which rail.js does); installed, they're their own app
+(references/installing.md).
 
 ## The identity header
 
@@ -527,9 +539,10 @@ Each `ui/*.js` has a `.d.ts` beside it. Exports, classes and token names only ev
 contract test holds them. How to use each one is in this skill's SKILL.md table and the references
 it links. `ui/chat.js` takes the turn API's events above as they come.
 
-The rail draws from `GET /api/contraptions/mine` (the browser's own session, not your key):
-`[{ name, title, icon, up }]`, the apps enabled for the signed-in person, `up` false when its
-service doesn't answer.
+The rail draws from `GET /apps/_citadel/api/mine` on your own host (the browser's own login, not
+your key): `{ name, citadel, apps: [{ name, title, icon, up }] }`, the person's name, Citadel's
+address (null when you're on Citadel's host), and the apps enabled for them, `up` false when its
+service doesn't answer. Their icons come from `/apps/_citadel/icon/<name>`, fetched by Citadel.
 
 ## Running and deploying: `citadel-app.json`
 
@@ -615,6 +628,12 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 ## What changed since 2026-11-02
 
 Newest first.
+
+- **2026-11-14:** Each contraption is served on its own host, `<name>.citadel.zip`, signed in through
+  Citadel with no second login ("Requests from browsers", "Your own host"). Allow Citadel's hosts to
+  frame you (no `X-Frame-Options`, no `frame-ancestors 'self'`). Your installed app, service worker,
+  storage and push subscriptions start over once on the new host. The rail reads
+  `/apps/_citadel/api/mine`.
 
 - **2026-11-13:** Your server reads your home scheme's CI files (`/api/projects/<id>/ci-files`,
   `/latest` and each file's URL) with your key.

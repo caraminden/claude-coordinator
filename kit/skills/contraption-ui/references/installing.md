@@ -2,8 +2,9 @@
 
 Part of `citadel:contraption-ui` (its SKILL.md has the file list, tokens and rules).
 
-Each contraption installs as its own app beside Citadel's, all on Citadel's one origin, so Chrome
-tells them apart only by the manifest (Cara, 2026-11-04: "I want each app to be able to install
+Each contraption installs as its own app beside Citadel's. Live, each is on its own host,
+`<name>.citadel.zip` (#709); without that (a dev copy, a preview) they share Citadel's origin and Chrome
+tells them apart only by the manifest, so the rules below hold either way (Cara, 2026-11-04: "I want each app to be able to install
 independently"), and every contraption ships one with a rail icon (Cara, 2026-11-09: "both of these
 should be the default behavior for new contraptions"). The starter has both: `manifest.webmanifest`
 (replace `my-app`), `icon.svg` and `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, which are

@@ -20,7 +20,7 @@ needed and why; don't grow a second library in your app.
 
 ## What there is
 
-Every file is under `/apps/_citadel/` on Citadel's own origin, which is your app's too. No login,
+Every file is under `/apps/_citadel/`, on your app's own host as on Citadel's. No login,
 `Cache-Control: no-cache` with an ETag: a page load costs a 304 until Citadel deploys, and a fix
 reaches you on Citadel's next deploy. Dev copies fetch them from the live Citadel on
 `http://127.0.0.1:8573/apps/_citadel/…`; a bundler marks `/apps/_citadel/*` external.

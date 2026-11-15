@@ -49,6 +49,11 @@ previews, tests) keeps the old same-origin serving. `src/apps.ts` has the routin
   API refuses a write whose `Origin` isn't its own host, `/backup/send` checks Origin too, nothing answers
   with CORS headers (so a cross-origin read fails), and the main host's websockets only go to `/apps/`.
   A new main-host route that writes on a GET, or a CORS header, would reopen this.
+- **Relative links to Citadel or another app keep working.** A page load on an app host of a path that
+  isn't its own app (Mandate's `/c/#/p/5/t/12` with `target="_top"`, its `/c/?next=` sign-in, `/apps/toc/`)
+  goes to Citadel's host at the apex, which shows it or hands it to that app's host. Someone on
+  `cara.apps.webplatformisbestplatform.net` who follows one lands on `citadel.zip`, which shares no
+  cookie with it, so they may sign in there once.
 - **Open paths still pass on Citadel's host** for non-page requests (websockets and fetches carry no
   login or identity): Peek Auras' PC link dials `wss://<citadel host>/apps/peek-auras/link`. An open
   path's page load goes to the app host like any other.

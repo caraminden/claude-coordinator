@@ -424,7 +424,9 @@ the Windows clock, so it is as right as that is (a steady 0.4 s behind NTP once 
 When the runner can't answer (Cara is logged off, GitHub is down, no runner takes the job within 90 s, the run
 takes more than 6 minutes), `land.sh` prints `CI FALLBACK` with the reason, runs the suite on perigee as it used
 to, and adds a `ci fallback` line to the day's retro log (`retro-log/<date>/land.md`), so they can be counted. A red
-run refuses the landing; it never falls back. `LAND_CI=0 tools/land.sh` skips CI, for when the runner itself is broken.
+run refuses the landing; it never falls back. The one exception (#769, ADR 0006): a red in which every failed file
+passed when `run-tests.sh` reran it alone gets one fresh run of the same commit, which must be fully green to land, and
+a `flake rerun` line in the retro log. `LAND_CI=0 tools/land.sh` skips CI, for when the runner itself is broken.
 
 ## Check it
 

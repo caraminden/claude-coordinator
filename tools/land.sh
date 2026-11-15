@@ -50,7 +50,7 @@ retro_log() (
   [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
   dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
   mkdir -p "$dir" || exit 0
-  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, and per test file that failed in a land or deploy run and passed alone (flake). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
   printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
 ) >/dev/null 2>&1 || true
 
@@ -530,11 +530,14 @@ ci_failed() {
 # The failed files, comma-separated, when $failed says every one of them passed alone (#769); fails otherwise. It
 # counts on run-tests.sh's own lines: "<n> test file(s) failed; rerunning each alone…" and then one label per file.
 # Without that line (more than its max_reruns files, a hang, a leak, a run that never got to the tests) it is no flake.
+# Only the labels after that line count: a test's own output can quote one (test/land.test.ts does).
 flake_only() {
-  local n files
-  n=$(sed -n 's/.*run-tests: \([0-9][0-9]*\) test file(s) failed; rerunning each alone.*/\1/p' <<<"$failed" | tail -n 1)
+  local at n files
+  at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
+  [[ $at =~ ^[0-9]+$ ]] || return 1
+  n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
   [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
-  files=$(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*/\1/p' <<<"$failed" | sort -u)
+  files=$(tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*/\1/p' | sort -u)
   [ -n "$files" ] && [ "$(wc -l <<<"$files")" = "$n" ] || return 1
   sed ':a;N;$!ba;s/\n/, /g' <<<"$files"
 }
@@ -552,20 +555,24 @@ else
   ci_gate || rc=$?
   # One fresh run, never more, for a red of flakes only (#769). The scratch branch goes first so the push starts a new
   # run (pushing a commit a branch already has starts none); ci_gate then passes over the red one as stale, so it is
-  # never read as the answer. A no-answer this time falls back to the run here, which must be green too.
+  # never read as the answer. A no-answer this time falls back to the run here, which must be green too. If the branch
+  # won't go, there is no fresh run: it stays a red, rather than a wait for a run never started read as CI being down.
   if [ "$rc" = 1 ]; then
     ci_failed
-    if reran=$(flake_only); then
+    if ! reran=$(flake_only); then
+      reran=''
+    elif ! hub git push -q "$REMOTE" ":refs/heads/$CI_REF" 2>"$state/ci.err"; then
+      say "only flakes failed ($reran), but deleting $CI_REF on GitHub to start a fresh run failed$(ci_said), so this stays red"
+      retro_log "flake rerun · $branch · $reran · not started"
+      reran=''
+    else
       say "only flakes failed ($reran); running CI once more on $short, the land needs a fully green run"
-      hub git push -q "$REMOTE" ":refs/heads/$CI_REF" >/dev/null 2>&1 || true
       ci_id='' ci_pushed=''
       rc=0
       ci_gate || rc=$?
       case $rc in 0) result=green ;; 1) result=red ;; *) result='no answer' ;; esac
       retro_log "flake rerun · $branch · $reran · $result"
       [ "$rc" != 1 ] || ci_failed
-    else
-      reran=''
     fi
   fi
 fi

@@ -306,7 +306,7 @@ test('red CI refuses with main untouched, shows the failed log, and never falls 
   assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy - · live - · refused at ci$/m);
   assert.match(res.stderr, /the red test's output \(run 7\)\n.*real\.test\.ts: failed again alone.*\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK|once more/);
-  assert.doesNotMatch(landLog(shared), /flake rerun/, 'a real failure gets no fresh run');
+  assert.doesNotMatch(landLog(shared), /· flake rerun ·/, 'a real failure gets no fresh run');
   assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1, 'one run only');
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   assert.equal(c.localRuns(), 0);
@@ -349,6 +349,22 @@ test('a red of flakes only whose fresh run is red again refuses, whatever its la
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   assert.equal(c.localRuns(), 0);
   assert.equal(c.refs(), '');
+});
+
+test("a red of flakes only stays red when the scratch branch can't be deleted for the fresh run, rather than wait on a run never started", () => {
+  const r = setup();
+  const c = ci(r);
+  // GitHub refuses the delete: pushing the same commit again would start no run.
+  writeFileSync(join(r.dir, 'hub.git', 'hooks', 'pre-receive'), '#!/bin/sh\nwhile read -r old new ref; do case $new in *[!0]*) ;; *) echo "deletes refused" >&2; exit 1 ;; esac; done\n', { mode: 0o755 });
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\), but deleting land\/ticket\/1-x on GitHub to start a fresh run failed \(.*deletes refused.*\), so this stays red\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|once more/);
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1, 'no second run asked for');
+  assert.match(landLog(shared), /· flake rerun · ticket\/1-x · .* · not started$/m);
+  assert.equal(c.localRuns(), 0);
 });
 
 test('a red with no rerun labels (too many files failed) refuses at once, and a fresh run that gets no answer falls back to the run here', () => {

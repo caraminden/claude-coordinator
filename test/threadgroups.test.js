@@ -36,8 +36,10 @@ test('parked minions leave their build or type for a Parked section at the botto
 
 test('a minion parked on start_after rests (under Waiting) before it ever runs; a new one without a chain does not (#261)', () => {
   assert.deepEqual(shape([
-    m(1, 'bug', { state: 'parked', status: 'new', parked_for: "#3 Leader's work is merged" }), m(2, 'bug', { state: 'parked', status: 'new' }),
-  ]), [['bug', false, [2]], ['waiting', false, [1]]]);
+    m(1, 'bug', { state: 'parked', status: 'new', parked_for: "#3 Leader's work is merged", wakes_on: "#3 Leader's work is merged" }), m(2, 'bug', { state: 'parked', status: 'new' }),
+    // Held: its leader was dismissed unshipped, so nothing starts it by itself.
+    m(3, 'bug', { state: 'parked', status: 'new', parked_for: '#4 L was dismissed without it, so only Unpark starts you' }),
+  ]), [['bug', false, [2]], ['waiting', false, [1]], ['parked', false, [3]]]);
 });
 
 test('Deploying sits on top; Waiting (something wakes it by itself) sits above Parked (#718)', () => {
@@ -46,7 +48,7 @@ test('Deploying sits on top; Waiting (something wakes it by itself) sits above P
     m(2, 'bug', { state: 'parked', status: 'idle', wakes_on: 'Waiting on #9 going live' }),
     m(3, 'feature', { state: 'pending-deploy', status: 'idle', build: 7 }),
     m(4, 'feature', { build: 7 }),
-    m(5, 'chore', { state: 'parked', status: 'new', parked_for: "#4 T's work is merged" }),
+    m(5, 'chore', { state: 'parked', status: 'new', parked_for: "#4 T's work is merged", wakes_on: "#4 T's work is merged" }),
     // Running again (or stuck) after its deploy: back in its own section until it rests.
     m(6, 'chore', { state: 'pending-deploy', status: 'running' }),
     m(7, 'design', { state: 'pending-deploy', status: 'idle' }),

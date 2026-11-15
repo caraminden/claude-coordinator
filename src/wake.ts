@@ -295,6 +295,16 @@ export class LiveWaiters {
     this.store.setSetting(CHAINS, [...this.chains().filter((o) => o.ticket !== c.ticket), c]);
   }
 
+  /**
+   * What wakes parked `ticket` by itself: its start_after leader's work, unless the chain is held (only Unpark starts it then),
+   * or its wake_when_live reason; null when nothing here does. The list shows such a minion under Waiting, not Parked.
+   */
+  wakesOn(ticket: number): string | null {
+    const c = this.chains().find((o) => o.ticket === ticket);
+    if (c) return c.held ? null : this.heldFor(ticket);
+    return this.list().find((w) => w.ticket === ticket)?.reason ?? null;
+  }
+
   /** What `ticket`, parked on start_after, waits for ("#3 Leader's work is merged"), or null when it isn't. */
   heldFor(ticket: number): string | null {
     const c = this.chains().find((o) => o.ticket === ticket);

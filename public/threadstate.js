@@ -45,7 +45,7 @@ function baseState(t, usage, now) {
   if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };
   const state = STATES[t.state];
   // Parked until something wakes it by itself (start_after, wake_when_live, runners back) reads as waiting, not grey (Cara, 2026-11-14).
-  if (t.state === 'parked' && (t.parked_for || t.wakes_on)) return { rank: 3, fam: 'wait', cell: 'waiting', label: `Waiting: ${t.parked_for ? `starts when ${t.parked_for}` : t.wakes_on}` };
+  if (t.state === 'parked' && t.wakes_on) return { rank: 3, fam: 'wait', cell: 'waiting', label: `Waiting: ${t.parked_for ? `starts when ${t.wakes_on}` : t.wakes_on}` };
   if (t.state === 'parked') return { rank: 4, fam: 'idle', cell: 'parked', label: state.label };
   if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, fam: 'wait', cell: `${t.state === 'outside' ? 'waiting' : 'deploying'}${steps}`, counted: !!steps, label: state.label };
   if (t.state === 'blocked') return { rank: 2, fam: 'broken', cell: 'blocked', label: state.label };

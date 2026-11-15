@@ -11,8 +11,8 @@
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status);
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
 const isDeploying = (t) => t.state === 'pending-deploy' && resting(t);
-/** Parked until something wakes it by itself. */
-const wakesItself = (t) => !!(t.parked_for || t.wakes_on);
+/** Parked until something wakes it by itself (the server's wakes_on; a held start_after chain has none). */
+const wakesItself = (t) => !!t.wakes_on;
 
 /**
  * [{ key, build?, current?, type?, group?, rows }] for open threads, empty sections left out. `types` are

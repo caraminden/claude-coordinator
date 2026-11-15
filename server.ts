@@ -355,7 +355,7 @@ runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'erro
 const startChain = (c: Chain, why: string) => startChained(c, why, { store, runner, waiters });
 waiters.start = (c, why) => void startChain(c, why).catch((err) => console.error(`Starting chained #${c.ticket} failed:`, err));
 runner.heldFor = (id) => waiters.heldFor(id);
-runner.wakesOn = (id) => (waiters.list().find((w) => w.ticket === id) ?? runnerWaiters(store).find((w) => w.ticket === id))?.reason ?? null;
+runner.wakesOn = (id) => waiters.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? null;
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {
   const t = store.getTicket(c.ticket);

@@ -26,7 +26,9 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     [{ status: 'running', steps: { done: 3, total: 7 } }, [1, 'work', '3/7', 'pulse']],
     [{ status: 'new' }, [1, 'work', 'working', 'pulse']],
     // Parked until something wakes it by itself is waiting, violet, above grey parked (#718).
-    [{ status: 'new', parked_for: 12, state: 'parked' }, [3, 'wait', 'waiting']],
+    [{ status: 'new', parked_for: 'x', wakes_on: 'x', state: 'parked' }, [3, 'wait', 'waiting']],
+    // A chain held because its leader was dismissed unshipped: only Unpark starts it, so it's plain parked.
+    [{ status: 'new', parked_for: 'x, so only Unpark starts you', state: 'parked' }, [4, 'idle', 'parked']],
     [{ state: 'parked', wakes_on: 'Waiting on #9 going live' }, [3, 'wait', 'waiting']],
     [{ state: 'outside' }, [2, 'wait', 'waiting']],
     [{ state: 'pending-deploy', steps: { done: 6, total: 6 } }, [2, 'wait', 'deploying 6/6']],
@@ -39,7 +41,7 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
 });
 
 test('rowState: a waiting minion says what wakes it in its label (#718)', () => {
-  assert.equal(rowState(t({ state: 'parked', status: 'new', parked_for: "#3 T's work is merged" }), null, NOW).label, "Waiting: starts when #3 T's work is merged");
+  assert.equal(rowState(t({ state: 'parked', status: 'new', parked_for: "#3 T's work is merged", wakes_on: "#3 T's work is merged" }), null, NOW).label, "Waiting: starts when #3 T's work is merged");
   assert.equal(rowState(t({ state: 'parked', wakes_on: 'the fix in #9 goes live' }), null, NOW).label, 'Waiting: the fix in #9 goes live');
 });
 

@@ -187,6 +187,7 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
   const follower = await chain(w, leader.id, 'merged');
+  assert.equal(w.wakesOn(follower), w.heldFor(follower), 'waiting on its leader: it wakes by itself');
   live.work(leader.branch);
   store.updateTicket(leader.id, { status: 'closed' });
   assert.equal(await w.check(), 0);
@@ -197,6 +198,7 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   assert.equal(held.length, 1, 'told once');
   assert.equal((await w.follow(leader.id, 'merged')).state, 'unshipped', 'nothing new can chain on it');
   assert.match(w.heldFor(follower)!, /^#\d+ T's work is merged, and #\d+ T was dismissed without it, so only Unpark starts you$/);
+  assert.equal(w.wakesOn(follower), null, 'held: nothing wakes it by itself, so the list shows it under Parked (#718)');
 
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   assert.equal(await w.check(), 1);
@@ -668,6 +670,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   assert.notEqual(parked.status, 'running', 'no turn for it');
   assert.equal(parked.state, 'parked');
   assert.equal(parked.parked_for, `#${next.data.number} Next's work is live`);
+  assert.equal(parked.wakes_on, parked.parked_for, 'its leader going live wakes it: the list shows it under Waiting (#718)');
   const started = await call(`/api/tickets/${later.id}/unpark`, {});
   assert.equal(started.status, 200);
   assert.equal(started.data.parked_for, null);

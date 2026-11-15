@@ -6,8 +6,8 @@
 // config comes from the JSON file $CITADEL_CODEX_TRIPWIRE names, written by the runner for every turn:
 // { script: <the turn's pinned src/tripwire.ts>, config: <its TripwireConfig>, mode?, mcp?, rules? }.
 // - mode "review" (also when missing or unknown): Citadel's read-only reviewer (src/codex-review.ts), shell only.
-// - mode "turn": a minion or Taskmaster turn on Codex (src/codex-turn.ts): shell, apply_patch and the
-//   turn's own MCP servers (`mcp`).
+// - mode "turn": a minion or Taskmaster turn on Codex (src/codex-turn.ts): shell, apply_patch, image_gen (#738) and
+//   the turn's own MCP servers (`mcp`).
 // - mode "contraption": an app's turn: only its own MCP servers (web search, when on, runs at OpenAI and fires no hook).
 // - mode "image": an --image-gen run of citadel-codex-review (#738): image_gen only, its reference images checked as reads.
 // The tripwire's ask tier and the scheme's approval rules (`rules`) need a person's card, which Codex
@@ -81,12 +81,15 @@ async function check(input, cfgFile) {
     if (tool !== 'Bash') deny(`${tool || 'This tool'} is off: Citadel's Codex reviewer is read-only and runs shell commands only.`);
     return stop(tripwire(input, { ...config, ask: false }));
   }
-  if (mode === 'image') {
-    if (tool !== 'image_gen') deny(`${tool || 'This tool'} is off: Citadel's Codex image run makes one picture with image_gen and nothing else.`);
+  // image_gen reads its reference images: each is checked as a read.
+  const imageGen = () => {
     const refs = ti.referenced_image_paths ?? [];
     if (!Array.isArray(refs)) deny('image_gen\'s referenced_image_paths is not a list, so the tripwire cannot check what it reads.');
     for (const p of refs) stop(tripwire({ tool_name: 'Read', tool_input: { file_path: at(String(p)) }, cwd }, { ...config, ask: false }));
-    return;
+  };
+  if (mode === 'image') {
+    if (tool !== 'image_gen') deny(`${tool || 'This tool'} is off: Citadel's Codex image run makes one picture with image_gen and nothing else.`);
+    return imageGen();
   }
   if (mcpServer && servers.has(mcpServer)) return rule(tool);
   if (mode === 'contraption') {
@@ -105,10 +108,11 @@ async function check(input, cfgFile) {
     for (const p of paths) stop(tripwire({ tool_name: 'Write', tool_input: { file_path: at(p) }, cwd }, { ...config, ask: false }));
     return;
   }
+  if (tool === 'image_gen') return imageGen();
   if (tool === 'view_image') return stop(tripwire({ tool_name: 'Read', tool_input: { file_path: at(String(ti.path ?? '')) }, cwd }, { ...config, ask: false }));
   if (mcpServer) deny(`${tool} is not one of this turn's tools (${[...servers].map((s) => `mcp__${s}`).join(', ') || 'none'}).`);
   // Collaboration (spawn_agent: Grunts), goals and the rest stay off: only the tools above are checked.
-  deny(`${tool || 'This tool'} is off in Citadel's Codex turns: use the shell, apply_patch and this turn's MCP tools.`);
+  deny(`${tool || 'This tool'} is off in Citadel's Codex turns: use the shell, apply_patch, image_gen and this turn's MCP tools.`);
 }
 
 // Run as the hook; imported (by its tests), it only exports the parsers.

@@ -152,8 +152,11 @@ test("an image run's hook lets image_gen through and nothing else, its reference
     assert.equal(r.code, 2, `${call.tool_name} is blocked`);
     assert.match(r.stderr, /image run makes one picture with image_gen and nothing else/);
   }
-  // A review, and any mode but image, still blocks image_gen.
+  // A review and a contraption's turn still block image_gen.
   for (const mode of [undefined, 'review', 'contraption']) assert.equal(hook(gen({ prompt: 'a red dot' }), configFile({ script: tripwire, config, mode })).code, 2, `mode ${mode}`);
+  // A Codex turn makes images too (src/codex.ts tells it to), its refs checked the same way.
+  assert.equal(hook(gen({ prompt: 'a red dot', referenced_image_paths: ['art/b.png'] }), turnCfg()).code, 0);
+  assert.equal(hook(gen({ prompt: 'x', referenced_image_paths: [`${home}/.ssh/id_rsa`] }), turnCfg()).code, 2);
 });
 
 test('an unknown or missing Codex hook mode is the read-only review', () => {

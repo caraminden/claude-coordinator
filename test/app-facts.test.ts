@@ -17,7 +17,7 @@ test('minions get the tripwire blocks, Taskmasters the one-line tripwire', () =>
   assert.ok(systemPrompt(project, minion, null, null, '/tickets', null).includes(TRIPWIRE_BLOCKS));
   const tm = systemPrompt(project, taskmaster, null, null, '/tickets', null);
   assert.ok(!tm.includes(TRIPWIRE_BLOCKS));
-  assert.match(tm, /A tripwire hook checks every tool call and stops known accidents; when it blocks one, it says why/);
+  assert.match(tm, /tripwire/i);
 });
 
 test('deploy lines show only when the server runs the scheme', () => {

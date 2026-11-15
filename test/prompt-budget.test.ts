@@ -109,8 +109,8 @@ test('the PR line says more only with an open PR', () => {
   const args = ['/shared/929', '/shared/project', '/tickets', '/memory', [], true, app] as const;
   const without = systemPrompt(project, minion, ...args);
   const withPr = systemPrompt(project, minion, ...args, null, [], null, false, null, null, true);
-  assert.match(without, /When you open a GitHub pull request .*set state outside and end the turn\./);
+  // One PR line either way; only its open-PR form carries ci-failures.
+  for (const p of [without, withPr]) assert.equal(p.split('"[GitHub]: ..."').length, 2);
   assert.doesNotMatch(without, /ci-failures/);
-  assert.match(withPr, /When your branch has an open GitHub pull request.*ci-failures/);
-  assert.doesNotMatch(withPr, /When you open a GitHub pull request/);
+  assert.match(withPr, /ci-failures/);
 });

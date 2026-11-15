@@ -35,11 +35,16 @@ IDLE_POLL=${DEPLOY_IDLE_POLL:-10} # seconds between looks at the running turns (
 UNKNOWN_WAIT=${DEPLOY_UNKNOWN_WAIT:-60} # how long a restart waits on a server that is up but doesn't answer
 NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
-SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520)
+SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520); tests use fractions
 REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a deploy report
 REPORT_RETRY=${DEPLOY_REPORT_RETRY:-60} # and how long to keep trying one that never reached it
 REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
 BACKUPS=${DEPLOY_BACKUPS:-3} # pre-deploy copies of the database to keep
+# Tests only (test/deploy.test.ts), so its waits take tenths of a second: DEPLOY_TEST_ names no real environment sets
+# (scriptEnv drops every DEPLOY_* a person exports), and the queued restart unit is never handed them.
+HEALTH_TIMEOUT=${DEPLOY_TEST_HEALTH_TIMEOUT:-3} # seconds one /api/health ask waits for its answer
+HEALTH_POLL=${DEPLOY_TEST_HEALTH_POLL:-1} # seconds before each of healthy()'s HEALTHY_WAIT asks
+REPORT_PAUSE=${DEPLOY_TEST_REPORT_PAUSE:-} # set: every pause between a report's tries, in place of the 1, 2, 4 s backoff
 
 say() { echo "deploy: $*" >&2; }
 git_live() { git -C "$LIVE" "$@"; }
@@ -63,7 +68,7 @@ retro_log() (
 
 # A field of the running server's /api/health, or nothing if it doesn't answer (or predates it).
 health() {
-  curl -fsS --max-time 3 "$URL/api/health" 2>/dev/null |
+  curl -fsS --max-time "$HEALTH_TIMEOUT" "$URL/api/health" 2>/dev/null |
     node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[process.argv[1]]??"")}catch{}})' "$1" || true
 }
 
@@ -107,7 +112,7 @@ post_report() {
     [ "$rc" = 0 ] && [ "${code:0:1}" != 5 ] && break
     left=$((REPORT_RETRY - (SECONDS - start)))
     [ "$left" -gt 0 ] || break
-    sleep $((pause < left ? pause : left))
+    sleep "${REPORT_PAUSE:-$((pause < left ? pause : left))}"
     pause=$((pause * 2))
   done
   say "could not post the report to minion $ticket's chat ($([ "$rc" = 0 ] && echo "HTTP $code" || echo "curl exit $rc"))"
@@ -258,7 +263,7 @@ rotate_backups() {
 # Wait up to HEALTHY_WAIT s for the service to answer healthy from commit $1.
 healthy() {
   for _ in $(seq "$HEALTHY_WAIT"); do
-    sleep 1
+    sleep "$HEALTH_POLL"
     [ "$(health commit)" = "$1" ] && systemctl --user is-active -q "$SERVICE" && return 0
   done
   return 1
@@ -300,7 +305,7 @@ restart_timing() (
 turns() {
   local names
   if [ "$1" = 1 ]; then printf '1 running turn'; else printf '%s running turns' "${1:-some}"; fi
-  names=$(curl -fsS --max-time 3 "$URL/api/health" 2>/dev/null | (cd /tmp && node -e '
+  names=$(curl -fsS --max-time "$HEALTH_TIMEOUT" "$URL/api/health" 2>/dev/null | (cd /tmp && node -e '
     let s = "";
     process.stdin.on("data", (d) => (s += d)).on("end", () => {
       const h = JSON.parse(s), ids = h.interruptibleTurns;
@@ -609,7 +614,7 @@ deploy() {
   flock -u 7
   # Usually it is live within seconds and checked again SETTLE s later (last-good moves); say how that went here, as
   # this turn carries on through the restart. A rollback fails this deploy (#553), so land.sh takes the commit off main.
-  local bad was limit=$((HEALTHY_WAIT * 2 + SETTLE + 15))
+  local bad was limit=$((HEALTHY_WAIT * 2 + ${SETTLE%.*} + 15)) # whole seconds: a test's SETTLE can be a fraction
   was=$(cat "$STATE/bad" 2>/dev/null || true)
   for _ in $(seq "$limit"); do
     sleep 1

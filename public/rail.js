@@ -371,6 +371,8 @@ const fetchItems = async () => {
   try {
     const res = await fetch(inContraption ? '/apps/_citadel/api/mine' : new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
     if (res.status >= 500) return null;
+    // An unread body keeps the request open (a proxy's 401 that never ends): let go of it, so the page can go network-idle.
+    if (!res.ok) res.body?.cancel().catch(() => {});
     let mine = res.ok ? await res.json() : [];
     if (inContraption) {
       person = mine?.name ?? null;

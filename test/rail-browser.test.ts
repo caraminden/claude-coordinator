@@ -30,10 +30,11 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 </script>`;
 
 // What the fake Citadel answers: toc up or down, its icon broken, or no answer at all.
-const state = { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false, citadelAt: null as string | null };
+const state = { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false, citadel401: false, citadelAt: null as string | null };
 // The orders the rail saved (#649), and how the next saves go: failing, or answered late.
 const orders = { saved: [] as string[][], fail: false, delay: 0 };
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#f93"/></svg>';
+let closed401 = 0;
 let server: Server;
 let browser: Browser;
 let base = '';
@@ -67,6 +68,11 @@ before(async () => {
     if (path === '/c/api/contraptions/mine' || path === '/apps/_citadel/api/mine') {
       if (state.citadelDown) return req.socket.destroy();
       if (state.citadel502) return res.writeHead(502).end();
+      // A proxy that answers 401 and keeps the body open: the page never goes idle unless the rail lets go of it.
+      if (state.citadel401) {
+        res.on('close', () => (closed401 += 1));
+        return res.writeHead(401, { 'content-type': 'application/json' }).write('{"error":');
+      }
       const apps = [
         { name: 'peek', title: 'Peek', icon: '/icon.svg', up: true },
         { name: 'toc', title: 'ToC', icon: '/icon.svg', up: state.tocUp },
@@ -343,4 +349,17 @@ test('on a touch screen a held press drags, and a swipe that moves at once does 
   await drag(500);
   assert.deepEqual(await appOrder(page), ['', 'toc', 'peek'], 'held, then dragged: moved');
   assert.deepEqual(await saves(1), [['toc', 'peek']], 'one save: the swipe sent none');
+});
+
+test('a 401 from Citadel whose body never ends is let go by the rail, so the page can go network-idle', { skip }, async () => {
+  Object.assign(state, { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false, citadel401: true });
+  closed401 = 0;
+  const page = await browser.page(base, { width: 1000 });
+  try {
+    for (const end = Date.now() + 5000; !closed401 && Date.now() < end; await wait(25));
+    assert.ok(closed401 > 0, 'the rail cancelled the unread 401 body');
+  } finally {
+    state.citadel401 = false;
+  }
+  assert.equal(await page.eval<string>('document.querySelector(".citadel-rail") ? "rail" : "none"'), 'none', 'no session: no rail');
 });

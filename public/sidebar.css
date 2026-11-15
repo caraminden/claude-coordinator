@@ -87,6 +87,11 @@
 .thread-row .card-badge { --chip: var(--waiting); align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: calc(0.1rem - 1px) calc(0.45rem - 1px);
   border: 1px solid var(--chip); border-radius: 999px; color: var(--chip); background: var(--panel); cursor: pointer; }
 .thread-row.f-idle .card-badge { --chip: var(--closed); }
+/* A running turn past a spend stage (#723; Cara, 2026-11-14: "a different background color or a red "!""): the badge
+   goes red and the row takes a red tint until Keep going or the turn's end. */
+.thread-row .card-badge.spend { --chip: var(--error); }
+.thread-row.spend, .thread-group .thread-row.spend { background: color-mix(in srgb, var(--error) 12%, var(--panel)); }
+.thread-row.spend.active, .thread-group .thread-row.spend.active { background: color-mix(in srgb, var(--error) 20%, var(--panel)); }
 .thread-row .card-badge:hover, .thread-row .card-badge:focus-visible { background: color-mix(in srgb, var(--chip) 18%, var(--panel)); }
 /* On phones its hit area reaches the full control height (#471) without growing the chip or the row. */
 @media (max-width: 800px) {

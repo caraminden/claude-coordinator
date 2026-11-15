@@ -388,14 +388,16 @@ export function threadRow(t, href = threadHref(t)) {
   // The chat head's bar (#573), only while it works or waits on a land, CI or a deploy (threadstate.js rowBar).
   const barOf = rowBar({ ...t, wait }, st);
   const bar = !barOf ? '' : progressTrack(barOf) || waitBar(barOf);
-  const card = cardBadge(t.open_cards ?? []);
+  // A running turn's unanswered spend alert (#723) leads the card badge, in red, and tints the row.
+  const spend = !coord && t.spend_alert;
+  const card = cardBadge([...(spend ? [{ kind: 'spend alert', what: `! $${spend.usd}`, href: spend.href }] : []), ...(t.open_cards ?? [])], spend);
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks a row with something for a person that changed since you last opened it.
   const yours = !coord && st.rank === 0 ? ' yours' : '';
   const unread = !coord && rowUnread(t, st, isSeen(t)) ? ' unread' : '';
   // No one-tap replies on list rows (#130): a stray tap on "Merge it" would ship work nobody opened.
-  return h('a', { class: `thread-row s-${t.status} f-${st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
+  return h('a', { class: `thread-row s-${t.status} f-${st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${spend ? ' spend' : ''}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     card,
@@ -422,7 +424,7 @@ function ownerChip(t, coord) {
  * clicking that indicator specifically would open to the card"): it stays until the cards are answered or settled,
  * read or not, and opens the oldest. `cards` is the row's open_cards (Runner.cardLinks), oldest first.
  */
-function cardBadge(cards) {
+function cardBadge(cards, spend = null) {
   if (!cards.length) return '';
   const go = (e) => {
     // The row is a link to the chat; this goes to the card in it instead, in a new tab as a link would on ctrl or middle click.
@@ -431,9 +433,9 @@ function cardBadge(cards) {
     if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey) window.open(new URL(cards[0].href, location.href).href, '_blank');
     else openHash(cards[0].href);
   };
-  const what = `${cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
+  const what = spend ? `spend alert: this turn passed $${spend.stage} and has used about $${spend.usd}` : `${cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
   return h('span', {
-    class: 'card-badge', role: 'link', tabindex: 0,
+    class: `card-badge${spend ? ' spend' : ''}`, role: 'link', tabindex: 0,
     title: cards.length > 1 ? `${cards.length} cards wait on you: open the oldest, the ${what}` : `Open the ${what}`,
     onclick: go, onauxclick: (e) => { if (e.button === 1) go(e); }, onkeydown: (e) => { if (e.key === 'Enter') go(e); },
   }, cardChip(cards));

@@ -66,6 +66,17 @@ export interface SpendState {
   fired: number;
   /** Someone picked Keep going: no more alerts this turn. */
   muted?: string;
+  /** The last alert: the stage it passed, its chat card's event and when, for the minions list and Needs you. */
+  alert?: { stage: number; event: number; at: number };
+}
+
+/**
+ * A turn's alert nobody has answered (#723; Cara, 2026-11-14: "This should show on the minion list view as an alert",
+ * "it could show up in your inbox"): the stage passed, the estimate now and the card's event; null once Keep going
+ * was picked or before any stage fired. The runner drops a turn's spend with its turn, so no turn means none.
+ */
+export function openSpend(spend: SpendState | undefined): { stage: number; usd: number; event: number; at: number } | null {
+  return spend?.alert && !spend.muted ? { ...spend.alert, usd: Math.round(num(spend.usd)) } : null;
 }
 
 interface Message { input: number; outPrice: number; snapshot: number; chars: number; cost: number }
@@ -79,16 +90,19 @@ export class SpendMeter {
   usd: number;
   fired: number;
   muted?: string;
+  alert?: { stage: number; event: number; at: number };
   private messages = new Map<string, Message>();
 
   constructor(state: SpendState = { usd: 0, fired: 0 }) {
     this.usd = num(state.usd);
     this.fired = Math.max(0, Math.floor(num(state.fired)));
     if (state.muted) this.muted = state.muted;
+    const a = state.alert;
+    if (a && Number.isFinite(a.stage) && Number.isInteger(a.event) && Number.isFinite(a.at)) this.alert = { stage: a.stage, event: a.event, at: a.at };
   }
 
   get state(): SpendState {
-    return { usd: this.usd, fired: this.fired, ...(this.muted ? { muted: this.muted } : {}) };
+    return { usd: this.usd, fired: this.fired, ...(this.muted ? { muted: this.muted } : {}), ...(this.alert ? { alert: this.alert } : {}) };
   }
 
   /** Count a stream event (a no-op for anything but an assistant message with usage); true if the estimate moved. */

@@ -1,9 +1,10 @@
 // The Needs-you inbox: everything in a scheme that waits on a person, as one list of items.
 import type { Approvals } from './approvals.ts';
 import type { Store } from './db.ts';
+import { openSpend, type SpendState } from './spend-alert.ts';
 
 export interface InboxItem {
-  /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'state' for a minion in state ready, complete or try, or 'replies' for one offering one-tap replies in another state. */
+  /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'spend' for a running turn's unanswered spend alert (#723), 'state' for a minion in state ready, complete or try, or 'replies' for one offering one-tap replies in another state. */
   kind: string;
   ticketId: number;
   /** When it started waiting. */
@@ -44,6 +45,11 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     ...store.openCards(projectId).map((e) => ({ e, card: JSON.parse(e.data) }))
       .filter(({ e, card }) => (card.to ? forPerson(card, person) : awake.has(e.ticket_id)))
       .map(({ e, card }) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card, eventId: e.id, key: `${e.kind}:${e.id}` })),
+    // A running turn past a spend stage (#723), until Keep going or the turn's end; the runner keeps a turn's spend in its saved turn.
+    ...tickets.filter((t) => t.status === 'running').flatMap((t) => {
+      const spend = openSpend(store.getSetting<{ spend?: SpendState }>(`turn:${t.id}`)?.spend);
+      return spend ? [{ kind: 'spend', ticketId: t.id, at: spend.at, card: spend, eventId: spend.event, key: `spend:${spend.event}` }] : [];
+    }),
     ...tickets.filter((t) => ['ready', 'complete', 'try'].includes(t.state ?? '')).map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at, key: `state:${t.id}` })),
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.
     ...tickets.filter((t) => t.replies && !['ready', 'complete', 'try', 'parked'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at, key: `replies:${t.id}` })),

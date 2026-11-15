@@ -184,7 +184,7 @@ function inboxRow(items) {
   const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
   const asks = new Map();
   for (const i of items) {
-    const ask = ASKS[i.kind === 'state' ? t.state : i.card?.notice ? 'notice' : i.kind] ?? i.kind;
+    const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.kind === 'state' ? t.state : i.card?.notice ? 'notice' : i.kind] ?? i.kind;
     asks.set(ask, (asks.get(ask) ?? 0) + 1);
   }
   const seen = items.every(faded);

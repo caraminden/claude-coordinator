@@ -36,7 +36,7 @@ import { GLOBAL_OWNER } from './properties.ts';
 import { homedir } from 'node:os';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
-import { SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
+import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -723,6 +723,8 @@ export class Runner {
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turnStartedAt(ticket.id),
+      // The running turn's unanswered spend alert (#723), for the list row's badge.
+      spend_alert: this.spendAlert(ticket),
       step_ratio: ratio,
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
@@ -2784,7 +2786,16 @@ export class Runner {
     const text = spendText(meter.usd, Date.now() - turn.startedAt);
     console.log(`[spend] minion ${ticketId}: passed $${stage}, about $${meter.usd.toFixed(2)}`);
     const row = this.emit(ticketId, 'spend', { text, usd: Math.round(meter.usd), stage, turn: turn.startedAt });
+    meter.alert = { stage, event: row.id, at: row.created_at };
+    this.saveTurn(ticketId, { spend: meter.state });
+    this.broadcastTicket(ticketId); // the list row's badge and Needs you
     this.onSpendAlert(ticketId, text, row.id, turn.person ?? null);
+  }
+
+  /** The running turn's unanswered spend alert (openSpend), or null; reads the saved turn only while one runs. */
+  spendAlert(ticket: Ticket) {
+    const spend = this.turns.has(ticket.id) ? openSpend(this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend) : null;
+    return spend && { ...spend, href: cardHref(ticket, spend.event) };
   }
 
   /** Keep going (#723): no more spend alerts for the running turn. False when no turn is running. */
@@ -2797,6 +2808,7 @@ export class Runner {
     if (spend?.startedAt === turn.startedAt) spend.meter.muted = by;
     this.saveTurn(ticketId, { spend: { ...(turn.spend ?? { usd: 0, fired: 0 }), muted: by } });
     this.emit(ticketId, 'spend_muted', { turn: turn.startedAt, by });
+    this.broadcastTicket(ticketId);
     return true;
   }
 

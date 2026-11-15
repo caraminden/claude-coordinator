@@ -833,6 +833,46 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "DELETE /api/me/openrouter": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/me/openrouter": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PATCH /api/me/openrouter": {
+  "anon": "401 Not logged in",
+  "person": "404 OpenRouter isn't connected",
+  "member": "404 OpenRouter isn't connected",
+  "outsider": "404 OpenRouter isn't connected",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/me/openrouter": {
+  "anon": "401 Not logged in",
+  "person": "400 That doesn't look like an OpenRouter key (it starts sk-or-)",
+  "member": "400 That doesn't look like an OpenRouter key (it starts sk-or-)",
+  "outsider": "400 That doesn't look like an OpenRouter key (it starts sk-or-)",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "PUT /api/me/order/apps": {
   "anon": "401 Not logged in",
   "person": "400 keys must be a list of app names, each once",
@@ -1882,6 +1922,16 @@
   "m1": "404 Not found",
   "m2": "404 Not found"
  },
+ "POST /api/tickets/:minion1/openrouter": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can make media in its folders",
+  "member": "403 Only the minion itself can make media in its folders",
+  "outsider": "403 Only the minion itself can make media in its folders",
+  "tmA": "403 Only the minion itself can make media in its folders",
+  "tmB": "403 Only the minion itself can make media in its folders",
+  "m1": "400 tool must be one of: generate_image, edit_image, generate_audio",
+  "m2": "403 A minion may only update itself"
+ },
  "PUT /api/tickets/:minion1/person-note": {
   "anon": "401 Not logged in",
   "person": "400 Text is required",
@@ -2371,6 +2421,16 @@
   "tmB": "404 Not found",
   "m1": "404 Not found",
   "m2": "404 Not found"
+ },
+ "POST /api/tickets/:taskmasterA/openrouter": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can make media in its folders",
+  "member": "403 Only the minion itself can make media in its folders",
+  "outsider": "403 Only the minion itself can make media in its folders",
+  "tmA": "403 Only the minion itself can make media in its folders",
+  "tmB": "403 Only the minion itself can make media in its folders",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "PUT /api/tickets/:taskmasterA/person-note": {
   "anon": "401 Not logged in",

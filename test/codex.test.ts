@@ -501,6 +501,12 @@ test('Codex usage: a review is skipped past 80% of a window, or when a window is
   assert.match(overPace({ primary: fiveHour(85, 10), secondary: week(10, 6) }, now)!, /5-hour Codex limit is 85% used$/);
   assert.match(overPace({ primary: fiveHour(10, 200), secondary: week(45, 5) }, now)!, /weekly Codex limit is 45% used with 29% of the window gone, on track to run out/);
   assert.equal(overPace({ primary: { usedPercent: 30 } }, now), null, 'no reset time: only the 80% rule');
+  // An image run (pace false, #736) refuses only near the limit: 53% used with 42% of the week gone is over pace for a review, fine for an image.
+  const ahead = { primary: fiveHour(10, 200), secondary: { usedPercent: 53, windowDurationMins: 10080, resetsAt: at(10080 * 0.58) } };
+  assert.match(overPace(ahead, now)!, /weekly Codex limit is 53% used with 42% of the window gone/);
+  assert.equal(overPace(ahead, now, false), null);
+  assert.match(overPace({ primary: fiveHour(10, 200), secondary: week(80, 3) }, now, false)!, /weekly Codex limit is 80% used$/);
+  assert.match(overPace({ primary: fiveHour(80, 200) }, now, false)!, /5-hour Codex limit is 80% used$/);
   assert.equal(usageLine({ primary: fiveHour(12, 100), secondary: week(30, 2) }), '5-hour 12%, weekly 30%');
 });
 

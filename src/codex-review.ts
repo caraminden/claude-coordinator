@@ -12,7 +12,7 @@
 //   citadel-codex-review --image-gen --out path.png [--transparent] [--overwrite] [--image ref]... < prompt
 //
 // --image-gen (#733) makes one picture with Codex's built-in image_gen (gpt-image) on the same login, lock,
-// pace check and container hop, for the generate_image_codex MCP tool: --image is then a reference or the
+// usage check (only the 80% ceiling, no pace line: #736) and container hop, for the generate_image_codex MCP tool: --image is then a reference or the
 // image to edit, and --out a .png inside the worktree or the shared folders (outPath()).
 //
 // Exits 0 with the review on stdout, 3 when it can't run here, 4 when it's skipped to save the
@@ -83,14 +83,16 @@ function windowName(w: RateWindow): string {
 /**
  * Why a review should be skipped to save the person's Codex plan, or null. Josh (2026-11-05): "maybe
  * the codex reviewers only run if your codex usage is on track to not be maxed". A window (5-hour,
- * weekly) is over when it's FULL_PERCENT used, or used faster than an even pace to its reset.
+ * weekly) is over when it's FULL_PERCENT used, or used faster than an even pace to its reset. With pace
+ * false (an image run) only FULL_PERCENT counts: Cara (2026-11-14), Codex for images "as long as we arent
+ * hitting usage limits"; the pace rule was Josh's for reviewers.
  */
-export function overPace(limits: RateLimits | null | undefined, now = Date.now()): string | null {
+export function overPace(limits: RateLimits | null | undefined, now = Date.now(), pace = true): string | null {
   for (const w of [limits?.primary, limits?.secondary]) {
     if (!w || typeof w.usedPercent !== 'number') continue;
     const name = windowName(w);
     if (w.usedPercent >= FULL_PERCENT) return `the ${name} Codex limit is ${w.usedPercent}% used`;
-    if (!w.resetsAt || !w.windowDurationMins) continue;
+    if (!pace || !w.resetsAt || !w.windowDurationMins) continue;
     const gone = Math.min(1, Math.max(0, 1 - (w.resetsAt * 1000 - now) / (w.windowDurationMins * 60_000)));
     if (w.usedPercent > gone * 100 + PACE_SLACK) return `the ${name} Codex limit is ${w.usedPercent}% used with ${Math.round(gone * 100)}% of the window gone, on track to run out before it resets`;
   }
@@ -278,7 +280,7 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
       limits = read?.rateLimitsByLimitId?.codex ?? read?.rateLimits ?? null;
       // shortcut: an image run also paces against any limit whose id names images (a failed generation carries its own limitId); the id isn't documented, so check it on a real read.
       const imageLimits = gen ? Object.entries(read?.rateLimitsByLimitId ?? {}).filter(([id]) => /image/i.test(id)).map(([, l]) => l as RateLimits) : [];
-      const why = [limits, ...imageLimits].map((l) => overPace(l, opts.now?.())).find(Boolean);
+      const why = [limits, ...imageLimits].map((l) => overPace(l, opts.now?.(), !gen)).find(Boolean);
       if (why) return finish(4, `Skipped to save your Codex plan: ${why}.`);
       const { thread } = await call('thread/start', { cwd: opts.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, developerInstructions: gen ? IMAGE_INSTRUCTIONS : DEVELOPER_INSTRUCTIONS });
       // An image run names its references for image_gen to read, rather than attaching them to the chat.

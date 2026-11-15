@@ -828,7 +828,7 @@ const IMAGE_PROPS = {
 export const NOT_DEFAULT = 'Not the default: images are drawn with code (SVG, canvas, a script). Call this only when a person explicitly asks for a generative model, or a scheme system calls for one.';
 const NOT_DEFAULT_AUDIO = 'Not the default: sound is made with code (Web Audio, a synth script), as images are. Call this only when a person explicitly asks for a generative model, or a scheme system calls for one.';
 /** Which generative tool makes what (Cara, 2026-11-14, "Codex for raster images"). */
-const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan, when it is offered; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex isn\'t offered or refused for pace.';
+const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan, when it is offered; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex isn\'t offered or refused because a Codex limit is near.';
 const MEDIA_TOOL_LIST = [
   { name: 'generate_image', description: `${NOT_DEFAULT} Then: make an image from a prompt through OpenRouter. ${IMAGE_ROUTING} ${MEDIA_COMMON}${IMAGE_MODELS}`, inputSchema: { type: 'object', properties: IMAGE_PROPS, required: ['prompt', 'out'] } },
   {
@@ -858,7 +858,7 @@ const MEDIA_TOOL_LIST = [
 const CODEX_IMAGES = process.env.COORDINATOR_CODEX_IMAGES === '1';
 const CODEX_IMAGE_TOOL = {
   name: 'generate_image_codex',
-  description: `${NOT_DEFAULT} Then: make or edit a PNG with Codex's built-in image generation (OpenAI gpt-image) on the ChatGPT plan of the person this turn runs for, with no per-image charge. For a raster image this is the generative tool to use; SVG and sound go to OpenRouter's generate_image and generate_audio, and so does a PNG when this one refuses because the person's Codex use is over pace (it reads their 5-hour and weekly limits first and leaves the rest for their own work). To edit, pass the image in refs and say what to change. No size or aspect setting: say the shape you want in the prompt. Writes the .png and returns its absolute path: link it as ![caption](/abs/path). Takes a minute or two. One take first; more only when asked or when it misses.`,
+  description: `${NOT_DEFAULT} Then: make or edit a PNG with Codex's built-in image generation (OpenAI gpt-image) on the ChatGPT plan of the person this turn runs for, with no per-image charge. For a raster image this is the generative tool to use; SVG and sound go to OpenRouter's generate_image and generate_audio, and so does a PNG when this one refuses because a Codex limit is near (it reads their 5-hour and weekly limits first and refuses at 80% of either, leaving the rest for their own work). To edit, pass the image in refs and say what to change. No size or aspect setting: say the shape you want in the prompt. Writes the .png and returns its absolute path: link it as ![caption](/abs/path). Takes a minute or two. One take first; more only when asked or when it misses.`,
   inputSchema: {
     type: 'object',
     properties: {

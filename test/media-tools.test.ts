@@ -54,7 +54,7 @@ test('every generative media tool opens by saying it is not the default: images 
 
 test('raster images go to Codex and SVG and sound to OpenRouter, which also takes a PNG Codex refuses (Cara, 2026-11-14, "Codex for raster images")', async () => {
   const by = Object.fromEntries((await tools(both)).map((t) => [t.name, t.description]));
-  for (const n of ['generate_image', 'edit_image']) assert.match(by[n], /Raster images \(PNG\) go to generate_image_codex.*SVG \(Recraft\).*isn't offered or refused for pace/, n);
+  for (const n of ['generate_image', 'edit_image']) assert.match(by[n], /Raster images \(PNG\) go to generate_image_codex.*SVG \(Recraft\).*isn't offered or refused because a Codex limit is near/, n);
   assert.match(by.generate_image_codex, /SVG and sound go to OpenRouter/);
 });
 

@@ -77,6 +77,7 @@ import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
+import { moveToNoCow } from './src/db-nocow.ts';
 import { Presence } from './src/presence.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -152,6 +153,12 @@ if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000)
 // A long one names who else has the databases open: a lock they hold, or a copy loading the disk (#622).
 // The post-deploy watch (#724), made once the store and waiters are: stalls before then are the boot's own.
 let deployWatch: DeployWatch | null = null;
+// Once, at the first start with it, before anything opens the database: the live file into a no-COW file (#761).
+// Not a dev copy's, a preview's or a boot check's: each would keep a second 1 GB file. NOCOW_DB=1 runs it anywhere, to try it.
+if (process.env.NOCOW_DB === '1' || (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DIR)) {
+  const { moved, note } = moveToNoCow(join(DATA_DIR, 'coordinator.db'));
+  if (note !== 'already no-COW') (moved ? console.log : console.warn)(`coordinator.db: ${note}`);
+}
 const BOOT_AT = Date.now();
 if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 300))), 100, 500, { profile: true, files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
 await loadAssets();

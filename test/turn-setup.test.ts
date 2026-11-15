@@ -134,6 +134,19 @@ test("each minion's and Taskmaster's turn gets its own private temp folder in it
   }
 });
 
+test("a Fable turn's Grunts default to Opus; other turns' Grunts inherit the session's model (#705)", async () => {
+  for (const model of ['claude-fable-5-2', 'claude-fable-5-1']) {
+    const t = await turn('ticket', 'connected', { model });
+    assert.equal(t.flag('--model'), model);
+    assert.equal(t.env.CLAUDE_CODE_SUBAGENT_MODEL, 'claude-opus-5-5', model);
+    assert.equal(t.env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE, undefined, "an Agent call's own model still wins");
+  }
+  for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', undefined]) {
+    const t = await turn('ticket', 'connected', model ? { model } : {});
+    assert.equal(t.env.CLAUDE_CODE_SUBAGENT_MODEL, undefined, model ?? "Claude Code's default");
+  }
+});
+
 test('a Taskmaster turn defaults to opus at high effort, and keeps a choice people made', async () => {
   const t = await turn('coordinator', 'connected');
   assert.equal(t.settings.autoCompactWindow, 180000, "a Taskmaster compacts at its own window (#423)");

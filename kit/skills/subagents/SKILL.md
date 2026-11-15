@@ -23,7 +23,10 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
   Grunt that judges (`citadel:critic`, `citadel:fresh-eyes`, `citadel:finding-checker`) inherits
   the session's model: on Delve's art critic Opus caught about 9 of 13 of Cara's notes, Sonnet 5.
   The exception: on a high-risk self-review `citadel:reviewer` and `citadel:finding-checker` run
-  on `fable` (`claude-fable-5-2`) at `medium`, set per call. A Grunt doing known-shape middle work (a
+  on `fable` (`claude-fable-5-2`) at `medium`, set per call. On a Fable turn, a Grunt with no
+  `model` on its call or its definition runs on Opus, not Fable (#705): Citadel launches Fable
+  turns with `CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5`. A definition's `model: inherit` and a
+  call's own `model` still win, so a Grunt that must run on Fable names `fable` on the call. A Grunt doing known-shape middle work (a
   clear-repro bug fix, a small clear-spec change, a follow-up) can run `opus` at `medium`; one that
   stalls or whose fix doesn't hold moves to high.
 - Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work

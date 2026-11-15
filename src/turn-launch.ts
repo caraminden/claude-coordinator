@@ -549,6 +549,11 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (facts.memory) env.COORDINATOR_MEMORY = '1';
   // The person's own GitHub token (or none, so it can't push).
   if (facts.env.github) env = { ...env, ...facts.env.github };
+  // Grunts on a Fable turn default to Opus, not Fable (#705, Cara 2026-11-14: "No Fable for helper Grunts"):
+  // general-purpose Grunts were most of a week's $691 of Fable Grunts. An Agent call's own `model` (self-review's
+  // `fable` reviewers and finding-checkers) and an agent definition's `model:`, `inherit` included, still win.
+  // Not CLAUDE_CODE_SUBAGENT_MODEL_FORCE: that would drop the explicit `fable` on a high-risk review too.
+  if (model && /fable/i.test(model)) env.CLAUDE_CODE_SUBAGENT_MODEL = 'claude-opus-5-5';
   // Whose data this turn may read (#295): the person whose own typed message it answers, as the identity's
   // `sub`, for contraptions' own hook guards. Set fresh per process and absent (never empty) on any other turn:
   // a relay, a wake, a schedule, a resume, GitHub or a contraption's post. turnEnv never passes CITADEL_*

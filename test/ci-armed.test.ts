@@ -31,13 +31,13 @@ function setup(name: string, prCi = true) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, dir, 'ticket/1-t');
   const ticket = store.getTicket(t.id)!;
-  const log = { events: [] as [string, any][], relays: [] as string[], notified: [] as any[], running: false };
+  const log = { events: [] as [string, any][], relays: [] as string[], wakes: [] as boolean[], notified: [] as any[], running: false, held: false as boolean | 'mail' };
   const runner = {
     emit: (_id: number, kind: string, data: any) => (log.events.push([kind, data]), { id: log.events.length }),
     broadcastTicket: () => {},
     isRunning: () => log.running,
     queued: () => 0,
-    relay: (_from: number, _to: number, _author: string, text: string) => (log.relays.push(text), false),
+    relay: (_from: number, _to: number, _author: string, text: string, _urgent: boolean, wake: boolean) => (log.held === true ? true : (log.relays.push(text), log.wakes.push(wake), log.held)),
   };
   const app = { store, runner, dataDir: join(root, `${name}-data`), notify: (_id: number, n: any) => log.notified.push(n) } as any;
   return { dir, sha, store, ticket, app, log };
@@ -65,6 +65,8 @@ test("arming is refused where PRs run no CI, or CI already failed on HEAD; CI al
   const green = setup('green');
   green.store.addGithubSeen(green.ticket.id, [`pr12:ci:${green.sha}:passed`], true);
   assert.equal(await armForCi(green.app, green.ticket, { card }), null);
+  green.store.addGithubSeen(green.ticket.id, [`pr12:ci:${green.sha}:failed`], true);
+  assert.equal(await armForCi(green.app, green.ticket, { card }), null, 'a green re-run after a red one counts as green');
   assert.equal(green.store.getSetting(armedKey(green.ticket.id)), null, 'nothing armed: the caller posts it');
 });
 
@@ -138,4 +140,22 @@ test('a fired arm on the first look at a PR still lands as held mail', async () 
   w.onCi = async () => ({ fired: true, note: 'The card you armed is posted.' });
   await w.poll(ticket, root, 'o/r');
   assert.deepEqual(sent, [{ text: 'The card you armed is posted.', quiet: true }]);
+});
+
+test('an armed held-mail message stays held mail when it goes out', async () => {
+  const { sha, ticket, app, log } = setup('quietmsg');
+  await armForCi(app, ticket, { coordinator: { text: 'landed, nothing to do', urgent: false, wake: false } });
+  assert.equal((await ciFinished(app, ticket, pr(sha), 'passed'))!.fired, true);
+  assert.deepEqual(log.wakes, [false]);
+});
+
+test("a message the loop guard holds isn't a firing: the minion wakes, told the card is out and the message isn't", async () => {
+  const { sha, store, ticket, app, log } = setup('heldmsg');
+  log.held = true;
+  await armForCi(app, ticket, { card, coordinator: { text: 'PR #12 is green', urgent: false } });
+  const got = await ciFinished(app, ticket, pr(sha), 'passed');
+  assert.equal(got!.fired, false);
+  assert.match(got!.note, /card you armed is posted: .*Not sent: the Taskmaster message \(held/);
+  assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'the card went out once');
+  assert.equal(store.getTicket(ticket.id)!.note, null, 'no fired note');
 });

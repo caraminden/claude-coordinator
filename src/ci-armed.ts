@@ -13,7 +13,7 @@ import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
 export interface Card { questions: unknown[]; kind?: 'merge'; to?: string; notice?: string }
-export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean } }
+export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean } }
 
 export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
 const short = (sha: string) => sha.slice(0, 7);
@@ -61,8 +61,9 @@ export async function armForCi(app: App, ticket: Ticket, part: Pick<Armed, 'card
   const sha = await git(ticket.cwd, ['rev-parse', 'HEAD']);
   if (!sha) throw new HttpError(500, "when_ci_passes: couldn't read the worktree's HEAD");
   const seen = store.githubSeen(ticket.id, 'pr');
-  if (seen.some((k) => k.endsWith(`:ci:${sha}:failed`))) throw new HttpError(409, `when_ci_passes: CI already failed on ${short(sha)}. Fix it and push, then arm again`);
+  // Passed wins over failed: a re-run that went green after a red one.
   if (seen.some((k) => k.endsWith(`:ci:${sha}:passed`))) return null;
+  if (seen.some((k) => k.endsWith(`:ci:${sha}:failed`))) throw new HttpError(409, `when_ci_passes: CI already failed on ${short(sha)}. Fix it and push, then arm again`);
   const prev = store.getSetting<Armed>(armedKey(ticket.id));
   store.setSetting(armedKey(ticket.id), { ...(prev?.sha === sha ? prev : {}), sha, at: Date.now(), ...part });
   const pushed = await git(ticket.cwd, ['rev-parse', `origin/${ticket.branch}`]);
@@ -85,22 +86,32 @@ export async function ciFinished(app: App, ticket: Ticket, pr: PrSnapshot, resul
   if (armed.sha !== pr.headSha) return dropped(`the PR's head is now ${short(pr.headSha)}`);
   if (result === 'failed') return dropped('CI failed');
   if (runner.isRunning(ticket.id) || runner.queued(ticket.id)) return dropped('a turn was running');
-  try {
-    const done: string[] = [];
-    if (armed.card) done.push(`The card you armed is posted: ${postCard(app, ticket, armed.card).href}`);
-    if (armed.coordinator) {
-      await tellTaskmaster(app, ticket, armed.coordinator.text, armed.coordinator.urgent);
-      done.push('Your armed message went to the Taskmaster.');
+  // All of it out is a firing; anything that didn't go out wakes the minion, saying what did.
+  const sent: string[] = [];
+  const failed: string[] = [];
+  if (armed.card) {
+    try {
+      sent.push(`The card you armed is posted: ${postCard(app, ticket, armed.card).href}`);
+    } catch (err: any) {
+      failed.push(`the card (${err.message})`);
     }
-    // A card is people's turn to answer, which the list shows by itself; a message alone leaves the merge to a person.
-    const state: TicketState | null = armed.card ? null : 'ready';
-    store.updateTicket(ticket.id, { state, note: `CI passed on ${short(armed.sha)}: ${armed.card ? 'card posted' : 'told the Taskmaster'}` });
-    runner.broadcastTicket(ticket.id);
-    if (state && NOTIFY_STATES[state]) app.notify(ticket.id, { kind: 'state', state, note: store.getTicket(ticket.id)!.note });
-    return { fired: true, note: done.join(' ') };
-  } catch (err: any) {
-    return dropped(`posting it failed (${err.message})`);
   }
+  if (armed.coordinator) {
+    const { text, urgent, wake } = armed.coordinator;
+    try {
+      if ((await tellTaskmaster(app, ticket, text, urgent, wake !== false)) === true) failed.push('the Taskmaster message (held by the 6-in-10-minutes guard)');
+      else sent.push('Your armed message went to the Taskmaster.');
+    } catch (err: any) {
+      failed.push(`the Taskmaster message (${err.message})`);
+    }
+  }
+  if (failed.length) return { fired: false, note: `CI passed on ${short(armed.sha)}. ${sent.join(' ')}${sent.length ? ' ' : ''}Not sent: ${failed.join(', ')}. Post it yourself if it still holds.` };
+  // A card is people's turn to answer, which the list shows by itself; a message alone leaves the merge to a person.
+  const state: TicketState | null = armed.card ? null : 'ready';
+  store.updateTicket(ticket.id, { state, note: `CI passed on ${short(armed.sha)}: ${armed.card ? 'card posted' : 'told the Taskmaster'}` });
+  runner.broadcastTicket(ticket.id);
+  if (state && NOTIFY_STATES[state]) app.notify(ticket.id, { kind: 'state', state, note: store.getTicket(ticket.id)!.note });
+  return { fired: true, note: sent.join(' ') };
 }
 // shortcut: a record armed on a PR that then merges or closes, or on a minion that's dismissed, stays in settings until the
 // next arm or CI result on that minion; fine while records are a few hundred bytes each. Clear them on close if that grows.

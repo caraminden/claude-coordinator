@@ -1442,7 +1442,8 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'ask_question': {
       const direct = args.to ? { to: args.to } : {};
       if (args.to && args.questions == null) {
-        const { href } = await call('POST', `/api/tickets/${TICKET}/questions`, { ...direct, notice: args.notice });
+        const { href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { ...direct, notice: args.notice, ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
+        if (armed) return `${armed} Nothing comes back from it, so keep working.`;
         return `The notice for ${args.to} is in the chat; its link is ${href}. Nothing comes back from it, so keep working.`;
       }
       if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice)');

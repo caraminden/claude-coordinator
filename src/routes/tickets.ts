@@ -779,7 +779,7 @@ export const ticketRoutes: Route[] = [
       // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
       const body = await readJson(req);
       const text = str(body.text, 'Message', 10_000);
-      const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { coordinator: { text, urgent: body.urgent === true } }) : null;
+      const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { coordinator: { text, urgent: body.urgent === true, ...(body.wake === false ? { wake: false } : {}) } }) : null;
       if (armed) return json(res, 202, { sent: false, armed });
       const held = await tellTaskmaster(app, ticket, text, body.urgent === true, body.wake !== false);
       if (held === true) return json(res, 202, { sent: false, held: true });

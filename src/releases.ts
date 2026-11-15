@@ -20,6 +20,9 @@ export interface Target {
   name: string;
   kind: string;
   link: string | null;
+  /** Its own release names (#764, citadel-app.json `release`): `name` a template ("Build {n}"), `number` where n comes
+   * from: `run` its CI run's number, `count` its releases that went live (the default; an APK's is its versionCode). */
+  numbering?: { name?: string; number?: 'run' | 'count' };
 }
 
 export interface Release {

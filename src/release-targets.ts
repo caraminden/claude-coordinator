@@ -29,6 +29,8 @@ export interface Found extends Target {
   shared?: string[];
   /** A ci job's own `name:`, which is what the Actions API calls it; its id when it has none. */
   jobName?: string;
+  /** The repo folders it ships (#764): a change touching one goes to it; a target with none takes what no target's folder holds. */
+  paths?: string[];
 }
 
 export interface Override {
@@ -36,6 +38,10 @@ export interface Override {
   name?: string;
   hidden?: boolean;
   link?: string;
+  /** The folders it ships, as path prefixes or globs ("companion/", "android/**"): see Found.paths. */
+  paths?: string[];
+  /** How its releases are numbered and named (Target.numbering). */
+  release?: { name?: string; number?: string };
 }
 
 /** A build a minion shared (the artifacts table): a file people install or run, and what it is for. */
@@ -109,7 +115,7 @@ export interface SchemeFacts {
   /** The scheme whose code this server runs: its server is its target (CitadelServer), so it gets no Main. */
   own: boolean;
   branch: string;
-  contraptions: Pick<ContraptionRow, 'name' | 'title'>[];
+  contraptions: (Pick<ContraptionRow, 'name' | 'title'> & Partial<Pick<ContraptionRow, 'repo'>>)[];
   /** Contraptions with an android/latest.json in their data folder: an APK they serve. */
   apkFeeds: string[];
   workflows: { path: string; text: string }[];
@@ -118,6 +124,10 @@ export interface SchemeFacts {
   scripts?: { path: string; text: string }[];
   /** Builds its minions shared, newest first. */
   files?: BuildFile[];
+  /** The folder its repo's contraption runs from (the root citadel-app.json's `workdir`), when not the root. */
+  appDir?: string;
+  /** The folder its Android app is in (the one holding app/build.gradle), when not the root. */
+  apkDir?: string;
 }
 
 /** Where a scheme's test copies come from, besides Citadel's previews (src/releases.ts previewCopies). */
@@ -188,6 +198,41 @@ export function shipsOn(text: string, branch: string): 'push' | 'dispatch' | nul
   return events.has('workflow_dispatch') ? 'dispatch' : null;
 }
 
+/** A workflow's push `paths:` filter (null: none), so only changes there ship on it. */
+export function pushPaths(text: string): string[] | null {
+  const on = block(text, 'on');
+  const push = on && !on.inline ? children(on.body).get('push') : null;
+  const list = push ? /\bpaths:([^\n]*(?:\n\s+-[^\n]*)*)/.exec(push)?.[1] : null;
+  if (!list) return null;
+  const items = list.replace(/[[\]]/g, '').split(/[\n,]/).map((l) => l.replace(/^\s*-?\s*/, '').replace(/#.*/, '').trim().replace(/^(["'])(.*)\1$/, '$2')).filter(Boolean);
+  return items.length ? items : null;
+}
+
+/** A path filter as a prefix: what comes before its first glob character ("android/**" → "android/"); "" holds everything. */
+const prefixOf = (p: string) => p.replace(/^\.?\//, '').split(/[*?[{!]/)[0];
+
+/**
+ * The targets a change ships on (#764), by the files it touched: each file goes to the targets whose folder holds it,
+ * else to the targets with no folder of their own; a change that reaches none (no files known, or only folders with no
+ * target) goes to the scheme's first target, so it never drops out. File targets (no pipeline) only when there is
+ * nothing else. `targets` are one scheme's, in detect's order.
+ */
+export function shipsTo(files: string[] | null | undefined, targets: Pick<Found, 'id' | 'kind' | 'paths'>[]): string[] {
+  const own = targets.filter((t) => t.kind !== 'file');
+  const list = own.length ? own : targets;
+  const holds = (t: Pick<Found, 'paths'>, f: string) => !!t.paths?.some((p) => {
+    const x = prefixOf(p);
+    return !x || f === x.replace(/\/$/, '') || f.startsWith(x.endsWith('/') ? x : `${x}/`);
+  });
+  const out = new Set<string>();
+  for (const f of files ?? []) {
+    const mine = list.filter((t) => holds(t, f));
+    for (const t of mine.length ? mine : list.filter((t) => !t.paths?.length)) out.add(t.id);
+  }
+  if (!out.size && list.length) out.add(list[0].id);
+  return [...out];
+}
+
 /** Each job of a workflow, by its id. */
 export function jobsOf(text: string): Map<string, string> {
   const jobs = block(text, 'jobs');
@@ -227,8 +272,11 @@ export function detect(f: SchemeFacts): Found[] {
   const out: Found[] = [];
   const base = { projectId: pid, branch: f.branch };
   for (const c of f.contraptions) {
-    out.push({ ...base, id: `app:${c.name}`, kind: 'contraption', name: f.contraptions.length > 1 ? c.title : 'Contraption', link: `/apps/${c.name}/`, contraption: c.name });
+    // The root citadel-app.json is the contraption deployed from this repo.
+    const dir = f.appDir && (!c.repo || c.repo.toLowerCase() === slug) ? { paths: [f.appDir] } : {};
+    out.push({ ...base, id: `app:${c.name}`, kind: 'contraption', name: f.contraptions.length > 1 ? c.title : 'Contraption', link: `/apps/${c.name}/`, contraption: c.name, ...dir });
   }
+  const apkDir = f.apkDir ? { paths: [f.apkDir] } : {};
   const feeds = [...f.apkFeeds];
   for (const w of f.workflows) {
     const on = shipsOn(w.text, f.branch);
@@ -237,15 +285,16 @@ export function detect(f: SchemeFacts): Found[] {
     // A release APK (a debug build is a test copy): started by hand is how people make one.
     if (/assembleRelease|bundleRelease/.test(w.text)) {
       const feed = feeds.shift();
-      out.push({ ...base, id: `apk:${file.replace(/\.ya?ml$/, '')}`, kind: 'apk', name: 'Android', link: feed ? `/apps/${feed}/android/` : null, workflow: w.path, ...(feed ? { contraption: feed } : {}) });
+      out.push({ ...base, id: `apk:${file.replace(/\.ya?ml$/, '')}`, kind: 'apk', name: 'Android', link: feed ? `/apps/${feed}/android/` : null, workflow: w.path, ...(feed ? { contraption: feed } : {}), ...apkDir });
       continue;
     }
     if (on !== 'push') continue;
+    const paths = pushPaths(w.text);
     for (const [id, job] of jobsOf(w.text)) {
-      if (shipsPackage(id, job)) out.push({ ...base, id: `ci:${file.replace(/\.ya?ml$/, '')}:${id}`, kind: 'ci', name: platform(w.path, w.text, job), link: null, workflow: w.path, job: id, jobName: jobName(job) ?? id });
+      if (shipsPackage(id, job)) out.push({ ...base, id: `ci:${file.replace(/\.ya?ml$/, '')}:${id}`, kind: 'ci', name: platform(w.path, w.text, job), link: null, workflow: w.path, job: id, jobName: jobName(job) ?? id, ...(paths ? { paths } : {}) });
     }
   }
-  for (const feed of feeds) out.push({ ...base, id: `apk:${feed}`, kind: 'apk', name: 'Android', link: `/apps/${feed}/android/`, contraption: feed });
+  for (const feed of feeds) out.push({ ...base, id: `apk:${feed}`, kind: 'apk', name: 'Android', link: `/apps/${feed}/android/`, contraption: feed, ...apkDir });
   // A platform no workflow or feed ships, whose builds minions hand people as files (FuckSpamTexts' APK and Chrome
   // extension, Delve's Windows zip): its releases are those files. Only files named for the scheme or its repo, so
   // another scheme's build a minion shared here (a Delve zip in Citadel) isn't taken for this one's.
@@ -269,9 +318,22 @@ export function detect(f: SchemeFacts): Found[] {
   for (const t of out) {
     const o = f.overrides.find((x) => x.id === t.id);
     if (o?.hidden) continue;
-    kept.push({ ...t, ...(typeof o?.name === 'string' && o.name.trim() ? { name: o.name.trim() } : {}), ...(typeof o?.link === 'string' ? { link: o.link } : {}) });
+    const paths = Array.isArray(o?.paths) ? o.paths.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [];
+    const numbering = numberingOf(o?.release);
+    kept.push({
+      ...t, ...(typeof o?.name === 'string' && o.name.trim() ? { name: o.name.trim() } : {}), ...(typeof o?.link === 'string' ? { link: o.link } : {}),
+      ...(paths.length ? { paths } : {}), ...(numbering ? { numbering } : {}),
+    });
   }
   return kept;
+}
+
+/** An override's `release`, kept when well formed: a name with {n} in it, and a number source this server knows. */
+function numberingOf(r: Override['release']): Target['numbering'] | null {
+  if (!r || typeof r !== 'object') return null;
+  const name = typeof r.name === 'string' && r.name.includes('{n}') ? r.name.trim() : undefined;
+  const number = r.number === 'run' || r.number === 'count' ? r.number : undefined;
+  return name || number ? { ...(name ? { name } : {}), ...(number ? { number } : {}) } : null;
 }
 
 /** The overrides in a citadel-app.json's text: its `targets`, the well-formed entries only. */
@@ -282,6 +344,17 @@ export function overridesOf(text: string | null): Override[] {
     return Array.isArray(list) ? list.filter((o) => o && typeof o.id === 'string') : [];
   } catch {
     return [];
+  }
+}
+
+/** A citadel-app.json's `workdir` as a folder ("companion/"), or undefined at the root or when it can't be read. */
+export function workdirOf(text: string | null): string | undefined {
+  try {
+    const w = text ? JSON.parse(text)?.workdir : null;
+    const dir = typeof w === 'string' ? w.trim().replace(/^\.?\/+/, '').replace(/\/+$/, '') : '';
+    return dir && dir !== '.' && !dir.startsWith('..') ? `${dir}/` : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -374,11 +447,16 @@ export class TargetFinder {
       if (text != null) workflows.push({ path: `.github/workflows/${name}`, text });
     }
     const scripts = [];
-    for (const path of ((await git(['ls-tree', '-r', '--name-only', branch], dir)) ?? '').split('\n').filter((n) => /(^|\/)[^/]*preview[^/]*\.sh$/i.test(n))) {
+    const tree = ((await git(['ls-tree', '-r', '--name-only', branch], dir)) ?? '').split('\n');
+    for (const path of tree.filter((n) => /(^|\/)[^/]*preview[^/]*\.sh$/i.test(n))) {
       const text = await git(['show', `${branch}:${path}`], dir);
       if (text != null) scripts.push({ path, text });
     }
-    return { ...base, branch: branch.replace(/^origin\//, ''), workflows, scripts, overrides: overridesOf(await git(['show', `${branch}:citadel-app.json`], dir)) };
+    const app = await git(['show', `${branch}:citadel-app.json`], dir);
+    // The Android app's top folder (android/native/app/build.gradle → android/); none when it is the repo itself.
+    const gradle = tree.find((n) => /(^|\/)app\/build\.gradle(\.kts)?$/.test(n));
+    const apkDir = gradle && gradle.split('/').length > 2 ? `${gradle.split('/')[0]}/` : undefined;
+    return { ...base, branch: branch.replace(/^origin\//, ''), workflows, scripts, overrides: overridesOf(app), appDir: workdirOf(app), apkDir };
   }
 }
 

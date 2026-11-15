@@ -11,7 +11,7 @@ import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { CITADEL_TARGET, Releases, type TargetView } from '../src/releases.ts';
-import { buildOf, copySources, detect, jobName, shipsOn, TargetFinder, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
+import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
@@ -90,6 +90,54 @@ test('citadel-app.json targets rename, relink and hide a found target', () => {
   const found = detect(facts({ contraptions: [{ name: 'mandate', title: 'Mandate' }], workflows: [{ path: '.github/workflows/windows.yml', text: WINDOWS }], overrides }));
   assert.deepEqual(found.map((t) => [t.id, t.name, t.link]), [['app:mandate', 'Web', '/apps/mandate/inbox']]);
   assert.deepEqual(ids(facts({ overrides: [{ id: 'main', hidden: true }] })), [], 'Main hidden too');
+});
+
+test('a target owns its folders: a contraption its workdir, an APK its top folder, a CI job its push paths, an override any (#764)', () => {
+  const PATHS = WINDOWS.replace("branches: [main, 'land/**']", "branches: [main]\n    paths:\n      - 'native/**'\n      - \"crates/**\" # the shared crates\n      - .github/workflows/windows.yml");
+  const found = detect(facts({
+    contraptions: [{ name: 'mandate', title: 'Mandate', repo: 'o/mandate' }], apkFeeds: ['mandate'], appDir: 'web/', apkDir: 'android/',
+    workflows: [{ path: '.github/workflows/android-release.yml', text: APK }, { path: '.github/workflows/windows.yml', text: PATHS }],
+  }));
+  assert.deepEqual(found.map((t) => [t.id, t.paths]), [
+    ['app:mandate', ['web/']], ['apk:android-release', ['android/']], ['ci:windows:release', ['native/**', 'crates/**', '.github/workflows/windows.yml']],
+  ]);
+  const other = detect(facts({ contraptions: [{ name: 'x', title: 'X', repo: 'o/elsewhere' }], appDir: 'web/' }));
+  assert.equal(other[0].paths, undefined, "another repo's contraption: this repo's workdir isn't its folder");
+  const over = detect(facts({ workflows: [{ path: '.github/workflows/windows.yml', text: WINDOWS }], overrides: [{ id: 'ci:windows:release', paths: ['native/', 7 as never, ' '], release: { name: 'Build {n}', number: 'run' } }] }));
+  assert.deepEqual(over[0].paths, ['native/']);
+  assert.deepEqual(over[0].numbering, { name: 'Build {n}', number: 'run' });
+  const bad = (release: unknown) => detect(facts({ overrides: [{ id: 'main', release: release as never }] }))[0].numbering;
+  assert.equal(bad({ name: 'Build', number: 'sometimes' }), undefined, 'a name with no {n} and an unknown number are both dropped');
+  assert.deepEqual(bad({ number: 'count' }), { number: 'count' });
+  assert.equal(bad('Build {n}'), undefined);
+});
+
+test('pushPaths and workdirOf read the folder a workflow and a contraption ship from', () => {
+  assert.deepEqual(pushPaths('on:\n  push:\n    branches: [main]\n    paths: [\'android/**\', ".github/x.yml"]\njobs: {}\n'), ['android/**', '.github/x.yml']);
+  assert.equal(pushPaths('on:\n  push:\n    branches: [main]\n  pull_request:\n    paths: [a/**]\njobs: {}\n'), null, "a PR's filter is not the push's");
+  assert.equal(pushPaths('on: push\n'), null);
+  assert.equal(workdirOf('{"workdir": "./companion/"}'), 'companion/');
+  for (const t of ['{"workdir": "."}', '{"workdir": "../up"}', '{}', 'not json', null]) assert.equal(workdirOf(t), undefined, String(t));
+});
+
+test('shipsTo: each file goes to the targets whose folder holds it, the rest to the folderless ones, nothing known to the first', () => {
+  // Peek: companion/ is its contraption, the rest builds Windows. Mandate: android/ the APK, the rest the web app.
+  const peek = [{ id: 'app:peek', kind: 'contraption', paths: ['companion/'] }, { id: 'ci:windows:release', kind: 'ci' }];
+  assert.deepEqual(shipsTo(['companion/src/a.ts'], peek), ['app:peek']);
+  assert.deepEqual(shipsTo(['crates/x/lib.rs', 'README.md'], peek), ['ci:windows:release']);
+  assert.deepEqual(shipsTo(['companion/a.ts', 'crates/x.rs'], peek), ['app:peek', 'ci:windows:release'], 'a change can ship on both');
+  assert.deepEqual(shipsTo(['companionship.md'], peek), ['ci:windows:release'], 'a folder, not a name prefix');
+  assert.deepEqual(shipsTo([], peek), ['app:peek'], 'no files known: the first target');
+  assert.deepEqual(shipsTo(null, peek), ['app:peek']);
+  const mandate = [{ id: 'app:mandate', kind: 'contraption' }, { id: 'apk:android-release', kind: 'apk', paths: ['android/**'] }];
+  assert.deepEqual(shipsTo(['android/app/build.gradle'], mandate), ['apk:android-release']);
+  assert.deepEqual(shipsTo(['server.ts'], mandate), ['app:mandate']);
+  // Every target has a folder and the file is in none: the first target, so the change never drops out.
+  assert.deepEqual(shipsTo(['docs/x.md'], [{ id: 'a', kind: 'ci', paths: ['a/'] }, { id: 'b', kind: 'ci', paths: ['b/'] }]), ['a']);
+  // A shared release file has no pipeline: it takes changes only when it is all there is.
+  assert.deepEqual(shipsTo(['x'], [{ id: 'file:windows', kind: 'file' }, { id: 'main', kind: 'main' }]), ['main']);
+  assert.deepEqual(shipsTo(['x'], [{ id: 'file:windows', kind: 'file' }]), ['file:windows']);
+  assert.deepEqual(shipsTo(['x'], []), []);
 });
 
 test('shipsOn: a push to the default branch, a tag or a release ships; another branch or a PR does not; dispatch alone is by hand', () => {

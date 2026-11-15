@@ -9,7 +9,7 @@ import type { Kind } from './ci-store.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
 import { CITADEL_TARGET, git, landedIn, releaseOf, type Change, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
-import { shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
+import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { median } from './waits.ts';
 
@@ -310,6 +310,18 @@ class RunsCache {
     this.kind = kind;
   }
 
+  /** Whether commit `head` touched a file in the target's folders (its workflow's push filter): one git call per head. */
+  private touched = new Map<string, boolean>();
+  private async touches(t: Found, head: string, dir: string): Promise<boolean> {
+    const key = `${tkey(t)} ${head}`;
+    if (!this.touched.has(key)) {
+      if (this.touched.size > 64) this.touched.clear();
+      const files = (await git(['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', head], dir))?.split('\n').filter(Boolean) ?? [];
+      this.touched.set(key, files.some((f) => holds(t, f)));
+    }
+    return this.touched.get(key)!;
+  }
+
   /** Read a target's runs again on the next refresh, moving or not (a run was just started for it). */
   forget(t: Found) {
     this.readAt.delete(tkey(t));
@@ -324,7 +336,9 @@ class RunsCache {
     const age = now - (this.readAt.get(tkey(t)) ?? 0);
     if (had && !moving && age < IDLE_MS) {
       const [head, ct] = (p.repo_dir ? (await git(['log', '-1', '--format=%H %ct', t.branch], p.repo_dir))?.trim().split(' ') : null) ?? [];
-      if (age < EARLY_MS || !head || had.some((r) => r.run.head_sha === head) || now - Number(ct) * 1000 > FRESH_MS) return;
+      // Early only for a push-built CI job whose filter takes the new commit: an APK's runs are Citadel's to start (it forgets them then).
+      if (t.kind !== 'ci' || age < EARLY_MS || !head || had.some((r) => r.run.head_sha === head) || now - Number(ct) * 1000 > FRESH_MS) return;
+      if (t.paths?.length && !(await this.touches(t, head, p.repo_dir!))) return;
     }
     const runs = await this.d.actions.workflowRuns(p, t.workflow.replace(/^.*\//, ''), t.branch);
     if (!runs) return;
@@ -474,7 +488,8 @@ export class CiPackageReader implements Reader {
       const inRun = new Set(moving ? ch(moving).map((c) => c.ticketId) : []);
       const changes: Change[] = [
         ...(running ? ch(moving!).map((c) => ({ ...c, ...running })) : []),
-        ...(waiting ? (ahead?.tickets ?? []).filter((x) => !inRun.has(x.id)).map((x) => ({ ...asChange(x), ...waiting })) : []),
+        // Past the run in flight: not in its build, so not under its number.
+        ...(waiting ? (ahead?.tickets ?? []).filter((x) => !inRun.has(x.id)).map((x) => ({ ...asChange(x), ...waiting, ...(moving ? { later: true } : {}) })) : []),
       ];
       const lead = running ?? waiting;
       // A target numbered by run knows its number once its run exists.
@@ -542,8 +557,11 @@ export class ApkReader implements Reader {
       // With no latest.json its signed runs are its releases, numbered as a CI package's.
       const feed = this.feeds.get(tkey(t));
       if (!feed) this.cache.record(t);
-      // The published APK's commit: the newest signed run from before latest.json was written.
-      const built = feed ? (this.cache.runs.get(tkey(t)) ?? []).find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at) : null;
+      // The published APK's commit: the run Citadel published it from, else (a hand publish) the newest signed run from before
+      // latest.json was written.
+      const runs = this.cache.runs.get(tkey(t)) ?? [];
+      const pub = feed && t.contraption ? this.d.store.lastApkPublish(t.projectId, t.contraption) : null;
+      const built = !feed ? null : (pub?.version_code === feed.versionCode ? runs.find((r) => r.run.id === pub.run_id) : null) ?? runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at);
       this.ahead.set(tkey(t), await this.cache.since(t, built?.run.head_sha ?? null));
       const p = this.d.store.getProject(t.projectId);
       if (!p?.repo_dir) continue;
@@ -805,9 +823,10 @@ export class LandsInFlight {
       for (const tv of mine.filter((v) => on.has(v.target.id))) {
         if (tv.next?.changes.some((c) => c.ticketId === id)) continue;
         if (tv.next) {
-          // Its own release leads: what is on main is further along than a land.
+          // Its own release leads: what is on main is further along than a land. A release already building can't take it.
           const stages = tv.next.stages.some((s) => s.name === 'land') ? tv.next.stages : [{ name: 'land', usual: null }, ...tv.next.stages];
-          tv.next = { ...tv.next, stages, changes: [...tv.next.changes, change] };
+          const later = tv.next.changes.some((c) => !c.waitingOn && !c.later && c.stage !== 'land');
+          tv.next = { ...tv.next, stages, changes: [...tv.next.changes, later ? { ...change, later } : change] };
           continue;
         }
         // An APK's number is its versionCode, a run-numbered target's its run's: neither known yet.

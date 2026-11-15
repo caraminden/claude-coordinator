@@ -138,6 +138,11 @@ test('shipsTo: each file goes to the targets whose folder holds it, the rest to 
   assert.deepEqual(shipsTo(['x'], [{ id: 'file:windows', kind: 'file' }, { id: 'main', kind: 'main' }]), ['main']);
   assert.deepEqual(shipsTo(['x'], [{ id: 'file:windows', kind: 'file' }]), ['file:windows']);
   assert.deepEqual(shipsTo(['x'], []), []);
+  // A `!` pattern excludes, the last match deciding, as GitHub reads a paths filter.
+  const split = [{ id: 'ci', kind: 'ci' as const, paths: ['**', '!android/**'] }, { id: 'apk', kind: 'apk' as const, paths: ['android/'] }];
+  assert.deepEqual(shipsTo(['android/app/A.kt'], split), ['apk']);
+  assert.deepEqual(shipsTo(['src/a.rs'], split), ['ci']);
+  assert.deepEqual(shipsTo(['android/keep.md'], [{ id: 'ci', kind: 'ci', paths: ['!android/**', 'android/keep.md'] }]), ['ci'], 'a later include wins back');
 });
 
 test('shipsOn: a push to the default branch, a tag or a release ships; another branch or a PR does not; dispatch alone is by hand', () => {
@@ -822,6 +827,14 @@ test('a CI package numbered by run: what is on main for it waits for CI, a run c
   assert.deepEqual([v.next?.stage, v.next?.number, v.next?.name], ['package', 997, 'Build 997']);
   assert.deepEqual(v.next?.changes.map((c) => [c.title, c.stage]), [['Overlay fix', 'package']]);
 
+  // Something lands after run 997 started: its checkout can't hold it, so it's marked for the build after.
+  minion('Hotkey fix', 'ticket/3-hotkey');
+  const after = landOne(repo, Date.now() + 3000, 'crates/hotkey/lib.rs', 'ticket/3-hotkey');
+  clock += 35_000;
+  await reader.refresh();
+  v = view();
+  assert.deepEqual(v.next?.changes.map((c) => [c.title, c.stage, !!c.later]), [['Overlay fix', 'package', false], ['Hotkey fix', 'ci', true]]);
+
   // Its release job fails: what it carried waits on a fix.
   runs[0] = { ...run(997, 'completed', 'failure', now - 1 * m, clock), head_sha: head };
   jobs[997] = [job(997, 'release', 'completed', 'failure', now - 1 * m, clock)];
@@ -831,12 +844,12 @@ test('a CI package numbered by run: what is on main for it waits for CI, a run c
   assert.deepEqual(v.recent.map((r) => [r.number, r.name, r.outcome]), [[997, 'Build 997', 'failed']]);
 
   // Fixed and shipped: the release carries only what ships on Windows, and nothing is left on its way.
-  runs.unshift({ ...run(998, 'completed', 'success', clock, clock + m), head_sha: head });
+  runs.unshift({ ...run(998, 'completed', 'success', clock, clock + m), head_sha: after });
   jobs[998] = [job(998, 'release', 'completed', 'success', clock, clock + m)];
   clock += 6 * m;
   await reader.refresh();
   v = view();
-  assert.deepEqual([v.current?.name, v.current?.changes.map((c) => c.title)], ['Build 998', ['Overlay fix']]);
+  assert.deepEqual([v.current?.name, v.current?.changes.map((c) => c.title)], ['Build 998', ['Overlay fix', 'Hotkey fix']]);
   assert.equal(v.next, null);
 });
 
@@ -859,7 +872,9 @@ test('an APK: changes to its folder on main with no version bump wait on one; th
   landOne(repo, Date.now() + 2000, 'server.ts', 'ticket/2-inbox');
   const web: Found = { id: 'app:mandate', projectId: p.id, name: 'Web', kind: 'contraption', link: '/apps/mandate/', branch: 'main', contraption: 'mandate' };
   const t: Found = { id: 'apk:android-release', projectId: p.id, name: 'Android', kind: 'apk', link: '/apps/mandate/android/', branch: 'main', workflow: '.github/workflows/android-release.yml', contraption: 'mandate', paths: ['android/'] };
-  const { actions } = fakeActions([{ ...run(6, 'completed', 'success', now - 290 * m, now - 280 * m), head_sha: built }], {});
+  // Run 7 signed main's head before latest.json was written, but Citadel published run 6's APK: the next counts from 6.
+  const { actions } = fakeActions([{ ...run(7, 'completed', 'success', now - 250 * m, now - 240 * m), head_sha: git(repo, 'rev-parse', 'HEAD') }, { ...run(6, 'completed', 'success', now - 290 * m, now - 280 * m), head_sha: built }], {});
+  store.recordApkPublish({ projectId: p.id, contraption: 'mandate', versionCode: 5, runId: 6, by: 'Cara', uid: null });
   const reader = new ApkReader({ store, finder: finderOf([web, t]), actions, now: () => now, feed: async () => ({ versionCode: 5, apk: 'mandate-5.apk', at: now - 200 * m }) });
   await reader.refresh();
   const [v] = reader.read();
@@ -868,6 +883,30 @@ test('an APK: changes to its folder on main with no version bump wait on one; th
   assert.deepEqual(v.next?.changes.map((c) => c.title), ['Widget']);
   assert.equal(v.next?.number, null, 'its versionCode is not known before the bump');
   assert.equal(reader.pending(t), null, 'nothing for auto-deploy to start');
+});
+
+test("a CI job's runs are read again early only when main's new head is in its push filter (#764)", async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `early-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  const now = Date.now(), m = 60_000;
+  const base = landOne(repo, now - 60 * m, 'README.md');
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek');
+  store.setProjectRepoDir(p.id, repo);
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', paths: ['crates/'] };
+  const { actions, reads } = fakeActions([{ ...run(1, 'completed', 'success', now - 58 * m, now - 50 * m), head_sha: base }], { 1: [job(1, 'release', 'completed', 'success', now - 55 * m, now - 50 * m)] });
+  let clock = now;
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => clock });
+  await reader.refresh();
+  landOne(repo, now, 'companion/a.ts');
+  clock += 35_000;
+  await reader.refresh();
+  assert.equal(reads.runs, 1, 'outside its filter: no run will come, so no early read');
+  landOne(repo, now, 'crates/a.rs');
+  clock += 35_000;
+  await reader.refresh();
+  assert.equal(reads.runs, 2);
 });
 
 test('landProgress: in line for the lock with its place, then landing', () => {
@@ -919,6 +958,11 @@ test('a handed-off land is on its targets from the hand-off: in line, then landi
   lands.attach(vs);
   assert.deepEqual(vs[1].next?.stages.map((s) => s.name), ['land', 'ci', 'package', 'live']);
   assert.deepEqual(vs[1].next?.changes.map((c) => [c.title, c.stage, c.waitingOn]), [['On main', 'ci', 'w'], ['Overlay fix', 'land', null]]);
+  // A build already under way (its change waits on nothing) can't take the land: it's marked for the one after.
+  vs = views();
+  vs[1].next = { stage: 'package', since: 0, usual: null, waitingOn: null, text: 'p', number: 997, link: null, stages: [{ name: 'ci', usual: null }, { name: 'package', usual: 5 }, { name: 'live', usual: 0 }], eta: null, changes: [{ ticketId: 99, number: 9, title: 'On main', stage: 'package', since: 0, usual: null, waitingOn: null, text: 'p' }] };
+  lands.attach(vs);
+  assert.deepEqual(vs[1].next?.changes.map((c) => [c.title, !!c.later]), [['On main', false], ['Overlay fix', true]]);
 
   // Done: off the list (a reader has it on main now).
   code = 0;

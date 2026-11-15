@@ -209,7 +209,22 @@ export function pushPaths(text: string): string[] | null {
 }
 
 /** A path filter as a prefix: what comes before its first glob character ("android/**" → "android/"); "" holds everything. */
-const prefixOf = (p: string) => p.replace(/^\.?\//, '').split(/[*?[{!]/)[0];
+const prefixOf = (p: string) => p.replace(/^\.?\//, '').split(/[*?[{]/)[0];
+
+/**
+ * Whether a target's folders hold file `f`, as GitHub reads a `paths:` list: the last pattern that matches decides, a
+ * `!` one excluding. shortcut: a pattern matches by its prefix before the first glob character, so `*.md` holds every
+ * file; match whole globs if a scheme's filter needs it.
+ */
+export function holds(t: Pick<Found, 'paths'>, f: string): boolean {
+  let held = false;
+  for (const p of t.paths ?? []) {
+    const neg = p.startsWith('!');
+    const x = prefixOf(neg ? p.slice(1) : p);
+    if (!x || f === x.replace(/\/$/, '') || f.startsWith(x.endsWith('/') ? x : `${x}/`)) held = !neg;
+  }
+  return held;
+}
 
 /**
  * The targets a change ships on (#764), by the files it touched: each file goes to the targets whose folder holds it,
@@ -220,10 +235,6 @@ const prefixOf = (p: string) => p.replace(/^\.?\//, '').split(/[*?[{!]/)[0];
 export function shipsTo(files: string[] | null | undefined, targets: Pick<Found, 'id' | 'kind' | 'paths'>[]): string[] {
   const own = targets.filter((t) => t.kind !== 'file');
   const list = own.length ? own : targets;
-  const holds = (t: Pick<Found, 'paths'>, f: string) => !!t.paths?.some((p) => {
-    const x = prefixOf(p);
-    return !x || f === x.replace(/\/$/, '') || f.startsWith(x.endsWith('/') ? x : `${x}/`);
-  });
   const out = new Set<string>();
   for (const f of files ?? []) {
     const mine = list.filter((t) => holds(t, f));

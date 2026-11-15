@@ -1945,6 +1945,11 @@ export class Store {
     this.db.prepare('INSERT INTO apk_publishes (project_id, contraption, version_code, run_id, published_by, uid, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(r.projectId, r.contraption, r.versionCode, r.runId, r.by, r.uid, Date.now());
   }
 
+  /** The newest Android build Citadel published into a contraption's feed (#764: what the next release counts from). */
+  lastApkPublish(projectId: number, contraption: string): { version_code: number; run_id: number } | null {
+    return (this.db.prepare('SELECT version_code, run_id FROM apk_publishes WHERE project_id = ? AND contraption = ? ORDER BY at DESC, rowid DESC LIMIT 1').get(projectId, contraption) as { version_code: number; run_id: number } | undefined) ?? null;
+  }
+
   /** Pins on files of a project's shared folder, by path relative to it. Kept while the file is gone, like an artifact's. */
   sharedPins(projectId: number): SharedPin[] {
     return this.db.prepare('SELECT path, pinned_at, pinned_by FROM shared_pins WHERE project_id = ?').all(projectId) as unknown as SharedPin[];

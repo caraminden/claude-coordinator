@@ -507,7 +507,8 @@ export function releaseChip(t) {
   for (const tv of schemes.get(t.project_id)?.targets ?? []) {
     const c = tv.next?.changes.find((x) => x.ticketId === t.id);
     if (c) {
-      const n = tv.next.number;
+      // A change past the build under way isn't in it, so it carries no number (#764).
+      const n = c.later ? null : tv.next.number;
       // Only the number opens the release itself (its test copy); the rest of the chip opens the scheme's page at this change.
       return h('span', { class: 'rel-chip' },
         n != null ? versionLink(tv.next, 'rel-ver', true) : '',
@@ -529,7 +530,11 @@ export function pendingRelease(t) {
   if (!t || !loaded) return null;
   for (const tv of schemes.get(t.project_id)?.targets ?? []) {
     const c = tv.next?.changes.find((x) => x.ticketId === t.id);
-    if (c) return { name: tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? 'Next release', target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text };
+    if (!c) continue;
+    // A change past the build under way (`later`) goes out in the one after, which has no number yet.
+    const tpl = tv.target.numbering?.name;
+    const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';
+    return { name: c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text };
   }
   return null;
 }
@@ -537,7 +542,7 @@ export function pendingRelease(t) {
 /** Each minion's pending release as rows show it, so a releases event redraws the list only when one changed. */
 let rowsKey = '';
 function rowsChanged() {
-  const key = JSON.stringify([...schemes.values()].flatMap((s) => s.targets.flatMap((tv) => (tv.next?.changes ?? []).map((c) => [c.ticketId, tv.next.number, tv.next.name, c.stage, c.waitingOn ?? c.text]))));
+  const key = JSON.stringify([...schemes.values()].flatMap((s) => s.targets.flatMap((tv) => (tv.next?.changes ?? []).map((c) => [c.ticketId, tv.next.number, tv.next.name, c.later, c.stage, c.waitingOn ?? c.text]))));
   const changed = key !== rowsKey;
   rowsKey = key;
   return changed;

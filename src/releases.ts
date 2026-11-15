@@ -66,6 +66,8 @@ export interface Change extends Progress {
   title: string;
   /** Citadel's own changes: its minion is open with a worktree, so a person can start its preview from the list (#638). */
   canPreview?: boolean;
+  /** Not in the release under way (#764): it landed after that build started, so it goes out in the one after. */
+  later?: boolean;
 }
 
 export interface Next extends Progress {

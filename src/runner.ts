@@ -2686,7 +2686,7 @@ export class Runner {
     this.notePushes(ticketId, ev);
   }
 
-  /** A main-thread message without its status trailers, remembering the last good one for the turn's end; a bad one is noted once. */
+  /** A main-thread message without its status trailer, remembering the last good one for the turn's end; a bad one is noted once. */
   private stripStatus(ticketId: number, ev: any): any {
     let changed = false;
     const content = ev.message.content.flatMap((b: any) => {
@@ -2696,6 +2696,8 @@ export class Runner {
       changed = true;
       if (status) this.statuses.set(ticketId, status);
       if (bad) {
+        // A later reply's bad line (a sent-back reply's rewrite) doesn't let an earlier reply's line stand.
+        this.statuses.delete(ticketId);
         console.log(`[status] minion ${ticketId}: ignored a status trailer, ${bad}`);
         this.emit(ticketId, 'note', { text: `The reply's status line was ignored (${bad}), so the state stays as it was.` });
       }

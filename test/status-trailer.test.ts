@@ -20,10 +20,12 @@ test('a reply without a trailer comes back untouched', () => {
   assert.deepEqual(takeStatus(text), { text, status: null, bad: null });
 });
 
-test('the last trailer wins, title and build are left to the tool, and backticks around it go too', () => {
-  const r = takeStatus('A\n<!-- status: {"state":"blocked"} -->\nB\n`<!-- status: {"state":null,"note":"waiting","title":"X","build":3} -->`');
-  assert.equal(r.text, 'A\nB');
+test('only a closing trailer counts: an example quoted earlier stays, and title and build are left to the tool', () => {
+  const r = takeStatus('Write `<!-- status: {"state":"blocked"} -->` at the end.\n`<!-- status: {"state":null,"note":"waiting","title":"X","build":3} -->`');
+  assert.equal(r.text, 'Write `<!-- status: {"state":"blocked"} -->` at the end.');
   assert.deepEqual(r.status, { state: null, note: 'waiting' });
+  const quoted = 'Like this:\n```\n<!-- status: {"state":"ready"} -->\n```\nThat is all.';
+  assert.deepEqual(takeStatus(quoted), { text: quoted, status: null, bad: null });
 });
 
 test('a malformed trailer is still hidden, and says why it was ignored', () => {
@@ -34,14 +36,15 @@ test('a malformed trailer is still hidden, and says why it was ignored', () => {
   assert.match(takeStatus('<!-- status: {"colour":"red"} -->').bad!, /no state, note or replies/);
 });
 
-// Through the server: a stand-in claude replies with whatever reply.txt holds, as one message, then ends the turn.
+// Through the server: a stand-in claude replies with whatever reply.txt holds, then ends the turn.
 const root = mkdtempSync(join(tmpdir(), 'status-trailer-'));
 const replyFile = join(root, 'reply.txt');
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!${process.execPath}
 const text = require('node:fs').readFileSync(${JSON.stringify(replyFile)}, 'utf8');
 process.stdin.once('data', () => {
-  console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }));
+  // Messages split on a line of ===, each its own assistant message.
+  for (const t of text.split(/\\n===\\n/)) console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: t }] } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: text }));
   process.exit(0);
 });
@@ -98,4 +101,13 @@ test('a trailer the checks refuse is noted, and the state stays cleared', async 
   assert.equal((await replies()).at(-1), 'All done.');
   assert.equal((await ticket()).state, null);
   assert.ok((await notes()).some((n) => /status line was refused: State complete needs a note/.test(n)));
+});
+
+test("a later message's bad line doesn't let an earlier message's line stand", async () => {
+  await turn('First go.\n<!-- status: {"state":"ready","replies":["Merge it"]} -->\n===\nSecond go.\n<!-- status: {state: blocked} -->');
+  assert.equal((await replies()).at(-1), 'Second go.');
+  const t = await ticket();
+  assert.equal(t.state, null);
+  assert.deepEqual(t.replies, []);
+  assert.ok((await notes()).some((n) => /status line was ignored \(not JSON/.test(n)));
 });

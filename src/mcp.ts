@@ -1147,16 +1147,13 @@ function schemeOf(args: any): number {
 /** The first line of another scheme's minions, so its numbers aren't taken for this scheme's (the chat links a bare #N here). */
 const otherScheme = (name: string) => `Scheme ${name}: these are its minions, not this scheme's; write each as "${name} #N".`;
 
-/** The label fields a call sets; ones left out stay as they are. A retired `tag` still goes along: the server makes it the type. */
+/** The label fields a call sets; ones left out stay as they are. */
 function labelFields(args: any) {
   const out: Record<string, unknown> = {};
-  for (const k of ['title', 'tag', 'state', 'note', 'replies', 'build']) if (args[k] !== undefined) out[k] = args[k];
+  for (const k of ['title', 'state', 'note', 'replies', 'build']) if (args[k] !== undefined) out[k] = args[k];
   return out;
 }
 
-// shortcut: a session that still sends the retired tag (#254) gets it as its type, and this; remove after a release.
-const TAG_RETIRED = 'tag is retired: set `type` with set_properties (or create_ticket\'s properties) instead. Until then an old tag still sets the type when none is given.';
-const tagNote = (args: any) => (args.tag ? `\n${TAG_RETIRED}` : '');
 
 /** land.sh's forms, for the land and hand_off_land tools (landArgs in src/land.ts checks them). */
 const LAND_PROPS = {
@@ -1374,9 +1371,9 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'create_ticket': {
       // A session that loaded an older schema may leave out properties (or its type); a missing type
-      // must not stop it starting minions, so it gets `other` (or a retired tag's type, server-side) and is told.
+      // must not stop it starting minions, so it gets `other` and is told.
       const properties = args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties) ? { ...args.properties } : {};
-      const untyped = !args.tag && !Object.keys(properties).some((k) => k.toLowerCase() === 'type');
+      const untyped = !Object.keys(properties).some((k) => k.toLowerCase() === 'type');
       if (untyped) properties.type = 'other';
       // A chained minion's brief waits for its leader, which may be the one writing the file.
       if (args.start_after == null) sharedFilesExist(args.message, 'Start this minion');
@@ -1390,7 +1387,6 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
         title: args.title,
-        tag: args.tag ?? undefined,
         properties,
         message: args.message,
         start_after: args.start_after ?? null,
@@ -1404,7 +1400,7 @@ async function runTool(name: string, args: any): Promise<string> {
         plugin_dirs: args.plugin_folders,
       });
       const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];
-      return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n') + tagNote(args);
+      return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n');
     }
     case 'read_person_instructions': {
       if (typeof args.person !== 'string' || !args.person.trim()) throw new Error('person is required: their name or login.');
@@ -1565,8 +1561,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
-      if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}${tagNote(args)}`;
+      needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
     case 'ask_question': {
       const direct = args.to ? { to: args.to } : {};
       if (args.to && args.questions == null) {
@@ -1636,11 +1632,11 @@ async function runTool(name: string, args: any): Promise<string> {
       return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'set_thread_status':
-      if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
+      needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
     {
       const t = await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args));
       const cancelled = t.close_cancelled ? `close_self is cancelled: ${t.close_cancelled}, so this minion stays open after this turn. If nothing is left for people, set another state and call close_self again. ` : '';
-      return `Updated. ${cancelled}${ticketLine(t)}${tagNote(args)}`;
+      return `Updated. ${cancelled}${ticketLine(t)}`;
     }
     case 'message_coordinator': {
       const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });

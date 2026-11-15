@@ -60,11 +60,6 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   if ((body.state === 'complete' || clearsNote) && !fields.note) {
     throw new HttpError(400, 'State complete needs a note in the same call saying what is left: "nothing left", or what people should read now ("read: the PR #12 report"), at most 60 characters. Link the files themselves in your reply');
   }
-  // shortcut: an old session's retired tag (#254) sets its type through type's aliases (process → chore, idea → ideation); remove after a release.
-  if (body.tag && ticket.kind === 'ticket') {
-    store.props.set('minion', id, ticket.project_id, { type: body.tag }, name);
-    runner.broadcastTicket(id);
-  }
   // The view's replies are a list; compare the stored JSON.
   const stored = store.getTicket(id)!;
   for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];

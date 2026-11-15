@@ -709,8 +709,6 @@ export const projectRoutes: Route[] = [
       const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
       if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
       const given = (key: string) => Object.keys(props).some((k) => k.toLowerCase() === key.toLowerCase());
-      // shortcut: an old session's retired tag (#254) becomes its type through type's aliases (process → chore, idea → ideation); remove after a release.
-      if (body.tag && !given('type')) props.type = body.tag;
       if (!caller && !given('requestedBy')) props.requestedBy = session.name;
       // The minion it is started for (#273): `parent` (#N, null for none), else the minion whose relay the Taskmaster's turn answers.
       const parent = body.parent !== undefined ? parentMinion(store, project.id, body.parent) : caller ? sameScheme(store, project.id, runner.relayedBy(caller.id)) : null;

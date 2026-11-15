@@ -118,8 +118,8 @@ export function resetsAt(now = Date.now()): string {
 const money = (n: number) => `$${n.toFixed(n < 1 ? 3 : 2)}`;
 
 /** A media call's refusal as a stable code (#732), which contraption turns hand to their app. */
-export type MediaCode = 'openrouter_not_connected' | 'openrouter_key_refused' | 'over_cap' | 'over_call_limit' | 'openrouter_refused' | 'bad_request' | 'failed';
-const refusal = (status: number, code: MediaCode, message: string) => Object.assign(new HttpError(status, message), { code });
+export type MediaCode = 'openrouter_not_connected' | 'openrouter_key_refused' | 'over_cap' | 'over_call_limit' | 'openrouter_refused' | 'codex_over_pace' | 'codex_not_ready' | 'bad_request' | 'failed';
+export const refusal = (status: number, code: MediaCode, message: string) => Object.assign(new HttpError(status, message), { code });
 /** The code for any error a media call threw: its own, else a bad argument (4xx) or a failure. */
 export const mediaCode = (err: unknown): MediaCode => (err as { code?: MediaCode } | null)?.code ?? (err instanceof HttpError && err.status < 500 ? 'bad_request' : 'failed');
 /** Asked of a model with no transparent background of its own, so the matte has black to take out. */
@@ -141,7 +141,7 @@ export const MEDIA_TOOLS = ['generate_image', 'edit_image', 'generate_audio'] as
 export type MediaTool = (typeof MEDIA_TOOLS)[number];
 const IMAGE_EXT = new Set(['.png', '.webp', '.svg']);
 const AUDIO_EXT = new Set(['.mp3', '.wav']);
-const INPUT_IMAGE = (p: string) => (/\.(png|jpe?g|webp)$/i.test(p) ? 'image' : null);
+export const INPUT_IMAGE = (p: string) => (/\.(png|jpe?g|webp)$/i.test(p) ? 'image' : null);
 const MEDIA_TYPES: Record<string, string> = { 'image/png': '.png', 'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/svg+xml': '.svg' };
 const MAX_INPUT_BYTES = 20 * 1024 * 1024;
 
@@ -495,7 +495,7 @@ async function* sse(res: Response): AsyncGenerator<any> {
 const licence = (model: string) => `Made with ${model} through OpenRouter; check the provider's terms before shipping it.`;
 
 /** Where an output goes: inside one of `roots` (relative to the first), with an extension from `exts`. */
-function outPath(out: unknown, roots: string[], exts: Set<string>, place = MINION_PLACE): string {
+export function outPath(out: unknown, roots: string[], exts: Set<string>, place = MINION_PLACE): string {
   if (typeof out !== 'string' || !out.trim() || out.includes('\0')) throw new HttpError(400, 'out is the file to write, like art/hero.png');
   const file = resolve(roots[0], out.trim());
   if (!exts.has(extname(file).toLowerCase())) throw new HttpError(400, `out ends in ${[...exts].join(', ')}`);
@@ -516,7 +516,7 @@ function outPath(out: unknown, roots: string[], exts: Set<string>, place = MINIO
 }
 
 /** The i-th of n files for `out` (name-1.png, name-2.png when n > 1), refused if it or its .json note is there and overwrite isn't set, or is a link. */
-function target(out: string, n: number, i: number, overwrite: boolean): string {
+export function target(out: string, n: number, i: number, overwrite: boolean): string {
   const ext = extname(out);
   const file = n > 1 ? `${out.slice(0, -ext.length)}-${i + 1}${ext}` : out;
   for (const f of [file, `${file}.json`]) {
@@ -533,7 +533,7 @@ function target(out: string, n: number, i: number, overwrite: boolean): string {
   return file;
 }
 
-function writeOutput(file: string, bytes: Buffer, note: object) {
+export function writeOutput(file: string, bytes: Buffer, note: object) {
   writeFileSync(file, bytes);
   writeFileSync(`${file}.json`, `${JSON.stringify(note, null, 2)}\n`);
 }

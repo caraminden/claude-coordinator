@@ -236,7 +236,7 @@ Body up to 4,000,000 bytes:
 | `agents` | | `false` (default) or `{ max, model }`: lets the agent start Grunts (the Agent tool), at most `max` (1 to 10, default 1) at once, nested ones included; `model` defaults to the turn's |
 | `webSearch` | | `true` adds WebSearch and WebFetch for the agent and its Grunts; default `false`. WebFetch puts a web page in front of the model, so keep your write tools behind the person's explicit asks on such turns |
 | `machines` | | `false` leaves out the person's online machines and the system prompt's note on them; default `true`. For a turn that must see only its prompt, such as a blind grader |
-| `media` | | `true` gives the agent Citadel's image and sound tools, spending the person's own OpenRouter money ("Media" below); default `false`. Your own `mcp` servers can't be called `citadel` then |
+| `media` | | `true` gives the agent Citadel's image and sound tools, spending the person's own OpenRouter money, or their Codex plan for PNGs ("Media" below); default `false`. Your own `mcp` servers can't be called `citadel` then |
 | `timeoutSec` | | 1 to 900, default 180 |
 
 Each `mcp` server is reached as `http://127.0.0.1:$PORT<path>` (streamable HTTP) with your headers
@@ -247,7 +247,7 @@ there: Citadel passes it through and never reads it.
 **What the agent can use** (tested): your MCP servers' tools (`mcp__<name>__<tool>`), the person's
 own machines that are online unless `machines` is `false` (their MCP servers, as `mcp__<machine>`;
 a server of yours with the same name wins and the machine is left out), Agent if `agents` is set, WebSearch and WebFetch
-if `webSearch` is `true`, and `mcp__citadel__generate_image`, `edit_image` and `generate_audio` if `media` is `true`. Nothing else: no shell, no files, no Citadel or scheme tools, no user
+if `webSearch` is `true`, and `mcp__citadel__generate_image`, `edit_image` and `generate_audio` if `media` is `true` (and `generate_image_codex` when the person has Codex). Nothing else: no shell, no files, no Citadel or scheme tools, no user
 settings, CLAUDE.md, memory, skills or plugins. Each (contraption, person) gets an empty scratch
 folder as its working directory.
 
@@ -340,6 +340,16 @@ refused before anything is spent. The key never reaches the turn, the agent or y
 They're offered even to a person who never connected OpenRouter, so the agent can say why it can't
 make anything; every call is then refused with `openrouter_not_connected` (tested).
 
+When the person has Codex set up in Citadel (their container signed in, or the server login's Codex
+container), the turn also gets `generate_image_codex`: a PNG from Codex's built-in image generation
+(OpenAI gpt-image) on their own ChatGPT plan, with no per-image charge. It takes `prompt`, `out`
+(`.png`), `refs` (up to 5 images in the folder, to edit or take style from), `background:
+"transparent"` (Codex's own transparency, no matte) and `overwrite`, and takes a minute or two. Its
+description tells the agent to use it first for a PNG and fall back to `generate_image` when it's
+refused with `codex_over_pace`. It writes to the same folder with a note and sends the same `media`
+event, with `"model": "codex image_gen"`, `"cost_usd": 0` and no `left_usd` (tested with a stand-in
+for Codex; no real Codex run was made).
+
 Only turn it on where the person asked for generated art or sound (a spell-alert maker, say): it's
 their money, and drawing in code is the default everywhere else.
 
@@ -380,7 +390,9 @@ starts with the same `code`.
 | `over_call_limit` | It could cost over $0.50 |
 | `openrouter_refused` | OpenRouter said no: out of credit, or a limit they set on OpenRouter |
 | `bad_request` | A bad argument; the agent usually fixes it and retries |
-| `failed` | OpenRouter didn't answer, or the call broke |
+| `codex_over_pace` | `generate_image_codex` only: the person's Codex use is ahead of pace for their 5-hour or weekly limit, so it's left for their own work; the agent uses `generate_image` instead |
+| `codex_not_ready` | `generate_image_codex` only: Codex can't run for them right now (not signed in, or their container isn't set up for it) |
+| `failed` | OpenRouter or Codex didn't answer, or the call broke |
 
 **Before a turn:** `GET /api/contraptions/openrouter?person=3` → `{ connected: false, account_url }`
 or `{ connected: true, failed, cap_usd, spent_usd, left_usd, resets, account_url }`, never the key. `account_url` is Citadel's account page for them as a path on Citadel's host
@@ -686,7 +698,7 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 | Turn `mcp` servers | 10 |
 | Turn `agents.max` | 1 to 10 |
 | Turns a day | the registry's `turn_cap`, per person |
-| Media call | $0.50 worst case, within the person's own monthly cap; files kept 30 days |
+| Media call | $0.50 worst case, within the person's own monthly cap ($0 on Codex, within their Codex pace); files kept 30 days |
 | Restart wait for running turns | 3 minutes |
 | Ask files | 20 files, 16 MiB decoded |
 | Ask text, summary, item | 10,000, 200, 100 characters |
@@ -706,7 +718,8 @@ Newest first.
 
 - **2026-11-14:** `media: true` on a turn gives the agent image and sound tools on the person's own
   OpenRouter key and cap, with a media folder you read through `/api/contraptions/media`, a `media`
-  event per call and `GET /api/contraptions/openrouter` to check before a turn ("Media").
+  event per call and `GET /api/contraptions/openrouter` to check before a turn ("Media"). A person with
+  Codex also gets `generate_image_codex`, PNGs on their ChatGPT plan.
 - **2026-11-14:** Each contraption is served on its own host, `<name>.citadel.zip`, signed in through
   Citadel with no second login ("Requests from browsers", "Your own host"). Allow Citadel's hosts to
   frame you (no `X-Frame-Options`, no `frame-ancestors 'self'`). Your installed app, service worker,

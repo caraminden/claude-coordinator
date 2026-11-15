@@ -21,7 +21,7 @@ import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
 import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
-import { MEDIA_SERVER, type MediaTurn } from './contraption-media.ts';
+import { MEDIA_SERVER, type CodexAt, type MediaTurn } from './contraption-media.ts';
 import { claudeConfigDir, transcriptPath, validSessionId } from './sessions.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
@@ -307,6 +307,13 @@ export class ContraptionTurns {
     return null;
   }
 
+  /** Where a media turn's generate_image_codex runs (#732), as a Codex turn would: the person's container, or the server login's Codex one. */
+  private codexAt(person: number, place: TurnPlace): CodexAt | null {
+    const at = this.codexWhy(person) ? null : place.host ? this.claude.codexPlace(person) : place;
+    if (!at || at.host) return null;
+    return { container: at.container, turnsDir: at.turnsDir, env: at.env, tripwire: tripwireConfig(0, at.configDir, false), ensure: at.ensure, podman: this.podman };
+  }
+
   /** Turns running now, which a restart would cut off. */
   running(): number {
     return this.live.size;
@@ -422,7 +429,7 @@ export class ContraptionTurns {
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
     const dir = this.turnDir(id, at);
     const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set(),
-      media: req.media ? { person: req.person, name: c.name, home: c.home_scheme, emit } : null };
+      media: req.media ? { person: req.person, name: c.name, home: c.home_scheme, emit, codex: this.codexAt(req.person, place) } : null };
     this.names.add(key);
     this.live.set(id, live);
     let outcome: string = 'failed';

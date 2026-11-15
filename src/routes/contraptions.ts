@@ -11,7 +11,7 @@ import { adminAskRefusal } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, askFiles, askLine, askMessage, askSummary, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
-import { listMedia, mcpMessage, mediaDir, mediaFile, MEDIA_TYPE, runMediaTool } from '../contraption-media.ts';
+import { listMedia, mcpMessage, mediaDir, mediaFile, mediaTools, MEDIA_TYPE, runMediaTool } from '../contraption-media.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import { ServiceError } from '../app-services.ts';
 import { contraptionRead } from '../contraption-read.ts';
@@ -362,7 +362,7 @@ export const contraptionRoutes: Route[] = [
       if (!turn) throw new HttpError(401, 'Not a running contraption turn with media');
       // No server-sent stream and no sessions: every answer comes back on its POST.
       if (req.method !== 'POST') return send(res, 405, { Allow: 'POST' }, '');
-      const answer = await mcpMessage(await readJson(req, 1_000_000), (tool, args) => runMediaTool(app.openrouter, app.dataDir, turn, tool, args));
+      const answer = await mcpMessage(await readJson(req, 1_000_000), mediaTools(turn), (tool, args) => runMediaTool(app.openrouter, app.dataDir, turn, tool, args));
       if (!answer) return send(res, 202, {}, '');
       return json(res, 200, answer);
     },

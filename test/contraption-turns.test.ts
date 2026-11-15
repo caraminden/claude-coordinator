@@ -621,6 +621,23 @@ test('a turn that asks for media (#732) gets Citadel\'s own media server with it
   assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate']);
 });
 
+test('a media turn offers Codex images only where the person\'s Codex can run: their container, or the server login\'s Codex container', () => {
+  const at = (uid: number) => (turns as any).codexAt(uid, places.place(uid));
+  assert.equal(at(josh.id), null, "codexWhy says Codex isn't set up");
+  turns.codexWhy = () => null;
+  try {
+    const j = at(josh.id);
+    assert.deepEqual({ ...j, ensure: typeof j.ensure, tripwire: j.tripwire.project }, { container: 'citadel-claude-t-2', turnsDir: join(root, 'run', 'turns', 'person-2'), env: places.place(josh.id)!.env, tripwire: 0, ensure: 'function', podman });
+    assert.equal(j.tripwire.claudeConfig, join(vol, '.claude'));
+    assert.equal(at(cara.id), null, 'a host person with no Codex container');
+    caraCodex = { host: false, container: 'citadel-claude-codex-1', configDir: join(root, 'cc'), home: join(root, 'ch'), turnsDir: join(root, 'run', 'turns', 'person-1'), env: {}, ensure: async () => {} };
+    assert.equal(at(cara.id).container, 'citadel-claude-codex-1');
+  } finally {
+    turns.codexWhy = () => "Codex isn't set up on this server";
+    caraCodex = null;
+  }
+});
+
 test('requests are checked before anything runs', () => {
   const bad = (body: object) => assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'p', ...body }, mandate), (e: any) => e.code === 'bad_request');
   bad({ person: 'one' });

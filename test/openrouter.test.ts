@@ -292,7 +292,7 @@ test('through the server: a person connects on their account page and their mini
   const srv = await bootServer({ root: boot, env: { OPENROUTER_BASE_URL: `http://127.0.0.1:${(orServer.address() as { port: number }).port}/api/v1` } });
   const mcp = async (media: boolean, method: string, params: object = {}) => {
     const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-      env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, minion.id), COORDINATOR_PROJECT: String(scheme.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: media ? '1' : '', COORDINATOR_MEMORY: '' },
+      env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, minion.id), COORDINATOR_PROJECT: String(scheme.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: media ? '1' : '', COORDINATOR_CODEX_IMAGES: '', COORDINATOR_MEMORY: '' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
     try {

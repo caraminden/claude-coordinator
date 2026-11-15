@@ -47,8 +47,8 @@ re-writes the whole context (about $2.40 at 300k on Opus). A lean session makes 
 and every wake cheaper. Compaction caps the cost of a session that forgets, but every compaction
 is lossy: what never entered the context can't be lost from it.
 
-Sonnet's cache reads cost what Opus's do, and reads were 35 to 52% of Delve's bill. So moving the
-same work to Sonnet saves only about 25 to 33%. Keeping noisy work out of the session saves more.
+Sonnet costs about half of what Opus does, cache reads included (measured 2026-11-14), so moving
+known-shape work to Sonnet halves it. Keeping noisy work out of the session saves more on top.
 
 ## The test
 

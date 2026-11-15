@@ -276,3 +276,53 @@ test('a card addressed to one person (#687) is in their list alone, waits past t
   assert.match(store.recentCards(citadel, 10).find((r) => JSON.parse(r.data).id === 'q-josh')!.reply ?? '', /"author":"Josh"/);
   assert.equal(store.recentCards(citadel, 10).find((r) => JSON.parse(r.data).id === 'p-josh')!.reply, null);
 });
+
+test('recentCards reads each card row once, and a card changed or deleted after that shows as it is now (#759)', () => {
+  const store = new Store(join(root, 'card-rows.sqlite'));
+  const p = store.createProject('Citadel', null).id;
+  const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const a = minion('a'), b = minion('b');
+  const plan = store.addEvent(a, 'plan', { id: 'p-1', summary: 's', plan: 'p', status: 'pending' });
+  store.addEvent(b, 'question', { id: 'q-1', questions: [] });
+  for (let i = 0; i < 50; i++) store.addEvent(a, 'claude', { type: 'assistant', message: { content: [] } });
+  const ids = () => store.recentCards(p, 10).map((r) => JSON.parse(r.data).id);
+  assert.deepEqual(ids(), ['p-1', 'q-1']);
+
+  // The second read takes the rows it has: changed under it by a write that skips the store, it doesn't see it.
+  const db = (store as any).db;
+  db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify({ id: 'p-1', summary: 'changed behind its back', plan: 'p', status: 'pending' }), plan.id);
+  assert.equal(JSON.parse(store.recentCards(p, 10)[0].data).summary, 's', 'the card row is read once, not on every call');
+
+  store.setEventData(plan.id, { id: 'p-1', summary: 's', plan: 'p', status: 'approved' });
+  assert.equal(JSON.parse(store.recentCards(p, 10)[0].data).status, 'approved', 'setEventData shows at once');
+
+  store.addEvent(a, 'question', { id: 'q-2', questions: [] });
+  store.updateTicket(a, { status: 'closed' });
+  assert.deepEqual(ids(), ['p-1', 'q-1', 'q-2'], 'a new card shows');
+  assert.equal(store.recentCards(p, 10)[0].tstatus, 'closed', 'its minion is read fresh');
+  assert.deepEqual(ids().slice(-2), ['q-1', 'q-2']);
+  assert.deepEqual(store.recentCards(p, 2).map((r) => JSON.parse(r.data).id), ['q-1', 'q-2'], 'the newest `limit`, oldest first');
+
+  // events.id has no AUTOINCREMENT: once the newest event's minion is deleted, the next event takes its id.
+  const d = minion('d');
+  const gone = store.addEvent(d, 'question', { id: 'q-gone', questions: [] });
+  assert.deepEqual(ids(), ['p-1', 'q-1', 'q-2', 'q-gone']);
+  store.deleteTicket(d);
+  store.deleteTicket(b);
+  const reused = store.addEvent(minion('c'), 'approval', { id: 'a-1', tool: 'Bash' });
+  assert.equal(reused.id, gone.id);
+  assert.deepEqual(ids(), ['p-1', 'q-2', 'a-1'], "a deleted minion's cards go, and a new card on a deleted one's id is read fresh");
+});
+
+test('eventsOfKinds reads only those kinds, after an id, oldest first (#759)', () => {
+  const store = new Store(join(root, 'kinds.sqlite'));
+  const p = store.createProject('Citadel', null).id;
+  const t = store.createTicket({ project_id: p, title: 't', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const q = store.addEvent(t, 'question', { id: 'q' });
+  store.addEvent(t, 'claude', { type: 'assistant' });
+  const m = store.addEvent(t, 'user_message', { text: 'hi' });
+  store.addEvent(t, 'plan', { id: 'p' });
+  assert.deepEqual(store.eventsOfKinds(t, ['user_message', 'question']).map((e) => e.id), [q.id, m.id]);
+  assert.deepEqual(store.eventsOfKinds(t, ['user_message', 'question'], q.id).map((e) => e.id), [m.id]);
+  assert.deepEqual(store.eventsOfKinds(t, ['note']), []);
+});

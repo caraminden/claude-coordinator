@@ -273,8 +273,8 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
  */
 function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number } }) {
   const { store, runner } = app;
-  for (const e of store.listEvents(id)) {
-    const old = e.kind === 'plan' ? JSON.parse(e.data) : null;
+  for (const e of store.eventsOfKinds(id, ['plan'])) {
+    const old = JSON.parse(e.data);
     if (old?.status !== 'pending' && old?.status !== 'revising') continue;
     if (old.machine?.id !== card.machine?.id) continue;
     store.setEventData(e.id, { ...old, status: 'superseded' });
@@ -509,12 +509,13 @@ export const ticketRoutes: Route[] = [
       // settle_question: the minion judged that a typed reply answered its card (or a newer card replaced
       // it). The card stops waiting on people: out of the inbox, no longer holding a deploy's dismissal.
       const only = (await readJson(req)).questionId;
-      const events = store.listEvents(id);
-      const answered = new Set(events.map((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId).filter(Boolean));
-      const open = events.filter((e) => {
-        const q = e.kind === 'question' ? JSON.parse(e.data) : null;
-        return q && !q.settled && !answered.has(q.id) && (only == null || q.id === only);
+      const asked = store.eventsOfKinds(id, ['question']).filter((e) => {
+        const q = JSON.parse(e.data);
+        return !q.settled && (only == null || q.id === only);
       });
+      // An answer comes after its card: only messages after the oldest card still asked are read.
+      const answered = new Set(asked.length ? store.eventsOfKinds(id, ['user_message'], asked[0].id).map((e) => JSON.parse(e.data).answer?.questionId).filter(Boolean) : []);
+      const open = asked.filter((e) => !answered.has(JSON.parse(e.data).id));
       if (only != null && !open.length) throw new HttpError(404, 'No open question card with that id');
       const settled = { at: Date.now() };
       for (const e of open) {
@@ -550,10 +551,10 @@ export const ticketRoutes: Route[] = [
       const { id } = ticket;
       const { store, runner } = app;
       const body = await readJson(req);
-      const events = store.listEvents(id);
-      const card = events.find((e) => e.kind === 'question' && JSON.parse(e.data).id === body.questionId);
+      const card = store.eventsOfKinds(id, ['question']).find((e) => JSON.parse(e.data).id === body.questionId);
       if (!card) throw new HttpError(404, 'No such question');
-      if (events.some((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === body.questionId)) {
+      // Its answer can only come after it: the chat's earlier messages are never read.
+      if (store.eventsOfKinds(id, ['user_message'], card.id).some((e) => JSON.parse(e.data).answer?.questionId === body.questionId)) {
         throw new HttpError(409, 'That question has already been answered');
       }
       const data = JSON.parse(card.data);
@@ -630,7 +631,7 @@ export const ticketRoutes: Route[] = [
       // A person approves a plan card (the go) or sends it back with notes; never the minion or the Taskmaster.
       const body = await readJson(req);
       if (body.verdict !== 'approve' && body.verdict !== 'revise') throw new HttpError(400, 'verdict must be approve or revise');
-      const event = store.listEvents(id).find((e) => e.kind === 'plan' && JSON.parse(e.data).id === body.planId);
+      const event = store.eventsOfKinds(id, ['plan']).find((e) => JSON.parse(e.data).id === body.planId);
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
       // A machine's notes card (#617): a reason to reject is optional, and only its owner or an admin approves.

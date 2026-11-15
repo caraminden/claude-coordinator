@@ -466,6 +466,8 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_ticket ON events(ticket_id, id);
 -- A minion's events of one kind without reading its whole history: its open cards (openCardsWhere, #527).
 CREATE INDEX IF NOT EXISTS events_ticket_kind ON events(ticket_id, kind, id);
+-- A scheme's cards without a seek into every minion's events (recentCards, #759): partial, so no other query's plan can change.
+CREATE INDEX IF NOT EXISTS events_cards ON events(ticket_id, kind) WHERE kind IN ('question', 'plan', 'approval');
 CREATE TABLE IF NOT EXISTS artifacts (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
@@ -1770,6 +1772,7 @@ export class Store {
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     this.doneCards.clear(); // events.id has no AUTOINCREMENT: a deleted newest card's id can come back as a new card
     this.cardFates.clear();
+    this.cardRows.clear();
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
@@ -1824,6 +1827,16 @@ export class Store {
   /** Replace an event's data, for cards whose status lives in the card (plans). */
   setEventData(id: number, data: unknown) {
     this.db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify(data), id);
+    this.cardRows.delete(id);
+  }
+
+  /**
+   * A chat's events of these kinds after event `afterId`, oldest first: by index, so a long chat's thousands of Claude
+   * events are never read. Reading a Taskmaster's whole chat to answer one card held the server 1-3 s (#759).
+   */
+  eventsOfKinds(ticketId: number, kinds: string[], afterId = 0): EventRow[] {
+    return this.db.prepare('SELECT * FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?)) AND id > ? ORDER BY id')
+      .all(ticketId, JSON.stringify(kinds), afterId) as unknown as EventRow[];
   }
 
   /** A project's artifacts, newest first, with the title of the ticket that made each. */
@@ -2256,21 +2269,33 @@ export class Store {
    * a click on another card (`reply`), and an approval's result (`result`). For the link check (#531).
    */
   recentCards(projectId: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
-    const cards = this.db.prepare(`
+    // Which cards, from the index alone; their rows only for cards not read before. Re-reading the 500 rows every
+    // time, scattered over a gigabyte file, held the event loop 1-5 s whenever the page cache had dropped them (#759).
+    const picked = this.db.prepare(`
       SELECT * FROM (
-        SELECT e.*, json_extract(e.data, '$.id') AS cid, t.number, t.kind AS tkind, t.status AS tstatus
-        FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
+        SELECT e.id, t.number, t.kind AS tkind, t.status AS tstatus
+        FROM events e INDEXED BY events_cards JOIN tickets t ON t.id = e.ticket_id
         WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval')
         ORDER BY e.id DESC LIMIT ?)
-      ORDER BY id`).all(projectId, limit) as any[];
+      ORDER BY id`).all(projectId, limit) as { id: number; number: number | null; tkind: string; tstatus: string }[];
+    const unread = picked.filter((p) => !this.cardRows.has(p.id)).map((p) => p.id);
+    if (unread.length) {
+      for (const row of this.db.prepare('SELECT * FROM events WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(unread)) as unknown as EventRow[]) {
+        this.cardRows.set(row.id, { ...row, cid: JSON.parse(row.data).id ?? null });
+      }
+    }
+    const cards = picked.flatMap((p) => {
+      const row = this.cardRows.get(p.id);
+      return row ? [{ ...row, number: p.number, tkind: p.tkind, tstatus: p.tstatus }] : [];
+    });
     const upTo = (this.db.prepare('SELECT max(id) AS id FROM events').get() as { id: number | null }).id ?? 0;
     const fates = cards.map((c) => this.cardFates.get(c.id) ?? { reply: null, result: null, upTo: c.id });
     // Each chat's messages are read once from its oldest card still waiting, not once per card: 500 cards each
     // scanning the rest of a long chat held the event loop 1-3 s (#622). By kind: left to itself SQLite walked
     // events_ticket, every event of the chat (56,619 rows for 1,861 messages), 2-3 s from a cold cache after a restart.
     for (const ticket of new Set(cards.map((c) => c.ticket_id))) {
-      const mine = cards.flatMap((c, i) => c.ticket_id === ticket ? [{ cid: c.cid, to: !!JSON.parse(c.data).to, fate: fates[i] }] : []);
-      const from = (pick: (f: CardFate) => string | null) => Math.min(...mine.filter((m) => pick(m.fate) == null).map((m) => m.fate.upTo));
+      const mine = cards.flatMap((c, i) => c.ticket_id === ticket ? [{ cid: c.cid, approval: c.kind === 'approval', to: !!JSON.parse(c.data).to, fate: fates[i] }] : []);
+      const from = (pick: (f: CardFate) => string | null, of = mine) => Math.min(...of.filter((m) => pick(m.fate) == null).map((m) => m.fate.upTo));
       const replyFrom = from((f) => f.reply);
       const replies = replyFrom === Infinity ? [] : this.db.prepare(`
         SELECT a.id, coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) AS card,
@@ -2279,15 +2304,16 @@ export class Store {
         FROM events a INDEXED BY events_ticket_kind WHERE a.ticket_id = ? AND a.kind = 'user_message' AND a.id > ? AND a.id <= ?
           AND (${PERSON_WROTE} OR json_extract(a.data, '$.answer.questionId') IS NOT NULL) ORDER BY a.id`)
         .all(ticket, replyFrom, upTo) as { id: number; card: unknown; reply: string }[];
-      const resultFrom = from((f) => f.result);
+      // Only an approval gets a result: looking one up for every chat's questions and plans was half a cold call (#759).
+      const resultFrom = from((f) => f.result, mine.filter((m) => m.approval));
       const results = resultFrom === Infinity ? [] : this.db.prepare(`
         SELECT id, json_extract(data, '$.id') AS card, json_set(data, '$.at', created_at) AS result
         FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind = 'approval_result' AND id > ? AND id <= ? ORDER BY id`)
         .all(ticket, resultFrom, upTo) as { id: number; card: unknown; result: string }[];
-      for (const { cid, to, fate } of mine) {
+      for (const { cid, approval, to, fate } of mine) {
         // A click on another card answers that card, not this one; a card addressed to one person only its own answer (#687).
         fate.reply ??= replies.find((a) => a.id > fate.upTo && (a.card ?? (to ? null : cid)) === cid)?.reply ?? null;
-        fate.result ??= results.find((r) => r.id > fate.upTo && r.card === cid)?.result ?? null;
+        if (approval) fate.result ??= results.find((r) => r.id > fate.upTo && r.card === cid)?.result ?? null;
         fate.upTo = upTo;
       }
     }
@@ -2300,6 +2326,10 @@ export class Store {
   // What recentCards found of each card, by event id: a reply or result once found stays (events are only appended),
   // and `upTo` is the newest event looked at, so the next read only scans messages after it (#622).
   private cardFates = new Map<number, CardFate>();
+
+  // recentCards' card rows, by event id, with the card's own id: a card's row only changes through setEventData and
+  // goes with deleteTicket, which both drop it here (#759).
+  private cardRows = new Map<number, EventRow & { cid: unknown }>();
 
   // Card events found answered, settled or no longer pending. None ever waits again (a plan never goes back to pending,
   // and events are only appended), so later reads skip their rows: cold, re-reading Citadel's 335 card rows and the
@@ -2369,7 +2399,10 @@ export class Store {
       throw err;
     }
     const deleted = changes.filter((c) => c.data == null).length;
-    if (deleted) this.cardFates.clear(); // a deleted newest id can come back, below recentCards' `upTo`
+    if (deleted) { // a deleted newest id can come back, below recentCards' `upTo`, as a card
+      this.cardFates.clear();
+      this.cardRows.clear();
+    }
     return { changed: changes.length - deleted, deleted };
   }
 

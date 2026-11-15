@@ -1112,7 +1112,7 @@ export class Runner {
         if (t.status === 'running') {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // This turn's waiting cards come back: if it is still running, it still polls for them (#209).
-          this.approvals.restore(t.id, this.store.listEvents(t.id), turn?.startedAt);
+          this.approvals.restore(t.id, this.store.eventsOfKinds(t.id, ['approval', 'approval_result']), turn?.startedAt);
           try {
             if (turn?.dir && this.reattach(t.id, turn)) continue;
           } catch (err: any) {

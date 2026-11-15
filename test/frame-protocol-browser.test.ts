@@ -112,7 +112,8 @@ const framer = (opts: { width: number; height?: number; touch?: boolean }, query
 
 test("the frame is another origin: Citadel can't read the contraption's page", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 });
-  await waitFor(page, 'the frame to load', `document.querySelector('#frames iframe')?.contentWindow?.length === 0`);
+  // The contraption's own report, so its page is in the frame: until then the frame holds about:blank, which Citadel can read (#758).
+  await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
   assert.equal(await page.eval(`document.querySelector('#frames iframe').contentDocument`), null);
 });
 
@@ -171,7 +172,8 @@ test("in a contraption's installed window, Citadel's layer on Citadel's host ope
   await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
   await waitFor(page, 'the layer', `!!document.querySelector('.citadel-layer:not([hidden])')`);
   assert.equal(await layer(page), `shown ${citadel()}/c/#/apps/toc inert`);
-  assert.equal(await page.eval(`document.querySelector('.citadel-layer iframe').contentDocument`), null, 'another origin');
+  // Waited for, not read once: the layer shows before Citadel's page is in its frame, and until then that is about:blank (#758).
+  await waitFor(page, "Citadel's page in the layer, on another origin (unreadable from here)", `document.querySelector('.citadel-layer iframe').contentDocument === null`);
   // Citadel's rail in the layer sits where this page's rail is, under it: click Peek there.
   const peek = await page.centre('.citadel-rail a[data-app="peek"]');
   for (const end = Date.now() + 10_000; Date.now() < end && (await layer(page)) !== 'hidden'; await new Promise((r) => setTimeout(r, 100))) {

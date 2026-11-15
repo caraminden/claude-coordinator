@@ -189,7 +189,7 @@ test("minion and Taskmaster turns both leave out unused built-in tools and the a
   for (const kind of ['ticket', 'coordinator'] as const) {
     const t = await turn(kind, 'connected');
     const denied = t.args.slice(t.args.indexOf('--disallowedTools') + 1);
-    for (const tool of ['AskUserQuestion', 'Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger']) assert.ok(denied.includes(tool), `${kind}: ${tool}`);
+    for (const tool of ['AskUserQuestion', 'Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger', 'ListAgents', 'ReportFindings']) assert.ok(denied.includes(tool), `${kind}: ${tool}`);
     assert.equal(t.settings.syncClaudeAiSkills, false, kind);
     assert.equal(t.settings.disableClaudeAiConnectors, true, kind);
     assert.ok(t.settings.hooks.PreToolUse, `${kind}: the tripwire hook is still there`);

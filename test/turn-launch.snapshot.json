@@ -39,7 +39,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-1",
    "env": {
@@ -128,7 +130,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -238,7 +241,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-2",
    "env": {
@@ -332,7 +337,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -484,7 +490,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-3",
    "env": {
@@ -571,7 +579,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -884,7 +893,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-4",
    "env": {
@@ -973,7 +984,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -1250,7 +1262,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-5",
    "env": {
@@ -1340,7 +1354,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -1448,7 +1463,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-6",
    "env": {
@@ -1538,7 +1555,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -1653,7 +1671,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-7",
    "env": {
@@ -1742,7 +1762,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -1871,7 +1892,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-8",
    "env": {
@@ -1961,7 +1984,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2093,7 +2117,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-9",
    "env": {
@@ -2183,7 +2209,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2298,7 +2325,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-10",
    "env": {
@@ -2387,7 +2416,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2505,7 +2535,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-11",
    "env": {
@@ -2595,7 +2627,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2712,6 +2745,8 @@
     "CronDelete",
     "CronList",
     "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings",
     "--resume",
     "sess-7"
    ],
@@ -2802,7 +2837,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [
@@ -2912,7 +2948,9 @@
     "CronCreate",
     "CronDelete",
     "CronList",
-    "RemoteTrigger"
+    "RemoteTrigger",
+    "ListAgents",
+    "ReportFindings"
    ],
    "cwd": "<ROOT>/ticket-13",
    "env": {
@@ -3001,7 +3039,8 @@
     "simplify": "off",
     "fewer-permission-prompts": "off",
     "run": "off",
-    "security-review": "off"
+    "security-review": "off",
+    "code-review": "off"
    },
    "permissions": {
     "deny": [

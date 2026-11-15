@@ -296,7 +296,7 @@ test('a project without rules or plugins still sends a minion\'s prompts to card
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
   assert.deepEqual(Object.keys(settings), ['hooks', 'syncClaudeAiSkills', 'disableClaudeAiConnectors', 'autoCompactWindow', 'bashOutputMaxChars', 'skillOverrides', 'permissions']);
   // Six bundled skills that never fired are off (#708); plugin-authoring and the rest stay on.
-  assert.deepEqual(Object.keys(settings.skillOverrides).sort(), ['fewer-permission-prompts', 'init', 'keybindings-help', 'loop', 'run', 'schedule', 'security-review', 'simplify', 'update-config', 'workflow-authoring']);
+  assert.deepEqual(Object.keys(settings.skillOverrides).sort(), ['code-review', 'fewer-permission-prompts', 'init', 'keybindings-help', 'loop', 'run', 'schedule', 'security-review', 'simplify', 'update-config', 'workflow-authoring']);
   assert.ok(Object.values(settings.skillOverrides).every((v) => v === 'off'));
   assert.equal(settings.skillOverrides['plugin-authoring'], undefined);
   assert.deepEqual(settings.permissions.ask, ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge']);

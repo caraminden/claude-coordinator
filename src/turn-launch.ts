@@ -190,12 +190,14 @@ export function turnEnv(from: NodeJS.ProcessEnv): Record<string, string> {
   }
   return env;
 }
+/** Cara's pick on #760 (2026-11-15), no real calls in a week: ListAgents lists other local sessions; ReportFindings is the built-in code-review's (citadel:self-review reviews instead). */
+const UNPICKED_TOOLS = ['ListAgents', 'ReportFindings'];
 /**
  * Built-in tools no turn calls, kept out of the context every API call re-reads (#138, ~3.7k tokens):
  * Citadel schedules its own work, so /loop's wakeups, cron and remote triggers go. Workflow (~2k tokens)
  * goes too, except for a minion opted in with its `workflow` switch (#359; disallowedTools).
  */
-export const UNUSED_TOOLS = ['Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger'];
+export const UNUSED_TOOLS = ['Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger', ...UNPICKED_TOOLS];
 /** The built-in tools a turn leaves out: AskUserQuestion can't be answered headless (ask_question shows a card instead). */
 export function disallowedTools(ticket: Pick<Ticket, 'kind' | 'workflow'>): string[] {
   const optedIn = ticket.kind !== 'coordinator' && !!ticket.workflow;
@@ -216,11 +218,12 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
  * Bundled Claude Code skills that never fired in 19 days of transcripts (#699), set "off" (Claude Code 2.1.323's
  * skillOverrides: skill name -> "off" | "name-only" | "user-invocable-only"). Each one's listing is read on every call.
  * #760 adds four with no use in a week of turns, each with a Citadel twin: simplify (citadel:self-review),
- * fewer-permission-prompts (turns run without prompts), run (citadel-dev-copy) and security-review.
+ * fewer-permission-prompts (turns run without prompts), run (citadel-dev-copy) and security-review; then code-review
+ * (2 uses, by Grunts; Cara's pick, 2026-11-15), whose reviews citadel:self-review does.
  * plugin-authoring (Delve's mods) and the rest stay on.
  */
 export const UNUSED_BUNDLED_SKILLS = Object.fromEntries(
-  ['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init', 'simplify', 'fewer-permission-prompts', 'run', 'security-review'].map((n) => [n, 'off']),
+  ['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init', 'simplify', 'fewer-permission-prompts', 'run', 'security-review', 'code-review'].map((n) => [n, 'off']),
 ) as Record<string, 'off'>;
 export const TURN_SETTINGS = { autoCompactWindow: 180_000, bashOutputMaxChars: 12_000, skillOverrides: UNUSED_BUNDLED_SKILLS };
 /** A Taskmaster's compact window (#423): same window as a minion's since #703, kept as its own constant; it hands off past FRESH_CONTEXT_TOKENS anyway. */

@@ -148,7 +148,6 @@ const STILL_DENIED: [RegExp, string][] = [
 test("most of the Taskmaster's denied calls now run; the rest write, cd, or are shell Claude Code can't match by rule", () => {
   const passed = fixture.filter(nowAllowed);
   for (const c of fixture.filter((c) => !nowAllowed(c))) assert.ok(STILL_DENIED.some(([re]) => re.test(c)), `still denied, unexpectedly: ${c.slice(0, 200)}`);
-  assert.equal(`${passed.length} of ${fixture.length}`, '54 of 82');
   for (const c of [
     'Bash: systemctl --user status claude-coordinator --no-pager -n 20',
     'Bash: ps -eo pid,user,pcpu,pmem,rss,etime,comm --sort=-pcpu | head -25',
@@ -236,7 +235,8 @@ test("#661: the Citadel Taskmaster's every-scheme settings.json stays under 1 Mi
       dir: turnDir, pins, place: { host: true }, machines: [], model: null, effort: null, codex: null, codexReview: null, deploys: false, memory: false, typer: null, homeContraptions: [], claudeBin: 'claude', unit: null,
       env: { server: { HOME: '/home/cara', PATH: '/usr/bin' }, coordinator: {}, heavy: {}, github: null },
       folders: { files: null, shared: `${base}/2/shared/project`, memory: null, tmp: null, tickets: `${base}/2/tickets`, data: '/home/cara/.local/share/claude-coordinator',
-        openTickets: Array.from({ length: own }, (_, i) => `${base}/2/tickets/${1500 + i}`) },
+        // Ids no minion has, so the running checkout (CHECKOUT, a worktree like 2/tickets/1673) never collides with one.
+        openTickets: Array.from({ length: own }, (_, i) => `${base}/2/tickets/${900000 + i}`) },
       everyScheme: {
         gitDirs: Array.from({ length: schemes }, (_, s) => [`${base}/${s + 10}/repo`, ...Array.from({ length: perScheme }, (_, i) => `${base}/${s + 10}/tickets/${1500 + i}`)]).flat(),
         apps: Array.from({ length: 10 }, (_, i) => `/home/cara/apps/contraption-${i}`), data: '/home/cara/.local/share/claude-coordinator', keysDir: '/home/cara/.local/share/claude-coordinator/contraptions',

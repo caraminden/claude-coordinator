@@ -1,6 +1,6 @@
 // A dev copy of this checkout's Citadel for a minion to try a change on (#482), run by the
 // citadel-dev-copy command every turn has on its PATH:
-//   citadel-dev-copy start [--data copy|empty|<file.db>] | status [--json] | env | seed <scenario>... | stop
+//   citadel-dev-copy start [--data copy|empty|<file.db>] [--apps-hosts] | status [--json] | env | seed <scenario>... | stop
 // start: a fresh folder under $TMPDIR, the live database (or the given file) copied in read-only in one
 // read transaction and scrubbed as a preview's copy is (or none), a free port, server.ts in preview mode
 // (no turns, no pushes, no new minions), and it prints the URL, a sign-in and the pid. A second start
@@ -9,6 +9,8 @@
 // env: shell lines for a script, `eval "$(citadel-dev-copy env)"` (DEV_URL, DEV_COOKIE, DEV_PID: the names
 // tools/ui-shot.ts reads). seed: adds a named state (tools/dev-seeds.ts) to the running copy, works on
 // --data empty too, and prints the route that shows it.
+// --apps-hosts: contraptions on their own hosts as live (APPS_DOMAIN, src/apps.ts), Citadel at citadel.localhost:<port>
+// and each contraption at <name>.citadel.localhost:<port> (Chromium sends *.localhost to loopback).
 //
 // Preview mode exits once its parent goes, so the server runs under a small sh that waits on it and
 // exits with it; the Bash call that ran start returns at once, since neither holds its output.
@@ -24,7 +26,7 @@ import { previewEnv, scrub } from '../src/previews.ts';
 
 const BOOT_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 8000;
-const USAGE = 'usage: citadel-dev-copy start [--data copy|empty|<file.db>] | status [--json] | env | seed <scenario>... | seed --list | stop';
+const USAGE = 'usage: citadel-dev-copy start [--data copy|empty|<file.db>] [--apps-hosts] | status [--json] | env | seed <scenario>... | seed --list | stop';
 
 interface State { pid: number; started: string; holder: number; port: number; url: string; login: string; password: string; cookie: string; data: string; worktree: string }
 
@@ -92,8 +94,10 @@ async function stop(quiet = false): Promise<void> {
 
 async function start(args: string[]): Promise<void> {
   let from = 'copy';
+  let appsHosts = false;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--data' && args[i + 1]) from = args[++i];
+    if (args[i] === '--apps-hosts') appsHosts = true;
+    else if (args[i] === '--data' && args[i + 1]) from = args[++i];
     else if (args[i].startsWith('--data=') && args[i].length > 7) from = args[i].slice(7);
     else refuse(USAGE);
   }
@@ -120,7 +124,7 @@ async function start(args: string[]): Promise<void> {
   const pidFile = join(home, 'server.pid');
   const log = openSync(logFile, 'a');
   const holder = spawn('sh', ['-c', '"$0" "$1" & echo $! > "$2"; wait $!', process.execPath, server, pidFile], {
-    cwd: worktree, env: previewEnv(port, data, password, randomBytes(32).toString('hex')), detached: true, stdio: ['ignore', log, log],
+    cwd: worktree, env: { ...previewEnv(port, data, password, randomBytes(32).toString('hex')), ...(appsHosts && { APPS_DOMAIN: `citadel.localhost:${port}` }) }, detached: true, stdio: ['ignore', log, log],
   });
   closeSync(log);
   holder.unref();
@@ -161,6 +165,7 @@ async function start(args: string[]): Promise<void> {
   writeFileSync(stateFile, JSON.stringify(s, null, 2), { mode: 0o600 });
   say(`Dev copy running from ${worktree}, on ${file ? `a copy of ${file}` : from === 'copy' ? 'a copy of the live data' : 'empty data'}; turns are off.`);
   print(s);
+  if (appsHosts) say(`  Apps:    contraptions at http://<name>.citadel.localhost:${port}/; open Citadel at http://citadel.localhost:${port}/ (ui-shot --url) to frame them as live does`);
 }
 
 function print(s: State) {

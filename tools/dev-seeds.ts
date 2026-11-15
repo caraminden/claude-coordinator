@@ -162,7 +162,7 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
     },
   },
   'spend-alert': {
-    about: 'a minion mid-turn whose turn passed $25: the spend alert card with Stop and Keep going (#723); no real turn runs, so its buttons stay hidden as on an earlier turn',
+    about: 'a minion mid-turn whose turn passed $25: the spend alert card with Stop and Keep going (#723); no real turn runs, so its buttons stay hidden as on an earlier turn; Needs you lists it, the row\'s red badge needs a live turn',
     seed(c) {
       const t = minion(c, 'Rework the land queue', { status: 'running', last_activity: 'Reviewing the diff… 4/5' });
       const w = chat(c, t, 12);
@@ -170,7 +170,10 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       w.init();
       w.said('Three Grunts are reviewing the queue code in parallel; I\'ll merge what they find.');
       w.call('Agent', { description: 'Review the land queue', prompt: 'Review tools/land.sh…' }, null);
-      const e = w.put('spend', { text: 'This turn has used about $26 in 48 min.', usd: 26, stage: 25, turn: Date.now() - 48 * 60_000 });
+      const turn = Date.now() - 48 * 60_000;
+      const e = w.put('spend', { text: 'This turn has used about $26 in 48 min.', usd: 26, stage: 25, turn });
+      // Needs you lists the alert from the saved turn; the row's red badge needs a live turn, so it shows only on a real one.
+      c.store.setSetting(`turn:${t.id}`, { resumes: 0, startedAt: turn, spend: { usd: 26, fired: 1, alert: { stage: 25, event: e, at: Date.now() - 60_000 } } });
       return route(c, t, e);
     },
   },

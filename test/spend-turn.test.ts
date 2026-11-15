@@ -3,7 +3,9 @@ import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { Approvals } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
+import { inboxItems } from '../src/inbox.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
 testPins();
@@ -45,6 +47,7 @@ chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
+const approvals = new Approvals((ticketId, kind, data) => store.addEvent(ticketId, kind, data));
 const runner = new Runner(store, () => {}, () => ({}), fake);
 const pushes: { ticket: number; text: string; eventId: number }[] = [];
 runner.onSpendAlert = (ticket, text, eventId) => pushes.push({ ticket, text, eventId });
@@ -82,9 +85,16 @@ test('Keep going mutes the rest of its own turn only, and the next turn alerts a
   runner.send(id, 'Cara', 'go');
   await until(() => cards(id).length === 1, 'the $25 card');
   const started = runner.turnStartedAt(id)!;
+  // The list row's badge and the Needs-you item (#723) show the open alert until Keep going.
+  const alert = runner.view(store.getTicket(id)!).spend_alert;
+  assert.deepEqual([alert?.stage, alert?.usd, alert?.event], [25, 30, cards(id)[0].id]);
+  assert.match(alert!.href, new RegExp(`${cards(id)[0].id}`));
+  assert.deepEqual(inboxItems(store, approvals, project.id, 'Cara').filter((i) => i.kind === 'spend').map((i) => [i.ticketId, i.eventId]), [[id, cards(id)[0].id]]);
   assert.equal(runner.muteSpend(id, 'Josh', started - 1), false); // an earlier turn's card
   assert.equal(runner.muteSpend(id, 'Josh', started), true);
   assert.deepEqual(cards(id, 'spend_muted').map((c) => c.by), ['Josh']);
+  assert.equal(runner.view(store.getTicket(id)!).spend_alert, null);
+  assert.deepEqual(inboxItems(store, approvals, project.id, 'Cara').filter((i) => i.kind === 'spend'), []);
   writeFileSync(go, '');
   await until(() => !runner.isRunning(id), 'the turn to end');
   assert.equal(cards(id).length, 1);
@@ -95,4 +105,5 @@ test('Keep going mutes the rest of its own turn only, and the next turn alerts a
   await until(() => cards(id).length === 2, 'the second turn\'s $25 card');
   assert.equal(cards(id)[1].usd, 30);
   await until(() => !runner.isRunning(id) && existsSync(go), 'the second turn to end');
+  assert.equal(runner.view(store.getTicket(id)!).spend_alert, null); // the turn's end clears it
 });

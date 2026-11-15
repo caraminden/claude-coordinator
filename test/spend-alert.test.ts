@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { DEFAULT_STAGES, SpendMeter, spendText, stagesFrom, visibleChars } from '../src/spend-alert.ts';
+import { DEFAULT_STAGES, openSpend, SpendMeter, spendText, stagesFrom, visibleChars } from '../src/spend-alert.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/spend-turns.json', import.meta.url), 'utf8'));
 
@@ -62,4 +62,13 @@ test('stages from the setting, and the alert\'s words', () => {
   assert.deepEqual(stagesFrom(null), DEFAULT_STAGES);
   assert.deepEqual(stagesFrom([]), DEFAULT_STAGES);
   assert.equal(spendText(30.4, 70 * 60_000), 'This turn has used about $30 in 70 min.');
+});
+
+test('the open alert for the list row and Needs you: kept across a restart, gone once muted, and a broken one is dropped', () => {
+  const meter = new SpendMeter({ usd: 31.6, fired: 1, alert: { stage: 25, event: 7, at: 1000 } } as never);
+  assert.deepEqual(openSpend(meter.state), { stage: 25, event: 7, at: 1000, usd: 32 });
+  meter.muted = 'Cara';
+  assert.equal(openSpend(meter.state), null);
+  assert.equal(openSpend(undefined), null);
+  assert.equal(openSpend(new SpendMeter({ usd: 30, fired: 1, alert: { stage: 25, event: 'x', at: 1 } } as never).state), null);
 });

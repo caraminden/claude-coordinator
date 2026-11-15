@@ -149,6 +149,36 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "DELETE /api/contraption-media/mcp": {
+  "anon": "401 Not a running contraption turn with media",
+  "person": "401 Not a running contraption turn with media",
+  "member": "401 Not a running contraption turn with media",
+  "outsider": "401 Not a running contraption turn with media",
+  "tmA": "401 Not a running contraption turn with media",
+  "tmB": "401 Not a running contraption turn with media",
+  "m1": "401 Not a running contraption turn with media",
+  "m2": "401 Not a running contraption turn with media"
+ },
+ "GET /api/contraption-media/mcp": {
+  "anon": "401 Not a running contraption turn with media",
+  "person": "401 Not a running contraption turn with media",
+  "member": "401 Not a running contraption turn with media",
+  "outsider": "401 Not a running contraption turn with media",
+  "tmA": "401 Not a running contraption turn with media",
+  "tmB": "401 Not a running contraption turn with media",
+  "m1": "401 Not a running contraption turn with media",
+  "m2": "401 Not a running contraption turn with media"
+ },
+ "POST /api/contraption-media/mcp": {
+  "anon": "401 Not a running contraption turn with media",
+  "person": "401 Not a running contraption turn with media",
+  "member": "401 Not a running contraption turn with media",
+  "outsider": "401 Not a running contraption turn with media",
+  "tmA": "401 Not a running contraption turn with media",
+  "tmB": "401 Not a running contraption turn with media",
+  "m1": "401 Not a running contraption turn with media",
+  "m2": "401 Not a running contraption turn with media"
+ },
  "POST /api/contraption-read/nope": {
   "anon": "401 Not logged in",
   "person": "403 Only a minion or Taskmaster reads a person's contraption data",
@@ -200,6 +230,36 @@
   "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
  "GET /api/contraptions/home": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "GET /api/contraptions/media": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "DELETE /api/contraptions/media/x.png": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "GET /api/contraptions/media/x.png": {
   "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
   "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
@@ -318,6 +378,16 @@
   "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "GET /api/contraptions/openrouter": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
  "DELETE /api/contraptions/relay/nope/x": {
   "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",

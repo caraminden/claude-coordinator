@@ -75,6 +75,8 @@ const PATHS: Record<string, string[]> = {
   'GET /api/projects/:project/memory': ['/api/projects/:p/memory?q=one'],
   'GET /api/tickets/:ticket/events': ['/api/tickets/:t/events', '/api/tickets/:t/events?after=0', '/api/tickets/:t/events?before=1000&limit=5&from=1'],
   'GET /api/files/:token/*path': ['/api/files/t1-0.zzzzzz.forged/report.md'],
+  'GET /api/contraptions/media/*path': ['/api/contraptions/media/x.png'],
+  'DELETE /api/contraptions/media/*path': ['/api/contraptions/media/x.png'],
   'HEAD /api/files/:token/*path': ['/api/files/t1-0.zzzzzz.forged/report.md'],
   'GET /api/tickets/:ticket/images/:name': ['/api/tickets/:t/images/0123456789abcdef01234567.png'],
   'GET /api/tickets/:ticket/uploads/:name': ['/api/tickets/:t/uploads/nothing.txt'],

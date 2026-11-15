@@ -314,6 +314,13 @@ export class LiveWaiters {
     return c.held ? `${who}'s work is ${c.when}, and ${who} was dismissed without it, so only Unpark starts you` : `${who}'s work is ${c.when}`;
   }
 
+  /** The brief `ticket` holds until its leader's work is in, for its chat to show read-only; null once it is sent (release) or when there is none. */
+  heldBrief(ticket: number): { text: string; from: string; leader: number; when: Chain['when'] } | null {
+    const c = this.chains().find((o) => o.ticket === ticket);
+    if (!c || !c.message) return null;
+    return { text: c.message, from: c.from, leader: this.store.getTicket(c.after)?.number ?? c.after, when: c.when };
+  }
+
   /** `ticket`'s held brief, kept in the chain, for a start about to run (Start now); null when none, or one already runs. */
   claim(ticket: number): Chain | null {
     const c = this.chains().find((o) => o.ticket === ticket) ?? null;

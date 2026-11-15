@@ -199,6 +199,18 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t);
     },
   },
+  'held-brief': {
+    about: 'a parked minion chained on a leader, holding a long brief and one message left for it (#728)',
+    seed(c) {
+      const leader = minion(c, 'Flask and charm auras');
+      const t = minion(c, 'Flask timers start on the press', { state: 'parked', note: `starts when #${leader.number} is merged` });
+      const brief = ['Make the flask timers start on the press, not on the buff.', '', '**Build**', ...Array.from({ length: 8 }, (_, i) => `- Step ${i + 1}: change the aura \`timer${i + 1}\` so it reads the press, then check it against #${leader.number}'s charm auras.`), '', 'Ship it by the usual route.'].join('\n');
+      c.store.setSetting('chained-minions', [...(c.store.getSetting<{ ticket: number }[]>('chained-minions') ?? []), { ticket: t.id, after: leader.id, when: 'merged', message: brief, from: 'Taskmaster', base: null }]);
+      c.store.addEvent(t.id, 'note', { text: `Created by Taskmaster; its brief is held until #${leader.number} ${leader.title}'s work is merged. Messages to it wait for that start; Unpark starts it now.` });
+      c.store.addEvent(t.id, 'user_message', { text: 'Remember the charm timers too.', author: c.who, mail: true, parked: true });
+      return route(c, t);
+    },
+  },
   landing: {
     about: 'a minion whose turn ended on hand_off_land while the server lands it: working, by the server (#727)',
     seed(c) {

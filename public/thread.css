@@ -448,3 +448,6 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .presence-head { flex: none; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.8em; font-weight: 600; line-height: 1.2; white-space: nowrap;
   color: color-mix(in srgb, var(--done) 75%, var(--ink)); background: color-mix(in srgb, var(--done) 14%, transparent); }
 .presence-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--done); font-style: normal; }
+
+/* A chained minion's held brief (#728): dashed like other messages from the Taskmaster, read-only. */
+.msg.user.held-brief { border-style: dashed; }

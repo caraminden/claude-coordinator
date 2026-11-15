@@ -377,6 +377,7 @@ runner.onSpendAlert = (ticketId, text, eventId, person) => notify(ticketId, { ki
 const startChain = (c: Chain, why: string) => startChained(c, why, { store, runner, waiters });
 waiters.start = (c, why) => void startChain(c, why).catch((err) => console.error(`Starting chained #${c.ticket} failed:`, err));
 runner.heldFor = (id) => waiters.heldFor(id);
+runner.heldBrief = (id) => waiters.heldBrief(id);
 runner.wakesOn = (id) => {
   const timed = timedWakes.next(id);
   return waiters.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);

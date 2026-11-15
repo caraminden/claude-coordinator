@@ -152,6 +152,7 @@ function renderHistory() {
   // Messages still on their way or not sent; the replay swapped out any that reached the server meanwhile, by sendId.
   log.append(...view.pendingMessages.map((m) => m.el), ...(recap ? [recap] : []));
   renderProgress();
+  syncHeldBrief();
 }
 
 /** Keep `el` at `top` px down the screen as what's above it lays out, until you scroll yourself. */
@@ -483,6 +484,7 @@ export function renderTicketHead() {
     phone ? '' : view.progressEl);
   if (had?.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
   renderTyping();
+  syncHeldBrief();
   // While a turn runs, Send steers it (composer.js); said on hover rather than in a line of its own.
   const send = document.querySelector('.composer button[type=submit]');
   if (send) send.title = t.status === 'running' ? 'Claude reads it between steps of the running turn; ▾ sends it after this turn' : '';
@@ -1209,6 +1211,36 @@ function narrationSummary(row) {
   row.querySelector('summary').replaceChildren(
     h('span', { class: 'who' }, h('span', { class: 'name' }, `${n} update${n === 1 ? '' : 's'}`)),
     h('span', { class: 'preview' }, last ? previewNodes(last.source, last.strikes) : ''));
+}
+
+/**
+ * A chained minion's held brief (#728), read-only in its chat above the messages left for it, until the brief is sent.
+ * Idempotent: the head's redraw calls it, so it draws, replaces or removes the block as the ticket says.
+ */
+function syncHeldBrief() {
+  const log = document.getElementById('log');
+  if (!log || !view?.ticket) return;
+  const b = view.ticket.held_brief;
+  const old = log.querySelector(':scope > .held-brief');
+  if (!b) return old?.remove();
+  const key = `${b.leader}|${b.when}|${b.from}|${b.text}`;
+  if (old?.dataset.key === key) return;
+  old?.remove();
+  const body = markdown(b.text, view.ticket.id);
+  const el = h('div', { class: 'msg user held-brief', 'data-key': key },
+    h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} is ${b.when === 'live' ? 'live' : 'merged'}`))),
+    body);
+  if (b.text.length > 500 || b.text.split('\n').length > 8) {
+    el.classList.add('clamped');
+    el.append(h('button', { type: 'button', class: 'show-all small secondary', onclick: (e) => {
+      const open = el.classList.toggle('clamped');
+      e.currentTarget.textContent = open ? 'Show more' : 'Show less';
+    } }, 'Show more'));
+  }
+  // Above the messages left for it, which come after the brief.
+  const first = [...log.children].find((c) => c.classList.contains('user') && c.querySelector('.msg-tag')?.textContent === 'held: parked');
+  const after = log.querySelector(':scope > #recap, :scope > .pending');
+  if (first) first.before(el); else if (after) after.before(el); else log.append(el);
 }
 
 /** Show a long message's first lines, with a button for the rest. */

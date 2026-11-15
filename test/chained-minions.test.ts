@@ -671,8 +671,13 @@ test('through the server: start_after parks the minion with its brief held; the 
   assert.equal(parked.state, 'parked');
   assert.equal(parked.parked_for, `#${next.data.number} Next's work is live`);
   assert.equal(parked.wakes_on, parked.parked_for, 'its leader going live wakes it: the list shows it under Waiting (#718)');
+  // #728: its ticket view carries the brief it holds (read-only in the chat), and not once it is sent.
+  assert.equal(parked.held_brief.text, 'brief for Later');
+  assert.equal(parked.held_brief.leader, next.data.number);
+  assert.equal(parked.held_brief.when, 'live');
   const started = await call(`/api/tickets/${later.id}/unpark`, {});
   assert.equal(started.status, 200);
+  assert.equal(started.data.held_brief, null, 'sent: no longer shown as held');
   assert.equal(started.data.parked_for, null);
   assert.notEqual(started.data.state, 'parked');
   assert.deepEqual(await said(later.id), ['what is this?', 'brief for Later']);

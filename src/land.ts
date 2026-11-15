@@ -114,7 +114,8 @@ export class Landings {
   /** Start land.sh for a minion, with `args` from landArgs(), unless one runs already; the tool polls get() until it ends. */
   start(ticketId: number, cwd: string, env: Record<string, string>, args: string[] = []): Landing {
     const now = this.get(ticketId);
-    if (now && now.code === null) return now;
+    // Nor over a hand-off that ended but isn't reported yet: starting afresh would wipe its output (the land tool then reads that one).
+    if (now && (now.code === null || existsSync(join(this.dir(ticketId), HANDOFF)))) return now;
     this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh', ...args], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId });
     return { output: '', code: null };
   }
@@ -126,7 +127,7 @@ export class Landings {
    */
   handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff): boolean {
     const now = this.get(ticketId);
-    if (now && now.code === null) return false;
+    if ((now && now.code === null) || existsSync(join(this.dir(ticketId), HANDOFF))) return false;
     this.start(ticketId, cwd, env, args);
     writeFileSync(join(this.dir(ticketId), HANDOFF), JSON.stringify({ ...h, args }));
     return true;
@@ -158,7 +159,7 @@ export class Landings {
     }
   }
 
-  /** A person wrote to the minion: if its land is handed off, a clean land then leaves it open for them. */
+  /** A message came for the minion (a person's, a relay): if its land is handed off, a clean land then leaves it open. */
   talked(ticketId: number) {
     if (existsSync(join(this.dir(ticketId), HANDOFF))) writeFileSync(join(this.dir(ticketId), 'talked'), '');
   }
@@ -218,8 +219,9 @@ export function landResult(output: string, code: number): LandResult {
   const commit = at ? { commit: at[1], subject: at[2] } : {};
   // deploy.sh's lines: "live now:" (front end reloaded, or the restart went live), "nothing to deploy: the server
   // already runs" (live already), "restart queued" / "a restart is already queued" / "not live yet" (waiting on it).
-  if (/live now:|nothing to deploy: the server already runs/.test(output)) return { kind: 'live', ...commit };
-  if (/restart queued|restart is already queued|not live yet/.test(output)) return { kind: 'restart', ...commit };
+  // Only deploy.sh's own lines: a commit subject or another scheme's land.sh could say the same words.
+  if (/^deploy: (live now:|nothing to deploy: the server already runs)/m.test(output)) return { kind: 'live', ...commit };
+  if (/^deploy: (restart queued|a restart is already queued|not live yet)/m.test(output)) return { kind: 'restart', ...commit };
   return { kind: 'landed', ...commit };
 }
 
@@ -289,6 +291,8 @@ export class LandHandoffs {
     const r = landResult(run.output, run.code!);
     const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
     if (r.kind === 'failed' || (r.kind === 'no-ci' && !this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))) {
+      store.updateTicket(id, { state: null, note: null });
+      runner.broadcastTicket(id);
       runner.send(id, from, `Your handed-off land didn't go through: tools/land.sh exited ${run.code} (main only moved if its output says so). Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`);
       return;
     }
@@ -310,7 +314,7 @@ export class LandHandoffs {
       runner.deployPending(id);
       runner.broadcastTicket(id);
     }
-    // A person wrote while it was in line: the minion answers them before it goes.
+    // Someone wrote while it was in line (a person, a relay): the minion answers them before it goes.
     if (this.d.landings.wasTalked(id)) {
       if (r.kind !== 'restart') {
         store.updateTicket(id, { state: null, note: null });
@@ -336,7 +340,8 @@ export class LandHandoffs {
       if (!runner.closeAfterTurn(id, `${why}.`)) runner.emit(id, 'note', { text: `${why}; this minion has a turn running or queued, so it stays open.` });
       return;
     }
-    store.updateTicket(id, { state: null, note: null });
+    store.updateTicket(id, { state: null, note: into ? `folded into Build ${into.slice('build/'.length)}` : null });
+    this.d.landings.settled(id);
     await runner.close(id, `${why}, so the server dismissed this minion.`);
   }
 }

@@ -442,8 +442,9 @@ outlives the restart it queues), and polls it every 5 s (`LandHandoffs` in
 risk label, live or waiting) and dismisses the minion, or sets pending-deploy when the
 restart is still to come. Exit 75 parks it until the scheme's runners are back. Any
 other exit, a cut-off run included, wakes the minion with the end of the output. A
-person who writes to the minion while its land waits keeps it open: it is told the
-result instead of dismissed.
+message for the minion while its land waits (a person's or a relay, not a GitHub
+notice) keeps it open: it is told the result instead of dismissed. A build minion's
+`--into build/<n> --full` isn't handed off, since it isn't the end of its work.
 
 A big feature can run as a build: a branch `build/<n>` its minions merge into and
 that lands on `main` once (the design is `specs/build-branches.md` in the scheme's

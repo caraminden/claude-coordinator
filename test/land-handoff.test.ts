@@ -48,7 +48,7 @@ function setup(name: string, opts: { running?: boolean; kept?: string | null; ru
     liveAlready: async () => !!opts.liveAlready,
   };
   const land = async (out: string, code = 0, h: object = H) => {
-    writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%s' ${JSON.stringify(out)}\nexit ${code}\n`);
+    writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%b' ${JSON.stringify(out)}\nexit ${code}\n`);
     assert.ok(landings.handOff(1, cwd, { PATH: process.env.PATH! }, [], { ...H, ...h }));
     await until('land.sh ends', () => landings.get(1)?.code !== null);
   };
@@ -110,6 +110,7 @@ test('each kind of failed land wakes the minion with the end of its output, and 
     assert.ok(s.sent[0].length < 8000, `${kind}: the tail, not the whole log (${s.sent[0].length})`);
     assert.ok(s.sent[0].includes(s.landings.log(1)), `${kind}: says where the whole output is`);
     assert.equal(s.notes.length, 0, `${kind}: no shipped line`);
+    assert.equal(s.ticket.state, null, `${kind}: the hand-off's outside state is cleared`);
     assert.ok(!s.did.some((d) => d.startsWith('close')), `${kind}: not dismissed`);
     assert.deepEqual(s.landings.handoffs(), [], `${kind}: reported`);
   }
@@ -132,9 +133,11 @@ test('exit 75 (no CI verdict) parks the minion until the runners are back, or wa
 
 test('a person who wrote while the land was in line keeps the minion open: it is told, not dismissed', async () => {
   const s = setup('talked');
-  writeFileSync(join(s.cwd, 'tools', 'land.sh'), `sleep 0.3\nprintf '%s' ${JSON.stringify(LIVE)}\n`);
+  writeFileSync(join(s.cwd, 'tools', 'land.sh'), `sleep 0.3\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
   assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
   assert.ok(!s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H), 'one landing at a time');
+  // A relay or a person's message (runner.send calls talked for any message but an fyi notice).
+
   s.landings.talked(1);
   await until('land.sh ends', () => s.landings.get(1)?.code !== null);
   await s.handoffs.poll();
@@ -142,6 +145,21 @@ test('a person who wrote while the land was in line keeps the minion open: it is
   assert.equal(s.sent.length, 1);
   assert.match(s.sent[0], /Someone wrote to you while it was in line/);
   assert.ok(!s.did.some((d) => d.startsWith('close')));
+});
+
+test("a feeder's merge into its build dismisses it as folded in; an unreported hand-off is never wiped by the next", async () => {
+  const s = setup('into');
+  mkdirSync(join(s.cwd, 'test'), { recursive: true });
+  writeFileSync(join(s.cwd, 'test', 'a.test.ts'), '');
+  writeFileSync(join(s.cwd, 'tools', 'land.sh'), "echo 'land: merged into build/3'\n");
+  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, ['--into', 'build/3', 'test/a.test.ts'], H));
+  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+  assert.ok(!s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H), 'ended but not reported: refused, not wiped');
+  assert.equal(s.landings.start(1, s.cwd, { PATH: process.env.PATH! }).code, 0, 'the land tool reads that one instead of starting afresh');
+  await s.handoffs.poll();
+  assert.match(s.notes[0], /^Shipped into build\/3: .* Merged into build\/3, not live until the build lands\.$/);
+  assert.equal(s.ticket.note, 'folded into Build 3');
+  assert.ok(s.did.some((d) => d.startsWith('close')));
 });
 
 test('a clean land with a card still open, or a turn running, is not dismissed out from under it', async () => {
@@ -182,7 +200,9 @@ test('landResult reads deploy.sh\'s lines; outputTail keeps the last lines', () 
   assert.deepEqual(landResult(LIVE, 0), { kind: 'live', commit: 'abc1234', subject: '#9: usage bar' });
   assert.equal(landResult(RESTART, 0).kind, 'restart');
   assert.equal(landResult(`${RESTART}deploy: live now: the server restarted on def5678 and stayed healthy\n`, 0).kind, 'live');
-  assert.equal(landResult('land: deploy: nothing to deploy: the server already runs abc1234\n', 0).kind, 'live');
+  assert.equal(landResult('deploy: nothing to deploy: the server already runs abc1234\n', 0).kind, 'live');
+  assert.equal(landResult('land: main is now at abc1234 "#9: say live now: in the chat"\ndeploy: not live yet after 75 s\n', 0).kind, 'restart', 'a subject saying the words is not deploy.sh saying them');
+  assert.equal(landResult('restart queued by our own deploy\n', 0).kind, 'landed', "another scheme's land.sh saying the words");
   assert.deepEqual(landResult('merged\n', 0), { kind: 'landed' }, "another scheme's land.sh");
   assert.equal(landResult(LIVE, 1).kind, 'failed');
   assert.equal(landResult('', 75).kind, 'no-ci');
@@ -200,7 +220,7 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
     const cwd = join(srv.root, 'wt');
     mkdirSync(join(cwd, 'tools'), { recursive: true });
-    writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%s' ${JSON.stringify(LIVE)}\n`);
+    writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%b' ${JSON.stringify(LIVE)}\n`);
     const git = (...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' });
     git('init', '-q');
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '.');
@@ -210,7 +230,7 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     const handOff = (body: object) => fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const body = { summary: 'Usage bar', risk: 'low', risk_reason: 'front end only' };
 
-    writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%s' ${JSON.stringify(LIVE)}\n# edited\n`);
+    writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%b' ${JSON.stringify(LIVE)}\n# edited\n`);
     const dirty = await handOff(body);
     assert.equal(dirty.status, 409);
     assert.match((await dirty.json()).error, /uncommitted changes/);
@@ -220,10 +240,15 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.equal(high.status, 400);
     assert.match((await high.json()).error, /go/);
 
+    const full = await handOff({ ...body, into: 'build/2', full: true });
+    assert.equal(full.status, 400, "a build minion's take-in of main stays in its turn");
+    assert.match((await full.json()).error, /--full yourself/);
+
     assert.equal((await handOff(body)).status, 202);
     assert.equal(store.getTicket(minion.id)!.state, 'outside');
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
     assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes('Shipped abc1234')), 'the shipped line is in its chat');
+
   } finally {
     await srv.stop();
   }

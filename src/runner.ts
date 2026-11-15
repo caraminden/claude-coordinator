@@ -588,8 +588,8 @@ export class Runner {
   inContainer(container: string): number {
     return [...this.turns.values()].filter((t) => t.container === container).length;
   }
-  /** A person wrote to a minion (server.ts: a handed-off land then leaves it open, src/land.ts). */
-  onPersonWrote?: (ticketId: number) => void;
+  /** A message (not an fyi notice) came for a minion: a handed-off land then leaves it open (server.ts, src/land.ts). */
+  onMessage?: (ticketId: number) => void;
   /** Other children of this server a restart would kill: landings that fell back to a child (src/land.ts), contraption turns, app deploys, ultra reviews. */
   hostJobs?: () => number;
   /** Why a message can't start or steer a turn (src/access.ts turnRefusal), or null when it can. */
@@ -1032,7 +1032,6 @@ export class Runner {
   /** A person wrote to this minion (a message, a comment or a card answer). */
   personWrote(ticketId: number) {
     if (this.store.getTicket(ticketId)?.state === 'pending-deploy') this.store.setSetting(talkedKey(ticketId), true);
-    this.onPersonWrote?.(ticketId);
   }
 
   /** The minion went into pending-deploy: a new deploy to wait on, so earlier talk no longer counts. */
@@ -1501,6 +1500,7 @@ export class Runner {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
     const { asker: askedBy, fyi, ...shown } = extra;
     extra = shown;
+    if (!fyi) this.onMessage?.(ticketId);
     const ticket = this.store.getTicket(ticketId);
     const refused = ticket && this.refuseTurn?.(ticket, author, extra.from);
     if (refused) {

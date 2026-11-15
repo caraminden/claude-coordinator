@@ -860,6 +860,8 @@ export const ticketRoutes: Route[] = [
       } catch (err: any) {
         throw new HttpError(400, err.message);
       }
+      // The build minion's take-in of main isn't the end of its work: a clean one would dismiss it mid-build.
+      if (args.includes('--full')) throw new HttpError(400, 'A build minion takes main in within its turn: run tools/land.sh --into build/<n> --full yourself (in a container, the land tool)');
       // As land.sh's own first check, but now, before the minion ends its turn on a land that would refuse at once.
       const dirty = await new Promise<string>((done) => execFile('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ticket.cwd! }, (err, out) => done(err ? `git status failed: ${err.message}` : out.trim())));
       if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);

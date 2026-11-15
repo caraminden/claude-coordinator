@@ -48,7 +48,8 @@ Each passes whatever the code does. Fix any you write; flag any you review.
 - **A fragment where the whole value is known**: assert the whole value (`toEqual`,
   `toMatchInlineSnapshot`), not a fragment with `toContain`.
 - **A constant pinned to its current value** (`SCHEMA_VERSION === 51`, a colour, a grace
-  period): a tautology with extra steps. Assert what the constant drives.
+  period, a row count that moves with data): a tautology with extra steps. Assert what the
+  constant drives.
 
 ## Tests that cost more than they prove
 
@@ -61,7 +62,21 @@ in review.
 - **Assert what code reads**: tool names, flags, routes, strings another program parses, and
   the behaviour a prompt drives. Prompt, copy and doc prose stay free to change.
 - **Waits are gates.** Wait on an event, a file, or an injected clock or timeout. A real sleep or
-  timeout over 100 ms in a test means the code needs a knob for it.
+  timeout over 100 ms in a test means the code needs a knob for it: every real timer a test
+  waits on (an undo bar, a proxy timeout, a lock wait) takes a setting the test turns down.
+  An absence ("nothing repaints", "nothing fires") is proved by a counter: wait for the queue to
+  drain, then check the count stayed put. A fixed idle proves nothing and costs its full length.
+- **A failed action stays loud.** `.catch(() => {})` on a browser click hides a missing element
+  and burns the full action timeout. Branch on the width or state that decides whether the
+  element exists.
+- **A comparison isn't a test.** When you try variants (thresholds, signal votes), the numbers go
+  in the decisions log; only the shipped variant gets a test.
+- **A probe that only prints isn't a test.** Give it an assertion, mark it ignored with the
+  reason, or delete it.
+- **Consumers test their use, not the kit.** An app's browser tests cover how it uses a shared
+  module; the module's own tests cover the module.
+- **Expensive fixtures are shared per file** (a worker pool, a booted engine), unless the test
+  is about the fixture.
 - **A one-off's tests leave with it.** The one-off's `shortcut:` comment names its test, so
   whoever deletes the code deletes the test in the same commit.
 - **Harnesses are shared.** Server boot, spawned tools, fake services and browsers come from the
@@ -94,3 +109,9 @@ and saying so is fine.
 
 One line in the PR: the seams tested, properties or examples, mutants killed (`3/3`), and any gap
 left with its score.
+
+## CI note
+
+vitest orders files slowest-first from a cache in `node_modules/.vite`, which `npm ci` wipes, so
+the slowest file can start last and set the wall time. Keep that cache between runs, or point
+`cacheDir` somewhere `npm ci` leaves alone.

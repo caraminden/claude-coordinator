@@ -92,7 +92,10 @@ export function progressPieces({ track, since, usual, wait }) {
   const wClock = w && (w.total || w.usual) ? w : null;
   const piece = (state, size, clock = null) => ({ size, state, clock, waits: state === 'now' && !!w && waitFam(w) === 'wait' });
   if (track?.length && (track.some(([, st]) => st === 'i') || !w)) {
-    return { segs: track.map(([g, st]) => st === 'c' ? piece('done', g) : st === 'i' ? piece('now', g, wClock ?? (usual ? { since, usual } : null)) : piece('', g)), label: '' };
+    // Nothing in the track or the wait ties a wait to a step, so the first step underway owns it (a guess): only it fills
+    // by the clock or hatches; any other step underway shows as underway with a sliver.
+    const owner = track.findIndex(([, st]) => st === 'i');
+    return { segs: track.map(([g, st], i) => st === 'c' ? piece('done', g) : st === 'i' ? (i === owner ? piece('now', g, wClock ?? (usual ? { since, usual } : null)) : { ...piece('now', g), waits: false }) : piece('', g)), label: '' };
   }
   if (!w) return null;
   const { at } = stageOf(w);

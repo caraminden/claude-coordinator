@@ -253,6 +253,10 @@ test("progressPieces: the plan's track stays through a wait, the wait filling th
   assert.deepEqual(states(landing), ['done', 'now*', ''], 'a landing mid-step: still the plan, not the wait\'s solid bar');
   assert.equal(landing.segs[1].clock, test, 'the step underway fills by the wait');
   assert.deepEqual(states(progressPieces({ track, wait: line })), ['done', 'now~', ''], 'waiting in the line: the step underway is hatched');
+  const two = [[2, 'c'], [3, 'i'], [4, 'i']];
+  assert.deepEqual(states(progressPieces({ track: two, since: NOW - MIN, usual: 180, wait: test })), ['done', 'now*', 'now'], 'two steps underway: only the first fills from the wait');
+  assert.deepEqual(states(progressPieces({ track: two, wait: line })), ['done', 'now~', 'now'], 'two steps underway in the line: only the first is hatched');
+  assert.deepEqual(states(progressPieces({ track: two, since: NOW - MIN, usual: 180 })), ['done', 'now*', 'now'], 'no wait: the one scaled guess is not shared either');
   // Cara's screenshot: a land with no plan step underway read "Test 3/6" over one solid bar.
   const stages = progressPieces({ track: [[2, 'c'], [3, 'c']], wait: test });
   assert.deepEqual(states(stages), ['done', 'done', 'now*', '', '', ''], "no step underway: the landing's own six stages");

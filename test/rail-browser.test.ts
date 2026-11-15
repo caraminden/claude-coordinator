@@ -30,7 +30,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 </script>`;
 
 // What the fake Citadel answers: toc up or down, its icon broken, or no answer at all.
-const state = { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false };
+const state = { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false, citadelAt: null as string | null };
 // The orders the rail saved (#649), and how the next saves go: failing, or answered late.
 const orders = { saved: [] as string[][], fail: false, delay: 0 };
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#f93"/></svg>';
@@ -62,15 +62,19 @@ before(async () => {
       }, orders.delay));
       return;
     }
-    if (path === '/c/api/contraptions/mine') {
+    // Citadel's list (its own page) and the kit's (a contraption's page: who is signed in, and Citadel's address
+    // when it's on another host, src/apps.ts kit).
+    if (path === '/c/api/contraptions/mine' || path === '/apps/_citadel/api/mine') {
       if (state.citadelDown) return req.socket.destroy();
       if (state.citadel502) return res.writeHead(502).end();
-      return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify([
+      const apps = [
         { name: 'peek', title: 'Peek', icon: '/icon.svg', up: true },
         { name: 'toc', title: 'ToC', icon: '/icon.svg', up: state.tocUp },
-      ]));
+      ];
+      return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(path.startsWith('/c/') ? apps : { name: 'josh', citadel: state.citadelAt, apps }));
     }
-    if (path.endsWith('icon.svg') && !(path.startsWith('/apps/toc/') && state.iconBroken)) return res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(svg);
+    const icon = path.match(/^\/apps\/_citadel\/icon\/([a-z]+)$/)?.[1];
+    if (path === '/c/icon.svg' || (icon && !(icon === 'toc' && state.iconBroken))) return res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(svg);
     res.writeHead(path.startsWith('/apps/toc/') ? 502 : 404).end();
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -100,7 +104,7 @@ async function twoAsks(page: Page) {
   await page.eval(`(() => {
     const real = window.fetch;
     window.asked = 0;
-    window.fetch = (...a) => real(...a).finally(() => { if (String(a[0]?.url ?? a[0]).includes('contraptions/mine')) window.asked++; });
+    window.fetch = (...a) => real(...a).finally(() => { if (String(a[0]?.url ?? a[0]).endsWith('/mine')) window.asked++; });
   })()`);
   await waitFor(page, 'two rechecks', 'window.asked >= 2');
 }

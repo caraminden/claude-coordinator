@@ -13,7 +13,7 @@ test('the rail lists Citadel, then each contraption, and marks where you are', (
   const inCitadel = railItems(mine, null, '/c/', true);
   assert.deepEqual(inCitadel.map((i) => [i.title, i.href, i.current]), [['Citadel', '/c/', true], ['Mandate', '#/apps/mandate', false], ['Peek Auras', '#/apps/peek-auras', false]]);
   // A contraption's icon is a path it serves; none gets a letter tile.
-  assert.deepEqual(inCitadel.map((i) => i.icon), ['/c/icon.svg', '/apps/mandate/icon.svg', null]);
+  assert.deepEqual(inCitadel.map((i) => i.icon), ['/c/icon.svg', '/apps/_citadel/icon/mandate', null]);
   assert.deepEqual(railItems(mine, 'mandate', '/c/', true).map((i) => i.current), [false, true, false]);
   // From a contraption's own page, the others open in Citadel's window too, through Citadel's root.
   const inMandate = railItems(mine, 'mandate', '/c/');

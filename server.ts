@@ -49,6 +49,7 @@ import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { ContraptionTurns } from './src/contraption-turns.ts';
+import { sweepMedia } from './src/contraption-media.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
@@ -452,6 +453,8 @@ if (!BOOT_CHECK && !PREVIEW) {
   });
   setTimeout(sweepBuild, 10 * 60_000).unref();
   setInterval(sweepBuild, 24 * 60 * 60_000).unref();
+  // Contraption turns' media files past 30 days (#732).
+  setInterval(() => void safely('contraption media sweep', async () => void sweepMedia(join(DATA_DIR, 'contraption-media'))), 24 * 60 * 60_000).unref();
 }
 
 // Steps' times from before step_times (#571), once, a minute after boot.

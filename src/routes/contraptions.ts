@@ -3,25 +3,28 @@
 // the ones enabled for them, for the app rail; a contraption's own server sends its people's bug
 // reports, feature asks and data to its home scheme (src/contraption-asks.ts) and runs turns for its people through the turn API (src/contraption-turns.ts).
 import { createHash } from 'node:crypto';
+import { readFileSync, rmSync } from 'node:fs';
+import { extname } from 'node:path';
 import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from '../appname.ts';
 import { adminAskRefusal } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, askFiles, askLine, askMessage, askSummary, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
+import { listMedia, mcpMessage, mediaDir, mediaFile, MEDIA_TYPE, runMediaTool } from '../contraption-media.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import { ServiceError } from '../app-services.ts';
 import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
 import { relay } from '../relay.ts';
 import type { ContraptionRow, Ticket } from '../db.ts';
-import { HttpError, json, oneOf, readJson, str, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, oneOf, readJson, send, SECURITY_HEADERS, str, type App, type Ctx, type Route } from '../http.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
 
 // Names the turn API (section 4) and the rail take under /api/contraptions/.
-const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay', 'home', 'minions']);
+const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay', 'home', 'minions', 'media', 'openrouter']);
 
 /** A contraption as Settings → Contraptions shows it: never a key. */
 function view(app: App, c: ContraptionRow) {
@@ -195,7 +198,7 @@ const ASK_WINDOW_MS = 10 * 60_000;
 const askTimes = new Map<string, number[]>();
 
 /** A turn API route: 'contraption' routes get the calling contraption (src/contraptions.ts caller) as ctx.contraption. */
-const fromContraption = (method: string, path: string, handler: (ctx: Ctx, c: ContraptionRow) => unknown): Route => ({
+const fromContraption = (method: string | readonly string[], path: string, handler: (ctx: Ctx, c: ContraptionRow) => unknown): Route => ({
   method, path, who: 'contraption', handler: (ctx) => handler(ctx, ctx.contraption),
 });
 
@@ -330,6 +333,40 @@ export const contraptionRoutes: Route[] = [
     }
     res.end();
   }),
+  // Media on contraption turns (#732, src/contraption-media.ts): the files a person's turns made, and their OpenRouter standing.
+  fromContraption('GET', '/api/contraptions/media', ({ res, app, url }, c) => json(res, 200, { files: listMedia(mediaDir(app.dataDir, c.name, enabledPerson(app, c, url))) })),
+  fromContraption(['GET', 'DELETE'], '/api/contraptions/media/*path', ({ req, res, app, url, params }, c) => {
+    const file = mediaFile(mediaDir(app.dataDir, c.name, enabledPerson(app, c, url)), params.path);
+    if (req.method === 'GET') return send(res, 200, { ...SECURITY_HEADERS, 'Content-Type': MEDIA_TYPE[extname(file).toLowerCase()] ?? 'application/octet-stream', 'Cache-Control': 'no-store' }, readFileSync(file));
+    rmSync(file);
+    if (!file.endsWith('.json')) rmSync(`${file}.json`, { force: true });
+    return json(res, 200, { ok: true });
+  }),
+  fromContraption('GET', '/api/contraptions/openrouter', ({ res, app, url }, c) => {
+    const person = enabledPerson(app, c, url);
+    const user = app.store.getUser(person);
+    const who = { uid: person, admin: !!user?.admin };
+    // The account page lives under a scheme: the home scheme if they're in it, else any they see.
+    const scheme = (c.home_scheme !== null && app.store.canSee(who, c.home_scheme) ? c.home_scheme : null) ?? app.store.listProjects().find((p) => app.store.canSee(who, p.id))?.id;
+    const account_url = scheme === undefined ? null : `/c/#/p/${scheme}/account`;
+    const s = app.openrouter.status(person);
+    if (!s.connected) return json(res, 200, { connected: false, account_url });
+    return json(res, 200, { connected: true, failed: s.failed, cap_usd: s.cap_usd, spent_usd: s.spent_usd, left_usd: s.left_usd, resets: s.resets, account_url });
+  }),
+  // The `citadel` MCP server a media turn's agent calls (streamable HTTP, JSON answers), with the turn's own token.
+  {
+    method: ['POST', 'GET', 'DELETE'], path: '/api/contraption-media/mcp', who: 'anyone',
+    handler: async ({ req, res, app }) => {
+      const token = (req.headers.authorization ?? '').match(/^Bearer (cmt_[\w-]+)$/)?.[1];
+      const turn = token ? app.contraptionTurns.mediaTurn(token) : null;
+      if (!turn) throw new HttpError(401, 'Not a running contraption turn with media');
+      // No server-sent stream and no sessions: every answer comes back on its POST.
+      if (req.method !== 'POST') return send(res, 405, { Allow: 'POST' }, '');
+      const answer = await mcpMessage(await readJson(req, 1_000_000), (tool, args) => runMediaTool(app.openrouter, app.dataDir, turn, tool, args));
+      if (!answer) return send(res, 202, {}, '');
+      return json(res, 200, answer);
+    },
+  },
   fromContraption('POST', '/api/contraptions/turns/:turn/cancel', ({ res, app, params }, c) => {
     if (!app.contraptionTurns.cancel(c.id, Number(params.turn))) throw new HttpError(404, 'No such turn running');
     return json(res, 200, { ok: true });

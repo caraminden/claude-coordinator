@@ -9,6 +9,7 @@ import { resolveFile } from './artifacts.ts';
 import type { Credentials } from './credentials.ts';
 import type { OpenrouterCallKind, Store } from './db.ts';
 import { HttpError } from './http.ts';
+import { matteBlack } from './png-matte.ts';
 
 type Fetch = typeof fetch;
 
@@ -116,13 +117,25 @@ export function resetsAt(now = Date.now()): string {
 
 const money = (n: number) => `$${n.toFixed(n < 1 ? 3 : 2)}`;
 
+/** A media call's refusal as a stable code (#732), which contraption turns hand to their app. */
+export type MediaCode = 'openrouter_not_connected' | 'openrouter_key_refused' | 'over_cap' | 'over_call_limit' | 'openrouter_refused' | 'bad_request' | 'failed';
+const refusal = (status: number, code: MediaCode, message: string) => Object.assign(new HttpError(status, message), { code });
+/** The code for any error a media call threw: its own, else a bad argument (4xx) or a failure. */
+export const mediaCode = (err: unknown): MediaCode => (err as { code?: MediaCode } | null)?.code ?? (err instanceof HttpError && err.status < 500 ? 'bad_request' : 'failed');
+/** Asked of a model with no transparent background of its own, so the matte has black to take out. */
+const BLACK_BACKGROUND = 'Background: plain solid pure black (#000000), nothing else behind the subject, no floor, no shadow on it.';
+
 export interface ToolContext {
   userId: number | null;
-  ticketId: number;
-  projectId: number;
-  /** Where the minion may write and read files: its working directory first (relative paths), then its shared folders. */
+  /** The minion and scheme it's booked to; null on a contraption turn (#732). */
+  ticketId: number | null;
+  projectId: number | null;
+  /** Where the turn may write and read files: its working directory first (relative paths), then its shared folders. */
   roots: string[];
+  /** What refusals call the roots (default: a minion's working directory or shared folders). */
+  place?: string;
 }
+const MINION_PLACE = 'your working directory or a shared folder';
 
 export const MEDIA_TOOLS = ['generate_image', 'edit_image', 'generate_audio'] as const;
 export type MediaTool = (typeof MEDIA_TOOLS)[number];
@@ -204,8 +217,8 @@ export class OpenRouter {
   /** The key for a call, or a refusal saying what to do. */
   private key(userId: number | null): { key: string; cap: number } {
     const c = userId ? this.creds.get<OpenRouterMeta>(userId, 'openrouter') : null;
-    if (!c) throw new HttpError(403, CONNECT);
-    if (c.failed || !c.secret) throw new HttpError(403, 'OpenRouter refused this person\'s key: connect it again on the account page.');
+    if (!c) throw refusal(403, 'openrouter_not_connected', CONNECT);
+    if (c.failed || !c.secret) throw refusal(403, 'openrouter_key_refused', 'OpenRouter refused this person\'s key: connect it again on the account page.');
     return { key: c.secret, cap: c.meta.cap_usd };
   }
 
@@ -217,10 +230,10 @@ export class OpenRouter {
     if (estimate === null || (estimate <= 0 && !model.endsWith(':free'))) {
       throw new HttpError(400, `OpenRouter shows no price for ${model} that Citadel can read, so it can't be checked against the cap: pick another model.`);
     }
-    if (estimate > PER_CALL_LIMIT_USD) throw new HttpError(400, `This call could cost up to ${money(estimate)}, over the ${money(PER_CALL_LIMIT_USD)} limit per call: ask for fewer or smaller outputs, or a cheaper model.`);
+    if (estimate > PER_CALL_LIMIT_USD) throw refusal(400, 'over_call_limit', `This call could cost up to ${money(estimate)}, over the ${money(PER_CALL_LIMIT_USD)} limit per call: ask for fewer or smaller outputs, or a cheaper model.`);
     const spent = this.store.openrouterSpent(userId, monthStart());
     if (spent + estimate > cap) {
-      throw new HttpError(402, `This call could cost up to ${money(estimate)}, and ${money(spent)} of this month's ${money(cap)} OpenRouter cap is spent: it's refused. The cap resets ${resetsAt()}, or its owner can raise it on the account page.`);
+      throw refusal(402, 'over_cap', `This call could cost up to ${money(estimate)}, and ${money(spent)} of this month's ${money(cap)} OpenRouter cap is spent: it's refused. The cap resets ${resetsAt()}, or its owner can raise it on the account page.`);
     }
     return this.store.addOpenrouterCall({ user_id: userId, ticket_id: ctx.ticketId, project_id: ctx.projectId, model, kind, estimate_usd: estimate });
   }
@@ -239,8 +252,8 @@ export class OpenRouter {
       said = JSON.parse(text)?.error?.message ?? text;
     } catch {}
     said = String(said).slice(0, 300);
-    if (res.status === 401) throw new HttpError(403, `OpenRouter refused the key${said ? ` (${said})` : ''}`);
-    if (res.status === 402 || res.status === 403) throw new HttpError(402, `OpenRouter refused the call: the key is out of credit or past the limit set on OpenRouter${said ? ` (${said})` : ''}`);
+    if (res.status === 401) throw refusal(403, 'openrouter_key_refused', `OpenRouter refused the key${said ? ` (${said})` : ''}`);
+    if (res.status === 402 || res.status === 403) throw refusal(402, 'openrouter_refused', `OpenRouter refused the call: the key is out of credit or past the limit set on OpenRouter${said ? ` (${said})` : ''}`);
     throw new HttpError(res.status === 400 || res.status === 404 || res.status === 413 ? 400 : 502, `OpenRouter answered ${res.status}${said ? `: ${said}` : ''}`);
   }
 
@@ -255,7 +268,7 @@ export class OpenRouter {
       // An answer refusing the call cost nothing; a timeout or a dropped answer may have been billed.
       const refused = err instanceof HttpError && err.status < 500;
       this.store.finishOpenrouterCall(id, refused ? 'failed' : 'unknown', refused ? 0 : null);
-      if (err instanceof HttpError && err.status === 403 && /refused the key/.test(err.message)) this.creds.fail(userId, 'openrouter');
+      if (mediaCode(err) === 'openrouter_key_refused') this.creds.fail(userId, 'openrouter');
       throw err instanceof HttpError ? err : new HttpError(502, `OpenRouter call didn't finish: ${(err as Error).message}`);
     }
   }
@@ -312,7 +325,8 @@ export class OpenRouter {
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
     if (!prompt || prompt.length > 8000) throw new HttpError(400, 'prompt is required, at most 8000 characters');
     if (args.model !== undefined && (typeof args.model !== 'string' || !/^[\w.-]+\/[\w.:-]+$/.test(args.model))) throw new HttpError(400, 'model is an OpenRouter model id, like black-forest-labs/flux-3-image-klein');
-    const out = outPath(args.out, ctx.roots, name === 'generate_audio' ? AUDIO_EXT : IMAGE_EXT);
+    const place = ctx.place ?? MINION_PLACE;
+    const out = outPath(args.out, ctx.roots, name === 'generate_audio' ? AUDIO_EXT : IMAGE_EXT, place);
     const date = new Date().toISOString();
     if (name === 'generate_audio') {
       const kind = args.kind === 'music' ? 'music' : args.kind === 'effect' ? 'effect' : null;
@@ -320,12 +334,16 @@ export class OpenRouter {
       const seconds = args.seconds === undefined ? undefined : Number(args.seconds);
       if (seconds !== undefined && !(seconds > 0 && seconds <= EFFECT_SECONDS)) throw new HttpError(400, `seconds is between 0 and ${EFFECT_SECONDS}`);
       if (kind === 'effect' && extname(out).toLowerCase() !== '.mp3') throw new HttpError(400, 'Sound effects come as .mp3');
+      const seed = args.seed;
+      if (seed !== undefined && !(Number.isSafeInteger(seed) && seed >= 0)) throw new HttpError(400, 'seed is a whole number from 0');
       const file = target(out, 1, 0, args.overwrite === true);
       const model = args.model ?? MODELS[kind];
+      // Only models that list seed take one (Lyria does; no effect model does today): refused before anything is spent.
+      if (seed !== undefined && !(await this.model(model)).supported_parameters?.includes('seed')) throw new HttpError(400, `${model} takes no seed`);
       const { value: bytes, cost } = kind === 'effect'
         ? await this.effect(userId, key, cap, ctx, model, seconds ? `${prompt}\nLength: about ${seconds} seconds.` : prompt)
-        : await this.music(userId, key, cap, ctx, model, prompt, extname(out).toLowerCase() === '.wav' ? 'wav' : 'mp3');
-      writeOutput(file, bytes, { tool: name, kind, prompt, model, cost_usd: cost, date, ...(seconds ? { seconds } : {}), licence: licence(model) });
+        : await this.music(userId, key, cap, ctx, model, prompt, extname(out).toLowerCase() === '.wav' ? 'wav' : 'mp3', seed);
+      writeOutput(file, bytes, { tool: name, kind, prompt, model, cost_usd: cost, date, ...(seconds ? { seconds } : {}), ...(seed !== undefined ? { seed } : {}), licence: licence(model) });
       return { paths: [file], cost_usd: cost, left_usd: this.left(userId, cap), model };
     }
     const n = args.n === undefined ? 1 : Number(args.n);
@@ -333,7 +351,7 @@ export class OpenRouter {
     const inputs = [...(name === 'edit_image' ? [args.image] : []), ...(Array.isArray(args.refs) ? args.refs : args.refs === undefined ? [] : [args.refs])];
     if (name === 'edit_image' && typeof args.image !== 'string') throw new HttpError(400, 'image is the file to edit');
     if (inputs.length > 8) throw new HttpError(400, 'At most 8 reference images');
-    const refs = await Promise.all(inputs.map((p) => inputImage(p, ctx.roots)));
+    const refs = await Promise.all(inputs.map((p) => inputImage(p, ctx.roots, place)));
     const svg = extname(out).toLowerCase() === '.svg';
     const model = args.model ?? (svg ? MODELS.vector : MODELS.image);
     const endpoints = await this.imageEndpoints(model);
@@ -344,13 +362,20 @@ export class OpenRouter {
     }
     if (params.n?.max !== undefined && n > params.n.max) throw new HttpError(400, `${model} makes at most ${params.n.max} image${params.n.max === 1 ? '' : 's'} per call: call it again for more`);
     if (refs.length > (params.input_references?.max ?? 0)) throw new HttpError(400, `${model} takes at most ${params.input_references?.max ?? 0} input image${params.input_references?.max === 1 ? '' : 's'}`);
-    const files = Array.from({ length: n }, (_, i) => target(out, n, i, args.overwrite === true));
     const format = extname(out).slice(1).toLowerCase();
+    // A transparent background (#732): the model's own when every endpoint it may route to lists one, else a matte here over black.
+    if (args.background !== undefined && args.background !== 'transparent') throw new HttpError(400, 'background is "transparent" or left out');
+    const clear = args.background !== 'transparent' ? null
+      : endpoints.length && endpoints.every((ep) => ep.supported_parameters?.background?.values?.includes('transparent')) ? 'native' : 'matte';
+    if (clear === 'native' && format !== 'png' && format !== 'webp') throw new HttpError(400, 'A transparent background needs out to end in .png or .webp');
+    if (clear === 'matte' && format !== 'png') throw new HttpError(400, `${model} has no transparent background of its own, so Citadel mattes it from black: out must end in .png (or pick a model with one, like bytedance-seed/seedream-5-0-flash)`);
+    const files = Array.from({ length: n }, (_, i) => target(out, n, i, args.overwrite === true));
     const estimate = imageEstimate(endpoints, { resolution: args.resolution, n, refs: refs.length, promptChars: prompt.length });
     const id = this.reserve(userId, cap, ctx, 'image', model, estimate);
     const { value: images, cost } = await this.settled(userId, id, estimate!, async () => {
       const res = await this.request(key, 'POST', '/images', {
-        model, prompt, n,
+        model, n, prompt: clear === 'matte' ? `${prompt}\n\n${BLACK_BACKGROUND}` : prompt,
+        ...(clear === 'native' ? { background: 'transparent' } : {}),
         ...(args.resolution ? { resolution: args.resolution } : {}),
         ...(args.aspect_ratio ? { aspect_ratio: args.aspect_ratio } : {}),
         ...(params.output_format?.values?.includes(format) ? { output_format: format } : {}),
@@ -362,22 +387,27 @@ export class OpenRouter {
       return { value: images, cost: body.usage?.cost ?? await this.generationCost(key, body.id) };
     });
     const paths: string[] = [];
+    const warnings: string[] = [];
     images.slice(0, n).forEach((img, i) => {
-      // Write what came back under its own extension (a jpeg asked for as .png stays a jpeg).
-      const got = MEDIA_TYPES[img.media_type ?? ''];
+      const raw = Buffer.from(img.b64_json!, 'base64');
+      const matted = clear === 'matte' ? matteBlack(raw) : null;
+      if (clear === 'matte' && !matted) warnings.push(`${basename(files[i])} came back in a form the matte can't read (${img.media_type ?? 'unknown'}), so it keeps its black background`);
+      // Write what came back under its own extension (a jpeg asked for as .png stays a jpeg); a matted one is a png.
+      const got = matted ? '.png' : MEDIA_TYPES[img.media_type ?? ''];
       let file = files[i];
       try {
         if (got && got !== extname(file).toLowerCase()) file = target(file.slice(0, -extname(file).length) + got, 1, 0, args.overwrite === true);
       } catch {} // that name is taken: keep the paid-for image under the asked name rather than lose it
-      writeOutput(file, Buffer.from(img.b64_json!, 'base64'), {
+      writeOutput(file, matted ?? raw, {
         tool: name, prompt, model, cost_usd: Math.round((cost / images.length) * 10000) / 10000, date, licence: licence(model),
         ...(args.resolution ? { resolution: args.resolution } : {}), ...(args.aspect_ratio ? { aspect_ratio: args.aspect_ratio } : {}),
         ...(inputs.length ? { refs: inputs } : {}),
+        ...(clear ? { background: clear === 'native' ? 'transparent (native)' : matted ? 'transparent (matte)' : 'black (the matte could not read it)' } : {}),
       });
       paths.push(file);
     });
     this.store.setOpenrouterCallPath(id, paths.join('\n'));
-    return { paths, cost_usd: cost, left_usd: this.left(userId, cap), model };
+    return { paths, cost_usd: cost, left_usd: this.left(userId, cap), model, ...(warnings.length ? { warnings } : {}) };
   }
 
   /** A sound effect through the speech endpoint: raw MP3 back, no cost in the answer. */
@@ -397,12 +427,13 @@ export class OpenRouter {
   }
 
   /** Music through chat completions with audio out, which OpenRouter only streams. */
-  private async music(userId: number, key: string, cap: number, ctx: ToolContext, model: string, prompt: string, format: 'mp3' | 'wav') {
+  private async music(userId: number, key: string, cap: number, ctx: ToolContext, model: string, prompt: string, format: 'mp3' | 'wav', seed?: number) {
     const estimate = model.endsWith(':free') ? 0 : perRequestPrice(await this.model(model));
     const id = this.reserve(userId, cap, ctx, 'music', model, estimate);
     return this.settled(userId, id, estimate!, async () => {
       const res = await this.request(key, 'POST', '/chat/completions', {
         model, messages: [{ role: 'user', content: prompt }], modalities: ['text', 'audio'], audio: { format }, stream: true, stream_options: { include_usage: true },
+        ...(seed !== undefined ? { seed } : {}),
       });
       let audio = '';
       let cost: number | null = null;
@@ -462,17 +493,17 @@ async function* sse(res: Response): AsyncGenerator<any> {
 const licence = (model: string) => `Made with ${model} through OpenRouter; check the provider's terms before shipping it.`;
 
 /** Where an output goes: inside one of `roots` (relative to the first), with an extension from `exts`. */
-function outPath(out: unknown, roots: string[], exts: Set<string>): string {
+function outPath(out: unknown, roots: string[], exts: Set<string>, place = MINION_PLACE): string {
   if (typeof out !== 'string' || !out.trim() || out.includes('\0')) throw new HttpError(400, 'out is the file to write, like art/hero.png');
   const file = resolve(roots[0], out.trim());
   if (!exts.has(extname(file).toLowerCase())) throw new HttpError(400, `out ends in ${[...exts].join(', ')}`);
   const root = roots.find((r) => file.startsWith(resolve(r) + sep));
-  if (!root) throw new HttpError(400, 'out must be inside your working directory or a shared folder');
+  if (!root) throw new HttpError(400, `out must be inside ${place}`);
   // Check the real folder (symlinks followed) is still inside, before making the missing part of it and after.
   const realRoot = realpathSync(root);
   const inside = (dir: string) => {
     const real = realpathSync(dir);
-    if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new HttpError(400, 'out must be inside your working directory or a shared folder');
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new HttpError(400, `out must be inside ${place}`);
     return real;
   };
   let have = dirname(file);
@@ -506,10 +537,10 @@ function writeOutput(file: string, bytes: Buffer, note: object) {
 }
 
 /** An input image as a data URL: a png, jpeg or webp inside the roots. */
-async function inputImage(path: unknown, roots: string[]): Promise<string> {
+async function inputImage(path: unknown, roots: string[], place: string): Promise<string> {
   if (typeof path !== 'string') throw new HttpError(400, 'Images to read are file paths');
   const found = await resolveFile(path, roots[0], roots, INPUT_IMAGE);
-  if (!found) throw new HttpError(400, `${path}: no png, jpeg or webp there inside your working directory or shared folders`);
+  if (!found) throw new HttpError(400, `${path}: no png, jpeg or webp there inside ${place}`);
   if (found.size > MAX_INPUT_BYTES) throw new HttpError(400, `${path} is over 20 MB`);
   const ext = extname(found.file).slice(1).toLowerCase();
   return `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${(await readFile(found.file)).toString('base64')}`;

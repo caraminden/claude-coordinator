@@ -21,6 +21,7 @@ import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
 import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
+import { MEDIA_SERVER, type MediaTurn } from './contraption-media.ts';
 import { claudeConfigDir, transcriptPath, validSessionId } from './sessions.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
@@ -88,6 +89,8 @@ export interface TurnRequest {
   webSearch: boolean;
   /** The person's online machines as MCP tools, with the system prompt's note on them (#306); `machines: false` drops both (#409). */
   machines: boolean;
+  /** generate_image, edit_image and generate_audio from Citadel's `citadel` server, on the person's own OpenRouter key (#732). */
+  media: boolean;
   timeoutSec: number;
 }
 
@@ -157,10 +160,12 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   }
   if (body.webSearch !== undefined && typeof body.webSearch !== 'boolean') bad('webSearch must be true or false');
   if (body.machines !== undefined && typeof body.machines !== 'boolean') bad('machines must be true or false');
+  if (body.media !== undefined && typeof body.media !== 'boolean') bad('media must be true or false');
+  if (body.media === true && mcp.some((s) => s.name === MEDIA_SERVER)) bad(`With media: true, ${MEDIA_SERVER} is Citadel's server: call yours something else`);
   return {
     person: body.person, session: body.session, fresh: body.fresh === true, prompt: body.prompt, system: body.system ?? '', model,
     compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), mcp, agents,
-    webSearch: body.webSearch === true, machines: body.machines !== false, timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
+    webSearch: body.webSearch === true, machines: body.machines !== false, media: body.media === true, timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
 
@@ -199,7 +204,7 @@ export function mcpConfig(port: number, servers: McpServer[]) {
 
 /** The turn's --settings: what it may use, where it compacts, and the Agent cap's hook. */
 export function settings(req: TurnRequest, hook: { node: string; script: string; slots: string } | null, machines: string[] = []) {
-  const allow = [...req.mcp, ...machines.map((name) => ({ name }))].map((s) => `mcp__${s.name}`);
+  const allow = [...req.mcp, ...machines.map((name) => ({ name })), ...(req.media ? [{ name: MEDIA_SERVER }] : [])].map((s) => `mcp__${s.name}`);
   allow.push(...builtins(req));
   const out: Record<string, unknown> = {
     permissions: { allow, defaultMode: 'dontAsk' },
@@ -241,6 +246,8 @@ interface Live {
   replied: boolean;
   /** Ids of steers written to claude that it hasn't taken in yet. */
   steers: Set<string>;
+  /** Set when it asked for media (#732): who and where its media calls go, and its event stream for the `media` event. */
+  media: MediaTurn | null;
 }
 
 /** One message as claude's stream-json input takes it; claude echoes `uuid` back once it takes it in. */
@@ -291,6 +298,12 @@ export class ContraptionTurns {
   /** The running turn a machine proxy's token belongs to, or null. */
   machineTurn(token: string): { id: number; person: number; contraption: number; machines: number[] } | null {
     for (const t of this.live.values()) if (t.token === token) return t;
+    return null;
+  }
+
+  /** The running turn that asked for media and holds this token, or null (src/contraption-media.ts). */
+  mediaTurn(token: string): MediaTurn | null {
+    for (const t of this.live.values()) if (t.token === token) return t.media;
     return null;
   }
 
@@ -408,7 +421,8 @@ export class ContraptionTurns {
     // Busy only once the turn is recorded, so a throw here can't leave the name busy until a restart (#468 S04-8).
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
     const dir = this.turnDir(id, at);
-    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set() };
+    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set(),
+      media: req.media ? { person: req.person, name: c.name, home: c.home_scheme, emit } : null };
     this.names.add(key);
     this.live.set(id, live);
     let outcome: string = 'failed';
@@ -464,13 +478,15 @@ export class ContraptionTurns {
     const secret = (name: string, text: string) => writeFileSync(join(dir.onHost, name), text, { mode: 0o600 });
     const config: { mcpServers: Record<string, object> } = mcpConfig(c.port, req.mcp);
     // The person's own machines (#306), through the same stand-in minion turns use; a contraption server's name wins.
-    const machines = !req.machines ? [] : this.machines(req.person).filter((m) => !req.mcp.some((s) => s.name === m.name));
+    const machines = !req.machines ? [] : this.machines(req.person).filter((m) => !req.mcp.some((s) => s.name === m.name) && !(req.media && m.name === MEDIA_SERVER));
     live.machines = machines.map((m) => m.id);
     if (machines.length) {
       secret('machine-mcp.ts', MACHINE_MCP);
       const env = { COORDINATOR_API: this.apiUrl(), COORDINATOR_TOKEN: live.token, COORDINATOR_MACHINE_ROUTE: 'contraption-session' };
       for (const m of machines) config.mcpServers[m.name] = { type: 'stdio', command: process.execPath, args: [join(dir.inside, 'machine-mcp.ts'), String(m.id), m.name, 'mcp'], env };
     }
+    // Citadel's own media server (#732), over HTTP on the address machine proxies use, with the turn's token.
+    if (req.media) config.mcpServers[MEDIA_SERVER] = { type: 'http', url: `${this.apiUrl()}/api/contraption-media/mcp`, headers: { Authorization: `Bearer ${live.token}` } };
     secret('mcp.json', JSON.stringify(config));
     const system = [req.system, machinesPrompt(machines)].filter(Boolean).join('\n\n');
     if (system) secret('system.md', system);

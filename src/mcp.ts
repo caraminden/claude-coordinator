@@ -817,6 +817,7 @@ const IMAGE_PROPS = {
   resolution: { type: 'string', description: "Optional: one of the model's sizes, like 1K or 2K (an unknown one is refused with the list)" },
   aspect_ratio: { type: 'string', description: 'Optional: like 1:1, 16:9 or 9:16 (an unknown one is refused with the list)' },
   n: { type: 'integer', minimum: 1, maximum: 4, description: 'How many takes (default 1)' },
+  background: { type: 'string', enum: ['transparent'], description: 'Optional: "transparent" for a see-through background (.png out). Models with their own (seedream, gpt-image-1) make real alpha; on others the server asks for black and takes it out, which suits glows but turns dark parts see-through' },
   refs: { type: 'array', items: { type: 'string' }, maxItems: 8, description: 'Optional: reference images (png, jpeg or webp paths) for style or subject' },
   overwrite: MEDIA_OVERWRITE,
 };
@@ -846,6 +847,7 @@ const MEDIA_TOOL_LIST = [
         prompt: { type: 'string', maxLength: 8000, description: 'What it should sound like' },
         out: { type: 'string', description: `${MEDIA_OUT.replace(/\. With n.*/, '')}. .mp3, or .wav for music` },
         seconds: { type: 'number', description: 'Optional, effects: roughly how long, up to 60' },
+        seed: { type: 'integer', minimum: 0, description: 'Optional, music: the same seed with a tweaked prompt keeps more of the last clip (models without one refuse it)' },
         model: MEDIA_MODEL,
         overwrite: MEDIA_OVERWRITE,
       },
@@ -1496,7 +1498,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'edit_image':
     case 'generate_audio': {
       const r = await call('POST', `/api/tickets/${TICKET}/openrouter`, { tool: name, args });
-      return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.`;
+      return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.${r.warnings ? `\n${r.warnings.join('\n')}` : ''}`;
     }
     case 'generate_image_codex':
       return codexImage(args);

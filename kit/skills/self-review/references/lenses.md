@@ -125,7 +125,9 @@ vacuous assertion, nothing that gives false confidence, a mutation it catches, p
 `citadel:test-quality`: when the diff adds or changes tests, read
 `<kit>/skills/test-quality/SKILL.md` and apply its checks (read-only, name the line you would
 flip). Also Should fix: a test that pins how the code works instead of what it does, so a
-harmless refactor breaks it.
+harmless refactor breaks it, and each shape under test-quality's "Tests that cost more than they
+prove" (a new test per bug number, a prose pin, a real wait, a copied harness, a host-path
+fixture), naming the cheaper shape.
 
 #### New types
 

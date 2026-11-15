@@ -47,6 +47,28 @@ Each passes whatever the code does. Fix any you write; flag any you review.
 - **A weaker check than the code allows**: the length checked but never the order.
 - **A fragment where the whole value is known**: assert the whole value (`toEqual`,
   `toMatchInlineSnapshot`), not a fragment with `toContain`.
+- **A constant pinned to its current value** (`SCHEMA_VERSION === 51`, a colour, a grace
+  period): a tautology with extra steps. Assert what the constant drives.
+
+## Tests that cost more than they prove
+
+These can go red, but they pay for it in lines, seconds or false alarms (Citadel's audit, #739,
+2026-11-15: about 5% of its test lines). Write the shape each line names; flag the other shape
+in review.
+
+- **A bug fix adds a row.** Put the failing case in the existing table or test for that
+  behaviour; a new test or file is for a new behaviour, not a new bug number.
+- **Assert what code reads**: tool names, flags, routes, strings another program parses, and
+  the behaviour a prompt drives. Prompt, copy and doc prose stay free to change.
+- **Waits are gates.** Wait on an event, a file, or an injected clock or timeout. A real sleep or
+  timeout over 100 ms in a test means the code needs a knob for it.
+- **A one-off's tests leave with it.** Mark the one-off code and its tests with the same
+  `one-off:` comment and delete them in one commit.
+- **Harnesses are shared.** Server boot, spawned tools, fake services and browsers come from the
+  repo's test helpers; a second copy moves into them.
+- **Fixtures live in the temp root.** Paths and ids a test makes up sit under its temp folder or
+  use values that can't exist on the host (ids from 900000). A test green on CI and red on the
+  box is a host-path fixture until shown otherwise.
 
 ## Properties where the code has a shape
 

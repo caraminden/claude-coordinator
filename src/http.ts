@@ -29,6 +29,7 @@ import type { Schedule } from './schedules.ts';
 import type { Embed } from './memory.ts';
 import type { UltraReviews } from './ultrareview.ts';
 import type { Chain, LiveWaiters, TimedWakes } from './wake.ts';
+import type { ClientErrors, DeployWatch } from './deploy-watch.ts';
 
 /** An answer with a status: what any route or module throws to refuse a request. */
 export class HttpError extends Error {
@@ -209,6 +210,8 @@ export interface App {
   waiters: LiveWaiters;
   /** wake_at's timed wakes (#722). */
   timedWakes: TimedWakes;
+  /** The post-deploy watch and the beacon's limits (src/deploy-watch.ts, #724); absent in tests that build no server. */
+  health?: { watch: DeployWatch | null; clientErrors: ClientErrors };
   previews: Previews | null;
   /** The release monitor's data: each scheme's targets and test copies (src/releases.ts, #625). */
   releases: Releases;

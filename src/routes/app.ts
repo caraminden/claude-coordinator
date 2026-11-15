@@ -79,6 +79,17 @@ export const appRoutes: Route[] = [
     handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', interruptible: app.runner.interruptible(), interruptibleTurns: app.runner.interruptibleTurns(), fallbacks: fallbacks.count, preview: app.preview }),
   },
   {
+    // The front-end error beacon (public/error-beacon.js, #724): one uncaught error or rejection from a page, for the
+    // post-deploy watch. Repeats and floods are dropped per person (ClientErrors); the answer is the same either way.
+    method: 'POST', path: '/api/client-errors', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const body = await readJson(req, 8_000);
+      const detail = app.health?.clientErrors.take(String(session.uid ?? session.name), body);
+      if (detail) app.health?.watch?.record('client-error', detail);
+      return json(res, 202, {});
+    },
+  },
+  {
     method: 'GET', path: '/api/me', who: ['person', 'taskmaster', 'minion'],
     handler({ req, res, app, session, caller }) {
       const { store } = app;

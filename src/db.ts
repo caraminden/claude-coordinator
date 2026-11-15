@@ -860,6 +860,17 @@ CREATE TABLE IF NOT EXISTS contraption_deploys (
   changes TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS contraption_deploys_name ON contraption_deploys(name, id);
+-- Health readings the post-deploy watch compares before and after each deploy (#724, src/deploy-watch.ts): front-end
+-- errors from the beacon, 5xx answers, in-server fallbacks and event-loop stalls, one row each, with the commit live
+-- then and what it said. Kept for HEALTH_KEEP_MS, and at most HEALTH_MAX_ROWS rows.
+CREATE TABLE IF NOT EXISTS health_events (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  commit_sha TEXT,
+  detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS health_events_kind ON health_events(kind, at);
 `;
 
 /**
@@ -1016,8 +1027,14 @@ export const SCHEMA_HISTORY = [
   [48, 'personal_instructions (#688)'],
   [49, 'push_subscriptions.everything (#690)'],
   [50, 'openrouter_calls (#717)'],
+  [51, 'health_events (#724)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
+
+/** How long health_events rows are kept (#724): the longest check compares a day before a deploy with the day after. */
+export const HEALTH_KEEP_MS = 3 * 24 * 60 * 60_000;
+/** The most health_events rows kept, oldest dropped first, so a page that throws in a loop can't grow the database. */
+export const HEALTH_MAX_ROWS = 5000;
 
 /** Store.stepRatio's numbers (#571): steps it sums, a scheme's own it needs, and the fewest it uses at all. */
 export const STEP_RATIO = { recent: 200, scheme: 50, least: 30 };
@@ -2518,6 +2535,59 @@ export class Store {
     return this.db
       .prepare('SELECT u.payer, t.project_id, SUM(u.cost_usd) AS cost FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? GROUP BY u.payer, t.project_id')
       .all(since) as unknown as { payer: number | null; project_id: number; cost: number }[];
+  }
+
+  /** Record a health reading (#724); every 100th insert also drops rows past HEALTH_KEEP_MS and HEALTH_MAX_ROWS. */
+  addHealthEvent(kind: string, at: number, commit: string | null, detail: string) {
+    const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };
+    if (Number(id) % 100 === 0) {
+      this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
+      this.db.prepare('DELETE FROM health_events WHERE id <= ?').run(Number(id) - HEALTH_MAX_ROWS);
+    }
+  }
+
+  /** How many `kind` readings fell in [from, to), the first one's time, and the commonest details with their counts. */
+  healthCount(kind: string, from: number, to: number, top = 3): { count: number; first: number | null; top: { detail: string; n: number }[] } {
+    const { count, first } = this.db.prepare('SELECT COUNT(*) AS count, MIN(at) AS first FROM health_events WHERE kind = ? AND at >= ? AND at < ?').get(kind, from, to) as { count: number; first: number | null };
+    const rows = count ? (this.db.prepare('SELECT detail, COUNT(*) AS n FROM health_events WHERE kind = ? AND at >= ? AND at < ? GROUP BY detail ORDER BY n DESC, MIN(at) LIMIT ?').all(kind, from, to, top) as { detail: string; n: number }[]) : [];
+    return { count: Number(count), first: first ?? null, top: rows.map((r) => ({ detail: r.detail, n: Number(r.n) })) };
+  }
+
+  /** The first event id created at or after `at`, by halving over ids (they grow with time), or one past the last: events has no index on time. */
+  eventIdAt(at: number): number {
+    const ends = this.db.prepare('SELECT MIN(id) AS lo, MAX(id) AS hi FROM events').get() as { lo: number | null; hi: number | null };
+    if (ends.hi == null) return 1;
+    const next = this.db.prepare('SELECT id, created_at FROM events WHERE id >= ? ORDER BY id LIMIT 1');
+    let lo = Number(ends.lo), hi = Number(ends.hi) + 1;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const row = next.get(mid) as { id: number; created_at: number } | undefined;
+      if (!row || row.created_at >= at) hi = mid;
+      else lo = Number(row.id) + 1;
+    }
+    return lo;
+  }
+
+  /**
+   * How turns ended in [from, to) (#724): every finished turn (the turns table) plus every error event (a turn that
+   * couldn't start or crashed), how many of those failed (a result with is_error, or an error), and the first failure's time.
+   */
+  turnOutcomes(from: number, to: number): { turns: number; failed: number; first: number | null } {
+    const ok = this.db.prepare(`SELECT COUNT(*) AS n, SUM(e.data LIKE '%"is_error":true%') AS bad, MIN(CASE WHEN e.data LIKE '%"is_error":true%' THEN t.ended_at END) AS first
+        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ?`).get(from, to) as { n: number; bad: number | null; first: number | null };
+    const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE id >= ? AND id < ? AND kind = 'error' AND created_at >= ? AND created_at < ?")
+      .get(this.eventIdAt(from), this.eventIdAt(to), from, to) as { n: number; first: number | null };
+    const firsts = [ok.first, errs.first].filter((f): f is number => f != null);
+    return { turns: Number(ok.n) + Number(errs.n), failed: Number(ok.bad ?? 0) + Number(errs.n), first: firsts.length ? Math.min(...firsts) : null };
+  }
+
+  /** The "Shipped <commit> …" notes LandHandoffs posted at or after `since`: the main commit each land moved to, and its minion. */
+  shippedSince(since: number): { ticket_id: number; commit: string }[] {
+    const rows = this.db.prepare(`SELECT ticket_id, data FROM events WHERE id >= ? AND kind = 'note' AND data LIKE '{"text":"Shipped %' ORDER BY id`).all(this.eventIdAt(since)) as { ticket_id: number; data: string }[];
+    return rows.flatMap((r) => {
+      const m = /^Shipped ([0-9a-f]{7,40}) /.exec(JSON.parse(r.data).text ?? '');
+      return m ? [{ ticket_id: Number(r.ticket_id), commit: m[1] }] : [];
+    });
   }
 
   getSetting<T>(key: string): T | null {

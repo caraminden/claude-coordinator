@@ -17,6 +17,8 @@ export class Fallbacks {
   private raised = new Set<string>();
   /** Tell people about a new cause; false (or a throw) when it didn't reach everyone, so the next fallback tries again. */
   alert: (cause: string, job: string, error: string, ticketId: number, kind: Kind) => Promise<boolean> = async () => false;
+  /** Hears every fallback, for the post-deploy watch's readings (#724). */
+  observe: (job: string, error: string) => void = () => {};
   /** Take down the fallback alerts out for jobs of `kind`. */
   clear: (kind: Kind) => Promise<void> = async () => {};
   /** Alerts and clears run one at a time, in order, so a clear never misses an alert still on its way. */
@@ -43,6 +45,7 @@ export class Fallbacks {
   /** `job` (as people read it) of minion `ticketId` runs in the server because systemd-run said `error`. */
   record(ticketId: number, job: string, error: string, now = Date.now(), kind: Kind = 'unit') {
     this.count++;
+    this.observe(job, error);
     console.error(`${job}: systemd-run failed (${error}), so it runs in the server's cgroup.`);
     // Unit names carry the minion's id and a time: the same trouble for another job is the same cause. A new
     // day makes it a new cause, so trouble that lasts alerts again even if yesterday's item was ticked.

@@ -15,6 +15,7 @@ import { ClaudeLink } from './src/claude-link.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
+import { ClientErrors, DeployWatch } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
@@ -147,7 +148,10 @@ const PARENT = process.ppid;
 if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000).unref();
 // Stalls of the event loop are named in the journal (#526), the start's own synchronous work included, with the code that ran (#609).
 // A long one names who else has the databases open: a lock they hold, or a copy loading the disk (#622).
-if (!BOOT_CHECK) watchLoopLag(console.warn, 100, 500, { profile: true, files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
+// The post-deploy watch (#724), made once the store and waiters are: stalls before then are the boot's own.
+let deployWatch: DeployWatch | null = null;
+const BOOT_AT = Date.now();
+if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 300))), 100, 500, { profile: true, files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // Off the event loop: a checkpoint fsyncs, and a stalled disk made one hold every request for seconds (#680).
@@ -260,6 +264,14 @@ const timedWakes = new TimedWakes(store, (ticketId, text) => runner.send(ticketI
 if (!BOOT_CHECK) timedWakes.arm();
 mainSync.as = githubOf;
 runner.liveHead = () => waiters.head;
+// After each deploy, compare health before and after it and wake the minions that shipped a regression (#724). No model.
+deployWatch = new DeployWatch({
+  store, dbPath: join(DATA_DIR, 'coordinator.db'), bootAt: BOOT_AT, head: () => waiters.head, scheme: ownScheme,
+  commits: (prev, head) => new Promise((done) => execFile('git', ['log', '--reverse', '--no-merges', '--format=%H%x09%s', `${prev}..${head}`], { cwd: import.meta.dirname, timeout: 30_000, maxBuffer: 16 << 20 }, (err, out) => done(err ? null : out.split('\n').filter(Boolean).map((l) => ({ sha: l.slice(0, l.indexOf('\t')), subject: l.slice(l.indexOf('\t') + 1) }))))),
+  wake: (id, text) => runner.send(id, APP_NAME, text),
+  mail: (id, text) => runner.leaveMail(id, APP_NAME, text),
+});
+const clientErrors = new ClientErrors();
 // Semantic memory (#331): llama-server on this box embeds the chats (deploy/citadel-embed.service).
 const EMBED_MODEL = process.env.CITADEL_EMBED_MODEL || 'Qwen3-Embedding-0.6B-Q8_0';
 const embed = llamaEmbed(process.env.CITADEL_EMBED_URL || 'http://127.0.0.1:21434');
@@ -280,6 +292,7 @@ function catchUp(repoDir: string) {
 /** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
 function liveOn(head: string | null) {
   // Not waited for (#526): its git and gh calls take seconds, and the server answers meanwhile.
+  deployWatch?.live(head);
   void (async () => {
     await waiters.check(head);
     for (const id of await waiters.pendingLive()) runner.deployLive(id);
@@ -776,6 +789,10 @@ const landHandoffs = new LandHandoffs({
   },
 });
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', () => landHandoffs.poll()), 5_000).unref();
+if (!BOOT_CHECK) {
+  void safely('deploy watch', () => deployWatch!.tick());
+  setInterval(() => void safely('deploy watch', () => deployWatch!.tick()), 60_000).unref();
+}
 // GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).
 const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined), log: (line) => console.log(line) });
 if (!BOOT_CHECK) setInterval(() => void artifactSweep.tick().catch((err) => console.error(`Artifact sweep: ${err?.message ?? err}`)), 60 * 60_000).unref();
@@ -789,6 +806,7 @@ const ciLoad = new CiLoad(store, {
 if (!BOOT_CHECK) ciLoad.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
+fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));
 fallbacks.alert = adminAlert(store, (project, person, key, title, link) => mandateAlert('In-server fallback', project, person, key, title, link));
 fallbacks.clear = adminClear(store, (project, person, key) => mandateAlert('In-server fallback', project, person, key, null));
 // Contraptions' timer jobs (#555): a failed run is one Mandate alert for every admin and the app's home-scheme owner,
@@ -918,7 +936,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 const app: App = {
   store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
-  dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
+  dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {
     return ASSET_VERSION;
   },
@@ -1006,6 +1024,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
   } catch (err: any) {
     const status = err instanceof HttpError ? err.status : 500;
     if (status === 500) console.error(err);
+    // Ids in the path would split one failing route into many readings.
+    if (status >= 500) deployWatch?.record('server-5xx', `${req.method} ${(req.url ?? '').split('?')[0].replace(/\d+/g, '#')}: ${String(err?.message ?? err).slice(0, 200)}`);
     // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
     if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
     else res.end();

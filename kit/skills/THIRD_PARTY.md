@@ -49,8 +49,8 @@ and re-synced to the pins above by #354 (2026-11-06). Licence texts are at the e
   description and two pointer lines reach them. The files are verbatim, frontmatter and
   `/ponytail-audit`-style names included, so a sync stays a plain copy; sessions follow the
   pointer line, not those names. `ponytail-review`'s description is rewritten to cover all
-  three and to leave "code review" and "review my PR" to the built-in `code-review`, and "is
-  this over-engineered" to the built-in `simplify`.
+  three and to leave "code review" and "review my PR" to `citadel:self-review` (turns switch
+  off the built-in `code-review` and `simplify` since #760).
 - **diagnosing-bugs** and the repo's own `bug-fixing` skill both matched every bug
   report. Its description now makes it the escalation for hard bugs.
 - **improve-codebase-architecture** was user-invoked (`disable-model-invocation: true`).

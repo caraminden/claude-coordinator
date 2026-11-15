@@ -15,9 +15,9 @@
 #    onto a newer main that keeps the branch's old files (undo_guard below; a message line "Undoes: <sha>"
 #    lets a meant undo through).
 # 3. Runs the check command on the rebased commit, within LAND_CHECK_TIMEOUT whole seconds (default
-#    1800). A failure or overrun stops here.
+#    1800). A failure or overrun stops here. With lanes (LANES below), the check of the commit's lane.
 # 4. With the CI gate on (below): pushes the commit to the scratch branch land/<branch> on origin and
-#    waits for CI to pass exactly that commit. Red stops here. On the way out the scratch branch is
+#    waits for CI to pass exactly that commit (with lanes, land/<lane>/<branch>, or no push for a lane with no CI). Red stops here. On the way out the scratch branch is
 #    deleted and its unfinished runs cancelled, except those of a commit that landed: they finish, so
 #    main's CI can reuse what they pass. With batches (CI_BATCH over 1, "Batches" below) only the
 #    last of a batch pushes, and its run covers the commits of the ones ahead of it in the batch.
@@ -58,12 +58,34 @@ FACTS=CLAUDE.md
 #   run again (it would skip again): a workflow whose jobs are skipped on purpose needs CI_STATUS.
 # CI_STATUS: only when "every workflow green" is not the scheme's rule (a workflow that blocks only
 #   when red, one that runs only for some paths): the scheme's own command. It gets the commit as
-#   its one argument and answers by exit code: 0 green, 1 red, 2 running, 3 not started (no run yet,
+#   its one argument (with lanes, the run's lane as a second) and answers by exit code: 0 green, 1 red, 2 running, 3 not started (no run yet,
 #   or still queued), 4 ended without a verdict (cancelled, the runner lost, its jobs skipped);
 #   anything else: no answer this time. What it prints is shown when CI is red. It must judge the
 #   newest run on that commit.
 CI_WORKFLOWS=''
 CI_STATUS=''
+# Lanes: off while LANES is empty, and then every landing is full, as above. LANES is the repo path of the scheme's
+#   lane map (tools/lanes), always read from $BRANCH's copy, never the landing's, so a commit can't loosen its own
+#   lane. A map line is "<lane> <pattern>...": a path takes the lane of the first line with a pattern that matches
+#   it, and a path no line matches is full. Patterns are bash case patterns, where * also matches /; '#' starts a
+#   comment. A lane is light, full, or a lower-case word naming a partial lane (fast, android, py); any other word
+#   reads as full. The map itself, tools/land.sh, tools/land.local.sh and .github/* are full whatever it says.
+#   A commit's lane is over what it changes since the commit it was rebased onto (main, or the commit of the one ahead
+#   in the stack): every path light is light; light and one partial lane P is P; two partial lanes, a full or unlisted
+#   path, no change at all, or a git failure is full. With batches a run takes the lane of its batch's whole range,
+#   from the commit under its first member to the one pushed.
+#   light: runs CHECK_LIGHT (none while it is empty), pushes nothing and starts no CI: it is green once checked, and
+#     still lands only on top of main in its place in line (behind a running CI: right after that one lands).
+#   a partial lane, fast: runs CHECK_FAST (CHECK while unset; '' none), pushes to land/fast/<branch> and waits for
+#     CI_WORKFLOWS_FAST (CI_WORKFLOWS while unset; '' runs no CI, like light); a run may skip the jobs named in
+#     CI_SKIPS_FAST, split by spaces. The setting names take the lane in upper case.
+#   full: CHECK and CI_WORKFLOWS, pushed to land/full/<branch>.
+#   A workflow picks its lanes by its push branches ('land/full/**', 'land/fast/**'), a job it skips on one by
+#   `if: ${{ !startsWith(github.ref_name, 'land/fast/') }}`. tools/land.sh --lane [<commit>] [<base>] prints
+#   "<lane> <the path that decided it>" for what <commit> (HEAD) changes since it forked from <base> ($BRANCH), by
+#   $BRANCH's map, and exits.
+LANES=''
+CHECK_LIGHT=''
 # How many landings at the front of the line run CI at once, each on top of the ones ahead of it
 # (below, "The stack"). 1: only the head of the line. Runners that can't carry three runs at once: 2.
 CI_STACK=${LAND_STACK_DEPTH:-3}
@@ -91,6 +113,55 @@ if [ -f "$LOCAL" ]; then
   trap - EXIT
 fi
 [[ $PUSH_MAIN =~ ^[01]$ ]] || refuse "PUSH_MAIN is 1 (push main) or 0 (keep it local), not \"$PUSH_MAIN\""
+
+# Lanes (the header at LANES). lane_of <base> <commit> <map's revision>: prints "<lane> <the path that decided it>"
+# for the paths <commit> changes since it forked from <base>, by the map as that revision has it.
+lane_of() {
+  local fork files f i l lane=light why='' words lanes=() pats=()
+  { fork=$(git merge-base "$1" "$2" 2>/dev/null) && files=$(git diff --no-renames --name-only -z "$fork" "$2" | tr '\0' '\n'); } 2>/dev/null ||
+    { echo "full (couldn't diff ${2:0:12} against ${1:0:12})"; return 0; }
+  [ -n "$files" ] || { echo "full (no changes)"; return 0; }
+  while read -r -a words || [ "${#words[@]}" -gt 0 ]; do
+    l=${words[0]:-}
+    [ -n "$l" ] && [[ $l != \#* ]] || continue
+    [[ $l =~ ^[a-z][a-z0-9_]*$ ]] || l=full
+    for i in "${words[@]:1}"; do [[ $i != \#* ]] || break; lanes+=("$l") pats+=("$i"); done
+  done < <(git show "$3:$LANES" 2>/dev/null)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case $f in "$LANES" | tools/land.sh | tools/land.local.sh | .github/*) echo "full $f"; return 0 ;; esac
+    l=full
+    for i in "${!pats[@]}"; do
+      case $f in ${pats[i]}) l=${lanes[i]}; break ;; esac
+    done
+    case $l in
+      light) [ -n "$why" ] || why=$f ;;
+      full) echo "full $f"; return 0 ;;
+      *) if [ "$lane" = light ]; then lane=$l why=$f; elif [ "$lane" != "$l" ]; then echo "full $f"; return 0; fi ;;
+    esac
+  done <<<"$files"
+  echo "$lane $why"
+}
+
+# lane_ci <lane>: 0 when its landings run CI, with LW the workflows the built-in reader waits for and LS the jobs a run
+# may skip; 1 when they run none.
+lane_ci() {
+  local v
+  LW=$CI_WORKFLOWS LS=''
+  if [ -n "$LANES" ] && [ "$1" != full ]; then
+    [ "$1" != light ] || return 1
+    v=CI_SKIPS_${1^^} && LS=${!v-}
+    v=CI_WORKFLOWS_${1^^}
+    if [ -n "${!v+set}" ]; then LW=${!v} && [ -n "$LW" ]; return; fi
+  fi
+  [ -n "$CI_WORKFLOWS$CI_STATUS" ]
+}
+
+if [ "${1:-}" = --lane ]; then
+  [ $# -le 3 ] || refuse "--lane takes a commit and a base, both optional"
+  if [ -z "$LANES" ]; then echo "full (LANES is not set, so every landing is full)"; else lane_of "${3:-$BRANCH}" "${2:-HEAD}" "$BRANCH"; fi
+  exit 0
+fi
 
 # A turn in its person's Claude container has its own pid namespace: this script there can't see the landings
 # running on the host, so it would delete their places in line as dead, and they its own (Theory of Crafting,
@@ -157,8 +228,10 @@ done
 CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60} CI_DOWN=${LAND_CI_DOWN:-600}
 [[ $CI_STACK =~ ^[1-9][0-9]*$ ]] || refuse "CI_STACK is a number from 1 up, not \"$CI_STACK\""
 [[ $CI_BATCH =~ ^[1-9][0-9]*$ ]] || refuse "CI_BATCH is a number from 1 up, not \"$CI_BATCH\""
-CI_ON=1
-[ -n "$CI_WORKFLOWS$CI_STATUS" ] || CI_ON='' CI_STACK=1 CI_LIMIT=0 CI_BATCH=1
+CI_ON=$CI_WORKFLOWS$CI_STATUS
+# With lanes, a lane's own workflows turn the gate on too.
+[ -z "$LANES" ] || for v in $(compgen -v CI_WORKFLOWS_); do CI_ON+=${!v}; done
+[ -n "$CI_ON" ] || CI_ON='' CI_STACK=1 CI_LIMIT=0 CI_BATCH=1
 BATCH='' BUILDERS=$CI_STACK BISECT=0 # BUILDERS: how many in line build at once
 if [ "$CI_BATCH" -gt 1 ]; then
   BATCH=1 BUILDERS=$(((CI_STACK + 1) * CI_BATCH))
@@ -554,29 +627,38 @@ blocked='' # why it can't land on $base (a conflict, a clash, a red check, red C
 keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
 green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 landed='' ci_skipped=''
 main_pushed='' # step 7 runs land_after only once this is set
+lane=full lane_why='' ci_lane=full # this commit's lane (LANES), why, and the lane of the CI run it waits for
 verdict=-  # CI's verdict on $tip, as its ticket says it: -, running, green or red
 B_NUM=''   # with batches: which batch this one is in, from the head's (1); "Batches" below
 fronted='' # with batches: it has been in the head's batch, so CI's limits count
 g_last='' g_quiet='' # with batches, the head: when it last asked CI about the commit it lands, and since when with no answer
 
-# CI's verdict on [commit] ($tip if none), by the exit codes in the header at CI_STATUS; what it found goes to $cilog.
+# CI's verdict on [commit] ($tip if none) in [lane] ($ci_lane if none), by the exit codes in the header at CI_STATUS;
+# what it found goes to $cilog. A lane that runs no CI is green.
 ci_verdict() {
-  local sha=${1:-$tip} runs w path id status result one failed skipped rank worst=0 worst_rank=0
+  local sha=${1:-$tip} ln=${2:-$ci_lane} runs w path id status result one failed skipped j rank worst=0 worst_rank=0
   : >"$cilog"
   ci_skipped=''
+  lane_ci "$ln" || return 0
   if [ -n "$CI_STATUS" ]; then
-    timeout 120 bash -c "$CI_STATUS \"\$1\"" _ "$sha" >"$cilog" 2>&1 9>&-
+    timeout 120 bash -c "$CI_STATUS \"\$@\"" _ "$sha" ${LANES:+"$ln"} >"$cilog" 2>&1 9>&-
     return
   fi
   runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5
-  for w in $CI_WORKFLOWS; do
+  for w in $LW; do
     one=3
     while IFS=$'\t' read -r path id status result url; do
       [[ ${path%%@*} == */"$w" ]] || continue
       case $status:$result in
         completed:success)
           # Green only when every job ran: a run whose jobs were skipped (an `if:` that came out false) concludes success too.
-          skipped=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.conclusion == "skipped")] | length' 2>>"$cilog") || return 5
+          if [ -z "$LS" ]; then
+            skipped=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.conclusion == "skipped")] | length' 2>>"$cilog") || return 5
+          else # the lane's CI_SKIPS_<LANE> may be skipped: the others are counted, by name
+            j=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '.jobs[] | select(.conclusion == "skipped") | .name' 2>>"$cilog") || return 5
+            skipped=0
+            while IFS= read -r j; do [ -z "$j" ] || [[ " $LS " == *" $j "* ]] || skipped=$((skipped + 1)); done <<<"$j"
+          fi
           # Only a plain 0 is green; a count is told apart from no answer (ci_ask), which is handled as a lost run.
           if [ "$skipped" = 0 ]; then one=0; else one=4; [ "$skipped" -gt 0 ] 2>/dev/null && ci_skipped="$skipped of the jobs in $w's run"; fi ;;
         completed:failure)
@@ -603,9 +685,24 @@ ci_verdict() {
 # writes land/<branch>, so there is no one's work to overwrite. --no-verify: the check ran above.
 # CI on $tip, begun: a run of this very commit that is green or going (its pull request's, say) will do;
 # otherwise a new one.
+# With lanes, a lane that runs no CI is green at once, with no push. With batches the run takes the lane of the batch's
+# range, from the commit under its first member (B_BASE[1], from batch_look) to $tip; one not under $tip is full.
 ci_start() {
-  local rc=0
+  local rc=0 l
   ci_clock=$SECONDS ci_last=$SECONDS ci_begun=''
+  if [ -n "$BATCH" ] && [ -n "$LANES" ]; then
+    l="full (${B_BASE[1]:--} is not under ${tip:0:12})"
+    ! git merge-base --is-ancestor "${B_BASE[1]:--}" "$tip" 2>/dev/null || l=$(lane_of "${B_BASE[1]}" "$tip" "refs/heads/$BRANCH")
+    ci_lane=${l%% *}
+    say "its batch's run, from ${B_BASE[1]:0:12} up, takes lane ${l%% *}: ${l#* }"
+  fi
+  if ! lane_ci "$ci_lane"; then
+    green=1 verdict=green
+    say "lane $ci_lane runs no CI, so nothing is pushed and ${tip:0:12} is green as checked"
+    queue_set 5 green
+    queue_phase "checked ${tip:0:12}: lane $ci_lane runs no CI"
+    return 0
+  fi
   ci_verdict || rc=$?
   case $rc in
     0) green=1 && rm -f "$state/ci-down" && say "CI already passed ${tip:0:12}" ;;
@@ -618,7 +715,14 @@ ci_start() {
   queue_phase "waiting for CI on ${tip:0:12} since $(date +%H:%M)"
 }
 
+# With lanes the scratch branch is land/<lane>/<branch>: one a rebuild moved off (its lane changed) goes, with its runs.
 ci_push() {
+  local ref=land/$branch
+  [ -z "$LANES" ] || ref=land/$ci_lane/$branch
+  if [ "$ref" != "$CI_REF" ]; then
+    [ -z "$pushed" ] || { ci_cancel; hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true; }
+    CI_REF=$ref
+  fi
   [ -n "$pushed" ] || ci_cancel # what a landing of this branch that was killed left running (a landed one's runs go on)
   hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
   hub git push -q --no-verify origin "+$tip:refs/heads/$CI_REF" || refuse "couldn't push ${tip:0:12} to origin's $CI_REF, so CI can't run on it and nothing landed"
@@ -677,7 +781,7 @@ ci_ask() {
       return 0 ;;
     4)
       cat "$cilog" >&2
-      [ -z "$ci_skipped" ] || refuse "$ci_skipped on ${tip:0:12} were skipped, so the commit's checks did not all run and nothing landed. Nothing is wrong with the runners, and running it again would skip them again. A workflow with jobs that are skipped on purpose needs the scheme's own CI_STATUS script (see the top of tools/land.sh)"
+      [ -z "$ci_skipped" ] || refuse "$ci_skipped on ${tip:0:12} were skipped, so the commit's checks did not all run and nothing landed. Nothing is wrong with the runners, and running it again would skip them again. A workflow with jobs that are skipped on purpose needs the scheme's own CI_STATUS script, or with lanes their names in the lane's CI_SKIPS_<LANE> (see the top of tools/land.sh)"
       [ -z "$retried" ] || park "CI's run on ${tip:0:12} ended without a verdict a second time (a runner lost mid-run, or the run cancelled), so nothing landed. The runners need a person's look; park, and run this again after"
       retried=1
       say "CI's run on ${tip:0:12} ended without a verdict (a runner lost mid-run, or the run cancelled): running it again, once. The commit is the same, so the ones stacked on it keep their runs"
@@ -715,7 +819,7 @@ ci_ask() {
 # The branch as it was, rebased onto <commit> and checked: sets base, and tip when it passed (with the
 # CI gate on, CI then runs on it), or blocked when it can't sit on that commit.
 build() {
-  local want=$1 on phase rc=0 clashes fork log
+  local want=$1 on phase rc=0 clashes fork log chk v
   [ -z "$pushed" ] || ci_cancel # its run is on a commit that will never land now
   base=$want tip='' blocked='' keep='' green='' retried='' pushed_at='' verdict=-
   queue_set 4 -
@@ -761,27 +865,39 @@ build() {
     refuse "nothing landed and $branch is back where it was. A squash onto a newer $BRANCH keeps the branch's old files, which reverts what landed since (git reset --soft from a branch that started further back). Find the branch's last commit before the squash (git reflog), rebase that onto $BRANCH, and squash only then: git reset --soft \$(git merge-base HEAD $BRANCH). If the undo is meant, add a line \"Undoes: <sha>\" to a commit message for each commit above, then run this again"
   fi
 
-  say "running $CHECK"
-  queue_phase "waiting to run the check"
-  log="$state/land-check-${branch//\//-}.log"
-  rm -f "$log" # the check makes it as it starts: none afterwards means the check lock never came
-  # It runs under the lock when this is the head, so it has a time limit (LAND_CHECK_TIMEOUT, in seconds), and
-  # 9>&- keeps a process it leaves running from holding the lock after this script ends. One check at a time,
-  # under a lock of its own (fd 7): the ones stacked behind the head check too, and the box is shared.
-  (
-    flock -w "$CHECK_WAIT" 7 || exit 1
-    queue_phase "running the check since $(date +%H:%M)"
-    timeout -k 30 "$CHECK_LIMIT" bash -c "$CHECK" >"$log" 2>&1 9>&- 7>&-
-  ) 7>"$state/land-check.lock" 9>&- || rc=$? # 9>&-: this subshell outlives a killed landing, and mustn't keep its lock
-  [ "$rc" = 0 ] || [ -e "$log" ] || refuse "the check lock ($state/land-check.lock) was still taken after ${CHECK_WAIT}s, so the check never ran and nothing landed: $(check_holder). A person needs to look at it before anyone tries again"
-  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-    echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
+  # Its lane, over what it changes on $want, and that lane's check.
+  lane=full lane_why='' chk=$CHECK
+  if [ -n "$LANES" ]; then
+    read -r lane lane_why <<<"$(lane_of "$want" HEAD "refs/heads/$BRANCH")"
+    say "lane $lane: $lane_why"
+    case $lane in light) chk=$CHECK_LIGHT ;; full) ;; *) v=CHECK_${lane^^} && chk=${!v-$CHECK} ;; esac
   fi
-  if [ "$rc" != 0 ]; then
-    tail -n 40 "$log" >&2
-    keep=$(git rev-parse HEAD)
-    blocked="the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
-    return 0
+  ci_lane=$lane
+  if [ -z "$chk" ]; then
+    say "lane $lane runs no check"
+  else
+    say "running $chk"
+    queue_phase "waiting to run the check"
+    log="$state/land-check-${branch//\//-}.log"
+    rm -f "$log" # the check makes it as it starts: none afterwards means the check lock never came
+    # It runs under the lock when this is the head, so it has a time limit (LAND_CHECK_TIMEOUT, in seconds), and
+    # 9>&- keeps a process it leaves running from holding the lock after this script ends. One check at a time,
+    # under a lock of its own (fd 7): the ones stacked behind the head check too, and the box is shared.
+    (
+      flock -w "$CHECK_WAIT" 7 || exit 1
+      queue_phase "running the check since $(date +%H:%M)"
+      timeout -k 30 "$CHECK_LIMIT" bash -c "$chk" >"$log" 2>&1 9>&- 7>&-
+    ) 7>"$state/land-check.lock" 9>&- || rc=$? # 9>&-: this subshell outlives a killed landing, and mustn't keep its lock
+    [ "$rc" = 0 ] || [ -e "$log" ] || refuse "the check lock ($state/land-check.lock) was still taken after ${CHECK_WAIT}s, so the check never ran and nothing landed: $(check_holder). A person needs to look at it before anyone tries again"
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+      echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
+    fi
+    if [ "$rc" != 0 ]; then
+      tail -n 40 "$log" >&2
+      keep=$(git rev-parse HEAD)
+      blocked="the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
+      return 0
+    fi
   fi
 
   tip=$(git rev-parse HEAD)
@@ -848,11 +964,11 @@ batch_push() {
 # all still running (one killed meanwhile must not land). CI is asked at most every CI_POLL, and with no answer for
 # CI_START it parks, as ci_ask does.
 batch_green() {
-  local i rc=0 under
+  local i rc=0 under main gl=full
   G='' GI=''
   for ((i = ${#B_VER[@]} - 1; i >= 1; i--)); do [ "${B_VER[i]}" != green ] || { GI=$i; break; }; done
   [ -n "$GI" ] && [[ ${B_SHA[GI]} =~ ^[0-9a-f]{40,}$ ]] || return 1
-  G=${B_SHA[GI]} under=$(git rev-parse "refs/heads/$BRANCH")
+  G=${B_SHA[GI]} under=$(git rev-parse "refs/heads/$BRANCH") main=$under
   git merge-base --is-ancestor "$under" "$G" 2>/dev/null || return 1
   for ((i = 1; i <= GI; i++)); do
     [ "${B_BASE[i]}" = "$under" ] && [[ ${B_SHA[i]} =~ ^[0-9a-f]{40,}$ ]] && git merge-base --is-ancestor "${B_SHA[i]}" "$G" 2>/dev/null || return 1
@@ -860,7 +976,9 @@ batch_green() {
   done
   [ -z "$g_last" ] || [ $((SECONDS - g_last)) -ge "$CI_POLL" ] || return 1
   g_last=$SECONDS
-  ci_verdict "$G" || rc=$?
+  # In the lane of main..G: inside the range G's run had, so no heavier than the lane that run took.
+  [ -z "$LANES" ] || { gl=$(lane_of "$main" "$G" "refs/heads/$BRANCH") && gl=${gl%% *}; }
+  ci_verdict "$G" "$gl" || rc=$?
   case $rc in
     0) g_quiet='' ;;
     [1-4])

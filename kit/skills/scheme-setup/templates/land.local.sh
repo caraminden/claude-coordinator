@@ -28,6 +28,23 @@
 # How many landings share one CI run (batches). 1: off. A deep line on slow CI: 3 or 4.
 # CI_BATCH=${LAND_BATCH:-1}
 
+# Lanes: a landing checks, and runs CI for, only the lane of the paths it changes. LANES names the map, read from
+# main's copy, lines of `<lane> <pattern>...` (bash case patterns, * crosses /, first match wins, # comments):
+#   light docs/* *.md
+#   android app/*
+# A path no line lists is full, and so are the map itself, tools/land.sh, this file and .github/*. Light paths and
+# one other lane: that lane; two other lanes: full. `tools/land.sh --lane [<commit>] [<base>]` prints a commit's.
+# Unset: every landing is full, as before. The header of tools/land.sh says the rest.
+# LANES=tools/lanes
+# The light lane's check (none: it lands in line with no check and no CI) and each other lane's (default CHECK).
+# CHECK_LIGHT=''
+# CHECK_ANDROID='./gradlew lint'
+# A lane's workflows (default CI_WORKFLOWS; '' runs no CI and pushes nothing), and the names of jobs its runs may
+# skip, split by spaces. Its runs are pushed to land/<lane>/<branch>: route them with `branches: ['land/android/**']`.
+# CI_WORKFLOWS_ANDROID='android.yml'
+# CI_SKIPS_ANDROID='desktop-tests'
+# CI_STATUS gets the lane as its second argument.
+
 # 0: main stays in the main checkout and is never pushed (a scheme whose origin isn't its own).
 # PUSH_MAIN=1
 

@@ -54,6 +54,7 @@ const FIXTURES = ['land-fixture.ts', 'land-recover-fixture.ts', 'scheme-setup-la
 const RUNS_SCRIPTS = [
   'land.test.ts', 'land-deploy.test.ts', 'land-queue.test.ts', 'land-recover.test.ts', 'land-boot-check.test.ts', 'deploy.test.ts',
   'run-tests.test.ts', 'run-tests-scope.test.ts', 'scheme-setup-land.test.ts', 'scheme-setup-land-ci.test.ts',
+  'scheme-setup-land-lanes.test.ts',
 ];
 
 test('the suites that start land.sh, deploy.sh or run-tests.sh start them with scriptEnv', () => {

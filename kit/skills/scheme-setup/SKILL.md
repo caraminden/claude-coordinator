@@ -194,7 +194,12 @@ run on the last one's commit: for a line that often runs deep on slow CI, 3 or 4
 the runners carry at once; the header says how a red batch is bisected. A new scheme has no line to measure yet, so
 leave it at 1. In the setup report, name `CI_BATCH` as the knob for a deep line. Raise it once landings come back to back
 for about a CI run each (a line, not a free runner), as in Citadel's `specs/batched-landings.md`. A high share of red
-land runs (over about 15%) argues for 2, not 4. When "every workflow
+land runs (over about 15%) argues for 2, not 4. When much of what lands needs less than the whole check and CI
+(docs, one app of several), give it lanes: `LANES=tools/lanes` and a map of `<lane> <pattern>...` lines, with
+`CHECK_<LANE>`, `CI_WORKFLOWS_<LANE>` and `CI_SKIPS_<LANE>` in `land.local.sh` (its comments show them). A light
+landing lands in line with no CI and no push; a lane's run goes to `land/<lane>/<branch>`, so `'land/**'` still
+catches every run and `'land/<lane>/**'` routes one lane's. Anything the map doesn't list is full, so a missing
+line costs time, never safety; `tools/land.sh --lane` prints the lane a commit would take. When "every workflow
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
 `CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion

@@ -210,10 +210,10 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
 /**
  * Claude Code settings every turn of every scheme gets, whatever the repo's own .claude/settings.json
  * says (Taskmasters' folders have none): where a turn compacts, in tokens, and how much of a Bash
- * command's output it keeps.
+ * command's output it keeps. Minions compact at about 150k (real compactions land near 82-88% of the window; #703).
  */
-export const TURN_SETTINGS = { autoCompactWindow: 250_000, bashOutputMaxChars: 12_000 };
-/** A Taskmaster's compact window (#423): a backstop, as it hands off past FRESH_CONTEXT_TOKENS anyway. */
+export const TURN_SETTINGS = { autoCompactWindow: 180_000, bashOutputMaxChars: 12_000 };
+/** A Taskmaster's compact window (#423): same window as a minion's since #703, kept as its own constant; it hands off past FRESH_CONTEXT_TOKENS anyway. */
 export const TASKMASTER_COMPACT_WINDOW = 180_000;
 /**
  * Read rules every turn gets, so the Read, Grep and Glob tools can't open a login or a transcript

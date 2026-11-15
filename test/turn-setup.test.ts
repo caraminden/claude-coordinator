@@ -106,7 +106,7 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
 
 test("a minion turn gets the compaction window, no service secrets, Claude Code's model and the scheme's effort", async () => {
   const t = await turn('ticket', 'connected');
-  assert.equal(t.settings.autoCompactWindow, 250000);
+  assert.equal(t.settings.autoCompactWindow, 180000);
   assert.equal(t.env.MACHINES_URL, undefined);
   assert.equal(t.env.COORDINATOR_PASSWORD, undefined);
   assert.equal(t.env.XDG_RUNTIME_DIR, '/run/user/1000');
@@ -136,7 +136,7 @@ test("each minion's and Taskmaster's turn gets its own private temp folder in it
 
 test('a Taskmaster turn defaults to opus at high effort, and keeps a choice people made', async () => {
   const t = await turn('coordinator', 'connected');
-  assert.equal(t.settings.autoCompactWindow, 180000, "a Taskmaster's backstop under a minion's 250k (#423)");
+  assert.equal(t.settings.autoCompactWindow, 180000, "a Taskmaster compacts at its own window (#423)");
   assert.equal(t.flag('--model'), 'opus');
   assert.equal(t.flag('--effort'), 'high');
   const chosen = await turn('coordinator', 'connected', { model: 'sonnet', effort: 'medium' });
@@ -156,7 +156,7 @@ test('every turn of every scheme loads its own pinned copy of the kit, and share
     assert.equal(basename(kit), 'kit');
     // The turn's own folder (beside its settings), not the server's copy a restart sweeps, nor the repo.
     assert.equal(dirname(dirname(kit)), dirname(t.flag('--settings')));
-    assert.equal(t.settings.autoCompactWindow, t === turns[2] ? 180000 : 250000);
+    assert.equal(t.settings.autoCompactWindow, 180000);
     assert.equal(t.settings.bashOutputMaxChars, 12000);
   }
 });

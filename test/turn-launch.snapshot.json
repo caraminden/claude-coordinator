@@ -116,7 +116,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -308,7 +308,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -1279,7 +1279,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -1464,7 +1464,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -1656,7 +1656,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -1863,7 +1863,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -2072,7 +2072,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -2264,7 +2264,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -2459,7 +2459,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -2654,7 +2654,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [
@@ -2841,7 +2841,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 250000,
+   "autoCompactWindow": 180000,
    "bashOutputMaxChars": 12000,
    "permissions": {
     "deny": [

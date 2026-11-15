@@ -108,7 +108,7 @@ test('people save it with a history row; the store keeps who and when', async ()
   assert.equal(saved.status, 200, JSON.stringify(saved.data));
   assert.equal(saved.data.text, 'One rule.');
   assert.equal(saved.data.by, 'Cara');
-  assert.equal((await srv.call('/api/app/instructions', { text: 'x'.repeat(16_001) }, 'PUT')).status, 400);
+  assert.equal((await srv.call('/api/app/instructions', { text: 'x'.repeat(32_001) }, 'PUT')).status, 400);
   assert.equal((await srv.call('/api/app/instructions', { text: 5 }, 'PUT')).status, 400);
   const { history } = (await srv.call('/api/app/instructions/history')).data;
   assert.equal(history.length, 1);

@@ -9,6 +9,7 @@
 // - mode "turn": a minion or Taskmaster turn on Codex (src/codex-turn.ts): shell, apply_patch and the
 //   turn's own MCP servers (`mcp`).
 // - mode "contraption": an app's turn: only its own MCP servers (web search, when on, runs at OpenAI and fires no hook).
+// - mode "image": an --image-gen run of citadel-codex-review (#738): image_gen only, its reference images checked as reads.
 // The tripwire's ask tier and the scheme's approval rules (`rules`) need a person's card, which Codex
 // turns can't show (not in this build), so both are plain blocks.
 import { readFileSync } from 'node:fs';
@@ -60,7 +61,7 @@ export function ruleHit(rules, tool, ti) {
 
 async function check(input, cfgFile) {
   const { script, config, mode: rawMode, mcp, rules } = cfgFile;
-  const mode = ['turn', 'contraption'].includes(rawMode) ? rawMode : 'review';
+  const mode = ['turn', 'contraption', 'image'].includes(rawMode) ? rawMode : 'review';
   const tool = String(input?.tool_name ?? '');
   const ti = input?.tool_input ?? {};
   const cwd = typeof input?.cwd === 'string' ? input.cwd : null;
@@ -79,6 +80,13 @@ async function check(input, cfgFile) {
   if (mode === 'review') {
     if (tool !== 'Bash') deny(`${tool || 'This tool'} is off: Citadel's Codex reviewer is read-only and runs shell commands only.`);
     return stop(tripwire(input, { ...config, ask: false }));
+  }
+  if (mode === 'image') {
+    if (tool !== 'image_gen') deny(`${tool || 'This tool'} is off: Citadel's Codex image run makes one picture with image_gen and nothing else.`);
+    const refs = ti.referenced_image_paths ?? [];
+    if (!Array.isArray(refs)) deny('image_gen\'s referenced_image_paths is not a list, so the tripwire cannot check what it reads.');
+    for (const p of refs) stop(tripwire({ tool_name: 'Read', tool_input: { file_path: at(String(p)) }, cwd }, { ...config, ask: false }));
+    return;
   }
   if (mcpServer && servers.has(mcpServer)) return rule(tool);
   if (mode === 'contraption') {

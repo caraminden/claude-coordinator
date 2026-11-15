@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -138,6 +138,24 @@ test("a contraption's Codex turn runs only the contraption's own tools: no shell
   }
 });
 
+test("an image run's hook lets image_gen through and nothing else, its reference images checked as reads (#738)", () => {
+  const img = configFile({ script: tripwire, config, mode: 'image' });
+  const gen = (ti: object) => ({ hook_event_name: 'PreToolUse', tool_name: 'image_gen', tool_input: ti, cwd: worktree });
+  assert.equal(hook(gen({ prompt: 'a red dot' }), img).code, 0);
+  assert.equal(hook(gen({ prompt: 'a red dot', referenced_image_paths: [`${worktree}/ref.png`, 'art/b.png'] }), img).code, 0);
+  const key = hook(gen({ prompt: 'x', referenced_image_paths: [`${home}/.ssh/id_rsa`] }), img);
+  assert.equal(key.code, 2);
+  assert.match(key.stderr, /SSH keys/);
+  assert.equal(hook(gen({ prompt: 'x', referenced_image_paths: 'ref.png' }), img).code, 2, 'refs that are not a list');
+  for (const call of [bash('git status'), patch('*** Add File: x\n+y'), { tool_name: 'mcp__thread__x', tool_input: {}, cwd: worktree }, { tool_name: 'view_image', tool_input: { path: 'a.png' }, cwd: worktree }]) {
+    const r = hook(call, configFile({ script: tripwire, config, mode: 'image', mcp: ['thread'] }));
+    assert.equal(r.code, 2, `${call.tool_name} is blocked`);
+    assert.match(r.stderr, /image run makes one picture with image_gen and nothing else/);
+  }
+  // A review, and any mode but image, still blocks image_gen.
+  for (const mode of [undefined, 'review', 'contraption']) assert.equal(hook(gen({ prompt: 'a red dot' }), configFile({ script: tripwire, config, mode })).code, 2, `mode ${mode}`);
+});
+
 test('an unknown or missing Codex hook mode is the read-only review', () => {
   for (const mode of [undefined, 'admin', 7]) {
     const r = hook(patch('*** Add File: x\n+y'), configFile({ script: tripwire, config, mode, mcp: ['thread'] }));
@@ -199,9 +217,10 @@ const fakeCodex = join(root, 'codex');
 writeFileSync(
   fakeCodex,
   `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
+const { appendFileSync, readFileSync } = require('node:fs');
 const log = (m) => appendFileSync(${JSON.stringify(fakeLog)}, JSON.stringify(m) + '\\n');
-log({ argv: process.argv.slice(2) });
+const tw = process.env.CITADEL_CODEX_TRIPWIRE;
+log({ argv: process.argv.slice(2), tripwire: tw ?? null, tripwireCfg: tw ? JSON.parse(readFileSync(tw, 'utf8')) : null });
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
 const mode = process.env.FAKE_CODEX;
 let imageRun = false;
@@ -226,6 +245,11 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
     send({ id: m.id, result: { turn: { id: 'tu1' } } });
     if (mode === 'hang') return;
     // An image run (#733): one imageGeneration item, saved by Codex (FAKE_SAVED) or inline, or refused for its limit.
+    // The hook blocked image_gen (#738): no image, only Codex saying so.
+    if (imageRun && mode === 'image-refused') {
+      send({ method: 'item/completed', params: { threadId: 'th1', turnId: 'tu1', item: { type: 'agentMessage', id: 'a1', text: "Image generation failed: Citadel's read-only reviewer policy blocked the image_gen tool." } } });
+      return send({ method: 'turn/completed', params: { threadId: 'th1', turn: { id: 'tu1', status: 'completed', error: null } } });
+    }
     if (imageRun && String(mode).startsWith('image')) {
       const item = mode === 'image-limit'
         ? { type: 'imageGeneration', id: 'ig_1', status: 'failed', failure: { type: 'usageLimitExceeded', limitId: 'images', resetsAt: 1700000000 } }
@@ -330,6 +354,23 @@ test('an image run starts a thread with no shell and image instructions, names t
   assert.equal(readFileSync(out2, 'utf8'), 'theirs');
   assert.equal((await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out: out2, transparent: false, overwrite: true }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image', FAKE_SAVED: saved } })).code, 0);
   assert.equal(readFileSync(out2, 'utf8'), 'saved png');
+});
+
+test("an image run's Codex gets the turn's tripwire config in image mode, a review the turn's own, and a refusal comes back in Codex's words (#738)", async () => {
+  const out = join(root, 'gen-mode.png');
+  const turnEnv = { ...process.env, CITADEL_CODEX_TRIPWIRE: good };
+  rmSync(fakeLog, { force: true });
+  assert.equal((await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out, transparent: false }, bin: fakeCodex, env: { ...turnEnv, FAKE_CODEX: 'image' } })).code, 0);
+  const ran = logged()[0];
+  assert.deepEqual(ran.tripwireCfg, { script: tripwire, config, mode: 'image' });
+  assert.notEqual(ran.tripwire, good);
+  assert.equal(existsSync(dirname(ran.tripwire)), false, "the image config's folder is removed once the run ends");
+  rmSync(fakeLog, { force: true });
+  assert.equal((await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...turnEnv, FAKE_CODEX: 'ok' } })).code, 0);
+  assert.equal(logged()[0].tripwire, good, 'a review keeps the turn config: review mode, shell only');
+  const refused = await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out: join(root, 'gen-refused.png'), transparent: false }, bin: fakeCodex, env: { ...turnEnv, FAKE_CODEX: 'image-refused' } });
+  assert.equal(refused.code, 1);
+  assert.equal(refused.text, "Codex made no image: Image generation failed: Citadel's read-only reviewer policy blocked the image_gen tool.");
 });
 
 test("an image run skips (exit 4) when an image limit is over pace, and says when a used-up image limit resets (#733)", async () => {

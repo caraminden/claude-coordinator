@@ -23,7 +23,7 @@
 // config, the review runs there instead (inContainer), and that copy checks the hook for itself.
 import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { saveGenerated } from './codex.ts';
@@ -196,8 +196,10 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
   const bin = opts.bin ?? 'codex';
   // file: the login stays in ~/.codex/auth.json (there's no keyring in a container); no history: CODEX_HOME grows fast otherwise.
   const gen = opts.imageGen;
-  // An image run needs no shell: off, so Codex can only call image_gen.
-  const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"', ...(gen ? ['-c', 'features.shell_tool=false'] : [])], { cwd: opts.cwd, env: opts.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const env = opts.env ?? process.env;
+  // An image run needs no shell: off, so Codex can only call image_gen, and the hook runs in image mode (#738), which lets only image_gen through.
+  const imageCfg = gen ? imageConfig(env) : null;
+  const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"', ...(gen ? ['-c', 'features.shell_tool=false'] : [])], { cwd: opts.cwd, env: imageCfg ? { ...env, CITADEL_CODEX_TRIPWIRE: imageCfg } : env, stdio: ['pipe', 'pipe', 'pipe'] });
   let nextId = 1;
   const waiting = new Map<number, (msg: any) => void>();
   const send = (msg: object) => child.stdin.write(JSON.stringify(msg) + '\n');
@@ -219,6 +221,7 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (imageCfg) rmSync(dirname(imageCfg), { recursive: true, force: true });
       child.stdin.end();
       child.kill('SIGTERM');
       const hard = setTimeout(() => child.kill('SIGKILL'), 3000);
@@ -266,7 +269,8 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
           const turn = msg.params?.turn ?? {};
           if (gen) {
             if (saved) finish(0, `Wrote ${saved}`);
-            else finish(1, `Codex made no image: ${errors.join('; ') || turn.error?.message || `the turn ended ${turn.status ?? 'without a status'}`}${last ? `\nIts last message:\n${last}` : ''}`);
+            // Codex's own words first (a refusal, the hook's reason as it read it), then the status as a last resort (#738).
+            else finish(1, `Codex made no image: ${[...new Set([...errors, turn.error?.message, last].filter(Boolean))].join('\n') || `the turn ended ${turn.status ?? 'without a status'}`}`);
           } else if (turn.status === 'completed' && last) finish(0, last);
           else finish(1, `The Codex turn ended ${turn.status ?? 'without a status'}: ${turn.error?.message ?? errors.join('; ')}${last ? `\nIts last message:\n${last}` : ''}`.trim());
         }
@@ -288,6 +292,16 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
       await call('turn/start', { threadId: thread.id, input });
     })().catch((err) => finish(1, `${err.message}${tail(stderr)}`));
   });
+}
+
+/**
+ * The turn's Codex config with mode "image" (#738), written to a fresh folder, for an --image-gen run's hook:
+ * review mode (the turn's own config) allows the shell only, so it blocked image_gen.
+ */
+function imageConfig(env: Record<string, string | undefined>): string {
+  const file = join(mkdtempSync(join(tmpdir(), 'citadel-codex-image-')), 'codex-tripwire.json');
+  writeFileSync(file, JSON.stringify({ ...turnConfig(env), mode: 'image' }), { mode: 0o444 });
+  return file;
 }
 
 /** Where a host turn's review runs instead (#398): the server login's Codex container, as the runner wrote it in the turn's Codex config. */

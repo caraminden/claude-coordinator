@@ -218,6 +218,7 @@ Body up to 4,000,000 bytes:
   "agents": { "max": 3, "model": "haiku" },
   "webSearch": false,
   "machines": true,
+  "media": false,
   "timeoutSec": 180
 }
 ```
@@ -235,6 +236,7 @@ Body up to 4,000,000 bytes:
 | `agents` | | `false` (default) or `{ max, model }`: lets the agent start Grunts (the Agent tool), at most `max` (1 to 10, default 1) at once, nested ones included; `model` defaults to the turn's |
 | `webSearch` | | `true` adds WebSearch and WebFetch for the agent and its Grunts; default `false`. WebFetch puts a web page in front of the model, so keep your write tools behind the person's explicit asks on such turns |
 | `machines` | | `false` leaves out the person's online machines and the system prompt's note on them; default `true`. For a turn that must see only its prompt, such as a blind grader |
+| `media` | | `true` gives the agent Citadel's image and sound tools, spending the person's own OpenRouter money ("Media" below); default `false`. Your own `mcp` servers can't be called `citadel` then |
 | `timeoutSec` | | 1 to 900, default 180 |
 
 Each `mcp` server is reached as `http://127.0.0.1:$PORT<path>` (streamable HTTP) with your headers
@@ -244,8 +246,8 @@ there: Citadel passes it through and never reads it.
 
 **What the agent can use** (tested): your MCP servers' tools (`mcp__<name>__<tool>`), the person's
 own machines that are online unless `machines` is `false` (their MCP servers, as `mcp__<machine>`;
-a server of yours with the same name wins and the machine is left out), Agent if `agents` is set, and WebSearch and WebFetch
-if `webSearch` is `true`. Nothing else: no shell, no files, no Citadel or scheme tools, no user
+a server of yours with the same name wins and the machine is left out), Agent if `agents` is set, WebSearch and WebFetch
+if `webSearch` is `true`, and `mcp__citadel__generate_image`, `edit_image` and `generate_audio` if `media` is `true`. Nothing else: no shell, no files, no Citadel or scheme tools, no user
 settings, CLAUDE.md, memory, skills or plugins. Each (contraption, person) gets an empty scratch
 folder as its working directory.
 
@@ -275,6 +277,7 @@ last event is always `end` or `error`, then the stream closes.
 | `text` | `{ delta, parent: null, message }`: the top-level agent's words, streamed. A new `message` id is a new model message (a new paragraph either side of a tool call); never glue two messages' deltas. Grunts' words are never streamed |
 | `tool` | `{ id, name, input, parent }`: `parent` is `null` at the top level, or the `id` of the Agent call whose Grunt made this call |
 | `tool_result` | `{ id, ok, parent }`, never the tool's output (your tool produced it). A failed call (`ok: false`) adds `error`: the error text the agent saw, up to 2000 characters, so a call refused before it reached your tool (a timeout or refusal in the agent's MCP client or Citadel's relay) still says why |
+| `media` | One per media tool call, before its `tool_result` ("Media" below) |
 | `compacted` | `{}`: the conversation was compacted |
 | `taken` | `{ id }`: the agent read a mid-turn message, `id` as its send returned |
 | `end` | `{ stop, usage: { input, output, cacheRead, cacheWrite }, provider, model }`; usage adds up every reply in the turn, and `model` is the full name the agent reported (`claude-haiku-…`), else as in `start` |
@@ -325,6 +328,75 @@ Body `{ "person": 3, "text": "…" }`, the turn's own person (tested).
   { "error": "busy" }` while a turn runs in it; `404` when there's no such session.
 - Both: `400` for a bad `person`, `403 { "error": "not_enabled" }` when your app isn't enabled for
   them.
+
+### Media: images and sounds on the person's OpenRouter
+
+A turn with `media: true` gets three tools from a server Citadel adds, named `citadel`:
+`generate_image`, `edit_image` (an image already in the folder, changed as the prompt says) and
+`generate_audio` (`kind: "effect"` or `"music"`). They're the same tools minions have, run on the
+Citadel server with the OpenRouter key the turn's `person` connected on their account page and
+booked against their monthly cap: a call that would pass the cap, or could cost over $0.50, is
+refused before anything is spent. The key never reaches the turn, the agent or your app (tested).
+They're offered even to a person who never connected OpenRouter, so the agent can say why it can't
+make anything; every call is then refused with `openrouter_not_connected` (tested).
+
+Only turn it on where the person asked for generated art or sound (a spell-alert maker, say): it's
+their money, and drawing in code is the default everywhere else.
+
+**Where files go.** Each (contraption, person) has a media folder on the Citadel server. A tool's
+`out` is a path inside it (`frost-alert.png`, `auras/frost-2.png`), and `image` and `refs` name files
+already there, so a later turn in any session can edit an earlier take. Each file gets a
+`<file>.json` note beside it (prompt, model, cost). With your key, for a person your app is enabled
+for (`400` bad `person`, `403` not enabled):
+
+| Call | Answer |
+|---|---|
+| `GET /api/contraptions/media?person=3` | `{ files: [{ path, bytes, modified }] }`, newest first, notes left out (tested) |
+| `GET /api/contraptions/media/<path>?person=3` | The bytes with their content type; `<path>.json` is the note. `400` for a path outside the folder, `404` for none (tested) |
+| `DELETE /api/contraptions/media/<path>?person=3` | `{ ok: true }`, the file and its note gone |
+
+Files are swept 30 days after they were written. Copy what a person keeps into your own storage:
+the folder is a work bench, not a library.
+
+**The `media` event.** One per call, before that call's `tool_result` (tested):
+
+```
+event: media
+data: { "tool": "generate_image", "ok": true, "files": [{ "path": "frost-alert.png", "bytes": 81234, "type": "image/png" }], "model": "black-forest-labs/flux-3-image-klein", "cost_usd": 0.009, "left_usd": 9.41 }
+
+event: media
+data: { "tool": "generate_image", "ok": false, "code": "openrouter_not_connected", "message": "…" }
+```
+
+A success may add `warnings` (text). It carries no `tool` event `id`, and may arrive just before
+or after the call's `tool` event; it's always before the `tool_result`. The agent's error text
+starts with the same `code`.
+
+| `code` | Meaning |
+|---|---|
+| `openrouter_not_connected` | The person never connected OpenRouter: link them to `account_url` |
+| `openrouter_key_refused` | OpenRouter refused their key; they connect it again at `account_url` |
+| `over_cap` | It would pass their monthly cap; `message` says when it resets |
+| `over_call_limit` | It could cost over $0.50 |
+| `openrouter_refused` | OpenRouter said no: out of credit, or a limit they set on OpenRouter |
+| `bad_request` | A bad argument; the agent usually fixes it and retries |
+| `failed` | OpenRouter didn't answer, or the call broke |
+
+**Before a turn:** `GET /api/contraptions/openrouter?person=3` → `{ connected: false, account_url }`
+or `{ connected: true, failed, cap_usd, spent_usd, left_usd, resets, account_url }`, never the key. `account_url` is Citadel's account page for them as a path on Citadel's host
+(`/c/#/p/<scheme>/account`), or `null` when they see no scheme.
+
+**Transparent images.** `background: "transparent"` on either image tool. A model with a transparent
+background of its own (seedream, gpt-image-1, gpt-image-2.5 and up, gpt-5-image, riverflow) makes
+real alpha; Citadel reads that from the model's endpoints on each call. Anything else (the Flux
+default, Recraft, Gemini, gpt-image-2) is asked for a plain black background, and Citadel takes the
+black out on the server: opacity from brightness. Right for glows and spell effects, wrong for icons
+with dark parts, so ask for `bytedance-seed/seedream-5-0-flash` (about $0.02) for icons. `out` must
+be `.png` (`.webp` too on a model with its own). The note's `background` says which ran (tested).
+
+**Iterating on sound.** No OpenRouter audio model takes a clip to continue, extend or vary (checked
+2026-11-14). Music on Lyria takes a `seed`: the same seed with a tweaked prompt keeps more of the
+last clip. Effects iterate on the prompt alone; trim and fade on your side.
 
 ## Asks: bug reports, feature asks and data
 
@@ -614,6 +686,7 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 | Turn `mcp` servers | 10 |
 | Turn `agents.max` | 1 to 10 |
 | Turns a day | the registry's `turn_cap`, per person |
+| Media call | $0.50 worst case, within the person's own monthly cap; files kept 30 days |
 | Restart wait for running turns | 3 minutes |
 | Ask files | 20 files, 16 MiB decoded |
 | Ask text, summary, item | 10,000, 200, 100 characters |
@@ -631,6 +704,9 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-14:** `media: true` on a turn gives the agent image and sound tools on the person's own
+  OpenRouter key and cap, with a media folder you read through `/api/contraptions/media`, a `media`
+  event per call and `GET /api/contraptions/openrouter` to check before a turn ("Media").
 - **2026-11-14:** Each contraption is served on its own host, `<name>.citadel.zip`, signed in through
   Citadel with no second login ("Requests from browsers", "Your own host"). Allow Citadel's hosts to
   frame you (no `X-Frame-Options`, no `frame-ancestors 'self'`). Your installed app, service worker,

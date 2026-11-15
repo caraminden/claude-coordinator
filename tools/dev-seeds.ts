@@ -172,6 +172,17 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t);
     },
   },
+  parked: {
+    about: 'a parked minion waiting on another minion going live, with Unpark left of Send (#718, #726)',
+    seed(c) {
+      const t = minion(c, 'Follow-up after the deploy', { state: 'parked', note: 'waiting on #700 going live' }, 'feature');
+      const w = chat(c, t, 2);
+      w.asked('Pick this up once #700 is live.');
+      w.init();
+      w.said('Parked until #700 is live; Citadel wakes me then.');
+      return route(c, t);
+    },
+  },
   'long-chat': {
     about: 'a finished minion with a long chat: markdown headings, lists, a table, code, an image and a file card',
     seed(c) {

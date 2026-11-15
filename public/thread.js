@@ -255,6 +255,8 @@ export function chatSection(chatId, ticket) {
     h('span', { 'aria-hidden': 'true' }, '↑'), ' Card');
   toCard.addEventListener('click', jumpToOpenCard);
   form.querySelector('.row > .add-image').after(latest, toCard);
+  // A parked minion's Unpark sits just left of Send (#726), filled by renderTicketHead.
+  form.querySelector('.row > .send-group').before(h('span', { class: 'unpark-slot', hidden: true }));
   // One-tap replies sit at the top of the composer, so they stay in view with it (renderTicketHead fills them).
   // Whose plan your message runs on, only when that's news (public/payer.js); under the replies, right over the box.
   form.prepend(h('div', { id: 'chat-payer', hidden: true }));
@@ -402,16 +404,19 @@ export function renderTicketHead() {
     slot.hidden = !line;
     slot.replaceChildren(line ?? '');
     renderWaiting();
+    // Parked (#718): messages wait unread until this, which wakes it with them (one chained on start_after starts, its brief first).
+    const unparkSlot = form.querySelector('.unpark-slot');
+    if (unparkSlot) {
+      const parked = (t.parked_for || t.state === 'parked') && !coord && t.status !== 'closed' && t.status !== 'running';
+      const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while parked';
+      unparkSlot.hidden = !parked;
+      unparkSlot.replaceChildren(parked ? h('button', { type: 'button', class: 'secondary small act-unpark', title, onclick: () => unpark(t) }, 'Unpark') : '');
+    }
   }
   const actions = [];
   // The minion's branch, running on a copy of the data (start_preview, src/previews.ts).
   if (t.preview && t.status !== 'closed') {
     actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`../preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
-  }
-  // Parked (#718): messages wait unread until this, which wakes it with them (one chained on start_after starts, its brief first).
-  if ((t.parked_for || t.state === 'parked') && !coord && t.status !== 'closed' && t.status !== 'running') {
-    const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while parked';
-    actions.push(h('button', { class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unpark'));
   }
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (t.status === 'running' || t.limit_resume_at) {
@@ -452,8 +457,7 @@ export function renderTicketHead() {
   // that matters now. Everything else waits behind ⋯.
   // Find's box is put back in the redrawn bar, which drops the caret from it: keep it there.
   const had = el.contains(document.activeElement) ? document.activeElement : null;
-  // A parked minion's one button is Unpark (#718); Dismiss waits behind ⋯ then.
-  const main = phone ? actions.find((a) => a?.classList?.contains('act-unpark')) ?? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen)\b/.test(a.className)) : null;
+  const main = phone ? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen)\b/.test(a.className)) : null;
   // A search in progress keeps the menu open: its box is in there.
   const menuOpen = phone && (menuFor === t.id || !!view.findEl?.querySelector('.chat-find')?.value);
   const more = h('button', { type: 'button', class: 'nav-btn head-more', title: 'More', 'aria-label': 'More', 'aria-expanded': String(menuOpen), onclick: () => {

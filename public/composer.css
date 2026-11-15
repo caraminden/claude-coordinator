@@ -67,7 +67,7 @@ dialog.image-zoom .close { position: absolute; top: 0.5rem; right: 0.5rem; width
 @media (max-width: 800px) {
   /* Phones: Add image, the settings button and Send (with its ▾ mid-turn) share one line. */
   .composer .row { position: relative; gap: 0.5rem; flex-wrap: nowrap; }
-  .composer .row > .add-image, .composer .row > .to-latest, .composer .row > .to-card, .composer .settings-picker, .composer .send-group { flex: none; }
+  .composer .row > .add-image, .composer .row > .to-latest, .composer .row > .to-card, .composer .settings-picker, .composer .unpark-slot, .composer .send-group { flex: none; }
   .composer .settings-picker { display: inline-flex; }
   .composer button.settings-button { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); padding: 0.2rem 0.6rem; }
   .composer button.settings-button .gear { font-size: 1.15em; line-height: 1; }
@@ -99,7 +99,10 @@ dialog.image-zoom .close { position: absolute; top: 0.5rem; right: 0.5rem; width
 /* Attach, the pickers and Send (with its ▾) share one height, content centred; taller on phones to stay tappable. */
 .composer { --control-h: 2rem; }
 @media (max-width: 800px) { .composer { --control-h: 2.5rem; } }
-.composer button.add-image, .composer button.to-latest, .composer button.to-card, .composer select.picker, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
+.composer button.add-image, .composer button.to-latest, .composer button.to-card, .composer select.picker, .composer .unpark-slot > button, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
+
+/* A parked minion's Unpark, just left of Send (#726). */
+.composer .unpark-slot[hidden] { display: none; }
 
 /* Send, and while a turn runs a ▾ beside it for "Send after this turn" (Send itself steers the turn). */
 .composer .send-group { position: relative; display: inline-flex; }

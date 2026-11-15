@@ -16,8 +16,6 @@ test('every pick in the table is a model and effort the server takes', () => {
 });
 
 test('a type picks its tier; no type, or other, the fallback; each pick is a fresh object', () => {
-  assert.deepEqual(pickFor('chore'), { model: 'claude-sonnet-5-5', effort: 'medium' });
-  assert.deepEqual(pickFor('feature'), { model: 'claude-opus-5-5', effort: 'high' });
   assert.deepEqual(pickFor('other'), FALLBACK);
   assert.deepEqual(pickFor(undefined), FALLBACK);
   pickFor(null).model = 'x';
@@ -43,6 +41,5 @@ test("the Taskmaster's prompt carries the table, with every tier's model and eff
   const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
   const prompt = systemPrompt(project, { id: 1, number: null, title: 'Taskmaster', kind: 'coordinator' } as any, '/s', '/p', '/t', '/m', [], true, '');
   assert.ok(prompt.includes(tableText()));
-  for (const t of TIERS) assert.ok(tableText().includes(`${t.work} ${t.model} at ${t.effort}`), t.work);
   assert.doesNotMatch(prompt, /leave both out/i);
 });

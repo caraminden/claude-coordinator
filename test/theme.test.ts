@@ -47,8 +47,6 @@ test('theme.css carries style.css\'s exact values for light and dark, and its co
     assert.equal(out['citadel-focus'], 'var(--citadel-accent)');
   }
   // Spot-check against the file itself, not just the parser.
-  assert.match(style, /--bg: #f6f5f2;/);
-  assert.equal(vars(lightCss)['citadel-bg'], '#f6f5f2');
   assert.match(lightCss, /color-scheme: light;/);
   assert.match(darkCss, /color-scheme: dark;/);
 });

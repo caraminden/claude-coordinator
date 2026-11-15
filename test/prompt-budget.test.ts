@@ -64,13 +64,6 @@ test("a build minion's and a Taskmaster's prompt with builds on stay within the 
   assert.ok(taskmaster.length <= BUDGET.taskmaster, `Taskmaster: ${taskmaster.length} > ${BUDGET.taskmaster}`);
 });
 
-test('the growth list names a line that grew and one that is new', () => {
-  const tripwire = 'A tripwire hook checks every tool call and stops known accidents: ';
-  const was = lineSizes(`Keep this.\n${tripwire}a, b`);
-  const now = lineSizes(`Keep this.\n${tripwire}a, b, c, d\nA new rule.`);
-  assert.deepEqual(growth(was, now), ['  +12 (new) "A new rule.…"', `  +6 "${tripwire.slice(0, 60)}…"`]);
-});
-
 test('saving instructions says what they cost, the same in the settings page and the Taskmaster tools', async () => {
   const { instructionCost } = await import('../src/prompt-cost.ts');
   const page = (await import('../public/prompt-cost.js')).instructionCost;

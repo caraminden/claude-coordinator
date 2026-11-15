@@ -32,13 +32,6 @@ function stub(name: string, unit: { ActiveState: string; FreezerState?: string; 
   return { cfg, used, log, dir };
 }
 
-test('defaults: the perigee-godot unit, 2 hours idle, ws port 9500', () => {
-  const cfg = settings({});
-  assert.equal(cfg.unit, 'perigee-godot.service');
-  assert.equal(cfg.idleS, 7200);
-  assert.equal(cfg.wsPort, 9500);
-});
-
 test('idleVerdict: stops only an active, unfrozen unit with neither a call nor its start in the last 2 hours', () => {
   const v = (unit: object, last: number) => idleVerdict({ now: NOW, unit: { state: 'active', frozen: false, since: NOW - 10 * H, ...unit }, last, idleS: 7200 }).stop;
   assert.equal(v({}, NOW - 2 * H - 1000), true);

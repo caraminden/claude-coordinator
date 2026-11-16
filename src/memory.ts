@@ -271,6 +271,11 @@ export class Memory {
 
   deleteTicket(ticketId: number) {
     this.db.prepare('DELETE FROM memory_chunks WHERE ticket_id = ?').run(ticketId);
+    this.forgetTicket(ticketId);
+  }
+
+  /** Drop a minion's remembered title and note, so it is compared afresh (deleteTicket, and the server's side of it on the writer). */
+  forgetTicket(ticketId: number) {
     this.ticketTexts?.delete(ticketId);
   }
 }

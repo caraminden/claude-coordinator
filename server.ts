@@ -77,6 +77,7 @@ import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
+import { writeOffThread } from './src/db-writer.ts';
 import { moveToNoCow } from './src/db-nocow.ts';
 import { Presence } from './src/presence.ts';
 
@@ -163,6 +164,9 @@ const BOOT_AT = Date.now();
 if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 300))), 100, 500, { profile: true, files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
+// Writes on a worker of their own: the first after a checkpoint fsyncs the WAL's header, held up to 14.3 s (#795).
+// Before the checkpoint worker, so its autoCheckpoint(false) reaches both connections.
+writeOffThread(store);
 // Off the event loop: a checkpoint fsyncs, and a stalled disk made one hold every request for seconds (#680).
 checkpointOffThread(store);
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.

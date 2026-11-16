@@ -1089,13 +1089,23 @@ export class Store {
   /** The database file; the runner keeps its turn folders beside it. */
   readonly path: string;
 
-  constructor(path: string) {
+  /** `writer`: the write worker's own connection (src/db-writer.ts) to a database the server's Store already set up, so no setup or migrations. */
+  constructor(path: string, opts: { writer?: boolean } = {}) {
     this.path = path;
     // Wait out another connection's write (a test's second Store, a backup) instead of failing at once with SQLITE_BUSY.
-    this.db = new DatabaseSync(path, { timeout: 5000 });
+    // The writer waits longer: it waits on its own thread, and giving up loses the write.
+    this.db = new DatabaseSync(path, { timeout: opts.writer ? 30_000 : 5000 });
     // NORMAL: in WAL mode it fsyncs at checkpoints, not on every commit, which a busy disk made cost 150-300 ms
     // each. A power cut can lose the last few seconds of writes; an app crash loses nothing (#470, Cara 2026-11-10).
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
+    if (opts.writer) {
+      this.db.prepare('ATTACH DATABASE ? AS state').run(this.statePath);
+      this.db.exec('PRAGMA state.synchronous = NORMAL; PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
+      this.props = new Registry(this.db);
+      this.schedules = new Schedules(this.db);
+      this.memory = new Memory(this);
+      return;
+    }
     // Setup commits once per block, not once per statement: each commit is an fsync, and a new database's
     // hundred of them took a boot past 15 s when the disk was busy (#426).
     this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} COMMIT;`);
@@ -1791,11 +1801,8 @@ export class Store {
     this.deleteSetting(planKey(id));
     this.deleteSetting(pagePlanKey(id));
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
-    this.doneCards.clear(); // events.id has no AUTOINCREMENT: a deleted newest card's id can come back as a new card
-    this.cardFates.clear();
-    this.savedFates.clear();
+    this.forgetCards(); // events.id has no AUTOINCREMENT: a deleted newest card's id can come back as a new card
     this.db.prepare('DELETE FROM card_fates').run();
-    this.cardRows.clear();
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
@@ -1835,22 +1842,35 @@ export class Store {
   addEvent(ticketId: number, kind: string, data: unknown): EventRow {
     const now = Date.now();
     const json = JSON.stringify(data);
+    // With the write worker on, the id is handed out here, so the row is known before the worker writes it (src/db-writer.ts).
+    let id: number | null = null;
+    if (this.eventIds) this.eventIds.next = (id = Math.max(this.eventIds.next, this.eventIds.floor())) + 1;
+    const rowid = this.insertEvent(id, ticketId, kind, json, now, data);
+    return { id: id ?? (rowid as number), ticket_id: ticketId, kind, data: json, created_at: now };
+  }
+
+  /** The next events.id to hand out, set by the write worker's start (src/db-writer.ts); null writes inline and lets SQLite pick. */
+  eventIds: { next: number; floor: () => number } | null = null;
+
+  /** addEvent's write: the row (its id, if one was handed out), and its author's latest action. Returns the row's id. */
+  insertEvent(id: number | null, ticketId: number, kind: string, json: string, now: number, data: unknown): number {
     const r = this.db
-      .prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)')
-      .run(ticketId, kind, json, now);
+      .prepare('INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, ticketId, kind, json, now);
     // A message or an approval click is its author's latest action in the scheme, for the recap (Store.recap).
     const actor = kind === 'user_message' ? (data as any)?.author : kind === 'approval_result' ? (data as any)?.by : null;
     if (typeof actor === 'string') {
       this.db.prepare(`INSERT INTO last_actions (name, project_id, at) SELECT ?, project_id, ? FROM tickets WHERE id = ?
         ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)`).run(actor, now, ticketId);
     }
-    return { id: Number(r.lastInsertRowid), ticket_id: ticketId, kind, data: json, created_at: now };
+    return Number(r.lastInsertRowid);
   }
+
 
   /** Replace an event's data, for cards whose status lives in the card (plans). */
   setEventData(id: number, data: unknown) {
     this.db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify(data), id);
-    this.cardRows.delete(id);
+    this.forgetCards(id);
   }
 
   /**
@@ -2398,17 +2418,25 @@ export class Store {
     });
     if (!todo.length) return;
     if (lagging) this.fatesSavedAt = now;
+    // On the write worker a failed write is only logged, so this remembers it as saved: it is read again after a restart.
+    if (this.putFates(todo.map(({ c, f }) => [c.id, c.ticket_id, c.cid == null ? null : String(c.cid), f.reply, f.result, f.upTo])) === false) return;
+    for (const { c, f } of todo) this.savedFates.set(c.id, { ...f });
+  }
+
+  /** saveFates' write, in one commit: rows of card_fates' columns. False if it failed. */
+  putFates(rows: unknown[][]): boolean {
     const put = this.db.prepare('INSERT OR REPLACE INTO card_fates (card_id, ticket_id, cid, reply, result, up_to) VALUES (?, ?, ?, ?, ?, ?)');
     try {
       this.db.exec('BEGIN');
-      for (const { c, f } of todo) put.run(c.id, c.ticket_id, c.cid == null ? null : String(c.cid), f.reply, f.result, f.upTo);
+      for (const r of rows) put.run(...(r as any[]));
       this.db.exec('COMMIT');
+      return true;
     } catch {
       try { this.db.exec('ROLLBACK'); } catch { /* no transaction was open */ }
-      return; // not saved: it is read again after a restart
+      return false; // not saved: it is read again after a restart
     }
-    for (const { c, f } of todo) this.savedFates.set(c.id, { ...f });
   }
+
 
   // What recentCards found of each card, by event id: a reply or result once found stays (events are only appended),
   // and `upTo` is the newest event looked at, so the next read only scans messages after it (#622).
@@ -2422,6 +2450,15 @@ export class Store {
   // and events are only appended), so later reads skip their rows: cold, re-reading Citadel's 335 card rows and the
   // messages after them was 270 ms of the scheme list's 340 ms (#614).
   private doneCards = new Set<number>();
+
+  /** Drop what recentCards and openCardsWhere remember of cards: one card's row (its data changed), or everything. */
+  forgetCards(id?: number) {
+    if (id !== undefined) return void this.cardRows.delete(id);
+    this.doneCards.clear();
+    this.cardFates.clear();
+    this.savedFates.clear();
+    this.cardRows.clear();
+  }
 
   private openCardsWhere(scope: string, id: number): EventRow[] {
     // Index-only: events_ticket_kind holds (ticket_id, kind, id).

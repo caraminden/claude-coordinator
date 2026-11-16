@@ -34,7 +34,7 @@ export function machineNotes(v: unknown): string {
  * Change a machine: any of name, notes, lend (what is ticked), workspace_tools, always_on and projects (the schemes it is
  * lent to: the whole list). The one write path for its settings: the Machines page's PATCH, and an approved notes card (#617).
  */
-export function patchMachine(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: any) {
+export async function patchMachine(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: any) {
   if (!managesMachine(session, machine)) throw new HttpError(404, 'No such machine');
   const lend = body.lend === undefined ? undefined : cleanLend(body.lend);
   if (lend === null) throw new HttpError(400, 'lend must be { server: a found MCP server\'s name or null, workspaces: [names] }');
@@ -55,11 +55,12 @@ export function patchMachine(app: Ctx['app'], session: Ctx['session'], machine: 
   }
   if (body.name !== undefined) fields.name = machineName(body.name);
   if (body.notes !== undefined) fields.notes = machineNotes(body.notes);
-  // Checked here: the write runs on the DB write worker, so its UNIQUE failure wouldn't reach this request (#795).
-  if (fields.name !== undefined && app.store.listMachines().some((m) => m.id !== machine.id && m.name === fields.name)) {
+  // Awaited: on the DB write worker (#795) its UNIQUE failure only reaches this request through the promise.
+  try {
+    await app.store.updateMachine(machine.id, fields);
+  } catch {
     throw new HttpError(409, 'A machine with that name already exists');
   }
-  app.store.updateMachine(machine.id, fields);
   if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
   if (lend) app.machines.setLend(machine.id, lend);
   // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
@@ -270,7 +271,7 @@ export const machineRoutes: Route[] = [
   },
   {
     method: 'PATCH', path: '/api/machines/:machine', ...people,
-    handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, patchMachine(app, session, machine, await readJson(req)))),
+    handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, await patchMachine(app, session, machine, await readJson(req)))),
   },
   {
     // Check now (#437): what the hourly check does, asked for; it answers once the check ends.

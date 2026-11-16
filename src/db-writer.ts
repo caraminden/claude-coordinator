@@ -34,20 +34,19 @@ export const VALUE_WRITES = [
   'schedules.create', 'schedules.update', 'schedules.remove', 'memory.index',
 ];
 
-/** What a write also changes in the server's own memory, done there when the write is sent. */
-const MAIN_SIDE: Record<string, (store: Store, args: any[], exec: (sql: string) => void) => void> = {
+/** What a write makes the server forget of its own caches: when it is sent, and again when it lands, since a read in
+ * between caches what the file still holds. */
+const FORGETS: Record<string, (store: Store, args: any[]) => void> = {
   deleteTicket: (store, [id]) => (store.forgetCards(), store.memory.forgetTicket(id)),
   setEventData: (store, [id]) => store.forgetCards(id),
   'memory.deleteTicket': (store, [id]) => store.memory.forgetTicket(id),
-  // The server's connection must not checkpoint either while the checkpoint worker does (src/checkpoint.ts).
-  autoCheckpoint: (store, [on], exec) => exec(`PRAGMA wal_autocheckpoint = ${on ? 1000 : 0}`),
 };
 
 // A statement that writes, or a transaction: it waits for the whole queue, so the database never sees writes out of order.
 const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|VACUUM|ATTACH|DETACH|BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b|^\s*PRAGMA\s+[\w.]+\s*=|^\s*WITH\b[\s\S]*\)\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
 /** How long a read waits for queued writes before it reads without them. */
 export const READ_WAIT_MS = 50;
-/** How long a write on the server's thread waits for the queue (it must come after it). */
+/** How long a write on the server's thread waits for the queue (it must come after it) before it is refused. */
 const DRAIN_MS = 30_000;
 
 const owner = (store: any, name: string) => {
@@ -69,9 +68,9 @@ export type Writer = {
  * and return a promise of the write instead of nothing. Reads on the store's connection first wait up to READ_WAIT_MS
  * for writes still queued; writes there (VALUE_WRITES, and SQL run directly) wait for all of them. If the worker can't
  * start or stops, writes run on the store's connection again. Null for an in-memory store. `delayMs` holds every
- * write that long on the worker, for tests of a stalled disk.
+ * write that long on the worker, for tests of a stalled disk; `drainMs` is how long a write here waits for the queue.
  */
-export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } = {}): Writer | null {
+export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, drainMs = DRAIN_MS } = {}): Writer | null {
   if (!store.statePath) return null;
   const db = store.db;
   // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone.
@@ -91,7 +90,10 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
   let seq = 0;
   let stalled = 0; // a read gave up waiting for this write: later reads don't wait until it has run
   let inline = 0; // inside a write on this thread: writes it makes run with it
-  const pending = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
+  const pending = new Map<number, { name: string; args: any[]; resolve: () => void; reject: (e: Error) => void }>();
+  // Settings sent and not yet written, by key (null: deleted). A read that gave up waiting still sees them, or a
+  // get-then-set (merge goes, turn nonces) would write back a list without the update before it.
+  const unwritten = new Map<string, { seq: number; json: string | null }>();
   const applied = () => Number(Atomics.load(shared, 0));
 
   const waitFor = (target: number, ms: number) => {
@@ -109,7 +111,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
     if (stalled && applied() < stalled) return;
     stalled = waitFor(target, READ_WAIT_MS) ? 0 : target;
   };
-  const drain = (ms = DRAIN_MS) => {
+  const drain = (ms = drainMs) => {
     const t0 = Date.now(), target = seq;
     const ok = !alive || waitFor(target, ms);
     if (Date.now() - t0 > 1000) console.error(`DB write on the server's thread waited ${Date.now() - t0} ms for ${target - applied()} queued writes${ok ? '' : ' and gave up'}.`);
@@ -117,8 +119,12 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
   };
   // A response waits as a read does, so a client reading the database itself (a test, a tool) finds the request's writes.
   writes.settle = beforeRead;
+  // A write here after a queue it can't wait out would land before writes made earlier: refuse it instead. If the
+  // worker is gone, the queue is lost anyway and its 'exit' puts writes back on this thread.
   const beforeWrite = () => {
-    if (alive && applied() < seq) drain();
+    if (alive && applied() < seq && !drain() && Atomics.load(shared, 1) === 1n) {
+      throw new Error(`DB write refused: the write worker is still ${seq - applied()} writes behind after ${drainMs} ms`);
+    }
   };
 
   // The store's connection: reads wait a moment for queued writes, and its own writes for all of them.
@@ -145,6 +151,14 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
   // Ids for addEvent, handed out here so it can return its row at once: past every id already written, and every id
   // handed out (a deleted newest event's id isn't reused while the server runs).
   store.eventIds = { next: 0, floor: () => ((maxEvent.get() as { id: number | null }).id ?? 0) + 1 };
+
+  const getSetting = store.getSetting.bind(store);
+  store.getSetting = (<T>(key: string): T | null => {
+    const u = unwritten.get(key);
+    if (u && applied() < u.seq) return u.json === null ? null : JSON.parse(u.json);
+    if (u) unwritten.delete(key);
+    return getSetting<T>(key);
+  }) as typeof store.getSetting;
 
   for (const name of VALUE_WRITES) {
     const { obj, method } = owner(store, name);
@@ -174,8 +188,12 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
         return f.apply(this, args);
       }
       seq = n;
-      MAIN_SIDE[name]?.(store, args, exec);
-      const p = new Promise<void>((resolve, reject) => pending.set(n, { resolve, reject }));
+      if (name === 'setSetting') unwritten.set(args[0], { seq: n, json: JSON.stringify(args[1]) });
+      else if (name === 'deleteSetting') unwritten.set(args[0], { seq: n, json: null });
+      // The server's connection must not checkpoint either while the checkpoint worker does (src/checkpoint.ts).
+      else if (name === 'autoCheckpoint') exec(`PRAGMA wal_autocheckpoint = ${args[0] ? 1000 : 0}`);
+      FORGETS[name]?.(store, args);
+      const p = new Promise<void>((resolve, reject) => pending.set(n, { name, args, resolve, reject }));
       p.catch(() => { /* logged by the worker; a caller that awaits sees it */ });
       return p;
     };
@@ -184,11 +202,13 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
   worker.on('message', ({ seq: n, error }: { seq: number; error?: string }) => {
     const p = pending.get(n);
     pending.delete(n);
+    if (p) FORGETS[p.name]?.(store, p.args);
     if (error) p?.reject(new Error(error));
     else p?.resolve();
   });
   worker.once('exit', (code) => {
     alive = false;
+    unwritten.clear();
     const lost = seq - applied();
     seq = applied();
     for (const p of pending.values()) p.reject(new Error('the DB write worker stopped'));

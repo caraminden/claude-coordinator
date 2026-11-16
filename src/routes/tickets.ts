@@ -645,7 +645,7 @@ export const ticketRoutes: Route[] = [
         if (!managesMachine(session, machine)) throw new HttpError(403, `Only ${card.machine.owner ? `${card.machine.owner}, who owns ${card.machine.name},` : 'an admin'}${card.machine.owner ? ' or an admin' : ''} can approve its notes`);
         // Approve writes what the card showed, or nothing: notes changed since (on the Machines page) aren't overwritten unseen.
         if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
-        patchMachine(app, session, machine, { notes: card.plan });
+        await patchMachine(app, session, machine, { notes: card.plan });
       }
       const result = { status: body.verdict === 'approve' ? 'approved' : card.machine ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });

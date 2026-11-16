@@ -21,12 +21,17 @@ The Store's void writes run on one worker thread with its own connection, in the
   health log as `db-write-error`. Its caller only learns of it by awaiting.
 - A read on the server's connection waits up to 50 ms for writes still queued, so it sees them. If the
   disk is stalled, it reads without them, and later reads don't wait until the queue catches up. An HTTP
-  response waits the same way.
+  response waits the same way. Settings are the exception: a setting sent and not yet written is read
+  from memory, so a get-then-set (merge goes, turn nonces) never loses the update before it. A cached
+  card row is dropped both when its change is sent and when it lands.
 - Writes that return a value (createTicket and about 30 more) still run on the server's thread, after the
-  whole queue. Step 2 moves them.
+  whole queue. If the queue doesn't empty within 30 s they throw instead of running ahead of it.
+  Step 2 moves them.
 - addEvent picks its event's id on the server's thread, so it still returns the row at once.
 - At exit, the queue is written first, for up to 10 s.
-- If the worker can't start or stops, writes go back to the server's thread.
+- If the worker can't start or stops, writes go back to the server's thread. Writes it had queued when it
+  died are lost, logged and counted in the health log (`db-writer-stopped`): replaying them could run
+  the one in flight twice.
 - Tests and tools that open a Store write inline unless they call `writeOffThread`. The server always
   calls it, so every test that boots `server.ts` runs with the worker.
 
@@ -34,6 +39,6 @@ The Store's void writes run on one worker thread with its own connection, in the
 
 - A stalled disk delays writes and leaves reads briefly stale. It no longer freezes pages, turns or tool calls.
 - A write that breaks a constraint no longer throws at its caller. A route that answers from such a
-  failure checks first (the machine rename's 409).
+  failure awaits the write (the machine rename's 409).
 - A value-returning write still waits for the queue. If the disk stalls under one, the event loop waits
   too, until step 2.

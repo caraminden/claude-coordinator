@@ -124,6 +124,11 @@ test('threads skip offline machines, and only people manage machines', async () 
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'thread' } }), /400/);
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'Bad Name!' } }), /400/);
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'sleepy' } }), /409/);
+  // A rename runs on the DB write worker (#795): its UNIQUE failure still comes back as a 409, and changes nothing.
+  const { machine: other } = await call('/api/machines', { method: 'POST', body: { name: 'wakeful' } });
+  await assert.rejects(call(`/api/machines/${other.id}`, { method: 'PATCH', body: { name: 'sleepy' } }), /409 A machine with that name/);
+  assert.equal((await call('/api/machines')).find((m: any) => m.id === other.id).name, 'wakeful');
+  await call(`/api/machines/${other.id}`, { method: 'DELETE' });
 });
 
 test('adding a machine takes a name, always on and nothing about what it lends (#439)', async () => {

@@ -19,11 +19,11 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 let n = 0;
-const open = (delayMs = 0) => {
+const open = (delayMs = 0, drainMs?: number) => {
   const dir = join(root, String(++n));
   execFileSync('mkdir', ['-p', dir]);
   const store = new Store(join(dir, 'coordinator.db'));
-  const w = writeOffThread(store, { delayMs })!;
+  const w = writeOffThread(store, { delayMs, drainMs })!;
   writers.push(w);
   return { store, w };
 };
@@ -34,25 +34,26 @@ const ticket = (store: Store) => {
 
 test('a write on a stalled disk never holds the event loop; reads go on, stale, until it lands', async () => {
   const { store, w } = open(400);
-  store.setSetting('k', 'old');
+  const t = ticket(store);
+  const title = () => store.getTicket(t.id)!.title;
   w.drain();
   let worst = 0, last = performance.now();
   const tick = setInterval(() => { worst = Math.max(worst, performance.now() - last); last = performance.now(); }, 10);
   const t0 = performance.now();
-  for (let i = 0; i < 4; i++) store.setSetting('k', `new ${i}`); // 1.6 s of writes on the worker
+  for (let i = 0; i < 4; i++) store.updateTicket(t.id, { title: `new ${i}` }); // 1.6 s of writes on the worker
   assert.ok(performance.now() - t0 < 100, 'sending writes is instant');
   // The first read waits READ_WAIT_MS for them, then reads without; the next doesn't wait again.
   const r0 = performance.now();
-  assert.equal(store.getSetting('k'), 'old');
+  assert.equal(title(), 'a minion');
   assert.ok(performance.now() - r0 < READ_WAIT_MS + 100);
   const r1 = performance.now();
-  for (let i = 0; i < 20; i++) assert.equal(store.getSetting('k'), 'old');
+  for (let i = 0; i < 20; i++) assert.equal(title(), 'a minion');
   assert.ok(performance.now() - r1 < 50, 'later reads skip the wait while the disk is stalled');
   while (w.queued()) await new Promise((r) => setTimeout(r, 20));
   clearInterval(tick);
   assert.ok(performance.now() - t0 >= 1500, 'the writes really were slow');
   assert.ok(worst < 200, `the event loop was held ${Math.round(worst)} ms`);
-  assert.equal(store.getSetting('k'), 'new 3', 'they landed in order');
+  assert.equal(title(), 'new 3', 'they landed in order');
 });
 
 test('a read right after a write sees it, and writes land in the order they were made', () => {
@@ -65,6 +66,49 @@ test('a read right after a write sees it, and writes land in the order they were
   const t = ticket(store);
   store.updateTicket(t.id, { title: 'renamed' });
   assert.equal(store.getTicket(t.id)!.title, 'renamed');
+});
+
+test('a get-then-set of a setting on a stalled disk keeps every update', () => {
+  const { store, w } = open(300);
+  const push = (v: string) => store.setSetting('goes', [...(store.getSetting<string[]>('goes') ?? []), v]);
+  push('cara'); push('josh'); push('cody');
+  assert.deepEqual(store.getSetting('goes'), ['cara', 'josh', 'cody'], 'read before they land');
+  store.deleteSetting('goes');
+  assert.equal(store.getSetting('goes'), null);
+  store.setSetting('goes', ['again']);
+  assert.ok(w.drain());
+  assert.deepEqual(store.getSetting('goes'), ['again'], 'and the file agrees once they land');
+});
+
+test('a card\'s cached row is dropped again when its change lands, not only when it is sent', async () => {
+  const { store, w } = open(150);
+  const t = ticket(store);
+  const e = store.addEvent(t.id, 'plan', { id: 'c1', status: 'pending' });
+  w.drain();
+  const card = () => JSON.parse(store.recentCards(t.project_id, 10).find((c) => c.id === e.id)!.data).status;
+  assert.equal(card(), 'pending');
+  const landed = store.setEventData(e.id, { id: 'c1', status: 'approved' }) as unknown as Promise<void>;
+  assert.equal(card(), 'pending', 'read while the change is still queued');
+  await landed;
+  assert.equal(card(), 'approved');
+});
+
+test('turning autocheckpoint off reaches the server\'s own connection at once', () => {
+  const { store } = open(200);
+  const pragma = () => (store.db.prepare('PRAGMA wal_autocheckpoint').get() as { wal_autocheckpoint: number }).wal_autocheckpoint;
+  store.autoCheckpoint(false);
+  assert.equal(pragma(), 0);
+  store.autoCheckpoint(true);
+  assert.equal(pragma(), 1000);
+});
+
+test('a write on the server\'s thread that can\'t wait out the queue is refused, not run ahead of it', () => {
+  const { store, w } = open(300, 50);
+  store.setSetting('k', 'queued');
+  assert.throws(() => store.createProject('late', null), /refused.*1 writes behind/);
+  assert.ok(w.drain(2000));
+  assert.equal(store.createProject('late', null).name, 'late');
+  assert.equal(store.getSetting('k'), 'queued');
 });
 
 test('a void write returns a promise of its own write; a failed one rejects and is in the health log', async () => {

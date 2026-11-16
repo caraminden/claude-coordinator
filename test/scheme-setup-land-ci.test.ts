@@ -824,7 +824,7 @@ test("batches: a member whose commit the head lands while it is looking at the l
     const d = c.land(3);
     await until("landing 3's ticket", () => c.issued() === 3);
     c.open();
-    const td = await c.tip(d).catch((e) => { throw new Error(`${e.message}\nA: ${a.stderr()}\nB: ${b2.stderr()}\nD: ${d.stderr()}`); });
+    const td = await c.tip(d);
     writeFileSync(join(hold, 'arm'), '');
     await until('the 2nd to stop in its look at the line', () => existsSync(join(hold, 'at')));
     c.verdict(td, GREEN);

@@ -10,10 +10,10 @@
 // A boot check, a preview or a dev copy without a stand-in systemctl gets `off`: it never touches systemd.
 import { execFile, spawn } from 'node:child_process';
 import { closeSync, existsSync, openSync } from 'node:fs';
-import { appendFile, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { ContraptionRow } from './db.ts';
 import { installCheck } from './pwa-check.ts';
 
@@ -102,6 +102,8 @@ const execLine = (argv: string[], home: string) => [argv[0], ...argv.slice(1).ma
 const tilde = (s: string, home: string) => (s.startsWith('~/') ? join(home, s.slice(2)) : s);
 /** A contraption's folder: where its repo is checked out; default ~/apps/<name>. */
 export const appFolder = (row: Pick<ContraptionRow, 'name' | 'folder'>, home: string) => (row.folder ? tilde(row.folder, home) : join(home, 'apps', row.name));
+/** Where a deploy keeps an app's two builds (#801), `.<folder's name>/a` and `/b` beside it; the folder links to the live one. */
+export const slotsOf = (folder: string) => join(dirname(folder), `.${basename(folder)}`);
 
 export interface UnitInputs {
   row: Pick<ContraptionRow, 'name' | 'title' | 'port'>;
@@ -432,9 +434,13 @@ export class AppServices {
     }
   }
 
-  /** `holds` (a deploy's) takes the drain's release, for after its health check; otherwise it's released after the restart. */
-  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[]; stage?: (stage: string) => void }): Promise<string[]> {
-    const folder = this.folder(row);
+  /**
+   * `holds` (a deploy's) takes the drain's release, for after its health check; otherwise it's released after the restart.
+   * `slot` (a deploy's): the slot to run from, which the app's folder is pointed at once its turns are drained (#801).
+   */
+  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[]; stage?: (stage: string) => void; slot?: string }): Promise<string[]> {
+    // Units run from the real folder, never through the link, so a running app never sees a deploy's flip (#801).
+    const folder = opts.slot ?? await realpath(this.folder(row)).catch(() => this.folder(row));
     const manifest = await this.manifest(row, folder);
     const files = unitFiles(this.inputs(row, manifest, folder));
     // citadel-app-<name>-<job> mustn't be another contraption's own unit.
@@ -465,10 +471,21 @@ export class AppServices {
     if (quiet.said) said.push(quiet.said);
     if (opts.holds) opts.holds.push(quiet.release);
     try {
+      if (opts.slot) said.push(await this.point(row, opts.slot));
       return await this.writeAndRestart(row, files, live, said);
     } finally {
       if (!opts.holds) quiet.release();
     }
+  }
+
+  /** Point the app's folder at `slot`: a new link renamed over the old one, so it is never missing or half-made. */
+  private async point(row: ContraptionRow, slot: string): Promise<string> {
+    const folder = this.folder(row);
+    const tmp = `${folder}.link-tmp`;
+    await rm(tmp, { force: true });
+    await symlink(relative(dirname(folder), slot), tmp);
+    await rename(tmp, folder);
+    return `Pointed ${folder} at ${slot}.`;
   }
 
   private async writeAndRestart(row: ContraptionRow, files: Map<string, string>, live: HandUnit[], said: string[]): Promise<string[]> {
@@ -622,79 +639,132 @@ export class AppServices {
       child.once('error', () => { clearTimeout(timer); ok(127); });
       child.once('close', (code) => { clearTimeout(timer); ok(late ? 124 : code ?? 1); });
     });
-    const git = async (...args: string[]) => {
-      const r = await new Promise<Ran>((ok) => execFile('git', args, { cwd: folder, env, timeout: 120_000 }, (err: any, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText) })));
+    const git = async (cwd: string, ...args: string[]) => {
+      const r = await new Promise<Ran>((ok) => execFile('git', args, { cwd, env, timeout: 120_000 }, (err: any, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText) })));
       if (r.code) throw new Error(`git ${args.join(' ')} failed: ${r.err.trim().slice(0, 500) || `exit ${r.code}`}`);
       return r.out.trim();
     };
     const short = (sha: string | null) => sha?.slice(0, 9) ?? 'nothing';
     const repo = row.repo!;
-    const live = (await this.handInstalled(row)).filter((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
-    if (live.length) throw new Error(`Hand-installed units run ${row.name}: ${live.map((u) => u.unit).join(', ')}. An admin installs it once with replace (contraption_service install, replace: true, or Settings → Contraptions) before it can deploy.`);
-
-    let prev: string | null = null;
-    if (!existsSync(folder)) {
-      await mkdir(dirname(folder), { recursive: true });
-      await say(`Cloning ${repo} (${view.branch}) into ${folder}.`);
-      if (await sh(['git', 'clone', '--quiet', '--branch', view.branch, '--', this.opts.gitUrl(repo), folder], dirname(folder), 600_000)) throw new Error(`Cloning ${repo} failed: see the log.`);
-    } else {
-      if ((await git('rev-parse', '--show-toplevel').catch(() => '')) !== (await realpath(folder))) throw new Error(`${folder} isn't a git checkout of its own: move it away, or set another folder.`);
-      const origin = await git('remote', 'get-url', 'origin').catch(() => '');
+    const hand = (await this.handInstalled(row)).filter((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
+    if (hand.length) throw new Error(`Hand-installed units run ${row.name}: ${hand.map((u) => u.unit).join(', ')}. An admin installs it once with replace (contraption_service install, replace: true, or Settings → Contraptions) before it can deploy.`);
+    /** A clean checkout of the app's repo, or an Error naming what's in the way. */
+    const checkout = async (dir: string, nothing: string) => {
+      if ((await git(dir, 'rev-parse', '--show-toplevel').catch(() => '')) !== (await realpath(dir))) throw new Error(`${dir} isn't a git checkout of its own: move it away, or set another folder.`);
+      const origin = await git(dir, 'remote', 'get-url', 'origin').catch(() => '');
       const slug = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(origin)?.[1];
       const bare = (u: string) => u.replace(/(\.git)?\/?$/, '').toLowerCase();
-      if (slug?.toLowerCase() !== repo.toLowerCase() && bare(origin) !== bare(this.opts.gitUrl(repo))) throw new Error(`${folder}'s origin is ${origin || 'not set'}, not ${repo}: refusing to deploy over it.`);
-      const branch = await git('branch', '--show-current');
-      if (branch !== view.branch) throw new Error(`${folder} is on ${branch || 'a detached HEAD'}, not ${view.branch}: switch it back by hand first.`);
-      const dirty = await git('status', '--porcelain');
-      if (dirty) throw new Error(`${folder} has local changes, so nothing was fetched: commit or remove them first.\n${dirty.split('\n').slice(0, 10).join('\n')}`);
-      prev = await git('rev-parse', 'HEAD');
+      if (slug?.toLowerCase() !== repo.toLowerCase() && bare(origin) !== bare(this.opts.gitUrl(repo))) throw new Error(`${dir}'s origin is ${origin || 'not set'}, not ${repo}: refusing to deploy over it.`);
+      const dirty = await git(dir, 'status', '--porcelain');
+      if (dirty) throw new Error(`${dir} has local changes, so nothing was ${nothing}: commit or remove them first.\n${dirty.split('\n').slice(0, 10).join('\n')}`);
+    };
+
+    // Two slots behind the app's folder (#801): the folder links to the live one, and a deploy builds in the other, so
+    // the running app never sees the new commit's files before its restart. A roll back points at the old slot again.
+    const slots = slotsOf(folder);
+    const [a, b] = [join(slots, 'a'), join(slots, 'b')];
+    let prev: string | null = null;
+    /** The live slot, kept as it is for a roll back; null on a first deploy. */
+    let old: string | null = null;
+    let next: string;
+    let link = await readlink(folder).catch(() => null);
+    if (link === null && !existsSync(folder)) {
+      if (existsSync(slots)) throw new Error(`${slots} is there but ${folder} isn't: move it away first.`);
+      next = a;
+      await mkdir(slots, { recursive: true });
+      await say(`Cloning ${repo} (${view.branch}) into ${next}.`);
+      if (await sh(['git', 'clone', '--quiet', '--branch', view.branch, '--', this.opts.gitUrl(repo), next], slots, 600_000)) throw new Error(`Cloning ${repo} failed: see the log.`);
+    } else {
+      if (link === null) {
+        // A plain folder from before the slots: move it, as it is, into the first slot. Its service runs on, its cwd moving with it.
+        await checkout(folder, 'fetched');
+        const branch = await git(folder, 'branch', '--show-current');
+        if (branch !== view.branch) throw new Error(`${folder} is on ${branch || 'a detached HEAD'}, not ${view.branch}: switch it back by hand first.`);
+        if (existsSync(slots)) throw new Error(`${slots} is there already: move it away first.`);
+        await mkdir(slots);
+        await rename(folder, a);
+        link = relative(dirname(folder), a);
+        try {
+          await symlink(link, folder);
+        } catch (err: any) {
+          await rename(a, folder);
+          throw new Error(`Couldn't link ${folder} to ${a}, so it was moved back: ${err.message}`);
+        }
+        await say(`Moved ${folder} to ${a} and linked it there: from now on a deploy builds in a second folder beside it.`);
+      }
+      old = resolve(dirname(folder), link);
+      if (old !== a && old !== b) throw new Error(`${folder} links to ${old}, not to ${a} or ${b}: point it back by hand.`);
+      next = old === a ? b : a;
+      await checkout(old, 'fetched');
+      prev = await git(old, 'rev-parse', 'HEAD');
+      if (!existsSync(next)) {
+        await git(old, 'worktree', 'add', '--detach', '--quiet', next, 'HEAD');
+        await say(`Made ${next}, a second checkout to build in.`);
+      } else {
+        await checkout(next, 'built');
+      }
       await say(`Fetching ${repo} ${view.branch}.`);
-      if (await sh(['git', 'fetch', '--quiet', 'origin', view.branch], folder, 600_000)) throw new Error(`Fetching ${repo} failed: see the log.`);
-      await git('merge', '--ff-only', '--quiet', 'FETCH_HEAD').catch((err) => {
-        throw new Error(`${folder}'s ${view.branch} has commits ${repo} doesn't, or git refused: it can only fast-forward, so nothing changed. ${err.message}`);
-      });
+      if (await sh(['git', 'fetch', '--quiet', 'origin', view.branch], next, 600_000)) throw new Error(`Fetching ${repo} failed: see the log.`);
+      const to = await git(next, 'rev-parse', 'FETCH_HEAD');
+      if (!(await git(next, 'merge-base', '--is-ancestor', prev, to).then(() => true, () => false))) {
+        throw new Error(`${old} has commits ${repo}'s ${view.branch} doesn't: a deploy only goes forward, so nothing changed.`);
+      }
+      await git(next, 'checkout', '--detach', '--quiet', to);
     }
+    env.MISE_TRUSTED_CONFIG_PATHS = next;
     view.from = prev;
-    view.to = await git('rev-parse', 'HEAD');
-    await say(prev === view.to ? `Already at ${short(view.to)}: building and restarting it anyway.` : `Now at ${short(view.to)}${prev ? ` (was ${short(prev)})` : ''}.`);
+    view.to = await git(next, 'rev-parse', 'HEAD');
+    await say(prev === view.to ? `Already at ${short(view.to)}: building and restarting it anyway.` : `Building ${short(view.to)}${prev ? ` (${short(prev)} runs meanwhile)` : ''}.`);
+    const unchanged = () => say(prev ? `Nothing changed: ${short(prev)} still runs.` : 'Nothing to roll back to: this was its first deploy.');
 
     // Its turns held by the restart wait for the health check too, so they find its MCP servers up.
     const holds: (() => void)[] = [];
-    const buildAndStart = async () => {
-      const m = await this.manifest(row, folder);
-      const deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
-      for (const step of m.build) {
-        await say(`Build: ${step}`);
-        const code = await sh(['nice', '-n', '10', 'sh', '-c', step], folder, deadline - Date.now());
-        if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
-        if (code) throw new Error(`Build step failed (exit ${code}): ${step}`);
-      }
-      for (const line of await this.installNow(row, { all, holds, stage: (s) => this.stage(view, s) })) await say(line);
+    const start = async (slot: string, m: Manifest) => {
+      for (const line of await this.installNow(row, { all, holds, slot, stage: (s) => this.stage(view, s) })) await say(line);
       await this.healthy(row, m.health);
       await say(`Healthy: ${m.health ? `${m.health} answered` : `port ${row.port} open`}.`);
     };
     try {
-      await buildAndStart();
-      view.state = 'deployed';
-      await say(`Deployed ${short(view.to)}.`);
-    } catch (err: any) {
-      await say(`Failed: ${err.message}`);
-      if (!prev || prev === view.to) {
+      let m: Manifest;
+      try {
+        m = await this.manifest(row, next);
+        const deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
+        for (const step of m.build) {
+          await say(`Build: ${step}`);
+          const code = await sh(['nice', '-n', '10', 'sh', '-c', step], next, deadline - Date.now());
+          if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
+          if (code) throw new Error(`Build step failed (exit ${code}): ${step}`);
+        }
+      } catch (err: any) {
+        // The live slot was never touched, nor its service restarted.
+        await say(`Failed: ${err.message}`);
         view.state = 'failed';
-        if (!prev) await say('Nothing to roll back to: this was its first deploy.');
+        await unchanged();
         return;
       }
-      await say(`Rolling back to ${short(prev)}.`);
       try {
-        await git('reset', '--hard', '--quiet', prev);
-        await buildAndStart();
-        view.state = 'rolled back';
-        await say(`Rolled back: ${short(prev)} runs again.`);
-      } catch (again: any) {
-        view.state = 'failed';
-        await say(`Rolling back failed too: ${again.message}`);
+        await start(next, m);
+        view.state = 'deployed';
+        await say(`Deployed ${short(view.to)}.`);
+      } catch (err: any) {
+        await say(`Failed: ${err.message}`);
+        // Refused before its folder was pointed at the new slot: the old one runs on, untouched.
+        if (!old || (await realpath(folder).catch(() => null)) !== (await realpath(next))) {
+          view.state = 'failed';
+          await unchanged();
+          return;
+        }
+        await say(`Rolling back to ${short(prev)}, built as it was in ${old}.`);
+        try {
+          await start(old, await this.manifest(row, old));
+          view.state = 'rolled back';
+          await say(`Rolled back: ${short(prev)} runs again.`);
+        } catch (again: any) {
+          view.state = 'failed';
+          await say(`Rolling back failed too: ${again.message}`);
+        }
       }
-      return;
+      if (view.state !== 'deployed') return;
     } finally {
       for (const release of holds) release();
     }

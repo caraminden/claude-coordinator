@@ -343,7 +343,7 @@ test('a first deploy clones, builds without Citadel\'s environment, installs and
 
 /** The real folder the app's folder points at now, and its unit's WorkingDirectory. */
 const liveSlot = (name: string) => realpathSync(join(home, 'apps', name));
-const unitDirOf = (name: string) => /^WorkingDirectory=(.*)$/m.exec(readFileSync(join(unitDir, `citadel-app-${name}.service`), 'utf8'))?.[1];
+const unitDirOf = (name: string) => realpathSync(/^WorkingDirectory=(.*)$/m.exec(readFileSync(join(unitDir, `citadel-app-${name}.service`), 'utf8'))![1]);
 
 test('a deploy builds beside the running app: until its restart the app\'s folder still holds the old commit (#801)', async () => {
   const name = `app${++repoN}`;
@@ -678,7 +678,7 @@ test('a build past its time is stopped, and counts as failing', async () => {
   assert.ok(d.said.some((l) => /Nothing to roll back to/.test(l)));
 });
 
-test('a deploy refuses a folder with local changes, another origin or branch, or no repo, and changes nothing', async () => {
+test('a deploy refuses a folder with local changes, another origin, a missing branch or no repo, and changes nothing', async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
   const first = r.push({ 'citadel-app.json': appManifest([]) });
@@ -698,8 +698,9 @@ test('a deploy refuses a folder with local changes, another origin or branch, or
     assert.equal(git(folder, 'rev-parse', 'HEAD'), first);
     rmSync(join(folder, 'mine.txt'));
 
+    // The slots aren't on a branch: the registered one is fetched (a plain folder's own branch is checked when it moves, below).
     services.deploy({ ...c, branch: 'release' }, 'Cara');
-    assert.match((await done(name)).said.join('\n'), /is on main, not release/);
+    assert.match((await done(name)).said.join('\n'), /Fetching cara\/.* failed/);
     services.deploy({ ...c, repo: 'cara/other' }, 'Cara');
     assert.match((await done(name)).said.join('\n'), /origin is .*, not cara\/other: refusing/);
     // A commit of its own on the folder's branch: it can only fast-forward.
@@ -707,7 +708,7 @@ test('a deploy refuses a folder with local changes, another origin or branch, or
     const local = git(folder, 'rev-parse', 'HEAD');
     services.deploy(c, 'Cara');
     d = await done(name);
-    assert.match(d.said.join('\n'), /has commits cara\/.* doesn't, or git refused: it can only fast-forward, so nothing changed\. git merge/);
+    assert.match(d.said.join('\n'), /has commits cara\/.*'s main doesn't: a deploy only goes forward, so nothing changed\./);
     assert.equal(git(folder, 'rev-parse', 'HEAD'), local);
   } finally {
     svc.close();

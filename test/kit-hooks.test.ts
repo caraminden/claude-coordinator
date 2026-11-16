@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { jobCheck, MAX_STOP_BLOCKS, stopHook } from '../kit/hooks/job-check.ts';
 import { bashLines, failedTests, logPath, note, refusals } from '../kit/hooks/retro-log.ts';
+import { isSourceFile, REMINDER, testFirstHook } from '../kit/hooks/test-first.ts';
 
 const HOOKS = join(import.meta.dirname, '..', 'kit', 'hooks');
 const running = { id: 'b1', type: 'shell', status: 'running', description: 'Run the test suite', command: 'node --test' };
@@ -181,4 +182,34 @@ test('after-compact prints the branch and the working tree from the session\'s f
   assert.equal(out.status, 0);
   assert.match(out.stdout, /^\[after-compact\] This conversation was just compacted/);
   assert.match(out.stdout, /\nBranch: /);
+});
+
+test('test-first reminder: once per session on the first source edit, quiet after a red run, never for tests, docs, config or UI', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kit-test-first-'));
+  const edit = (file: string, session = 's1') => testFirstHook({ hook_event_name: 'PostToolUse', tool_name: 'Edit', session_id: session, cwd: '/w', tool_input: { file_path: file } }, dir);
+  const bash = (command: string, session: string, over: object = {}) => testFirstHook({ hook_event_name: 'PostToolUse', tool_name: 'Bash', session_id: session, cwd: '/w', tool_input: { command }, tool_response: { stdout: '', stderr: '' }, ...over }, dir);
+  for (const f of ['/w/test/a.test.ts', '/w/src/a.test.ts', '/w/crates/x/tests/busy.rs', '/w/ingest/tests/test_x.py', '/w/README.md', '/w/docs/adr/1.md', '/w/package.json', '/w/vite.config.ts', '/w/public/app.js', '/w/web/page.tsx', '/w/src/style.css', '/w/kit/skills/x/SKILL.md', '/tmp/scratch.ts', '/w/../other/src/a.ts']) {
+    assert.equal(edit(f, 'quiet'), null, f);
+  }
+  // A first source edit, after those: the reminder, as context, once.
+  const out = JSON.parse(edit('/w/src/runner.ts', 'quiet')!);
+  assert.deepEqual(out, { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: REMINDER } });
+  assert.equal(edit('/w/src/other.ts', 'quiet'), null, 'quiet the second time');
+  // A red run first keeps it quiet: a failed exit (citadel-test, cargo test) or a failure count in the output.
+  bash('citadel-test test/a.test.ts', 'red1', { hook_event_name: 'PostToolUseFailure', error: 'Exit code 1' });
+  assert.equal(edit('/w/src/a.ts', 'red1'), null);
+  bash('npm test 2>&1 | tail -5', 'red2', { tool_response: { stdout: '# fail 2\n' } });
+  assert.equal(edit('/w/src/a.rs', 'red2'), null);
+  bash('cd app && cargo test -p core', 'red3', { hook_event_name: 'PostToolUseFailure', error: 'test result: FAILED. 3 passed; 1 failed;' });
+  assert.equal(edit('/w/src/lib.rs', 'red3'), null);
+  // A green run, a failing command that isn't a test, or a test run left in the background: still reminds.
+  bash('citadel-test test/a.test.ts', 'green', { tool_response: { stdout: '✔ 4 passed, 0 failed in 1.2 s' } });
+  bash('grep -n foo src/a.ts', 'green', { hook_event_name: 'PostToolUseFailure', error: 'Exit code 1' });
+  bash('cargo test', 'green', { hook_event_name: 'PostToolUseFailure', tool_input: { command: 'cargo test', run_in_background: true } });
+  assert.ok(edit('/w/tools/land.sh', 'green'));
+  assert.ok(isSourceFile('src/db.ts') && isSourceFile('crates/core/src/lib.rs') && isSourceFile('ingest/load.py'));
+  // The script itself prints the reminder and nothing on a broken input.
+  const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'test-first.ts')], { input, env: { ...process.env, TMPDIR: dir }, encoding: 'utf8' });
+  assert.match(run(JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Write', session_id: 'cli', cwd: '/w', tool_input: { file_path: 'src/x.ts' } })).stdout, /test-first/);
+  assert.equal(run('not json').stdout, '');
 });

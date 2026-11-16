@@ -437,7 +437,8 @@ export function questionCard(ticketId, card, opts = {}) {
       const choose = (o) => {
         if (answered) return;
         const sel = picks[i].selected;
-        if (q.multiSelect) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
+        // A picked option unpicks on a second click, on single-pick questions too (Cara, 2026-11-16).
+        if (q.multiSelect || sel.has(o.label)) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
         else {
           sel.clear();
           sel.add(o.label);
@@ -454,17 +455,17 @@ export function questionCard(ticketId, card, opts = {}) {
         setViewerGallery({
           ticketId, at: pictured.indexOf(o), answered: () => answered,
           options: pictured.map((o) => ({
-            path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => choose(o),
+            path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => { if (q.multiSelect || !picks[i].selected.has(o.label)) choose(o); },
           })),
         });
       };
       // A picture option's button selects it and opens its picture, as its thumbnail does; the rest only pick.
-      // On a pick-any question a picked option's button unpicks it in place, like a checkbox (Cara, 2026-11-14:
+      // A picked option's button unpicks it in place, like a checkbox (Cara, 2026-11-14:
       // "Multi select image cards cant be unselected"); its thumbnail still only looks.
       const pickBtn = (o, thumb) => h('button', {
         type: 'button', class: `opt${thumb ? ' pic' : ''}`, 'data-label': o.label,
         onclick: () => {
-          const unpick = q.multiSelect && !answered && picks[i].selected.has(o.label);
+          const unpick = !answered && picks[i].selected.has(o.label);
           thumb && !unpick ? thumb.click() : choose(o);
         },
       }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, o.description) : '');

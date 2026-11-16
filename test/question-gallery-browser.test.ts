@@ -109,8 +109,8 @@ async function closeViewer(page: Page) {
 }
 
 test('a click anywhere on a picture tile selects it, opens it in the viewer and sends nothing', { skip }, async () => {
-  const page = await chat(7);
   for (const part of ['.tile .thumb', '.tile .opt .label', '.tile .opt .desc', '.tile .opt']) {
+    const page = await chat(7); // a fresh card each: a second click on the picked button unpicks it
     await click(page, part);
     await waitFor(page, `the viewer from ${part}`, viewerOpen);
     assert.equal(await page.eval(title), 'Garden', part);
@@ -118,6 +118,20 @@ test('a click anywhere on a picture tile selects it, opens it in the viewer and 
     assert.deepEqual(await page.eval(picked), ['Garden'], `${part} selects it`);
     await closeViewer(page);
   }
+});
+
+test('a picked picture option\'s button unpicks it in place on a one-pick card; its thumbnail keeps it', { skip }, async () => {
+  const page = await chat(7);
+  await click(page, '.tile .opt');
+  await waitFor(page, 'the viewer', viewerOpen);
+  await closeViewer(page);
+  await click(page, '.tile .thumb');
+  await waitFor(page, 'the viewer', viewerOpen);
+  assert.deepEqual(await page.eval(picked), ['Garden'], 'the thumbnail keeps it');
+  await closeViewer(page);
+  await click(page, '.tile .opt');
+  assert.deepEqual(await page.eval(picked), [], 'its button takes it off');
+  assert.equal(await page.eval(viewerOpen), false);
 });
 
 test('the viewer steps between the card\'s pictures, and Pick this picks without sending', { skip }, async () => {
@@ -169,6 +183,18 @@ test('a text-only one-pick card waits for Send, and sends the pick with the text
   assert.deepEqual(await page.eval(picked), ['Tabs'], 'typing keeps the pick');
   await page.eval(`${sendBtn}.click()`);
   assert.deepEqual(await page.eval('sent'), [{ questionId: 'q9', answers: [{ selected: ['Tabs'], other: 'but smaller' }] }]);
+});
+
+// Cara, 2026-11-16: "click a selection again to unselect it", so a person can send just their text.
+test('clicking a picked one-pick option again unpicks it, and the text alone sends', { skip }, async () => {
+  const page = await chat(9);
+  await click(page, '.opt');
+  assert.deepEqual(await page.eval(picked), ['Tabs']);
+  await click(page, '.opt');
+  assert.deepEqual(await page.eval(picked), [], 'a second click unpicks');
+  await page.eval(`(() => { const o = document.querySelector('.qcard .other'); o.value = 'neither'; o.dispatchEvent(new Event('input')); })()`);
+  await page.eval(`${sendBtn}.click()`);
+  assert.deepEqual(await page.eval('sent'), [{ questionId: 'q9', answers: [{ selected: [], other: 'neither' }] }]);
 });
 
 test('a picture card with a second question waits for Send with both answers', { skip }, async () => {

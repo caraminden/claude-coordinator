@@ -321,7 +321,19 @@ today's date; one row per copied path. If this is the file's first row and the p
 audits leave out the upstream check, get it asked for as `citadel:upstream-check` says. *Done when*
 every copied file has its row.
 
-### 8. Commit and merge
+### 8. Check the app is registered
+
+Skip this step when the scheme's app is not a contraption (an app Citadel serves under `/apps/<name>/`).
+
+CLAUDE.md names how a change goes live ("deploys with `deploy_contraption`") only for a *registered* contraption, so confirm it is one before the setup is done:
+
+1. Call `deploy_contraption` for the app. A refusal that names the app as unknown means it is not registered.
+2. Not registered: message your own Taskmaster (`message_coordinator`) to get it registered. Registration is admin-only, done by the Citadel Taskmaster, which your Taskmaster relays to. Give every field `register_contraption` takes: `name` (slug), `title`, `port` (a free one, checked with `ss -ltn`), `icon`, `home_scheme` (this scheme's id), `repo` (owner/name), `branch`, `open_paths`. The registered branch needs a `citadel-app.json` first: land it before you ask.
+3. In CLAUDE.md, write the deploy line as fact only once a `deploy_contraption` run went live. Until then leave it out and list "contraption registered and first deploy" as open in the done note.
+
+*Done when* the first deploy went live, or the done note lists registration and first deploy as open with the message you sent.
+
+### 9. Commit and merge
 
 Commit with each file named in the message. Run `citadel:self-review`: it never skips
 `CLAUDE.md` or `.claude/`. The guard files you just listed as high risk by file make a setup
@@ -344,5 +356,5 @@ is pushed or your note says it stays local.
 
 Your reply lists: the files written; kit items that covered planned ones (step 2); gaps that
 took a default; the copies recorded (and whether the scheme has the standard upstream check, or it was asked for); scrub
-hits kept; the check command and its result; whether main is pushed; and any command Cara must
+hits kept; the check command and its result; whether main is pushed; a contraption's registration and first deploy, when still open (step 8); and any command Cara must
 run by hand (a unit install). The Taskmaster's first minions start on your merge by themselves; nothing for you to start.

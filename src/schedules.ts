@@ -305,7 +305,7 @@ export function runBrief(s: Schedule, when: string, window: string): string {
   return [
     `Scheduled run of "${s.name}" (${describeCron(s.cron)}, this run ${when}). A schedule started this minion, not a person, and nobody is watching it live.`,
     window,
-    'Do the brief below. If you find nothing a person needs to see or act on, file the run away quietly: set only the note (e.g. "nothing to report"), leaving state null, since state ready pings people; call close_self; end your turn with one line on what you checked. If you do find something, leave the minion open in state ready with a short report: that pings people and shows in the Needs-you inbox.',
+    'Do the brief below. If you find nothing a person needs to see or act on, file the run away quietly: set only the note (e.g. "nothing to report"), leaving state null, since state ready pings people; call close_self; end your turn with one line on what you checked. If you do find something, leave the minion open in state ready with a short report: that pings people and shows in the Needs-you inbox. If the run writes handoffs or proposals, end with one multi-select ask_question card, one option per handoff, your recommendation marked, and start no minions yourself. Once a person answers, narrow the picked handoffs, delete the unpicked ones, and send the picks to your Taskmaster with message_coordinator, naming each handoff path.',
     '',
     s.brief,
   ].join('\n');

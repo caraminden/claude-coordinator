@@ -81,7 +81,10 @@ checked again.
   (per row: the range checked, the verdict, why, the changed lines in short) and put the takes in
   one `handoffs/handoff-upstream-<YYYY-MM>.md`, one item per row, so a fresh minion can apply
   them. Each alarm gets a card (`ask_question`) with the choices that fit: keep our copy as our
-  own (its row leaves Copies), drop the copy, or mark it fine. Leave the minion open in state complete, its note naming the report.
+  own (its row leaves Copies), drop the copy, or mark it fine. End with the scheduled run's one
+  handoffs card (multi-select, one option per handoff, your pick marked; start no minions), then
+  send the picks to your Taskmaster with `message_coordinator`, naming each handoff path. Leave the
+  minion open in state complete, its note naming the report.
 - **Then, for take and ignore rows**, set Checked to HEAD's short commit and today's date, so the
   next run diffs only what is newer. Alarm rows keep theirs until a person decides; Pinned only
   moves when a re-sync lands.

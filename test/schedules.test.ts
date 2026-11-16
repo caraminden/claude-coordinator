@@ -134,6 +134,7 @@ test("a run's brief names the schedule and ends with the brief", () => {
   const text = runBrief(s, 'Oct 29, 2026, 3:00 AM', 'Last real run: never; since then 4 minions in this scheme.');
   assert.match(text, /^Scheduled run of "Nightly" \(Every day at 03:00.*\nLast real run: never; since then 4 minions in this scheme\.\n/);
   assert.ok(text.endsWith('\n\nIs main healthy?'));
+  assert.match(text, /one multi-select ask_question card, one option per handoff.*start no minions yourself.*message_coordinator, naming each handoff path/);
 });
 
 test("a scheduled run's minion is pinned for the scheme's owner alone, an unpin sticks, and no owner means no pin (#384)", () => {

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
@@ -69,7 +69,8 @@ test('the runner opens every scheme only to the Citadel Taskmaster, on a Citadel
   const every = runner.everySchemeFor(citadel, tmCitadel, josh.id)!;
   assert.ok(every, 'a Citadel member');
   assert.ok(runner.everySchemeFor(citadel, tmCitadel, cara.id), 'an admin');
-  assert.deepEqual(every.apps, [appDir]);
+  // The folder and its two deploy slots beside it (#801).
+  assert.deepEqual(every.apps, [appDir, join(root, 'apps', '.peek-auras')]);
   // Other schemes' repos and their open minions' worktrees; not its own, and not a dismissed minion's.
   assert.ok(every.gitDirs.includes(delve.repo_dir!) && every.gitDirs.includes(peek.repo_dir!) && every.gitDirs.includes(peekMinion.cwd!));
   assert.ok(!every.gitDirs.includes(citadel.repo_dir!) && !every.gitDirs.includes(closed.cwd!));
@@ -134,8 +135,10 @@ test('its prompt names every scheme and contraption folder on a member ask, and 
 
 test("a member's container mounts the contraption folders read-only; others' don't", () => {
   const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), data, process.execPath, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-es-');
-  const mount = (uid: number) => link.spec(uid).mounts.find((m) => m.src === appDir);
-  assert.deepEqual(mount(josh.id), { src: appDir, dst: appDir, ro: true });
+  // The folder's parent: the folder links into its slots beside it, which must follow each deploy (#801).
+  const apps = dirname(appDir);
+  const mount = (uid: number) => link.spec(uid).mounts.find((m) => m.src === apps);
+  assert.deepEqual(mount(josh.id), { src: apps, dst: apps, ro: true });
   assert.equal(mount(alex.id), undefined);
 });
 

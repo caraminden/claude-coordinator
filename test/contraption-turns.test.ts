@@ -86,6 +86,8 @@ take().then((m) => {
   }
   // Limited on the first account only (#785): the second one's folder ends in claude2.
   if (prompt.includes('first account limited') && !process.env.CLAUDE_CONFIG_DIR.endsWith('claude2')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
+  // Text first, then the limit: the app has seen output, so it mustn't be run again on another account (#785).
+  if (prompt.includes('limited after text')) { out({ type: 'stream_event', event: { type: 'message_start', message: { id: 'ml' } } }); out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Half' } } }); out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   if (prompt.includes('plan limit')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   if (prompt.includes('expired')) { out({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 authentication_error OAuth token has expired' }); process.exit(1); }
   if (prompt.includes('crash')) { process.stderr.write('boom\\n'); process.exit(3); }
@@ -201,6 +203,7 @@ const places = {
   // Cara's Codex-only container (#341), once a test gives her one.
   codexPlace: (uid: number) => (uid === cara.id ? caraCodex : null),
   expire: (uid: number) => expired.push(uid),
+  configDirs: (uid: number) => (uid === cara.id ? [claudeDir, join(root, 'claude2')] : []),
   limitedView(_uid: number, n: number, until: number) {
     caraLimits.push({ n, until });
     const next = n === 1 && caraSpare ? { n: 2, label: 'account 2' } : null;
@@ -888,4 +891,19 @@ test('every Claude account limited: the turn fails with limit and says which res
   assert.equal(errorOf(evs), 'limit');
   assert.match(evs.at(-1)!.data.message, /Another of this person's Claude accounts resets first/);
   assert.equal(caraLimits.length, 1);
+});
+
+test('a limit after output is marked but not retried: the app never sees a reply twice; the next turn resumes on the other account (#785)', async () => {
+  caraOn = 1; caraLimits = []; caraSpare = true;
+  await turn(mandate, { session: 'half', prompt: 'hello again' });
+  const evs = await turn(mandate, { session: 'half', prompt: 'limited after text' });
+  assert.equal(errorOf(evs), 'limit');
+  assert.equal(evs.filter((e) => e.event === 'start').length, 1);
+  assert.equal(evs.filter((e) => e.event === 'text').length, 1);
+  assert.equal(caraOn, 2, 'turns moved on');
+  const next = await turn(mandate, { session: 'half', prompt: 'carry on' });
+  assert.equal(next.at(-1)!.event, 'end');
+  const text = readdirSync(join(root, 'claude2', 'projects')).flatMap((d) => readdirSync(join(root, 'claude2', 'projects', d)).map((f) => readFileSync(join(root, 'claude2', 'projects', d, f), 'utf8'))).join('');
+  assert.match(text, /hello again/, 'the session came along');
+  caraOn = 1; caraSpare = false;
 });

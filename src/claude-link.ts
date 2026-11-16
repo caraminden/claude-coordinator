@@ -352,6 +352,11 @@ export class ClaudeLink {
     return home && join(home, accountDir(n));
   }
 
+  /** Every linked account's config folder, as this server sees it (an app turn's session may sit in another account's after a switch, #785). */
+  configDirs(uid: number): string[] {
+    return (this.accounts(uid)?.accounts ?? []).flatMap((a) => this.configDir(uid, a.n) ?? []);
+  }
+
   /** The image tag for the current Containerfile and the files it copies in (codex/). */
   private image(): string {
     return `${IMAGE_REPO}:${imageHash(CONTAINERFILE_DIR)}`;

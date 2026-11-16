@@ -269,6 +269,8 @@ export interface ClaudePlaces {
   /** The server login's Codex-only container (#341), whose place() is the host. */
   codexPlace(uid: number): TurnPlace | null;
   expire(uid: number, account?: number): void;
+  /** Every linked account's config folder: a session left on another account's (after a switch) is carried over before it resumes. */
+  configDirs(uid: number): string[];
   /** A turn on `account` hit its limit, which resets at `until` (ClaudeLink.limitedView, the minions' path): the account turns move on to, or null when none is ready, and the first reset. */
   limitedView(uid: number, account: number, until: number): { next: { n: number; label: string } | null; resetAt: number } | null;
 }
@@ -459,19 +461,9 @@ export class ContraptionTurns {
     try {
       let r = await this.turn(c, req, place, at, wantCodex, live, dir, out, () => !sent);
       if (r.retry) {
-        // The limit moved this person's turns to their next account: carry the session's transcript over, as a minion's restoreSession does.
+        // The limit moved this person's turns to their next account; turn() carries the session's transcript over to it.
         retrying = true;
         const next = this.claude.place(req.person);
-        const known = this.store.contraptionSession(c.id, req.person, req.session);
-        if (next && known) {
-          const from = this.scratch(c, req.person, place), to = this.scratch(c, req.person, next);
-          const src = transcriptPath(from.configDir, from.cwd, known.claude_session), dst = transcriptPath(to.configDir, to.cwd, known.claude_session);
-          if (src && dst && src !== dst && existsSync(src)) {
-            mkdirSync(dirname(dst), { recursive: true });
-            copyFileSync(src, dst);
-            if (existsSync(src.replace(/\.jsonl$/, ''))) cpSync(src.replace(/\.jsonl$/, ''), dst.replace(/\.jsonl$/, ''), { recursive: true });
-          }
-        }
         rmSync(dir.onHost, { recursive: true, force: true }); // turn() makes it again
         live.replied = false;
         live.steers.clear();
@@ -516,6 +508,17 @@ export class ContraptionTurns {
     // Resume the name's session unless asked for a fresh one, or its transcript is gone (a relinked Claude).
     const known = this.store.contraptionSession(c.id, req.person, req.session);
     const transcript = known ? transcriptPath(where.configDir, where.cwd, known.claude_session) : null;
+    // A limit moved this person to another account (#785): its transcript is still in the old one's folder, so copy it (and its subagents') in.
+    if (transcript && !req.fresh && !existsSync(transcript)) {
+      for (const dir of this.claude.configDirs(req.person)) {
+        const from = transcriptPath(dir, where.cwd, known!.claude_session);
+        if (!from || from === transcript || !existsSync(from)) continue;
+        mkdirSync(dirname(transcript), { recursive: true });
+        copyFileSync(from, transcript);
+        if (existsSync(from.replace(/\.jsonl$/, ''))) cpSync(from.replace(/\.jsonl$/, ''), transcript.replace(/\.jsonl$/, ''), { recursive: true });
+        break;
+      }
+    }
     const resume = !!transcript && !req.fresh && existsSync(transcript);
     const claudeSession = resume ? known!.claude_session : randomUUID();
     // The name can never get back to the session it leaves, so that session's transcript goes.

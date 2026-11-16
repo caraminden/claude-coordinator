@@ -443,7 +443,7 @@ export function renderUsage(next = usage) {
     el.querySelector('.label').textContent = `Week ${pct}%`;
     el.style.setProperty('--pct', `${pct}%`);
     // Several accounts: out only once every one is (turns move to the next by themselves).
-    const out = accounts ? accounts.every((a) => a.usage && (out1(a.usage.weekly) || out1(a.usage.session))) : week.status && week.status !== 'allowed';
+    const out = accounts ? accounts.every((a) => high(a.usage)) : week.status && week.status !== 'allowed';
     el.dataset.level = out || pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
     const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
     const sess = (w) => `${Math.round(w.utilization * 100)}%${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`;
@@ -506,8 +506,6 @@ function fillCodexWindows(el) {
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 const live = (w) => w && (!w.resetsAt || w.resetsAt > Date.now());
 /** A Claude window is past 90% (or out): the left panel offers the override then (Josh, 2026-11-05). */
-/** A window that is out: not allowed, or at 90%, and not yet reset. */
-const out1 = (w) => live(w) && ((w.status && w.status !== 'allowed') || w.utilization >= 0.9);
 const high = (u) => [u?.session, u?.weekly].some((w) => live(w) && (w.status === 'rejected' || w.utilization >= 0.9));
 // With several Claude accounts (#779), only once every one of them is high: turns move to the next by themselves.
 const claudeHigh = () => usage?.accounts?.length > 1 ? usage.accounts.every((a) => high(a.usage)) : high(usage);

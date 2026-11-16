@@ -52,7 +52,7 @@ export const bridgeTypedAt = () => typedAt;
 export const bridgeUnsaved = () => [...frames].some((f) => alive(f) && f.unsaved);
 
 /** A failure worth sending again: the network, or Caddy's answer while Citadel restarts. */
-const transient = (err) => err instanceof TypeError || [502, 503, 504].includes(err?.status);
+const transient = (err) => err?.retry === true || err instanceof TypeError || [502, 503, 504].includes(err?.status);
 
 const win = (f) => (f.iframe ? f.iframe.contentWindow : f.tab);
 const alive = (f) => (f.iframe ? f.iframe.isConnected : !f.tab.closed);
@@ -97,21 +97,19 @@ async function onMessage(e) {
       return reply({ ok: true, result: { sent: true, to: r.to.label } });
     }
     if (req.op === 'write') {
-      if (!takeWrite(frame)) throw new Error('Too many writes; slow down');
+      // The page sends a refused write again after its gap, so a burst of picks isn't lost.
+      if (!takeWrite(frame)) throw Object.assign(new Error('Too many writes; slow down'), { retry: true });
       typedAt = Date.now();
     }
-    let r;
-    try {
-      r = await storeCall(frame, req.page, req.op === 'write' ? { op: 'write', entries: req.entries } : { op: 'list' });
-    } catch (err) {
-      // The page sends it again until it lands (artifact-bridge.js); until then a reload here would lose it.
-      if (req.op === 'write' && transient(err)) frame.unsaved = true;
-      throw err;
-    }
-    if (req.op === 'write') frame.unsaved = false;
+    const r = await storeCall(frame, req.page, req.op === 'write' ? { op: 'write', entries: req.entries } : { op: 'list' });
+    // Landed, or a hello from a page that reloaded and so has no write left to send.
+    if (req.op !== 'list') frame.unsaved = false;
     const result = req.op === 'hello' ? { person: r.person, file: frame.name, owner: frame.owner, entries: r.entries } : { entries: r.entries };
     reply({ ok: true, result });
   } catch (err) {
+    // A write the page sends again until it lands (artifact-bridge.js) holds a reload here; one refused
+    // for good won't be sent again, so it doesn't.
+    if (req.op === 'write') frame.unsaved = transient(err);
     reply({ ok: false, error: err.message, ...(transient(err) ? { retry: true } : {}) });
   }
 }

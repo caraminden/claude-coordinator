@@ -177,17 +177,28 @@ test('a write Citadel could not take while it restarts tells the page to try aga
   write(3);
   await settle();
   assert.ok(!posted.at(-1).retry, 'a refusal is not retried');
-  assert.equal(bridgeUnsaved(), true, 'still unsaved: the retried write has not landed');
-  fail = null;
+  assert.equal(bridgeUnsaved(), false, 'refused for good: the page will not send it again, so nothing holds a reload');
+  fail = new TypeError('Failed to fetch');
   write(4);
   await settle();
+  assert.equal(bridgeUnsaved(), true);
+  fail = null;
+  write(5);
+  await settle();
   assert.equal(posted.at(-1).ok, true);
-  assert.equal(bridgeUnsaved(), false);
+  assert.equal(bridgeUnsaved(), false, 'landed');
+  fail = new TypeError('Failed to fetch');
+  write(6);
+  await settle();
+  fail = null;
+  onMessage({ source: win, origin: 'null', data: { bridge: TAG, id: 7, op: 'hello', page: 'p9' } });
+  await settle();
+  assert.equal(bridgeUnsaved(), false, 'a page that reloaded has no write left to send');
 
   // Typing on the page counts as typing in Citadel, and gets no answer.
   const n = posted.length;
   const before = Date.now();
-  onMessage({ source: win, origin: 'null', data: { bridge: TAG, id: 5, op: 'typing', page: 'p9' } });
+  onMessage({ source: win, origin: 'null', data: { bridge: TAG, id: 8, op: 'typing', page: 'p9' } });
   await settle();
   assert.ok(bridgeTypedAt() >= before);
   assert.equal(posted.length, n);

@@ -18,7 +18,7 @@ import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
 import { hostCheck } from '../host-check.ts';
-import { landArgs, type Handoff } from '../land.ts';
+import { landArgs, landConflict, type Handoff } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
 import { previewPath } from '../previews.ts';
@@ -953,6 +953,9 @@ export const ticketRoutes: Route[] = [
       if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);
       const env = app.runner.hostEnv(ticket, String(req.headers.authorization).replace(/^Bearer /, ''));
       if (body.fix === true) env.LAND_FIX = '1';
+      // A branch that wouldn't rebase cleanly is sent back now, in the minion's own turn, not after its wait in line (#770).
+      const clash = await landConflict(ticket.cwd, env, args);
+      if (clash) throw new HttpError(409, `Not handed off: ${clash}`);
       if (!app.landings.handOff(ticket.id, ticket.cwd, env, args, h)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       app.store.updateTicket(ticket.id, { state: 'outside', note: 'landing: handed to the server' });
       app.runner.broadcastTicket(ticket.id);

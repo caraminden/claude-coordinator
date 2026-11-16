@@ -9,6 +9,7 @@
 // run/landings/<minion>/, so the next server reports them to the tool still polling. Without units
 // (tests, a dev copy) or when systemd-run fails, it runs as the server's child, which a restart would
 // cut off: only those count toward the runner's interruptible().
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -93,6 +94,20 @@ export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown
     return r.startsWith('-') ? `.${sep}${r}` : r;
   });
   return ['--into', into, ...rel];
+}
+
+/**
+ * The early conflict check at hand-off (#770): `tools/land.sh --check <args>` in the worktree, which runs git merge-tree
+ * against what the land would rebase onto (main, a build, another scheme's BRANCH). Its refusal when it says the branch
+ * would conflict (exit 3), else null: clean, or no verdict (a land.sh from before --check refuses the argument with 1,
+ * a hang, a git error), and then the hand-off goes on as before. It only ever saves a wait, never blocks a land.
+ */
+export function landConflict(cwd: string, env: Record<string, string>, args: string[], timeout = 30_000): Promise<string | null> {
+  return new Promise((done) => {
+    execFile('bash', ['tools/land.sh', '--check', ...args], { cwd, env, timeout, maxBuffer: MAX_OUTPUT }, (err: any, _out, stderr) => {
+      done(err?.code === 3 ? String(stderr).replace(/^land: /gm, '').trim() || 'land.sh --check says it would conflict, but named nothing' : null);
+    });
+  });
 }
 
 export class Landings {

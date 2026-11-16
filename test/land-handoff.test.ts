@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { deployApps, LandHandoffs, Landings, landResult, outputTail, type DeployOps, type HandoffDeps } from '../src/land.ts';
+import { deployApps, LandHandoffs, landConflict, Landings, landResult, outputTail, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
 import { git } from './git.ts';
 
@@ -329,6 +329,21 @@ test('landResult reads deploy.sh\'s lines; outputTail keeps the last lines', () 
   assert.ok(!outputTail(long).includes('line 400\n'));
 });
 
+test("landConflict reads only land.sh --check's exit 3 as a conflict: an older land.sh, a failure or a hang hands off as before (#770)", async () => {
+  const cwd = mkdtempSync(join(root, 'check-'));
+  mkdirSync(join(cwd, 'tools'));
+  const script = (body: string) => writeFileSync(join(cwd, 'tools', 'land.sh'), body);
+  const env = { PATH: process.env.PATH! };
+  script('echo "land: $1 $2" >&2; echo "land: conflicted files: a.txt" >&2; exit 3\n');
+  assert.equal(await landConflict(cwd, env, ['--into', 'build/2']), '--check --into\nconflicted files: a.txt', 'its lines, with --check before the land\'s own arguments');
+  script('echo "land: takes no arguments" >&2; exit 1\n');
+  assert.equal(await landConflict(cwd, env, []), null, 'a land.sh from before --check');
+  script('exit 0\n');
+  assert.equal(await landConflict(cwd, env, []), null);
+  script('sleep 5; exit 3\n');
+  assert.equal(await landConflict(cwd, env, [], 300), null, 'a hang is no verdict');
+});
+
 // The route: what it refuses before the minion ends its turn, and a clean land end to end through a real server.
 test('the hand-off route refuses uncommitted work, a missing label and a high risk with no go, and reports a clean land', async () => {
   const srv = await bootServer();
@@ -338,7 +353,8 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
     const cwd = join(srv.root, 'wt');
     mkdirSync(join(cwd, 'tools'), { recursive: true });
-    writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%b' ${JSON.stringify(LIVE)}\n`);
+    // --check (#770): exit 3 with its refusal while the file "conflict" is there (untracked, so the worktree stays clean).
+    writeFileSync(join(cwd, 'tools', 'land.sh'), `if [ "$1" = --check ]; then [ -e conflict ] || exit 0; echo "land: ticket/1-x won't rebase onto main cleanly, so nothing landed; conflicted files: a.txt. On conflicts: run git rebase main" >&2; exit 3; fi\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
     git(cwd, 'init', '-q');
     git(cwd, 'add', '.');
     git(cwd, 'commit', '-qm', 'init');
@@ -362,6 +378,12 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.match((await full.json()).error, /--full yourself/);
 
     assert.equal((await handOff({ ...body, deploy: 'no' })).status, 400, 'deploy is true or false');
+    writeFileSync(join(cwd, 'conflict'), '');
+    const clash = await handOff(body);
+    assert.equal(clash.status, 409, 'a branch that would conflict is sent back in the turn');
+    assert.equal((await clash.json()).error, "Not handed off: ticket/1-x won't rebase onto main cleanly, so nothing landed; conflicted files: a.txt. On conflicts: run git rebase main");
+    assert.equal(store.getTicket(minion.id)!.state, null, 'nothing was handed off');
+    rmSync(join(cwd, 'conflict'));
     assert.equal((await handOff(body)).status, 202);
     assert.equal(store.getTicket(minion.id)!.state, 'outside');
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);

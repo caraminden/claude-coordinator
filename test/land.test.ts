@@ -616,6 +616,56 @@ test('a conflict still refuses the same when there is no shared dir or it cannot
   }
 });
 
+test('--check (#770) says whether the rebase onto main would conflict, naming the files, and changes nothing', () => {
+  const r = setup();
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  r.commit(r.source, 'b.txt', 'clean\n');
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  let res = r.run({}, ['--check']);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stderr, '');
+  r.commit(r.source, 'a.txt', 'theirs\n');
+  const tip = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.source, 'rev-parse', 'main');
+  const shared = join(r.dir, 'shared');
+  res = r.run({ COORDINATOR_SHARED_DIR: shared }, ['--check']);
+  assert.equal(res.status, 3);
+  assert.match(res.stderr, new RegExp(`^land: ticket/1-x won't rebase onto main \\(${main.slice(0, 7)} "a\\.txt: theirs"\\) cleanly, by git merge-tree at hand-off, so nothing landed; conflicted files: a\\.txt\\. On conflicts: run git rebase main, resolve them`));
+  assert.match(landLog(shared), new RegExp(`^- \\d\\d:\\d\\d:\\d\\dZ · land conflict · ticket/1-x onto ${main.slice(0, 7)}: a\\.txt · at hand-off$`, 'm'));
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), tip);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.equal(git(r.wt, 'status', '--porcelain'), '');
+  assert.ok(!existsSync(state), 'no lock, line or state');
+  assert.equal(r.note(), null, 'no deploy');
+});
+
+test('--check leaves behind a commit that came off main, as the rebase does, and checks --into against the build', () => {
+  const r = setup();
+  const before = git(r.source, 'rev-parse', 'main');
+  r.commit(r.source, 'a.txt', 'rolled back\n');
+  const u = git(r.source, 'rev-parse', 'main');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  git(r.source, 'reset', '-q', '--keep', before);
+  r.commit(r.source, 'a.txt', 'redone\n');
+  assert.equal(r.run({}, ['--check']).status, 3, 'carried along, the commit that came off main would conflict');
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  mkdirSync(state);
+  writeFileSync(join(state, 'taken-back'), `${u} ticket/9-other\n`);
+  let res = r.run({}, ['--check']);
+  assert.equal(res.status, 0, res.stderr);
+  // --into: against the build, not main, and only when the branch isn't on the build's tip already.
+  git(r.source, 'branch', 'build/1', before);
+  res = r.run({}, ['--check', '--into', 'build/1', 'test/ok.test.mjs']);
+  assert.equal(res.status, 0, res.stderr);
+  git(r.source, 'checkout', '-q', 'build/1');
+  r.commit(r.source, 'b.txt', 'the build\'s\n');
+  git(r.source, 'checkout', '-q', 'main');
+  res = r.run({}, ['--check', '--into', 'build/1', 'test/ok.test.mjs']);
+  assert.equal(res.status, 3);
+  assert.match(res.stderr, /won't rebase onto build\/1 .*conflicted files: b\.txt\. On conflicts: run git rebase build\/1/);
+});
+
 test('a deploy that fails before going live puts main back', () => {
   const r = setup();
   r.commit(r.wt, 'b.txt', 'mine\n');

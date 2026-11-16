@@ -5,7 +5,9 @@
 # small one could lose every round and time out (2026-11-10). So waiters line up first: each takes a
 # numbered ticket file in <state>/queue, and only the oldest ticket tries the lock.
 #   queue_lock <state dir> <label>   wait in line, then hold the lock on fd 9. Returns 1 only when
-#                                    nothing has moved for DEPLOY_QUEUE_STALL seconds.
+#                                    nothing has moved for DEPLOY_QUEUE_STALL seconds, and 2 when the
+#                                    caller's queue_wait_check (if it defines one) failed while others
+#                                    were ahead; it said why.
 #   queue_phase <text>               say what the holder is doing now: the waiters' sign of progress
 #   queue_done [ok]                  leave the line (the caller lets go of fd 9, or exits); ok: it went
 #                                    all the way, so its time counts toward the waiters' estimate
@@ -158,6 +160,12 @@ queue_lock() {
       ahead=$((ahead + 1))
       [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *}; }
     done
+
+    # The caller's own check while others are ahead (land.sh's early conflict check, #770): a failure leaves the line.
+    if [ "$ahead" -gt 0 ] && declare -F queue_wait_check >/dev/null && ! queue_wait_check; then
+      queue_done
+      return 2
+    fi
 
     if [ "$ahead" = 0 ]; then
       # A short blocking wait, not a poll: the lockers outside the line block in the kernel, and a poller would lose to every one of them.

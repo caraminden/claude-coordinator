@@ -90,6 +90,11 @@ land_timing() (
 [ "${COORDINATOR_CONTAINER:-}" != 1 ] || refuse "this turn runs in a container: call the land tool (mcp__thread) instead, which runs land.sh on the host"
 # Inside a slot it would hold a heavy slot, shared by every scheme, while it waits on the deploy lock.
 [ -z "${CITADEL_HEAVY_HELD:-}" ] || refuse "run it on its own, not under citadel-heavy: it would hold a heavy slot other schemes need while it waits for the deploy lock"
+# --check (#770): only say whether the branch would still rebase onto what it lands on, for the server's hand_off_land.
+# No lock, no line and no state: exit 3 with the conflict's refusal when it wouldn't, 0 otherwise (a refusal of
+# anything else is 1, as for a land, and the hand-off goes on to meet it there).
+check=
+[ "${1:-}" != --check ] || { check=1; shift; }
 args=("$@") # for the rebased copy (the execs below)
 mode=land build='' files=()
 case ${1:-} in
@@ -116,7 +121,7 @@ branch=$(git branch --show-current)
 { [ -n "$branch" ] && [ "$branch" != main ]; } || refuse "run it from a minion's branch, not main or a detached HEAD"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
 state=$(git -C "$LIVE" rev-parse --absolute-git-dir)/cc-deploy
-mkdir -p -m 700 "$state"
+[ -n "$check" ] || mkdir -p -m 700 "$state"
 label=$branch # for the retro log's lines: which kind of run this is
 untouched="main is untouched"
 case $mode in
@@ -145,6 +150,42 @@ case $mode in
     done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/')
 esac
 
+# A commit that came off main again (its restart was rolled back) while this branch was already rebased onto it
+# (#566: the gate runs beside that restart) is still under this branch, and a plain rebase would carry it back onto
+# main. It is left behind, unless it is this branch's own: this prints the newest such commit, for the rebase's --onto.
+under_of() {
+  local t b u=''
+  [ "$mode" = land ] || return 0
+  while read -r t b; do
+    [ "$b" != "$branch" ] && git merge-base --is-ancestor "$t" HEAD 2>/dev/null && ! git merge-base --is-ancestor "$t" main 2>/dev/null || continue
+    { [ -n "$u" ] && git merge-base --is-ancestor "$t" "$u"; } || u=$t
+  done < <(cat "$state/taken-back" 2>/dev/null || true)
+  echo "$u"
+}
+# What to do about a conflict, the same for a rebase or merge that stopped and for the early check below.
+conflict_fix() {
+  case $mode in
+    land) echo "On conflicts: run git rebase ${under:+--onto }main${under:+ $(git rev-parse --short "$under")}, resolve them keeping the other minions' changes, re-test, commit, then run this again" ;;
+    into) echo "On conflicts: run git rebase $build, resolve them keeping the other feeders' changes, re-test, commit, then run this again" ;;
+    build) echo "Take main in on your branch by hand (git merge main), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again" ;;
+  esac
+}
+# The early check (#770): <onto> <when>. Whether the rebase onto <onto> (--build's merge of it) would stop on a conflict,
+# by git merge-tree, which touches no worktree, index or ref. With $under, as the rebase's --onto leaves it behind. On a
+# conflict it logs the files as conflict() does, says the same refusal, and fails. A git that can't tell (exit 2 and up)
+# counts as clean: the rebase itself decides then. shortcut: a three-way merge, not a replay commit by commit, so a
+# branch that changes a line and changes it back can pass here and still stop in the rebase, which catches it as before.
+early_check() {
+  local out rc=0 files at
+  out=$(git merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
+  [ "$rc" = 1 ] || return 0
+  files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
+  at=$(git log -1 --format='%h "%s"' "$1")
+  retro_log "land conflict · $label onto ${at%% *}: ${files:-no conflicted files named} · $2"
+  say "$branch won't $([ "$mode" = build ] && echo "merge ${1#refs/heads/} in" || echo "rebase onto ${1#refs/heads/}") ($at) cleanly, by git merge-tree $2, so nothing landed${files:+; conflicted files: $files}. $(conflict_fix)"
+  return 1
+}
+
 # LAND_REBASED: this is the rebased land.sh, started below by the one that rebased, and it holds the lock on fd 9.
 # LAND_REDO with it: main went back while this waited for the restart ahead, so this starts over, once (1: the rebase
 # is still to do; 2: done, by the copy that started this one).
@@ -163,6 +204,14 @@ if [ "$mode" = build ]; then
   label="$branch · lands $build"
 fi
 unset LAND_REBASED LAND_REDO LAND_BUILD
+if [ -n "$check" ]; then
+  under=$(under_of)
+  case $mode in
+    land | build) early_check main "at hand-off" || exit 3 ;;
+    into) git merge-base --is-ancestor "refs/heads/$build" HEAD || early_check "refs/heads/$build" "at hand-off" || exit 3 ;;
+  esac
+  exit 0 # --full: no rebase, so nothing to check
+fi
 quiet=$resumed
 [ "$redo" != 1 ] || quiet=
 times=$state/times-$$ # the same in the rebased copy, which is this process
@@ -189,7 +238,19 @@ build_lock() {
 # ticket at the end has to be set again.
 if [ -z "$resumed" ]; then
   [ -z "$build" ] || build_lock || { land_timing 1; exit 1; }
-  if [ "$mode" != into ]; then queue_lock "$state" "$branch" || { land_timing 1; exit 1; }; fi
+  if [ "$mode" != into ]; then
+    # While others are ahead, each time main moves: whether this would still rebase onto it (#770). A conflict leaves
+    # the line at once, so the minion is woken now rather than when it reaches the front. --full doesn't rebase.
+    waited_on=''
+    queue_wait_check() {
+      local now
+      [ "$mode" != full ] && now=$(git rev-parse -q --verify refs/heads/main) && [ "$now" != "$waited_on" ] || return 0
+      waited_on=$now under=$(under_of)
+      early_check main "waiting in line"
+    }
+    queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
+    unset -f queue_wait_check
+  fi
   land_mark lock rebase
 fi
 trap 'land_timing $? || true; queue_done' EXIT
@@ -214,7 +275,7 @@ if [ "$mode" = land ] || [ "$mode" = build ]; then
 fi
 
 old=$(git -C "$SOURCE" rev-parse main)
-# <onto> <rebase|merge> <refusal> <what to do>: a rebase or merge that stopped. Which files collide is worth a retro-log
+# <onto> <rebase|merge> <refusal>: a rebase or merge that stopped. Which files collide is worth a retro-log
 # line (the architecture check counts them).
 conflict() {
   local conflicted what
@@ -222,25 +283,18 @@ conflict() {
   if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h "$1"): $conflicted"; else what=": no conflicted files found (the $2 may not have started)"; fi
   retro_log "land conflict · $label$what"
   git "$2" --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
-  refuse "$3${conflicted:+; conflicted files: $conflicted}. $4"
+  refuse "$3${conflicted:+; conflicted files: $conflicted}. $(conflict_fix)"
 }
 if [ "$mode" = build ] && [ "$redo" = 1 ]; then
   git reset -q --keep "$base" # main went back while this waited: main is merged in again without what came off it
 fi
-# A commit that came off main again (its restart was rolled back) while this branch was already rebased onto it
-# (#566: the gate runs beside that restart) is still under this branch, and a plain rebase would carry it back onto
-# main. It is left behind, unless it is this branch's own.
-under=
-[ "$mode" != land ] || while read -r t b; do
-  [ "$b" != "$branch" ] && git merge-base --is-ancestor "$t" HEAD 2>/dev/null && ! git merge-base --is-ancestor "$t" main 2>/dev/null || continue
-  { [ -n "$under" ] && git merge-base --is-ancestor "$t" "$under"; } || under=$t
-done < <(cat "$state/taken-back" 2>/dev/null || true)
+under=$(under_of) # under_of above: a commit that came off main, which the rebase leaves behind
 case $mode in
   land)
     [ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
     [ -n "$quiet" ] || queue_phase "rebasing onto main"
     [ -n "$quiet" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
-    git rebase -q ${under:+--onto} main ${under:+"$under"} || conflict main rebase "the rebase onto main failed (see git's output above), so nothing landed" "On conflicts: run git rebase ${under:+--onto }main${under:+ $(git rev-parse --short "$under")}, resolve them keeping the other minions' changes, re-test, commit, then run this again" ;;
+    git rebase -q ${under:+--onto} main ${under:+"$under"} || conflict main rebase "the rebase onto main failed (see git's output above), so nothing landed" ;;
   into | full)
     if git merge-base --is-ancestor "$base" HEAD; then
       say "$build is already under $branch: no rebase"
@@ -248,7 +302,7 @@ case $mode in
       # A rebase would flatten the build minion's merge of main.
       [ "$mode" = into ] || refuse "$build has commits this branch doesn't: run git merge $build (not a rebase), re-test, then run this again. Nothing merged"
       say "rebasing $branch onto $build ($(git log -1 --format='%h "%s"' "$base"))"
-      git rebase -q "$base" || conflict "$base" rebase "the rebase onto $build failed (see git's output above), so $build is untouched" "On conflicts: run git rebase $build, resolve them keeping the other feeders' changes, re-test, commit, then run this again"
+      git rebase -q "$base" || conflict "$base" rebase "the rebase onto $build failed (see git's output above), so $build is untouched"
     fi ;;
   build)
     # The same commit under a build sits below its merges of main and can't be left behind, so it is reverted by hand.
@@ -265,7 +319,7 @@ case $mode in
     else
       [ -n "$quiet" ] || queue_phase "merging main into $build"
       say "merging main ($(git log -1 --format='%h "%s"' main)) into $build on $branch"
-      git merge -q --no-edit main || conflict main merge "merging main into $build failed (see git's output above), so nothing landed" "Take main in on your branch by hand (git merge main), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again"
+      git merge -q --no-edit main || conflict main merge "merging main into $build failed (see git's output above), so nothing landed"
     fi ;;
 esac
 # Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):

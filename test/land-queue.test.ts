@@ -37,6 +37,42 @@ test('ten landings started together land in the order they arrived, each told it
   assert.equal(spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status, 0, 'the deploy lock is free');
 });
 
+test('a landing waiting in line rechecks each time main moves, and leaves the line at once when it would conflict (#770)', async () => {
+  const r = setup();
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  const shared = join(r.dir, 'shared');
+  const extra = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), FAKE_DEPLOY_GATE: join(r.dir, 'gate'), DEPLOY_QUEUE_POLL: '0.05', COORDINATOR_SHARED_DIR: shared };
+  const wt2 = join(r.dir, 'wt2');
+  git(r.source, 'worktree', 'add', '-q', '-b', 'ticket/2-x', wt2);
+  r.commit(r.wt, 'f1.txt', '1\n');
+  r.commit(wt2, 'a.txt', 'mine\n');
+  try {
+    const first = landAsync(r.wt, extra, 60_000);
+    await until('landing 1 to hold the lock in its deploy', () => r.note() !== null);
+    let said = '';
+    const second = landAsync(wt2, extra, 60_000, (stderr) => (said = stderr));
+    await until('landing 2 to wait in line', () => /2nd in line/.test(said));
+    // main moved (landing 1's own commit is on it already): a clean move keeps it in line.
+    r.commit(r.source, 'b.txt', 'clean\n');
+    await new Promise((ok) => setTimeout(ok, 500));
+    assert.equal(tickets(state).length, 2, 'still in line after a clean move');
+    r.commit(r.source, 'a.txt', 'theirs\n');
+    const main = git(r.source, 'rev-parse', 'main');
+    const out = await second;
+    assert.equal(out.status, 1);
+    assert.match(out.stderr, new RegExp(`land: ticket/2-x won't rebase onto main \\(${main.slice(0, 7)} "a\\.txt: theirs"\\) cleanly, by git merge-tree waiting in line, so nothing landed; conflicted files: a\\.txt\\. On conflicts: run git rebase main`));
+    const log = readFileSync(join(shared, 'retro-log', readdirSync(join(shared, 'retro-log'))[0], 'land.md'), 'utf8');
+    assert.match(log, new RegExp(`· land conflict · ticket/2-x onto ${main.slice(0, 7)}: a\\.txt · waiting in line$`, 'm'));
+    assert.equal(tickets(state).length, 1, 'its ticket is gone, the holder keeps its own');
+    assert.equal(git(wt2, 'status', '--porcelain'), '');
+    writeFileSync(join(r.dir, 'gate'), '');
+    const held = await first;
+    assert.equal(held.status, 0, held.stderr);
+  } finally {
+    writeFileSync(join(r.dir, 'gate'), '');
+  }
+});
+
 // Fake work for the line itself: wait in line, note the turn, then hold the lock while $3 runs.
 const queueLib = join(import.meta.dirname, '..', 'tools', 'deploy-queue.sh');
 function waiter(state: string, label: string, work: string, extra: Record<string, string> = {}) {

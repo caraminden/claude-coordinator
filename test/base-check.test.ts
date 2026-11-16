@@ -73,6 +73,10 @@ test('picks the runner\'s command and the cargo target', () => {
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/parse/mod.rs'), ['-p', 'peek-core', '--lib', '--', 'parse::']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/lib.rs'), ['-p', 'peek-core', '--lib', '--']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/main.rs'), ['-p', 'peek-core', '--bins']);
+  // With the changed cases known, only those run, not the whole lib or bin target.
+  assert.deepEqual(cargoArgs(ws, 'crates/core/src/lib.rs', ['clamps', 'rounds']), ['-p', 'peek-core', '--lib', '--', 'clamps', 'rounds']);
+  assert.deepEqual(cargoArgs(ws, 'crates/core/src/main.rs', ['clamps']), ['-p', 'peek-core', '--bins', '--', 'clamps']);
+  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/busy_cara.rs', ['x']), ['-p', 'peek-core', '--test', 'busy_cara'], 'an integration test file is its own target');
   assert.ok(isTestPath('crates/core/tests/common/mod.rs') && isTestPath('src/a.spec.ts') && !isTestPath('src/latest.ts'));
 });
 
@@ -86,6 +90,7 @@ test('judges a file: a case passing on the base is flagged; failing, not loading
   assert.deepEqual(judge(e, run(0, '')).map((v) => v.kind), ['skipped'], 'a run that reports nothing proves nothing');
   assert.deepEqual(judge(e, { ...run(0, ''), timedOut: true }).map((v) => v.kind), ['skipped']);
   assert.deepEqual(judge({ path: 't', cases: null }, { status: 0, out: 'whatever', timedOut: false, parsed: false }).map((v) => v.kind), ['flag'], 'a --cmd run with no parsed cases: the exit status decides');
+  assert.deepEqual(judge({ path: 't.test.ts', cases: [] }, run(0, 'ok 1 - old')), [{ kind: 'skipped', label: 't.test.ts', detail: 'no new or changed case found (only shared setup or helpers changed): judge it by hand' }], 'a file whose cases are all unchanged is not a finding');
 });
 
 /** A repo with a little module and its test on main, and a branch on top. */
@@ -135,6 +140,17 @@ test('end to end: a fix whose new test fails on main is not flagged; a test that
   r = check(load);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /^red +test\/half\.test\.ts: didn't run on the base \(1 new or changed case\): SyntaxError: .*does not provide an export named 'half'/m);
+
+  // A test file of a stack it can't name: said, never dropped.
+  const ruby = repo('ruby');
+  writeFileSync(join(ruby, 'test', 'math_test.rb'), "assert true\n");
+  writeFileSync(join(ruby, 'test', 'helper.rb'), "# shared\n");
+  git(ruby, 'add', '-A');
+  commit(ruby);
+  r = check(ruby);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^skipped +test\/math_test\.rb: no runner for this kind of test file: run it on the base by hand$/m);
+  assert.doesNotMatch(r.stdout, /helper\.rb/, 'a helper is not a test file');
 
   // No test changes: nothing to do.
   const none = repo('none');

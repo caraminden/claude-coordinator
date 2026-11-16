@@ -10,7 +10,8 @@
 //   PASSES ON BASE  a finding: fix the test, or say why it's fine
 //   red             failed on the base, or the file didn't load or build there (a new file that can't compile
 //                   without the change counts as red)
-//   skipped         not checked, and why: a stack it doesn't know, a missing tool, a timeout
+//   skipped         not checked, and why: a stack it doesn't know, a missing tool, a timeout, no changed case
+//                   found in a changed file. All files together stop within 540 s (inside a 600 s Bash call).
 // Runners, picked per test file: node --test (the package.json test script's launcher and flags kept), vitest,
 // cargo test (one crate's test target, through citadel-heavy when it is on PATH, sharing the worktree's target/
 // so only workspace crates rebuild), pytest (the worktree's .venv when there is one). --cmd overrides the
@@ -29,8 +30,11 @@ type Change = { status: string; path: string; old: string };
 type Entry = { path: string; runner: Runner | null; why?: string; cases: string[] | null; spliced?: boolean };
 type Verdict = { kind: 'flag' | 'red' | 'skipped'; label: string; detail: string };
 
+const BUDGET = 540; // seconds for all files together
 const JS_TEST = /(?:\.(?:test|spec)|[-_]test)\.[cm]?[jt]sx?$/;
 const PY_TEST = /(?:^test_.*|_test)\.py$/;
+// A test file by its name in any language (math_test.rb, test_x.lua, FooTest.php), as against a helper or fixture.
+const ANY_TEST = /^tests?[_.-]|[._-](?:tests?|spec)\.\w+$|Tests?\.\w+$/;
 const OTHER_TEST: [RegExp, string][] = [
   [/\.cs$/, 'dotnet tests'],
   [/\.(?:kt|kts|java)$/, 'Gradle and JVM tests'],
@@ -143,7 +147,8 @@ export function judge(entry: Pick<Entry, 'path' | 'cases'>, run: { status: numbe
   const { path, cases } = entry;
   if (run.timedOut) return [{ kind: 'skipped', label: path, detail: 'timed out on the base' }];
   const results = run.parsed ? parseResults(run.out) : [];
-  if (cases === null || cases.length === 0) {
+  if (cases?.length === 0) return [{ kind: 'skipped', label: path, detail: 'no new or changed case found (only shared setup or helpers changed): judge it by hand' }];
+  if (cases === null) {
     if (run.status === 0 && run.parsed && results.length === 0) return [{ kind: 'skipped', label: path, detail: 'ran no tests on the base' }];
     return [run.status === 0 ? { kind: 'flag', label: path, detail: 'the whole file passed on the base' } : { kind: 'red', label: path, detail: firstError(run.out) }];
   }
@@ -231,7 +236,7 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
     const other = OTHER_TEST.find(([re]) => re.test(name));
     let runner: Runner | null = null;
     let why: string | undefined;
-    if (cmd && (JS_TEST.test(name) || PY_TEST.test(name) || c.path.endsWith('.rs') || other)) runner = 'cmd';
+    if (cmd && (JS_TEST.test(name) || PY_TEST.test(name) || c.path.endsWith('.rs') || other || ANY_TEST.test(name))) runner = 'cmd';
     else if (JS_TEST.test(name)) {
       const dir = nearest(root, c.path, ['package.json']);
       const script: string = dir === null ? '' : (JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8')).scripts?.test ?? '');
@@ -240,6 +245,7 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
     } else if (PY_TEST.test(name)) runner = 'pytest';
     else if (c.path.endsWith('.rs') && (/(?:^|\/)tests\/[^/]+\.rs$/.test(c.path) || /(?:^|\/)tests\/[^/]+\/main\.rs$/.test(c.path) || /(?:^|\/)src\/.*tests?\.rs$/.test(c.path))) runner = 'cargo';
     else if (other) why = `${other[1]} are not supported yet: run it on the base by hand`;
+    else if (ANY_TEST.test(name)) why = 'no runner for this kind of test file: run it on the base by hand';
     else continue; // a helper or fixture: copied in, run through the tests that use it
     entries.push({ path: c.path, runner, why, cases: lang && runner ? changedCases(baseText, head, lang) : null });
   }
@@ -247,7 +253,7 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
 }
 
 /** The crate's name and the cargo target arguments that run this file's tests. */
-export function cargoArgs(root: string, path: string): string[] | string {
+export function cargoArgs(root: string, path: string, cases: string[] = []): string[] | string {
   const dir = nearest(root, path, ['Cargo.toml']);
   if (dir === null) return 'no Cargo.toml above it';
   const toml = readFileSync(join(root, dir, 'Cargo.toml'), 'utf8');
@@ -258,9 +264,10 @@ export function cargoArgs(root: string, path: string): string[] | string {
   if (m) return ['-p', pkg, '--test', m[1]];
   m = /^src\/(.*)\.rs$/.exec(rel);
   if (!m) return `${rel} is not under tests/ or src/ of ${pkg}`;
-  if (m[1] === 'main' || m[1].startsWith('bin/')) return ['-p', pkg, '--bins'];
+  // The changed cases as name filters, so only they run, not the whole lib or bin target.
+  if (m[1] === 'main' || m[1].startsWith('bin/')) return ['-p', pkg, '--bins', ...(cases.length ? ['--', ...cases] : [])];
   const mod = m[1].split('/').filter((s) => s !== 'mod' && s !== 'lib').join('::');
-  return ['-p', pkg, '--lib', '--', ...(mod ? [`${mod}::`] : [])];
+  return ['-p', pkg, '--lib', '--', ...(cases.length ? cases : mod ? [`${mod}::`] : [])];
 }
 
 function main(argv: string[]): number {
@@ -315,6 +322,8 @@ function main(argv: string[]): number {
   const tree = join(scratch, 'tree');
   const links: string[] = [];
   const verdicts: Verdict[] = [];
+  // The whole check ends inside BUDGET, so the 600 s Bash call it runs in outlives it and the scratch worktree goes.
+  const deadline = Date.now() + BUDGET * 1000;
   try {
     git(root, 'worktree', 'add', '--detach', '-q', tree, base);
     for (const [p, text] of writes) {
@@ -326,7 +335,12 @@ function main(argv: string[]): number {
         verdicts.push({ kind: 'skipped', label: e.path, detail: e.why! });
         continue;
       }
-      const r = runOne(root, tree, e, cmd, limit, links);
+      const left = (deadline - Date.now()) / 1000;
+      if (left < 30) {
+        verdicts.push({ kind: 'skipped', label: e.path, detail: `out of time: base-check stops within ${BUDGET} s` });
+        continue;
+      }
+      const r = runOne(root, tree, e, cmd, Math.min(limit, left), links);
       if (typeof r === 'string') verdicts.push({ kind: 'skipped', label: e.path, detail: r });
       else {
         console.log(`  ran ${e.path}${e.spliced ? ' (HEAD\'s test module on the base\'s code)' : ''}: ${r.shown}`);
@@ -386,7 +400,7 @@ function runOne(root: string, tree: string, e: Entry, cmd: string | null, limit:
   } else {
     const cargo = onPath('cargo') ?? [join(homedir(), '.cargo/bin/cargo')].find(existsSync);
     if (!cargo) return "cargo isn't installed here";
-    const args = cargoArgs(tree, e.path);
+    const args = cargoArgs(tree, e.path, e.cases ?? []);
     if (typeof args === 'string') return args;
     // Share the worktree's target/: only the workspace's own crates rebuild, not every dependency.
     env.CARGO_TARGET_DIR ??= join(root, 'target');

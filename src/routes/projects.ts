@@ -23,7 +23,7 @@ import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
-import { ICON_HEADERS, iconVersion, readIcon } from '../scheme-icon.ts';
+import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 
@@ -310,7 +310,7 @@ export const projectRoutes: Route[] = [
           fresh: !!seen && waiting.some((i) => !seen.has(i.key)),
           running: !hidden.has(p.id) && tickets.some(busy),
           working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
-          icon: await iconVersion(p.repo_dir),
+          icon: await iconVersion(p.repo_dir, { store, projectId: p.id }),
           // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538).
           coordinator_id: tickets.find((t) => t.kind === 'coordinator')?.id ?? null,
         };
@@ -345,10 +345,10 @@ export const projectRoutes: Route[] = [
   {
     // The scheme's favicon (src/scheme-icon.ts). Its URL carries the version, so it can be kept long.
     method: 'GET', path: '/api/projects/:project/icon', who: ['person'],
-    async handler({ res, project }) {
-      const icon = await readIcon(project.id, project.repo_dir);
-      if (!Buffer.isBuffer(icon)) throw new HttpError(404, icon.missing);
-      send(res, 200, { ...ICON_HEADERS, 'Cache-Control': 'private, max-age=31536000, immutable' }, icon);
+    async handler({ res, project, app: { store } }) {
+      const icon = await readIcon(project.id, project.repo_dir, store);
+      if ('missing' in icon) throw new HttpError(404, icon.missing);
+      send(res, 200, { ...iconHeaders(icon.type), 'Cache-Control': 'private, max-age=31536000, immutable' }, icon.body);
     },
   },
   {

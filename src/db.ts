@@ -2776,6 +2776,19 @@ export class Store {
     this.db.prepare('INSERT INTO runner_load (machine_id, at, data) VALUES (?, ?, ?)').run(machineId, at, data);
   }
 
+  /** Many samples in one commit (CiLoad's buffer, #791); one whose machine has since been deleted is dropped. */
+  addRunnerLoads(rows: { machine: number; at: number; data: string }[]) {
+    const ins = this.db.prepare('INSERT INTO runner_load (machine_id, at, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM machines WHERE id = ?)');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const r of rows) ins.run(r.machine, r.at, r.data, r.machine);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
   /** Every agent's samples from `since` on, oldest first. */
   runnerLoadSince(since: number): { machine_id: number; at: number; data: string }[] {
     return this.db.prepare('SELECT machine_id, at, data FROM runner_load WHERE at >= ? ORDER BY at').all(since) as { machine_id: number; at: number; data: string }[];

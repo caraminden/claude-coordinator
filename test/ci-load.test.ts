@@ -227,3 +227,40 @@ test('views keep up with samples as they come in, and drop a deleted machine and
   assert.deepEqual(new CiLoad(store, { jobs: () => [], hosts: () => [], mandate: async () => true }).views(NOW + 2 * MIN), [], 'the same as a fresh read');
   store.db.close();
 });
+
+test('samples wait in memory and are written together, with nothing lost to a read, a restart or a deleted machine (#791)', () => {
+  const store = new Store(join(root, 'buffer.db'));
+  const quiet = { jobs: () => [], hosts: () => [], mandate: async () => true };
+  const load = new CiLoad(store, quiet);
+  const desk = store.createMachine('desk', '', 'Cara');
+  const lab = store.createMachine('lab', '', 'Cara');
+  const saved = () => store.runnerLoadSince(0).map((r) => [r.machine_id, r.at]);
+  const changes = () => Number((store.db.prepare('SELECT total_changes() AS n').get() as any).n);
+  const before = changes();
+  load.add(desk.id, sample(0, { host: 'DESK' }), NOW);
+  load.add(lab.id, sample(0, { host: 'LAB' }), NOW + 1);
+  assert.equal(changes(), before, 'adding a sample writes nothing');
+  assert.deepEqual(saved(), []);
+  assert.throws(() => load.add(desk.id, null, NOW), 'a bad sample is still refused as it arrives');
+  // The first read loads from the database: the waiting samples are written first, so it sees them.
+  assert.deepEqual(load.views(NOW + 1).map((v) => v.host), ['DESK', 'LAB']);
+  assert.deepEqual(saved(), [[desk.id, NOW], [lab.id, NOW + 1]]);
+  load.add(desk.id, sample(0, { host: 'DESK' }), NOW + 2);
+  load.add(lab.id, sample(0, { host: 'LAB' }), NOW + 3);
+  assert.equal(load.views(NOW + 3).length, 2, 'a waiting sample already shows');
+  assert.equal(saved().length, 2);
+  // A deleted machine's waiting samples go with it, and one that slipped through is dropped, not an error.
+  store.deleteMachine(lab.id);
+  load.forget(lab.id);
+  load.flush();
+  assert.deepEqual(saved(), [[desk.id, NOW], [desk.id, NOW + 2]]);
+  store.addRunnerLoads([{ machine: lab.id, at: NOW + 4, data: '{}' }, { machine: desk.id, at: NOW + 5, data: JSON.stringify(sample(0, { host: 'DESK' })) }]);
+  assert.deepEqual(saved().at(-1), [desk.id, NOW + 5]);
+  assert.equal(saved().length, 3);
+  // Stopping (the server's SIGTERM) writes what is left, so the next server reads it.
+  load.add(desk.id, sample(0, { host: 'DESK' }), NOW + 6);
+  load.stop();
+  assert.equal(saved().length, 4);
+  assert.deepEqual(new CiLoad(store, quiet).views(NOW + 6).map((v) => v.host), ['DESK']);
+  store.db.close();
+});

@@ -1103,6 +1103,7 @@ process.on('SIGTERM', () => {
   console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
   claudeLink.close(); // before detachAll: a turn's start still in flight must not see its container idle and replace it
   runner.detachAll();
+  ciLoad.stop(); // writes the runner-load samples it still holds
   server.close(() => process.exit(0));
   for (const c of clients.keys()) c.end();
   for (const s of upgraded) s.destroy();

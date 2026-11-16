@@ -13,6 +13,8 @@ import { repoSlug } from './prlinks.ts';
 
 const MIN = 60_000;
 export const KEEP_MS = 14 * 24 * 3600_000;
+/** How long a sample waits in memory before it is written. */
+export const FLUSH_MS = 5000;
 const DAY_MS = 24 * 3600_000;
 const BUCKET_MS = 5 * MIN;
 // A sample older than this isn't "now": the agent posts every 30 seconds.
@@ -313,7 +315,10 @@ export class CiLoad {
   // The last day's samples, oldest first: read once, then kept as they come in (add), so views never reads runner_load
   // again (a day is ~4.6 MB, scattered through the database: 0.5 s held cold on live, #613).
   private recent: { machine: number; at: number; s: Sample }[] | null = null;
+  // Samples not yet in runner_load: written together every FLUSH_MS, not one commit per agent's request (#791).
+  private pending: { machine: number; at: number; data: string }[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  private flusher: ReturnType<typeof setInterval> | null = null;
   private busy = false;
 
   constructor(store: Store, deps: CiLoadDeps) {
@@ -324,17 +329,33 @@ export class CiLoad {
   start() {
     this.timer ??= setInterval(() => void this.tick().catch((err) => console.error(`CI load: ${err?.message ?? err}`)), 5 * MIN);
     this.timer.unref?.();
+    this.flusher ??= setInterval(() => this.flush(), FLUSH_MS);
+    this.flusher.unref?.();
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    if (this.flusher) clearInterval(this.flusher);
+    this.timer = this.flusher = null;
+    this.flush();
+  }
+
+  /** Write the samples that came in since the last flush, as one commit. A failed write loses them: the next ones still land. */
+  flush() {
+    if (!this.pending.length) return;
+    const rows = this.pending;
+    this.pending = [];
+    try {
+      this.store.addRunnerLoads(rows);
+    } catch (err: any) {
+      console.error(`CI load: ${rows.length} sample(s) not saved: ${err?.message ?? err}`);
+    }
   }
 
   /** A runner agent's sample, kept for 14 days. */
   add(machineId: number, body: unknown, now = Date.now()) {
     const data = JSON.stringify(cleanSample(body, now));
-    this.store.addRunnerLoad(machineId, now, data);
+    this.pending.push({ machine: machineId, at: now, data });
     if (this.recent) {
       this.recent.push({ machine: machineId, at: now, s: JSON.parse(data) });
       if (this.recent.length > 1 && this.recent.at(-2)!.at > now) this.recent.sort((a, b) => a.at - b.at);
@@ -345,6 +366,7 @@ export class CiLoad {
   /** A deleted machine's samples go with it (its rows cascade). */
   forget(machineId: number) {
     this.recent = this.recent?.filter((r) => r.machine !== machineId) ?? null;
+    this.pending = this.pending.filter((r) => r.machine !== machineId);
     this.kept = null;
   }
 
@@ -358,6 +380,7 @@ export class CiLoad {
     });
     const byHost = new Map<string, Sample[]>(this.deps.hosts().filter(Boolean).map((h) => [h.toLowerCase(), []]));
     const since = now - DAY_MS;
+    if (!this.recent) this.flush(); // the read below must see them
     this.recent ??= this.store.runnerLoadSince(since).map((r) => ({ machine: r.machine_id, at: r.at, s: JSON.parse(r.data) as Sample }));
     const old = this.recent.findIndex((r) => r.at >= since);
     if (old > 0) this.recent.splice(0, old);
@@ -375,6 +398,7 @@ export class CiLoad {
     if (this.busy) return;
     this.busy = true;
     try {
+      this.flush();
       this.store.pruneRunnerLoad(now - KEEP_MS);
       const admins = this.store.listUsers().filter((u) => u.admin && !u.disabled_at && this.store.contraptionEnabled('mandate', u.id));
       for (const v of this.views(now)) {

@@ -126,9 +126,16 @@ export function matches(reported: string, name: string): boolean {
   return r === name || r.endsWith(' > ' + name) || r.endsWith('::' + name);
 }
 
-function firstError(out: string): string {
-  const line = out.split('\n').find((l) => /\berror\b|Error\b|Cannot find|does not provide|not found/i.test(l) && !/^\s*(ok|# )/.test(l));
-  return (line ?? out.trim().split('\n').at(-1) ?? '').trim().slice(0, 200);
+/** The line of a failed run that says why: a load or build error before any generic one. */
+export function firstError(out: string): string {
+  const lines = out.split('\n').map((l) => l.replace(/^#\s?/, '').trim());
+  // The error's own line ("SyntaxError: …", "Error [ERR_MODULE_NOT_FOUND]: …", rustc's "error[E0425]: …"), then any.
+  const pick = [/^(?:\w*Error(?: \[\w+\])?:|error\[E\d+\]|E\s+\w*Error\b)/, /Cannot find|does not provide|No module named|^error\b|\bError:/i];
+  for (const re of pick) {
+    const hit = lines.find((l) => re.test(l) && !/^(?:throw |at |error: 'test failed'|code: 'ERR_TEST_FAILURE')/.test(l));
+    if (hit) return hit.slice(0, 200);
+  }
+  return (lines.filter(Boolean).at(-1) ?? '').slice(0, 200);
 }
 
 /** One file's verdicts from its run on the base. */
@@ -141,13 +148,17 @@ export function judge(entry: Pick<Entry, 'path' | 'cases'>, run: { status: numbe
     return [run.status === 0 ? { kind: 'flag', label: path, detail: 'the whole file passed on the base' } : { kind: 'red', label: path, detail: firstError(run.out) }];
   }
   if (run.status === 0 && run.parsed && results.length === 0) return [{ kind: 'skipped', label: path, detail: 'ran no tests on the base' }];
+  // A file that failed with none of its cases reported never ran them: one line, with the reason.
+  if (run.status !== 0 && !cases.some((name) => results.some((r) => matches(r.name, name)))) {
+    return [{ kind: 'red', label: path, detail: `didn't run on the base (${cases.length} new or changed case${cases.length === 1 ? '' : 's'}): ${firstError(run.out)}` }];
+  }
   return cases.map((name): Verdict => {
     const mine = results.filter((r) => matches(r.name, name));
     const label = `${path} › ${name}`;
     if (mine.length === 0) {
       return run.status === 0
         ? { kind: 'flag', label, detail: 'not named in the output, and the whole file passed on the base' }
-        : { kind: 'red', label, detail: `didn't run: the file failed on the base (${firstError(run.out)})` };
+        : { kind: 'red', label, detail: `not named in the output, and the file failed on the base` };
     }
     if (mine.some((r) => r.ok === false)) return { kind: 'red', label, detail: '' };
     if (mine.every((r) => r.ok === 'skip')) return { kind: 'skipped', label, detail: 'skipped or todo on the base' };

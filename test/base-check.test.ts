@@ -80,7 +80,8 @@ test('judges a file: a case passing on the base is flagged; failing, not loading
   const run = (status: number, out: string) => ({ status, out, timedOut: false, parsed: true });
   const e = { path: 't.test.ts', cases: ['new', 'other'] };
   assert.deepEqual(judge(e, run(1, 'ok 1 - new\nnot ok 2 - other')).map((v) => v.kind), ['flag', 'red']);
-  assert.deepEqual(judge(e, run(1, "not ok 1 - /x/t.test.ts\n  SyntaxError: does not provide an export named 'g'")).map((v) => v.kind), ['red', 'red']);
+  const load = judge(e, run(1, "# SyntaxError: The requested module '../m.ts' does not provide an export named 'g'\nnot ok 1 - t.test.ts\n  error: 'test failed'"));
+  assert.deepEqual(load, [{ kind: 'red', label: 't.test.ts', detail: "didn't run on the base (2 new or changed cases): SyntaxError: The requested module '../m.ts' does not provide an export named 'g'" }], 'a file that never loaded: one line, with the cause');
   assert.deepEqual(judge(e, run(0, 'ok 1 - new # SKIP\nok 2 - other')).map((v) => v.kind), ['skipped', 'flag']);
   assert.deepEqual(judge(e, run(0, '')).map((v) => v.kind), ['skipped'], 'a run that reports nothing proves nothing');
   assert.deepEqual(judge(e, { ...run(0, ''), timedOut: true }).map((v) => v.kind), ['skipped']);
@@ -133,7 +134,7 @@ test('end to end: a fix whose new test fails on main is not flagged; a test that
   commit(load);
   r = check(load);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^red +test\/half\.test\.ts › halves: didn't run: the file failed on the base/m);
+  assert.match(r.stdout, /^red +test\/half\.test\.ts: didn't run on the base \(1 new or changed case\): SyntaxError: .*does not provide an export named 'half'/m);
 
   // No test changes: nothing to do.
   const none = repo('none');

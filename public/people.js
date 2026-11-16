@@ -273,7 +273,8 @@ function claudeCard() {
       },
     }, 'Unlink');
     const note = h('p', { class: 'muted small' }, 'Turns you start run on your plan and count against its limits. ',
-      'Every account signs in with Anthropic inside your own container on the server: Citadel never sees a password or token, only the one-time code you paste here. ',
+      st.host ? 'Each extra account signs in with Anthropic on the server, in a folder of its own: Citadel never sees a password or token, only the one-time code you paste here. '
+        : 'Every account signs in with Anthropic inside your own container on the server: Citadel never sees a password or token, only the one-time code you paste here. ',
       'Link only accounts of your own: sharing one breaks Anthropic\'s terms.');
     if (st.state === 'starting') {
       poll = setTimeout(() => api('api/me/claude').then(render).catch(() => {}), 2000);

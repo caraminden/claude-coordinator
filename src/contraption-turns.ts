@@ -264,8 +264,14 @@ interface Live {
 /** One message as claude's stream-json input takes it; claude echoes `uuid` back once it takes it in. */
 const userLine = (text: string, uuid?: string) => JSON.stringify({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: [{ type: 'text', text }] } }) + '\n';
 
+/** An app session as the account pick knows it (ClaudePlaces.place). */
+const appWarmKey = (contraption: number, session: string) => `app:${contraption}:${session}`;
+
 export interface ClaudePlaces {
-  place(uid: number | null): TurnPlace | null;
+  /** `warm` names the session a turn resumes (`app:<contraption>:<name>`), which stays on its account while its cache is warm (#793). */
+  place(uid: number | null, warm?: string): TurnPlace | null;
+  /** A Claude turn of session `key` ended on `account` (ClaudeLink.ran). */
+  ran?(uid: number, key: string, account: number): void;
   /** The server login's Codex-only container (#341), whose place() is the host. */
   codexPlace(uid: number): TurnPlace | null;
   expire(uid: number, account?: number): void;
@@ -433,7 +439,8 @@ export class ContraptionTurns {
     const key = this.key(c.id, req.person, req.session);
     if (this.names.has(key)) return fail('busy', `A turn is already running in ${req.session}`);
     if (c.turn_cap && this.store.contraptionTurnsSince(c.id, req.person, dayStart()) >= c.turn_cap) return fail('limit', `${c.title}'s cap of ${c.turn_cap} turns a day is used up for this person`);
-    const place = this.claude.place(req.person);
+    const known = !req.fresh && this.store.contraptionSession(c.id, req.person, req.session);
+    const place = this.claude.place(req.person, known ? appWarmKey(c.id, req.session) : undefined);
     if (!place) return fail('no_plan', 'This person hasn\'t linked their Claude in Citadel (Settings → Claude), or it needs linking again');
 
     // The server login's Codex turns run in its Codex-only container (#341); its Claude turns, and the session's bookkeeping, stay on the host.
@@ -463,7 +470,7 @@ export class ContraptionTurns {
       if (r.retry) {
         // The limit moved this person's turns to their next account; turn() carries the session's transcript over to it.
         retrying = true;
-        const next = this.claude.place(req.person);
+        const next = this.claude.place(req.person, known ? appWarmKey(c.id, req.session) : undefined);
         rmSync(dir.onHost, { recursive: true, force: true }); // turn() makes it again
         live.replied = false;
         live.steers.clear();
@@ -709,6 +716,7 @@ export class ContraptionTurns {
       child.on('close', (n) => resolve(n));
     });
     clearTimeout(timer);
+    if (!codex) this.claude.ran?.(req.person, appWarmKey(c.id, req.session), place.account ?? 1);
     if (codex) {
       // This turn's log joins the session's, for the way back to Claude; its folder goes when the turn ends.
       let log = '';
@@ -824,7 +832,7 @@ export class ContraptionTurns {
     if (this.names.has(this.key(c.id, person, name))) return 'busy';
     const s = this.store.contraptionSession(c.id, person, name);
     if (!s) return 'missing';
-    const place = this.claude.place(person);
+    const place = this.claude.place(person, appWarmKey(c.id, name));
     if (place) this.dropTranscript(this.scratch(c, person, place), s.claude_session);
     this.dropCodex(codexKey(c.id, person, name), place ? codexLogFile(this.scratch(c, person, place).onHost, name) : null);
     this.store.deleteContraptionSession(c.id, person, name);

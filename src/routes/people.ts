@@ -228,8 +228,9 @@ export const peopleRoutes: Route[] = [
     method: 'POST', path: '/api/me/claude/use', who: ['person'],
     async handler({ req, res, app, session }) {
       const uid = uidOf(session);
+      // Pins account n (#793): new and cold turns run on it while it's ready. { account: null } unpins.
       const n = (await readJson(req)).account;
-      if (!Number.isInteger(n)) throw new HttpError(400, 'Which account? Send { account: n }.');
+      if (n !== null && !Number.isInteger(n)) throw new HttpError(400, 'Which account? Send { account: n }.');
       try {
         app.claude.use(uid, n);
       } catch (err: any) {

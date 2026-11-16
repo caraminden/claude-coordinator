@@ -323,10 +323,10 @@ const ciStore = new CiStore(store, DATA_DIR);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 runner.refuseTurn = (ticket, author, from) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from);
 // Sender pays (#213): the server login's owner runs on the host, everyone else in their own container.
-runner.placeFor = (person) => {
+runner.placeFor = (person, warm) => {
   const user = person ? store.getUser(person) : undefined;
   if (!user) return { host: true };
-  return claudeLink.place(user.id) ?? { refused: claudeRefusal(user, (uid) => claudeLink.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
+  return claudeLink.place(user.id, warm) ?? { refused: claudeRefusal(user, (uid) => claudeLink.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
 };
 runner.onAuthFailure = (person, account) => claudeLink.expire(person, account);
 // Several Claude accounts per person (#779): which one turns run on, and moving on from one at its limit.
@@ -334,6 +334,7 @@ runner.claudeAccounts = (person) => claudeLink.accountList(person);
 runner.onLimit = (person, account, until) => claudeLink.limitedView(person, account, until);
 claudeLink.turnOn = (configDir) => runner.turnIn(configDir);
 runner.onCleared = (person, account) => claudeLink.cleared(person, account);
+runner.onRan = (person, key, account) => claudeLink.ran(person, key, account);
 const codexLink = new CodexLink(claudeLink);
 // Codex turns (#337) run only in a person's own container, once they've signed in to Codex there (the server login's: #341).
 const codexReady = (uid: number) => {

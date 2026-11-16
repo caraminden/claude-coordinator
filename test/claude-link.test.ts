@@ -6,7 +6,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ClaudeLink, pickAccount, type ClaudeAccount } from '../src/claude-link.ts';
+import { accountUsageKey } from '../src/account-pick.ts';
+import { ClaudeLink, type ClaudeAccount } from '../src/claude-link.ts';
 import { Containers, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
@@ -88,19 +89,8 @@ test('a sign-in that ends while waiting for the code says so instead of waiting 
   assert.match(status.error ?? '', /ended/);
 });
 
-// Several Claude accounts (#779): which account turns run on, and how a limit, an expiry and "Use now" move it.
+// Several Claude accounts (#779): which account turns run on, and how a limit, an expiry and a pin move it.
 const acct = (n: number, extra: Partial<ClaudeAccount> = {}): ClaudeAccount => ({ n, linkedAt: 1, ...extra });
-
-test('pickAccount keeps the account in use while it is ready, else takes the next ready one in order, wrapping (#779)', () => {
-  const now = 1_000;
-  assert.equal(pickAccount({ accounts: [acct(1), acct(2), acct(3)], inUse: 2 }, now)?.n, 2, 'sticky');
-  assert.equal(pickAccount({ accounts: [acct(1), acct(2, { limitedUntil: 2_000 }), acct(3)], inUse: 2 }, now)?.n, 3, 'next after it');
-  assert.equal(pickAccount({ accounts: [acct(1), acct(2), acct(3, { expired: 5 })], inUse: 3 }, now)?.n, 1, 'wraps past the end');
-  assert.equal(pickAccount({ accounts: [acct(1), acct(2, { limitedUntil: 500 })], inUse: 2 }, now)?.n, 2, 'a limit that has reset no longer counts');
-  assert.equal(pickAccount({ accounts: [acct(1, { limitedUntil: 2_000 }), acct(2, { limitedUntil: 3_000 })], inUse: 2 }, now)?.n, 2, 'all limited: stays on the one in use');
-  assert.equal(pickAccount({ accounts: [acct(1, { limitedUntil: 2_000 }), acct(2, { expired: 5 })], inUse: 2 }, now)?.n, 1, 'all limited and the one in use expired: one whose sign-in holds');
-  assert.equal(pickAccount({ accounts: [acct(1, { expired: 5 }), acct(2, { expired: 5 })], inUse: 1 }, now), null);
-});
 
 function linkedPerson(accounts: ClaudeAccount[], inUse = accounts[0].n) {
   const { link, uid } = newLink();
@@ -124,7 +114,7 @@ test('a row from before #779 reads as account 1 alone, expired with the row (#77
   assert.equal(link.place(uid), null);
 });
 
-test('a limit moves turns to the next ready account, a turn that gets through clears it, and "Use now" moves them back (#779)', () => {
+test('a limit moves turns to the next ready account, a turn that gets through clears it, and a pin moves them back (#779)', () => {
   const { link, uid } = linkedPerson([acct(1, { email: 'one@x' }), acct(2, { email: 'two@x' }), acct(3, { email: 'three@x' })]);
   const view = link.limitedView(uid, 1, Date.now() + 60_000);
   assert.deepEqual(view?.next, { n: 2, label: 'two@x' });
@@ -139,6 +129,51 @@ test('a limit moves turns to the next ready account, a turn that gets through cl
   assert.equal(link.place(uid)?.account, 2, 'sticky: a cleared account does not pull turns back');
   link.use(uid, 1);
   assert.equal(link.place(uid)?.account, 1);
+});
+
+test('turns go where the week resets soonest, a warm session stays put, and a pin wins until it is unpinned (#793)', () => {
+  const { link, uid } = linkedPerson([acct(1), acct(2)]);
+  const H = 3600_000;
+  const meter = (utilization: number, resetsIn: number) => ({ weekly: { utilization, resetsAt: Date.now() + resetsIn, status: 'allowed' }, session: null, updatedAt: Date.now() });
+  store.setSetting(accountUsageKey(uid, 1), meter(0.95, 100 * H));
+  store.setSetting(accountUsageKey(uid, 2), meter(0.05, 20 * H));
+  // A minion that ran on 1 a moment ago keeps its warm cache there; a new one goes to 2, whose week ends first.
+  link.ran(uid, 'ticket:7', 1);
+  assert.equal(link.place(uid, 'ticket:7')?.account, 1);
+  assert.equal(link.place(uid)?.account, 2);
+  assert.equal(link.place(uid, 'ticket:8')?.account, 2, 'a session with no record is cold');
+  assert.equal(link.accounts(uid)?.inUse, 2, 'next-up is saved');
+  assert.deepEqual([link.status(uid).inUse, link.status(uid).why], [2, 'soonest']);
+  // A pin takes cold turns, never a warm one; unpinned, they go back to the soonest reset.
+  link.use(uid, 1);
+  assert.equal(link.place(uid)?.account, 1);
+  link.ran(uid, 'ticket:8', 2);
+  assert.equal(link.place(uid, 'ticket:8')?.account, 2);
+  assert.deepEqual([link.status(uid).inUse, link.status(uid).why, link.status(uid).pinned], [1, 'pinned', 1]);
+  // Limited, the pin falls over to the other account; it comes back once its limit has passed.
+  assert.equal(link.limitedView(uid, 1, Date.now() + 60_000)?.next?.n, 2);
+  assert.equal(link.place(uid)?.account, 2);
+  link.cleared(uid, 1);
+  assert.equal(link.place(uid)?.account, 1);
+  link.use(uid, null);
+  assert.equal(link.status(uid).pinned, undefined);
+  assert.equal(link.place(uid)?.account, 2);
+});
+
+test('a warm record lasts under an hour, and old ones are dropped as new ones are written (#793)', (t) => {
+  const { link, uid } = linkedPerson([acct(1), acct(2)]);
+  const start = Date.now();
+  // Account 2's week ends first, so a cold turn goes there.
+  store.setSetting(accountUsageKey(uid, 1), { weekly: { utilization: 0.5, resetsAt: start + 100 * 3600_000, status: 'allowed' }, session: null, updatedAt: start });
+  store.setSetting(accountUsageKey(uid, 2), { weekly: { utilization: 0.1, resetsAt: start + 20 * 3600_000, status: 'allowed' }, session: null, updatedAt: start });
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+  link.ran(uid, 'ticket:1', 1);
+  t.mock.timers.setTime(start + 54 * 60_000);
+  assert.equal(link.place(uid, 'ticket:1')?.account, 1, 'warm');
+  t.mock.timers.setTime(start + 56 * 60_000);
+  assert.equal(link.place(uid, 'ticket:1')?.account, 2, 'cold');
+  link.ran(uid, 'ticket:2', 2);
+  assert.deepEqual(Object.keys(store.getSetting<object>(`claude_warm:${uid}`)!), ['ticket:2']);
 });
 
 test('when every account is limited, turns stay put and the earliest reset is when they resume (#779)', () => {

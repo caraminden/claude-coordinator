@@ -13,6 +13,7 @@ import { appFolder } from './app-services.ts';
 import { Containers, specHash, type CmdResult, type ContainerSpec, type Mount } from './containers.ts';
 import type { Credentials } from './credentials.ts';
 import type { Store } from './db.ts';
+import { accountReady, accountUsageKey, pickAccount, WARM_MS, type Meter, type Pick } from './account-pick.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
 
 const IMAGE_REPO = 'localhost/citadel-claude';
@@ -102,10 +103,13 @@ export interface ClaudeAccount {
   limitedUntil?: number;
 }
 
-/** A person's accounts in their order, and the one turns run on now (sticky: it moves on a limit, an expiry or "Use now"). */
+/** A person's accounts in their order, where new work goes (src/account-pick.ts, #793) and the one they pinned. */
 export interface AccountSet {
   accounts: ClaudeAccount[];
+  /** Next-up: the account new and cold turns went to last, which keeps them until another is clearly better. */
   inUse: number;
+  /** Pinned in Settings: new and cold turns run on it while it's ready. */
+  pinned?: number;
 }
 
 export interface ClaudeMeta {
@@ -119,6 +123,7 @@ export interface ClaudeMeta {
   /** Absent on rows from before #779: then account 1 alone, from the fields above. */
   accounts?: ClaudeAccount[];
   inUse?: number;
+  pinned?: number;
 }
 
 export type ClaudeState = 'not linked' | 'starting' | 'waiting for code' | 'linked' | 'expired';
@@ -133,7 +138,11 @@ export interface ClaudeStatus {
   error?: string;
   /** Their accounts, in order; the server login's account 1 is the host's own login. */
   accounts: (ClaudeAccount & { ready: boolean })[];
+  /** The account a new or cold turn runs on now. */
   inUse: number | null;
+  /** Why that one (src/account-pick.ts, PickWhy). */
+  why?: Pick['why'];
+  pinned?: number;
   /** The account a sign-in in progress is for. */
   linking?: number;
 }
@@ -141,20 +150,7 @@ export interface ClaudeStatus {
 /** An account's config folder, relative to its home: account 1 keeps the plain one. */
 export const accountDir = (n: number) => (n === 1 ? '.claude' : `.claude-${n}`);
 
-/** Linked, its sign-in good, and no limit still running. */
-export const accountReady = (a: ClaudeAccount, now = Date.now()) => !a.expired && !(a.limitedUntil && a.limitedUntil > now);
-
-/**
- * The account turns should run on: the one in use while it's ready, else the next ready one in order after it
- * (wrapping), else the one in use while its sign-in holds (every account limited: a turn may still try), else
- * any whose sign-in holds. Null when every sign-in has failed.
- */
-export function pickAccount(set: AccountSet, now = Date.now()): ClaudeAccount | null {
-  const list = set.accounts;
-  const at = Math.max(0, list.findIndex((a) => a.n === set.inUse));
-  const order = [...list.slice(at), ...list.slice(0, at)];
-  return order.find((a) => accountReady(a, now)) ?? order.find((a) => !a.expired) ?? null;
-}
+export { accountReady };
 
 /**
  * Where a turn runs: the host, or a person's container (with its config folder as the host sees it, and
@@ -168,6 +164,9 @@ export type TurnPlace = { host: true; account?: number; configDir?: string; env?
 const containerHomeKey = (uid: number) => `container_home:${uid}`;
 /** The server login's accounts (#779): account 1 is the host's own login, the others signed in under the data folder. */
 const hostAccountsKey = (uid: number) => `claude_accounts:${uid}`;
+/** Where each of a person's sessions last ran and when its last turn ended (#793): `ticket:<id>` or `app:<contraption>:<name>`. */
+const warmKey = (uid: number) => `claude_warm:${uid}`;
+type WarmRecord = Record<string, { n: number; at: number }>;
 /** What a host account folder shares with the host's own: instructions, settings, memory and transcripts. */
 const SHARED_CONFIG = ['CLAUDE.md', 'settings.json', 'projects', 'plugins', 'agents', 'skills', 'commands'];
 
@@ -252,7 +251,7 @@ export class ClaudeLink {
     if (!c) return null;
     // A row from before #779 is account 1 alone, expired with the row.
     const accounts = c.meta.accounts ?? [{ n: 1, email: c.meta.email, plan: c.meta.plan, linkedAt: c.meta.linkedAt }];
-    return { accounts: c.failed && !c.meta.accounts ? accounts.map((a) => ({ ...a, expired: c.updated_at })) : accounts, inUse: c.meta.inUse ?? accounts[0]?.n ?? 1 };
+    return { accounts: c.failed && !c.meta.accounts ? accounts.map((a) => ({ ...a, expired: c.updated_at })) : accounts, inUse: c.meta.inUse ?? accounts[0]?.n ?? 1, ...(c.meta.pinned ? { pinned: c.meta.pinned } : {}) };
   }
 
   /** Write a person's accounts back. A container person's whose every sign-in failed reads as expired, as one account did. */
@@ -262,7 +261,7 @@ export class ClaudeLink {
     if (!meta) return;
     const first = set.accounts[0];
     // The secret is only the container's name: there is nothing secret here, and never a Claude token.
-    this.credentials.put(uid, 'claude_runner', this.name(uid), { ...meta, email: first?.email, plan: first?.plan, accounts: set.accounts, inUse: set.inUse } satisfies ClaudeMeta);
+    this.credentials.put(uid, 'claude_runner', this.name(uid), { ...meta, email: first?.email, plan: first?.plan, accounts: set.accounts, inUse: set.inUse, pinned: set.pinned } satisfies ClaudeMeta);
     if (set.accounts.every((a) => a.expired)) this.credentials.fail(uid, 'claude_runner');
   }
 
@@ -282,37 +281,63 @@ export class ClaudeLink {
     const c = this.credentials.get<ClaudeMeta>(uid, 'claude_runner');
     const set = this.accounts(uid);
     const now = Date.now();
+    const pick = set && this.pick(uid, set, undefined, now);
     const base = {
       host, ...(c?.meta.email ? { email: c.meta.email } : {}), ...(c?.meta.plan ? { plan: c.meta.plan } : {}), ...(login?.error ? { error: login.error } : {}),
-      accounts: (set?.accounts ?? []).map((a) => ({ ...a, ready: accountReady(a, now) })), inUse: set ? pickAccount(set, now)?.n ?? null : null, ...(login ? { linking: login.n } : {}),
+      accounts: (set?.accounts ?? []).map((a) => ({ ...a, ready: accountReady(a, now) })), inUse: pick?.n ?? null, ...(pick ? { why: pick.why } : {}),
+      ...(set?.pinned ? { pinned: set.pinned } : {}), ...(login ? { linking: login.n } : {}),
     };
     if (login && !login.error) return { ...base, state: login.url ? 'waiting for code' : 'starting', ...(login.url ? { url: login.url } : {}) };
     return { ...base, state: host ? 'linked' : !c ? 'not linked' : c.failed ? 'expired' : 'linked' };
   }
 
-  /** "Use now": turns run on account `n` from the next one on. */
-  use(uid: number, n: number) {
+  /**
+   * The pick for one of `uid`'s turns (src/account-pick.ts): `warm` names its session (`ticket:<id>`, `app:<id>:<name>`)
+   * when it has one to resume, so a session whose cache is still warm stays on its account.
+   */
+  private pick(uid: number, set: AccountSet, warm?: string, now = Date.now()): Pick | null {
+    const payer = this.serverLogin(uid) ? null : uid;
+    const at = warm ? this.store.getSetting<WarmRecord>(warmKey(uid))?.[warm] : undefined;
+    return pickAccount({
+      accounts: set.accounts, meter: (n) => this.store.getSetting<Meter>(accountUsageKey(payer, n)) ?? null, nextUp: set.inUse, pinned: set.pinned,
+      warm: at && now - at.at < WARM_MS ? at.n : null, now,
+    });
+  }
+
+  /** A turn of session `key` (as place() takes it) ended on account `n`: its cache is warm there for the next WARM_MS. */
+  ran(uid: number, key: string, n: number) {
+    const now = Date.now();
+    const all = Object.entries(this.store.getSetting<WarmRecord>(warmKey(uid)) ?? {}).filter(([k, w]) => k !== key && now - w.at < WARM_MS);
+    this.store.setSetting(warmKey(uid), Object.fromEntries([...all, [key, { n, at: now }]]));
+  }
+
+  /** Pin account `n` (null: unpin): new and cold turns run on it while it's ready; warm ones move at their next cold moment. */
+  use(uid: number, n: number | null) {
     const ok = this.withAccounts(uid, (set) => {
+      if (n === null) {
+        delete set.pinned;
+        return true;
+      }
       const a = set.accounts.find((x) => x.n === n);
       if (!a || a.expired) return false;
-      set.inUse = n;
+      set.pinned = n;
       return true;
     });
-    if (!ok) throw new Error(`Account ${n} isn't linked, or needs linking again.`);
+    if (!ok) throw new Error(n === null ? 'No Claude accounts to unpin.' : `Account ${n} isn't linked, or needs linking again.`);
   }
 
   /**
-   * A turn on account `n` hit its usage limit, which resets at `until`: mark it, and move turns on to the next
-   * ready account. Returns that account, or null when none is ready (every account limited).
+   * A turn on account `n` hit its usage limit, which resets at `until`: mark it, and pick again. Returns the account
+   * turns move on to, or null when none is ready (every account limited).
    */
   limited(uid: number, n: number, until: number): ClaudeAccount | null {
     return this.withAccounts(uid, (set) => {
       const a = set.accounts.find((x) => x.n === n);
       if (a) a.limitedUntil = until;
-      // From the one in use: this one, if the turn ran on it, else one an earlier switch already moved to.
-      const next = pickAccount(set);
-      if (!next || !accountReady(next)) return null;
-      set.inUse = next.n;
+      const p = this.pick(uid, set);
+      const next = p && set.accounts.find((x) => x.n === p.n);
+      if (!p || !next || !accountReady(next)) return null;
+      set.inUse = p.nextUp;
       return next;
     });
   }
@@ -322,11 +347,12 @@ export class ClaudeLink {
     return a.email ?? (this.serverLogin(uid) && a.n === 1 ? "the server's own login" : `account ${a.n}`);
   }
 
-  /** A person's accounts in order with the one turns run on now (Runner.claudeAccounts); null with none. */
-  accountList(uid: number): { inUse: number | null; accounts: { n: number; label: string }[] } | null {
+  /** A person's accounts in order with the one a new or cold turn runs on now, and why (Runner.claudeAccounts); null with none. */
+  accountList(uid: number): { inUse: number | null; why?: Pick['why']; pinned?: number; accounts: { n: number; label: string }[] } | null {
     const set = this.accounts(uid);
     if (!set) return null;
-    return { inUse: pickAccount(set)?.n ?? null, accounts: set.accounts.map((a) => ({ n: a.n, label: this.label(uid, a) })) };
+    const p = this.pick(uid, set);
+    return { inUse: p?.n ?? null, ...(p ? { why: p.why } : {}), ...(set.pinned ? { pinned: set.pinned } : {}), accounts: set.accounts.map((a) => ({ n: a.n, label: this.label(uid, a) })) };
   }
 
   /** limited() for the runner (Runner.onLimit): the account turns move on to, and the first of the accounts to reset. */
@@ -447,24 +473,27 @@ export class ClaudeLink {
     this.closing = true;
   }
 
-  /** Where a turn for `uid` runs, or null when it can't run (not linked, signed out). */
-  place(uid: number | null): TurnPlace | null {
+  /**
+   * Where a turn for `uid` runs, or null when it can't run (not linked, signed out). `warm` names the session it resumes,
+   * if any (pick()): a fresh one, or one with no session yet, goes where new work goes.
+   */
+  place(uid: number | null, warm?: string): TurnPlace | null {
     const user = uid ? this.store.getUser(uid) : undefined;
     if (!user) return null;
     const set = this.accounts(user.id);
-    const a = set && pickAccount(set);
-    // Sticky (#779): turns stay on the account in use until it's limited or expires; then the one picked is in use.
-    if (set && a && a.n !== set.inUse) this.withAccounts(user.id, (s) => void (s.inUse = a.n));
+    const p = set && this.pick(user.id, set, warm);
+    if (set && p && p.nextUp !== set.inUse) this.withAccounts(user.id, (s) => void (s.inUse = p.nextUp));
+    const n = p?.n;
     if (user.server_login) {
-      if (!a || a.n === 1) return { host: true };
-      const configDir = this.configDir(user.id, a.n)!;
-      return { host: true, account: a.n, configDir, env: { CLAUDE_CONFIG_DIR: configDir } };
+      if (!n || n === 1) return { host: true };
+      const configDir = this.configDir(user.id, n)!;
+      return { host: true, account: n, configDir, env: { CLAUDE_CONFIG_DIR: configDir } };
     }
     const c = this.credentials.get<ClaudeMeta>(user.id, 'claude_runner');
-    if (!c || c.failed || !a) return null;
+    if (!c || c.failed || !n) return null;
     return {
-      host: false, container: c.meta.container, configDir: join(c.meta.home, accountDir(a.n)), home: c.meta.home, turnsDir: this.turnsDir(user.id),
-      env: this.containerEnv(a.n), ensure: () => this.ensure(user.id, true), account: a.n,
+      host: false, container: c.meta.container, configDir: join(c.meta.home, accountDir(n)), home: c.meta.home, turnsDir: this.turnsDir(user.id),
+      env: this.containerEnv(n), ensure: () => this.ensure(user.id, true), account: n,
     };
   }
 
@@ -700,6 +729,7 @@ export class ClaudeLink {
     this.withAccounts(uid, (s) => {
       s.accounts = s.accounts.filter((a) => a.n !== n);
       if (s.inUse === n) s.inUse = s.accounts[0]?.n ?? 1;
+      if (s.pinned === n) delete s.pinned;
     });
   }
 

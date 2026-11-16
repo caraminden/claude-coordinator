@@ -18,6 +18,7 @@ import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, re
 import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
+import { accountUsageKey, usageKey } from './account-pick.ts';
 import { isAuthFailure, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
@@ -217,10 +218,8 @@ export const FRESH_CONTEXT_TOKENS = 150_000;
 export const FRESH_IDLE_CONTEXT_TOKENS = 60_000;
 const HANDOFF_MAX = 20_000;
 
-/** Where a person's own plan usage is kept (their container turns'), apart from the server login's `usage`. */
-export const usageKey = (person: number) => `usage:user:${person}`;
-/** Where one Claude account's usage is kept (#779): account 1 keeps the key it had before there were several. */
-export const accountUsageKey = (payer: number | null, account = 1) => `${payer === null ? 'usage' : usageKey(payer)}${account > 1 ? `:account:${account}` : ''}`;
+// Kept in src/account-pick.ts, which claude-link.ts reads them from too (#793).
+export { accountUsageKey, usageKey };
 
 /** A turn whose wrapper hasn't said it runs (no pid.json or beat yet) counts as still starting for this long. */
 const START_GRACE_MS = 60_000;
@@ -272,6 +271,8 @@ export function unsentSteers(turn: Pick<TurnState, 'steered' | 'dir'>): QueuedMe
 }
 
 const turnKey = (ticketId: number) => `turn:${ticketId}`;
+/** A minion's session as the account pick knows it (#793): only one it resumes can be warm, so a fresh start goes where new work goes. */
+const warmKey = (ticket: Ticket) => (ticket.session_id ? `ticket:${ticket.id}` : undefined);
 // A scheme's standing gos to merge (#260), kept in settings so they outlive turns and restarts.
 const goesKey = (projectId: number) => `merge_goes:${projectId}`;
 /** Set when a person writes to a minion waiting in pending-deploy: its deploy then leaves it open. */
@@ -581,7 +582,9 @@ export class Runner {
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
-  placeFor?: (person: number | null) => TurnPlace | { refused: string };
+  placeFor?: (person: number | null, warm?: string) => TurnPlace | { refused: string };
+  /** A Claude turn of session `key` (warmKey) ended on `account`, so the session stays there while its cache is warm (ClaudeLink.ran, #793). */
+  onRan?: (person: number, key: string, account: number) => void;
   /** Whether `person` has OpenRouter connected, so the turn's minion is offered the media tools (src/openrouter.ts, #717). */
   mediaFor?: (person: number | null) => boolean;
   /** Why a person's turns can't run on Codex (#337), or null when they can: their own container, signed in to Codex. */
@@ -596,7 +599,7 @@ export class Runner {
    * A person's Claude accounts (#779), in order, with the one turns run on now; null when they have none.
    * The ClaudeLink's, set by the server.
    */
-  claudeAccounts?: (person: number) => { inUse: number | null; accounts: { n: number; label: string }[] } | null;
+  claudeAccounts?: (person: number) => { inUse: number | null; why?: string; pinned?: number; accounts: { n: number; label: string }[] } | null;
   /**
    * A turn on `account` hit its limit, which resets at `until` (src/claude-link.ts, limited): the account turns
    * move on to, or null when none is ready, with the earliest reset of the person's accounts.
@@ -1299,7 +1302,7 @@ export class Runner {
       const project = ticket && this.store.getProject(ticket.project_id);
       // Nothing stored, nothing to restore: no need to ask whose Claude it runs on.
       if (ticket && project && ticket.status !== 'closed' && (this.store.listClaudeState(project.id, ticket.id).length || this.store.listClaudeState(project.id, null).length)) {
-        const place = this.placeFor?.(person(ticket, project)) ?? { host: true as const };
+        const place = this.placeFor?.(person(ticket, project), warmKey(ticket)) ?? { host: true as const };
         if (!('refused' in place)) ahead = restoreAhead(this.store, ticket, project, place.host ? place.configDir ?? claudeConfigDir(process.env) : place.configDir);
       }
     } catch (err: any) {
@@ -2148,7 +2151,7 @@ export class Runner {
       return this.broadcastTicket(ticket.id);
     }
     // Whose Claude it runs on (sender pays, #213): the host's login for its owner, else their own container.
-    const claudePlace = this.placeFor?.(person) ?? { host: true as const };
+    const claudePlace = this.placeFor?.(person, warmKey(ticket)) ?? { host: true as const };
     if ('refused' in claudePlace) {
       this.emit(ticket.id, 'note', { text: claudePlace.refused });
       return this.broadcastTicket(ticket.id);
@@ -2535,6 +2538,8 @@ export class Runner {
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     this.store.deleteSetting(turnKey(ticketId));
     const stopped = !!turn?.stopped;
+    // Its session's cache is warm on this account for the next hour (src/account-pick.ts): its next turn stays there.
+    if (turn?.person && !turn.codex && turn.account) this.onRan?.(turn.person, `ticket:${ticketId}`, turn.account);
     // Steers that came in as the turn's reply went out never reached claude: they start the next turn.
     const unsent = turn && !stopped ? unsentSteers(turn) : [];
     if (unsent.length) {

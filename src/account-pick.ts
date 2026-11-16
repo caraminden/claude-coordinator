@@ -56,7 +56,13 @@ export const SESSION_BACK = 0.7;
 export const RESET_MARGIN_MS = 6 * 3600_000;
 const WEEK_MS = 7 * 24 * 3600_000;
 
-export const accountReady = (a: PickAccount, now: number) => !a.expired && !(a.limitedUntil && a.limitedUntil > now);
+/** Where a person's own plan usage is kept (their container turns'), apart from the server login's `usage`. */
+export const usageKey = (person: number) => `usage:user:${person}`;
+/** Where one Claude account's usage is kept (#779): account 1 keeps the key it had before there were several. */
+export const accountUsageKey = (payer: number | null, account = 1) => `${payer === null ? 'usage' : usageKey(payer)}${account > 1 ? `:account:${account}` : ''}`;
+
+/** Linked, its sign-in good, and no limit still running. */
+export const accountReady = (a: PickAccount, now = Date.now()) => !a.expired && !(a.limitedUntil && a.limitedUntil > now);
 
 /**
  * A window as it stands at `now`: one past its reset counts as empty, with its next reset a week (or weeks) on,

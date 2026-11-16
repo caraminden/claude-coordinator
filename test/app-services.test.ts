@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -341,7 +341,70 @@ test('a first deploy clones, builds without Citadel\'s environment, installs and
   }
 });
 
-test('a deploy whose build fails rolls back to the commit before, builds it and restarts it', async () => {
+/** The real folder the app's folder points at now, and its unit's WorkingDirectory. */
+const liveSlot = (name: string) => realpathSync(join(home, 'apps', name));
+const unitDirOf = (name: string) => /^WorkingDirectory=(.*)$/m.exec(readFileSync(join(unitDir, `citadel-app-${name}.service`), 'utf8'))?.[1];
+
+test('a deploy builds beside the running app: until its restart the app\'s folder still holds the old commit (#801)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const folder = join(home, 'apps', name);
+  const seen = join(root, `seen-${name}`);
+  r.push({ 'version.txt': 'old\n', 'citadel-app.json': appManifest([]) });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    services.deploy(c, 'Cara');
+    assert.equal((await done(name)).state, 'deployed');
+    const first = liveSlot(name);
+    assert.equal(unitDirOf(name), first, 'the unit runs from the real folder, not the link');
+    // The new commit's build reads the folder the running app reads from.
+    r.push({ 'version.txt': 'new\n', 'citadel-app.json': appManifest([`cat ${folder}/version.txt > ${seen}`]) });
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.equal(readFileSync(seen, 'utf8'), 'old\n', 'the running app saw none of the new commit during the build');
+    assert.equal(readFileSync(join(folder, 'version.txt'), 'utf8'), 'new\n', 'and its folder is the new commit once deployed');
+    assert.notEqual(liveSlot(name), first);
+    assert.equal(unitDirOf(name), liveSlot(name));
+    assert.equal(readFileSync(join(first, 'version.txt'), 'utf8'), 'old\n', 'the old build is kept for a roll back');
+  } finally {
+    svc.close();
+  }
+});
+
+test('deploys take turns between the two slots, and refuse local changes in the idle one, naming them (#801)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([]) });
+  const slots = join(home, 'apps', `.${name}`);
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const live: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      r.push({ [`f${i}.txt`]: 'x' });
+      services.deploy(c, 'Cara');
+      assert.equal((await done(name)).state, 'deployed');
+      live.push(liveSlot(name));
+    }
+    assert.deepEqual(live, [join(slots, 'a'), join(slots, 'b'), join(slots, 'a')].map((p) => realpathSync(p)));
+    writeFileSync(join(slots, 'b', 'stray.txt'), 'someone\'s work');
+    const head = git(join(slots, 'b'), 'rev-parse', 'HEAD');
+    r.push({ 'later.txt': 'x' });
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'failed');
+    assert.match(d.said.join('\n'), /has local changes, so nothing was built[\s\S]*stray\.txt/);
+    assert.equal(git(join(slots, 'b'), 'rev-parse', 'HEAD'), head, 'the idle slot untouched');
+    assert.equal(readFileSync(join(slots, 'b', 'stray.txt'), 'utf8'), 'someone\'s work');
+    assert.equal(liveSlot(name), live[2]);
+  } finally {
+    svc.close();
+  }
+});
+
+test('a deploy whose build fails changes nothing: the old build keeps running, never restarted (#801)', async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
   const good = r.push({ '.gitignore': 'out.txt\n', 'citadel-app.json': appManifest(['echo good > out.txt']) });
@@ -350,16 +413,77 @@ test('a deploy whose build fails rolls back to the commit before, builds it and 
     const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     services.deploy(c, 'Cara');
     assert.equal((await done(name)).state, 'deployed');
+    const unit = readFileSync(join(unitDir, `citadel-app-${name}.service`), 'utf8');
     const bad = r.push({ 'citadel-app.json': appManifest(['echo bad > out.txt', 'exit 3']) });
     services.deploy(c, '#12');
     const d = await done(name);
-    assert.equal(d.state, 'rolled back', d.said.join('\n'));
+    assert.equal(d.state, 'failed', d.said.join('\n'));
     assert.deepEqual([d.from, d.to, d.by], [good, bad, '#12']);
     assert.ok(d.said.some((l) => /Build step failed \(exit 3\): exit 3/.test(l)));
+    assert.ok(d.said.includes(`Nothing changed: ${good.slice(0, 9)} still runs.`), d.said.join('\n'));
     const folder = join(home, 'apps', name);
     assert.equal(git(folder, 'rev-parse', 'HEAD'), good);
-    assert.equal(readFileSync(join(folder, 'out.txt'), 'utf8'), 'good\n', 'the good commit built again');
-    assert.equal(fake.calls().filter((x) => x === `--user restart citadel-app-${name}.service`).length, 2, 'restarted on its first deploy and on the roll back');
+    assert.equal(readFileSync(join(folder, 'out.txt'), 'utf8'), 'good\n');
+    assert.equal(readFileSync(join(unitDir, `citadel-app-${name}.service`), 'utf8'), unit);
+    assert.equal(fake.calls().filter((x) => x === `--user restart citadel-app-${name}.service`).length, 1, 'restarted on its first deploy only');
+  } finally {
+    svc.close();
+  }
+});
+
+test('an unhealthy deploy rolls back by pointing at the old slot again, with no rebuild (#801)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const builds = join(root, `builds-${name}`);
+  r.push({ 'citadel-app.json': appManifest([`echo built >> ${builds}`]) });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    services.deploy(c, 'Cara');
+    assert.equal((await done(name)).state, 'deployed');
+    const old = liveSlot(name);
+    r.push({ 'citadel-app.json': appManifest([`echo built >> ${builds}`], { health: '/nope' }) });
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'rolled back', d.said.join('\n'));
+    assert.equal(liveSlot(name), old);
+    assert.equal(unitDirOf(name), old);
+    assert.equal(readFileSync(builds, 'utf8'), 'built\nbuilt\n', 'the old commit wasn\'t built again');
+  } finally {
+    svc.close();
+  }
+});
+
+test('a deploy moves an app\'s plain folder into its first slot, keeping its ignored files and leaving DATA_DIR alone (#801)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const first = r.push({ '.gitignore': 'node_modules/\n', 'citadel-app.json': appManifest([]) });
+  const folder = join(home, 'apps', name);
+  mkdirSync(join(home, 'apps'), { recursive: true });
+  git(join(home, 'apps'), 'clone', '--quiet', `file://${join(root, 'remotes', 'cara', name)}.git`, name);
+  mkdirSync(join(folder, 'node_modules'));
+  writeFileSync(join(folder, 'node_modules', 'x'), 'cache');
+  const data = join(home, '.local/share', name);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'db'), 'state');
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    // On another branch it is refused before anything moves.
+    services.deploy({ ...c, branch: 'release' }, 'Cara');
+    assert.match((await done(name)).said.join('\n'), /is on main, not release/);
+    assert.ok(!lstatSync(folder).isSymbolicLink());
+    const next = r.push({ 'n.txt': 'x' });
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.deepEqual([d.from, d.to], [first, next]);
+    const slots = join(home, 'apps', `.${name}`);
+    assert.ok(lstatSync(folder).isSymbolicLink());
+    assert.equal(liveSlot(name), realpathSync(join(slots, 'b')));
+    assert.equal(git(join(slots, 'a'), 'rev-parse', 'HEAD'), first, 'the old folder, as it was');
+    assert.equal(readFileSync(join(slots, 'a', 'node_modules', 'x'), 'utf8'), 'cache', 'its ignored files stay with it');
+    assert.equal(readFileSync(join(data, 'db'), 'utf8'), 'state');
   } finally {
     svc.close();
   }

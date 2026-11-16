@@ -110,6 +110,31 @@ test('the Codex line under the Claude bar reads a 5-hour window past its reset a
   assert.match(line.title, /^5-hour window: 0%\nWeekly: 40%, resets /);
 });
 
+test('with several Claude accounts the bar combines them: average weekly, a reset or missing report counts 0%, error only when all are out', { skip }, async () => {
+  const page = await open();
+  const soon = Date.now() + 3600000, later = Date.now() + 86400000;
+  const acc = (n: number, usage: string) => `{ n: ${n}, label: 'Account ${n}', usage: ${usage} }`;
+  const wk = (u: number, resetsAt: number, status = 'allowed') => `{ weekly: { utilization: ${u}, resetsAt: ${resetsAt}, status: '${status}' } }`;
+  const show = (accounts: string[]) => page.eval(`renderUsage({ weekly: { utilization: 0.2, resetsAt: ${later} }, account: 1, accounts: [${accounts.join(',')}], updatedAt: new Date().toISOString() })`);
+  const bar = () => page.eval<{ text: string; level: string; title: string }>(`(({ textContent: text, dataset, title }) => ({ text, level: dataset.level, title }))(document.querySelector('#usage'))`);
+  await show([acc(1, wk(0.8, later)), acc(2, wk(0.2, soon))]);
+  let b = await bar();
+  assert.equal(b.text.replace(/\s+/g, ''), 'Week50%');
+  assert.equal(b.level, '');
+  assert.match(b.title, /^Weekly usage combined across 2 Claude accounts: 50%, next reset /);
+  assert.match(b.title, /▸ Account 1: week 80%/);
+  await show([acc(1, wk(0.8, later)), acc(2, 'null')]);
+  assert.equal((await bar()).text, 'Week 40%', 'no report counts 0%');
+  await show([acc(1, wk(0.8, later)), acc(2, wk(0.9, Date.now() - 1000))]);
+  assert.equal((await bar()).text, 'Week 40%', 'a window past its reset counts 0%');
+  await show([acc(1, wk(0.95, later)), acc(2, wk(1, later, 'rejected'))]);
+  b = await bar();
+  assert.equal(b.text, 'Week 98%');
+  assert.equal(b.level, 'error');
+  await show([acc(1, wk(0.8, later)), acc(2, wk(0.8, later))]);
+  assert.equal((await bar()).level, 'warn');
+});
+
 test('a row\'s card badge opens the oldest open card, the rest of the row the chat, and a row without cards has none', { skip }, async () => {
   const page = await open();
   await page.eval(`(async () => {

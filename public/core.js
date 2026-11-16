@@ -416,24 +416,45 @@ let codexHint = '';
 export const usageMeter = () => h('div', { class: 'usage', hidden: true },
   h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), costChip());
 
+/**
+ * One window combined across a person's accounts (Cara, 2026-11-16: "just combine all accounts into a single bar"):
+ * the average utilization, equal weight. An account with no report, or whose window already reset, counts as 0%.
+ * resetsAt is the soonest still-ahead reset. Null when no account has reported that window at all.
+ */
+export function combineWindows(accounts, key) {
+  const ws = accounts.map((a) => a.usage?.[key]);
+  if (!ws.some(Boolean)) return null;
+  const now = Date.now();
+  const util = ws.map((w) => (w && (!w.resetsAt || w.resetsAt > now) ? Math.min(1, Math.max(0, w.utilization)) : 0));
+  const resets = ws.filter((w) => w?.resetsAt > now).map((w) => w.resetsAt);
+  return { utilization: util.reduce((x, y) => x + y, 0) / accounts.length, resetsAt: resets.length ? Math.min(...resets) : null };
+}
+
 /** Fill in every usage bar from the latest usage report from Claude turns. */
 export function renderUsage(next = usage) {
   usage = next;
-  const week = usage?.weekly;
+  const accounts = usage?.accounts?.length > 1 ? usage.accounts : null;
+  const week = accounts ? combineWindows(accounts, 'weekly') : usage?.weekly;
+  const session = accounts ? combineWindows(accounts, 'session') : usage?.session;
   for (const el of document.querySelectorAll('.usage:not(.codex)')) {
     el.hidden = !week;
     if (!week) continue;
     const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
     el.querySelector('.label').textContent = `Week ${pct}%`;
     el.style.setProperty('--pct', `${pct}%`);
-    el.dataset.level = week.status && week.status !== 'allowed' ? 'error' : pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
+    // Several accounts: out only once every one is (turns move to the next by themselves).
+    const out = accounts ? accounts.every((a) => a.usage && (out1(a.usage.weekly) || out1(a.usage.session))) : week.status && week.status !== 'allowed';
+    el.dataset.level = out || pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
     const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+    const sess = (w) => `${Math.round(w.utilization * 100)}%${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`;
     el.title = [
-      `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
-      usage.session ? `5-hour window: ${Math.round(usage.session.utilization * 100)}%${usage.session.resetsAt ? `, resets ${when(usage.session.resetsAt)}` : ''}` : null,
+      accounts
+        ? `Weekly usage combined across ${accounts.length} Claude accounts: ${pct}%${week.resetsAt ? `, next reset ${when(week.resetsAt)}` : ''}`
+        : `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
+      session ? `5-hour window${accounts ? ' (combined)' : ''}: ${sess(session)}` : null,
       `As of the last turn, ${ago(usage.updatedAt)}`,
-      // Several Claude accounts (#779): the bar is the one in use; the tooltip lists them all.
-      ...(usage.accounts?.length > 1 ? ['', ...usage.accounts.map((a) => `${a.n === usage.account ? '▸ ' : ''}${a.label}: ${a.usage?.weekly ? `week ${Math.round(a.usage.weekly.utilization * 100)}%` : 'no turns yet'}${a.usage?.session ? `, 5 hours ${Math.round(a.usage.session.utilization * 100)}%` : ''}`)] : []),
+      // Several Claude accounts (#779): the bar combines them; the tooltip lists each, ▸ on the one in use.
+      ...(accounts ? ['', ...accounts.map((a) => `${a.n === usage.account ? '▸ ' : ''}${a.label}: ${a.usage?.weekly ? `week ${Math.round(a.usage.weekly.utilization * 100)}%` : 'no turns yet'}${a.usage?.session ? `, 5 hours ${Math.round(a.usage.session.utilization * 100)}%` : ''}`)] : []),
     ].filter((line) => line != null).join('\n');
   }
   for (const el of document.querySelectorAll('.usage:not(.codex)')) renderCodexSwitch(renderCodexMeter(el));
@@ -485,6 +506,8 @@ function fillCodexWindows(el) {
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 const live = (w) => w && (!w.resetsAt || w.resetsAt > Date.now());
 /** A Claude window is past 90% (or out): the left panel offers the override then (Josh, 2026-11-05). */
+/** A window that is out: not allowed, or at 90%, and not yet reset. */
+const out1 = (w) => live(w) && ((w.status && w.status !== 'allowed') || w.utilization >= 0.9);
 const high = (u) => [u?.session, u?.weekly].some((w) => live(w) && (w.status === 'rejected' || w.utilization >= 0.9));
 // With several Claude accounts (#779), only once every one of them is high: turns move to the next by themselves.
 const claudeHigh = () => usage?.accounts?.length > 1 ? usage.accounts.every((a) => high(a.usage)) : high(usage);

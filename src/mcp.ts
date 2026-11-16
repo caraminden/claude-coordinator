@@ -97,6 +97,8 @@ const EFFORT_CHANGE = { type: ['string', 'null'], enum: [...EFFORT_IDS, null], d
 const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with. Required: pick it from the model table in your prompt; a mechanical checkup is a read-only check (claude-sonnet-5-5).' };
 const SCHEDULE_EFFORT = { ...EFFORT, description: 'The effort each run starts with. Required: the one the model table pairs with your model (a read-only check: low).' };
 // The activity gate and one-offs (#745).
+/** The kit's standard audits, kit/schedules/<slug>.md (#799); test/schedule-templates.test.ts checks this matches the folder. */
+export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check'] as const;
 const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
   gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },
@@ -480,6 +482,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'schedule_audit',
+    description:
+      "Add one of the kit's standard audits to this scheme (kit/schedules/<template>.md, #799): it brings its name, time (staggered by scheme), model, effort and activity gate, and each run renders the kit's current text with this scheme's name, then your notes. Add one only where the repo shows what it needs. code-health: app code people build on, not only notes, docs or an empty scaffold. test-audit: a test suite. monthly-retro: minions working in the scheme. upstream-check: a THIRD_PARTY.md with a Copies table, or a \"## Copies\" table in onboarding.md. A scheme has each at most once; update_schedule changes it.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template: { type: 'string', enum: [...SCHEDULE_TEMPLATES], description: 'Which audit' },
+        notes: { type: 'string', description: 'What this scheme adds to the template, appended under "For <scheme>:", e.g. "Merges wait for a person\'s go." or "Never push."' },
+      },
+      required: ['template'],
+    },
+  },
+  {
     name: 'update_schedule',
     description: 'Change, pause or resume a schedule. Pass only what changes.',
     inputSchema: {
@@ -494,6 +509,8 @@ const TOOLS = [
         effort: SCHEDULE_EFFORT,
         ...SCHEDULE_GATE,
         paused: { type: 'boolean', description: 'true pauses it, false resumes it' },
+        template: { type: 'string', enum: [...SCHEDULE_TEMPLATES], description: 'Swap a hand-written copy of a standard audit for its kit template (see schedule_audit), keeping its pause and last run; pass notes with what its brief had beyond the template' },
+        notes: { type: 'string', description: "A standard audit's notes for this scheme, replacing the old ones. A whole brief instead turns it into a custom copy that no longer follows the kit" },
       },
       required: ['schedule_id'],
     },
@@ -1790,9 +1807,13 @@ async function runTool(name: string, args: any): Promise<string> {
       const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once });
       return `Scheduled. ${scheduleLine(s)}`;
     }
+    case 'schedule_audit': {
+      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { template: args.template, notes: args.notes });
+      return `Scheduled. ${scheduleLine(s)}`;
+    }
     case 'update_schedule': {
       const { schedule_id, ...patch } = args;
-      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'min_minions', 'gate_scope', 'once', 'paused'], 'update_schedule');
+      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'min_minions', 'gate_scope', 'once', 'paused', 'template', 'notes'], 'update_schedule');
       return `Updated. ${scheduleLine(await call('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
     }
     case 'delete_schedule':
@@ -1831,7 +1852,8 @@ function scheduleLine(s: any): string {
   // A schedule from before #698 may name neither; its runs take the model table's pick for its type (src/schedules.ts runMinion).
   const runsAs = `model ${s.model ?? `the table's pick for a ${s.type}`}, effort ${s.effort ?? `the table's pick for a ${s.type}`}`;
   const gate = s.min_minions != null ? `; skips under ${s.min_minions} minions${s.gate_scope === 'all' ? ' across all schemes' : ''}` : '';
-  return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
+  const kind = s.template ? `; standard audit ${s.template}${s.notes ? ' with notes' : ''}` : '';
+  return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
 /** list_tickets and read_ticket with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */

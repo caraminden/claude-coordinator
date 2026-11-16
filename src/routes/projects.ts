@@ -16,7 +16,7 @@ import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
-import { describeCron, type Schedule } from '../schedules.ts';
+import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
@@ -149,6 +149,33 @@ function scheduleFields(app: App, projectId: number, body: any, all: boolean, ta
     out.once = body.once;
   }
   return out;
+}
+
+/**
+ * A standard audit's part of a schedule request (#799). `template` (a kit/schedules slug) attaches the row to it: its name,
+ * time, type, model, effort and gate fill whatever the body leaves out, and its brief is the template plus `notes`. Notes
+ * alone re-render a templated row's brief. Returns the body to read with scheduleFields, and the template and notes to store.
+ */
+function scheduleTemplate(app: App, project: Pick<Project, 'id' | 'name'>, body: any, row: Schedule | null): { body: any; extra: { template?: string; notes?: string; brief?: string } } {
+  if (body.template === undefined && body.notes === undefined) return { body, extra: {} };
+  if (body.template === null) throw new HttpError(400, 'To make a standard audit a custom copy, send its whole brief instead');
+  if (body.brief !== undefined) throw new HttpError(400, "A standard audit's brief is its kit template plus the scheme's notes: send notes, or a brief alone to make it a custom copy");
+  if (body.notes !== undefined && body.notes !== null && typeof body.notes !== 'string') throw new HttpError(400, 'notes must be text');
+  const notes = body.notes == null ? undefined : String(body.notes).trim();
+  if (notes !== undefined && notes.length > 10_000) throw new HttpError(400, `notes are too long: ${notes.length.toLocaleString('en')} characters, at most 10,000`);
+  const slug = body.template === undefined ? row?.template : body.template;
+  if (!slug) throw new HttpError(400, 'notes go with a standard audit: pass template too');
+  const all = loadTemplates();
+  const t = typeof slug === 'string' ? all.get(slug) : undefined;
+  if (!t) throw new HttpError(400, `There is no standard audit "${String(slug).slice(0, 40)}": the kit has ${[...all.keys()].join(', ')}`);
+  const twin = app.store.schedules.list(project.id).find((x) => x.template === t.slug && x.id !== row?.id);
+  if (twin) throw new HttpError(409, `${project.name} already has the standard ${t.name} (kit/schedules/${t.slug}.md): schedule ${twin.id} ("${twin.name}"). Update that one instead.`);
+  const vars = templateVars(app.store, app.dataDir, project.id);
+  const kept = notes ?? (row?.template === t.slug ? row.notes : '');
+  if (body.template === undefined) return { body, extra: { notes: kept, brief: renderTemplate(t, kept, vars) } };
+  const { template, notes: n, brief, ...fields } = templateFields(t, project, kept, vars);
+  // Attaching an existing row keeps its pause and last run; the template's fields replace its own unless the body names them.
+  return { body: { ...fields, brief, ...Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'template' && k !== 'notes')) }, extra: { template, notes: n } };
 }
 
 /** A schedule for the API: its cron in words and its last run's minion number. */
@@ -907,8 +934,9 @@ export const projectRoutes: Route[] = [
   {
     method: 'POST', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
-      const fields = scheduleFields(app, project.id, await readJson(req), true, !!caller);
-      const s = app.store.schedules.create({ project_id: project.id, ...(fields as Required<typeof fields>), created_by: session.name });
+      const { body, extra } = scheduleTemplate(app, project, await readJson(req), null);
+      const fields = scheduleFields(app, project.id, body, true, !!caller);
+      const s = app.store.schedules.create({ project_id: project.id, ...(fields as Required<typeof fields>), ...extra, created_by: session.name });
       app.broadcast({ type: 'schedules', projectId: project.id });
       return json(res, 201, scheduleView(app, s));
     },
@@ -917,8 +945,9 @@ export const projectRoutes: Route[] = [
   {
     method: 'PATCH', path: '/api/schedules/:schedule', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, schedule: s }) {
-      const body = await readJson(req);
-      const patch: Record<string, unknown> = scheduleFields(app, s.project_id, body, false);
+      const project = app.store.getProject(s.project_id)!;
+      const { body, extra } = scheduleTemplate(app, project, await readJson(req), s);
+      const patch: Record<string, unknown> = { ...scheduleFields(app, s.project_id, body, false), ...extra };
       if (body.paused !== undefined) {
         if (typeof body.paused !== 'boolean') throw new HttpError(400, 'paused must be true or false');
         patch.paused = body.paused;

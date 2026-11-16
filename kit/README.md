@@ -24,6 +24,10 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     saying to write the failing test first. Once per session; a red run first keeps it quiet.
   - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, and a
     reminder to re-read the record rather than the summary.
+- `schedules/<slug>.md` are the standard audits' templates (#799): a scheduled run whose row names one
+  gets that body, `{scheme}` filled in, plus the scheme's own notes (`src/schedules.ts`). Frontmatter
+  holds the defaults, the stagger and `applies:`, which the setup plan checks before adding one.
+  A template names no repo's paths, as skills don't.
 - A plugin can't carry `.claude/rules`: per-repo rules stay in each repo.
 - A kit skill or agent names no repo's paths or commands. It reads them from the repo's CLAUDE.md
   "Project facts" section (check commands, glossary, decisions log, retro folder, high-risk files,

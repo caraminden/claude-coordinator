@@ -1052,6 +1052,7 @@ export const SCHEMA_HISTORY = [
   [53, 'events_cards partial index (#759)'],
   [54, 'card_fates (#762)'],
   [55, 'projects.ci_watch (#774)'],
+  [56, 'schedules.template, notes; standard audits backfill (#799)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

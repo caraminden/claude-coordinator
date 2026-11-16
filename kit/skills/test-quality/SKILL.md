@@ -94,6 +94,12 @@ order, a seeded loop needing no library, and what to do on a failure:
 [references/properties.md](references/properties.md). Code with no such shape gets example tests,
 and saying so is fine.
 
+## Auditing a whole suite
+
+A scheme-wide audit (the standard Test audit schedule, or someone asking whether a suite is too big or
+too weak) follows [references/audit-method.md](references/audit-method.md): size and time, Sonnet
+Grunts per batch, your own re-check, then a report and a card.
+
 ## Check before calling it done
 
 1. **Mutate by hand.** Flip two or three risky lines of the diff (a comparison, a boundary, a

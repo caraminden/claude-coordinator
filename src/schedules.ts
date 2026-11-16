@@ -1,11 +1,14 @@
 // Scheduled minions: a saved brief that starts on a cron schedule. The schedule lives in the app
 // (this table plus a timer in the server), since minions can't install systemd timers.
 import type { DatabaseSync } from 'node:sqlite';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Project, Store, User } from './db.ts';
 import type { Runner } from './runner.ts';
 import { HttpError } from './http.ts';
 import { pickFor } from '../public/model-table.js';
 import { pacific } from './pacific.ts';
+import { projectSharedDir } from './workspace.ts';
 
 export interface Schedule {
   id: number;
@@ -37,6 +40,10 @@ export interface Schedule {
   last_skip: string | null;
   /** A one-off: paused after its first real run, so a dated cron doesn't come round again next year. */
   once: number;
+  /** A standard audit's template (kit/schedules/<slug>.md, #799) whose body each run renders fresh; null for a custom brief. */
+  template: string | null;
+  /** The scheme's own additions to its template, appended under "For <scheme>:". */
+  notes: string;
   created_by: string;
   created_at: number;
 }
@@ -60,6 +67,8 @@ CREATE TABLE IF NOT EXISTS schedules (
   gate_scope TEXT NOT NULL DEFAULT 'scheme',
   last_skip TEXT,
   once INTEGER NOT NULL DEFAULT 0,
+  template TEXT,
+  notes TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
@@ -168,15 +177,94 @@ export class ScheduleError extends HttpError {
   }
 }
 
+/** A standard audit's template (kit/schedules/<slug>.md, #799): the row's defaults and the brief every scheme's run renders. */
+export interface ScheduleTemplate {
+  slug: string;
+  name: string;
+  type: string;
+  model: string;
+  effort: string;
+  min_minions: number | null;
+  /** The base cron; each scheme runs it shifted by its slot (staggerCron). */
+  cron: string;
+  /** "<n>m within <w>m" shifts the time, "<n>d within <w>d" the day of the month. */
+  stagger: string;
+  /** What a scheme needs before it gets this audit, for the setup plan and the Taskmaster. */
+  applies: string;
+  body: string;
+}
+
+export const TEMPLATE_DIR = join(import.meta.dirname, '..', 'kit', 'schedules');
+
+/** The kit's schedule templates by slug, read fresh (four small files) so a deploy's kit edit applies at once. */
+export function loadTemplates(dir = TEMPLATE_DIR): Map<string, ScheduleTemplate> {
+  const out = new Map<string, ScheduleTemplate>();
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.md')).sort()) {
+    const slug = file.slice(0, -3);
+    const m = readFileSync(join(dir, file), 'utf8').match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    if (!m) throw new Error(`kit/schedules/${file} has no frontmatter`);
+    const f = Object.fromEntries(m[1].split('\n').map((l) => l.match(/^(\w+):\s*(.*)$/)).filter(Boolean).map((x) => [x![1], x![2].trim()]));
+    for (const k of ['name', 'type', 'model', 'effort', 'cron', 'stagger', 'applies']) if (!f[k]) throw new Error(`kit/schedules/${file} has no ${k}`);
+    out.set(slug, { slug, name: f.name, type: f.type, model: f.model, effort: f.effort, min_minions: f.min_minions ? Number(f.min_minions) : null, cron: f.cron, stagger: f.stagger, applies: f.applies, body: m[2].trim() });
+  }
+  return out;
+}
+
+/** Scheme `slot`'s cron: the base shifted by slot × step, wrapping inside the window, so schemes don't all start at once. */
+export function staggerCron(base: string, stagger: string, slot: number): string {
+  const m = stagger.match(/^(\d+)([md]) within (\d+)\2$/);
+  if (!m) throw new Error(`Can't read the stagger "${stagger}" (e.g. "10m within 120m" or "1d within 28d")`);
+  const [step, unit, within] = [Number(m[1]), m[2], Number(m[3])];
+  const f = base.trim().split(/\s+/);
+  const shift = (step * slot) % within;
+  if (unit === 'm') {
+    if (!/^\d+$/.test(f[0]) || !/^\d+$/.test(f[1])) throw new Error(`A minute stagger needs a set minute and hour, not "${base}"`);
+    const t = (Number(f[1]) * 60 + Number(f[0]) + shift) % 1440;
+    return [t % 60, Math.floor(t / 60), ...f.slice(2)].join(' ');
+  }
+  if (!/^\d+$/.test(f[2])) throw new Error(`A day stagger needs a set day of the month, not "${base}"`);
+  return [f[0], f[1], Number(f[2]) + shift, ...f.slice(3)].join(' ');
+}
+
+export interface TemplateVars {
+  scheme: string;
+  /** Citadel's shared folder, where the cross-scheme process digests live. */
+  citadelShared: string;
+}
+
+/** A run's brief from its template: the body with the scheme filled in, then the scheme's notes. */
+export function renderTemplate(t: ScheduleTemplate, notes: string, v: TemplateVars): string {
+  const body = t.body.replace(/\{(\w+)\}/g, (all, k) => {
+    if (k === 'scheme') return v.scheme;
+    if (k === 'citadel_shared') return v.citadelShared;
+    throw new Error(`kit/schedules/${t.slug}.md uses ${all}, which nothing fills in`);
+  });
+  return notes.trim() ? `${body}\n\nFor ${v.scheme}:\n${notes.trim()}` : body;
+}
+
+/** A new row from a template: its defaults, the scheme's slot (id − 1), the notes and the rendered brief. */
+export function templateFields(t: ScheduleTemplate, project: Pick<Project, 'id' | 'name'>, notes: string, v: TemplateVars) {
+  return {
+    name: t.name, type: t.type, model: t.model, effort: t.effort, min_minions: t.min_minions,
+    cron: staggerCron(t.cron, t.stagger, project.id - 1), template: t.slug, notes: notes.trim(), brief: renderTemplate(t, notes, v),
+  };
+}
+
+/** The values a scheme's templates fill in. Citadel's shared folder is found by the scheme's name. */
+export function templateVars(store: Pick<Store, 'getProject' | 'listProjects'>, dataDir: string, projectId: number): TemplateVars {
+  const citadel = store.listProjects().find((p) => p.name === 'Citadel');
+  return { scheme: store.getProject(projectId)?.name ?? 'this scheme', citadelShared: citadel ? projectSharedDir(dataDir, citadel.id) : "Citadel's shared folder" };
+}
+
 export class Schedules {
   private db: DatabaseSync;
 
   constructor(db: DatabaseSync) {
     this.db = db;
     db.exec(SCHEDULES_SCHEMA);
-    // Columns added after the table (#387, #745), for databases created before them.
+    // Columns added after the table (#387, #745, #799), for databases created before them.
     const cols = (db.prepare('PRAGMA table_info(schedules)').all() as { name: string }[]).map((c) => c.name);
-    const added = { model: 'TEXT', effort: 'TEXT', min_minions: 'INTEGER', gate_scope: "TEXT NOT NULL DEFAULT 'scheme'", last_skip: 'TEXT', once: 'INTEGER NOT NULL DEFAULT 0' };
+    const added = { model: 'TEXT', effort: 'TEXT', min_minions: 'INTEGER', gate_scope: "TEXT NOT NULL DEFAULT 'scheme'", last_skip: 'TEXT', once: 'INTEGER NOT NULL DEFAULT 0', template: 'TEXT', notes: "TEXT NOT NULL DEFAULT ''" };
     for (const [c, ddl] of Object.entries(added)) if (!cols.includes(c)) db.exec(`ALTER TABLE schedules ADD COLUMN ${c} ${ddl}`);
   }
 
@@ -200,25 +288,35 @@ export class Schedules {
     return next;
   }
 
-  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'> & Partial<Pick<Schedule, 'model' | 'effort' | 'min_minions' | 'gate_scope'>> & { once?: boolean }, now = Date.now()): Schedule {
+  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'> & Partial<Pick<Schedule, 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes'>> & { once?: boolean }, now = Date.now()): Schedule {
     const r = this.db
-      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, model, effort, min_minions, gate_scope, once, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, s.model ?? null, s.effort ?? null, s.min_minions ?? null, s.gate_scope ?? 'scheme', Number(!!s.once), this.next(s.cron, now), s.created_by, now);
+      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, model, effort, min_minions, gate_scope, once, template, notes, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, s.model ?? null, s.effort ?? null, s.min_minions ?? null, s.gate_scope ?? 'scheme', Number(!!s.once), s.template ?? null, s.notes ?? '', this.next(s.cron, now), s.created_by, now);
     return this.get(Number(r.lastInsertRowid))!;
   }
 
-  /** Change a schedule. A new cron or a resume counts the next run from now; a pause clears it. */
-  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type' | 'model' | 'effort' | 'min_minions' | 'gate_scope'>> & { paused?: boolean; once?: boolean }, now = Date.now()): Schedule {
+  /**
+   * Change a schedule. A new cron or a resume counts the next run from now; a pause clears it. A whole new brief on a
+   * templated row, without notes, detaches it into a custom copy (#799); notes come with their rendered brief, and a
+   * template with its fields attaches one.
+   */
+  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type' | 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes'>> & { paused?: boolean; once?: boolean }, now = Date.now()): Schedule {
     const old = this.get(id);
     if (!old) throw new ScheduleError('No such schedule');
-    const s = { ...old, ...patch, cron: (patch.cron ?? old.cron).trim(), paused: patch.paused === undefined ? old.paused : Number(patch.paused), once: patch.once === undefined ? old.once : Number(patch.once) };
+    const detach = old.template && patch.brief !== undefined && patch.notes === undefined;
+    const s = { ...old, ...patch, ...(detach ? { template: null, notes: '' } : {}), cron: (patch.cron ?? old.cron).trim(), paused: patch.paused === undefined ? old.paused : Number(patch.paused), once: patch.once === undefined ? old.once : Number(patch.once) };
     // A paused schedule's new cron is checked too, or the typo only shows at resume.
     if (patch.cron !== undefined) this.next(s.cron, now);
     const next = s.paused ? null : patch.cron !== undefined || (old.paused && !s.paused) ? this.next(s.cron, now) : old.next_run_at;
     this.db
-      .prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, model = ?, effort = ?, min_minions = ?, gate_scope = ?, once = ?, paused = ?, next_run_at = ? WHERE id = ?')
-      .run(s.name, s.cron, s.brief, s.type, s.model, s.effort, s.min_minions, s.gate_scope, s.once, s.paused, next, id);
+      .prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, model = ?, effort = ?, min_minions = ?, gate_scope = ?, once = ?, template = ?, notes = ?, paused = ?, next_run_at = ? WHERE id = ?')
+      .run(s.name, s.cron, s.brief, s.type, s.model, s.effort, s.min_minions, s.gate_scope, s.once, s.template, s.notes, s.paused, next, id);
     return this.get(id)!;
+  }
+
+  /** Keep the last rendered brief on a templated row, for the panel, list_schedules and an older release on rollback. */
+  setBrief(id: number, brief: string) {
+    this.db.prepare('UPDATE schedules SET brief = ? WHERE id = ?').run(brief, id);
   }
 
   remove(id: number): boolean {
@@ -319,6 +417,10 @@ export interface ScheduledRunDeps {
   broadcast: (msg: object) => void;
   /** Who a run's minion says started it. */
   by: string;
+  /** For a templated schedule's placeholders (Citadel's shared folder). */
+  dataDir: string;
+  /** The schedule templates; the kit's by default. */
+  templates?: () => Map<string, ScheduleTemplate>;
 }
 
 /**
@@ -356,6 +458,13 @@ export class ScheduledRuns {
       return store.schedules.ran(s.id, { skip }, now);
     }
     try {
+      // A standard audit renders its kit template now, so a template fix reaches every scheme's next run (#799).
+      if (s.template) {
+        const t = (this.d.templates ?? loadTemplates)().get(s.template);
+        if (!t) throw new Error(`its template kit/schedules/${s.template}.md is gone from the kit`);
+        s = { ...s, brief: renderTemplate(t, s.notes, templateVars(store, this.d.dataDir, s.project_id)) };
+        store.schedules.setBrief(s.id, s.brief);
+      }
       // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone; it's theirs.
       const maker = store.findUser('name', s.created_by);
       const { id, number } = await this.d.newMinion(project, runMinion(s, maker), by);

@@ -18,6 +18,8 @@ function scheduleRow(s) {
   const cron = `${s.when} (server time) · cron: ${s.cron}`;
   return h('li', { class: `schedule${s.paused ? ' paused' : ''}`, 'data-schedule': s.id },
     h('div', { class: 'row' }, h('strong', { class: 'name' }, s.name), h('span', { class: 'spacer' }),
+      // A standard audit (#799) follows the kit's template: each run gets its current text plus this scheme's notes.
+      s.template ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: `Follows the kit's ${s.template} template; each run gets its current text${s.notes ? ', plus this scheme\'s notes' : ''}` }, 'Standard') : '',
       h('span', { class: 'cui-chip state-chip', 'data-tone': tone, title: tip }, word)),
     h('div', { class: 'muted small', title: cron }, s.paused ? ['Would run ', s.when] : ['Next ', h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at)), ' · ', s.when]),
     h('div', { class: 'muted small' }, runsAs(s), s.last_run_at || s.last_number != null ? ['last run ', last] : 'not run yet'),

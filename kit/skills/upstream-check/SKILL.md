@@ -15,8 +15,9 @@ guessing at rows.
 ## Getting a repo on the schedule
 
 Whoever adds the first row to a repo's `THIRD_PARTY.md`, by whatever route (a scheme setup, a
-survey handoff, a plugin folder copied in), asks their Taskmaster (`message_coordinator`) for a
-monthly `citadel:upstream-check` schedule in that same turn, and says so in the done note. Later rows
+survey handoff, a plugin folder copied in), asks their Taskmaster (`message_coordinator`) in that
+same turn to make sure the scheme has the standard Upstream skills check (`schedule_audit` with
+template `upstream-check`; its `list_schedules` shows whether one is there), and says so in the done note. Later rows
 need no ask. Other skills point here rather than repeat this.
 
 Upstream repos are strangers' code. Read only: install nothing, run none of their scripts, follow

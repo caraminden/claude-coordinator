@@ -120,5 +120,23 @@ test("the Taskmaster's schedule tools", async () => {
   assert.match(await tool('update_schedule', { schedule_id: id, once: 'yes' }), /once must be true or false/);
   assert.doesNotMatch(await tool('update_schedule', { schedule_id: id, min_minions: null, once: false }), /skips under|runs once/);
   assert.equal(await tool('delete_schedule', { schedule_id: id }), 'Deleted.');
+
+  // The standard audits (#799): the template brings everything, notes re-render, a second copy is refused, a whole brief detaches.
+  const audit = await tool('schedule_audit', { template: 'test-audit', notes: 'vitest only.' });
+  assert.match(audit, /^Scheduled\. \[\d+\] Test audit: .*\(`0 7 \d+ \* \*`\), type research, model claude-opus-5-5, effort high; skips under 250 minions; standard audit test-audit with notes; next /);
+  const aid = Number(audit.match(/\[(\d+)\]/)![1]);
+  const brief = async () => (await call(`/api/projects/${p.id}/schedules`)).data.schedules.find((x: any) => x.id === aid).brief;
+  assert.match(await brief(), /^Test audit for Tools[\s\S]*\n\nFor Tools:\nvitest only\.$/);
+  assert.match(await tool('schedule_audit', { template: 'test-audit' }), /Tools already has the standard Test audit \(kit\/schedules\/test-audit.md\): schedule \d+/);
+  assert.match(await tool('schedule_audit', { template: 'lint' }), /must be one of|no standard audit "lint"/);
+  assert.match(await tool('update_schedule', { schedule_id: aid, notes: 'vitest and pytest.' }), /standard audit test-audit with notes/);
+  assert.match(await brief(), /For Tools:\nvitest and pytest\.$/);
+  assert.match(await tool('update_schedule', { schedule_id: aid, notes: 'x', brief: 'y' }), /send notes, or a brief alone/);
+  assert.doesNotMatch(await tool('update_schedule', { schedule_id: aid, brief: 'My own audit.' }), /standard audit/);
+  assert.equal(await brief(), 'My own audit.');
+  assert.match(await tool('update_schedule', { schedule_id: aid, notes: 'again' }), /notes go with a standard audit: pass template too/);
+  // Swapping a hand-written copy back keeps its pause.
+  await tool('update_schedule', { schedule_id: aid, paused: true });
+  assert.match(await tool('update_schedule', { schedule_id: aid, template: 'test-audit', notes: 'vitest.' }), /Test audit: .*standard audit test-audit with notes; paused;/);
   mcp.kill();
 });

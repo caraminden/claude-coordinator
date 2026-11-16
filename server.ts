@@ -33,6 +33,7 @@ import { type Chain, githubPrs, LiveWaiters, pacificTime, runsRepo, startChained
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
+import { backfillStandardAudits } from './src/standard-audits.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
@@ -459,7 +460,13 @@ async function newMinion(project: Project, m: { title: string; props: Record<str
 
 // Scheduled minions (src/schedules.ts): each due schedule starts a fresh minion with its brief. Checked
 // every half minute; a schedule that came due while the server was down runs once when it is back.
-const scheduledRuns = new ScheduledRuns({ store, newMinion, runner, broadcast, by: APP_NAME });
+const scheduledRuns = new ScheduledRuns({ store, newMinion, runner, broadcast, by: APP_NAME, dataDir: DATA_DIR });
+// Once per database (#799): the hand-made audits follow kit/schedules/, and each scheme gets the ones its repo fits.
+try {
+  for (const line of backfillStandardAudits(store, DATA_DIR)) console.log(`Standard audits (#799): ${line}`);
+} catch (err) {
+  console.error('Standard audits (#799) backfill failed; it tries again at the next start:', err);
+}
 if (!BOOT_CHECK) setInterval(() => void safely('schedules', () => scheduledRuns.runDue()), 30_000).unref();
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fresh sessions', () => runner.freshSweep()), 60_000).unref();

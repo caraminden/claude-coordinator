@@ -46,6 +46,7 @@ function scheduled() {
       limitWait: (id: number) => (waits.limit.has(id) ? { ticket: id, at: 0, tries: 1 } : null), netWait: (id: number) => (waits.net.has(id) ? { ticket: id, tries: 1 } : null) } as any,
     broadcast: s.broadcast,
     by: 'Citadel',
+    dataDir: '/data',
   });
   return { ...s, runs, notes, sends, made, waits };
 }
@@ -65,6 +66,24 @@ test('a due schedule starts one minion with its brief, records the run and tells
   assert.ok(sent.some((m: any) => m.type === 'schedules' && m.projectId === project.id));
   // Not due again until its next run.
   assert.ok(!store.schedules.due(after.next_run_at! - 1).some((x) => x.id === sch.id));
+});
+
+test("a standard audit's run renders its kit template fresh, keeps that brief on the row, and a missing template is a recorded error (#799)", async () => {
+  const { store, project, runs, sends } = scheduled();
+  const citadel = store.createProject('Citadel', null);
+  const sch = store.schedules.create({ project_id: project.id, name: 'Monthly retro', cron: '* * * * *', brief: 'an old render', type: 'research', template: 'monthly-retro', notes: 'Never push.', created_by: 'Cara' });
+  await runs.run(sch);
+  assert.equal(sends.length, 1);
+  assert.match(sends[0].text, new RegExp(`Monthly retro for ${project.name}`));
+  assert.ok(sends[0].text.includes(join('/data', 'projects', String(citadel.id), 'shared', 'project', 'reports')), "Citadel's digests by path");
+  assert.match(sends[0].text, new RegExp(`For ${project.name}:\\nNever push\\.`));
+  assert.doesNotMatch(sends[0].text, /an old render/);
+  assert.match(store.schedules.get(sch.id)!.brief, /^Monthly retro for /);
+
+  const gone = store.schedules.create({ project_id: project.id, name: 'Gone', cron: '* * * * *', brief: 'b', type: 'research', template: 'no-such-audit', created_by: 'Cara' });
+  await runs.run(gone);
+  assert.match(store.schedules.get(gone.id)!.last_error ?? '', /kit\/schedules\/no-such-audit\.md is gone/);
+  assert.equal(sends.length, 1);
 });
 
 test('a slot is skipped while the last run still works, and a start that throws is recorded, not thrown', async () => {
@@ -215,6 +234,7 @@ test('runDue does not start a second pass while one is running', async () => {
     runner: { emit() {}, send() {} } as any,
     broadcast() {},
     by: 'Citadel',
+    dataDir: '/data',
   });
   store.schedules.create({ project_id: project.id, name: 'slow', cron: '* * * * *', brief: 'b', type: 'chore', created_by: 'Cara' }, Date.now() - 120_000);
   const first = runs.runDue();

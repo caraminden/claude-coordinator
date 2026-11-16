@@ -317,8 +317,9 @@ this table and, below it, each licence's full text:
 ```
 
 `Copied` is `unchanged` or `adapted: <what changed>`; `Checked` starts as the pinned commit and
-today's date; one row per copied path. If this is the file's first row, get the schedule
-asked for as `citadel:upstream-check` says. *Done when* every copied file has its row.
+today's date; one row per copied path. If this is the file's first row and the plan's Standard
+audits leave out the upstream check, get it asked for as `citadel:upstream-check` says. *Done when*
+every copied file has its row.
 
 ### 8. Commit and merge
 
@@ -342,6 +343,6 @@ is pushed or your note says it stays local.
 ## Done note
 
 Your reply lists: the files written; kit items that covered planned ones (step 2); gaps that
-took a default; the copies recorded (and the upstream-check schedule to ask for, if any); scrub
+took a default; the copies recorded (and whether the scheme has the standard upstream check, or it was asked for); scrub
 hits kept; the check command and its result; whether main is pushed; and any command Cara must
 run by hand (a unit install). The Taskmaster's first minions start on your merge by themselves; nothing for you to start.

@@ -790,6 +790,56 @@ test('batches: a member whose branch got a commit while it waited says that comm
   }
 });
 
+test("batches: a member whose commit the head lands while it is looking at the line is not checked against main (#770's in-line check) and leaves as landed", async () => {
+  // The window is narrow: after batch_landed's look at the loop's top and before the in-line conflict check, inside
+  // queue_look. A cat in front of the real one freezes the 2nd there, with the line it read (the 1st still alive) after
+  // the head has landed all three. The 2nd deletes a line the 3rd inserts beside: the 3rd rebases onto it cleanly, but
+  // the 2nd's commit as it was before the rebase conflicts with main, which holds the 3rd's change too.
+  const c = ciSetup(3, { stack: '1', batch: '3', check: gated });
+  const bin = join(c.dir, 'bin');
+  const real = spawnSync('bash', ['-c', 'command -v cat'], { encoding: 'utf8' }).stdout.trim();
+  const hold = join(c.dir, 'hold');
+  mkdirSync(hold);
+  writeFileSync(join(bin, 'cat'), `#!/bin/bash\n[ -n "$HOLD_DIR" ] && [ "$1" = "/proc/$HOLD_PID/stat" ] || exec ${real} "$@"\nout=$(${real} "$@")\nif [ -e "$HOLD_DIR/arm" ]; then rm "$HOLD_DIR/arm"; : >"$HOLD_DIR/at"; until [ -e "$HOLD_DIR/go" ]; do sleep 0.05; done; fi\nprintf '%s\\n' "$out"\n`, { mode: 0o755 });
+  try {
+    // A base with lines to share, and the three branches redone on it: 1 deletes L6, 2 deletes L3, and 3 deletes L3
+    // too, then inserts a line where it was. Found by trying every pair of small edits for the 3rd.
+    const lines = (...l: string[]) => l.join('\n') + '\n';
+    const base = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'L9'];
+    const without = (...gone: string[]) => base.filter((l) => !gone.includes(l));
+    git(c.main, 'config', 'user.name', 't');
+    writeFileSync(join(c.main, 'lines.txt'), lines(...base));
+    git(c.main, 'add', 'lines.txt');
+    git(c.main, 'commit', '-qm', 'lines');
+    for (const wt of c.wts) git(wt, 'reset', '-q', '--hard', 'main');
+    const edit = (i: number, msg: string, ...l: string[]) => { writeFileSync(join(c.wts[i], 'lines.txt'), lines(...l)); git(c.wts[i], 'commit', '-qam', msg); };
+    edit(0, 'lines.txt: 1', ...without('L6'));
+    edit(1, 'lines.txt: 2', ...without('L3'));
+    edit(2, 'lines.txt: 3', ...without('L3'));
+    edit(2, 'lines.txt: 3 again', 'L1', 'L2', 'NEW', ...without('L1', 'L2', 'L3'));
+    const a = c.land(1);
+    await until("landing 1's ticket", () => c.issued() === 1);
+    const b2 = c.land(2, { HOLD_DIR: hold, HOLD_PID: String(a.child.pid) });
+    await until("landing 2's ticket", () => c.issued() === 2);
+    const d = c.land(3);
+    await until("landing 3's ticket", () => c.issued() === 3);
+    c.open();
+    const td = await c.tip(d).catch((e) => { throw new Error(`${e.message}\nA: ${a.stderr()}\nB: ${b2.stderr()}\nD: ${d.stderr()}`); });
+    writeFileSync(join(hold, 'arm'), '');
+    await until('the 2nd to stop in its look at the line', () => existsSync(join(hold, 'at')));
+    c.verdict(td, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await d.exit, 0, d.stderr());
+    assert.equal(git(c.main, 'rev-parse', 'main').slice(0, 12), td, 'the head landed all three');
+    writeFileSync(join(hold, 'go'), '');
+    assert.equal(await b2.exit, 0, b2.stderr());
+    assert.doesNotMatch(b2.stderr(), /won't rebase onto/);
+    assert.match(b2.stderr(), /landed in a batch with/);
+  } finally {
+    c.stop();
+  }
+});
+
 test("batches: the head runs land.local.sh's land_after for itself and each member it landed, once main is pushed", async () => {
   const c = ciSetup(3, { stack: '1', batch: '3', check: gated, local: 'land_after() { echo "$1 $2" >>"$(git rev-parse --path-format=absolute --git-common-dir)/after.log"; }\n' });
   try {

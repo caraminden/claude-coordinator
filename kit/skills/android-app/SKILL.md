@@ -54,6 +54,12 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   3. Sign with `apksigner` from `$ANDROID_HOME/build-tools/36.1.0/`, then verify:
      `apksigner sign --ks <jks> --ks-pass file:<pass> --out <app>.apk app-release-unsigned.apk`,
      then `apksigner verify <app>.apk`.
+- Before signing a Capacitor shell, check the merged release manifest
+  (`AndroidManifest.xml` under `app/build/intermediates/merged_manifests/release/`) with
+  `grep -rE 'allowBackup|usesCleartextTraffic|debuggable'`: none may be `true`. `capacitor.config`
+  has no `server.url` or `server.cleartext`, and `allowNavigation` lists only hosts we control
+  (each one can call the app's native plugins). Checklist after Cap-go/capgo-skills @e82217b (MIT),
+  in our words.
 - A lost keystore means every friend uninstalls (losing local data) and reinstalls, so never
   delete or regenerate one. If it's missing, stop and ask Cara.
 
@@ -131,5 +137,10 @@ citadel-android down               # when you're done
 - **Reach a dev server on perigee with `adb reverse`**:
   `adb -s emulator-5554 reverse tcp:<port> tcp:<port>`, then `http://127.0.0.1:<port>` in the phone.
   `10.0.2.2` inside the phone is the desktop, not perigee.
+- **A Capacitor shell's WebView.** The page's console is in logcat under the tags `Capacitor` and
+  `Capacitor/Console`; a debug build's WebView also shows in `chrome://inspect/#devices`. Replay a
+  permission flow without reinstalling: `adb -s emulator-5554 shell pm revoke <appId>
+  android.permission.<NAME>`, then `pm grant` to undo it. When phones behave differently, note the
+  WebView version: `adb -s emulator-5554 shell dumpsys webviewupdate`.
 - It renders in software (SwiftShader, no GPU) with guest Vulkan off: fine for screenshots and
   flows, not for frame rates or graphics bugs. Test those on a real phone.

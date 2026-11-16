@@ -277,6 +277,23 @@ test('a card addressed to one person (#687) is in their list alone, waits past t
   assert.equal(store.recentCards(citadel, 10).find((r) => JSON.parse(r.data).id === 'p-josh')!.reply, null);
 });
 
+test('warmCardRows reads a few card rows a step, and recentCards then finds them read (#796)', () => {
+  const store = new Store(join(root, 'card-warm.sqlite'));
+  const p = store.createProject('Citadel', null).id;
+  const a = store.createTicket({ project_id: p, title: 'a', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const plan = store.addEvent(a, 'plan', { id: 'p-1', summary: 's', plan: 'p', status: 'pending' });
+  for (let i = 0; i < 4; i++) store.addEvent(a, 'question', { id: `q-${i}`, questions: [] });
+  assert.equal(store.warmCardRows(p, 500, 2), 3, 'two of five read, three left');
+  assert.equal(store.warmCardRows(p, 500, 2), 1);
+  assert.equal(store.warmCardRows(p, 500, 2), 0);
+  assert.equal(store.warmCardRows(p, 500, 2), 0, 'nothing more to read');
+  // Changed behind the store's back, it still shows what the warm-up read: the rows were not read again.
+  (store as any).db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify({ id: 'p-1', summary: 'behind', plan: 'p', status: 'pending' }), plan.id);
+  const cards = store.recentCards(p, 500);
+  assert.equal(cards.length, 5);
+  assert.equal(JSON.parse(cards[0].data).summary, 's');
+});
+
 test('recentCards reads each card row once, and a card changed or deleted after that shows as it is now (#759)', () => {
   const store = new Store(join(root, 'card-rows.sqlite'));
   const p = store.createProject('Citadel', null).id;

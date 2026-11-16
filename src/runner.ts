@@ -3237,6 +3237,21 @@ export class Runner {
     });
   }
 
+  /**
+   * Read each scheme's newest cards' rows into the store's memory in small steps, yielding between them, so the first
+   * refsShared after a restart doesn't read 500 scattered rows in one go (Store.warmCardRows). Quits on its own errors.
+   */
+  async warmCards(chunk = 25, pauseMs = 5) {
+    try {
+      for (const p of this.store.listProjects()) {
+        while (this.store.warmCardRows(p.id, 500, chunk) > 0) await new Promise((r) => setTimeout(r, pauseMs));
+        await new Promise((r) => setTimeout(r, pauseMs));
+      }
+    } catch (err) {
+      console.warn('warming card rows failed:', err);
+    }
+  }
+
   /** What every turn's scheme-refs snapshot in a scheme shares, read once however many turns run there (#609). */
   refsShared(projectId: number) {
     const tickets = this.store.listTickets(projectId);

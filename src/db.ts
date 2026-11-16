@@ -2291,6 +2291,34 @@ export class Store {
     return row?.id ?? null;
   }
 
+  private pickedCards(projectId: number, limit: number) {
+    return this.db.prepare(`
+      SELECT * FROM (
+        SELECT e.id, t.number, t.kind AS tkind, t.status AS tstatus
+        FROM events e INDEXED BY events_cards JOIN tickets t ON t.id = e.ticket_id
+        WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval')
+        ORDER BY e.id DESC LIMIT ?)
+      ORDER BY id`).all(projectId, limit) as { id: number; number: number | null; tkind: string; tstatus: string }[];
+  }
+
+  private readCardRows(ids: number[]) {
+    if (!ids.length) return;
+    for (const row of this.db.prepare('SELECT * FROM events WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids)) as unknown as EventRow[]) {
+      this.cardRows.set(row.id, { ...row, cid: JSON.parse(row.data).id ?? null });
+    }
+  }
+
+  /**
+   * Read up to `chunk` of recentCards' card rows it hasn't read yet, and say how many are still unread. The first
+   * recentCards after a restart reads all 500 rows at once, scattered over a gigabyte file: 1.3 s of held loop when the
+   * disk was busy. The server calls this in small steps at start, so that first call finds them read.
+   */
+  warmCardRows(projectId: number, limit: number, chunk: number): number {
+    const unread = this.pickedCards(projectId, limit).filter((p) => !this.cardRows.has(p.id)).map((p) => p.id);
+    this.readCardRows(unread.slice(0, chunk));
+    return Math.max(unread.length - chunk, 0);
+  }
+
   /**
    * A project's newest `limit` question, plan and approval cards, oldest first,
    * each with its minion and how it was settled: the first person's message after it in its chat that isn't
@@ -2299,19 +2327,8 @@ export class Store {
   recentCards(projectId: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
     // Which cards, from the index alone; their rows only for cards not read before. Re-reading the 500 rows every
     // time, scattered over a gigabyte file, held the event loop 1-5 s whenever the page cache had dropped them (#759).
-    const picked = this.db.prepare(`
-      SELECT * FROM (
-        SELECT e.id, t.number, t.kind AS tkind, t.status AS tstatus
-        FROM events e INDEXED BY events_cards JOIN tickets t ON t.id = e.ticket_id
-        WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval')
-        ORDER BY e.id DESC LIMIT ?)
-      ORDER BY id`).all(projectId, limit) as { id: number; number: number | null; tkind: string; tstatus: string }[];
-    const unread = picked.filter((p) => !this.cardRows.has(p.id)).map((p) => p.id);
-    if (unread.length) {
-      for (const row of this.db.prepare('SELECT * FROM events WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(unread)) as unknown as EventRow[]) {
-        this.cardRows.set(row.id, { ...row, cid: JSON.parse(row.data).id ?? null });
-      }
-    }
+    const picked = this.pickedCards(projectId, limit);
+    this.readCardRows(picked.filter((p) => !this.cardRows.has(p.id)).map((p) => p.id));
     const cards = picked.flatMap((p) => {
       const row = this.cardRows.get(p.id);
       return row ? [{ ...row, number: p.number, tkind: p.tkind, tstatus: p.tstatus }] : [];

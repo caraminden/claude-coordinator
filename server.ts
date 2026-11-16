@@ -249,7 +249,10 @@ if (previews) {
   // Builds' previews are of this server's own code, so only its own scheme has them.
   previews.buildScheme = ownScheme;
 }
-if (!BOOT_CHECK) runner.recover();
+if (!BOOT_CHECK) {
+  void runner.warmCards();
+  runner.recover();
+}
 if (runner.units && !BOOT_CHECK) {
   execFile('systemctl', ['--user', 'show', '-p', 'MemoryMax', '--value', 'citadel.slice'], (err, out) => {
     if (err || out.trim() === 'infinity') console.warn('citadel.slice has no MemoryMax, so turns run uncapped: install deploy/citadel.slice (see README).');

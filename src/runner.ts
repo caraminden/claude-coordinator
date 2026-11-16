@@ -209,8 +209,10 @@ const failNoteKey = (ticketId: number) => `failnote:${ticketId}`;
 const closeCancelledKey = (ticketId: number) => `close-cancelled:${ticketId}`;
 /** Idle this long, a Taskmaster's prompt cache (1 hour) is still warm, so its handoff turn reads it cheaply. */
 export const FRESH_IDLE_MS = 55 * 60_000;
-/** Past this much context (tokens), a Taskmaster starts fresh by itself: as its turn ends (#423), or idle (#406). */
+/** Past this much context (tokens), a Taskmaster whose turn just ended starts fresh by itself (#423), so a long working session isn't cut mid-flow. */
 export const FRESH_CONTEXT_TOKENS = 150_000;
+/** Past this much context (tokens), an idle Taskmaster starts fresh (#406): its next cold wake would re-read all of it at full price. Cara 2026-11-15: 60k, not 150k. */
+export const FRESH_IDLE_CONTEXT_TOKENS = 60_000;
 const HANDOFF_MAX = 20_000;
 
 /** Where a person's own plan usage is kept (their container turns'), apart from the server login's `usage`. */
@@ -1963,7 +1965,7 @@ export class Runner {
   }
 
   /**
-   * Taskmasters idle FRESH_IDLE_MS with more than FRESH_CONTEXT_TOKENS of context start fresh (#406),
+   * Taskmasters idle FRESH_IDLE_MS with more than FRESH_IDLE_CONTEXT_TOKENS of context start fresh (#406),
    * while their prompt cache is still warm. One that missed that window (a restart) still does: its
    * next wake would re-read the whole context anyway. Run every minute.
    */
@@ -1974,7 +1976,7 @@ export class Runner {
         if (t.kind !== 'coordinator' || !t.session_id || t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id) || this.lanes.busy(t.id) || this.limitWait(t.id) || this.netWait(t.id)) continue;
         const size = this.store.getSetting<number>(contextKey(t.id));
         const ended = this.store.lastTurnEnd(t.id);
-        if (!size || size <= FRESH_CONTEXT_TOKENS || !ended || now - ended < FRESH_IDLE_MS) continue;
+        if (!size || size <= FRESH_IDLE_CONTEXT_TOKENS || !ended || now - ended < FRESH_IDLE_MS) continue;
         this.requestFresh(t.id, `idle ${Math.round((now - ended) / 60_000)} minutes with ${Math.round(size / 1000)}k tokens of context`, true);
       }
     }

@@ -226,7 +226,7 @@ export const UNUSED_BUNDLED_SKILLS = Object.fromEntries(
   ['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init', 'simplify', 'fewer-permission-prompts', 'run', 'security-review', 'code-review'].map((n) => [n, 'off']),
 ) as Record<string, 'off'>;
 export const TURN_SETTINGS = { autoCompactWindow: 180_000, bashOutputMaxChars: 12_000, skillOverrides: UNUSED_BUNDLED_SKILLS };
-/** A Taskmaster's compact window (#423): same window as a minion's since #703, kept as its own constant; it hands off past FRESH_CONTEXT_TOKENS anyway. */
+/** A Taskmaster's compact window (#423): same window as a minion's since #703, kept as its own constant; it hands off past FRESH_CONTEXT_TOKENS (turn end) or FRESH_IDLE_CONTEXT_TOKENS (idle) anyway. */
 export const TASKMASTER_COMPACT_WINDOW = 180_000;
 /**
  * Read rules every turn gets, so the Read, Grep and Glob tools can't open a login or a transcript

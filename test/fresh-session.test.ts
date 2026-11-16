@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { FRESH_CONTEXT_TOKENS, FRESH_IDLE_MS, Runner } from '../src/runner.ts';
+import { FRESH_CONTEXT_TOKENS, FRESH_IDLE_CONTEXT_TOKENS, FRESH_IDLE_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
 import { jsonLines, lines, stopTurns, testPins, until } from './helpers.ts';
 testPins();
@@ -224,13 +224,13 @@ test('the idle sweep starts fresh only past the idle time and the context size',
   const due = taskmaster();
   const small = taskmaster();
   const recent = taskmaster();
-  for (const [id, size, ended] of [[due, FRESH_CONTEXT_TOKENS + 1, now - FRESH_IDLE_MS], [small, FRESH_CONTEXT_TOKENS, now - FRESH_IDLE_MS], [recent, FRESH_CONTEXT_TOKENS + 1, now - FRESH_IDLE_MS + 60_000]]) {
+  for (const [id, size, ended] of [[due, FRESH_IDLE_CONTEXT_TOKENS + 1, now - FRESH_IDLE_MS], [small, FRESH_IDLE_CONTEXT_TOKENS, now - FRESH_IDLE_MS], [recent, FRESH_IDLE_CONTEXT_TOKENS + 1, now - FRESH_IDLE_MS + 60_000]]) {
     store.setSetting(`context:${id}`, size);
     store.recordTurn(id, { event_id: null, session_id: 'old', ended_at: ended, session_cost_usd: 0, duration_ms: 1, usage: {} } as any);
   }
   runner.freshSweep(now);
   assert.equal(runner.view(store.getTicket(due)!).fresh_pending, true);
-  assert.match(notes(due).at(-1)!, /idle 55 minutes with 150k tokens of context/);
+  assert.match(notes(due).at(-1)!, /idle 55 minutes with 60k tokens of context/);
   assert.equal(runner.view(store.getTicket(small)!).fresh_pending, false);
   assert.equal(runner.view(store.getTicket(recent)!).fresh_pending, false);
   // Let it run out: no handoff, then the compaction.
@@ -244,7 +244,7 @@ test('the idle sweep starts fresh only past the idle time and the context size',
 test('a fresh start that cannot run a turn gives up once, not every minute', async () => {
   const id = taskmaster();
   const now = Date.now();
-  store.setSetting(`context:${id}`, FRESH_CONTEXT_TOKENS + 1);
+  store.setSetting(`context:${id}`, FRESH_IDLE_CONTEXT_TOKENS + 1);
   store.recordTurn(id, { event_id: null, session_id: 'old', ended_at: now - FRESH_IDLE_MS, session_cost_usd: 0, duration_ms: 1, usage: {} } as any);
   runner.placeFor = () => ({ refused: 'No Claude login for this turn.' });
   try {
@@ -303,6 +303,32 @@ async function prompts(count: number, want: number) {
   await until('the fake to log its calls', () => callCount() >= count + want);
   return jsonLines(calls).slice(count).map((l) => promptText(l.prompt));
 }
+
+test('61k of context: an idle Taskmaster hands off, one whose turn just ended does not (Cara 2026-11-15)', async () => {
+  assert.equal(FRESH_IDLE_CONTEXT_TOKENS, 60_000);
+  try {
+    const working = taskmaster();
+    contextSize(61_000);
+    runner.send(working, 'Cara', 'hi');
+    await started(working);
+    await endTurn(working, 'ok');
+    await waitIdle(working);
+    await new Promise((r) => setTimeout(r, 100)); // its save, after which a fresh start would run
+    assert.equal(runner.isRunning(working), false);
+    assert.equal(runner.view(store.getTicket(working)!).fresh_pending, false);
+    // The same 61k, once it has sat idle, does hand off.
+    store.recordTurn(working, { event_id: null, session_id: 'old', ended_at: Date.now(), session_cost_usd: 0, duration_ms: 1, usage: {} } as any);
+    runner.freshSweep(Date.now() + FRESH_IDLE_MS + 1000);
+    assert.equal(runner.view(store.getTicket(working)!).fresh_pending, true);
+    await started(working);
+    await endTurn(working, 'ok');
+    await started(working);
+    await endTurn(working, 'ok');
+    await waitIdle(working);
+  } finally {
+    contextSize(null);
+  }
+});
 
 test('a Taskmaster turn that ends past 150k hands off at once; one at 150k does not (#423)', async () => {
   try {

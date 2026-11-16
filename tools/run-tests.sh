@@ -16,7 +16,8 @@
 # every failed file in a CI run passed alone, it asks CI for one fresh run, which must be fully green to land. So the
 # "<n> test file(s) failed; rerunning" line and the per-file labels below are its input: test/land.test.ts pins them.
 # The reruns hold the deploy lock too, and a waiting land gives up after 15 minutes: DEPLOY_RERUN_TIMEOUT limits
-# each in seconds (default 120), DEPLOY_RERUN_BUDGET all of them together (default 300); a file left over is not rerun.
+# each in seconds (default 120, or 1.5 times the file's time in the full run when that is longer: test/land-overlap.test.ts takes
+# about 190 s alone), DEPLOY_RERUN_BUDGET all of them together (default 300); a file left over is not rerun.
 #
 # Landing tests win over routine checks (#503): the run and its reruns get their own systemd scope in citadel.slice
 # with CPUWeight=500, beside the host turns' slice and each person's container (100 each) and under the server's
@@ -131,7 +132,9 @@ if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
 fi
 [ "$rc" -eq 1 ] || exit "$rc" # green, hung or killed: nothing to rerun
 
-mapfile -t files <"$failed"
+mapfile -t lines <"$failed"
+files=() took=() # the reporter writes "<file><tab><seconds the file took in the full run>"
+for l in "${lines[@]}"; do files+=("${l%%$'\t'*}"); took+=("${l#*$'\t'}"); done
 say() { echo "run-tests: $*" >>"$log"; }
 [ "${#files[@]}" -gt 0 ] || exit "$rc"
 if [ "${#files[@]}" -gt "$max_reruns" ]; then
@@ -160,13 +163,16 @@ if [ -f "$tools/deploy-queue.sh" ]; then
   queue_phase "rerunning ${#files[@]} failed test file$([ "${#files[@]}" = 1 ] || echo s) since $(date +%H:%M)"
 fi
 SECONDS=0
-for f in "${files[@]}"; do
+for i in "${!files[@]}"; do
+  f=${files[$i]}
   left=$((budget - SECONDS))
   if [ "$left" -le 0 ]; then
     say "$f: not rerun: the reruns' ${budget}s ran out"
     continue
   fi
-  this=$((left < rerun_limit ? left : rerun_limit))
+  # A long file gets 1.5 times its own full-run time, never less than the flat limit, and never more than the budget left.
+  want=$((took[i] * 3 / 2 > rerun_limit ? took[i] * 3 / 2 : rerun_limit))
+  this=$((left < want ? left : want))
   echo "== $f" >>"$rerun_log"
   timeout -k 10 "$this" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit "$f" >>"$rerun_log" 2>&1
   case $? in

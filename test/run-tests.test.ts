@@ -49,6 +49,19 @@ test('watch', async () => {
   writeFileSync('seen-progress', f && existsSync(f) ? readFileSync(f, 'utf8') : 'none');
 });
 `;
+// A long file: 3 s of work in the full run, then fails (first run only); alone it takes 3 s again, and passes or hangs.
+const slowOnce = (then: 'pass' | 'hang') => `import test from 'node:test';
+import { existsSync, writeFileSync } from 'node:fs';
+test('slow', async () => {
+  const again = existsSync('ran-slow');
+  await new Promise((r) => setTimeout(r, 3000));
+  if (again) return ${then === 'hang' ? 'new Promise(() => setInterval(() => {}, 1000))' : 'undefined'};
+  writeFileSync('ran-slow', '');
+  throw new Error('first run fails');
+});
+`;
+FIXTURES['slow-pass.test.mjs'] = slowOnce('pass');
+FIXTURES['slow-hang.test.mjs'] = slowOnce('hang');
 for (const name of ['once-then-hang', 'once-then-hang2', 'once-then-hang3']) FIXTURES[`${name}.test.mjs`] = onceThenHang(name);
 
 // Four files that each log "+" when they start and "-" when done, 700 ms apart: the log shows how many ran at once.
@@ -139,6 +152,20 @@ test('a file that hangs when rerun alone is stopped and counts as a real failure
   const r = await run(['once-then-hang.test.mjs'], { DEPLOY_RERUN_TIMEOUT: '3' });
   assert.equal(r.code, 1, r.log);
   assert.match(r.log, /test\/once-then-hang\.test\.mjs: hung when rerun alone \(stopped after 3s\): a real failure/);
+  assert.deepEqual(flakeLines(r.retro), []);
+});
+
+test("a file's rerun limit fits its own length: one that took 3 s in the full run is not stopped at a 2 s flat limit", async () => {
+  const r = await run(['slow-pass.test.mjs'], { DEPLOY_RERUN_TIMEOUT: '2' });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.log, /test\/slow-pass\.test\.mjs: failed in the full run, passed alone/);
+  assert.equal(flakeLines(r.retro).length, 1, r.retro);
+});
+
+test('a long file that really hangs alone is still called a hang, at the limit its length gave it (1.5 times its 3-4 s, more than the 2 s flat limit)', async () => {
+  const r = await run(['slow-hang.test.mjs'], { DEPLOY_RERUN_TIMEOUT: '2', DEPLOY_RERUN_BUDGET: '20' });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.log, /test\/slow-hang\.test\.mjs: hung when rerun alone \(stopped after (?:[3-9]|1\d)s\): a real failure/);
   assert.deepEqual(flakeLines(r.retro), []);
 });
 

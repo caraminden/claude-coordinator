@@ -2,3 +2,10 @@
 
 /** The cards that wait on `person`: those to everyone and those addressed to them, not ones addressed to someone else (they stay in the chat, answerable by anyone). */
 export const cardsForMe = (cards, person) => (cards ?? []).filter((c) => !c.to || c.to.toLowerCase() === String(person ?? '').toLowerCase());
+
+/**
+ * The cards the strip over the composer lists for `person`: in the Taskmaster's chat every card waiting on them
+ * (#608); in a minion's only its open choices cards (#821; Cara, 2026-11-16: "When you have an open choices card it
+ * should have a thing at the bottom of the chat"), since their picks are made on another page, not in the chat.
+ */
+export const stripCards = (t, person) => cardsForMe(t?.open_cards, person).filter((c) => t.kind === 'coordinator' || c.doc);

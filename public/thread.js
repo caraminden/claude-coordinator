@@ -368,11 +368,11 @@ export function renderBranch(status) {
   el.hidden = !parts.length && !chip;
 }
 
-/** Fill the Taskmaster's waiting-cards strip over its composer (public/waiting.js); a minion's chat has none. */
+/** Fill the waiting-cards strip over the composer (public/waiting.js): a Taskmaster's cards, a minion's open choices cards. */
 function renderWaiting() {
   const slot = document.getElementById('chat-waiting');
   if (!slot || !view.ticket) return;
-  const strip = isCoordinator(view.ticket) ? waitingStrip(view.ticket) : null;
+  const strip = waitingStrip(view.ticket);
   slot.hidden = !strip;
   slot.replaceChildren(strip ?? '');
 }

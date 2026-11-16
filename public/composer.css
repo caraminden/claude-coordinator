@@ -121,10 +121,15 @@ a.waiting-card { --chip: var(--waiting); display: inline-flex; gap: 0.3rem; alig
 a.waiting-card:hover, a.waiting-card:focus-visible { background: color-mix(in srgb, var(--chip) 14%, var(--panel)); }
 a.waiting-card .what { font-weight: 650; color: var(--chip); flex: none; }
 a.waiting-card .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* A choices card's Open the page (#821): the card's own main action, so it is the strip's accent button. */
+a.button.waiting-open { flex: none; background: var(--accent); color: var(--on-accent); }
 /* On a phone it stays one row that scrolls sideways, so the chat keeps its room however many wait. */
 @media (max-width: 800px) {
   .waiting-strip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .waiting-head, a.waiting-card { flex: none; }
+  /* A choices card's link gives up width, so its Open the page stays on screen. */
+  a.waiting-card.doc { flex: 0 1 auto; }
+  .waiting-strip.choices .waiting-head { display: none; }
   /* A tap target as tall as the controls, its words centred. */
   a.waiting-card { max-width: 75vw; min-height: var(--control-h); align-items: center; padding-block: 0; }
   /* A row that scrolls drops its end padding; this keeps the last card off the edge. */

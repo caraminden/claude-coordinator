@@ -130,6 +130,44 @@ export function proseChoice(text: string, status: { replies?: unknown } | null, 
   return hit && postedCard(transcript) === false ? hit.trim() : null;
 }
 
+const CLOSING = /\b(closing (this|the) (minion|thread)|closing (it |myself )?(out|down)\b|i(?:'ll| will| am|'m) (?:now )?(?:close|dismiss) (?:this minion|myself|this thread)|dismissing (this minion|myself)|(?:ready|about) to close (?:this|the|myself)\b|ready to close\b)/i;
+
+/** Whether this turn's close_self call was answered without an error: true, false (called, refused), or null (not called or unreadable). */
+function closeSelfOk(transcript?: string): boolean | null {
+  if (!transcript) return null;
+  try {
+    let called: boolean | null = false;
+    const ids = new Map<string, boolean>();
+    for (const l of readFileSync(transcript, 'utf8').split('\n')) {
+      if (!l) continue;
+      const e = JSON.parse(l);
+      const content = e.message?.content;
+      if (!Array.isArray(content)) { if (e.type === 'user' && !e.isMeta) { called = false; ids.clear(); } continue; }
+      if (e.type === 'user' && !e.isMeta && !content.some((c: any) => c?.type === 'tool_result')) { called = false; ids.clear(); continue; }
+      for (const c of content) {
+        if (c?.type === 'tool_use' && /^mcp__[a-z-]+__close_self$/.test(c.name)) { ids.set(c.id, false); called = true; }
+        else if (c?.type === 'tool_result' && ids.has(c.tool_use_id)) ids.set(c.tool_use_id, !c.is_error);
+      }
+    }
+    return called ? [...ids.values()].some(Boolean) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Why a reply that says the minion is closing is false (no working close_self, or a status line that cancels it), or null (#809). */
+export function closingClaim(text: string, status: { state?: unknown } | null, transcript?: string): string | null {
+  if (!transcript) return null;
+  const tail = text.replace(CODE, '').replace(QUOTED, '').trim().split(/\n\s*\n/).slice(-2).join('\n\n');
+  const hit = tail.match(CLOSING)?.[0];
+  if (!hit) return null;
+  const ok = closeSelfOk(transcript);
+  const state = typeof status?.state === 'string' ? status.state : null;
+  if (ok && state && ['complete', 'try', 'ready'].includes(state)) return `it says "${hit}", but its status line sets state ${state}, which cancels the close, so it stays open`;
+  if (!ok) return `it says "${hit}", but close_self was ${ok === false ? 'refused' : 'not called'} this turn, so it stays open`;
+  return null;
+}
+
 /** The prompt the marker says was nudged, or null if none was. */
 function readMarker(file: string): string | null {
   try {
@@ -159,7 +197,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const docs = new Set([...(refs?.cards ?? []), ...(refs?.settled ?? [])].flatMap((c) => (c.doc ? [c.doc] : [])));
   const choices = refs?.cards ? await cardlessChoices(reply, cfg, docs) : [];
   const asked = proseChoice(reply, status, input.transcript_path);
-  if (!asked && !broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length) return null;
+  const closing = closingClaim(reply, status, input.transcript_path);
+  if (!asked && !broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length && !closing) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -193,11 +232,15 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
     ? `Your reply asks a choice in prose ("${asked.slice(0, 120)}") and no card was posted this turn. Post it as an ask_question card (or a status-line reply button for a lone go), `
       + `or answer ${KEEP} if nobody has a choice to make.\n`
     : '';
+  const close = closing
+    ? `Your reply says this minion is closing, but ${closing}. Words don't close it: call close_self (state null in the status line, no card open), or rewrite the line to say plainly why it stays open `
+      + '(for example "Staying open in state complete for you to read X").\n'
+    : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
   const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '')
     + (stale.length ? `${explainStale(stale, refs!.self ?? null)}\n` : '');
-  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${ask}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${ask}${close}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

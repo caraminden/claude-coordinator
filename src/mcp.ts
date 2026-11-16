@@ -98,6 +98,16 @@ const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with.
 const SCHEDULE_EFFORT = { ...EFFORT, description: 'The effort each run starts with. Required: the one the model table pairs with your model (a read-only check: low).' };
 // The activity gate and one-offs (#745).
 /** The kit's standard audits, kit/schedules/<slug>.md (#799); test/schedule-templates.test.ts checks this matches the folder. */
+/**
+ * close_self's answer. The call is checked against the state now, but the reply's own status line is applied after
+ * it: a final state of complete, try or ready cancels the close (#809), so the answer says that before the minion writes it.
+ */
+export function closeSelfResult(cleared: boolean): string {
+  return `${cleared ? 'Dismissed (state ready cleared): do not set state ready again this turn, since that keeps it open. ' : ''}This minion will be dismissed when your turn ends (unless the turn fails or a new message arrives). `
+    + 'Your final reply\'s status line counts too: a state of complete, try or ready there (or a card posted after this call) cancels the close, so end it with state null. '
+    + 'Do not announce the close in prose. If you do stay open, say plainly why ("Staying open in state complete for you to read X"). Finish your reply now.';
+}
+
 export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check'] as const;
 const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
@@ -1334,7 +1344,7 @@ const THREAD_TOOLS = [
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile (a GitHub notice that needs no action, like its PR merging, doesn't count); its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open in state complete until someone has read it. It refuses while a question or plan card is open or the state is try or complete; a state ready is cleared. Setting state complete, try or ready after it cancels the dismissal.`,
+      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile (a GitHub notice that needs no action, like its PR merging, doesn't count); its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open in state complete until someone has read it. It refuses while a question or plan card is open or the state is try or complete; a state ready is cleared. Setting state complete, try or ready after it cancels the dismissal, and so does the state in your final reply's status line, which is applied after this call. Never announce a close in prose ("closing this minion"): call this tool, and if it refuses or the minion stays open, say plainly why you are staying open.`,
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Merged abc1234; live after the restart"' } },
@@ -1788,7 +1798,7 @@ async function runTool(name: string, args: any): Promise<string> {
         }
         throw err;
       }
-      return `${closed?.cleared ? 'Dismissed (state ready cleared): do not set state ready again this turn, since that keeps it open. ' : ''}This minion will be dismissed when your turn ends (unless the turn fails or a new message arrives). Finish your reply now.`;
+      return closeSelfResult(!!closed?.cleared);
     }
     case 'wake_when_live': {
       const target = ROLE === 'thread' ? TICKET : await id(args);

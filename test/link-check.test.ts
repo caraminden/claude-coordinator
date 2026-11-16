@@ -201,3 +201,32 @@ test('a reply that asks a choice in prose with no card this turn is sent back; a
   // No readable transcript: say nothing rather than guess.
   assert.equal(await check({ last_assistant_message: 'Should I merge it?' }, cfg), null);
 });
+
+test('a reply that says the minion is closing is sent back unless close_self was called and the status line keeps nothing open', async () => {
+  const line = (o: object) => JSON.stringify(o);
+  const user = line({ type: 'user', message: { role: 'user', content: 'hi' } });
+  const use = (name: string, id: string) => line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input: {} }] } });
+  const res = (id: string, is_error = false) => line({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error, content: 'x' }] } });
+  let n = 0;
+  const ask = (text: string, ...transcript: string[]) => {
+    const transcript_path = join(root, `close-${n++}.jsonl`);
+    writeFileSync(transcript_path, [user, ...transcript].join('\n'));
+    return check({ last_assistant_message: text, transcript_path }, cfg);
+  };
+  const ok = [use('mcp__thread__close_self', 'c1'), res('c1')];
+  const v = await ask('Landed.\n\nClosing this minion.');
+  assert.equal(v?.decision, 'block');
+  assert.match(v.reason, /says this minion is closing/);
+  assert.match(v.reason, /close_self/);
+  assert.equal((await ask('Merged.\n\nI\'ll close myself now.', use('mcp__thread__close_self', 'c1'), res('c1', true)))?.decision, 'block', 'a refused close_self');
+  assert.equal(await ask('Landed.\n\nClosing this minion.', ...ok), null);
+  assert.equal(await ask('Landed. Closing this minion.\n<!-- status: {"state":null,"note":"merged"} -->', ...ok), null);
+  // The status line applied after close_self cancels it (#18): the reply's words are false.
+  const w = await ask('Landed. Closing this minion.\n<!-- status: {"state":"complete","note":"nothing left"} -->', ...ok);
+  assert.equal(w?.decision, 'block');
+  assert.match(w.reason, /state complete/);
+  assert.equal(await ask('Staying open in state complete for you to read the report.'), null);
+  assert.equal(await ask('I closed the stale PR and the old branch.'), null);
+  assert.equal(await ask('Cara asked "closing this minion?" and I said no.'), null);
+  assert.equal(await check({ last_assistant_message: 'Closing this minion.' }, cfg), null, 'no readable transcript: say nothing');
+});

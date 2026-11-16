@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { closeSelfResult } from '../src/mcp.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
 testPins();
@@ -298,4 +299,13 @@ test('a new turn clears complete with its note, since "nothing left" is stale on
     assert.deepEqual([store.getTicket(id)!.state, store.getTicket(id)!.note], [null, note], state);
     await endTurn(id, 'ok');
   }
+});
+
+test("close_self's answer warns that the final status line counts, and says what to write if it stays open", () => {
+  const said = closeSelfResult(false);
+  assert.match(said, /status line/);
+  assert.match(said, /complete, try or ready/);
+  assert.match(said, /say plainly why/i);
+  assert.doesNotMatch(said, /Closing this minion/);
+  assert.match(closeSelfResult(true), /state ready cleared/);
 });

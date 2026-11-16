@@ -99,7 +99,7 @@ export class ContraptionReader implements Reader {
     for (const t of this.d.finder.list('contraption')) {
       const row = this.d.store.getContraption(t.contraption!);
       if (!row) continue;
-      // A deploy fast-forwards the folder before it builds: until it ends, what was read before it started stands.
+      // Until a deploy ends, what was read before it started stands: the folder only flips to the new build at its restart.
       const kept = this.state.get(t.id);
       if (kept && this.d.running(row.name)) {
         next.set(t.id, kept);

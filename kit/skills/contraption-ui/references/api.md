@@ -664,16 +664,24 @@ with `hand_off_land` deploys it by itself and reports the outcome, and auto-depl
 5 minutes after it last moved, so the tool is for redeploys outside a land. It deploys what is on
 GitHub, so push first. A deploy (tested):
 
-1. clones the repo if the folder is missing; otherwise fetches and fast-forwards the branch, and
-   refuses, changing nothing, on local changes, untracked files that aren't ignored, other commits,
-   another branch or another origin (keep build output in `.gitignore`);
-2. runs the build;
-3. holds new turns, waits up to 3 minutes for running ones, rewrites the units and restarts the
-   service;
+1. checks out the branch's new commit in the idle one of two checkouts, `~/apps/.<name>/a` and
+   `/b` (the folder, `~/apps/<name>`, is a link to the live one; a deploy turns a plain folder into
+   `a` first), and refuses, changing nothing, on local changes or untracked files that aren't
+   ignored in either, commits the branch doesn't have, another branch or another origin (keep build
+   output in `.gitignore`);
+2. runs the build there, while the live build keeps running untouched;
+3. holds new turns, waits up to 3 minutes for running ones, points the folder at the new checkout,
+   rewrites the units and restarts the service;
 4. waits up to 60 s for the health path to answer, twice a few seconds apart.
 
-If 2 to 4 fail, it resets to the commit it ran before, builds that and restarts it (`rolled back`);
-a first deploy has nothing to roll back to (`failed`). The tool returns what happened and the end
+If 2 fails, nothing changed and nothing restarts (`failed`). If 3 or 4 fail, it points the folder
+back at the old checkout and restarts that as it was built, with no rebuild (`rolled back`); a
+first deploy has nothing to roll back to (`failed`). Each checkout keeps its own build output, so
+an app takes about twice the disk. Anything the app writes belongs in its `DATA_DIR`, never the
+repo folder: the next deploy runs from the other checkout. To undo the layout by hand: deploy
+until `a` is the live one (`b`'s git lives in `a`), stop the app, `rm ~/apps/<name>` (the link),
+`mv ~/apps/.<name>/a ~/apps/<name>`, `rm -rf ~/apps/.<name>`, `git -C ~/apps/<name> worktree
+prune`, and install it again. The tool returns what happened and the end
 of the log. After a good deploy it checks the two things every contraption ships with (Cara,
 2026-11-09: "both of these should be the default behavior for new contraptions"):
 

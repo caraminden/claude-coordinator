@@ -415,9 +415,10 @@ export class ClaudeLink {
     if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push(...checkoutMounts(LIVE_CHECKOUT) ?? []);
     // The contraptions' folders, read-only, for a Citadel member or admin: their Citadel Taskmaster turns read every scheme (#656).
     const user = this.store.getUser(uid);
+    // Their parent folders: a folder is a link into its two slots beside it (#801), which a mount of the link would pin at
+    // the slot live when the container started.
     if (this.store.isAdmin(user)) {
-      for (const c of this.store.listContraptions()) {
-        const dir = appFolder(c, this.home);
+      for (const dir of new Set(this.store.listContraptions().map((c) => dirname(appFolder(c, this.home))))) {
         if (existsSync(dir)) mounts.push({ src: dir, dst: dir, ro: true });
       }
     }

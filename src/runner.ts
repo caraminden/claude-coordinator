@@ -31,7 +31,7 @@ import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { takeStatus, type StatusFields } from './status-trailer.ts';
-import { appFolder } from './app-services.ts';
+import { appFolder, slotsOf } from './app-services.ts';
 import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { homedir } from 'node:os';
@@ -654,7 +654,8 @@ export class Runner {
     const others = this.store.listProjects().filter((p) => p.id !== project.id && p.repo_dir);
     return {
       gitDirs: [...new Set(others.flatMap((p) => [p.repo_dir!, ...this.store.listTickets(p.id).filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))],
-      apps: this.store.listContraptions().map((c) => appFolder(c, homedir())),
+      // The folder is a link into its two slots (#801): rules match the path read, so both are listed.
+      apps: this.store.listContraptions().flatMap((c) => [appFolder(c, homedir()), slotsOf(appFolder(c, homedir()))]),
       data: dirname(this.store.path),
       keysDir: this.contraptionKeys,
     };

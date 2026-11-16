@@ -12,6 +12,7 @@ import { claudeConfigDir } from './sessions.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import { SCHEME_REFS_MATCHER } from './scheme-refs.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
+import { advisedModel } from '../public/model-table.js';
 
 // Turns run a copy of the MCP server taken when this server started, not the file on disk: a deploy
 // pulls new code before the restart, and a newer MCP server would offer tools this process rejects.
@@ -529,7 +530,11 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (addDirs.length) args.push('--add-dir', ...addDirs);
   if (existsSync(pinned(pins.KIT))) args.push('--plugin-dir', pinned(pins.KIT));
   args.push(...pluginDirArgs(turnPluginDirs(project, ticket), ticket.cwd));
-  if (model) args.push('--model', model);
+  // The advisor trial (#817): `claude-sonnet-5-5+opus-advisor` runs Sonnet with Opus as its advisor. Never a Taskmaster's.
+  // Claude Code's CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1, in the service's env, switches the tool off for every turn.
+  const advised = advisedModel(model);
+  if (advised.model) args.push('--model', advised.model);
+  if (advised.advisor && ticket.kind !== 'coordinator') args.push('--advisor', advised.advisor);
   if (effort) args.push('--effort', effort);
   // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
   let env: Record<string, string> = { ...turnEnv(facts.env.server), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };

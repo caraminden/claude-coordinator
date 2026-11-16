@@ -14,6 +14,7 @@ import { cardHref } from '../card-links.ts';
 import { armForCi, postCard, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
+import { CLAUDE_MODELS } from '../../public/model-table.js';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
@@ -231,8 +232,10 @@ function cleanAnswers(questions: any[], raw: unknown) {
   });
 }
 
-/** "Opus 5.5" for "claude-opus-5-5". */
+/** "Opus 5.5" for "claude-opus-5-5"; a model with an advisor (#817) by the model table's own name for it. */
 function modelName(id: string): string {
+  const named = CLAUDE_MODELS.find(([m]) => m === id)?.[1];
+  if (named) return named;
   const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id);
   return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
 }

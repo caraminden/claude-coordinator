@@ -219,3 +219,17 @@ test("a resumed turn is sent this turn's system prompt, not its session's first 
     if (name === 'minion') assert.equal(args[args.indexOf('--resume') + 1], 'sess-7');
   }
 });
+
+// The advisor trial (#817): a minion set to Sonnet with an Opus advisor launches as Sonnet and gets
+// --advisor; a plain model never does, and a Taskmaster set to it runs without the advisor.
+test('--advisor is passed only when the minion\'s model carries one, and never to a Taskmaster', async () => {
+  const flags = async (c: Case) => {
+    const args: string[] = ((await launch(c)) as any).spec.args;
+    const at = (f: string) => (args.includes(f) ? args[args.indexOf(f) + 1] : null);
+    return { model: at('--model'), advisor: at('--advisor') };
+  };
+  assert.deepEqual(await flags({ set: { model: 'claude-sonnet-5-5+opus-advisor' } }), { model: 'claude-sonnet-5-5', advisor: 'opus' });
+  assert.deepEqual(await flags({ set: { model: 'claude-sonnet-5-5' } }), { model: 'claude-sonnet-5-5', advisor: null });
+  assert.deepEqual(await flags({}), { model: null, advisor: null });
+  assert.deepEqual(await flags({ kind: 'coordinator', set: { model: 'claude-sonnet-5-5+opus-advisor' } }), { model: 'claude-sonnet-5-5', advisor: null });
+});

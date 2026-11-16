@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline';
 import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
 import { liveState } from './live-state.ts';
+import { ADVISOR_TRIAL } from '../public/model-table.js';
 import { instructionCost } from './prompt-cost.ts';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
@@ -78,12 +79,12 @@ const BUILD = {
 
 // The same lists as MODELS and EFFORTS in db.ts; the server checks them again. Required on create (#698;
 // Cara, 2026-11-14: "we should ALWAYS make an intentional choice about model"): the table is in the Taskmaster's prompt.
-const MODEL_IDS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'];
+const MODEL_IDS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5+opus-advisor', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'];
 const EFFORT_IDS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODEL = {
   type: 'string',
   enum: MODEL_IDS,
-  description: "The model for the minion's turns, as in its composer. Required: pick it on purpose from the model table in your prompt, by the kind of work (mostly its type). The gpt-6 ones are Codex, only for a person who asked for it.",
+  description: `The model for the minion's turns, as in its composer. Required: pick it on purpose from the model table in your prompt, by the kind of work (mostly its type). The gpt-6 ones are Codex, only for a person who asked for it. ${ADVISOR_TRIAL}`,
 };
 const EFFORT = {
   type: 'string',
@@ -91,7 +92,7 @@ const EFFORT = {
   description: "The effort for the minion's turns, as in its composer. Required: the effort the model table pairs with your model for this kind of work. xhigh only after a Fable run failed twice or a person asks; never max.",
 };
 // update_ticket can still put a minion back on Claude Code's default (Opus 5.5 at high) with null.
-const MODEL_CHANGE = { type: ['string', 'null'], enum: [...MODEL_IDS, null], description: "The model for the minion's next turns, as in its composer; null for Claude Code's default (Opus 5.5 at high)." };
+const MODEL_CHANGE = { type: ['string', 'null'], enum: [...MODEL_IDS, null], description: `The model for the minion's next turns, as in its composer; null for Claude Code's default (Opus 5.5 at high). ${ADVISOR_TRIAL}` };
 const EFFORT_CHANGE = { type: ['string', 'null'], enum: [...EFFORT_IDS, null], description: "The effort for the minion's next turns, as in its composer; null for the scheme's default effort." };
 // What a schedule's runs start with (#387), from the same table: a mechanical checkup is a read-only check.
 const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with. Required: pick it from the model table in your prompt; a mechanical checkup is a read-only check (claude-sonnet-5-5).' };

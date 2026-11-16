@@ -8,6 +8,9 @@
 export const CLAUDE_MODELS = [
   ['claude-opus-5-5', 'Opus 5.5'],
   ['claude-sonnet-5-5', 'Sonnet 5.5'],
+  // The advisor trial (#817, Cara 2026-11-16 "Start the trial"): Sonnet runs the turn and consults Opus at hard points.
+  // Experimental in Claude Code; to drop it, take this row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts).
+  ['claude-sonnet-5-5+opus-advisor', 'Sonnet 5.5 + Opus advisor'],
   ['claude-haiku-5-5', 'Haiku 5.5'],
   ['claude-fable-5-1', 'Fable 5.1'],
   ['claude-fable-5-2', 'Fable 5.2'],
@@ -24,6 +27,16 @@ export const TIERS = [
   { work: 'only architecture shaping a big multi-part feature or major build, security and risk reviews of a high-risk change, and bugs whose fix failed to hold or that are intermittent', model: 'claude-fable-5-2', effort: 'medium' },
   { work: 'everything else (a feature needing design, a new screen or data model, the land pipeline, runner, tripwire, auth or a migration, multi-file refactors, art)', model: 'claude-opus-5-5', effort: 'high' },
 ];
+
+/**
+ * The model and advisor a model setting launches with: `<model>+<advisor>-advisor` is `--model <model> --advisor <advisor>`
+ * (#817). Any other value is the model alone. Read from the id itself, so a minion still set to an advisor
+ * row that was taken out of CLAUDE_MODELS keeps launching.
+ */
+export function advisedModel(id) {
+  const m = /^(.+)\+([a-z]+)-advisor$/.exec(id ?? '');
+  return m ? { model: m[1], advisor: m[2] } : { model: id ?? null, advisor: null };
+}
 
 /** What a start that knows only the minion's `type` picks: the tier most work of that type falls in. */
 export const BY_TYPE = {
@@ -59,6 +72,9 @@ const CLUES = [
 export function guessType(text) {
   return CLUES.find(([, re]) => re.test(text ?? ''))?.[0] ?? null;
 }
+
+/** The advisor trial's brief to the Taskmaster (#817; handoff from #813), in create_ticket's and update_ticket's model description: whom it starts on the advisor. */
+export const ADVISOR_TRIAL = 'claude-sonnet-5-5+opus-advisor is the advisor trial (#817): Sonnet runs the turn and consults Opus at hard points (~$0.35 a consult at an 85k context). Until its report ends it, start about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high on it at medium, and move a stalled Sonnet-medium minion to it before Opus medium. Never a Taskmaster. `node tools/advisor-trial.ts` reads its numbers.';
 
 /** The table as one line of prose, for the Taskmaster's prompt. */
 export function tableText() {

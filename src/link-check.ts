@@ -6,7 +6,8 @@
 // the cross-scheme link check's (src/scheme-refs.ts): a bare #N that likely means another scheme's minion,
 // the card link check's (src/card-links.ts): a card waiting on people mentioned without its link, or
 // linked as "above" or "below" when it sits the other way, or one already answered linked as still waiting, the page check: a linked HTML page with an
-// answer button of its own instead of the mock kit's Send dock (#417), and the choices check: a linked page with pick bars that no card opens (#804).
+// answer button of its own instead of the mock kit's Send dock (#417), the choices check: a linked page with pick bars that no card opens (#804),
+// and the card check: a choice asked in prose when the turn posted no card and the status line has no reply button (#806).
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -96,6 +97,39 @@ export async function cardlessChoices(text: string, cfg: LinkCheckConfig, docs: 
   return pages;
 }
 
+// The sentences that ask a choice (measured on 14 days of replies in #803's audit: precision about 0.8). Named limit: "I can build a fresh one if you want to play them" slips through.
+const DIRECT = /(^should\b[^?]*\?|\bwant me to|\bshould I|\bshall I|\bdo you want|would you like|which (one|of these|do you|would you|should)|ok(ay)? to (merge|land|ship|start|close|delete|go)|(want|like) (a|the|that|me)\b[^.?!\n]{0,90}\?|or (should|do|would|shall) (I|we)|(go|merge|land|ship|start) (it|them|now)\?)/i;
+const OFFER = /(?<!(\b(it|they|he|she|will|'ll|would|and)\s))\b((just )?say (the word|go|so|which)|let me know (which|if|whether)|tell me (which|if|whether)|if you('d| would)? (want|like|prefer)\b[^.\n]{0,80}(say|tell|I('ll| can| will))|(it's|is|that's) your call\b)/i;
+const QUOTED = /"[^"\n]*"|“[^”\n]*”/g;
+const CARD_TOOLS = /^mcp__[a-z-]+__(ask_question|propose_plan)$/;
+
+/** Whether this turn (the transcript after its last real prompt) called a card tool; null if the transcript can't be read. */
+function postedCard(transcript?: string): boolean | null {
+  if (!transcript) return null;
+  try {
+    let posted = false;
+    for (const l of readFileSync(transcript, 'utf8').split('\n')) {
+      if (!l) continue;
+      const e = JSON.parse(l);
+      const content = e.message?.content;
+      if (e.type === 'user' && !(Array.isArray(content) && content.some((c: any) => c?.type === 'tool_result'))) posted = false;
+      else if (e.type === 'assistant' && Array.isArray(content) && content.some((c: any) => c?.type === 'tool_use' && CARD_TOOLS.test(c.name))) posted = true;
+    }
+    return posted;
+  } catch {
+    return null;
+  }
+}
+
+/** The sentence in the reply's last two paragraphs that asks a choice, when no card, link to one or reply button answers it; else null. */
+export function proseChoice(text: string, status: { replies?: unknown } | null, transcript?: string): string | null {
+  const tail = text.replace(CODE, '').replace(QUOTED, '').trim().split(/\n\s*\n/).slice(-2).join('\n\n');
+  if (/\]\(#\/p\/\d+\/t\/\d+\?e=\d+\)|nothing needed from you/i.test(tail)) return null;
+  if (Array.isArray(status?.replies) && status.replies.length) return null;
+  const hit = tail.split(/(?<=[.?!])\s+|\n/).find((s) => DIRECT.test(s) || OFFER.test(s));
+  return hit && postedCard(transcript) === false ? hit.trim() : null;
+}
+
 /** The prompt the marker says was nudged, or null if none was. */
 function readMarker(file: string): string | null {
   try {
@@ -106,13 +140,13 @@ function readMarker(file: string): string | null {
 }
 
 /** The Stop hook's answer for this input: a block with the reason, or null to let the turn end. */
-export async function check(input: { stop_hook_active?: boolean; last_assistant_message?: string; prompt_id?: string }, cfg: LinkCheckConfig) {
+export async function check(input: { stop_hook_active?: boolean; last_assistant_message?: string; prompt_id?: string; transcript_path?: string }, cfg: LinkCheckConfig) {
   // One nudge per prompt (a steered turn holds several), noted in the turn's own marker:
   // stop_hook_active is also set by any other Stop hook's block (the kit's job check), which once
   // let a broken link through (#243).
   const prompt = String(input.prompt_id ?? '');
   // The status line (#711) is hidden from the chat, and its note can't hold a link: only what people read is checked.
-  const reply = takeStatus(input.last_assistant_message ?? '').text;
+  const { text: reply, status } = takeStatus(input.last_assistant_message ?? '');
   if (!reply || (cfg.nudged ? readMarker(cfg.nudged) === prompt : input.stop_hook_active)) return null;
   const broken = await brokenLinks(reply, cfg);
   const misused = misusedWords(reply);
@@ -124,7 +158,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const rolled = await handRolledPages(reply, cfg);
   const docs = new Set([...(refs?.cards ?? []), ...(refs?.settled ?? [])].flatMap((c) => (c.doc ? [c.doc] : [])));
   const choices = refs?.cards ? await cardlessChoices(reply, cfg, docs) : [];
-  if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length) return null;
+  const asked = proseChoice(reply, status, input.transcript_path);
+  if (!asked && !broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -154,11 +189,15 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
       + 'A choices page always comes with its card: call ask_question with doc set to the page\'s path (and no questions), so it waits on people '
       + 'like any card and its Send settles it, then rewrite the reply with the card\'s link. A page linked only to show picks already made can stay.\n'
     : '';
+  const ask = asked
+    ? `Your reply asks a choice in prose ("${asked.slice(0, 120)}") and no card was posted this turn. Post it as an ask_question card (or a status-line reply button for a lone go), `
+      + `or answer ${KEEP} if nobody has a choice to make.\n`
+    : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
   const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '')
     + (stale.length ? `${explainStale(stale, refs!.self ?? null)}\n` : '');
-  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${ask}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

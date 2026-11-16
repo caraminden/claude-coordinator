@@ -220,6 +220,8 @@ test('senderTone: a Taskmaster is violet, a minion orange, a person plain', () =
   assert.equal(senderTone('Coordinator'), 'from-tm');
   assert.equal(senderTone('Taskmaster of Delve, for Josh, a Citadel member'), 'from-tm');
   assert.equal(senderTone('#12 Fix the thing'), 'from-minion');
+  assert.equal(senderTone('Citadel'), 'from-app');
+  assert.equal(senderTone('GitHub'), '');
   assert.equal(senderTone('Cara'), '');
   assert.equal(senderTone(undefined), '');
 });

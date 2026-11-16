@@ -364,7 +364,7 @@ export class ScheduledRuns {
       if (pinnedFor) this.d.broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });
       store.schedules.ran(s.id, { ticketId: id }, now);
       runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
-      runner.send(id, by, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }), runWindow(s, last?.number ?? null, minions)), [], { brief: true });
+      runner.send(id, by, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }), runWindow(s, last?.number ?? null, minions)), [], { brief: true, schedule: s.name });
       console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
     } catch (err: any) {
       console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);

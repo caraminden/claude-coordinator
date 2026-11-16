@@ -935,7 +935,7 @@ export function appendEvent(event, scroll = true) {
       const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
         data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null,
-        { id: event.id, strikes: data.strikes, brief: data.brief, ask: data.ask },
+        { id: event.id, strikes: data.strikes, brief: data.brief, schedule: data.schedule, ask: data.ask },
         (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })));
       bubble.dataset.event = event.id;
       // What its ✎ puts back in the message box while it waits in the queue (markQueued); a comment on a file would lose its file.
@@ -1385,12 +1385,13 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   const who = machineAuthor(author);
   // Sent by another agent: it takes its sender's colour (#693), a Taskmaster's (this scheme's or another's) or a minion's.
   const tone = senderTone(author) ? ` ${senderTone(author)}` : '';
-  if (who && event?.brief) {
+  // A schedule's brief starts collapsed (Cara, 2026-11-16: "scheduled briefs can start collapsed"), its row naming the schedule; the rest keep the brief open.
+  if (who && event?.brief && !event.schedule) {
     msg.querySelector('.who').textContent = who;
     msg.className += tone;
   } else if (who) {
     msg.querySelector('.who').remove();
-    return h('details', { class: `msg user coord${tone}` }, h('summary', {}, h('span', { class: 'who' }, h('span', { class: 'name' }, who)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
+    return h('details', { class: `msg user coord${tone}` }, h('summary', {}, h('span', { class: 'who' }, h('span', { class: 'name' }, event?.schedule ? `${who}: ${event.schedule}` : who)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
   }
   return msg;
 }

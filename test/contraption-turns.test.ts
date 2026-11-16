@@ -418,6 +418,24 @@ test('a name resumes its own Claude session; fresh starts another; other contrap
   assert.ok(lastRun().argv.includes('--session-id'));
 });
 
+test('a turn names its session to the account pick when it resumes one, and says where it ran (#793)', async () => {
+  const asked: (string | undefined)[] = [];
+  const ran: [number, string, number][] = [];
+  const place = places.place;
+  places.place = (uid: number | null, warm?: string) => (asked.push(warm), place(uid));
+  (places as any).ran = (uid: number, key: string, n: number) => void ran.push([uid, key, n]);
+  try {
+    await turn(mandate, { session: 'warm-793' });
+    await turn(mandate, { session: 'warm-793' });
+    await turn(mandate, { session: 'warm-793', fresh: true });
+    assert.deepEqual(asked, [undefined, `app:${mandate.id}:warm-793`, undefined], 'a new or fresh session goes where new work goes');
+    assert.deepEqual(ran, Array(3).fill([cara.id, `app:${mandate.id}:warm-793`, 1]));
+  } finally {
+    places.place = place;
+    delete (places as any).ran;
+  }
+});
+
 test('two names run at once, a second turn on a busy name gets busy, and cancel stops a turn', async () => {
   const evs: Ev[] = [];
   const slow = turns.run(mandate, parseTurn({ person: cara.id, session: 'aura-1', prompt: 'slow' }, mandate), (event, data) => evs.push({ event, data }));

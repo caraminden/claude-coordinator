@@ -2079,6 +2079,12 @@ export class Store {
     return Object.fromEntries(rows.map((r) => [r.ticket_id, r.seen_at]));
   }
 
+  /** When `name` last had this minion open, or 0. */
+  seenAt(name: string, ticketId: number): number {
+    const row = this.db.prepare('SELECT seen_at FROM ticket_seen WHERE name = ? AND ticket_id = ?').get(name, ticketId) as { seen_at: number } | undefined;
+    return row?.seen_at ?? 0;
+  }
+
   markSeen(name: string, ticketId: number): number {
     const now = Date.now();
     this.db

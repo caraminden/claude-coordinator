@@ -184,7 +184,7 @@ test('refuses while a question or plan card waits on people, or the state is try
   assert.match(runner.keptOpen(t, true)!, /state is try/);
   // Complete is finished work kept open on purpose (#547): unlike ready, close_self's own call refuses it too.
   store.updateTicket(t, { state: 'complete', note: 'read: the report' });
-  assert.match(runner.keptOpen(t, true)!, /state is complete, which keeps it open/);
+  assert.match(runner.keptOpen(t, true)!, /state is complete: it closes once a member has seen it/);
   assert.match(runner.keptOpen(t)!, /state is complete/);
   for (const state of [null, 'parked', 'pending-deploy']) {
     store.updateTicket(t, { state });
@@ -254,7 +254,7 @@ test('a keep-open state set after close_self cancels the close at once, so the v
     assert.equal(store.getTicket(id)!.status, 'idle', state);
     // One note, when it was cancelled; none again at the turn end.
     assert.equal(notes(id).length, 1, state);
-    assert.match(notes(id)[0], new RegExp(`^Claude's close_self was cancelled: its state is ${state}, .*so it stays open\\.$`), state);
+    assert.match(notes(id)[0], new RegExp(`^Claude's close_self was cancelled: its state is ${state}[,:] .*so it stays open\\.$`), state);
   }
   // A state that doesn't keep it open leaves the close armed.
   const id = newTicket();
@@ -308,4 +308,54 @@ test("close_self's answer warns that the final status line counts, and says what
   assert.match(said, /say plainly why/i);
   assert.doesNotMatch(said, /Closing this minion/);
   assert.match(closeSelfResult(true), /state ready cleared/);
+});
+
+// Close on seen (#811): a complete minion closes when a member leaves it having had it open since its last update.
+const pause = () => new Promise((r) => setTimeout(r, 5));
+function complete() {
+  const id = newTicket();
+  store.updateTicket(id, { state: 'complete', note: 'nothing left' });
+  return id;
+}
+
+test('a complete, idle minion closes when a member leaves it, having seen its last update', async () => {
+  const id = complete();
+  await pause();
+  store.markSeen('Cara', id);
+  assert.equal(runner.closeIfSeen(id, 'Cara'), true);
+  assert.equal(store.getTicket(id)!.status, 'closed');
+  assert.deepEqual(notes(id), ['Closed: Cara saw its result']);
+});
+
+test('close on seen leaves it open with a card, in try or ready, mid-turn, or seen only before its last update', async () => {
+  const seenFirst = complete();
+  store.markSeen('Cara', seenFirst);
+  await pause();
+  store.updateTicket(seenFirst, { note: 'newer' });
+  assert.equal(runner.closeIfSeen(seenFirst, 'Cara'), false, 'seen before the last update');
+
+  const never = complete();
+  assert.equal(runner.closeIfSeen(never, 'Cara'), false, 'never seen');
+
+  const card = complete();
+  store.addEvent(card, 'question', { id: 'q9', questions: [] });
+  await pause();
+  store.markSeen('Cara', card);
+  assert.equal(runner.closeIfSeen(card, 'Cara'), false, 'open card');
+
+  for (const state of ['try', 'ready', null] as const) {
+    const id = newTicket();
+    store.updateTicket(id, { state });
+    await pause();
+    store.markSeen('Cara', id);
+    assert.equal(runner.closeIfSeen(id, 'Cara'), false, String(state));
+  }
+
+  const running = complete();
+  runner.send(running, 'Cara', 'more'); // a new turn clears complete; set it again mid-turn
+  store.updateTicket(running, { state: 'complete' });
+  await pause();
+  store.markSeen('Cara', running);
+  assert.equal(runner.closeIfSeen(running, 'Cara'), false, 'mid-turn');
+  await endTurn(running, 'ok');
 });

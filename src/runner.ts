@@ -1076,7 +1076,7 @@ export class Runner {
     const state = this.store.getTicket(ticketId)?.state;
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
     // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.
-    if (state === 'complete') return 'its state is complete, which keeps it open for people to read or close';
+    if (state === 'complete') return 'its state is complete: it closes once a member has seen it';
     return null;
   }
 
@@ -1091,6 +1091,21 @@ export class Runner {
     this.closing.set(ticketId, reason);
     this.saveTurn(ticketId, { closing: reason });
     this.broadcastTicket(ticketId);
+    return true;
+  }
+
+  /**
+   * Close a finished minion once a member has read it (#811): its state is complete, no turn is running or queued,
+   * no card waits, and `name` had it open at its latest update (seen_at is at least updated_at, the sidebar's own
+   * isSeen). Called when they leave it, so nobody is closed out from under their reading. Try, ready and by-hand
+   * work are never complete, so they stay open. A message to the closed minion reopens it as before.
+   */
+  closeIfSeen(ticketId: number, name: string): boolean {
+    const t = this.store.getTicket(ticketId);
+    if (!t || t.state !== 'complete' || t.status === 'closed' || t.status === 'running' || this.isRunning(ticketId)) return false;
+    if (this.queues.get(ticketId)?.length || this.store.openCardAt(ticketId) !== null || this.approvals.waiting(ticketId)) return false;
+    if (this.store.seenAt(name, ticketId) < t.updated_at) return false;
+    void this.close(ticketId, `Closed: ${name} saw its result`);
     return true;
   }
 

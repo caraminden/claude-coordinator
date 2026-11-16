@@ -791,6 +791,14 @@ export function markSeen(ticketId) {
   }, 800));
 }
 
+/** You've left a thread (another page, a hidden tab, a closed page): a finished minion you had open at its last update closes (#811). */
+function leaveSeen(ticketId) {
+  if (!ticketId) return;
+  fetch(`api/tickets/${ticketId}/seen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ left: true }), keepalive: true }).catch(() => {});
+}
+addEventListener('pagehide', () => view?.kind === 'project' && leaveSeen(view.id));
+document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && view?.kind === 'project' && leaveSeen(view.id));
+
 function onEvent(event) {
   if (view?.kind !== 'project' || view.id !== event.ticket_id) return;
   if (event.id <= view.lastEventId) return;
@@ -815,6 +823,7 @@ async function route() {
   if (!framed()) saveScroll();
   const seq = ++routeSeq;
   const hash = location.hash || '#/';
+  if (view?.kind === 'project' && view.id && !new RegExp(`/t/${view.ticket?.number}(?!\\d)`).test(hash)) leaveSeen(view.id);
   let m;
   // A contraption in Citadel's window (frames.js): Citadel's page stays as it was underneath.
   if ((m = hash.match(/^#\/apps\/([a-z0-9][a-z0-9-]{0,31})$/))) return showFrame(m[1]);

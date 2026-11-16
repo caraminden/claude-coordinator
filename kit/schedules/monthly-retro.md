@@ -25,4 +25,4 @@ Then follow citadel:retro's steps:
 3. Make the few edits the retro calls for in this scheme's own skills, rules and docs, after citadel:self-review, by this scheme's usual landing route.
 4. A fix for the Citadel kit, the tripwire or Citadel's prompts goes in a handoff in this scheme's handoffs/, named handoff-citadel-<slug>.md; message your Taskmaster its path to pass on to Citadel.
 
-Reply with the top three findings and what landed (commit and risk label), linking the retro. Stay open in state complete, with the retro named in the note, until someone has read it.
+Reply with the top three findings and what landed (commit and risk label), linking the retro. Stay open in state complete, with the retro named in the note; the server closes it once a member has seen it.

@@ -373,9 +373,13 @@ export const ticketRoutes: Route[] = [
   {
     method: 'POST', path: '/api/tickets/:ticket/seen', who: ['person'], refuse: 'Only people mark minions seen',
     async handler(ctx) {
-      const { res, session, app, ticket } = ctx;
+      const { req, res, session, app, ticket } = ctx;
       const { id } = ticket;
       const { store } = app;
+      // `left`: they've left it (navigated away, hid the tab). That records nothing new: a finished minion
+      // they had open at its latest update closes (#811).
+      const body = await readJson(req).catch(() => ({}));
+      if (body?.left === true) return json(res, 200, { seen_at: store.seenAt(session.name, id), closed: app.runner.closeIfSeen(id, session.name) });
       return json(res, 200, { seen_at: store.markSeen(session.name, id) });
     },
   },

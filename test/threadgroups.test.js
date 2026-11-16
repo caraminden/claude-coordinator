@@ -105,3 +105,10 @@ test('a dismissed minion whose change is still on its way stays under Deploying 
   assert.deepEqual(shape([m(1, 'bug', { status: 'closed', release }), m(2, 'bug'), m(3, 'feature', { status: 'closed', release, server_work: { kind: 'land' } })]),
     [['deploying', false, [1]], ['feature', false, [3]], ['bug', false, [2]]]);
 });
+
+test('a minion on main whose apps the server is deploying sits in Deploying; one still in the land line does not (#776)', () => {
+  const land = { kind: 'land' };
+  assert.deepEqual(shape([m(1, 'feature', { status: 'idle', server_work: land, ship: { stage: 'main' } }), m(2, 'feature', { status: 'idle', server_work: land, ship: { stage: 'branch' } }),
+    m(3, 'feature', { status: 'idle', server_work: land }), m(4, 'feature', { status: 'running', server_work: land, ship: { stage: 'main' } }), m(5, 'bug', { status: 'idle', server_work: land, ship: { stage: 'live' } })]),
+    [['deploying', false, [1]], ['feature', false, [2, 3, 4]], ['bug', false, [5]]]);
+});

@@ -11,7 +11,9 @@
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
 /** Deploying: pending-deploy, or dismissed with its change still on its way in a release (#764, `release` from releases.js). */
-const isDeploying = (t) => (t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t);
+const isDeploying = (t) => (t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t) || onMainDeploying(t);
+/** Landed on main with the server still deploying its apps (server_work): in Deploying, unlike one still in the land line or testing (#776). */
+const onMainDeploying = (t) => !!t.server_work && t.status !== 'closed' && !t.approvals && !['running', 'error'].includes(t.status) && ['main', 'deploying'].includes(t.ship?.stage);
 /** Parked until something wakes it by itself (the server's wakes_on; a held start_after chain has none). */
 const wakesItself = (t) => !!t.wakes_on;
 

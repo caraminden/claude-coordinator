@@ -74,13 +74,13 @@ export function windowNow(w: MeterWindow | null | undefined, now: number, period
   return { utilization: 0, resetsAt: w.resetsAt + Math.ceil((now - w.resetsAt + 1) / period) * period };
 }
 
-/** Whether new work fits on account `a`: ready, its week under WEEK_FULL and its 5-hour window under the bar for its role. */
-function hasRoom(a: PickAccount, input: PickInput): boolean {
+/** Whether new work fits on account `a`: ready, its week under WEEK_FULL and its 5-hour window under the bar for its role (`back` off: SESSION_FULL for all). */
+function hasRoom(a: PickAccount, input: PickInput, back = true): boolean {
   if (!accountReady(a, input.now)) return false;
   const m = input.meter(a.n);
   const week = windowNow(m?.weekly, input.now, WEEK_MS);
   const five = windowNow(m?.session, input.now, 5 * 3600_000);
-  return (week?.utilization ?? 0) < WEEK_FULL && (five?.utilization ?? 0) < (a.n === input.nextUp ? SESSION_FULL : SESSION_BACK);
+  return (week?.utilization ?? 0) < WEEK_FULL && (five?.utilization ?? 0) < (back && a.n !== input.nextUp ? SESSION_BACK : SESSION_FULL);
 }
 
 /** When `n`'s week resets; an account with no meter yet comes first (a cold turn there reads its meter for free). */
@@ -90,12 +90,14 @@ function resetOf(n: number, input: PickInput): number {
 
 /**
  * Where new work goes, pin aside: next-up while it has room and no account with room resets RESET_MARGIN_MS sooner,
- * else the account with room whose week resets soonest. With none that has room, today's order: next-up while
+ * else the account with room whose week resets soonest. With none that has room, even without hysteresis, today's order: next-up while
  * ready, then the next ready one after it, then any whose sign-in holds (a turn may still try). Null when every sign-in failed.
  */
 function nextUp(input: PickInput): { n: number; full: boolean } | null {
   const list = input.accounts;
-  const roomy = list.filter((a) => hasRoom(a, input));
+  // Hysteresis only picks between accounts with room: when it would leave none, a 5-hour window under SESSION_FULL will do.
+  const strict = list.filter((a) => hasRoom(a, input));
+  const roomy = strict.length ? strict : list.filter((a) => hasRoom(a, input, false));
   const cur = roomy.find((a) => a.n === input.nextUp);
   const best = roomy.reduce<PickAccount | null>((b, a) => (!b || resetOf(a.n, input) < resetOf(b.n, input) ? a : b), null);
   if (best) return { n: cur && !(resetOf(best.n, input) < resetOf(cur.n, input) - RESET_MARGIN_MS) ? cur.n : best.n, full: false };

@@ -3174,23 +3174,31 @@ export class Runner {
 
   /** Record a turn's plan usage: the server login's (the top bar's meter), or a container turn's payer's own (#213). */
   private updateUsage(info: any, ticketId?: number) {
+    const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
+    this.recordUsage(info, turn?.container && turn.person ? turn.person : null, turn?.person ?? null, turn?.account);
+  }
+
+  /** Record a Claude turn's `rate_limit_info` on `account` of `payer` (null: the server login), a minion's or an app's (#793). */
+  recordUsage(info: any, payer: number | null, person: number | null, account?: number) {
     const windows = info?.unifiedWindows;
     if (!windows) return;
-    const usage: Usage = { weekly: usageWindow(windows.seven_day), session: usageWindow(windows.five_hour), updatedAt: Date.now() };
-    if (!usage.weekly && !usage.session) return;
-    const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
-    const payer = turn?.container && turn.person ? turn.person : null;
-    const key = accountUsageKey(payer, turn?.account);
+    const key = accountUsageKey(payer, account);
     const was = this.store.getSetting<Usage>(key);
+    const now = Date.now();
+    // An event may report one window: the other keeps its last reading until it resets, so the account pick still sees a nearly
+    // spent week. Not its status: a stale 'rejected' would hold the next limit's turns until that window's reset.
+    const kept = (w: Usage['weekly'] | undefined) => (w && w.resetsAt && w.resetsAt > now ? { ...w, status: null } : null);
+    const usage: Usage = { weekly: usageWindow(windows.seven_day) ?? kept(was?.weekly), session: usageWindow(windows.five_hour) ?? kept(was?.session), updatedAt: now };
+    if (!usage.weekly && !usage.session) return;
     this.store.setSetting(key, usage);
     // The plan's limit lifted (#477): every window that was hit now says otherwise, so what waits on it needn't wait for the reset time.
     const hit = (['session', 'weekly'] as const).filter((k) => was?.[k]?.status === 'rejected');
     if (hit.length && hit.every((k) => usage[k]?.status && usage[k]!.status !== 'rejected')) {
-      if (turn?.person && turn.account) this.onCleared?.(turn.person, turn.account);
+      if (person && account) this.onCleared?.(person, account);
       this.limitCleared(payer);
     }
     // Only the payer's own meter shows it (server.ts, broadcast): the account in use's, whichever account this turn ran on.
-    this.broadcast({ type: 'usage', usage: turn?.person ? this.usageOf(turn.person) ?? usage : usage, payer });
+    this.broadcast({ type: 'usage', usage: person ? this.usageOf(person) ?? usage : usage, payer });
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {

@@ -84,6 +84,7 @@ take().then((m) => {
       out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: 'Heard.', usage: { input_tokens: 3, output_tokens: 4, cache_read_input_tokens: 5 } });
     });
   }
+  if (prompt.includes('meter me')) out({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: { utilization: 0.42, status: 'allowed' } } } });
   // Limited on the first account only (#785): the second one's folder ends in claude2.
   if (prompt.includes('first account limited') && !process.env.CLAUDE_CONFIG_DIR.endsWith('claude2')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   // Text first, then the limit: the app has seen output, so it mustn't be run again on another account (#785).
@@ -886,6 +887,39 @@ test("the server login's Codex app turns run in its own Codex-only container, ha
     store.deleteSetting(codexSwitchKey(cara.id));
     turns.codexWhy = () => "Codex isn't set up on this server";
     caraCodex = null;
+  }
+});
+
+test('a session that moved to account 2 and carried on there brings its newer transcript back to account 1 (#793)', async () => {
+  const transcriptIn = (dir: string) => {
+    const { claude_session } = store.contraptionSession(mandate.id, cara.id, 'there-and-back')!;
+    return join(dir, 'projects', join(data, 'contraption-scratch', 'mandate', String(cara.id)).replace(/[^a-zA-Z0-9]/g, '-'), `${claude_session}.jsonl`);
+  };
+  caraOn = 1;
+  await turn(mandate, { session: 'there-and-back', prompt: 'hello from one' });
+  caraOn = 2;
+  await turn(mandate, { session: 'there-and-back', prompt: 'carried on in two' });
+  assert.doesNotMatch(readFileSync(transcriptIn(claudeDir), 'utf8'), /carried on in two/, 'account 1 still holds the old copy');
+  caraOn = 1;
+  await turn(mandate, { session: 'there-and-back', prompt: 'back on one' });
+  const text = readFileSync(transcriptIn(claudeDir), 'utf8');
+  assert.match(text, /carried on in two/, 'the move back resumes the conversation as it is now');
+  assert.match(text, /back on one/);
+  // Account 1's copy is the newest now, so a turn there keeps it as it is.
+  await turn(mandate, { session: 'there-and-back', prompt: 'again on one' });
+  assert.match(readFileSync(transcriptIn(claudeDir), 'utf8'), /back on one[\s\S]*again on one/);
+});
+
+test("an app turn's plan meter goes to the account it ran on (#793)", async () => {
+  const got: unknown[][] = [];
+  turns.onUsage = (...a) => got.push(a);
+  try {
+    caraOn = 2;
+    await turn(mandate, { session: 'metered', prompt: 'meter me' });
+    assert.deepEqual(got, [[{ unifiedWindows: { seven_day: { utilization: 0.42, status: 'allowed' } } }, null, cara.id, 2]], 'a host turn: the server login pays');
+  } finally {
+    turns.onUsage = () => {};
+    caraOn = 1;
   }
 });
 

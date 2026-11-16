@@ -351,6 +351,7 @@ const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, {
 contraptionTurns.noTurns = PREVIEW;
 contraptionTurns.codexWhy = (uid) => runner.codexWhy(uid);
 contraptionTurns.onCodexUsage = (uid, limits) => runner.updateCodexUsage(limits, uid);
+contraptionTurns.onUsage = (info, payer, person, account) => runner.recordUsage(info, payer, person, account);
 services.drain = (row) => contraptionTurns.drain(row.id);
 // A contraption turn gets its person's own machines that are online (#306), never a shared one.
 contraptionTurns.machines = (person) => machines.online().filter((m) => m.owner_id !== null && m.servers.includes('mcp') && ownerAsked(store, m.owner_id, [person], null));

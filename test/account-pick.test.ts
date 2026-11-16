@@ -42,6 +42,11 @@ test('the 5-hour window has hysteresis: next-up keeps work below 90%, another ta
   assert.equal(pick({ nextUp: 1, meters: { 1: week(0.4, 120 * H), 2: week(0.1, 24 * H, 0.6) } })?.n, 2);
 });
 
+test('a spent next-up hands new work to one whose 5-hour window sits between the two bars, rather than wait for its limit', () => {
+  assert.deepEqual(pick({ meters: { 1: week(0.98, 120 * H), 2: week(0.1, 24 * H, 0.75) } }), { n: 2, nextUp: 2, why: 'soonest' });
+  assert.equal(pick({ meters: { 1: week(0.98, 120 * H), 2: week(0.1, 24 * H, 0.92) } })?.n, 1, 'past SESSION_FULL it has no room either');
+});
+
 test('next-up keeps new work unless another resets at least 6 hours sooner', () => {
   assert.equal(pick({ meters: { 1: week(0.4, 30 * H), 2: week(0.1, 25 * H) } })?.n, 1, '5 hours sooner: no swap');
   assert.equal(pick({ meters: { 1: week(0.4, 32 * H), 2: week(0.1, 25 * H) } })?.n, 2, '7 hours sooner: swap');

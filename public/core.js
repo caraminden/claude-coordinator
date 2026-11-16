@@ -436,9 +436,9 @@ export function pickLine(u, accounts) {
   if (!a) return 'No Claude account is ready for new minions.';
   const reset = a.usage?.weekly?.resetsAt > Date.now() ? ` (${new Date(a.usage.weekly.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })})` : '';
   const why = u.why === 'pinned' ? 'you pinned it'
-    : u.pinned ? `account ${u.pinned}, which you pinned, is limited`
+    : u.pinned ? `account ${u.pinned}, which you pinned, isn't ready`
     : u.why === 'full' ? 'every account is close to its limit'
-    : `its week resets soonest${reset}`;
+    : `of the accounts with room, its week resets first${reset}`;
   return `New minions start on ${a.label}: ${why}. Running minions stay on their account while warm.`;
 }
 

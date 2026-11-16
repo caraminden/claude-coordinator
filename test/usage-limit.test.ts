@@ -322,6 +322,20 @@ test("a rate-limit event saying the plan works again ends the waits mid-turn, wi
   store.deleteSetting('usage');
 });
 
+test("an event reporting one window keeps the other's last reading, without its status, until it resets; app turns record theirs too (#793)", () => {
+  const week = Math.floor(Date.now() / 1000) + 3 * 86400;
+  runner.recordUsage({ unifiedWindows: { seven_day: { utilization: 0.99, resetsAt: week, status: 'rejected' } } }, 7, 7, 2);
+  runner.recordUsage({ unifiedWindows: { five_hour: { utilization: 0.1, status: 'allowed' } } }, 7, 7, 2);
+  const u = store.getSetting<any>('usage:user:7:account:2');
+  assert.deepEqual(u.weekly, { utilization: 0.99, resetsAt: week * 1000, status: null }, 'the account pick still sees the spent week');
+  assert.equal(u.session.utilization, 0.1);
+  // Past its reset, a kept window goes.
+  store.setSetting('usage:user:7:account:2', { ...u, weekly: { ...u.weekly, resetsAt: Date.now() - 1000 } });
+  runner.recordUsage({ unifiedWindows: { five_hour: { utilization: 0.2, status: 'allowed' } } }, 7, 7, 2);
+  assert.equal(store.getSetting<any>('usage:user:7:account:2').weekly, null);
+  store.deleteSetting('usage:user:7:account:2');
+});
+
 test(`it gives up after ${MAX_LIMIT_RESUMES} resumes in a row`, async () => {
   runner.limitFallbackMs = 50;
   const id = minion();

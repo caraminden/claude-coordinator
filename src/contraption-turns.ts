@@ -13,7 +13,7 @@
 // and the session names are stored. The transcript is the person's own Claude session, in their folder.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
@@ -303,6 +303,8 @@ export class ContraptionTurns {
   /** Why a person's turns can't run on Codex, or null (Runner.codexWhy), and where their Codex usage goes: set by server.ts. */
   codexWhy: (person: number) => string | null = () => "Codex isn't set up on this server";
   onCodexUsage: (person: number, limits: unknown) => void = () => {};
+  /** A Claude turn's `rate_limit_info` on `account` of `payer` (null: the server login), for the account pick's meters (Runner.recordUsage, #793). */
+  onUsage: (info: unknown, payer: number | null, person: number, account: number) => void = () => {};
 
   constructor(store: Store, contraptions: Contraptions, claude: ClaudePlaces, opts: { dataDir: string; claudeBin: string; podman?: string; env?: NodeJS.ProcessEnv }) {
     this.store = store;
@@ -515,15 +517,22 @@ export class ContraptionTurns {
     // Resume the name's session unless asked for a fresh one, or its transcript is gone (a relinked Claude).
     const known = this.store.contraptionSession(c.id, req.person, req.session);
     const transcript = known ? transcriptPath(where.configDir, where.cwd, known.claude_session) : null;
-    // A limit moved this person to another account (#785): its transcript is still in the old one's folder, so copy it (and its subagents') in.
-    if (transcript && !req.fresh && !existsSync(transcript)) {
+    // A limit (#785) or a cold move (#793) took this session to another account, where it may have carried on: the newest
+    // copy of its transcript (and its subagents') comes in, or a move back would resume the conversation as it was before.
+    if (transcript && !req.fresh) {
+      const here = existsSync(transcript) ? realpathSync(transcript) : null;
+      let from: { path: string; at: number } | null = null;
       for (const dir of this.claude.configDirs(req.person)) {
-        const from = transcriptPath(dir, where.cwd, known!.claude_session);
-        if (!from || from === transcript || !existsSync(from)) continue;
+        const path = transcriptPath(dir, where.cwd, known!.claude_session);
+        // A shared projects folder (claude-link.ts, SHARED_CONFIG) is the same file: copying a file onto itself would empty it.
+        if (!path || !existsSync(path) || realpathSync(path) === here) continue;
+        const at = statSync(path).mtimeMs;
+        if (!from || at > from.at) from = { path, at };
+      }
+      if (from && (!here || from.at > statSync(here).mtimeMs)) {
         mkdirSync(dirname(transcript), { recursive: true });
-        copyFileSync(from, transcript);
-        if (existsSync(from.replace(/\.jsonl$/, ''))) cpSync(from.replace(/\.jsonl$/, ''), transcript.replace(/\.jsonl$/, ''), { recursive: true });
-        break;
+        copyFileSync(from.path, transcript);
+        if (existsSync(from.path.replace(/\.jsonl$/, ''))) cpSync(from.path.replace(/\.jsonl$/, ''), transcript.replace(/\.jsonl$/, ''), { recursive: true });
       }
     }
     const resume = !!transcript && !req.fresh && existsSync(transcript);
@@ -637,6 +646,8 @@ export class ContraptionTurns {
         waited = true;
       } else if (ev.type === 'codex_rate_limits') {
         this.onCodexUsage(req.person, ev.rate_limits);
+      } else if (ev.type === 'rate_limit_event' && !codex) {
+        this.onUsage(ev.rate_limit_info, place.host ? null : req.person, req.person, place.account ?? 1);
       } else if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
         const t = this.store.getSetting<CodexSession>(ckey);
         if (t) this.store.setSetting(ckey, { ...t, thread: ev.codex_thread });

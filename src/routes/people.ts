@@ -228,8 +228,10 @@ export const peopleRoutes: Route[] = [
     method: 'POST', path: '/api/me/claude/use', who: ['person'],
     async handler({ req, res, app, session }) {
       const uid = uidOf(session);
+      const n = (await readJson(req)).account;
+      if (!Number.isInteger(n)) throw new HttpError(400, 'Which account? Send { account: n }.');
       try {
-        app.claude.use(uid, Number((await readJson(req)).account));
+        app.claude.use(uid, n);
       } catch (err: any) {
         throw new HttpError(400, err.message);
       }

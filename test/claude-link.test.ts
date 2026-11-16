@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ClaudeLink } from '../src/claude-link.ts';
+import { ClaudeLink, pickAccount, type ClaudeAccount } from '../src/claude-link.ts';
 import { Containers, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
@@ -86,4 +86,90 @@ test('a sign-in that ends while waiting for the code says so instead of waiting 
   }, 5000);
   assert.equal(status.state, 'not linked');
   assert.match(status.error ?? '', /ended/);
+});
+
+// Several Claude accounts (#779): which account turns run on, and how a limit, an expiry and "Use now" move it.
+const acct = (n: number, extra: Partial<ClaudeAccount> = {}): ClaudeAccount => ({ n, linkedAt: 1, ...extra });
+
+test('pickAccount keeps the account in use while it is ready, else takes the next ready one in order, wrapping (#779)', () => {
+  const now = 1_000;
+  assert.equal(pickAccount({ accounts: [acct(1), acct(2), acct(3)], inUse: 2 }, now)?.n, 2, 'sticky');
+  assert.equal(pickAccount({ accounts: [acct(1), acct(2, { limitedUntil: 2_000 }), acct(3)], inUse: 2 }, now)?.n, 3, 'next after it');
+  assert.equal(pickAccount({ accounts: [acct(1), acct(2), acct(3, { expired: 5 })], inUse: 3 }, now)?.n, 1, 'wraps past the end');
+  assert.equal(pickAccount({ accounts: [acct(1), acct(2, { limitedUntil: 500 })], inUse: 2 }, now)?.n, 2, 'a limit that has reset no longer counts');
+  assert.equal(pickAccount({ accounts: [acct(1, { limitedUntil: 2_000 }), acct(2, { limitedUntil: 3_000 })], inUse: 2 }, now)?.n, 2, 'all limited: stays on the one in use');
+  assert.equal(pickAccount({ accounts: [acct(1, { limitedUntil: 2_000 }), acct(2, { expired: 5 })], inUse: 2 }, now)?.n, 1, 'all limited and the one in use expired: one whose sign-in holds');
+  assert.equal(pickAccount({ accounts: [acct(1, { expired: 5 }), acct(2, { expired: 5 })], inUse: 1 }, now), null);
+});
+
+function linkedPerson(accounts: ClaudeAccount[], inUse = accounts[0].n) {
+  const { link, uid } = newLink();
+  const creds = new Credentials(store, 'x'.repeat(40));
+  creds.put(uid, 'claude_runner', link.name(uid), { container: link.name(uid), home: join(root, `home-${uid}`), linkedAt: 1, accounts, inUse });
+  return { link, uid, creds };
+}
+
+test('a row from before #779 reads as account 1 alone, expired with the row (#779)', () => {
+  const { link, uid } = newLink();
+  const creds = new Credentials(store, 'x'.repeat(40));
+  creds.put(uid, 'claude_runner', link.name(uid), { container: link.name(uid), home: '/h', email: 'a@x', linkedAt: 1 });
+  assert.deepEqual(link.accounts(uid), { accounts: [{ n: 1, email: 'a@x', plan: undefined, linkedAt: 1 }], inUse: 1 });
+  const place = link.place(uid);
+  assert.ok(place && !place.host);
+  assert.equal(place.account, 1);
+  assert.equal(place.configDir, '/h/.claude');
+  assert.equal(place.env.CLAUDE_CONFIG_DIR.endsWith('/.claude'), true);
+  creds.fail(uid, 'claude_runner');
+  assert.ok(link.accounts(uid)!.accounts[0].expired);
+  assert.equal(link.place(uid), null);
+});
+
+test('a limit moves turns to the next ready account, a turn that gets through clears it, and "Use now" moves them back (#779)', () => {
+  const { link, uid } = linkedPerson([acct(1, { email: 'one@x' }), acct(2, { email: 'two@x' }), acct(3, { email: 'three@x' })]);
+  const view = link.limitedView(uid, 1, Date.now() + 60_000);
+  assert.deepEqual(view?.next, { n: 2, label: 'two@x' });
+  const place = link.place(uid);
+  assert.ok(place && !place.host);
+  assert.equal(place.account, 2);
+  assert.match(place.env.CLAUDE_CONFIG_DIR, /\/\.claude-2$/);
+  assert.equal(link.status(uid).inUse, 2);
+  assert.equal(link.status(uid).accounts.find((a) => a.n === 1)?.ready, false);
+  link.cleared(uid, 1);
+  assert.equal(link.status(uid).accounts.find((a) => a.n === 1)?.ready, true);
+  assert.equal(link.place(uid)?.account, 2, 'sticky: a cleared account does not pull turns back');
+  link.use(uid, 1);
+  assert.equal(link.place(uid)?.account, 1);
+});
+
+test('when every account is limited, turns stay put and the earliest reset is when they resume (#779)', () => {
+  const { link, uid } = linkedPerson([acct(1), acct(2)]);
+  const soon = Date.now() + 60_000;
+  assert.equal(link.limitedView(uid, 1, soon + 60_000)?.next?.n, 2);
+  const view = link.limitedView(uid, 2, soon + 120_000);
+  assert.equal(view?.next, null);
+  assert.equal(view?.resetAt, soon + 60_000, 'account 1 resets first');
+  assert.equal(link.linked(uid), 'linked', 'limited is not signed out: messages still start turns that wait');
+});
+
+test('an expired account moves turns on; the person reads as expired only once every account has (#779)', () => {
+  const { link, uid } = linkedPerson([acct(1), acct(2)]);
+  link.expire(uid, 1);
+  assert.equal(link.linked(uid), 'linked');
+  assert.equal(link.place(uid)?.account, 2);
+  assert.throws(() => link.use(uid, 1), /needs linking again/);
+  link.expire(uid, 2);
+  assert.equal(link.linked(uid), 'expired');
+  assert.equal(link.place(uid), null);
+});
+
+test("the server login's extra account runs on the host with its own config folder; account 1 is the host's (#779)", () => {
+  const user = store.createUser({ name: 'Host', login: `host${++n}`, server_login: true });
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), join(bin, 'claude'), new Containers(fakeRun), `citadel-claude-h${n}-`);
+  assert.deepEqual(link.place(user.id), { host: true });
+  store.setSetting(`claude_accounts:${user.id}`, { accounts: [acct(1), acct(2, { email: 'two@x' })], inUse: 1 });
+  link.limitedView(user.id, 1, Date.now() + 60_000);
+  const dir = join(root, 'data', 'claude-accounts', String(user.id), '2');
+  assert.deepEqual(link.place(user.id), { host: true, account: 2, configDir: dir, env: { CLAUDE_CONFIG_DIR: dir } });
+  assert.equal(link.status(user.id).state, 'linked');
+  assert.throws(() => link.linkSlot(user.id, 1));
 });

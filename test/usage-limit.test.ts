@@ -31,7 +31,7 @@ const wait = setInterval(() => {
   if (!input.includes('\\n') || !existsSync(${JSON.stringify(release)})) return;
   clearInterval(wait);
   appendFileSync(${JSON.stringify(prompts)}, input);
-  const result = readFileSync(${JSON.stringify(release)}, 'utf8');
+  const result = process.env.FAKE_RESULT ?? readFileSync(${JSON.stringify(release)}, 'utf8');
   console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [], usage: { input_tokens: 5, cache_read_input_tokens: 120000, cache_creation_input_tokens: 2000 } } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result }));
   process.exit(0);
@@ -378,4 +378,67 @@ test('a turn whose claude never starts says why', async () => {
   assert.match(store.getTicket(id)!.note!, /^Could not start claude: /);
   assert.match(pushes.at(-1)!.text, /^Could not start claude: /);
   pushes.length = 0;
+});
+
+// Several Claude accounts (#779): fakes for ClaudeLink's side. Account 2's turns end as FAKE_RESULT says.
+function accountsFor(person: number, second: string) {
+  const s = { inUse: 1, limited: new Map<number, number>(), cleared: [] as number[] };
+  const labels = [{ n: 1, label: 'one@x' }, { n: 2, label: 'two@x' }];
+  runner.personOf = (author) => (author === 'Pat' ? person : null);
+  runner.placeFor = () => (s.inUse === 1 ? { host: true } : { host: true, account: 2, configDir: join(root, 'acct-2'), env: { CLAUDE_CONFIG_DIR: join(root, 'acct-2'), FAKE_RESULT: second } });
+  runner.claudeAccounts = () => ({ inUse: s.inUse, accounts: labels });
+  runner.onLimit = (_p, n, until) => {
+    s.limited.set(n, until);
+    const next = labels.find((a) => !s.limited.has(a.n)) ?? null;
+    if (next) s.inUse = next.n;
+    return { next, resetAt: Math.min(...s.limited.values()) };
+  };
+  runner.onCleared = (_p, n) => void s.cleared.push(n);
+  return s;
+}
+const noAccounts = () => {
+  runner.personOf = runner.placeFor = runner.claudeAccounts = runner.onLimit = runner.onCleared = undefined;
+};
+
+test('a turn that hits its account\'s limit carries on at once with the next ready account, not as a limit resume (#779)', async () => {
+  const pat = store.createUser({ name: 'Pat', login: 'pat779' });
+  const s = accountsFor(pat.id, 'ok');
+  try {
+    const id = minion();
+    const before = turnsRun();
+    setRelease(LIMIT);
+    runner.send(id, 'Pat', 'go');
+    await until(() => turnsRun() === before + 2 && !runner.isRunning(id), 'the turn on account 2');
+    const t = store.getTicket(id)!;
+    assert.equal(t.status, 'idle');
+    assert.equal(t.state, null, 'never limited: it carried on');
+    assert.equal(s.inUse, 2);
+    assert.ok(s.limited.get(1)! > Date.now(), 'account 1 marked until its reset');
+    assert.match(events(id, 'note').join('\n'), /hit your 5-hour limit[^\n]*\nCarrying on with two@x \(account 2\): this turn picks up where it stopped\./);
+    assert.match(lines(prompts).at(-1)!, /usage limit/i, 'the resume tells Claude why it stopped');
+    assert.deepEqual(s.cleared, [2], 'the turn that got through clears its own account');
+    assert.deepEqual(events(id, 'error'), []);
+    assert.equal(pushes.length, 0);
+  } finally {
+    noAccounts();
+  }
+});
+
+test('when every account is limited, the turn waits for the first of them to reset (#779)', async () => {
+  const pat = store.findUser('name', 'Pat')!;
+  runner.limitFallbackMs = 60 * 60 * 1000;
+  const s = accountsFor(pat.id, LIMIT);
+  try {
+    const id = minion();
+    const before = turnsRun();
+    setRelease(LIMIT);
+    runner.send(id, 'Pat', 'go');
+    await until(() => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.state === 'limited', 'both accounts to hit their limits');
+    assert.equal(s.limited.size, 2);
+    assert.equal(runner.view(store.getTicket(id)!).limit_resume_at, Math.min(...s.limited.values()));
+    assert.match(events(id, 'note').at(-1)!, /Every linked Claude account is limited now\. It resumes by itself at/);
+    assert.equal(runner.stop(id), true);
+  } finally {
+    noAccounts();
+  }
 });

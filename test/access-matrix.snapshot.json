@@ -856,6 +856,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/me/claude/use": {
+  "anon": "401 Not logged in",
+  "person": "400 Which account? Send { account: n }.",
+  "member": "400 Which account? Send { account: n }.",
+  "outsider": "400 Which account? Send { account: n }.",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "DELETE /api/me/codex": {
   "anon": "401 Not logged in",
   "person": "200",

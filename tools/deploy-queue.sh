@@ -288,10 +288,11 @@ restart_lock() {
   fi
   until flock -w "$QUEUE_POLL" 7; do
     phase=$(queue_restart "$1")
+    # The restart's own phase is the sign of progress for the landings behind this one. Written before the line below,
+    # so whoever reads that line finds the ticket already says it (#790: land-overlap read it in between).
+    if [ -n "$phase" ]; then queue_phase "deploying: waiting for the restart ahead: $phase"; else queue_phase "deploying: waiting for the restart ahead${said:- since $(date +%H:%M)}"; fi
     [ -n "$said" ] || echo "queue: waiting for the restart ahead to have its verdict${phase:+ ($phase)}; main and the live checkout stay as they are until then" >&2
     [ -n "$said" ] || said=" since $(date +%H:%M)"
-    # The restart's own phase is the sign of progress for the landings behind this one.
-    if [ -n "$phase" ]; then queue_phase "deploying: waiting for the restart ahead: $phase"; else queue_phase "deploying: waiting for the restart ahead$said"; fi
     if [ $((SECONDS - started)) -ge "$limit" ]; then
       echo "queue: the restart lock ($1/restart.lock) has not been let go for $limit s (${phase:-no restart says it holds it}), so this gave up. A person needs to look at the restart (journalctl --user -u ${DEPLOY_UNIT:-cc-restart-when-idle}) before anyone tries again" >&2
       exec 7>&-

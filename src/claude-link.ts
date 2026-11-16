@@ -4,13 +4,13 @@
 // Their turns run in it (src/runner.ts, placeFor) at the same paths as on the host. The server
 // login's owner keeps running on the host. The credential row (kind claude_runner) holds only
 // Citadel's bookkeeping: container, volume path, email and plan.
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
 import { appFolder } from './app-services.ts';
-import { Containers, specHash, type ContainerSpec, type Mount } from './containers.ts';
+import { Containers, specHash, type CmdResult, type ContainerSpec, type Mount } from './containers.ts';
 import type { Credentials } from './credentials.ts';
 import type { Store } from './db.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
@@ -87,13 +87,38 @@ export function isAuthFailure(text: string): boolean {
   return /\b401\b|authentication_error|invalid (x-)?api[ -]key|invalid bearer token|oauth token (has )?(expired|revoked)|token (has )?expired|please run \/login/i.test(text);
 }
 
+/** Most Claude accounts one person may link (#779): each is its own config folder, so its own sign-in. */
+export const MAX_ACCOUNTS = 3;
+
+/** One of a person's Claude accounts (#779). Account 1 is the one linked before there were several. */
+export interface ClaudeAccount {
+  n: number;
+  email?: string;
+  plan?: string;
+  linkedAt: number;
+  /** Its sign-in failed (a 401 mid-turn): it needs linking again. */
+  expired?: number;
+  /** It hit a usage limit that resets then; it isn't ready until that passes or a turn on it gets through. */
+  limitedUntil?: number;
+}
+
+/** A person's accounts in their order, and the one turns run on now (sticky: it moves on a limit, an expiry or "Use now"). */
+export interface AccountSet {
+  accounts: ClaudeAccount[];
+  inUse: number;
+}
+
 export interface ClaudeMeta {
   container: string;
   /** The volume's folder on the host: the container's home, so the server can restore and save sessions in it. */
   home: string;
+  /** Account 1's, kept for rows from before #779. */
   email?: string;
   plan?: string;
   linkedAt: number;
+  /** Absent on rows from before #779: then account 1 alone, from the fields above. */
+  accounts?: ClaudeAccount[];
+  inUse?: number;
 }
 
 export type ClaudeState = 'not linked' | 'starting' | 'waiting for code' | 'linked' | 'expired';
@@ -106,18 +131,49 @@ export interface ClaudeStatus {
   email?: string;
   plan?: string;
   error?: string;
+  /** Their accounts, in order; the server login's account 1 is the host's own login. */
+  accounts: (ClaudeAccount & { ready: boolean })[];
+  inUse: number | null;
+  /** The account a sign-in in progress is for. */
+  linking?: number;
+}
+
+/** An account's config folder, relative to its home: account 1 keeps the plain one. */
+export const accountDir = (n: number) => (n === 1 ? '.claude' : `.claude-${n}`);
+
+/** Linked, its sign-in good, and no limit still running. */
+export const accountReady = (a: ClaudeAccount, now = Date.now()) => !a.expired && !(a.limitedUntil && a.limitedUntil > now);
+
+/**
+ * The account turns should run on: the one in use while it's ready, else the next ready one in order after it
+ * (wrapping), else the one in use while its sign-in holds (every account limited: a turn may still try), else
+ * any whose sign-in holds. Null when every sign-in has failed.
+ */
+export function pickAccount(set: AccountSet, now = Date.now()): ClaudeAccount | null {
+  const list = set.accounts;
+  const at = Math.max(0, list.findIndex((a) => a.n === set.inUse));
+  const order = [...list.slice(at), ...list.slice(0, at)];
+  return order.find((a) => accountReady(a, now)) ?? order.find((a) => !a.expired) ?? null;
 }
 
 /**
  * Where a turn runs: the host, or a person's container (with its config folder as the host sees it, and
- * the folder its turns' files go in, the only part of run/turns that container mounts).
+ * the folder its turns' files go in, the only part of run/turns that container mounts). `account` is which of
+ * the person's Claude accounts (#779); a host turn on the server login's extra account has its folder in `env`.
  */
-export type TurnPlace = { host: true } | { host: false; container: string; configDir: string; home: string; turnsDir: string; env: Record<string, string>; ensure: () => Promise<void> };
+export type TurnPlace = { host: true; account?: number; configDir?: string; env?: Record<string, string> }
+  | { host: false; container: string; configDir: string; home: string; turnsDir: string; env: Record<string, string>; ensure: () => Promise<void>; account?: number };
 
 /** Where the server login's container volume is on the host (#341): it has no Claude link to record it in. */
 const containerHomeKey = (uid: number) => `container_home:${uid}`;
+/** The server login's accounts (#779): account 1 is the host's own login, the others signed in under the data folder. */
+const hostAccountsKey = (uid: number) => `claude_accounts:${uid}`;
+/** What a host account folder shares with the host's own: instructions, settings, memory and transcripts. */
+const SHARED_CONFIG = ['CLAUDE.md', 'settings.json', 'projects', 'plugins', 'agents', 'skills', 'commands'];
 
 interface Login {
+  /** The account it signs in. */
+  n: number;
   child: ChildProcess | null;
   out: string;
   url?: string;
@@ -187,14 +243,111 @@ export class ClaudeLink {
     return !c ? null : c.failed ? 'expired' : 'linked';
   }
 
+  /** A person's accounts and the one in use: the server login's from a setting, anyone else's from their link. */
+  accounts(uid: number): AccountSet | null {
+    if (this.serverLogin(uid)) return this.store.getSetting<AccountSet>(hostAccountsKey(uid)) ?? { accounts: [{ n: 1, linkedAt: 0 }], inUse: 1 };
+    const c = this.credentials.get<ClaudeMeta>(uid, 'claude_runner');
+    if (!c) return null;
+    // A row from before #779 is account 1 alone, expired with the row.
+    const accounts = c.meta.accounts ?? [{ n: 1, email: c.meta.email, plan: c.meta.plan, linkedAt: c.meta.linkedAt }];
+    return { accounts: c.failed && !c.meta.accounts ? accounts.map((a) => ({ ...a, expired: c.updated_at })) : accounts, inUse: c.meta.inUse ?? accounts[0]?.n ?? 1 };
+  }
+
+  /** Write a person's accounts back. A container person's whose every sign-in failed reads as expired, as one account did. */
+  private saveAccounts(uid: number, set: AccountSet) {
+    if (this.serverLogin(uid)) return this.store.setSetting(hostAccountsKey(uid), set);
+    const meta = this.meta(uid);
+    if (!meta) return;
+    const first = set.accounts[0];
+    // The secret is only the container's name: there is nothing secret here, and never a Claude token.
+    this.credentials.put(uid, 'claude_runner', this.name(uid), { ...meta, email: first?.email, plan: first?.plan, accounts: set.accounts, inUse: set.inUse } satisfies ClaudeMeta);
+    if (set.accounts.every((a) => a.expired)) this.credentials.fail(uid, 'claude_runner');
+  }
+
+  /** Change a person's accounts in place; returns what the change returned. */
+  private withAccounts<T>(uid: number, change: (set: AccountSet) => T): T | null {
+    const set = this.accounts(uid);
+    if (!set) return null;
+    const out = change(set);
+    this.saveAccounts(uid, set);
+    return out;
+  }
+
   status(uid: number): ClaudeStatus {
     const user = this.store.getUser(uid);
     const host = !!user?.server_login;
     const login = this.logins.get(uid);
     const c = this.credentials.get<ClaudeMeta>(uid, 'claude_runner');
-    const base = { host, ...(c?.meta.email ? { email: c.meta.email } : {}), ...(c?.meta.plan ? { plan: c.meta.plan } : {}), ...(login?.error ? { error: login.error } : {}) };
+    const set = this.accounts(uid);
+    const now = Date.now();
+    const base = {
+      host, ...(c?.meta.email ? { email: c.meta.email } : {}), ...(c?.meta.plan ? { plan: c.meta.plan } : {}), ...(login?.error ? { error: login.error } : {}),
+      accounts: (set?.accounts ?? []).map((a) => ({ ...a, ready: accountReady(a, now) })), inUse: set ? pickAccount(set, now)?.n ?? null : null, ...(login ? { linking: login.n } : {}),
+    };
     if (login && !login.error) return { ...base, state: login.url ? 'waiting for code' : 'starting', ...(login.url ? { url: login.url } : {}) };
-    return { ...base, state: !c ? 'not linked' : c.failed ? 'expired' : 'linked' };
+    return { ...base, state: host ? 'linked' : !c ? 'not linked' : c.failed ? 'expired' : 'linked' };
+  }
+
+  /** "Use now": turns run on account `n` from the next one on. */
+  use(uid: number, n: number) {
+    const ok = this.withAccounts(uid, (set) => {
+      const a = set.accounts.find((x) => x.n === n);
+      if (!a || a.expired) return false;
+      set.inUse = n;
+      return true;
+    });
+    if (!ok) throw new Error(`Account ${n} isn't linked, or needs linking again.`);
+  }
+
+  /**
+   * A turn on account `n` hit its usage limit, which resets at `until`: mark it, and move turns on to the next
+   * ready account. Returns that account, or null when none is ready (every account limited).
+   */
+  limited(uid: number, n: number, until: number): ClaudeAccount | null {
+    return this.withAccounts(uid, (set) => {
+      const a = set.accounts.find((x) => x.n === n);
+      if (a) a.limitedUntil = until;
+      // From the one in use: this one, if the turn ran on it, else one an earlier switch already moved to.
+      const next = pickAccount(set);
+      if (!next || !accountReady(next)) return null;
+      set.inUse = next.n;
+      return next;
+    });
+  }
+
+  /** An account as the chat names it: its email, or the server login's own. */
+  private label(uid: number, a: ClaudeAccount): string {
+    return a.email ?? (this.serverLogin(uid) && a.n === 1 ? "the server's own login" : `account ${a.n}`);
+  }
+
+  /** A person's accounts in order with the one turns run on now (Runner.claudeAccounts); null with none. */
+  accountList(uid: number): { inUse: number | null; accounts: { n: number; label: string }[] } | null {
+    const set = this.accounts(uid);
+    if (!set) return null;
+    return { inUse: pickAccount(set)?.n ?? null, accounts: set.accounts.map((a) => ({ n: a.n, label: this.label(uid, a) })) };
+  }
+
+  /** limited() for the runner (Runner.onLimit): the account turns move on to, and the first of the accounts to reset. */
+  limitedView(uid: number, n: number, until: number): { next: { n: number; label: string } | null; resetAt: number } | null {
+    if (!this.accounts(uid)) return null;
+    const next = this.limited(uid, n, until);
+    const resets = this.accounts(uid)!.accounts.filter((a) => !a.expired).map((a) => a.limitedUntil ?? Date.now());
+    return { next: next && { n: next.n, label: this.label(uid, next) }, resetAt: resets.length ? Math.min(...resets) : until };
+  }
+
+  /** A turn on account `n` got through: whatever limit it had is gone. */
+  cleared(uid: number, n: number) {
+    if (!this.accounts(uid)?.accounts.some((a) => a.n === n && a.limitedUntil)) return;
+    this.withAccounts(uid, (set) => {
+      for (const a of set.accounts) if (a.n === n) delete a.limitedUntil;
+    });
+  }
+
+  /** An account's config folder as the host sees it; the server login's account 1 is the host's own. */
+  configDir(uid: number, n: number): string | null {
+    if (this.serverLogin(uid)) return n === 1 ? claudeConfigDir(process.env) : join(this.dataDir, 'claude-accounts', String(uid), String(n));
+    const home = this.meta(uid)?.home ?? null;
+    return home && join(home, accountDir(n));
   }
 
   /** The image tag for the current Containerfile and the files it copies in (codex/). */
@@ -213,7 +366,6 @@ export class ClaudeLink {
   /** What a person's container is made of. Every mount sits at its host path, so worktrees, session folders and prompts match. */
   spec(uid: number): ContainerSpec {
     const name = this.name(uid);
-    const config = join(this.home, '.claude');
     const mounts: Mount[] = [
       { src: name, dst: this.home, volume: true },
       { src: join(this.dataDir, 'projects'), dst: join(this.dataDir, 'projects') },
@@ -242,7 +394,8 @@ export class ClaudeLink {
       const slug = projectSlug(p.repo_dir);
       const src = join(claudeConfigDir(process.env), 'projects', slug, 'memory');
       mkdirSync(src, { recursive: true });
-      mounts.push({ src, dst: join(config, 'projects', slug, 'memory') });
+      // In every account's folder (#779), linked or not, so linking another never changes the spec under running turns.
+      for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src, dst: join(this.home, accountDir(n), 'projects', slug, 'memory') });
     }
     return { name, image: this.image(), mounts, env: { HOME: this.home }, memory: '6g', cpus: 4 };
   }
@@ -290,12 +443,21 @@ export class ClaudeLink {
   /** Where a turn for `uid` runs, or null when it can't run (not linked, signed out). */
   place(uid: number | null): TurnPlace | null {
     const user = uid ? this.store.getUser(uid) : undefined;
-    if (!user || user.server_login) return user ? { host: true } : null;
+    if (!user) return null;
+    const set = this.accounts(user.id);
+    const a = set && pickAccount(set);
+    // Sticky (#779): turns stay on the account in use until it's limited or expires; then the one picked is in use.
+    if (set && a && a.n !== set.inUse) this.withAccounts(user.id, (s) => void (s.inUse = a.n));
+    if (user.server_login) {
+      if (!a || a.n === 1) return { host: true };
+      const configDir = this.configDir(user.id, a.n)!;
+      return { host: true, account: a.n, configDir, env: { CLAUDE_CONFIG_DIR: configDir } };
+    }
     const c = this.credentials.get<ClaudeMeta>(user.id, 'claude_runner');
-    if (!c || c.failed) return null;
+    if (!c || c.failed || !a) return null;
     return {
-      host: false, container: c.meta.container, configDir: join(c.meta.home, '.claude'), home: c.meta.home, turnsDir: this.turnsDir(user.id),
-      env: this.containerEnv(), ensure: () => this.ensure(user.id, true),
+      host: false, container: c.meta.container, configDir: join(c.meta.home, accountDir(a.n)), home: c.meta.home, turnsDir: this.turnsDir(user.id),
+      env: this.containerEnv(a.n), ensure: () => this.ensure(user.id, true), account: a.n,
     };
   }
 
@@ -319,32 +481,92 @@ export class ClaudeLink {
     if ((await this.containers.status(this.name(uid))).state !== 'running') await this.ensure(uid);
   }
 
-  private containerEnv(): Record<string, string> {
-    return { HOME: this.home, PATH: containerPath(process.env.PATH), CLAUDE_CONFIG_DIR: join(this.home, '.claude'), DISABLE_AUTOUPDATER: '1' };
+  private containerEnv(n = 1): Record<string, string> {
+    return { HOME: this.home, PATH: containerPath(process.env.PATH), CLAUDE_CONFIG_DIR: join(this.home, accountDir(n)), DISABLE_AUTOUPDATER: '1' };
   }
 
-  /** The sign-in went bad mid-turn: say so until they link again. */
-  expire(uid: number) {
-    this.credentials.fail(uid, 'claude_runner');
+  /**
+   * Account `n`'s sign-in went bad mid-turn: say so until they link it again, and move turns on to another.
+   * The person reads as expired (their messages wait) only once every account has.
+   */
+  expire(uid: number, n = 1) {
+    this.withAccounts(uid, (set) => {
+      for (const a of set.accounts) if (a.n === n) a.expired = Date.now();
+    });
+  }
+
+  /** The lowest account number free for a new link, or null at MAX_ACCOUNTS. */
+  private freeAccount(uid: number): number | null {
+    const taken = new Set(this.accounts(uid)?.accounts.map((a) => a.n) ?? []);
+    for (let n = 1; n <= MAX_ACCOUNTS; n++) if (!taken.has(n)) return n;
+    return null;
+  }
+
+  /**
+   * A server login's extra account folder, made the first time, with the host folder's instructions, settings,
+   * memory and transcripts linked in, so its turns read what account 1's do. The sign-in itself stays its own.
+   */
+  private hostFolder(uid: number, n: number): string {
+    const dir = this.configDir(uid, n)!;
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const main = claudeConfigDir(process.env);
+    for (const f of SHARED_CONFIG) if (existsSync(join(main, f)) && !existsSync(join(dir, f))) symlinkSync(join(main, f), join(dir, f));
+    return dir;
+  }
+
+  /** The environment a command for account `n` runs with: the server's, minus any login that would win over the folder's own. */
+  private hostEnv(dir: string): NodeJS.ProcessEnv {
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: dir };
+    for (const v of AUTH_VARS) delete env[v];
+    return env;
+  }
+
+  /** Run claude's `args` for account `n`: in the person's container, or on the host for the server login's extras. */
+  private claudeCmd(uid: number, n: number, args: string[]): Promise<CmdResult> {
+    if (this.serverLogin(uid)) {
+      const env = this.hostEnv(this.hostFolder(uid, n));
+      return new Promise((resolve) => execFile(resolveClaude(this.claudeBin), args, { env, timeout: 30_000 }, (err: any, stdout, stderr) =>
+        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr || err?.message || '') })));
+    }
+    return this.containers.exec(this.name(uid), [resolveClaude(this.claudeBin), ...args], { env: { CLAUDE_CONFIG_DIR: join(this.home, accountDir(n)) }, timeout: 30_000 });
   }
 
   /**
    * Start linking: the container, then `claude auth login` under a pty (script) inside it, over plain
    * pipes. Resolves once Anthropic's link is out (or it failed); the code comes later, in code().
    */
-  async link(uid: number): Promise<ClaudeStatus> {
+  /**
+   * The account a sign-in is for: `account` to sign one in again (expired, say), or with none, the lowest free number
+   * for another. Throws what's wrong, before link() starts anything.
+   */
+  linkSlot(uid: number, account?: number): number {
+    const n = account ?? this.freeAccount(uid);
+    if (account !== undefined && !(Number.isInteger(account) && account >= 1 && account <= MAX_ACCOUNTS)) throw new Error(`Accounts are numbered 1 to ${MAX_ACCOUNTS}.`);
+    if (!n) throw new Error(`${MAX_ACCOUNTS} Claude accounts at most: unlink one first.`);
+    if (this.serverLogin(uid) && n === 1) throw new Error("Account 1 is the server's own login: sign it in on the server itself.");
+    return n;
+  }
+
+  async link(uid: number, account?: number): Promise<ClaudeStatus> {
+    const host = this.serverLogin(uid);
+    const n = this.linkSlot(uid, account);
     const old = this.logins.get(uid);
     if (old?.child && !old.error) old.child.kill();
-    const login: Login = { child: null, out: '' };
+    const login: Login = { n, child: null, out: '' };
     this.logins.set(uid, login);
     try {
-      // A sign-in starts in a fresh container: the restart's :U chown also mends a volume an older start left root-owned folders in.
-      if (!this.busy(this.name(uid))) await this.containers.stop(this.name(uid));
-      await this.ensure(uid);
+      if (!host) {
+        // A sign-in starts in a fresh container: the restart's :U chown also mends a volume an older start left root-owned folders in.
+        if (!this.busy(this.name(uid))) await this.containers.stop(this.name(uid));
+        await this.ensure(uid);
+      }
       // Started again (or unlinked) while the container was starting: that call owns the sign-in now.
       if (this.logins.get(uid) !== login) return this.status(uid);
       const claude = resolveClaude(this.claudeBin);
-      const child = spawn('podman', ['exec', '-i', '-e', `CLAUDE_CONFIG_DIR=${join(this.home, '.claude')}`, this.name(uid), 'script', '-qfec', `stty cols 4000; ${claude} auth login --claudeai`, '/dev/null'], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const script = ['script', '-qfec', `stty cols 4000; ${claude} auth login --claudeai`, '/dev/null'];
+      const child = host
+        ? spawn(script[0], script.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], env: this.hostEnv(this.hostFolder(uid, n)) })
+        : spawn('podman', ['exec', '-i', '-e', `CLAUDE_CONFIG_DIR=${join(this.home, accountDir(n))}`, this.name(uid), ...script], { stdio: ['pipe', 'pipe', 'pipe'] });
       login.child = child;
       login.exited = new Promise((r) => child.on('exit', (code) => r(code ?? 1)));
       await new Promise<void>((resolve) => {
@@ -388,20 +610,31 @@ export class ClaudeLink {
     login.child.stdin!.write(`${code}\r`);
     const exit = await Promise.race([login.exited, new Promise<null>((r) => setTimeout(() => r(null), 60_000))]);
     if (exit === null) login.child.kill();
-    const who = await this.whoami(uid);
+    const who = await this.whoami(uid, login.n);
     if (!who.loggedIn) {
       const said = signInOutcome(login.out, code);
       login.error = `The sign-in didn't take (${exit === null ? 'no answer within a minute' : `exit ${exit}`}): ${said}${exit === 0 ? ` Then \`claude auth status\` said: ${who.said}` : ''}`;
       // File names and owners only: what the sign-in left in the Claude folder, for the server log.
-      const files = await this.containers.exec(this.name(uid), ['sh', '-c', 'id; ls -la "$CLAUDE_CONFIG_DIR"'], { env: { CLAUDE_CONFIG_DIR: join(this.home, '.claude') }, timeout: 30_000 });
+      const files = this.serverLogin(uid) ? { stdout: '', stderr: '' } : await this.containers.exec(this.name(uid), ['sh', '-c', 'id; ls -la "$CLAUDE_CONFIG_DIR"'], { env: { CLAUDE_CONFIG_DIR: join(this.home, accountDir(login.n)) }, timeout: 30_000 });
       console.warn(`claude-link: sign-in for user ${uid} didn't take (exit ${exit}): ${said} | auth status: ${who.raw} | ${files.stdout}${files.stderr}`);
       login.child = null;
       return this.status(uid);
     }
-    const home = await this.containers.volumePath(this.name(uid));
-    if (!home) throw new Error(`The volume ${this.name(uid)} is gone.`);
-    // The secret is only the container's name: there is nothing secret here, and never a Claude token.
-    this.credentials.put(uid, 'claude_runner', this.name(uid), { container: this.name(uid), home, email: who.email, plan: who.plan, linkedAt: Date.now() } satisfies ClaudeMeta);
+    const account: ClaudeAccount = { n: login.n, email: who.email, plan: who.plan, linkedAt: Date.now() };
+    const set = this.accounts(uid);
+    if (set) {
+      // Another account, or one signing in again: in its place in the order, the rest kept.
+      const at = set.accounts.findIndex((a) => a.n === login.n);
+      if (at >= 0) set.accounts[at] = account;
+      else set.accounts.push(account);
+      set.accounts.sort((a, b) => a.n - b.n);
+      this.saveAccounts(uid, set);
+    } else {
+      const home = await this.containers.volumePath(this.name(uid));
+      if (!home) throw new Error(`The volume ${this.name(uid)} is gone.`);
+      // The secret is only the container's name: there is nothing secret here, and never a Claude token.
+      this.credentials.put(uid, 'claude_runner', this.name(uid), { container: this.name(uid), home, email: who.email, plan: who.plan, linkedAt: account.linkedAt, accounts: [account], inUse: login.n } satisfies ClaudeMeta);
+    }
     this.logins.delete(uid);
     return this.status(uid);
   }
@@ -412,23 +645,52 @@ export class ClaudeLink {
     this.logins.delete(uid);
   }
 
-  /** Sign out inside the container, stop it, and remove the volume with everything in it. */
-  async unlink(uid: number): Promise<void> {
+  /**
+   * Unlink account `n`: sign it out and remove its folder. With no `n`, or the last account, sign out inside the
+   * container, stop it, and remove the volume with everything in it.
+   */
+  async unlink(uid: number, n?: number): Promise<void> {
+    const set = this.accounts(uid);
+    if (n !== undefined && (this.serverLogin(uid) || (set && set.accounts.some((a) => a.n !== n)))) return this.unlinkOne(uid, n);
     // shortcut: a sign-in abandoned across a restart leaves its small volume behind until they link and unlink again.
     const started = this.logins.has(uid) || !!this.meta(uid);
     const name = this.name(uid);
     if (this.busy(name)) throw new Error('Turns are running on your Claude now: stop them first, then unlink.');
     this.cancel(uid);
     if (!started) return;
-    if ((await this.containers.status(name)).state === 'running') await this.containers.exec(name, [resolveClaude(this.claudeBin), 'auth', 'logout'], { env: { CLAUDE_CONFIG_DIR: join(this.home, '.claude') }, timeout: 30_000 });
+    if ((await this.containers.status(name)).state === 'running') {
+      for (const a of set?.accounts ?? [{ n: 1 }]) await this.claudeCmd(uid, a.n, ['auth', 'logout']);
+    }
     await this.containers.stop(name);
     await this.containers.removeVolume(name);
     this.credentials.remove(uid, 'claude_runner');
   }
 
+  /** Sign out one of several accounts and remove its folder; the others, and the container, stay. */
+  private async unlinkOne(uid: number, n: number): Promise<void> {
+    if (this.serverLogin(uid) && n === 1) throw new Error("Account 1 is the server's own login: it can't be unlinked here.");
+    const set = this.accounts(uid);
+    if (!set?.accounts.some((a) => a.n === n)) {
+      if (this.logins.get(uid)?.n === n) this.cancel(uid);
+      return;
+    }
+    // Its turns would lose their sign-in mid-turn; the other accounts' carry on.
+    if (!this.serverLogin(uid) && this.busy(this.name(uid)) && pickAccount(set)?.n === n) throw new Error('Turns are running on this account now: switch to another with Use now, or stop them, then unlink.');
+    if (this.logins.get(uid)?.n === n) this.cancel(uid);
+    const dir = this.configDir(uid, n);
+    const running = this.serverLogin(uid) || (await this.containers.status(this.name(uid))).state === 'running';
+    if (running) await this.claudeCmd(uid, n, ['auth', 'logout']);
+    // shortcut: the folder goes from the host side; a container that isn't running keeps nothing of it either way.
+    if (dir && n !== 1) rmSync(dir, { recursive: true, force: true });
+    this.withAccounts(uid, (s) => {
+      s.accounts = s.accounts.filter((a) => a.n !== n);
+      if (s.inUse === n) s.inUse = s.accounts[0]?.n ?? 1;
+    });
+  }
+
   /** `claude auth status` in the container: signed in or not, and as whom. */
-  private async whoami(uid: number): Promise<{ loggedIn: boolean; email?: string; plan?: string; said: string; raw: string }> {
-    const r = await this.containers.exec(this.name(uid), [resolveClaude(this.claudeBin), 'auth', 'status'], { env: { CLAUDE_CONFIG_DIR: join(this.home, '.claude') }, timeout: 30_000 });
+  private async whoami(uid: number, n: number): Promise<{ loggedIn: boolean; email?: string; plan?: string; said: string; raw: string }> {
+    const r = await this.claudeCmd(uid, n, ['auth', 'status']);
     const raw = `${r.stdout}\n${r.stderr}`;
     const said = lastLines(raw);
     try {

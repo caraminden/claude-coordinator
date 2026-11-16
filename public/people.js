@@ -1,6 +1,6 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
 import { account, api, h, icon, view } from './base.js';
-import { codexToggle, codexWindowsBlock, setCodex } from './core.js';
+import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
 import { settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
@@ -132,7 +132,7 @@ export function peoplePage() {
     };
     const turns = u.server_login_owner && h('input', { type: 'checkbox', checked: u.server_login,
       onchange: (e) => patch({ server_login: e.target.checked }, `switch ${u.name}'s turns to ${e.target.checked ? 'the server login' : 'their own Claude'}`) });
-    const claude = u.server_login ? 'Claude: server login' : u.claude === 'linked' ? 'Claude linked' : u.claude === 'expired' ? 'Claude needs linking again' : 'Claude not linked';
+    const claude = u.server_login ? `Claude: server login${u.claude_accounts > 1 ? ` (${u.claude_accounts})` : ''}` : u.claude === 'linked' ? `Claude linked${u.claude_accounts > 1 ? ` (${u.claude_accounts})` : ''}` : u.claude === 'expired' ? 'Claude needs linking again' : 'Claude not linked';
     const self = u.id === account?.id;
     // One status chip leads the row (#492): the first thing that needs someone, else Ready.
     const [tone, word, tip] = u.disabled ? ['neutral', 'Disabled', 'They cannot sign in']
@@ -235,7 +235,17 @@ export function accountPage() {
 /** A plan's week as of its last turn: "41%, resets Mon 9:00 AM", or null before its first turn. */
 const weekText = (w) => w ? `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%${w.resetsAt ? `, resets ${new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}` : null;
 
-/** Your own Claude plan (#213): turns you start run on it, in a container of your own on the server. */
+/** A window's use as of its account's last turn: "41%". */
+const pctText = (w) => `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%`;
+const clock = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+/** One account's meters: "5 hours 41% · week 62%, resets Thu 9:00 AM", or nothing before its first turn. */
+const meterText = (u) => [u?.session && `5 hours ${pctText(u.session)}`, u?.weekly && `week ${weekText(u.weekly)}`].filter(Boolean).join(' · ');
+
+/**
+ * Your own Claude plan (#213): turns you start run on it, in a container of your own on the server. Up to three
+ * accounts (#779): turns stay on the one in use and move to the next ready one when it hits a limit.
+ */
 function claudeCard() {
   const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading Claude…'));
   let poll = null;
@@ -244,7 +254,6 @@ function claudeCard() {
     if (!card.isConnected && poll) return;
     const title = (chip, cls = '') => h('h3', {}, 'Claude', h('span', { class: `link-chip ${cls}` }, chip));
     const errLine = st.error ? h('p', { class: 'error', role: 'status' }, st.error) : '';
-    const week = weekText(st.usage?.weekly);
     const act = (label, method, path, body, cls = '') => h('button', {
       type: 'button', class: `small ${cls}`,
       onclick: async (e) => {
@@ -252,24 +261,24 @@ function claudeCard() {
         render(await api(path, { method, body }).catch((err) => ({ ...st, error: err.message })));
       },
     }, label);
-    const link = (label) => act(label, 'POST', 'api/me/claude');
-    const unlink = h('button', {
+    const link = (label, account) => act(label, 'POST', 'api/me/claude', account ? { account } : {});
+    const accounts = st.accounts ?? [];
+    const unlink = (a) => h('button', {
       type: 'button', class: 'secondary small',
       onclick: async () => {
-        if (!confirm('Unlink your Claude? Citadel signs you out and deletes your container and its files; your messages wait in the chat until you link again.')) return;
-        render(await api('api/me/claude', { method: 'DELETE' }).catch((err) => ({ ...st, error: err.message })));
+        const last = accounts.length < 2;
+        if (!confirm(last ? 'Unlink your Claude? Citadel signs you out and deletes your container and its files; your messages wait in the chat until you link again.'
+          : `Unlink ${a.email ?? `account ${a.n}`}? Citadel signs it out and deletes its folder; your turns carry on with your other accounts.`)) return;
+        render(await api(`api/me/claude?account=${a.n}`, { method: 'DELETE' }).catch((err) => ({ ...st, error: err.message })));
       },
     }, 'Unlink');
     const note = h('p', { class: 'muted small' }, 'Turns you start run on your plan and count against its limits. ',
-      'You sign in with Anthropic inside your own container on the server: Citadel never sees your password or token, only the one-time code you paste here.');
-    if (st.host) {
-      return card.replaceChildren(title('Server login', 'ok'), h('p', {}, 'Your turns run on this server\'s own Claude login, so there\'s nothing to link.'),
-        week ? h('dl', { class: 'kv' }, h('dt', {}, 'This week'), h('dd', {}, week)) : '');
-    }
+      'Every account signs in with Anthropic inside your own container on the server: Citadel never sees a password or token, only the one-time code you paste here. ',
+      'Link only accounts of your own: sharing one breaks Anthropic\'s terms.');
     if (st.state === 'starting') {
       poll = setTimeout(() => api('api/me/claude').then(render).catch(() => {}), 2000);
       return card.replaceChildren(title('Starting', 'off'), errLine,
-        h('p', {}, 'Starting your container and Anthropic\'s sign-in. The first time builds Citadel\'s image, which can take a few minutes.'));
+        h('p', {}, st.host ? 'Starting Anthropic\'s sign-in.' : 'Starting your container and Anthropic\'s sign-in. The first time builds Citadel\'s image, which can take a few minutes.'));
     }
     if (st.state === 'waiting for code') {
       const code = h('input', { placeholder: 'Paste the code here', autocomplete: 'off', spellcheck: 'false', required: true, maxlength: 2000 });
@@ -281,27 +290,59 @@ function claudeCard() {
         send.textContent = 'Signing in…';
         render(await api('api/me/claude/code', { method: 'POST', body: { code: code.value.trim() } }).catch((err) => ({ ...st, error: err.message })));
       };
-      return card.replaceChildren(title('Signing in', 'off'), errLine,
+      return card.replaceChildren(title(st.linking > 1 || accounts.length ? `Signing in account ${st.linking}` : 'Signing in', 'off'), errLine,
         h('p', {}, '1. ', h('a', { href: st.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Anthropic\'s sign-in'), ' and sign in with your Claude account.'),
         h('p', {}, '2. Paste the code it shows you:'), form,
-        h('div', { class: 'row' }, act('Cancel', 'DELETE', 'api/me/claude', undefined, 'secondary')), note);
+        h('div', { class: 'row' }, act('Cancel', 'DELETE', `api/me/claude?account=${st.linking}`, undefined, 'secondary')), note);
     }
-    if (st.state === 'expired') {
-      return card.replaceChildren(title('Needs linking again', 'warn'), errLine,
-        h('p', {}, `Anthropic stopped accepting your sign-in${st.email ? ` as ${st.email}` : ''} (signed out or expired). Your messages wait in the chat until you link again.`),
-        h('div', { class: 'row' }, link('Link Claude again'), unlink), note);
+    if (!accounts.length) {
+      return card.replaceChildren(title('Not linked', 'off'), errLine,
+        h('p', {}, 'Link your Claude plan so the turns your messages start run on it. Until then your messages wait in the chat.'),
+        h('div', { class: 'row' }, link('Link Claude')), note);
     }
-    if (st.state === 'linked') {
-      return card.replaceChildren(title('Linked', 'ok'), errLine,
-        h('dl', { class: 'kv' },
-          h('dt', {}, 'Signed in as'), h('dd', {}, st.email || '—'),
-          h('dt', {}, 'Plan'), h('dd', {}, st.plan || '—'),
-          week && [h('dt', {}, 'This week'), h('dd', {}, week)]),
-        h('div', { class: 'row' }, unlink), note);
-    }
-    return card.replaceChildren(title('Not linked', 'off'), errLine,
-      h('p', {}, 'Link your Claude plan so the turns your messages start run on it. Until then your messages wait in the chat.'),
-      h('div', { class: 'row' }, link('Link Claude')), note);
+    const usageFor = (n) => st.usage?.accounts?.find((a) => a.n === n)?.usage ?? (n === (st.usage?.account ?? st.inUse) ? st.usage : null);
+    // "Use now" shows at once and sends behind; a refusal puts the account in use back.
+    const useNow = (a) => h('button', {
+      type: 'button', class: 'secondary small',
+      onclick: () => optimistic({
+        key: 'claude-use',
+        apply: () => render({ ...st, inUse: a.n }),
+        send: () => api('api/me/claude/use', { method: 'POST', body: { account: a.n } }).then((next) => {
+          render(next);
+          renderUsage(next.usage);
+        }),
+        undo: () => render(st),
+        label: `switch your turns to ${a.email ?? `account ${a.n}`}`,
+      }),
+    }, 'Use now');
+    const now = Date.now();
+    const rows = accounts.map((a) => {
+      const own = st.host && a.n === 1;
+      const [chip, cls] = a.expired ? ['Needs linking again', 'warn']
+        : a.n === st.inUse ? ['In use', 'use']
+        : a.limitedUntil > now ? [`Limited until ${clock(a.limitedUntil)}`, 'warn']
+        : ['Ready', 'ok'];
+      return h('li', { class: `acct${a.n === st.inUse ? ' in-use' : ''}` },
+        h('span', { class: 'n' }, String(a.n)),
+        h('span', { class: 'who' }, h('strong', {}, own ? 'Server login' : a.email || `Account ${a.n}`), h('span', { class: `link-chip ${cls}` }, chip), a.plan ? h('span', { class: 'muted small' }, a.plan) : ''),
+        h('span', { class: 'acts' },
+          a.expired && !own ? link('Link again', a.n) : '',
+          a.n !== st.inUse && !a.expired ? useNow(a) : '',
+          own ? '' : unlink(a)),
+        h('span', { class: 'meters' }, meterText(usageFor(a.n)) || 'No turns on it yet'));
+    });
+    const ready = accounts.filter((a) => a.ready).length;
+    const allExpired = accounts.every((a) => a.expired);
+    const full = accounts.length >= 3;
+    const chip = st.host ? ['Server login', 'ok'] : allExpired ? ['Needs linking again', 'warn'] : accounts.length > 1 ? [`${ready} of ${accounts.length} ready`, ready ? 'ok' : 'warn'] : ['Linked', 'ok'];
+    return card.replaceChildren(title(...chip), errLine,
+      allExpired ? h('p', {}, 'Anthropic stopped accepting your sign-in (signed out or expired). Your messages wait in the chat until you link again.') : '',
+      accounts.length > 1 || st.host ? h('p', { class: 'small' }, 'Turns stay on the account in use. When it hits a usage limit, they carry on with the next ready one in this order, mid-turn included.') : '',
+      h('ol', { class: 'acct-list' }, rows),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', disabled: full, title: full ? 'Three accounts at most' : 'Sign in another Claude account of yours',
+        onclick: (e) => { e.target.disabled = true; api('api/me/claude', { method: 'POST', body: {} }).then(render).catch((err) => render({ ...st, error: err.message })); } }, 'Link another account'),
+      full ? h('span', { class: 'muted small' }, 'Three at most') : ''),
+      note);
   };
   api('api/me/claude').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
   return card;

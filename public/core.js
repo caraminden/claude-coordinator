@@ -432,7 +432,9 @@ export function renderUsage(next = usage) {
       `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
       usage.session ? `5-hour window: ${Math.round(usage.session.utilization * 100)}%${usage.session.resetsAt ? `, resets ${when(usage.session.resetsAt)}` : ''}` : null,
       `As of the last turn, ${ago(usage.updatedAt)}`,
-    ].filter(Boolean).join('\n');
+      // Several Claude accounts (#779): the bar is the one in use; the tooltip lists them all.
+      ...(usage.accounts?.length > 1 ? ['', ...usage.accounts.map((a) => `${a.n === usage.account ? '▸ ' : ''}${a.label}: ${a.usage?.weekly ? `week ${Math.round(a.usage.weekly.utilization * 100)}%` : 'no turns yet'}${a.usage?.session ? `, 5 hours ${Math.round(a.usage.session.utilization * 100)}%` : ''}`)] : []),
+    ].filter((line) => line != null).join('\n');
   }
   for (const el of document.querySelectorAll('.usage:not(.codex)')) renderCodexSwitch(renderCodexMeter(el));
   for (const el of document.querySelectorAll('.codex-toggle')) syncToggle(el);
@@ -483,7 +485,9 @@ function fillCodexWindows(el) {
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 const live = (w) => w && (!w.resetsAt || w.resetsAt > Date.now());
 /** A Claude window is past 90% (or out): the left panel offers the override then (Josh, 2026-11-05). */
-const claudeHigh = () => [usage?.session, usage?.weekly].some((w) => live(w) && (w.status === 'rejected' || w.utilization >= 0.9));
+const high = (u) => [u?.session, u?.weekly].some((w) => live(w) && (w.status === 'rejected' || w.utilization >= 0.9));
+// With several Claude accounts (#779), only once every one of them is high: turns move to the next by themselves.
+const claudeHigh = () => usage?.accounts?.length > 1 ? usage.accounts.every((a) => high(a.usage)) : high(usage);
 
 /** "Enable Codex override" (#337): runs the person's turns on Codex. Settings has one; the left panel shows one past 90%. */
 export function codexToggle() {

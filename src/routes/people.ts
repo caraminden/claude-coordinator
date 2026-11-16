@@ -12,7 +12,7 @@ function personView(app: App, u: User) {
     id: u.id, name: u.name, login: u.login, admin: !!u.admin, server_login: !!u.server_login,
     disabled: !!u.disabled_at, has_password: !!u.password_hash, invite_open: (u.invite_expires ?? 0) > Date.now(),
     github: app.github.login(u.id),
-    claude: app.claude.linked(u.id), server_login_owner: u.id === app.store.serverLoginOwner(),
+    claude: app.claude.linked(u.id), claude_accounts: app.claude.accounts(u.id)?.accounts.length ?? 0, server_login_owner: u.id === app.store.serverLoginOwner(),
     week: app.runner.usageOf(u.id)?.weekly ?? null,
   };
 }
@@ -209,12 +209,31 @@ export const peopleRoutes: Route[] = [
   { method: 'GET', path: '/api/me/claude', who: ['person'], handler: ({ res, app, session }) => json(res, 200, { ...app.claude.status(uidOf(session)), usage: app.runner.usageOf(uidOf(session)) }) },
   {
     method: 'POST', path: '/api/me/claude', who: ['person'],
-    handler({ res, app, session }) {
+    async handler({ req, res, app, session }) {
       const uid = uidOf(session);
-      if (app.store.getUser(uid)?.server_login) throw new HttpError(400, 'Your turns run on the server\'s own Claude login, so there\'s nothing to link.');
+      // Which account (#779): another one, or one to sign in again. A page from before #779 sends no body.
+      const body = (req.headers['content-type'] ?? '').startsWith('application/json') ? await readJson(req) : {};
+      let n: number;
+      try {
+        n = app.claude.linkSlot(uid, body.account === undefined ? undefined : Number(body.account));
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
       // Starting the container can take minutes the first time (it builds the image): Settings polls GET meanwhile.
-      void app.claude.link(uid);
+      void app.claude.link(uid, n).catch((err) => console.warn(`claude-link: linking account ${n} for user ${uid} failed: ${err.message}`));
       return json(res, 202, app.claude.status(uid));
+    },
+  },
+  {
+    method: 'POST', path: '/api/me/claude/use', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const uid = uidOf(session);
+      try {
+        app.claude.use(uid, Number((await readJson(req)).account));
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      return json(res, 200, { ...app.claude.status(uid), usage: app.runner.usageOf(uid) });
     },
   },
   {
@@ -228,9 +247,11 @@ export const peopleRoutes: Route[] = [
   },
   {
     method: 'DELETE', path: '/api/me/claude', who: ['person'],
-    async handler({ res, app, session }) {
-      await app.claude.unlink(uidOf(session)).catch((err) => { throw new HttpError(400, err.message); });
-      return json(res, 200, app.claude.status(uidOf(session)));
+    async handler({ res, app, session, url }) {
+      // One account of several (#779), or with none named, the whole link.
+      const account = url.searchParams.get('account');
+      await app.claude.unlink(uidOf(session), account ? Number(account) : undefined).catch((err) => { throw new HttpError(400, err.message); });
+      return json(res, 200, { ...app.claude.status(uidOf(session)), usage: app.runner.usageOf(uidOf(session)) });
     },
   },
   // Signing in to Codex (src/codex-link.ts, #330): in the person's Claude container, by OpenAI's device code. No token passes through.

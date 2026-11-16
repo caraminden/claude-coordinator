@@ -267,7 +267,7 @@ export interface ClaudePlaces {
   place(uid: number | null): TurnPlace | null;
   /** The server login's Codex-only container (#341), whose place() is the host. */
   codexPlace(uid: number): TurnPlace | null;
-  expire(uid: number): void;
+  expire(uid: number, account?: number): void;
 }
 
 export class ContraptionTurns {
@@ -380,7 +380,7 @@ export class ContraptionTurns {
     if (place.host) {
       // Not DATA_DIR/contraptions: a dev copy keeps contraptions' key folders there.
       const dir = join(this.dataDir, 'contraption-scratch', c.name, String(person));
-      return { cwd: dir, onHost: dir, configDir: claudeConfigDir(this.env) };
+      return { cwd: dir, onHost: dir, configDir: place.configDir ?? claudeConfigDir(this.env) };
     }
     const rel = join('.citadel', 'contraption-scratch', c.name);
     return { cwd: join(homedir(), rel), onHost: join(place.home, rel), configDir: place.configDir };
@@ -549,6 +549,11 @@ export class ContraptionTurns {
     let cmd: string;
     let cmdArgs: string[];
     if (at.host) {
+      // The server login's extra Claude account (#779): its folder's own sign-in, nothing of the host's over it.
+      if (at.env) {
+        for (const v of AUTH_VARS) delete env[v];
+        env = { ...env, ...at.env };
+      }
       [cmd, cmdArgs] = [this.claudeBin, argv];
     } else {
       // The person's own sign-in, so nothing of the server's may win over it.
@@ -696,10 +701,11 @@ export class ContraptionTurns {
       return { outcome: 'end', usage };
     }
     const why = [typeof result?.result === 'string' ? result.result : '', ...(Array.isArray(result?.errors) ? result.errors.map(String) : []), stderr].join('\n').trim();
+    // shortcut: an app turn's limit doesn't move its person's turns to another Claude account (#779); a minion's turn on it does.
     if (USAGE_LIMIT.test(why)) return error('limit', why.split('\n')[0].slice(0, 300));
     // A Codex turn's 401 is OpenAI's: it says nothing about the Claude sign-in.
     if (!codex && isAuthFailure(why)) {
-      if (!place.host) this.claude.expire(req.person);
+      if (!place.host || (place.account ?? 1) > 1) this.claude.expire(req.person, place.account);
       return error('no_plan', 'This person\'s Claude sign-in was refused: they need to link it again in Citadel');
     }
     return error('failed', `${codex ? 'Codex' : 'Claude'} ended without a reply (exit ${code ?? 'unknown'})${why ? `: ${why.split('\n').filter(Boolean).at(-1)!.slice(0, 300)}` : ''}`);

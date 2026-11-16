@@ -148,6 +148,8 @@ interface TurnState {
   handBack?: true;
   /** The person it runs for (turnPerson). */
   person?: number | null;
+  /** Which of that person's Claude accounts it runs on (#779); absent on a Codex turn. */
+  account?: number;
   /** Who asked for it (Store.turnAsker), which a non-member's relay keeps apart from `person`. */
   asker?: number | null;
   /**
@@ -217,6 +219,8 @@ const HANDOFF_MAX = 20_000;
 
 /** Where a person's own plan usage is kept (their container turns'), apart from the server login's `usage`. */
 export const usageKey = (person: number) => `usage:user:${person}`;
+/** Where one Claude account's usage is kept (#779): account 1 keeps the key it had before there were several. */
+export const accountUsageKey = (payer: number | null, account = 1) => `${payer === null ? 'usage' : usageKey(payer)}${account > 1 ? `:account:${account}` : ''}`;
 
 /** A turn whose wrapper hasn't said it runs (no pid.json or beat yet) counts as still starting for this long. */
 const START_GRACE_MS = 60_000;
@@ -324,6 +328,9 @@ interface LimitResume {
   /** Its person switched to Codex: it resumes on Codex now (#337). */
   codex?: true;
 }
+const RESUME_ACCOUNT_PROMPT =
+  `Your last turn stopped at a Claude account's usage limit (or its sign-in ran out), so this turn carries on with another of your person's Claude accounts. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
+
 const RESUME_LIMIT_PROMPT =
   `Your last turn stopped at the account's usage limit, which has now reset. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
 
@@ -580,8 +587,20 @@ export class Runner {
   codexPlaceFor?: (person: number) => TurnPlace | null;
   /** Start the server login's Codex container if it isn't running, for its host turns' Codex reviews (#398). */
   wakeCodex?: (person: number) => void;
-  /** A container turn's Claude sign-in was refused, so that person has to link again. */
-  onAuthFailure?: (person: number) => void;
+  /** A turn's Claude sign-in was refused, so that person has to link that account again. */
+  onAuthFailure?: (person: number, account?: number) => void;
+  /**
+   * A person's Claude accounts (#779), in order, with the one turns run on now; null when they have none.
+   * The ClaudeLink's, set by the server.
+   */
+  claudeAccounts?: (person: number) => { inUse: number | null; accounts: { n: number; label: string }[] } | null;
+  /**
+   * A turn on `account` hit its limit, which resets at `until` (src/claude-link.ts, limited): the account turns
+   * move on to, or null when none is ready, with the earliest reset of the person's accounts.
+   */
+  onLimit?: (person: number, account: number, until: number) => { next: { n: number; label: string } | null; resetAt: number } | null;
+  /** A turn on `account` got through, so its limit is gone. */
+  onCleared?: (person: number, account: number) => void;
 
   /**
    * The environment a host turn's tools get, for running a minion's tools/land.sh on the host (src/land.ts).
@@ -1237,7 +1256,7 @@ export class Runner {
    * Start an auto-resume turn, after a restart or (limitTries > 0) the usage limit, with any messages
    * that were queued behind the cut-off one.
    */
-  private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false, netTries = 0) {
+  private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false, netTries = 0, onAccount = false) {
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return;
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
@@ -1255,9 +1274,10 @@ export class Runner {
         this.store.deleteSetting(owedKey(ticketId));
         return;
       }
-      this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
+      // An account switch's note went with the turn that stopped (switchAccount).
+      if (!onAccount) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
       // It carries on the interrupted turn, so it runs for that turn's person.
-      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries);
+      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : onAccount ? RESUME_ACCOUNT_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries);
     }));
   }
 
@@ -1277,7 +1297,7 @@ export class Runner {
       // Nothing stored, nothing to restore: no need to ask whose Claude it runs on.
       if (ticket && project && ticket.status !== 'closed' && (this.store.listClaudeState(project.id, ticket.id).length || this.store.listClaudeState(project.id, null).length)) {
         const place = this.placeFor?.(person(ticket, project)) ?? { host: true as const };
-        if (!('refused' in place)) ahead = restoreAhead(this.store, ticket, project, place.host ? claudeConfigDir(process.env) : place.configDir);
+        if (!('refused' in place)) ahead = restoreAhead(this.store, ticket, project, place.host ? place.configDir ?? claudeConfigDir(process.env) : place.configDir);
       }
     } catch (err: any) {
       // The turn's start meets the same trouble itself, and says so.
@@ -2310,7 +2330,7 @@ export class Runner {
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
@@ -2514,14 +2534,16 @@ export class Runner {
       status = 'error';
       // A container's sign-in that stopped working: their messages wait until they link again.
       // Not a Codex turn's: its 401 is OpenAI's, and says nothing about the Claude sign-in.
-      if (turn?.container && turn.person && !turn.codex && isAuthFailure(`${resultError ?? ''}\n${stderr.join('\n')}`)) {
-        this.onAuthFailure?.(turn.person);
-        this.emit(ticketId, 'note', { text: `${this.store.getUser(turn.person)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
-      }
+      // A host turn on the server login's own account 1 has no sign-in of Citadel's to expire.
+      const authFailed = !!turn?.person && !turn.codex && (!!turn.container || (turn.account ?? 1) > 1) && isAuthFailure(`${resultError ?? ''}\n${stderr.join('\n')}`);
+      if (authFailed) this.onAuthFailure?.(turn!.person!, turn!.account);
       const payer = this.payerOf(turn?.person);
-      const usage = payer === null ? this.usage : this.store.getSetting<Usage>(usageKey(payer));
+      const usage = this.store.getSetting<Usage>(accountUsageKey(payer, turn?.account));
       const codexReset = turn?.codex && turn.person ? codexResetAt(this.store.getSetting<CodexUsage>(codexUsageKey(turn.person))) : undefined;
-      this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage, codexReset, turn?.netTries ?? 0);
+      const reason = killed || resultError?.trim() || startError;
+      const switched = turn ? this.switchAccount(ticketId, turn, reason, usage, authFailed) : null;
+      if (authFailed && switched !== true) this.emit(ticketId, 'note', { text: `${this.store.getUser(turn!.person!)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
+      if (switched !== true) this.turnFailed(ticketId, reason, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage, codexReset, turn?.netTries ?? 0, switched ?? undefined);
     } else if (turn?.handBack) {
       // Claude has the Codex turns now.
       this.store.deleteSetting(codexThreadKey(ticketId));
@@ -2539,7 +2561,10 @@ export class Runner {
     if (status === 'idle' && !stopped && !signal) this.clearFailNote(ticketId);
     const ran = this.store.getTicket(ticketId);
     const ranIn = ran && this.store.getProject(ran.project_id);
-    if (status === 'idle' && !stopped && !signal && !turn?.codex && ran && ranIn) this.limitCleared(this.payerOf(turn?.person), turnSettings(ran, ranIn).model);
+    if (status === 'idle' && !stopped && !signal && !turn?.codex && ran && ranIn) {
+      if (turn?.person && turn.account) this.onCleared?.(turn.person, turn.account);
+      this.limitCleared(this.payerOf(turn?.person), turnSettings(ran, ranIn).model);
+    }
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
     this.closing.delete(ticketId);
@@ -2613,7 +2638,7 @@ export class Runner {
    * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
    * problem needs a person: it blocks, never retries, and pushes once for everyone.
    */
-  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null, netTries = 0) {
+  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null, netTries = 0, allLimited?: number) {
     const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
     const why = reason || stderr;
     const text = why ? `${why}${reason && stderr ? `\n${stderr}` : ''}\n(${exited})` : exited;
@@ -2630,10 +2655,10 @@ export class Runner {
         return;
       }
       // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
-      const hit = codexReset !== undefined ? (codexReset ? [codexReset] : []) : [usage?.session, usage?.weekly].filter((w) => w?.status === 'rejected' && w.resetsAt && w.resetsAt > Date.now()).map((w) => w!.resetsAt!);
-      const resetAt = hit.length ? Math.max(...hit) : parseResetTime(reason) ?? Date.now() + this.limitFallbackMs;
+      // Every one of several accounts limited (#779): the first of them to reset.
+      const resetAt = allLimited ?? this.limitResetAt(reason, usage, codexReset);
       const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz);
-      this.emit(ticketId, 'note', { text: `${reason}\nIt resumes by itself at ${clockTime(at, tz)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.` });
+      this.emit(ticketId, 'note', { text: `${reason}\n${allLimited ? 'Every linked Claude account is limited now. ' : ''}It resumes by itself at ${clockTime(at, tz)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.` });
       if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit, resumes ${clockTime(at, tz)}` });
       return;
     }
@@ -2659,6 +2684,42 @@ export class Runner {
     const event = this.emit(ticketId, 'error', { text: netDown ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.` : text });
     this.setFailNote(ticketId, { note: netDown ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
     this.onTurnError(ticketId, text, event.id);
+  }
+
+  /** When a turn's usage limit resets: the windows it hit, else the time Claude's words give, else a while from now. */
+  private limitResetAt(reason: string, usage: Usage | null | undefined, codexReset?: number | null): number {
+    // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
+    const hit = codexReset !== undefined ? (codexReset ? [codexReset] : []) : [usage?.session, usage?.weekly].filter((w) => w?.status === 'rejected' && w.resetsAt && w.resetsAt > Date.now()).map((w) => w!.resetsAt!);
+    return hit.length ? Math.max(...hit) : parseResetTime(reason) ?? Date.now() + this.limitFallbackMs;
+  }
+
+  /**
+   * A Claude turn on one of its person's accounts hit that account's usage limit, or lost its sign-in (#779): the
+   * account is marked, and when another is ready the turn carries on with it now, a switch that isn't one of
+   * MAX_LIMIT_RESUMES (true). Else, on a limit with several accounts, when the first of them resets; null otherwise.
+   */
+  private switchAccount(ticketId: number, turn: TurnState, reason: string | null, usage: Usage | null, authFailed: boolean): true | number | null {
+    const person = turn.person;
+    if (!person || turn.codex || turn.account === undefined || turn.stopped) return null;
+    const limit = !!reason && USAGE_LIMIT.test(reason);
+    if (!limit && !authFailed) return null;
+    const several = (this.claudeAccounts?.(person)?.accounts.length ?? 0) > 1;
+    let next: { n: number; label: string } | null = null;
+    if (limit) {
+      const r = this.onLimit?.(person, turn.account, this.limitResetAt(reason!, usage));
+      if (!r) return null;
+      if (!r.next) return several ? r.resetAt : null;
+      next = r.next;
+    } else {
+      const acc = this.claudeAccounts?.(person);
+      const n = acc?.inUse;
+      next = n && n !== turn.account ? acc!.accounts.find((a) => a.n === n) ?? null : null;
+      if (!next) return null;
+    }
+    const why = limit ? reason! : `This account's Claude sign-in expired: link it again in Settings → Your account.`;
+    this.emit(ticketId, 'note', { text: `${why}\nCarrying on with ${next.label} (account ${next.n}): this turn picks up where it stopped.` });
+    this.resume(ticketId, 0, turn.limitTries ?? 0, false, 0, true);
+    return true;
   }
 
   private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {
@@ -2987,10 +3048,16 @@ export class Runner {
     return name ? { id, name } : null;
   }
 
-  /** A person's own plan usage, for their top-bar meter: the server login's, or their container turns'. */
-  usageOf(uid: number | null | undefined): Usage | null {
+  /**
+   * A person's own plan usage, for their top-bar meter: the server login's, or their container turns', of the
+   * account in use. With several accounts (#779) it says which, and carries each account's.
+   */
+  usageOf(uid: number | null | undefined): (Usage & { account?: number; accounts?: { n: number; label: string; usage: Usage | null }[] }) | null {
     const payer = this.payerOf(uid);
-    return payer === null ? this.usage : this.store.getSetting<Usage>(usageKey(payer));
+    const acc = uid ? this.claudeAccounts?.(uid) : null;
+    const usage = this.store.getSetting<Usage>(accountUsageKey(payer, acc?.inUse ?? 1));
+    if (!acc || acc.accounts.length < 2) return usage;
+    return { ...(usage ?? { weekly: null, session: null, updatedAt: 0 }), account: acc.inUse ?? 1, accounts: acc.accounts.map((a) => ({ ...a, usage: this.store.getSetting<Usage>(accountUsageKey(payer, a.n)) })) };
   }
 
   /**
@@ -3063,14 +3130,17 @@ export class Runner {
     if (!usage.weekly && !usage.session) return;
     const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
     const payer = turn?.container && turn.person ? turn.person : null;
-    const key = payer === null ? 'usage' : usageKey(payer);
+    const key = accountUsageKey(payer, turn?.account);
     const was = this.store.getSetting<Usage>(key);
     this.store.setSetting(key, usage);
     // The plan's limit lifted (#477): every window that was hit now says otherwise, so what waits on it needn't wait for the reset time.
     const hit = (['session', 'weekly'] as const).filter((k) => was?.[k]?.status === 'rejected');
-    if (hit.length && hit.every((k) => usage[k]?.status && usage[k]!.status !== 'rejected')) this.limitCleared(payer);
-    // Only the payer's own meter shows it (server.ts, broadcast).
-    this.broadcast({ type: 'usage', usage, payer });
+    if (hit.length && hit.every((k) => usage[k]?.status && usage[k]!.status !== 'rejected')) {
+      if (turn?.person && turn.account) this.onCleared?.(turn.person, turn.account);
+      this.limitCleared(payer);
+    }
+    // Only the payer's own meter shows it (server.ts, broadcast): the account in use's, whichever account this turn ran on.
+    this.broadcast({ type: 'usage', usage: turn?.person ? this.usageOf(turn.person) ?? usage : usage, payer });
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {

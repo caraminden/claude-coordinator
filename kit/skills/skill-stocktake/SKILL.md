@@ -74,7 +74,9 @@ person picks which fixes become minions.
    repo commit, the scope list, totals (always-loaded words across all descriptions; how many
    skills fired in 30 days), then the table (skill, description words, body words, uses,
    verdict, reason). Group the non-Keep verdicts into handoffs in `handoffs/`, one per minion
-   the work should become, and list them at the end.
+   the work should become, and list them at the end. End the turn with one multi-select
+   `ask_question` card of which handoffs to start, your recommendations marked.
 
 Done when every scanned skill has a row with a verdict and a standalone reason, every non-Keep
-verdict is in a handoff or says why not, and the reply carries the top three findings.
+verdict is in a handoff or says why not, the reply carries the top three findings, and the
+handoff card is posted.

@@ -13,7 +13,7 @@ When exploring the codebase, read the glossary the repo's CLAUDE.md names under 
 
 This skill has you show commands, outputs and captured artifacts. **Redact every secret first**: write `<REDACTED>` in its place. Build loops against env vars, so the credential stays in the environment rather than in what you show. Captured artifacts carry auth headers: quote only the lines that carry the signal.
 
-If the redacted output is not enough to diagnose the bug, say so and ask the user.
+If the redacted output is not enough to diagnose the bug, say so and ask with a card.
 
 ## Three strikes
 
@@ -114,7 +114,7 @@ out or unclear, with the evidence.
 
 ### When you genuinely cannot build a loop
 
-Stop and say so explicitly. List what you tried. Ask the user for: (a) access to whatever environment reproduces it, (b) a redacted captured artifact (HAR file, log dump, core dump, screen recording with timestamps), or (c) permission to add temporary production instrumentation. Do **not** proceed to hypothesise without a loop.
+Stop and say so explicitly. List what you tried. Ask with a card for: (a) access to whatever environment reproduces it, (b) a redacted captured artifact (HAR file, log dump, core dump, screen recording with timestamps), or (c) permission to add temporary production instrumentation. Do **not** proceed to hypothesise without a loop.
 
 ### Completion criterion: a tight loop that goes red
 

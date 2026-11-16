@@ -3,12 +3,13 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, sep } from 'node:path';
 import { cleanPluginPicks, lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
 import { adminAskRefusal, lendsMachine, managesMachine } from '../access.ts';
 import { APP_NAME } from '../appname.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { commentMessage, optionImageProblem } from '../artifacts.ts';
+import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../artifacts.ts';
 import { cardHref } from '../card-links.ts';
 import { armForCi, postCard, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
@@ -162,6 +163,15 @@ async function cleanQuestions(app: App, ticket: Ticket, raw: unknown) {
     }
   }
   return questions;
+}
+
+/** The page a choices card opens (#804): a mock kit page with pick bars in the minion's folders, whose Send dock answers the card. */
+async function choicesDoc(app: App, ticket: Ticket, raw: unknown): Promise<{ path: string; title: string }> {
+  const found = await resolveTicketFile(app, ticket, str(raw, 'doc', 1000));
+  if (found?.type.kind !== 'html') throw new HttpError(400, 'doc must be an HTML page in your working directory or shared folder');
+  const html = await readFile(found.file, 'utf8');
+  if (!choicesPage(html)) throw new HttpError(400, 'doc must be a mock kit page with pick bars (it loads mockkit.js and calls mock.picks or mock.boards): its Send dock is what answers the card (citadel:docs-and-mocks skill)');
+  return { path: found.abs, title: pageTitle(html, found.abs) };
 }
 
 /**
@@ -490,11 +500,13 @@ export const ticketRoutes: Route[] = [
       const body = await readJson(req);
       // Addressed to one person (#687): only their Needs-you list and devices get it. With no questions it's a notice, answered with Got it.
       const to = addressee(app, ticket, body.to);
-      const notice = to && body.questions == null ? str(body.notice, 'Notice', 500) : null;
-      const questions = notice ? [] : await cleanQuestions(app, ticket, body.questions);
+      // A choices page (#804): the card opens it, its pick bars ask, and its Send settles the card.
+      const doc = body.doc != null && body.questions == null ? await choicesDoc(app, ticket, body.doc) : null;
+      const notice = to && body.questions == null && !doc ? str(body.notice, 'Notice', 500) : null;
+      const questions = notice || doc ? [] : await cleanQuestions(app, ticket, body.questions);
       // A card asking for the go to merge or land says so, for the minions list's chip (#575).
       const kind = oneOf(body.kind ?? null, ['merge'], 'kind') as 'merge' | null;
-      const card = { questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}) };
+      const card = { questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}) };
       // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
       const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
       if (armed) return json(res, 202, { armed });
@@ -560,6 +572,7 @@ export const ticketRoutes: Route[] = [
       }
       const data = JSON.parse(card.data);
       if (data.settled) throw new HttpError(409, data.settled.by ? `${data.settled.by} already marked this seen` : 'Claude took this as answered in the chat');
+      if (data.doc) throw new HttpError(409, 'This card is answered on its page: open it and press Send there');
       // A notice (#687): Got it takes it out of the addressee's list, and sends the asker nothing.
       if (data.notice) {
         const settled = { at: Date.now(), by: session.name };

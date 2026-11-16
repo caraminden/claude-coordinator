@@ -162,7 +162,7 @@ const WHEN_CI_PASSES = {
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. After calling it, finish your turn with a short reply and wait: the card shows below your reply, even when you asked early in a long turn (say "the card below", never "above"), and the answers arrive as the next message. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below". The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345).',
+    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. When the choice is visual or has several parts, make a choices page instead (citadel:docs-and-mocks, mock.picks or mock.boards) and ask with `doc` set to its path and no questions: the card opens the page, people pick there, and the page's Send settles the card. Every choices page you link comes with this card. After calling it, finish your turn with a short reply and wait: the card shows below your reply, even when you asked early in a long turn (say "the card below", never "above"), and the answers arrive as the next message. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below". The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -202,6 +202,10 @@ const ASK_QUESTION = {
       },
       kind: { type: 'string', enum: ['merge'], description: '"merge" when the card asks people for the go to merge or land a change (the self-review\'s high-risk card): the minions list then labels it "merge". Leave out otherwise.' },
       to: DIRECT_TO,
+      doc: {
+        type: 'string', maxLength: 1000,
+        description: 'With no questions: the path of a choices page (a mock kit page with pick bars) in your working directory or shared folder. The card names the page and opens it; it lists no options of its own. The picks arrive as a message from the person who pressed Send on the page, which settles the card.',
+      },
       notice: {
         type: 'string', maxLength: 500,
         description: 'With to and no questions: a one-line notice for that person instead of a question (at most 500 characters). They see it with a "Got it" button, and nothing comes back to you.',
@@ -1616,12 +1620,18 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
     case 'ask_question': {
       const direct = args.to ? { to: args.to } : {};
+      if (args.doc != null && args.questions == null) {
+        const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
+        const { id: questionId, href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { doc: args.doc, ...direct, ...ci });
+        if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
+        return `The choices card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}; it opens the page. Its link is ${href}: link every mention of it, in this reply and later ones, e.g. [the card below](${href}), and link the card rather than the page when you point people at the choices. End your turn now with a short reply; the picks will come as a message from whoever presses Send on the page.`;
+      }
       if (args.to && args.questions == null) {
         const { href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { ...direct, notice: args.notice, ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
         if (armed) return `${armed} Nothing comes back from it, so keep working.`;
         return `The notice for ${args.to} is in the chat; its link is ${href}. Nothing comes back from it, so keep working.`;
       }
-      if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice)');
+      if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice) or ask on a choices page (doc)');
       const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
       const { id: questionId, href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci });
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;

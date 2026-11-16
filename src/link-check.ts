@@ -5,14 +5,14 @@
 // same send-back carries the wording check's findings (src/wording.ts): a reserved word used in another sense,
 // the cross-scheme link check's (src/scheme-refs.ts): a bare #N that likely means another scheme's minion,
 // the card link check's (src/card-links.ts): a card waiting on people mentioned without its link, or
-// linked as "above" or "below" when it sits the other way, or one already answered linked as still waiting, and the page check: a linked HTML page with an
-// answer button of its own instead of the mock kit's Send dock (#417).
+// linked as "above" or "below" when it sits the other way, or one already answered linked as still waiting, the page check: a linked HTML page with an
+// answer button of its own instead of the mock kit's Send dock (#417), and the choices check: a linked page with pick bars that no card opens (#804).
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
+import { choicesPage, fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
 import { explainCards, explainMisplaced, explainStale, misplacedCards, staleCards, unlinkedCards } from './card-links.ts';
 import { explainStrays, readRefs, strayRefs } from './scheme-refs.ts';
 import { takeStatus } from './status-trailer.ts';
@@ -80,6 +80,22 @@ export async function handRolledPages(text: string, cfg: LinkCheckConfig): Promi
   return pages;
 }
 
+/** The choices pages (#804) `text` links whose path no card in `docs` opens, as absolute paths. */
+export async function cardlessChoices(text: string, cfg: LinkCheckConfig, docs: Set<string>): Promise<string[]> {
+  const pages: string[] = [];
+  for (const abs of linkedPaths([text.replace(CODE, '')], cfg.cwd)) {
+    if (fileType(abs)?.kind !== 'html') continue;
+    const found = await resolveFile(abs, cfg.cwd, cfg.roots);
+    if (!found || docs.has(found.abs) || found.size > MAX_PAGE_BYTES) continue;
+    try {
+      if (choicesPage(readFileSync(found.file, 'utf8'))) pages.push(abs);
+    } catch {
+      // Unreadable: the broken-link check speaks for it.
+    }
+  }
+  return pages;
+}
+
 /** The prompt the marker says was nudged, or null if none was. */
 function readMarker(file: string): string | null {
   try {
@@ -106,7 +122,9 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const misplaced = refs?.cards ? misplacedCards(reply, refs.cards, refs.self ?? null) : [];
   const stale = refs?.settled ? staleCards(reply, refs.settled) : [];
   const rolled = await handRolledPages(reply, cfg);
-  if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length) return null;
+  const docs = new Set([...(refs?.cards ?? []), ...(refs?.settled ?? [])].flatMap((c) => (c.doc ? [c.doc] : [])));
+  const choices = refs?.cards ? await cardlessChoices(reply, cfg, docs) : [];
+  if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -131,11 +149,16 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
       + 'People answer a page only through the mock kit\'s Send dock, which posts straight into your chat: ask with mock.picks instead '
       + '(citadel:docs-and-mocks skill, mockkit.md), fix the pages, then rewrite the reply. A clipboard use that is no answer button can stay.\n'
     : '';
+  const choice = choices.length
+    ? `These pages ask with pick bars, but no card in the chat opens them:\n${choices.map((p) => `- ${p}`).join('\n')}\n`
+      + 'A choices page always comes with its card: call ask_question with doc set to the page\'s path (and no questions), so it waits on people '
+      + 'like any card and its Send settles it, then rewrite the reply with the card\'s link. A page linked only to show picks already made can stay.\n'
+    : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
   const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '')
     + (stale.length ? `${explainStale(stale, refs!.self ?? null)}\n` : '');
-  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

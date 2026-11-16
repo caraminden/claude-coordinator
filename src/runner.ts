@@ -3228,6 +3228,7 @@ export class Runner {
     const minion = ticket.kind === 'coordinator' ? null : ticket.number;
     const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({
       minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href: cardHref(ticket, eventId), ...((data as { to?: string })?.to ? { to: (data as { to: string }).to } : {}),
+      ...((data as { doc?: { path: string } })?.doc ? { doc: (data as { doc: { path: string } }).doc.path } : {}),
       // Only question and plan cards are held under the turn's words (public/thread.js heldCards).
       ...(placed ? { below: kind !== 'approval' && this.store.heldBelow(ticket.id, eventId) } : {}),
     });
@@ -3249,7 +3250,7 @@ export class Runner {
       const data = JSON.parse(r.data);
       const minion = r.tkind === 'coordinator' ? null : r.number;
       const how = settledHow(kind, data, r.reply && JSON.parse(r.reply), r.result && JSON.parse(r.result), r.tstatus === 'closed' ? minion : null, (ms) => clockTime(ms));
-      return [{ minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href, how }];
+      return [{ minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href, how, ...(data?.doc ? { doc: data.doc.path } : {}) }];
     });
   }
 

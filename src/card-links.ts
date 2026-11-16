@@ -23,6 +23,8 @@ export interface CardLink {
   below?: boolean;
   /** The one person it's addressed to (#687), whom it waits on. */
   to?: string;
+  /** A choices card's page (#804), absolute: the link check knows a linked choices page has its card. */
+  doc?: string;
 }
 
 /** A card that no longer waits on people, and what happened to it: "answered by Cara at 2:31am: Done, I ran it". */
@@ -55,6 +57,7 @@ export function cardWhat(kind: CardLink['kind'], data: any): CardWhat {
 export function cardLabel(kind: string, data: any): string {
   if (kind === 'plan') return clip(data?.summary);
   if (kind === 'question' && data?.notice) return clip(data.notice);
+  if (kind === 'question' && data?.doc) return clip(`picks on “${data.doc.title}”`);
   if (kind === 'question') return clip((data?.questions ?? []).map((q: any) => q?.header || q?.question).filter(Boolean).join(', '));
   return clip(typeof data?.input?.description === 'string' ? `${data.tool}: ${data.input.description}` : data?.tool);
 }
@@ -72,6 +75,7 @@ export function settledHow(kind: string, data: any, reply: any, result: any, dis
   if (result?.via) return `allowed on ${result.by}'s go "${clip(result.via.text)}" at ${clock(result.at)}`;
   if (result?.state) return `${result.state}${result.by ? ` by ${result.by}` : ''} at ${clock(result.at)}`;
   if (reply) return `${reply.author} wrote in its chat at ${clock(reply.at)}: "${clip(reply.text)}"`;
+  if (data?.settled?.sent) return `picks sent by ${data.settled.by} at ${clock(data.settled.at)}`;
   if (data?.settled?.by) return `seen by ${data.settled.by} at ${clock(data.settled.at)}`;
   if (data?.settled?.at) return `settled by its minion at ${clock(data.settled.at)}`;
   return dismissed != null ? `#${dismissed} was dismissed` : 'no longer waits on people';

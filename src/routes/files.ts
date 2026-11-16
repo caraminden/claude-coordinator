@@ -534,6 +534,14 @@ export const fileRoutes: Route[] = [
       if (!to) throw new HttpError(404, 'No minion or Taskmaster to send this to');
       const { about, text } = commentMessage(to.cwd && abs.startsWith(to.cwd + sep) ? abs.slice(to.cwd.length + 1) : abs, str(body.text, 'Answer', 10_000));
       app.runner.send(to.id, session.name, text, [], { comment: { path: abs, about }, hold: true });
+      // The picks answer the chat's choices cards for this page (#804).
+      for (const e of app.store.openCardsOf(to.id)) {
+        const q = e.kind === 'question' ? JSON.parse(e.data) : null;
+        if (q?.doc?.path !== abs) continue;
+        const settled = { at: Date.now(), by: session.name, sent: true };
+        app.store.setEventData(e.id, { ...q, settled });
+        app.runner.emit(to.id, 'question_result', { id: q.id, settled });
+      }
       app.runner.personWrote(to.id);
       // As in the chat: writing to the Taskmaster continues the loop guard for every minion of the scheme.
       for (const t of to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]) app.runner.continueLoop(t.id, session.name);

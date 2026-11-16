@@ -280,6 +280,17 @@ export async function optionImageProblem(path: string, cwd: string, roots: strin
   return null;
 }
 
+/** A choices page (#804): it loads the mock kit and asks with pick bars (mock.picks, or mock.boards' default picks). */
+export function choicesPage(html: string): boolean {
+  return /<script\b[^>]*\bsrc\s*=\s*["'][^"']*mockkit\.js/i.test(html) && /\bmock\.(?:picks|boards)\s*\(/.test(html);
+}
+
+/** A page's <title>, or its file name without one. */
+export function pageTitle(html: string, path: string): string {
+  const t = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1].replace(/\s+/g, ' ').trim();
+  return (t || basename(path)).slice(0, 200);
+}
+
 /**
  * A person's comment on a file as a chat message: `about` names the file in the message's
  * "[Name on about]:" prefix, and a quoted passage leads the text as a Markdown quote.

@@ -14,13 +14,25 @@ import { note } from './retro-log.ts';
 
 export const MAX_STOP_BLOCKS = 2;
 
-/**
- * The background jobs still running, as "id (what it is)". A workflow run doesn't count: `claude -p`
- * keeps the turn alive until it finishes, and no blocking command could wait for it (#359).
- */
-export function runningJobs(input: any): string[] {
+/** A background job still running; `grunt` is a subagent, anything else a Bash job (a workflow run doesn't count: `claude -p`
+ *  keeps the turn alive until it finishes, and no blocking command could wait for it, #359). */
+export function runningTasks(input: any): { id: string; what: string; grunt: boolean; pid?: number }[] {
   const tasks = Array.isArray(input?.background_tasks) ? input.background_tasks : [];
-  return tasks.filter((t: any) => t?.status === 'running' && t?.type !== 'workflow').map((t: any) => `${t.id} (${String(t.description || t.command || t.type || 'job').slice(0, 80)})`);
+  return tasks
+    .filter((t: any) => t?.status === 'running' && t?.type !== 'workflow')
+    .map((t: any) => ({ id: String(t.id), what: String(t.description || t.command || t.type || 'job').slice(0, 80), grunt: !/shell|bash/i.test(String(t.type ?? 'shell')), pid: Number.isInteger(t.pid) ? t.pid : undefined }));
+}
+
+/** The background jobs still running, as "id (what it is)". */
+export function runningJobs(input: any): string[] {
+  return runningTasks(input).map((t) => `${t.id} (${t.what})`);
+}
+
+/** The one action that ends the wait for this job. */
+function wayOut(t: ReturnType<typeof runningTasks>[number]): string {
+  return t.grunt
+    ? `${t.id} (${t.what}), a Grunt: wait for its result with SendMessage to ${t.id}, or stop it with TaskStop ${t.id}`
+    : `${t.id} (${t.what}), a Bash job: wait with \`citadel-wait pid ${t.pid ?? '<pid>'}\` and a Bash timeout of 600000, repeated until it ends (the pid is the \`$!\` you noted when you started it), or stop it with TaskStop ${t.id}`;
 }
 
 /** Why the turn may not end yet, or null. `blocks` is how many stops this prompt already refused. */
@@ -28,7 +40,8 @@ export function jobCheck(input: any, role: string | undefined, blocks: number): 
   if (role !== 'thread' || blocks >= MAX_STOP_BLOCKS) return null;
   const jobs = runningJobs(input);
   if (!jobs.length) return null;
-  return `[citadel job check] Your own background job is still running: ${jobs.join(', ')}. Don't end the turn to wait for it: keep its task in progress and wait inside the turn with one blocking command, like \`citadel-wait pid <pid>\` or \`citadel-wait cmd '<test>'\` with a Bash timeout of 600000 (\`sleep N; check\` is refused), repeated until it finishes, or stop it with TaskStop if it is no longer needed. A Grunt whose result this turn needs starts with \`run_in_background: false\` on its Agent call, so the next one can't hold up the stop.`;
+  const lines = runningTasks(input).map((t) => `- ${wayOut(t)}`).join('\n');
+  return `[citadel job check] Your own background job is still running, and ending the turn now would leave it unwatched. Keep its task in progress and end the wait with the action beside each job (\`sleep N; check\` is refused):\n${lines}\nA Grunt whose result this turn needs starts with \`run_in_background: false\` on its Agent call, so it can't hold up a later stop.`;
 }
 
 /** Runs the check for one Stop, counting refusals per prompt in a temp file; prints the block, if any. */

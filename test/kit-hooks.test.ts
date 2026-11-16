@@ -31,8 +31,14 @@ test('hooks.json is valid and every script it names exists in kit/hooks', () => 
 });
 
 test('job check: refuses a minion\'s stop while its background job runs, at most twice per prompt', () => {
-  assert.match(jobCheck(stop(), 'thread', 0)!, /still running: b1 \(Run the test suite\).*wait inside the turn/);
+  assert.match(jobCheck(stop(), 'thread', 0)!, /still running.*b1 \(Run the test suite\), a Bash job/s);
   assert.match(jobCheck(stop(), 'thread', 0)!, /`citadel-wait pid <pid>`/, 'names a wait Claude Code lets through (#481)');
+  assert.match(jobCheck(stop({ background_tasks: [{ ...running, pid: 4242 }] }), 'thread', 0)!, /`citadel-wait pid 4242`/, 'the pid when the task has it');
+  const grunt = { id: 'a7', type: 'agent', status: 'running', description: 'Review the diff' };
+  const both = jobCheck(stop({ background_tasks: [running, grunt] }), 'thread', 0)!;
+  assert.match(both, /a7 \(Review the diff\), a Grunt: wait for its result with SendMessage to a7, or stop it with TaskStop a7/, 'a Grunt gets its own way out');
+  assert.match(both, /b1 .*`citadel-wait pid <pid>`/s, 'each job lists its own action');
+  assert.match(both, /`run_in_background: false`/);
   assert.equal(jobCheck(stop(), 'thread', MAX_STOP_BLOCKS), null);
   assert.equal(jobCheck(stop(), 'coordinator', 0), null, 'the Taskmaster loads the kit too, and is left alone');
   assert.equal(jobCheck(stop({ background_tasks: [{ ...running, status: 'completed' }] }), 'thread', 0), null);
@@ -40,7 +46,7 @@ test('job check: refuses a minion\'s stop while its background job runs, at most
   // #359: claude -p waits for a workflow run itself, and no blocking command could; a shell job beside it still counts.
   const workflow = { id: 'w1', type: 'workflow', status: 'running', name: 'survey' };
   assert.equal(jobCheck(stop({ background_tasks: [workflow] }), 'thread', 0), null);
-  assert.match(jobCheck(stop({ background_tasks: [workflow, running] }), 'thread', 0)!, /still running: b1 \(Run the test suite\)\./);
+  assert.match(jobCheck(stop({ background_tasks: [workflow, running] }), 'thread', 0)!, /b1 \(Run the test suite\), a Bash job/);
 
   const dir = mkdtempSync(join(tmpdir(), 'kit-jobs-'));
   const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared() };

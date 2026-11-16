@@ -118,6 +118,32 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t, e);
     },
   },
+  'choices-card': {
+    about: 'a choices card (#804): a mock kit page with three takes to pick from, and the card that opens it',
+    seed(c) {
+      const t = minion(c, 'Header layout takes', { note: 'needs picks on the takes page' });
+      const kit = join(import.meta.dirname, '..', 'kit', 'skills', 'docs-and-mocks', 'starter');
+      for (const f of ['mockkit.js', 'mockkit.css']) copyFileSync(join(kit, f), join(t.cwd!, f));
+      const page = join(t.cwd!, 'header-takes.html');
+      writeFileSync(page, `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Header layout takes</title><link rel="stylesheet" href="mockkit.css"></head><body><main>
+<h1>Header layout takes</h1><p>Three ways to lay out the chat header. Pick one, then press Send.</p><div id="takes"></div></main>
+<script src="mockkit.js"></script><script>
+mock.boards('#takes', { boards: [
+  { id: 'A', title: 'Title left, chips right', note: 'Today\\'s order with the chips pulled right.', rec: true },
+  { id: 'B', title: 'Two rows', note: 'Title on top, chips under it.' },
+  { id: 'C', title: 'Chips in a menu', note: 'One line; chips behind a button.' },
+], render: (b) => '<div style="padding:12px;border:1px solid #8884;border-radius:8px">' + mock.esc(b.title) + '</div>' });
+</script></body></html>`);
+      const w = chat(c, t, 8);
+      w.asked('Mock up a few header layouts for me to pick from.');
+      w.init();
+      w.said('Three takes are on the page the card below opens.');
+      const e = w.put('question', { id: hex(), questions: [], doc: { path: page, title: 'Header layout takes' } });
+      w.done('Asked with a choices card.');
+      return route(c, t, e);
+    },
+  },
   'direct-card': {
     about: 'cards addressed to one person (#687): a question and a notice to you, a question to Josh, and one to you from a second scheme',
     seed(c) {

@@ -715,7 +715,7 @@ background: var(--citadel-warn-tint);</code></pre></div>
         </dialog>
       </div>
       <div class="mk-about">
-        <p>Every modal is this dialog (Cara, 2026-11-08: "the X to close should stay at the top and clicking off the modal should close it"). A native <code>&lt;dialog&gt;</code> opened with <code>showModal()</code>: the head is sticky on the surface colour, spans the box and keeps equal room above and below its title and ✕; the body scrolls under it; the box fits the window (8px in on a phone) and the page behind stays still. Width 480px, or <code>--cui-dialog-width</code>.</p>
+        <p>Every modal is this dialog (Cara, 2026-11-08: "the X to close should stay at the top and clicking off the modal should close it"). A native <code>&lt;dialog&gt;</code> opened with <code>showModal()</code>: the head is sticky on the surface colour, spans the box and keeps equal room above and below its title and ✕; the body scrolls under it; the box fits the window (8px in on a phone) and the page behind stays still. Width 480px, or <code>--cui-dialog-width</code>. In the installed app it opens below the title bar strip, <code>--cui-dialog-top</code>, so the window controls never cover it and its ✕ takes clicks (#772): set no <code>top</code> of your own, and size a full-height one <code>calc(100dvh - var(--cui-dialog-top))</code>.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/dialog.js</code> (<code>mountDialogs</code>) · <code>.cui-dialog</code>, <code>.cui-dialog-head</code> in <code>ui/base.css</code></p>
       </div>
     </div>

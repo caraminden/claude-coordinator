@@ -1,8 +1,11 @@
 {
-  "description": "Citadel kit hooks: the job check (with the answer check), the retro log, the test-first reminder and the after-compact reminder (kit/README.md).",
+  "description": "Citadel kit hooks: the job check (with the answer check), the retro log, the test-first reminder, the big-read guard and the after-compact reminder (kit/README.md).",
   "hooks": {
     "SessionStart": [
       { "matcher": "compact", "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/after-compact.sh\"", "timeout": 30 }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "^(Read|Bash)$", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/big-read.ts\"", "timeout": 10 }] }
     ],
     "PostToolUse": [
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/retro-log.ts\"", "timeout": 10 }, { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/test-first.ts\"", "timeout": 10 }] },

@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { jobCheck, MAX_STOP_BLOCKS, stopHook } from '../kit/hooks/job-check.ts';
 import { bashLines, failedTests, logPath, note, refusals } from '../kit/hooks/retro-log.ts';
 import { isSourceFile, REMINDER, testFirstHook } from '../kit/hooks/test-first.ts';
+import { bigReadHook } from '../kit/hooks/big-read.ts';
 
 const HOOKS = join(import.meta.dirname, '..', 'kit', 'hooks');
 const running = { id: 'b1', type: 'shell', status: 'running', description: 'Run the test suite', command: 'node --test' };
@@ -212,4 +213,53 @@ test('test-first reminder: once per session on the first source edit, quiet afte
   const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'test-first.ts')], { input, env: { ...process.env, TMPDIR: dir }, encoding: 'utf8' });
   assert.match(run(JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Write', session_id: 'cli', cwd: '/w', tool_input: { file_path: 'src/x.ts' } })).stdout, /test-first/);
   assert.equal(run('not json').stdout, '');
+});
+
+test('big-read guard: sends back whole reads and plain cat/sed of big files, lets small, ranged, unclear and allow_large through', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kit-big-read-'));
+  writeFileSync(join(dir, 'big.ts'), Array.from({ length: 900 }, (_, i) => `const line${i} = ${i};`).join('\n'));
+  writeFileSync(join(dir, 'wide.css'), Array.from({ length: 200 }, () => 'x'.repeat(200)).join('\n')); // 200 lines, 40k chars
+  writeFileSync(join(dir, 'small.ts'), Array.from({ length: 300 }, (_, i) => `const line${i} = ${i};`).join('\n'));
+  writeFileSync(join(dir, 'pic.png'), Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0]), Buffer.alloc(60_000, 1)]));
+  const read = (tool_input: object) => bigReadHook({ hook_event_name: 'PreToolUse', tool_name: 'Read', cwd: dir, tool_input });
+  const bash = (command: string) => bigReadHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: dir, tool_input: { command } });
+  const denied = (out: string | null, what: string) => {
+    assert.ok(out, what);
+    const h = JSON.parse(out).hookSpecificOutput;
+    assert.equal(h.hookEventName, 'PreToolUse');
+    assert.equal(h.permissionDecision, 'deny', what);
+    return h.permissionDecisionReason as string;
+  };
+  // A whole read of a big file, by lines or by chars: sent back, naming the size and the cheaper way.
+  const why = denied(read({ file_path: join(dir, 'big.ts') }), 'whole read, 900 lines');
+  assert.match(why, /900 lines/);
+  assert.match(why, /grep -n/);
+  assert.match(why, /offset\/limit/);
+  assert.match(why, /allow_large: true/);
+  denied(read({ file_path: join(dir, 'wide.css') }), 'whole read, 40k chars');
+  denied(read({ file_path: join(dir, 'big.ts'), offset: 100 }), 'offset with no limit still reads 800 lines');
+  // Let through: a small file, a ranged read, allow_large, a short tail from an offset, binaries and missing paths.
+  for (const input of [{ file_path: join(dir, 'small.ts') }, { file_path: join(dir, 'big.ts'), offset: 1, limit: 200 }, { file_path: join(dir, 'big.ts'), limit: 800 }, { file_path: join(dir, 'big.ts'), allow_large: true }, { file_path: join(dir, 'big.ts'), offset: 700 }, { file_path: join(dir, 'pic.png') }, { file_path: join(dir, 'nope.ts') }, { file_path: dir }]) {
+    assert.equal(read(input), null, JSON.stringify(input));
+  }
+  // Bash: a plain cat or sed -n range over the bar is sent back, naming the cheaper way.
+  assert.match(denied(bash('cat big.ts'), 'cat'), /sed -n|offset\/limit/);
+  denied(bash(`cat -n "${join(dir, 'wide.css')}"`), 'cat -n, quoted absolute path');
+  denied(bash("git status; cat big.ts && echo done"), 'cat between other commands');
+  denied(bash("sed -n '1,800p' big.ts"), 'sed range of 800 lines');
+  denied(bash("sed -n '50,$p' big.ts"), 'sed to the end');
+  assert.match(denied(bash('cat small.ts big.ts'), 'two files'), /# allow_large/);
+  // Let through: small files and ranges, pipes, redirects, expansions, a cd first, other commands, and the marker.
+  for (const c of ['cat small.ts', "sed -n '1,200p' big.ts", "sed -n '100,300p;400,500p' big.ts", 'cat big.ts | grep line1', 'cat big.ts > copy.ts', 'cat $F', 'cat *.ts', 'cd sub && cat big.ts', 'cat big.ts # allow_large', "sed -i 's/a/b/' big.ts", 'head -n 900 big.ts', 'cat nope.ts', 'cat pic.png', "echo 'cat big.ts'", 'grep -n line big.ts']) {
+    assert.equal(bash(c), null, c);
+  }
+  // Other tools pass, and the script prints the deny for Claude Code and nothing on a broken input.
+  assert.equal(bigReadHook({ hook_event_name: 'PreToolUse', tool_name: 'Edit', cwd: dir, tool_input: { file_path: join(dir, 'big.ts') } }), null);
+  const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'big-read.ts')], { input, encoding: 'utf8' });
+  assert.match(run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Read', cwd: dir, tool_input: { file_path: 'big.ts' } })).stdout, /"deny"/);
+  assert.equal(run('not json').stdout, '');
+  // Wired for Read and Bash before they run.
+  const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
+  const pre = (tool: string) => hooks.PreToolUse.some((m: any) => new RegExp(m.matcher).test(tool) && m.hooks.some((h: any) => h.command.includes('big-read.ts')));
+  assert.ok(pre('Read') && pre('Bash'));
 });

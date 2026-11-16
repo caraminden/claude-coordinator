@@ -22,6 +22,11 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
   - `test-first.ts` (PostToolUse on edits and Bash, never blocks): the first time a session edits
     a source file (not a test, doc, config or UI file) before any red test run, it adds one line
     saying to write the failing test first. Once per session; a red run first keeps it quiet.
+  - `big-read.ts` (PreToolUse on Read and Bash, every session, Grunts included): sends back a
+    whole read of a big file (over 600 lines or 25k chars): a Read with no `limit`, or a plain
+    `cat path` / `sed -n 'N,Mp' path` whose output isn't piped or redirected. The reason names the
+    size and the cheaper way (grep -n, then offset/limit or a small sed range). `allow_large: true`
+    on Read, or `# allow_large` in the command, gets past it; anything it can't read plainly goes through.
   - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, and a
     reminder to re-read the record rather than the summary.
 - `schedules/<slug>.md` are the standard audits' templates (#799): a scheduled run whose row names one

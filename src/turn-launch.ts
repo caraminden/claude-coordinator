@@ -133,7 +133,8 @@ export function tripwireConfig(projectId: number, claudeConfig: string, ask: boo
 export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = turnPins().TRIPWIRE, readOnly: string[] = [], envFiles: string[] = []) {
   const config = tripwireConfig(projectId, claudeConfig, ask, readOnly, envFiles);
   const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
-  return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
+  // onFailure: a check that times out (or dies outside tripwire.ts's own fail-open catch) blocks the call; without it Claude Code lets it through.
+  return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] }] };
 }
 
 /**

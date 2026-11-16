@@ -90,7 +90,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":1,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -297,7 +298,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -539,7 +541,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":3,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -944,7 +947,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -1314,7 +1318,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":4,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -1515,7 +1520,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":5,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -1722,7 +1728,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":6,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -1944,7 +1951,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":7,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -2169,7 +2177,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":8,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -2376,7 +2385,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":9,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -2587,7 +2597,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":10,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -2797,7 +2808,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":11,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },
@@ -2999,7 +3011,8 @@
        {
         "type": "command",
         "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":12,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
-        "timeout": 10
+        "timeout": 10,
+        "onFailure": "block"
        }
       ]
      },

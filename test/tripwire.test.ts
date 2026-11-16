@@ -877,6 +877,11 @@ test('the hook script blocks with exit 2, asks in a minion turn, and lets other 
   assert.equal(spawnSync(node, [script, '{bad'], { input: '{}', encoding: 'utf8' }).status, 0);
 });
 
+test('the tripwire hook is set to block the call when its check times out', () => {
+  // Claude Code lets a call through when a command hook times out unless onFailure says block (2.1.323, checked on #817).
+  assert.equal(tripwireHooks(2, `${home}/.claude`).PreToolUse[0].hooks[0].onFailure, 'block');
+});
+
 // ---------- the card a tripwire ask turns into (Approvals.ask; the MCP round trip is in approvals.test.ts) ----------
 
 test('cards: approve settles that exact call, deny blocks it, and one card at a time', async () => {

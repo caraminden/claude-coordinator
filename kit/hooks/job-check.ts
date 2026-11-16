@@ -20,7 +20,7 @@ export function runningTasks(input: any): { id: string; what: string; grunt: boo
   const tasks = Array.isArray(input?.background_tasks) ? input.background_tasks : [];
   return tasks
     .filter((t: any) => t?.status === 'running' && t?.type !== 'workflow')
-    .map((t: any) => ({ id: String(t.id), what: String(t.description || t.command || t.type || 'job').slice(0, 80), grunt: !/shell|bash/i.test(String(t.type ?? 'shell')), pid: Number.isInteger(t.pid) ? t.pid : undefined }));
+    .map((t: any) => ({ id: String(t.id), what: String(t.description || t.command || t.type || 'job').slice(0, 80), grunt: /agent/i.test(String(t.type ?? '')), pid: Number.isInteger(t.pid) ? t.pid : undefined }));
 }
 
 /** The background jobs still running, as "id (what it is)". */
@@ -32,7 +32,7 @@ export function runningJobs(input: any): string[] {
 function wayOut(t: ReturnType<typeof runningTasks>[number]): string {
   return t.grunt
     ? `${t.id} (${t.what}), a Grunt: wait for its result with SendMessage to ${t.id}, or stop it with TaskStop ${t.id}`
-    : `${t.id} (${t.what}), a Bash job: wait with \`citadel-wait pid ${t.pid ?? '<pid>'}\` and a Bash timeout of 600000, repeated until it ends (the pid is the \`$!\` you noted when you started it), or stop it with TaskStop ${t.id}`;
+    : `${t.id} (${t.what}), a Bash job: wait with \`citadel-wait pid ${t.pid ?? '<pid>'}\` and a Bash timeout of 600000, repeated until it ends (the pid is the \`$!\` you noted when you started it); without the pid, \`citadel-wait cmd '<test>'\` / \`port <n>\` / \`file <path>\`, or stop it with TaskStop ${t.id}`;
 }
 
 /** Why the turn may not end yet, or null. `blocks` is how many stops this prompt already refused. */

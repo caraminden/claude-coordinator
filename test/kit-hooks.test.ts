@@ -39,6 +39,10 @@ test('job check: refuses a minion\'s stop while its background job runs, at most
   assert.match(both, /a7 \(Review the diff\), a Grunt: wait for its result with SendMessage to a7, or stop it with TaskStop a7/, 'a Grunt gets its own way out');
   assert.match(both, /b1 .*`citadel-wait pid <pid>`/s, 'each job lists its own action');
   assert.match(both, /`run_in_background: false`/);
+  assert.match(both, /`citadel-wait cmd '<test>'`/, 'a Bash job without a pid keeps the other waits');
+  const other = jobCheck(stop({ background_tasks: [{ id: 'm1', type: 'monitor', status: 'running', description: 'watch' }] }), 'thread', 0)!;
+  assert.match(other, /m1 \(watch\), a Bash job.*TaskStop m1/s, 'an unknown type is not told to SendMessage');
+  assert.match(jobCheck(stop({ background_tasks: [{ ...grunt, type: 'local_agent' }] }), 'thread', 0)!, /a Grunt: wait for its result with SendMessage/);
   assert.equal(jobCheck(stop(), 'thread', MAX_STOP_BLOCKS), null);
   assert.equal(jobCheck(stop(), 'coordinator', 0), null, 'the Taskmaster loads the kit too, and is left alone');
   assert.equal(jobCheck(stop({ background_tasks: [{ ...running, status: 'completed' }] }), 'thread', 0), null);

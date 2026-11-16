@@ -209,6 +209,8 @@ export class ClaudeLink {
   private containers: Containers;
   /** Names its containers: "citadel-claude-" for the live server, with a tag for a dev copy so the two never share one. */
   private prefix: string;
+  /** Whether a turn is running in this config folder now (Runner.turnIn): unlinking its account would end it on a 401. */
+  turnOn?: (configDir: string) => boolean;
 
   constructor(store: Store, credentials: Credentials, dataDir: string, claudeBin: string, containers = new Containers(), prefix = 'citadel-claude-') {
     this.store = store;
@@ -532,10 +534,6 @@ export class ClaudeLink {
   }
 
   /**
-   * Start linking: the container, then `claude auth login` under a pty (script) inside it, over plain
-   * pipes. Resolves once Anthropic's link is out (or it failed); the code comes later, in code().
-   */
-  /**
    * The account a sign-in is for: `account` to sign one in again (expired, say), or with none, the lowest free number
    * for another. Throws what's wrong, before link() starts anything.
    */
@@ -547,6 +545,11 @@ export class ClaudeLink {
     return n;
   }
 
+  /**
+   * Start linking account `account` (linkSlot's): the container, then `claude auth login` under a pty (script)
+   * inside it, or for the server login on the host in the account's own folder, over plain pipes. Resolves once
+   * Anthropic's link is out (or it failed); the code comes later, in code().
+   */
   async link(uid: number, account?: number): Promise<ClaudeStatus> {
     const host = this.serverLogin(uid);
     const n = this.linkSlot(uid, account);
@@ -651,6 +654,10 @@ export class ClaudeLink {
    */
   async unlink(uid: number, n?: number): Promise<void> {
     const set = this.accounts(uid);
+    // Cancel on a sign-in again ("Link again"): only that sign-in stops; the account it was for stays linked.
+    if (n !== undefined && this.logins.get(uid)?.n === n && set?.accounts.some((a) => a.n === n)) return this.cancel(uid);
+    // The server login has no container of Claude's to remove: its Codex one lives in that volume.
+    if (this.serverLogin(uid) && n === undefined) return this.cancel(uid);
     if (n !== undefined && (this.serverLogin(uid) || (set && set.accounts.some((a) => a.n !== n)))) return this.unlinkOne(uid, n);
     // shortcut: a sign-in abandoned across a restart leaves its small volume behind until they link and unlink again.
     const started = this.logins.has(uid) || !!this.meta(uid);
@@ -674,14 +681,17 @@ export class ClaudeLink {
       if (this.logins.get(uid)?.n === n) this.cancel(uid);
       return;
     }
-    // Its turns would lose their sign-in mid-turn; the other accounts' carry on.
-    if (!this.serverLogin(uid) && this.busy(this.name(uid)) && pickAccount(set)?.n === n) throw new Error('Turns are running on this account now: switch to another with Use now, or stop them, then unlink.');
-    if (this.logins.get(uid)?.n === n) this.cancel(uid);
     const dir = this.configDir(uid, n);
+    // Its turns would lose their sign-in mid-turn; the other accounts' carry on.
+    // shortcut: an app's (contraption's) turn on it isn't seen here; it would end on a 401, which expires nothing more.
+    if (dir && this.turnOn?.(dir)) throw new Error('A turn is running on this account now: stop it or let it end, then unlink.');
     const running = this.serverLogin(uid) || (await this.containers.status(this.name(uid))).state === 'running';
     if (running) await this.claudeCmd(uid, n, ['auth', 'logout']);
-    // shortcut: the folder goes from the host side; a container that isn't running keeps nothing of it either way.
-    if (dir && n !== 1) rmSync(dir, { recursive: true, force: true });
+    // The sign-in goes from the host side too, whether or not logout ran: account 1's folder also holds the container's
+    // other Claude files, so only its login goes; another account's whole folder does.
+    if (dir) rmSync(n === 1 ? join(dir, '.credentials.json') : dir, { recursive: true, force: true });
+    // Its meters would show on the next account linked in its place.
+    this.store.deleteSetting(`${this.serverLogin(uid) ? 'usage' : `usage:user:${uid}`}:account:${n}`);
     this.withAccounts(uid, (s) => {
       s.accounts = s.accounts.filter((a) => a.n !== n);
       if (s.inUse === n) s.inUse = s.accounts[0]?.n ?? 1;

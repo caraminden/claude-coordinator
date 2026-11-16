@@ -320,8 +320,8 @@ function claudeCard() {
     const rows = accounts.map((a) => {
       const own = st.host && a.n === 1;
       const [chip, cls] = a.expired ? ['Needs linking again', 'warn']
-        : a.n === st.inUse ? ['In use', 'use']
         : a.limitedUntil > now ? [`Limited until ${clock(a.limitedUntil)}`, 'warn']
+        : a.n === st.inUse ? ['In use', 'use']
         : ['Ready', 'ok'];
       return h('li', { class: `acct${a.n === st.inUse ? ' in-use' : ''}` },
         h('span', { class: 'n' }, String(a.n)),

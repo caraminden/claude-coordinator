@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { resolveClaude, stripAnsi, type TurnPlace } from './claude-link.ts';
+import { AUTH_VARS, resolveClaude, stripAnsi, type TurnPlace } from './claude-link.ts';
 import { HostJobs, type JobState } from './host-job.ts';
 
 const run = promisify(execFile);
@@ -227,6 +227,8 @@ export class UltraReviews {
       if (place.host) {
         argv = [...limit, this.deps.claudeBin, ...args];
         env = this.deps.hostEnv;
+        // The server login's extra account (#779): its own config folder, and none of the host login's variables.
+        if (place.env) env = { ...Object.fromEntries(Object.entries(env).filter(([k]) => !AUTH_VARS.includes(k))), ...place.env };
       } else {
         await place.ensure();
         // podman exec passes none of the server's environment, so the container's own sign-in is the only login.

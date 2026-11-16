@@ -3048,6 +3048,11 @@ export class Runner {
     return name ? { id, name } : null;
   }
 
+  /** A turn is running with this Claude config folder now (#779: unlinking its account would end it on a 401). */
+  turnIn(configDir: string): boolean {
+    return [...this.turns.values()].some((t) => t.configDir === configDir);
+  }
+
   /**
    * A person's own plan usage, for their top-bar meter: the server login's, or their container turns', of the
    * account in use. With several accounts (#779) it says which, and carries each account's.

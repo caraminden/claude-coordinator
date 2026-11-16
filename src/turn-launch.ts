@@ -538,12 +538,12 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
   args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', ...disallowedTools(ticket));
   env = { ...env, ...facts.env.coordinator, COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
-  // In a container, claude signs in with the person's own login, so nothing of the server's may win over it.
   // The server login's extra Claude account (#779): its own config folder, so nothing of the host's own login may win over it.
   if (place.host && place.env) {
     for (const v of AUTH_VARS) delete env[v];
     env = { ...env, ...place.env };
   }
+  // In a container, claude signs in with the person's own login, so nothing of the server's may win over it.
   if (!place.host) {
     for (const v of AUTH_VARS) delete env[v];
     env = { ...env, ...place.env, COORDINATOR_CONTAINER: '1' };

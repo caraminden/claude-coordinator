@@ -325,6 +325,7 @@ runner.onAuthFailure = (person, account) => claudeLink.expire(person, account);
 // Several Claude accounts per person (#779): which one turns run on, and moving on from one at its limit.
 runner.claudeAccounts = (person) => claudeLink.accountList(person);
 runner.onLimit = (person, account, until) => claudeLink.limitedView(person, account, until);
+claudeLink.turnOn = (configDir) => runner.turnIn(configDir);
 runner.onCleared = (person, account) => claudeLink.cleared(person, account);
 const codexLink = new CodexLink(claudeLink);
 // Codex turns (#337) run only in a person's own container, once they've signed in to Codex there (the server login's: #341).

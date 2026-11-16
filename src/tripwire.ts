@@ -99,6 +99,8 @@ function writeReason(p: string, cfg: TripwireConfig): string | null {
 function readReason(p: string, cfg: TripwireConfig): string | null {
   if (under(p, join(cfg.home, '.ssh'))) return `${join(cfg.home, '.ssh')} holds SSH keys; nothing here needs to read them (ssh and git use them on their own).`;
   if (p === join(cfg.claudeConfig, '.credentials.json') || p === join(cfg.home, '.claude/.credentials.json')) return 'That file is the Claude login; nothing here needs to read it.';
+  // A person's extra Claude accounts (#779): .claude-2 and .claude-3 at home, and the server login's under the data dir.
+  if (basename(p) === '.credentials.json' && (/^\.claude-\d+$/.test(basename(dirname(p))) || under(p, join(cfg.data, 'claude-accounts')))) return 'That file is a Claude login; nothing here needs to read it.';
   if (p === join(cfg.home, CODEX_LOGIN)) return "That file is this person's Codex login (ChatGPT); codex uses it on its own, and nothing here needs to read it.";
   if (under(p, join(cfg.home, '.config/claude-coordinator'))) return `${join(cfg.home, '.config/claude-coordinator')} holds the live service's password and session secret, which let anyone act as a person. To try the API, log in to a dev copy or a preview with its own password; ask Cara to change the env file.`;
   if (ENVIRON.test(p)) return ENVIRON_WHY;
@@ -170,9 +172,10 @@ const envRootMet = (root: string, cfg: TripwireConfig) => cfg.envFiles?.find((r)
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
 function secretInside(root: string, cfg: TripwireConfig): string | null {
-  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, CODEX_LOGIN), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml'), join(cfg.home, '.config/citadel-claude'), join(cfg.home, CONTAINER_STORAGE)];
+  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, '.claude-2/.credentials.json'), join(cfg.home, '.claude-3/.credentials.json'), join(cfg.data, 'claude-accounts'), join(cfg.home, CODEX_LOGIN), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml'), join(cfg.home, '.config/citadel-claude'), join(cfg.home, CONTAINER_STORAGE)];
   const homes = dirname(cfg.home);
   if (homes !== '/' && under(homes, root)) return `other people's home folders in ${homes}`;
+  if (under(root, join(cfg.data, 'claude-accounts'))) return 'the Claude logins of the server login\'s extra accounts';
   return secrets.find((x) => x !== root && under(x, root)) ?? null;
 }
 const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag']);

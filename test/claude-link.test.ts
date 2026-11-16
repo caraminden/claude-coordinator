@@ -2,7 +2,7 @@
 // and when the sign-in ends while waiting for their code (#468 S02-7, S02-8). A fake `podman` on PATH
 // stands in for `podman exec … claude auth login`; how it behaves is the FAKE_PODMAN env var.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -160,6 +160,32 @@ test('an expired account moves turns on; the person reads as expired only once e
   link.expire(uid, 2);
   assert.equal(link.linked(uid), 'expired');
   assert.equal(link.place(uid), null);
+});
+
+test('unlinking one of several accounts removes its sign-in and meters, keeps the rest, and waits for a turn on it (#779)', async () => {
+  const { link, uid } = linkedPerson([acct(1), acct(2), acct(3)], 2);
+  const home = join(root, `home-${uid}`);
+  for (const d of ['.claude', '.claude-2']) {
+    mkdirSync(join(home, d), { recursive: true });
+    writeFileSync(join(home, d, '.credentials.json'), '{}');
+  }
+  writeFileSync(join(home, '.claude', 'settings.json'), '{}');
+  store.setSetting(`usage:user:${uid}:account:2`, { weekly: null, session: null, updatedAt: 1 });
+  let busy = join(home, '.claude-2');
+  link.turnOn = (dir) => dir === busy;
+  await assert.rejects(link.unlink(uid, 2), /turn is running on this account/);
+  assert.ok(existsSync(join(home, '.claude-2', '.credentials.json')), 'refused: nothing removed');
+  busy = '';
+  // The container isn't running (fake podman says nothing): the sign-in still goes, from the host side.
+  await link.unlink(uid, 2);
+  assert.equal(existsSync(join(home, '.claude-2')), false);
+  assert.equal(store.getSetting(`usage:user:${uid}:account:2`) ?? null, null);
+  assert.deepEqual(link.accounts(uid)?.accounts.map((a) => a.n), [1, 3]);
+  assert.equal(link.accounts(uid)?.inUse, 1, 'turns move off the account that went');
+  await link.unlink(uid, 1);
+  assert.equal(existsSync(join(home, '.claude', '.credentials.json')), false, "account 1's login goes");
+  assert.ok(existsSync(join(home, '.claude', 'settings.json')), "the container's other Claude files stay");
+  assert.deepEqual(link.accounts(uid)?.accounts.map((a) => a.n), [3]);
 });
 
 test("the server login's extra account runs on the host with its own config folder; account 1 is the host's (#779)", () => {

@@ -190,6 +190,9 @@ const BLOCKED: [string, string?][] = [
   ['cd ~ && cat .ssh/config'],
   ['grep token ~/.claude/.credentials.json'],
   ['base64 < ~/.claude/.credentials.json'],
+  // a person's extra Claude accounts (#779)
+  ['cat ~/.claude-2/.credentials.json'],
+  ['grep -r token ~/.claude-3'],
   // the person's Codex login (#330)
   ['cat ~/.codex/auth.json'],
   ['jq .tokens $HOME/.codex/auth.json'],
@@ -812,6 +815,12 @@ test('file tools: writes, edits and reads', () => {
   assert.ok(t('Write', { file_path: '../../../../coordinator.db' }));
   assert.ok(t('Read', { file_path: `${home}/.ssh/id_ed25519` }));
   assert.ok(t('Read', { file_path: '~/.claude/.credentials.json' }));
+  assert.ok(t('Read', { file_path: '~/.claude-2/.credentials.json' }));
+  assert.ok(t('Read', { file_path: `${home}/.local/share/containers/storage/volumes/citadel-claude-3/_data/.claude-3/.credentials.json` }));
+  assert.ok(t('Read', { file_path: `${data}/claude-accounts/1/2/.credentials.json` }));
+  assert.ok(t('Grep', { pattern: 'token', path: `${data}/claude-accounts/1/2` }));
+  assert.ok(t('Grep', { pattern: 'token', path: data }));
+  assert.equal(t('Read', { file_path: `${data}/claude-accounts/1/2/projects/x/s.jsonl` }), null);
   assert.ok(t('Grep', { pattern: 'x', path: `${home}/.ssh` }));
   assert.ok(t('Read', { file_path: `${home}/.config/claude-coordinator/env` }));
   assert.ok(t('Grep', { pattern: 'SECRET', path: `${home}/.config/claude-coordinator` }));

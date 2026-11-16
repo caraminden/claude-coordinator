@@ -225,6 +225,20 @@ mock.boards('#takes', { boards: [
       return route(c, t);
     },
   },
+  'limit-accounts': {
+    about: 'a minion waiting on the usage limit with two linked Claude accounts both limited: one weekly, one 5-hour (#819), for the banner',
+    seed(c) {
+      const t = minion(c, 'Waits on two limited accounts', { state: 'limited', note: 'Usage limit, resumes soon', person_id: c.store.findUser('name', c.who)?.id }, 'feature');
+      const w = chat(c, t, 2);
+      w.asked('Carry on with the build.');
+      w.init();
+      const now = Date.now();
+      c.store.setSetting('limit-resumes', [{ ticket: t.id, at: now + 2 * 3_600_000, tries: 1, tz: 'America/Los_Angeles', accounts: [
+        { n: 1, label: 'one@example.com', until: now + 2 * 3_600_000 - 180_000 },
+        { n: 2, label: 'two@example.com', until: now + 5 * 86_400_000, here: true, kind: 'weekly' }] }]);
+      return route(c, t);
+    },
+  },
   'held-brief': {
     about: 'a parked minion chained on a leader, holding a long brief and one message left for it (#728)',
     seed(c) {

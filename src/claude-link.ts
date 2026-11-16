@@ -356,11 +356,12 @@ export class ClaudeLink {
   }
 
   /** limited() for the runner (Runner.onLimit): the account turns move on to, and the first of the accounts to reset. */
-  limitedView(uid: number, n: number, until: number): { next: { n: number; label: string } | null; resetAt: number } | null {
+  limitedView(uid: number, n: number, until: number): { next: { n: number; label: string } | null; resetAt: number; limits: { n: number; label: string; until: number }[] } | null {
     if (!this.accounts(uid)) return null;
     const next = this.limited(uid, n, until);
     const resets = this.accounts(uid)!.accounts.filter((a) => !a.expired).map((a) => a.limitedUntil ?? Date.now());
-    return { next: next && { n: next.n, label: this.label(uid, next) }, resetAt: resets.length ? Math.min(...resets) : until };
+    const limits = this.accounts(uid)!.accounts.filter((a) => !a.expired && a.limitedUntil && a.limitedUntil > Date.now()).map((a) => ({ n: a.n, label: this.label(uid, a), until: a.limitedUntil! }));
+    return { next: next && { n: next.n, label: this.label(uid, next) }, resetAt: resets.length ? Math.min(...resets) : until, limits };
   }
 
   /** A turn on account `n` got through: whatever limit it had is gone. */

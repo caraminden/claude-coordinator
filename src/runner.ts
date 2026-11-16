@@ -319,6 +319,9 @@ export const ACCOUNT_ERROR = /identity verification|credit balance|oauth token|i
 export const MAX_LIMIT_RESUMES = 3;
 const LIMIT_RESUMES = 'limit-resumes';
 /** Minions waiting for the usage limit to reset, in the settings table so the wait outlives a restart. */
+/** One linked Claude account's limit: `here` is the one this minion's turn hit, `kind` what Claude called it ('weekly', '5-hour'). */
+export interface LimitedAccount { n: number; label: string; until: number; here?: boolean; kind?: string }
+
 interface LimitResume {
   ticket: number;
   /** When it resumes (ms): a while after the reset, spaced from the others. */
@@ -329,6 +332,8 @@ interface LimitResume {
   queued?: QueuedMessage[];
   /** The account's time zone from Claude's words, for saying the time. */
   tz?: string;
+  /** Several accounts all limited (#819): each one's reset, so the banner says which limit is which. */
+  accounts?: LimitedAccount[];
   /** Its person switched to Codex: it resumes on Codex now (#337). */
   codex?: true;
 }
@@ -337,6 +342,17 @@ const RESUME_ACCOUNT_PROMPT =
 
 const RESUME_LIMIT_PROMPT =
   `Your last turn stopped at the account's usage limit, which has now reset. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
+
+/** Every one of a person's accounts is limited (#779): when the first resets, and (#819) each one's own limit. */
+export interface AllLimited { resetAt: number; accounts: LimitedAccount[] }
+
+/** The note for a minion whose accounts are all limited: which one is out until when, and which reset it waits for. */
+export function allLimitedText(accounts: LimitedAccount[], at: number, tz?: string): string {
+  const out = (a: LimitedAccount) => `${a.here ? `This account (${a.label})` : a.label} is out until ${clockTime(a.until, tz)}${a.kind ? ` (${a.kind})` : ''}.`;
+  const first = accounts.reduce((m, a) => (a.until < m.until ? a : m));
+  const when = accounts.length > 1 ? `when ${first.label}'s limit resets` : 'when it resets';
+  return `${[...accounts].sort((a, b) => Number(!!b.here) - Number(!!a.here) || a.until - b.until).map(out).join(' ')} This minion carries on at ${clockTime(at, tz)}, ${when} (or sooner once a turn gets through); a person's message tries now.`;
+}
 
 /** When "resets 3:30pm (America/Los_Angeles)" next comes round after `now`, or null for words without a plain time of day. */
 export function parseResetTime(text: string, now = Date.now()): number | null {
@@ -604,7 +620,7 @@ export class Runner {
    * A turn on `account` hit its limit, which resets at `until` (src/claude-link.ts, limited): the account turns
    * move on to, or null when none is ready, with the earliest reset of the person's accounts.
    */
-  onLimit?: (person: number, account: number, until: number) => { next: { n: number; label: string } | null; resetAt: number } | null;
+  onLimit?: (person: number, account: number, until: number) => { next: { n: number; label: string } | null; resetAt: number; limits?: { n: number; label: string; until: number }[] } | null;
   /** A turn on `account` got through, so its limit is gone. */
   onCleared?: (person: number, account: number) => void;
 
@@ -762,6 +778,8 @@ export class Runner {
       step_ratio: ratio,
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
+      // With several accounts all limited, each one's reset (#819), for the banner.
+      limit_accounts: this.limitWait(ticket.id)?.accounts ?? null,
       approvals: this.approvals.waiting(ticket.id),
       // Parked on start_after: what it waits for, for Start now.
       parked_for: this.heldFor(ticket.id),
@@ -1443,12 +1461,12 @@ export class Runner {
   }
 
   /** Wait for the limit to reset, a while after `resetAt` and spaced from the minions already waiting; returns when it resumes. */
-  private waitForLimit(ticketId: number, resetAt: number, tries: number, tz?: string): number {
+  private waitForLimit(ticketId: number, resetAt: number, tries: number, tz?: string, accounts?: LimitedAccount[]): number {
     const list = this.limitResumes().filter((w) => w.ticket !== ticketId);
     let at = resetAt + this.limitDelayMs;
     for (const w of [...list].sort((a, b) => a.at - b.at)) if (Math.abs(w.at - at) < this.limitGapMs) at = w.at + this.limitGapMs;
     const queued = this.queues.get(ticketId);
-    list.push({ ticket: ticketId, at, tries, ...(queued?.length ? { queued } : {}), ...(tz ? { tz } : {}) });
+    list.push({ ticket: ticketId, at, tries, ...(queued?.length ? { queued } : {}), ...(tz ? { tz } : {}), ...(accounts?.length ? { accounts } : {}) });
     this.saveLimitResumes(list);
     return at;
   }
@@ -2697,7 +2715,7 @@ export class Runner {
    * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
    * problem needs a person: it blocks, never retries, and pushes once for everyone.
    */
-  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null, netTries = 0, allLimited?: number) {
+  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null, netTries = 0, allLimited?: AllLimited) {
     const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
     const why = reason || stderr;
     const text = why ? `${why}${reason && stderr ? `\n${stderr}` : ''}\n(${exited})` : exited;
@@ -2715,9 +2733,10 @@ export class Runner {
       }
       // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
       // Every one of several accounts limited (#779): the first of them to reset.
-      const resetAt = allLimited ?? this.limitResetAt(reason, usage, codexReset);
-      const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz);
-      this.emit(ticketId, 'note', { text: `${reason}\n${allLimited ? 'Every linked Claude account is limited now. ' : ''}It resumes by itself at ${clockTime(at, tz)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.` });
+      const resetAt = allLimited?.resetAt ?? this.limitResetAt(reason, usage, codexReset);
+      const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz, allLimited?.accounts);
+      const tail = allLimited?.accounts.length ? allLimitedText(allLimited.accounts, at, tz) : `It resumes by itself at ${clockTime(at, tz)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.`;
+      this.emit(ticketId, 'note', { text: `${reason}\n${tail}` });
       if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit, resumes ${clockTime(at, tz)}` });
       return;
     }
@@ -2757,7 +2776,7 @@ export class Runner {
    * account is marked, and when another is ready the turn carries on with it now, a switch that isn't one of
    * MAX_LIMIT_RESUMES (true). Else, on a limit with several accounts, when the first of them resets; null otherwise.
    */
-  private switchAccount(ticketId: number, turn: TurnState, reason: string | null, usage: Usage | null, authFailed: boolean): true | number | null {
+  private switchAccount(ticketId: number, turn: TurnState, reason: string | null, usage: Usage | null, authFailed: boolean): true | AllLimited | null {
     const person = turn.person;
     if (!person || turn.codex || turn.account === undefined || turn.stopped) return null;
     const limit = !!reason && USAGE_LIMIT.test(reason);
@@ -2767,7 +2786,12 @@ export class Runner {
     if (limit) {
       const r = this.onLimit?.(person, turn.account, this.limitResetAt(reason!, usage));
       if (!r) return null;
-      if (!r.next) return several ? r.resetAt : null;
+      if (!r.next) {
+        if (!several) return null;
+        const kind = /weekly/i.test(reason!) ? 'weekly' : /(\d+)-hour/i.exec(reason!)?.[0].toLowerCase();
+        const accounts = (r.limits ?? []).map((l) => ({ ...l, ...(l.n === turn.account ? { here: true, ...(kind ? { kind } : {}) } : {}) }));
+        return { resetAt: r.resetAt, accounts };
+      }
       next = r.next;
     } else {
       const acc = this.claudeAccounts?.(person);

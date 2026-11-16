@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { accountUsageKey } from '../src/account-pick.ts';
 import { Store } from '../src/db.ts';
 import { clockTime, MAX_LIMIT_RESUMES, parseResetTime, Runner } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
@@ -405,7 +406,7 @@ function accountsFor(person: number, second: string) {
     s.limited.set(n, until);
     const next = labels.find((a) => !s.limited.has(a.n)) ?? null;
     if (next) s.inUse = next.n;
-    return { next, resetAt: Math.min(...s.limited.values()) };
+    return { next, resetAt: Math.min(...s.limited.values()), limits: labels.filter((a) => s.limited.has(a.n)).map((a) => ({ ...a, until: s.limited.get(a.n)! })) };
   };
   runner.onCleared = (_p, n) => void s.cleared.push(n);
   return s;
@@ -477,7 +478,37 @@ test('when every account is limited, the turn waits for the first of them to res
     await until(() => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.state === 'limited', 'both accounts to hit their limits');
     assert.equal(s.limited.size, 2);
     assert.equal(runner.view(store.getTicket(id)!).limit_resume_at, Math.min(...s.limited.values()));
-    assert.match(events(id, 'note').at(-1)!, /Every linked Claude account is limited now\. It resumes by itself at/);
+    assert.match(events(id, 'note').at(-1)!, /This account \(\w+@x\) is out until [^\n]*\. \w+@x is out until [^\n]*\. This minion carries on at/);
+    assert.equal(runner.stop(id), true);
+  } finally {
+    noAccounts();
+  }
+});
+
+const WEEKLY = `You've hit your weekly limit · resets ${new Date(Date.now() + 5 * 86_400_000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' })}, 12am (America/Los_Angeles)`;
+
+test('weekly on one account and 5-hour on another: the note says which account is out until when, and why it waits (#819)', async () => {
+  const pat = store.findUser('name', 'Pat')!;
+  runner.limitFallbackMs = 60 * 60 * 1000;
+  const week = Date.now() + 5 * 86_400_000;
+  // Account 2's own usage state, as Claude's rate-limit events leave it: the week is spent.
+  store.setSetting(accountUsageKey((runner as any).payerOf(pat.id), 2), { session: null, weekly: { utilization: 1, resetsAt: week, status: 'rejected' }, updatedAt: Date.now() });
+  const s = accountsFor(pat.id, WEEKLY);
+  try {
+    const id = minion();
+    const before = turnsRun();
+    setRelease(LIMIT); // account 1: 5-hour; account 2 then hits its weekly limit
+    runner.send(id, 'Pat', 'go');
+    await until(() => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.state === 'limited', 'both accounts to hit their limits');
+    const note = events(id, 'note').at(-1)!;
+    assert.match(note, /This account \(two@x\) is out until [^\n]*\(weekly\)\./);
+    assert.match(note, /one@x is out until \S+\./);
+    assert.match(note, /carries on at \S+, when one@x's limit resets/);
+    assert.doesNotMatch(note, /Every linked Claude account is limited now\. It resumes/);
+    const v = runner.view(store.getTicket(id)!);
+    assert.equal(v.limit_resume_at! < week, true, 'waits for the 5-hour account, not the week');
+    assert.deepEqual(v.limit_accounts!.map((a: any) => [a.label, !!a.here]), [['one@x', false], ['two@x', true]]);
+    assert.equal(v.limit_accounts!.find((a: any) => a.here)!.kind, 'weekly');
     assert.equal(runner.stop(id), true);
   } finally {
     noAccounts();

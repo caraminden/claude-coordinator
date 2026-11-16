@@ -278,7 +278,7 @@ export interface ClaudePlaces {
   /** Every linked account's config folder: a session left on another account's (after a switch) is carried over before it resumes. */
   configDirs(uid: number): string[];
   /** A turn on `account` hit its limit, which resets at `until` (ClaudeLink.limitedView, the minions' path): the account turns move on to, or null when none is ready, and the first reset. */
-  limitedView(uid: number, account: number, until: number): { next: { n: number; label: string } | null; resetAt: number } | null;
+  limitedView(uid: number, account: number, until: number): { next: { n: number; label: string } | null; resetAt: number; limits?: { n: number; label: string; until: number }[] } | null;
 }
 
 export class ContraptionTurns {

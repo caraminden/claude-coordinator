@@ -3,6 +3,8 @@
 #   tools/land.sh
 # Under the deploy lock (the one tools/deploy.sh takes), so landings and deploys go one at a time, in the
 # order they asked (tools/deploy-queue.sh): it says its place in line, and waits as long as the line moves.
+# Each time main moves while it waits, git merge-tree checks the branch would still rebase cleanly; a conflict leaves
+# the line at once (#770). tools/land.sh --check runs only that check, for hand_off_land: exit 3 on a conflict.
 # The restart the landing before it queued may still be running: steps 1 and 2 go on beside it, and steps 3 and 4
 # wait for its verdict (the restart lock, #566). If that restart was rolled back and its commit came off main,
 # steps 1 and 2 are done again without it.

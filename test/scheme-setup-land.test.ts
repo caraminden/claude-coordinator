@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { root, env, git, n, setup, landLockFree, until, queueSetup } from './scheme-setup-land-fixture.ts';
+import { root, env, git, n, setup, landLockFree, until, queueSetup, sleep } from './scheme-setup-land-fixture.ts';
 
 test('rebases onto main, checks, fast-forwards main and pushes it past the pre-push hook', () => {
   const r = setup();
@@ -83,6 +83,28 @@ test('a rebase conflict aborts and leaves main untouched', () => {
   assert.equal(git(r.main, 'rev-parse', 'main'), main);
   assert.equal(git(r.wt, 'rev-parse', 'HEAD'), mine);
   assert.equal(git(r.wt, 'status', '--porcelain'), '');
+});
+
+test('--check (#770) says whether the rebase onto main would conflict, naming the files, and changes nothing', () => {
+  const r = setup();
+  const check = (...args: string[]) => spawnSync('bash', [join(r.wt, 'tools', 'land.sh'), '--check', ...args], { cwd: r.wt, encoding: 'utf8', env });
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  r.commit(r.main, 'b.txt', 'clean\n');
+  let res = check();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stderr, '');
+  r.commit(r.main, 'a.txt', 'theirs\n');
+  const mine = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.main, 'rev-parse', 'main');
+  res = check();
+  assert.equal(res.status, 3);
+  assert.equal(res.stderr, `land: ticket/1-x won't rebase onto main (${main.slice(0, 7)} "a.txt: theirs") cleanly, by git merge-tree at hand-off, so nothing landed; conflicted files: a.txt. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again\n`);
+  assert.equal(git(r.main, 'rev-parse', 'main'), main);
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), mine);
+  assert.equal(git(r.wt, 'status', '--porcelain'), '');
+  assert.ok(!existsSync(join(git(r.main, 'rev-parse', '--absolute-git-dir'), 'land-queue')), 'no place in line');
+  assert.equal(check('x').status, 1, 'nothing else after it');
+  assert.match(check('x').stderr, /takes no arguments/);
 });
 
 test("a stale squash, which reverts what landed since the branch started, is refused until it names each undo (#677)", () => {
@@ -298,6 +320,38 @@ test('ten landings started together land in the order they arrived, each told it
   assert.deepEqual(q.tickets(), [], 'every ticket is gone');
   assert.equal(readFileSync(join(q.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 5, 'the newest five landings were timed, for the estimate');
   assert.ok(landLockFree(q), 'the land lock is free');
+});
+
+test('a landing waiting in line rechecks each time main moves, and leaves the line at once when it would conflict (#770)', async () => {
+  // 1 and 3 change files of their own; 2 and 4 both change a.txt. Each check waits for a gate of its own.
+  const q = queueSetup(4, undefined, {}, (i) => (i % 2 ? `f${i}.txt` : 'a.txt'));
+  const gate = (i: number) => join(q.dir, `gate${i}`);
+  const lands: ReturnType<typeof q.land>[] = [];
+  try {
+    for (let i = 1; i <= 4; i++) {
+      lands.push(q.land(i, { GATE: gate(i) }));
+      await until(`landing ${i}'s ticket`, () => q.issued() === i);
+    }
+    await until('landing 4 to wait in line', () => /4th in line/.test(lands[3].stderr()));
+    writeFileSync(gate(1), '');
+    assert.equal(await lands[0].exit, 0, lands[0].stderr());
+    await until('landing 2 to take the lock', () => /got the land lock/.test(lands[1].stderr()));
+    await sleep(300);
+    assert.equal(q.tickets().length, 3, 'a clean move of main keeps landing 4 in line');
+    writeFileSync(gate(2), '');
+    assert.equal(await lands[1].exit, 0, lands[1].stderr());
+    const main = git(q.main, 'rev-parse', 'main');
+    assert.equal(await lands[3].exit, 1, 'landing 4 leaves while landing 3 still holds the lock');
+    assert.match(lands[3].stderr(), new RegExp(`land: ticket/4-x won't rebase onto main \\(${main.slice(0, 7)} "a\\.txt: 2"\\) cleanly, by git merge-tree waiting in line, so nothing landed; conflicted files: a\\.txt\\. On conflicts: run git rebase main`));
+    assert.equal(q.tickets().length, 1, 'only landing 3 is left in line');
+    assert.equal(git(q.wts[3], 'branch', '--show-current'), 'ticket/4-x');
+    assert.equal(git(q.wts[3], 'status', '--porcelain'), '');
+    writeFileSync(gate(3), '');
+    assert.equal(await lands[2].exit, 0, lands[2].stderr());
+    assert.deepEqual(q.landed(), ['f1.txt: 1', 'a.txt: 2', 'f3.txt: 3']);
+  } finally {
+    for (let i = 1; i <= 4; i++) writeFileSync(gate(i), '');
+  }
 });
 
 test('a waiter that is killed leaves the line, and the one behind it goes next', async () => {

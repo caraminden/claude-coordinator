@@ -8,6 +8,9 @@
 # time, under a lock in the scheme repo's .git, in the order they asked: it says its place in line
 # and waits as long as the line moves, so run it in the background with a long timeout (a run that
 # is stopped loses its place).
+#   tools/land.sh --check   only says whether the rebase onto main would conflict (exit 3, naming the files), changing
+#       nothing; Citadel's hand_off_land runs it first. While others are ahead in line, each move of main is checked
+#       the same way, and a conflict leaves the line at once.
 # 1. Rebases the branch onto the local main. A conflict stops here.
 # 2. Refuses when the branch takes a number main already has (a migration, a version, a ledger id),
 #    as the "Numbered things" line in Project facts names them. No line, or "none": no check.
@@ -586,11 +589,33 @@ undo_guard() {
   ' "$base" "$(sed -nE 's|^ticket/([0-9]+)-.*|\1|p' <<<"$branch")"
 }
 
+# The early check: whether <commit> (the branch as it was) would rebase onto $BRANCH's tip cleanly, by git merge-tree,
+# which touches no worktree, index or ref. On a conflict it says the refusal, naming the files, and fails; a git that
+# can't tell (too old, exit 2 and up) counts as clean, and the rebase itself decides. shortcut: a three-way merge, not a
+# replay commit by commit, so a branch that changes a line and changes it back can pass here and still stop in the
+# rebase, which catches it as before.
+early_conflict() {
+  local out rc=0 files
+  out=$(git merge-tree --write-tree --name-only --no-messages "refs/heads/$BRANCH" "$1" 2>/dev/null) || rc=$?
+  [ "$rc" = 1 ] || return 0
+  files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
+  say "$branch won't rebase onto $BRANCH ($(git log -1 --format='%h "%s"' "refs/heads/$BRANCH")) cleanly, by git merge-tree $2, so nothing landed${files:+; conflicted files: $files}. On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again"
+  return 1
+}
+
+# --check: only the early check, changing nothing; exit 3 on a conflict, else 0. Citadel runs it at hand_off_land.
+check=
+[ "${1:-}" != --check ] || { check=1; shift; }
 [ $# -eq 0 ] || refuse "takes no arguments"
 here=$(git rev-parse --show-toplevel)
 cd "$here"
 gitdir=$(git rev-parse --absolute-git-dir)
 branch=$(git branch --show-current)
+if [ -n "$check" ]; then
+  { [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || exit 0 # the land itself refuses these
+  early_conflict HEAD "at hand-off" || exit 3
+  exit 0
+fi
 # A landing that was killed outright left this worktree on its detached commit, and the branch where it was.
 if [ -z "$branch" ] && [ -s "$gitdir/land-branch" ]; then
   git rebase --abort 2>/dev/null || true
@@ -1050,11 +1075,17 @@ leave() {
 
 queue_join "$state" "$branch"
 trap leave EXIT
-seen_main='' looked=''
+seen_main='' looked='' checked_main=''
 while :; do
   # In a batch, landed by the head: its commit is under the one the head moved main to.
   if [ -n "$BATCH" ] && [ -n "$tip" ] && git merge-base --is-ancestor "$tip" "refs/heads/$BRANCH" 2>/dev/null; then batch_landed; fi
   queue_look || exit 1
+  # While others are ahead, each time main moves: whether the branch would still rebase onto it. A conflict leaves the
+  # line at once, so the minion hears now rather than when it reaches the front.
+  if [ "$Q_AHEAD" != 0 ] && [ "$(git rev-parse "refs/heads/$BRANCH")" != "$checked_main" ]; then
+    checked_main=$(git rev-parse "refs/heads/$BRANCH")
+    early_conflict "$pre" "waiting in line" || exit 1
+  fi
   if [ -n "$BATCH" ]; then
     batch_look
     looked=1

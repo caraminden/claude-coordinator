@@ -522,12 +522,12 @@ export function questionCard(ticketId, card, opts = {}) {
 
 /**
  * A notice for one person (#687: ask_question with to and no questions): one line, and Got it for them, which
- * takes it out of their Needs-you list and sends the asker nothing.
+ * takes it out of their Needs-you list and sends the asker nothing. Anyone in the scheme can press it.
  */
 function noticeCard(ticketId, card, opts) {
   const head = whoLine('tells', card, opts);
   const status = h('span', { class: 'muted' });
-  const got = h('button', { type: 'button', class: 'small', hidden: card.to !== me }, 'Got it');
+  const got = h('button', { type: 'button', class: 'small' }, 'Got it');
   const el = h('div', { class: 'qcard notice' }, head.el, h('div', { class: 'qtitle' }, card.notice),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), got));
   let seen = false;
@@ -547,7 +547,7 @@ function noticeCard(ticketId, card, opts) {
       key: `card:${card.id}`,
       apply: () => { seen = true; got.hidden = true; el.classList.add('answered'); head.done(`seen by ${me}`); },
       send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id } }),
-      undo: () => { seen = false; got.hidden = false; el.classList.remove('answered'); head.done(`waiting on you`); },
+      undo: () => { seen = false; got.hidden = false; el.classList.remove('answered'); head.done(`waiting on ${card.to === me ? 'you' : card.to}`); },
       label: 'mark the notice seen',
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {});
   });

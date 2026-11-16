@@ -148,7 +148,7 @@ const TICKET_ID = { type: 'integer', description: 'Minion number in this scheme,
 const DIRECT_TO = {
   type: 'string',
   description:
-    'Only when someone other than this chat\'s own people (its owner and whoever is working with it) has to answer, such as an admin\'s permission or another member\'s call: their login (a member of this scheme; a wrong name is refused with the list). It shows in their Needs-you list in every scheme they open and pings only their devices; they answer it in place. Any member can still answer it in this chat, and the answer starts your next turn as any card\'s does. Never for an ordinary question to the person you work for: leave it out and the card goes to everyone in this chat.',
+    'Leave out: a card goes to everyone in this chat, and any member can answer it. Set it only when one person is asking another, or a decision truly needs one specific person: their login (a member of this scheme; a wrong name is refused with the list). It then counts in only their Needs-you list and pings only their devices, in every scheme they open. Anyone in the scheme can still answer it in the chat, and the answer starts your next turn.',
 };
 
 const WHEN_CI_PASSES = {

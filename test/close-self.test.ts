@@ -8,8 +8,8 @@ import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
 testPins();
 
-// A stand-in for `claude -p`: waits until a release file appears, then ends the turn the way
-// FAKE_OUTCOME says (ok, error), so the test can act while the turn is running.
+// A stand-in for `claude -p`: waits until a release file appears, takes it, then ends the turn the way
+// the file says (ok, error), so the test can act while the turn is running.
 const root = mkdtempSync(join(tmpdir(), 'close-self-'));
 after(async () => {
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
@@ -20,14 +20,21 @@ const fake = join(root, 'claude-fake');
 writeFileSync(
   fake,
   `#!${process.execPath}
-const { appendFileSync, existsSync, readFileSync } = require('node:fs');
+const { appendFileSync, readFileSync, unlinkSync } = require('node:fs');
 // Each turn's prompt, kept for the tests that read what a turn was told.
 process.stdin.on('data', (d) => appendFileSync(${JSON.stringify(join(root, 'prompts.log'))}, d));
 const wait = setInterval(() => {
   const release = ${JSON.stringify(join(root, 'release'))};
-  if (!existsSync(release)) return;
+  let outcome;
+  // One release ends one turn (#771): left in place, it ended the queued next turn too, before that turn
+  // had read its prompt, or was deleted by the test between this fake's look and its read (ENOENT, a failed turn).
+  try {
+    outcome = readFileSync(release, 'utf8');
+    unlinkSync(release);
+  } catch {
+    return;
+  }
   clearInterval(wait);
-  const outcome = readFileSync(release, 'utf8');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: outcome === 'error', result: 'done' }));
   process.exit(0);
 }, 20);
@@ -46,13 +53,23 @@ function newTicket() {
   return t.id;
 }
 
-async function endTurn(id: number, outcome: 'ok' | 'error') {
-  rmSync(join(root, 'release'), { force: true });
+// Ends the turn that is running: its fake takes the file, so a turn that starts after it stays running.
+// With no turn running the file would end the next one to start, in whatever test that is.
+function release(outcome: 'ok' | 'error') {
   // Made under another name and renamed: the fake polling for the file would otherwise read it between create and write, empty.
   writeFileSync(join(root, 'release.tmp'), outcome);
   renameSync(join(root, 'release.tmp'), join(root, 'release'));
+}
+
+// The first turn's close note is out: wait for the queued second turn. It starts only after the first one's
+// session is saved, and until then nothing runs, so an endTurn there would return at once and leave it running.
+async function secondTurn(id: number) {
+  while (!notes(id).length || !runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+}
+
+async function endTurn(id: number, outcome: 'ok' | 'error') {
+  release(outcome);
   while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
-  rmSync(join(root, 'release'), { force: true });
 }
 
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text);
@@ -97,10 +114,9 @@ test('a message queued during the turn keeps it open and runs next', async () =>
   runner.send(id, 'Cara', 'ship it');
   runner.closeAfterTurn(id, null);
   runner.send(id, 'Josh', 'one more thing');
-  rmSync(join(root, 'release'), { force: true });
-  writeFileSync(join(root, 'release'), 'ok');
-  // The first turn ends and the queued message starts a second one straight away.
-  while (!notes(id).length) await new Promise((r) => setTimeout(r, 20));
+  release('ok');
+  // The first turn ends and the queued message starts a second one.
+  await secondTurn(id);
   assert.match(notes(id)[0], /new message arrived/);
   await endTurn(id, 'ok');
   assert.equal(store.getTicket(id)!.status, 'idle');
@@ -128,9 +144,8 @@ test('a GitHub notice that needs action, or a person beside a no-action one, sti
     else runner.send(id, 'GitHub', 'CI failed on abc1234 in PR #82 — build: https://ci/build');
     for (const [who, text, more] of extra) runner.send(id, who, text, [], more);
     rmSync(join(root, 'prompts.log'), { force: true });
-    rmSync(join(root, 'release'), { force: true });
-    writeFileSync(join(root, 'release'), 'ok');
-    while (!notes(id).length) await new Promise((r) => setTimeout(r, 20));
+    release('ok');
+    await secondTurn(id);
     assert.match(notes(id)[0], /new message arrived/);
     // The second turn's prompt says the close was cancelled, before the message that cancelled it.
     const prompts = () => readFileSync(join(root, 'prompts.log'), { encoding: 'utf8', flag: 'a+' });

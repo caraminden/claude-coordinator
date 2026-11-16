@@ -67,6 +67,10 @@ Every modal (rule 22), from `ui/base.css` and `ui/dialog.js`:
   so a `cancel` listener that calls `preventDefault()` (unsaved changes) keeps it open, as it does for Escape.
 - **It fits the window:** 480 px wide (`--cui-dialog-width: 560px` on it for another), 12 px in from each
   edge, 8 px on a phone; the page behind doesn't scroll while it's open.
+- **It opens below the title bar strip** in an installed app (#772), framed in Citadel or in your own window, so
+  the window controls and Citadel's ‹ › × never cover it; the backdrop still covers the strip. Set no `top` or
+  `margin` of your own, and size a full-height one from `--cui-dialog-top` (the strip's height, 0 elsewhere):
+  `height: calc(100dvh - var(--cui-dialog-top))`, never `100dvh`.
 - **Open it with `showModal()`.** `show()` gives a non-modal box with no backdrop, no Escape and no lock.
 - The body's padding is the dialog's own (`--cui-dialog-pad`, 16 px, 12 px on a phone); a footer of
   buttons is a plain row at the end of the body, scrolling with it.

@@ -211,7 +211,8 @@ above until it passes. The critic's `ui-screenshots` rubric fails both (`citadel
 22. **Every modal is the kit dialog.** Cara, 2026-11-08: "the X to close should stay at the top and
     clicking off the modal should close it". A `<dialog class="cui-dialog">` with a `cui-dialog-head`,
     opened with `showModal()`, and `mountDialogs()` from `ui/dialog.js` called once: the ✕ stays in
-    view however long the body, a click on the backdrop closes it, Escape too.
+    view however long the body, a click on the backdrop closes it, Escape too. It opens below an installed
+    app's title bar strip: no `top` of your own, and a full-height one is `100dvh - var(--cui-dialog-top)`.
 23. **Clicks never freeze the UI.** Cara, 2026-11-08: "assume things will work instantly, but recover
     later if there was an issue". A click shows its result at once and the request runs behind it;
     every other control stays usable and rapid clicks in a row all count. A failure rolls back that

@@ -73,8 +73,6 @@ export function guessType(text) {
   return CLUES.find(([, re]) => re.test(text ?? ''))?.[0] ?? null;
 }
 
-/** The advisor trial's brief to the Taskmaster (#817; handoff from #813), in create_ticket's and update_ticket's model description: whom it starts on the advisor. */
-export const ADVISOR_TRIAL = 'claude-sonnet-5-5+opus-advisor is the advisor trial (#817): Sonnet runs the turn and consults Opus at hard points (~$0.35 a consult at an 85k context). Until its report ends it, start about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high on it at medium, and move a stalled Sonnet-medium minion to it before Opus medium. Never a Taskmaster. `node tools/advisor-trial.ts` reads its numbers.';
 
 /** The table as one line of prose, for the Taskmaster's prompt. */
 export function tableText() {

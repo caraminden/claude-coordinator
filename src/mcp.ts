@@ -7,7 +7,6 @@ import { createInterface } from 'node:readline';
 import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
 import { liveState } from './live-state.ts';
-import { ADVISOR_TRIAL } from '../public/model-table.js';
 import { instructionCost } from './prompt-cost.ts';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
@@ -80,6 +79,8 @@ const BUILD = {
 // The same lists as MODELS and EFFORTS in db.ts; the server checks them again. Required on create (#698;
 // Cara, 2026-11-14: "we should ALWAYS make an intentional choice about model"): the table is in the Taskmaster's prompt.
 const MODEL_IDS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5+opus-advisor', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'];
+/** The advisor trial's brief to the Taskmaster (#817; handoff from #813): whom it starts on the advisor. Here, not in public/model-table.js, as turns run a pinned copy of this file that carries only ./ imports. */
+const ADVISOR_TRIAL = 'claude-sonnet-5-5+opus-advisor is the advisor trial (#817): Sonnet runs the turn and consults Opus at hard points (~$0.35 a consult at an 85k context). Until its report ends it, start about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high on it at medium, and move a stalled Sonnet-medium minion to it before Opus medium. Never a Taskmaster. `node tools/advisor-trial.ts` reads its numbers.';
 const EFFORT_IDS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODEL = {
   type: 'string',

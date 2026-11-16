@@ -64,7 +64,7 @@ export function cardLabel(kind: string, data: any): string {
 
 /**
  * What happened to a card that no longer waits on people (#531), from its chat event's data, the first
- * person's message after it (`reply`, Store.recentCards), an approval's result, and whether its minion
+ * answer to it (`reply`, Store.recentCards; a typed message from before #812 can still be one), an approval's result, and whether its minion
  * was dismissed. `clock` formats a time.
  */
 export function settledHow(kind: string, data: any, reply: any, result: any, dismissed: number | null, clock: (ms: number) => string): string {

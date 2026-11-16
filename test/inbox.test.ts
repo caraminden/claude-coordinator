@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
-import { Store } from '../src/db.ts';
+import { Store, TYPED_HANDLES_UP_TO } from '../src/db.ts';
 import { directCards, inboxCount, inboxItems } from '../src/inbox.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'inbox-'));
@@ -12,6 +12,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 
 test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies, approvals first, then newest first', () => {
   const store = new Store(join(root, 'db.sqlite'));
+  store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
   const minion = (projectId: number, title: string) =>
     store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
@@ -49,6 +50,7 @@ test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies
 
 test('a card stays in the inbox past typed messages (#812), relays and other cards\' clicks; only its own answer clears it', () => {
   const store = new Store(join(root, 'typed.sqlite'));
+  store.typedHandlesUpTo = 0;
   const p = store.createProject('One', null).id;
   const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
   const typed = minion('typed'), relayed = minion('relayed'), clicked = minion('clicked');
@@ -69,6 +71,7 @@ test('a card stays in the inbox past typed messages (#812), relays and other car
 
 test('no message clears a card but its own answer: another scheme\'s Taskmaster (live or held mail), relays, Mandate, briefs and typing (#610, #812)', () => {
   const store = new Store(join(root, 'not-people.sqlite'));
+  store.typedHandlesUpTo = 0;
   const p = store.createProject('Peek', null).id;
   const tm = store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' }).id;
   const minion = store.createTicket({ project_id: p, title: 'm', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
@@ -90,6 +93,7 @@ test('no message clears a card but its own answer: another scheme\'s Taskmaster 
 
 test('openCardAt: when a minion\'s oldest open card was posted, for the list\'s "?" badge; answered, settled, superseded and dismissed cards don\'t count', () => {
   const store = new Store(join(root, 'card-at.sqlite'));
+  store.typedHandlesUpTo = 0;
   const p = store.createProject('One', null).id;
   const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
   const two = minion('two'), done = minion('done'), gone = minion('gone');
@@ -113,6 +117,7 @@ test('openCardAt: when a minion\'s oldest open card was posted, for the list\'s 
 
 test('open cards read again on the same server: an answered card stays gone, new ones show, and a reopened minion\'s cards come back (#614)', () => {
   const store = new Store(join(root, 'cards-again.sqlite'));
+  store.typedHandlesUpTo = 0;
   const p = store.createProject('One', null).id;
   const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
   const a = minion('a'), b = minion('b');
@@ -147,6 +152,7 @@ test('open cards read again on the same server: an answered card stays gone, new
 
 test('each item carries the chat event it jumps to: its card\'s for approvals, questions and plans; none for ready and replies (#236)', () => {
   const store = new Store(join(root, 'events.sqlite'));
+  store.typedHandlesUpTo = 0;
   const approvals = new Approvals((ticketId, kind, data) => store.addEvent(ticketId, kind, data));
   const p = store.createProject('One', null).id;
   const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
@@ -165,6 +171,7 @@ test('each item carries the chat event it jumps to: its card\'s for approvals, q
 
 test('inboxCount: the Needs-you badge\'s number for one person; a ready or replies minion they opened since it changed stops counting, cards never do', () => {
   const store = new Store(join(root, 'count.sqlite'));
+  store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
   const p = store.createProject('One', null).id;
   const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
@@ -180,6 +187,7 @@ test('inboxCount: the Needs-you badge\'s number for one person; a ready or repli
 
 test('each person\'s inbox holds only their own minions and unassigned ones, cards and approvals too (#197)', () => {
   const store = new Store(join(root, 'mine.sqlite'));
+  store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
   const p = store.createProject('One', null).id;
   const minion = (title: string, assigned?: string) => {
@@ -202,6 +210,7 @@ test('each person\'s inbox holds only their own minions and unassigned ones, car
 
 test('a minion assigned under a person\'s sign-in or GitHub login is in their inbox, its cards too (#582)', () => {
   const store = new Store(join(root, 'logins.sqlite'));
+  store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
   const p = store.createProject('One', null).id;
   const josh = store.createUser({ name: 'Josh', login: 'jkatz' });
@@ -223,6 +232,7 @@ test('a minion assigned under a person\'s sign-in or GitHub login is in their in
 
 test('a parked minion waits on something else by design: out of the inbox and its badge, its open cards and replies too; an approval holding up a running turn still counts (#344)', () => {
   const store = new Store(join(root, 'parked.sqlite'));
+  store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
   const p = store.createProject('One', null).id;
   const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
@@ -240,6 +250,7 @@ test('a parked minion waits on something else by design: out of the inbox and it
 
 test('a card addressed to one person (#687) is in their list alone, waits past typed messages, and shows in their other schemes too', () => {
   const store = new Store(join(root, 'direct.sqlite'));
+  store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
   const cara = store.createUser({ name: 'Cara', login: 'cara' });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
@@ -279,6 +290,7 @@ test('a card addressed to one person (#687) is in their list alone, waits past t
 
 test('warmCardRows reads a few card rows a step, and recentCards then finds them read (#796)', () => {
   const store = new Store(join(root, 'card-warm.sqlite'));
+  store.typedHandlesUpTo = 0;
   const p = store.createProject('Citadel', null).id;
   const a = store.createTicket({ project_id: p, title: 'a', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
   const plan = store.addEvent(a, 'plan', { id: 'p-1', summary: 's', plan: 'p', status: 'pending' });
@@ -296,6 +308,7 @@ test('warmCardRows reads a few card rows a step, and recentCards then finds them
 
 test('recentCards reads each card row once, and a card changed or deleted after that shows as it is now (#759)', () => {
   const store = new Store(join(root, 'card-rows.sqlite'));
+  store.typedHandlesUpTo = 0;
   const p = store.createProject('Citadel', null).id;
   const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
   const a = minion('a'), b = minion('b');
@@ -333,6 +346,7 @@ test('recentCards reads each card row once, and a card changed or deleted after 
 
 test('eventsOfKinds reads only those kinds, after an id, oldest first (#759)', () => {
   const store = new Store(join(root, 'kinds.sqlite'));
+  store.typedHandlesUpTo = 0;
   const p = store.createProject('Citadel', null).id;
   const t = store.createTicket({ project_id: p, title: 't', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
   const q = store.addEvent(t, 'question', { id: 'q' });
@@ -395,4 +409,15 @@ test('recentCards keeps what it found across a restart, and never shows a card a
   assert.ok(first.recentCards(p, 10).length && (first as any).db.prepare('SELECT count(*) AS n FROM card_fates').get().n > 0);
   (new Store(file) as any).db.prepare("DELETE FROM events WHERE kind = 'approval_result'").run();
   assert.equal((first as any).db.prepare('SELECT count(*) AS n FROM card_fates').get().n, 0);
+});
+
+test('a card posted before #812 that someone answered by typing stays handled, so deploying it reopens nothing', () => {
+  const store = new Store(join(root, 'legacy-812.sqlite'));
+  const p = store.createProject('One', null).id;
+  const a = store.createTicket({ project_id: p, title: 'a', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const e = store.addEvent(a, 'question', { id: 'q-old', questions: [] });
+  store.addEvent(a, 'user_message', { author: 'Cara', text: 'yes' });
+  // The cut-off is the newest event at that land; events below it are old cards.
+  assert.equal(e.id <= TYPED_HANDLES_UP_TO, true);
+  assert.deepEqual(store.openCards(p), []);
 });

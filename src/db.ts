@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 import { Memory } from './memory.ts';
@@ -12,6 +13,18 @@ export const buildOwnerKey = (projectId: number, build: number) => `build-owner:
 export const planKey = (ticketId: number) => `plan:${ticketId}`;
 /** A minion's task-list state just before the furthest chat page start read, so a restart's first open replays only what came since (#613; src/history.ts planBefore). */
 export const pagePlanKey = (ticketId: number) => `plan:${ticketId}:page`;
+
+/** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
+export const TYPED_HANDLES_UP_TO = 696493;
+
+/**
+ * SQL on user_message event `a`: a person wrote it in that chat, so a card from before #812 counts it as handling it.
+ * Not a relay from another chat (`from`: a minion, this or another scheme's Taskmaster), held mail, a
+ * brief, Mandate's hook news, nor a name that isn't a person's (#610).
+ */
+const PERSON_WROTE = `json_extract(a.data, '$.from') IS NULL AND json_extract(a.data, '$.mail') IS NULL AND json_extract(a.data, '$.brief') IS NULL
+  AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${[...NOT_PEOPLE, 'Mandate'].map((n) => `'${n.toLowerCase().replace(/'/g, "''")}'`).join(', ')})
+  AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'`;
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** Each project has one long-lived coordinator ticket that manages the others. */
@@ -2451,6 +2464,9 @@ export class Store {
     this.cardRows.clear();
   }
 
+  /** TYPED_HANDLES_UP_TO; a test sets 0 to run the new rule on its small ids. */
+  typedHandlesUpTo = TYPED_HANDLES_UP_TO;
+
   private openCardsWhere(scope: string, id: number): EventRow[] {
     // Index-only: events_ticket_kind holds (ticket_id, kind, id).
     const ids = (this.db.prepare(`SELECT e.id FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
@@ -2464,7 +2480,9 @@ export class Store {
       AND NOT EXISTS (
         SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id
           -- only this card's own answer settles it, a held one for a cold asker (#687) too; a typed message answers nothing (#812)
-          AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) = json_extract(e.data, '$.id'))
+          AND (coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) = json_extract(e.data, '$.id')
+            OR (e.id <= ${this.typedHandlesUpTo} AND ${PERSON_WROTE} AND json_extract(e.data, '$.to') IS NULL
+              AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) IS NULL)))
       ORDER BY e.id`).all(JSON.stringify(ids)) as unknown as EventRow[];
     const still = new Set(open.map((e) => e.id));
     for (const i of ids) if (!still.has(i)) this.doneCards.add(i);

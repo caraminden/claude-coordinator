@@ -81,6 +81,7 @@ test('a minion\'s view lists its waiting cards with links, and a card posted mid
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db.sqlite'));
+  store.typedHandlesUpTo = 0;
   const runner = new Runner(store, () => {}, () => ({}), fake);
   const p = store.createProject('Citadel', null);
   const minion = store.createTicket({ project_id: p.id, title: 'Asker', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -156,6 +157,7 @@ test('a turn\'s snapshot marks its own cards below until a person writes or the 
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-412.sqlite'));
+  store.typedHandlesUpTo = 0;
   const runner = new Runner(store, () => {}, () => ({}), fake);
   const p = store.createProject('Transdata', null);
   const minion = store.createTicket({ project_id: p.id, title: 'Citations', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -230,6 +232,7 @@ test('a turn\'s snapshot lists the scheme\'s recently settled cards with who set
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-531.sqlite'));
+  store.typedHandlesUpTo = 0;
   const runner = new Runner(store, () => {}, () => ({}), fake);
   const p = store.createProject('Citadel', null);
   const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -271,6 +274,7 @@ test('a later snapshot sees replies and results that came after the last one, an
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-622.sqlite'));
+  store.typedHandlesUpTo = 0;
   const runner = new Runner(store, () => {}, () => ({}), fake);
   const p = store.createProject('Citadel', null);
   const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -322,6 +326,7 @@ test('an unrelated message does not settle a card; its own answer does, and is t
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-812.sqlite'));
+  store.typedHandlesUpTo = 0;
   const runner = new Runner(store, () => {}, () => ({}), fake);
   const p = store.createProject('Citadel', null);
   const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });

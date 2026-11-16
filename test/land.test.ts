@@ -716,3 +716,14 @@ test("refuses uncommitted work, main itself, arguments, running inside a citadel
   const onMain = spawnSync('bash', [land], { cwd: r.source, encoding: 'utf8', env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source } });
   assert.match(onMain.stderr, /not main/);
 });
+
+// merge-tree reads .gitattributes from the worktree it runs in, but the rebase sees main's: a union file main gained
+// after the branch forked must not make --check refuse a branch that appends to it too.
+test("--check reads main's .gitattributes, so both appending to a union file is no conflict", () => {
+  const r = setup();
+  r.commit(r.wt, 'log.md', 'base\nmine\n');
+  r.commit(r.source, '.gitattributes', 'log.md merge=union\n');
+  r.commit(r.source, 'log.md', 'base\ntheirs\n');
+  const res = r.run({}, ['--check']);
+  assert.equal(res.status, 0, res.stderr);
+});

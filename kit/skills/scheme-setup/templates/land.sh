@@ -598,7 +598,7 @@ undo_guard() {
 # through clean. Upgrade to a replay if that bites.
 early_conflict() {
   local out rc=0 files
-  out=$(git merge-tree --write-tree --name-only --no-messages "refs/heads/$BRANCH" "$1" 2>/dev/null) || rc=$?
+  out=$(git -c "attr.tree=refs/heads/$BRANCH" merge-tree --write-tree --name-only --no-messages "refs/heads/$BRANCH" "$1" 2>/dev/null) || rc=$?
   [ "$rc" = 1 ] || return 0
   files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
   say "$branch won't rebase onto $BRANCH ($(git log -1 --format='%h "%s"' "refs/heads/$BRANCH")) cleanly, by git merge-tree $2, so nothing landed${files:+; conflicted files: $files}. On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again"

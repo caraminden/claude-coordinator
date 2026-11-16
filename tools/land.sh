@@ -181,7 +181,7 @@ conflict_fix() {
 # the rebase would skip it: the git rebase the refusal names then goes through clean. Upgrade to a replay if that bites.
 early_check() {
   local out rc=0 files at
-  out=$(git merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
+  out=$(git -c "attr.tree=$1" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
   [ "$rc" = 1 ] || return 0
   files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
   at=$(git log -1 --format='%h "%s"' "$1")

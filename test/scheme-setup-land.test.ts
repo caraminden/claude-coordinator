@@ -614,3 +614,14 @@ test('a land-queue/.seq that holds no number is named, and the next ticket still
     b?.child.kill('SIGKILL');
   }
 });
+
+// merge-tree reads .gitattributes from the worktree it runs in, but the rebase sees main's: a union file main gained
+// after the branch forked must not make --check refuse a branch that appends to it too.
+test("--check reads main's .gitattributes, so both appending to a union file is no conflict", () => {
+  const r = setup();
+  r.commit(r.wt, 'log.md', 'base\nmine\n');
+  r.commit(r.main, '.gitattributes', 'log.md merge=union\n');
+  r.commit(r.main, 'log.md', 'base\ntheirs\n');
+  const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh'), '--check'], { cwd: r.wt, encoding: 'utf8', env });
+  assert.equal(res.status, 0, res.stderr);
+});

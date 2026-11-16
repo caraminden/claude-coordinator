@@ -489,6 +489,53 @@ test('a deploy moves an app\'s plain folder into its first slot, keeping its ign
   }
 });
 
+test('a deploy picks up where one stopped before linking the folder: a failed first deploy, a move cut short, an empty slots folder (#801)', async () => {
+  const svc = await listening();
+  try {
+    // A first deploy whose build fails leaves its clone in the first slot and no link; the next deploy carries on from it.
+    const name = `app${++repoN}`;
+    const r = remote(`cara/${name}`);
+    r.push({ 'citadel-app.json': appManifest(['exit 3']) });
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    services.deploy(c, 'Cara');
+    assert.equal((await done(name)).state, 'failed');
+    const fixed = r.push({ 'citadel-app.json': appManifest([]) });
+    services.deploy(c, 'Cara');
+    let d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.equal(git(join(home, 'apps', name), 'rev-parse', 'HEAD'), fixed);
+
+    // A move into the first slot cut short before its link (Citadel stopped between the two): linked again, then deployed.
+    const moved = `app${++repoN}`;
+    const m = remote(`cara/${moved}`);
+    const first = m.push({ 'citadel-app.json': appManifest([]) });
+    const slots = join(home, 'apps', `.${moved}`);
+    mkdirSync(slots, { recursive: true });
+    git(slots, 'clone', '--quiet', `file://${join(root, 'remotes', 'cara', moved)}.git`, 'a');
+    const mc = { ...row(moved, svc.port), repo: `cara/${moved}`, branch: null, folder: null } as ContraptionRow;
+    const next = m.push({ 'n.txt': 'x' });
+    services.deploy(mc, 'Cara');
+    d = await done(moved);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.deepEqual([d.from, d.to], [first, next]);
+    assert.match(d.said.join('\n'), /Linked .* again: an earlier deploy stopped before linking it/);
+    assert.equal(liveSlot(moved), realpathSync(join(slots, 'b')));
+
+    // Stopped after making the slots folder, before moving into it: the plain folder still moves.
+    const empty = `app${++repoN}`;
+    const e = remote(`cara/${empty}`);
+    e.push({ 'citadel-app.json': appManifest([]) });
+    mkdirSync(join(home, 'apps', `.${empty}`));
+    git(join(home, 'apps'), 'clone', '--quiet', `file://${join(root, 'remotes', 'cara', empty)}.git`, empty);
+    services.deploy({ ...row(empty, svc.port), repo: `cara/${empty}`, branch: null, folder: null } as ContraptionRow, 'Cara');
+    d = await done(empty);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.ok(lstatSync(join(home, 'apps', empty)).isSymbolicLink());
+  } finally {
+    svc.close();
+  }
+});
+
 /** A stand-in for ContraptionTurns.drain: records when it ran and was released, against systemctl's restarts so far. */
 function drainSpy(said: string | null, ms = 200) {
   const seen: string[] = [];

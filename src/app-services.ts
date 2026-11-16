@@ -9,7 +9,7 @@
 // reported, and stopped and disabled only when an admin asks with replace: their files stay.
 // A boot check, a preview or a dev copy without a stand-in systemctl gets `off`: it never touches systemd.
 import { execFile, spawn } from 'node:child_process';
-import { closeSync, existsSync, openSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
@@ -569,10 +569,11 @@ export class AppServices {
   }
 
   /**
-   * Deploy an app from its repo (#266): clone it, or fetch and fast-forward its branch (refused on local
-   * changes or a branch that isn't the registered one), build it niced with a time limit, write its units
-   * and restart it, then check its health. A failure after the fast-forward rolls back to the commit
-   * before, builds that, and restarts it. Starts it and returns at once; lastDeploy follows it. With
+   * Deploy an app from its repo (#266): clone it, or check its branch's new commit out in the idle one of
+   * its two slots (#801; refused on local changes, or commits the branch doesn't have), build it there niced
+   * with a time limit while the live slot runs on, point the folder at it, write its units and restart it,
+   * then check its health. A failed build changes nothing; an unhealthy one points back at the old slot and
+   * restarts that, with no rebuild. Starts it and returns at once; lastDeploy follows it. With
    * `identity` (a fresh X-Citadel-Identity header for the person deploying), a deployed app's page and
    * manifest are checked for installing as its own app (src/pwa-check.ts). A registry entry with no icon
    * gets its manifest's first icon (`hooks.setIcon`, answering whether it took). What's still missing goes
@@ -668,8 +669,16 @@ export class AppServices {
     let old: string | null = null;
     let next: string;
     let link = await readlink(folder).catch(() => null);
+    /** An empty slots folder is one a deploy stopped right after making. */
+    const inTheWay = () => existsSync(slots) && readdirSync(slots).length > 0;
+    if (link === null && !existsSync(folder) && existsSync(join(a, '.git'))) {
+      // A deploy stopped before linking the folder (a failed first deploy, or a move into the slot cut short): link it now.
+      link = relative(dirname(folder), a);
+      await symlink(link, folder);
+      await say(`Linked ${folder} to ${a} again: an earlier deploy stopped before linking it.`);
+    }
     if (link === null && !existsSync(folder)) {
-      if (existsSync(slots)) throw new Error(`${slots} is there but ${folder} isn't: move it away first.`);
+      if (inTheWay()) throw new Error(`${slots} is there but ${folder} isn't: move it away first.`);
       next = a;
       await mkdir(slots, { recursive: true });
       await say(`Cloning ${repo} (${view.branch}) into ${next}.`);
@@ -680,15 +689,15 @@ export class AppServices {
         await checkout(folder, 'fetched');
         const branch = await git(folder, 'branch', '--show-current');
         if (branch !== view.branch) throw new Error(`${folder} is on ${branch || 'a detached HEAD'}, not ${view.branch}: switch it back by hand first.`);
-        if (existsSync(slots)) throw new Error(`${slots} is there already: move it away first.`);
-        await mkdir(slots);
+        if (inTheWay()) throw new Error(`${slots} is there already: move it away first.`);
+        await mkdir(slots, { recursive: true });
         await rename(folder, a);
         link = relative(dirname(folder), a);
         try {
           await symlink(link, folder);
         } catch (err: any) {
-          await rename(a, folder);
-          throw new Error(`Couldn't link ${folder} to ${a}, so it was moved back: ${err.message}`);
+          const back = await rename(a, folder).then(() => 'so it was moved back', (e) => `and moving it back failed too (${e.message}): the next deploy links it`);
+          throw new Error(`Couldn't link ${folder} to ${a}, ${back}: ${err.message}`);
         }
         await say(`Moved ${folder} to ${a} and linked it there: from now on a deploy builds in a second folder beside it.`);
       }

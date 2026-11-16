@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
-import { appFolder } from './app-services.ts';
+import { appFolder, slotsOf } from './app-services.ts';
 import { Containers, specHash, type CmdResult, type ContainerSpec, type Mount } from './containers.ts';
 import type { Credentials } from './credentials.ts';
 import type { Store } from './db.ts';
@@ -418,7 +418,9 @@ export class ClaudeLink {
     // Their parent folders: a folder is a link into its two slots beside it (#801), which a mount of the link would pin at
     // the slot live when the container started.
     if (this.store.isAdmin(user)) {
-      for (const dir of new Set(this.store.listContraptions().map((c) => dirname(appFolder(c, this.home))))) {
+      // shortcut: a folder set right in home (none is) mounts its link pinned at start, not home with its keys; mount per slot if one is.
+      const dirs = this.store.listContraptions().flatMap((c) => { const f = appFolder(c, this.home); return dirname(f) === this.home ? [f, slotsOf(f)] : [dirname(f)]; });
+      for (const dir of new Set(dirs)) {
         if (existsSync(dir)) mounts.push({ src: dir, dst: dir, ro: true });
       }
     }

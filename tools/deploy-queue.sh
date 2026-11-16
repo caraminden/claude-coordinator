@@ -115,7 +115,8 @@ queue_ordinal() {
 }
 
 queue_lock() {
-  local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=$SECONDS said="" typical sum count line
+  # The stall is timed in microseconds: $SECONDS ticks whole seconds, so a 3 s stall gave up 2.0-3.0 s after the last change (#790).
+  local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line
   mkdir -p -m 700 "$q"
   # Unopened, every flock below fails at once ("Bad file descriptor") for the whole stall (#553 F12b).
   if ! exec 9>"$1/lock"; then
@@ -192,7 +193,7 @@ queue_lock() {
     # Progress is any change at the head of the line: a new head, or the head's next phase.
     sig="$ahead $head"
     if [ "$sig" != "$last" ]; then
-      last=$sig since=$SECONDS
+      last=$sig since=${EPOCHREALTIME//[!0-9]/}
       [ -n "$headname" ] || headname=$(exec 9>&-; queue_outside "$1")
       line="$(queue_ordinal $((ahead + 1))) in line for the deploy lock"
       if [ "$ahead" -gt 0 ]; then
@@ -205,7 +206,7 @@ queue_lock() {
       echo "queue: $line (ahead: $headname)" >&2
       [ -n "$said" ] || echo "queue: the wait has no time limit while the line moves, so run this in the background with a long timeout rather than under a 10 min limit: a run that is stopped loses its place" >&2
       said=1
-    elif [ $((SECONDS - since)) -ge "$QUEUE_STALL" ]; then
+    elif [ $((${EPOCHREALTIME//[!0-9]/} - since)) -ge $((QUEUE_STALL * 1000000)) ]; then
       [ -n "$headname" ] || headname=$(exec 9>&-; queue_outside "$1")
       detail="" look="what holds the deploy lock ($1/lock)"
       if [ "$ahead" -gt 0 ]; then

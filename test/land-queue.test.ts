@@ -357,6 +357,24 @@ test("the queued restart's phases show to the waiters and count as progress", { 
   }
 });
 
+// #790: the stall was timed with $SECONDS, which ticks whole seconds, so a 3 s stall gave up 2.0-3.0 s after the last
+// change, and the test above failed whenever its 2 s gaps ran a little long on a loaded box.
+test('the stall is timed in real seconds: a 1 s stall gives up no sooner than 1 s after the last change', async () => {
+  const state = queueState();
+  const holder = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 42', join(state, 'lock')], { stdio: 'ignore' });
+  try {
+    await until('the lock to be held', () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
+    const t0 = Date.now();
+    const a = waiter(state, 'a', 'true', { DEPLOY_QUEUE_STALL: '1' });
+    assert.equal(await a.exit, 1, a.stderr());
+    const took = Date.now() - t0;
+    assert.match(a.stderr(), /nothing has moved/);
+    assert.ok(took >= 1000, `gave up after ${took} ms`);
+  } finally {
+    holder.kill('SIGKILL');
+  }
+});
+
 // F12b: a lock file that can't be opened printed "flock: 9: Bad file descriptor" about once a second for the whole
 // 15 min stall, then blamed a holder.
 test("a deploy lock that can't be opened gives up at once and says so, not a flock error a second", async () => {

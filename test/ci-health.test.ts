@@ -855,6 +855,18 @@ test('a watched workflow gone red on main wakes the Taskmaster once per red stre
   assert.equal(told.length, 4);
   assert.match(told[3][0], /back to green on main: .*runs\/8005 .*after run 8005 failed\.$/);
   assert.equal(told[3][1], false);
+
+  // A watched workflow's scheduled and dispatched reds on main are the same streak: one wake, never held mail per run.
+  const nightly = push({ id: 8006, event: 'schedule', conclusion: 'failure', created_at: iso(-50 * MIN), updated_at: iso(-55 * MIN) });
+  const dispatch = push({ id: 8007, event: 'workflow_dispatch', conclusion: 'failure', created_at: iso(-60 * MIN), updated_at: iso(-65 * MIN) });
+  w.gh.scheduled = [nightly];
+  w.gh.dispatched = [dispatch];
+  w.gh.mainRuns = [dispatch, nightly, ...w.gh.mainRuns];
+  await health.tick(NOW + 70 * MIN);
+  await health.tick(NOW + 75 * MIN);
+  assert.equal(told.length, 5);
+  assert.equal(told[4][1], true);
+  assert.match(told[4][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8007 failed on .* \(workflow_dispatch by caraminden, /);
 });
 
 test('orphanRuns: queued land/** runs over an hour old that no landing holds', () => {

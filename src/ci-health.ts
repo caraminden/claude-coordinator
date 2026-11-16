@@ -737,8 +737,8 @@ export class CiHealth {
         }
         continue;
       }
-      // The Taskmaster hears of the default branch only: scheduled runs, and dispatched ones there.
-      if (!this.deps.tell || r.conclusion !== 'failure' || (dispatch && r.head_branch !== branch) || quiet.has(workflowFile(r))) continue;
+      // The Taskmaster hears of the default branch only: scheduled runs, and dispatched ones there. A watched workflow's go through its streak, below.
+      if (!this.deps.tell || r.conclusion !== 'failure' || (dispatch && r.head_branch !== branch) || quiet.has(workflowFile(r)) || watch.has(workflowFile(r))) continue;
       // Kept while no Taskmaster can take it, so each poll's retry doesn't read its jobs and annotations again.
       const text = this.texts.get(r.id) ?? (await this.runText(p, slug, r, as, 'taskmaster'));
       this.texts.set(r.id, text);

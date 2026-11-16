@@ -226,6 +226,12 @@ test('a reply that says the minion is closing is sent back unless close_self was
   assert.equal(w?.decision, 'block');
   assert.match(w.reason, /state complete/);
   assert.equal(await ask('Staying open in state complete for you to read the report.'), null);
+  for (const t of ['Not closing this minion: waiting on you.', "I won't be closing this minion.", 'Closing out the last two audit findings now.', 'Closing the thread on the PR.']) assert.equal(await ask(t), null, t);
+  assert.equal(await ask('Deployed; the deploy closes this minion.\n<!-- status: {"state":"pending-deploy","note":"x"} -->'), null);
+  const bad = join(root, 'bad.jsonl');
+  writeFileSync(bad, `${user}\n{half`);
+  assert.equal(await check({ last_assistant_message: 'Closing this minion.', transcript_path: bad }, cfg), null, 'unreadable transcript');
+  assert.equal(await check({ last_assistant_message: 'Closing this minion.', transcript_path: join(root, 'close-0.jsonl') }, { ...cfg, refs: undefined }).then((v) => v?.decision), 'block');
   assert.equal(await ask('I closed the stale PR and the old branch.'), null);
   assert.equal(await ask('Cara asked "closing this minion?" and I said no.'), null);
   assert.equal(await check({ last_assistant_message: 'Closing this minion.' }, cfg), null, 'no readable transcript: say nothing');

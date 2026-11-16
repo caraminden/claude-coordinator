@@ -130,11 +130,11 @@ export function proseChoice(text: string, status: { replies?: unknown } | null, 
   return hit && postedCard(transcript) === false ? hit.trim() : null;
 }
 
-const CLOSING = /\b(closing (this|the) (minion|thread)|closing (it |myself )?(out|down)\b|i(?:'ll| will| am|'m) (?:now )?(?:close|dismiss) (?:this minion|myself|this thread)|dismissing (this minion|myself)|(?:ready|about) to close (?:this|the|myself)\b|ready to close\b)/i;
+const CLOSING = /\b(closing (this|the) minion|closing (it |this minion )?(out|down) (this minion|myself)|i(?:'ll| will| am|'m) (?:now )?(?:close|dismiss) (?:this minion|myself)|dismissing (this minion|myself)|(?:ready|about) to close (?:this minion|myself)|done, ready to close)\b/i;
 
-/** Whether this turn's close_self call was answered without an error: true, false (called, refused), or null (not called or unreadable). */
-function closeSelfOk(transcript?: string): boolean | null {
-  if (!transcript) return null;
+/** Whether this turn's close_self call was answered without an error: true, false (called, refused), null (not called), or undefined (unreadable). */
+function closeSelfOk(transcript?: string): boolean | null | undefined {
+  if (!transcript) return undefined;
   try {
     let called: boolean | null = false;
     const ids = new Map<string, boolean>();
@@ -149,22 +149,24 @@ function closeSelfOk(transcript?: string): boolean | null {
         else if (c?.type === 'tool_result' && ids.has(c.tool_use_id)) ids.set(c.tool_use_id, !c.is_error);
       }
     }
-    return called ? [...ids.values()].some(Boolean) : null;
+    return [...ids.values()].some(Boolean) || (called ? false : null);
   } catch {
-    return null;
+    return undefined;
   }
 }
 
 /** Why a reply that says the minion is closing is false (no working close_self, or a status line that cancels it), or null (#809). */
-export function closingClaim(text: string, status: { state?: unknown } | null, transcript?: string): string | null {
-  if (!transcript) return null;
+export function closingClaim(text: string, status: { state?: unknown } | null, transcript?: string, self?: number | null): string | null {
+  if (!transcript || self === null) return null; // a Taskmaster has no close_self
   const tail = text.replace(CODE, '').replace(QUOTED, '').trim().split(/\n\s*\n/).slice(-2).join('\n\n');
-  const hit = tail.match(CLOSING)?.[0];
-  if (!hit) return null;
+  const m = tail.match(CLOSING);
+  const hit = m?.[0];
+  if (!m || !hit || /\b(not|never|no longer)\b|n't/i.test(tail.slice(Math.max(0, m.index! - 40), m.index!).split(/[.!?\n]/).pop()!)) return null;
   const ok = closeSelfOk(transcript);
   const state = typeof status?.state === 'string' ? status.state : null;
-  if (ok && state && ['complete', 'try', 'ready'].includes(state)) return `it says "${hit}", but its status line sets state ${state}, which cancels the close, so it stays open`;
-  if (!ok) return `it says "${hit}", but close_self was ${ok === false ? 'refused' : 'not called'} this turn, so it stays open`;
+  if (ok && state && ['complete', 'try', 'ready'].includes(state)) return `its status line sets state ${state}, which cancels the close, so it stays open`;
+  if (ok === undefined || state === 'pending-deploy') return null;
+  if (!ok) return `close_self was ${ok === false ? 'refused' : 'not called'} this turn, so it stays open`;
   return null;
 }
 
@@ -197,7 +199,7 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const docs = new Set([...(refs?.cards ?? []), ...(refs?.settled ?? [])].flatMap((c) => (c.doc ? [c.doc] : [])));
   const choices = refs?.cards ? await cardlessChoices(reply, cfg, docs) : [];
   const asked = proseChoice(reply, status, input.transcript_path);
-  const closing = closingClaim(reply, status, input.transcript_path);
+  const closing = closingClaim(reply, status, input.transcript_path, refs ? (refs.self ?? null) : undefined);
   if (!asked && !broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length && !closing) return null;
   if (cfg.nudged) {
     try {

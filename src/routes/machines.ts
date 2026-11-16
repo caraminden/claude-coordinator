@@ -55,11 +55,11 @@ export function patchMachine(app: Ctx['app'], session: Ctx['session'], machine: 
   }
   if (body.name !== undefined) fields.name = machineName(body.name);
   if (body.notes !== undefined) fields.notes = machineNotes(body.notes);
-  try {
-    app.store.updateMachine(machine.id, fields);
-  } catch {
+  // Checked here: the write runs on the DB write worker, so its UNIQUE failure wouldn't reach this request (#795).
+  if (fields.name !== undefined && app.store.listMachines().some((m) => m.id !== machine.id && m.name === fields.name)) {
     throw new HttpError(409, 'A machine with that name already exists');
   }
+  app.store.updateMachine(machine.id, fields);
   if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
   if (lend) app.machines.setLend(machine.id, lend);
   // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.

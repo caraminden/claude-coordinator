@@ -8,6 +8,7 @@
 import type { StatementSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { Store } from './db.ts';
+import { writes } from './http.ts';
 
 /** The Store's writes the worker runs: none returns a value its callers use, and every argument survives postMessage. */
 export const WRITES = [
@@ -35,7 +36,7 @@ export const VALUE_WRITES = [
 
 /** What a write also changes in the server's own memory, done there when the write is sent. */
 const MAIN_SIDE: Record<string, (store: Store, args: any[], exec: (sql: string) => void) => void> = {
-  deleteTicket: (store) => store.forgetCards(),
+  deleteTicket: (store, [id]) => (store.forgetCards(), store.memory.forgetTicket(id)),
   setEventData: (store, [id]) => store.forgetCards(id),
   'memory.deleteTicket': (store, [id]) => store.memory.forgetTicket(id),
   // The server's connection must not checkpoint either while the checkpoint worker does (src/checkpoint.ts).
@@ -112,6 +113,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
     if (Date.now() - t0 > 1000) console.error(`DB write on the server's thread waited ${Date.now() - t0} ms for ${target - applied()} queued writes${ok ? '' : ' and gave up'}.`);
     return ok;
   };
+  // A response waits as a read does, so a client reading the database itself (a test, a tool) finds the request's writes.
+  writes.settle = beforeRead;
   const beforeWrite = () => {
     if (alive && applied() < seq) drain();
   };

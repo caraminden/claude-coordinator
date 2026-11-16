@@ -62,8 +62,12 @@ export function framedWithApps(domain: string) {
 export const acceptsGzip = new WeakSet<ServerResponse>();
 const MIN_GZIP_BYTES = 1400;
 
+/** Set by the DB write worker (src/db-writer.ts): waits a moment for queued writes, so a response comes after its request's writes (#795). */
+export const writes = { settle: null as (() => void) | null };
+
 /** Send a whole body, gzipped when the browser accepts it and it is big enough to be worth it. */
 export function send(res: ServerResponse, status: number, headers: Record<string, string>, body: string | Buffer) {
+  writes.settle?.();
   const buf = typeof body === 'string' ? Buffer.from(body) : body;
   if (buf.length < MIN_GZIP_BYTES || !acceptsGzip.has(res)) {
     res.writeHead(status, { Vary: 'Accept-Encoding', ...headers });

@@ -61,12 +61,13 @@ Ask one question: will the session need what this step reads, or only what it co
 ## Use a subagent when
 
 - **The step is noisy.** Test logs, searches across many files and data pulls often come to 20k
-  tokens or more. A question that needs 5 or more files read goes to an `Explore` Grunt on Sonnet,
-  briefed for the conclusion and the exact lines that matter, not file dumps; a 2-file look stays
-  in the session, since the Grunt's own base context costs more than the reads. A chain of hops
-  where each result only names the next lookup is one script that prints only the answer (in the
-  session or in the Grunt), capped with `| head -50`. The session would re-read all of that on every later call. The `citadel:check-runner`
+  tokens or more. The session would re-read all of that on every later call. The `citadel:check-runner`
   agent exists for exactly this.
+- **A sweep or a chain of lookups.** A question that needs 5 or more files read goes to an `Explore` Grunt on Sonnet,
+  briefed for the conclusion and the exact lines that matter, not file dumps; a shorter look stays in
+  the session, since the Grunt's own base context costs more than the reads. Hops where each result only
+  names the next lookup are one script that prints only the answer (in the session or in the Grunt),
+  capped with `| head -50`.
 - **The session is already big.** Past about 150k context, the savings grow quickly. Off a 90k
   session they are small.
 - **Your own read needs to stay clear.** A lean session keeps the requester's actual words in

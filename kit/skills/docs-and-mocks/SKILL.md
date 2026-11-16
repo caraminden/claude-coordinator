@@ -28,8 +28,10 @@ Make a page when one of these is true:
 - Rules or a state model look fine on paper, and the question is whether they hold through real
   cases: an economy, an automation rule, a flow with awkward orders. (Prototype: a logic toy.)
 
-A choice a click settles is a question card. A bug, a status, a one-off list of numbers or anything
-five lines can say is a reply.
+A choice a click settles is a question card. A choice that is visual or has several parts (takes to
+compare side by side, a handful of separate picks) is a choices page, a review page with pick bars:
+make those often, people decide fast from them (Cara 2026-11-16, "we should DEFINITELY do a lot of
+when appropriate"). A bug, a status, a one-off list of numbers or anything five lines can say is a reply.
 
 ## Pick the kind
 
@@ -80,7 +82,10 @@ when look variants belong in the real app instead, in [`prototypes.md`](prototyp
    what counts as a pass: [`reader-test.md`](reader-test.md). Review pages skip it unless their notes carry
    the argument.
 7. **Show it:** link the page as a card and the screenshots inline, say in one line what to
-   pick, and end the turn waiting on the picks.
+   pick, and ask with `ask_question`, `doc` set to the page's path and no questions. That choices
+   card waits on people like any card, opens the page, and settles when the page's Send lands. Every
+   page with pick bars you link comes with one (the link check sends the reply back otherwise); never
+   repeat the takes as a second card's options. End the turn waiting on the picks.
 8. **Read the picks** with the `artifact_data` tool on the page's path: `db/<collection>/<id>` =
    `{ v, note, by, at }`. Send posts them into your chat as the person's message, which wakes you. A
    page saves them through `window.claude.use('db')` (as on claude.ai), `localStorage` or

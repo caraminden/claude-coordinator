@@ -236,7 +236,7 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
     : '';
   const close = closing
     ? `Your reply says this minion is closing, but ${closing}. Words don't close it: call close_self (state null in the status line, no card open), or rewrite the line to say plainly why it stays open `
-      + '(for example "Staying open in state complete for you to read X").\n'
+      + '(for example "Staying open in state ready for you to do X").\n'
     : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';

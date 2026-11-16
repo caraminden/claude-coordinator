@@ -823,7 +823,7 @@ async function route() {
   if (!framed()) saveScroll();
   const seq = ++routeSeq;
   const hash = location.hash || '#/';
-  if (view?.kind === 'project' && view.id && !new RegExp(`/t/${view.ticket?.number}(?!\\d)`).test(hash)) leaveSeen(view.id);
+  if (view?.kind === 'project' && view.id && !/^#\/(f|apps|share)\b/.test(hash) && !new RegExp(`/t/${view.ticket?.number}(?!\\d)`).test(hash)) leaveSeen(view.id);
   let m;
   // A contraption in Citadel's window (frames.js): Citadel's page stays as it was underneath.
   if ((m = hash.match(/^#\/apps\/([a-z0-9][a-z0-9-]{0,31})$/))) return showFrame(m[1]);

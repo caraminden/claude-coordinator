@@ -60,6 +60,8 @@ export type Writer = {
   drain(ms?: number): boolean;
   /** Writes sent and not yet run. */
   queued(): number;
+  /** Stop the worker: writes run on the store's connection again. */
+  stop(): Promise<number>;
 };
 
 /**
@@ -204,7 +206,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
     alive = false;
   });
   worker.unref(); // after the listeners: adding one refs the worker again
-  return { drain, queued: () => seq - applied() };
+  return { drain, queued: () => seq - applied(), stop: () => worker.terminate() };
 }
 
 if (!isMainThread && workerData?.writer) {

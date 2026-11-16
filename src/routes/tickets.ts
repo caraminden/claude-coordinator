@@ -33,6 +33,7 @@ import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { machineNotes, patchMachine } from './machines.ts';
+import { LINE_FIELDS } from './projects.ts';
 import { pacificTime, parseWakeTime } from '../wake.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
@@ -852,6 +853,60 @@ export const ticketRoutes: Route[] = [
       const held = await tellTaskmaster(app, ticket, text, body.urgent === true, body.wake !== false);
       if (held === true) return json(res, 202, { sent: false, held: true });
       return json(res, 202, { sent: true, ...(held === 'cold' ? { cold: true } : held === 'mail' ? { mail: true } : {}) });
+    },
+  },
+  {
+    // message_minion (#783): one minion messages another in its own scheme, with the Taskmaster's wake rules
+    // (runner.relayMinion) and one loop guard per pair. It never reopens a dismissed one, and the Taskmaster
+    // gets a one-line copy as held mail, which wakes nothing.
+    method: 'POST', path: '/api/tickets/:ticket/minion-message', who: ['minion'], refuse: 'Only a minion messages another minion this way',
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      const { store, runner } = app;
+      const body = await readJson(req);
+      const text = str(body.text, 'Message', 10_000);
+      const to = Number(body.to);
+      if (!Number.isInteger(to) || to <= 0) throw new HttpError(400, 'to must be a minion number');
+      // By number in the sender's own scheme: no minion of another scheme can be named.
+      const target = store.getTicketByNumber(ticket.project_id, to);
+      if (!target || target.kind === 'coordinator') throw new HttpError(404, `There is no minion #${to} in this scheme. Another scheme's minions are reached through the Taskmaster (message_coordinator).`);
+      if (target.id === ticket.id) throw new HttpError(400, 'That is you');
+      if (target.status === 'closed') throw new HttpError(409, `#${to} is dismissed, and a message from a minion never reopens one. Ask the Taskmaster (message_coordinator) to reopen it or to pass this on.`);
+      const author = `#${ticket.number} ${ticket.title}`;
+      const held = runner.relayMinion(ticket.id, target.id, author, text, body.urgent === true, body.wake !== false);
+      if (held !== true) {
+        const how = held === 'parked' ? 'Left for' : held ? 'Left held mail for' : 'Sent';
+        runner.emit(ticket.id, 'note', { text: `${how} #${target.number} ${target.title}: ${text}` });
+        const coordinator = store.getCoordinator(ticket.project_id);
+        const line = text.replace(/\s+/g, ' ');
+        if (coordinator) runner.leaveMail(coordinator.id, author, `(to #${target.number}, for your tracking; nothing to do) ${line.length > 200 ? line.slice(0, 200) + '…' : line}`);
+      }
+      return json(res, 202, { held, number: target.number, title: target.title, state: target.state });
+    },
+  },
+  {
+    // read_minion (#783): another minion's line, worktree and recent chat, for its scheme's minions. Only
+    // the chat's words: no cards, tool calls, approvals, attachments or costs.
+    method: 'GET', path: '/api/tickets/:ticket/peer', who: ['minion'], refuse: 'Only a minion reads another this way',
+    handler({ res, url, app, ticket }) {
+      const { store, runner } = app;
+      const n = Number(url.searchParams.get('number'));
+      const last = Math.min(Math.max(Number(url.searchParams.get('last')) || 10, 1), 50);
+      const target = Number.isInteger(n) && n > 0 ? store.getTicketByNumber(ticket.project_id, n) : undefined;
+      if (!target || target.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
+      const v = runner.view(target);
+      const line = { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), ...(target.cwd ? { worktree: target.cwd } : {}) };
+      const events = store.listEvents(target.id).flatMap((e) => {
+        const d = JSON.parse(e.data);
+        const keep = e.kind === 'user_message' ? { author: d.author, text: d.text ?? '', ...(d.comment ? { comment: { about: d.comment.about } } : {}) }
+          : e.kind === 'note' || e.kind === 'error' ? { text: d.text ?? '' }
+          : e.kind === 'claude' && d.type === 'assistant' && !d.replaced && (d.message?.content ?? []).some((b: any) => b.type === 'text' && b.text.trim())
+            ? { type: 'assistant', message: { content: d.message.content.filter((b: any) => b.type === 'text') }, ...(d.parent_tool_use_id ? { parent_tool_use_id: d.parent_tool_use_id } : {}) }
+          : e.kind === 'claude' && d.type === 'result' ? { type: 'result', is_error: !!d.is_error }
+          : null;
+        return keep ? [{ kind: e.kind, data: JSON.stringify(keep) }] : [];
+      });
+      return json(res, 200, { ticket: line, events: events.slice(-last), skipped: Math.max(events.length - last, 0) });
     },
   },
   {

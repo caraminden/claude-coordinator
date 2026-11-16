@@ -248,7 +248,7 @@ function visibleSchemes(store: App['store'], who: { uid?: number; admin?: boolea
 }
 
 // What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
-const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'workflow', 'plugin_dirs', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity', 'open_cards'] as const;
+export const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'workflow', 'plugin_dirs', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity', 'open_cards'] as const;
 
 export const projectRoutes: Route[] = [
   {
@@ -477,14 +477,15 @@ export const projectRoutes: Route[] = [
     // line's fields, the latest activity line and waiting cards' labels and links among them (no card
     // contents, costs or paths). checkRole keeps a minion to its own scheme.
     method: 'GET', path: '/api/projects/:project/tickets', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
-    handler({ res, url, app, project }) {
+    handler({ res, url, app, project, caller }) {
       const closed = url.searchParams.get('include_closed') === '1';
       const tickets = app.store
         .listTickets(project.id)
         .filter((t) => t.kind === 'ticket' && (closed || t.status !== 'closed'))
         .map((t) => {
           const v = app.runner.view(t);
-          return Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]]));
+          // A minion also gets each one's worktree (#783), to find who owns a file; the Taskmaster's read_ticket shows it.
+          return { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), ...(caller && caller.kind !== 'coordinator' && t.cwd ? { worktree: t.cwd } : {}) };
         });
       return json(res, 200, { tickets, scheme: project.name });
     },

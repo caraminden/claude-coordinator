@@ -2002,6 +2002,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/minion-message": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion messages another minion this way",
+  "member": "403 Only a minion messages another minion this way",
+  "outsider": "403 Only a minion messages another minion this way",
+  "tmA": "403 Only a minion messages another minion this way",
+  "tmB": "403 Only a minion messages another minion this way",
+  "m1": "400 Message is required",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/nonsense": {
   "anon": "401 Not logged in",
   "person": "404 Not found",
@@ -2020,6 +2030,16 @@
   "tmA": "403 Only the minion itself can make media in its folders",
   "tmB": "403 Only the minion itself can make media in its folders",
   "m1": "400 tool must be one of: generate_image, edit_image, generate_audio",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:minion1/peer": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion reads another this way",
+  "member": "403 Only a minion reads another this way",
+  "outsider": "403 Only a minion reads another this way",
+  "tmA": "403 Only a minion reads another this way",
+  "tmB": "403 Only a minion reads another this way",
+  "m1": "404 There is no minion #0 in this scheme",
   "m2": "403 A minion may only update itself"
  },
  "PUT /api/tickets/:minion1/person-note": {
@@ -2532,6 +2552,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:taskmasterA/minion-message": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion messages another minion this way",
+  "member": "403 Only a minion messages another minion this way",
+  "outsider": "403 Only a minion messages another minion this way",
+  "tmA": "403 Only a minion messages another minion this way",
+  "tmB": "403 Only a minion messages another minion this way",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:taskmasterA/nonsense": {
   "anon": "401 Not logged in",
   "person": "404 Not found",
@@ -2549,6 +2579,16 @@
   "outsider": "403 Only the minion itself can make media in its folders",
   "tmA": "403 Only the minion itself can make media in its folders",
   "tmB": "403 Only the minion itself can make media in its folders",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/peer": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion reads another this way",
+  "member": "403 Only a minion reads another this way",
+  "outsider": "403 Only a minion reads another this way",
+  "tmA": "403 Only a minion reads another this way",
+  "tmB": "403 Only a minion reads another this way",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

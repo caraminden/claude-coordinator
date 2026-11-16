@@ -245,3 +245,20 @@ test("held mail outlives a turn whose Claude can't start, and rides along with t
   assert.deepEqual(lastPrompt(), ['[Cara]: second try', `[Held mail from #${minion.number} M, sent 2026-11-08 14:05 UTC]: please start #9`]);
   await idle(tm.id);
 });
+
+// Minions message each other directly (#783): the same cold hold, and urgent (blocked on its reply) wakes it.
+test("a minion's message to a cold minion is held as mail; an urgent one wakes it, the held one along", async () => {
+  const tm = ticket('coordinator', 0);
+  const sender = ticket('ticket', 0, tm.project_id);
+  const cold = ticket('ticket', 90 * 60_000, tm.project_id);
+  assert.equal(runner.relayMinion(sender.id, cold.id, `#${sender.number} M`, 'FYI: I renamed foo()'), 'cold');
+  assert.equal(lastMessage(cold.id).mail, true);
+  assert.equal(runner.isRunning(cold.id), false, 'a cold minion must not wake for news');
+
+  const before = promptCount();
+  assert.equal(runner.relayMinion(sender.id, cold.id, `#${sender.number} M`, 'Blocked: which port does your server use?', true), false);
+  await until('the turn', async () => promptCount() > before);
+  assert.deepEqual(lastPrompt(), [`[#${sender.number} M]: Blocked: which port does your server use?`, `[Held mail from #${sender.number} M, sent 2026-11-08 14:05 UTC]: FYI: I renamed foo()`]);
+  await idle(cold.id);
+  assert.equal(store.getSetting(`loop:${cold.id}`), null, "not counted on the receiver's loop with its Taskmaster");
+});

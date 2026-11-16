@@ -307,6 +307,9 @@ interface LoopState {
 const loopKey = (minionId: number) => `loop:${minionId}`;
 /** Two schemes' Taskmasters share one loop, stored the same way whichever wrote first. */
 const pairKey = (a: number, b: number) => `loop:taskmasters:${Math.min(a, b)}:${Math.max(a, b)}`;
+/** Two minions messaging each other directly (#783) share one loop, apart from each one's loop with its Taskmaster. */
+const MINION_PAIRS = 'loop:minions:';
+const minionPairKey = (a: number, b: number) => `${MINION_PAIRS}${Math.min(a, b)}:${Math.max(a, b)}`;
 const clip = (text: string) => (text.length > 140 ? text.slice(0, 140) + '…' : text);
 
 /** Claude's words for an account problem only a person can fix, like "API Error: 400 Identity verification is required to continue.": never retried. */
@@ -1645,6 +1648,24 @@ export class Runner {
   }
 
   /**
+   * A message from one minion to another in its scheme (message_minion, #783): the same wake rules as
+   * relay (busy: after its turn; parked: held; cold: mail unless urgent), never steering a running turn.
+   * Each pair shares one count, both ways, apart from the Taskmaster's; a person's Continue in either
+   * chat releases it. The caller refuses a dismissed receiver: this would reopen it.
+   */
+  relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true): boolean | 'cold' | 'mail' | 'parked' {
+    const { held, cold, parked } = this.guard(minionPairKey(from, to), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, false, from, !wake, urgent);
+    if (!held) return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
+    const [a, b] = [from, to].map((id) => `#${this.store.getTicket(id)!.number}`);
+    const what = `${a}'s message to ${b} ("${clip(text)}")`;
+    const note = held === 1
+      ? `Paused: ${a} and ${b} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`
+      : `Also held: ${what}.`;
+    for (const id of [from, to]) this.emit(id, 'loop_paused', { minion: id, text: note });
+    return true;
+  }
+
+  /**
    * A message from one scheme's Taskmaster to another's (message_taskmaster). Each pair shares one
    * count, both ways: TASKMASTER_LOOP_LIMIT per TASKMASTER_LOOP_WINDOW_MS go through, which stops a
    * runaway exchange within a few turns but not work spread out over an hour. Past that each is held,
@@ -1822,23 +1843,28 @@ export class Runner {
   continueLoop(ticketId: number, by: string): number {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return 0;
-    const loops = ticket.kind === 'coordinator'
+    const loops: { key: string; chats: number[]; pair?: true }[] = ticket.kind === 'coordinator'
       ? this.store.listProjects().map((p) => this.store.getCoordinator(p.id)).filter((c) => c && c.id !== ticketId)
         .map((c) => ({ key: pairKey(ticketId, c!.id), chats: [ticketId, c!.id] }))
-      : [{ key: loopKey(ticketId), chats: this.loopChats(ticket) }];
+      : [{ key: loopKey(ticketId), chats: this.loopChats(ticket) },
+        // Its direct exchanges with the scheme's other minions (#783).
+        ...this.store.settingKeys(MINION_PAIRS).map((key) => key.slice(MINION_PAIRS.length).split(':').map(Number)).filter((ids) => ids.includes(ticketId))
+          .map(([a, b]) => ({ key: minionPairKey(a, b), chats: [ticketId, a === ticketId ? b : a], pair: true as const }))];
     let total = 0;
-    for (const { key, chats } of loops) {
+    for (const { key, chats, pair } of loops) {
       const loop = this.store.getSetting<LoopState>(key);
       if (!loop) continue;
       this.store.deleteSetting(key);
       const n = loop.held.length;
       if (!n) continue;
       const text = `${by} continued, so ${n === 1 ? 'the held message' : `the ${n} held messages`} went through.`;
-      // A minion's note is keyed by the minion in both chats; a Taskmasters' note by each chat's own Taskmaster.
-      for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' ? id : ticketId, by, text });
-      // Only the Taskmaster's messages to its minion steer; Taskmasters' to each other queue.
+      // A minion's note is keyed by the minion in both chats; a Taskmasters' or two minions' note by each chat's own.
+      for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' || pair ? id : ticketId, by, text });
+      // Only the Taskmaster's messages to its minion steer; Taskmasters' and minions' to each other queue.
       for (const m of loop.held) {
-        if (m.mail) this.mail(m.to, m.author, m.text, m.from);
+        // A minion dismissed since never reopens for another minion's message (#783): it waits as mail.
+        if (m.mail || (pair && this.store.getTicket(m.to)?.status === 'closed')) this.mail(m.to, m.author, m.text, m.from);
+        else if (pair) this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, false);
         else this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, ticket.kind !== 'coordinator' && m.to === ticketId);
       }
       total += n;

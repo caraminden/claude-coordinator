@@ -318,10 +318,10 @@ export const ACCOUNT_ERROR = /identity verification|credit balance|oauth token|i
 /** Usage-limit resumes in a row before a minion waits for a person. */
 export const MAX_LIMIT_RESUMES = 3;
 const LIMIT_RESUMES = 'limit-resumes';
-/** Minions waiting for the usage limit to reset, in the settings table so the wait outlives a restart. */
 /** One linked Claude account's limit: `here` is the one this minion's turn hit, `kind` what Claude called it ('weekly', '5-hour'). */
 export interface LimitedAccount { n: number; label: string; until: number; here?: boolean; kind?: string }
 
+/** Minions waiting for the usage limit to reset, in the settings table so the wait outlives a restart. */
 interface LimitResume {
   ticket: number;
   /** When it resumes (ms): a while after the reset, spaced from the others. */

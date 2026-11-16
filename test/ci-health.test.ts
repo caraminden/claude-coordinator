@@ -805,6 +805,58 @@ test('a red nightly fixed by a push to main says back to green from that push ru
   assert.deepEqual(w.told.slice(1).map(([, t]) => t), ["Peek Auras's desktop is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/7002 (c0ffee0, Nov 5, 03:10 PST), after run 7001 failed."]);
 });
 
+test('a watched workflow gone red on main wakes the Taskmaster once per red streak, from any trigger, and says back to green as held mail (#774)', async () => {
+  const w = outsideWorld();
+  const told: [string, boolean][] = [];
+  let taskmaster = true;
+  const deps = { ...w.outside, tell: (_p: { name: string }, text: string, wake?: boolean) => (taskmaster && told.push([text, !!wake]), taskmaster) };
+  const health = new CiHealth(w.store, deps);
+  const push = (fields: Partial<Run>) => runOf({ event: 'push', name: 'Desktop', workflow_id: 7, path: '.github/workflows/desktop.yml', triggering_actor: { login: 'caraminden' }, ...fields });
+  w.gh.jobs.set(8001, [
+    job({ run_id: 8001, name: 'build', conclusion: 'failure', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run tests', conclusion: 'failure' }] }),
+    job({ run_id: 8001, name: 'package', conclusion: 'failure', steps: [] }),
+    job({ run_id: 8001, name: 'lint', conclusion: 'success' }),
+  ]);
+  w.gh.mainRuns = [push({ id: 8001, head_sha: 'bad0001fff', conclusion: 'failure', created_at: iso(40 * MIN), updated_at: iso(30 * MIN) })];
+  await health.tick(NOW);
+  assert.deepEqual(told, [], 'not watched yet: a red push run says nothing');
+
+  // Watched while main is already red: told at once, waking the Taskmaster.
+  w.store.setProjectSettings(w.peek.id, { ci_watch: 'desktop.yml' });
+  await health.tick(NOW + 5 * MIN);
+  assert.equal(told.length, 1);
+  assert.equal(told[0][1], true, 'it wakes the Taskmaster');
+  assert.match(told[0][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8001 failed on bad0001 \(push by caraminden, finished Nov 5, 03:30 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/8001\nFailing jobs: build › Run tests; package\n/);
+  assert.match(told[0][0], /`ci-failures 8001 -R caraminden\/peek-auras` prints its failing tests\. Later red runs of desktop\.yml won't message you again/);
+
+  // Later red runs in the streak, and one still running, say nothing, across a restart too.
+  w.gh.mainRuns = [push({ id: 8003, status: 'in_progress', conclusion: null, created_at: iso(MIN) }), push({ id: 8002, conclusion: 'failure', created_at: iso(20 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + 10 * MIN);
+  await new CiHealth(w.store, deps).tick(NOW + 15 * MIN);
+  assert.equal(told.length, 1, 'once per streak');
+
+  // The streak ends green: held mail, once.
+  w.gh.mainRuns = [push({ id: 8004, head_sha: 'a00d000fff', created_at: iso(-MIN), updated_at: iso(-10 * MIN) }), ...w.gh.mainRuns.slice(1)];
+  await health.tick(NOW + 20 * MIN);
+  await health.tick(NOW + 25 * MIN);
+  assert.deepEqual(told.slice(1), [["Peek Auras's Desktop is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/8004 (a00d000, Nov 5, 04:10 PST), after run 8001 failed.", false]]);
+
+  // The next red starts a new streak, waiting untold while there's no Taskmaster; then a re-run of it going green ends it.
+  taskmaster = false;
+  w.gh.mainRuns = [push({ id: 8005, head_sha: 'bad0005fff', conclusion: 'failure', created_at: iso(-20 * MIN), updated_at: iso(-25 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + 30 * MIN);
+  assert.equal(told.length, 2);
+  taskmaster = true;
+  await health.tick(NOW + 35 * MIN);
+  assert.equal(told.length, 3);
+  assert.match(told[2][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8005 failed on bad0005 /);
+  w.gh.mainRuns = [{ ...w.gh.mainRuns[0], conclusion: 'success', run_attempt: 2, updated_at: iso(-40 * MIN) }, ...w.gh.mainRuns.slice(1)];
+  await health.tick(NOW + 40 * MIN);
+  assert.equal(told.length, 4);
+  assert.match(told[3][0], /back to green on main: .*runs\/8005 .*after run 8005 failed\.$/);
+  assert.equal(told[3][1], false);
+});
+
 test('orphanRuns: queued land/** runs over an hour old that no landing holds', () => {
   const old = (f: Partial<Run>) => runOf({ status: 'queued', conclusion: null, head_branch: 'land/ticket/550-x', created_at: iso(ORPHAN_MS + MIN), ...f });
   const orphan = old({ id: 1 });

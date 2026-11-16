@@ -20,6 +20,9 @@
 // started: a workflow_dispatch run on a minion's branch wakes that minion with its result, red or green, as a PR's CI
 // would; a failed one on the default branch, like a failed scheduled run, is held mail for the Taskmaster, and the
 // next green run of that workflow says it's back to green. A scheme quiets a workflow in its settings (ci_quiet).
+// #774 (Cara's pick on a Peek card, 2026-11-15: "Land, then alert"): a scheme also lists workflows to watch (ci_watch).
+// When one's newest verdict on the default branch, from any trigger (a land's push too), is red, the Taskmaster is
+// woken once for that red streak, sharing the red mark above, so later red runs say nothing until it's back to green.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { lines } from './approvals.ts';
@@ -446,8 +449,8 @@ export interface CiHealthDeps {
   post?: (path: string, as: GithubEnv) => Promise<{ status: number }>;
   /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing. No message, no wakes. */
   wake?: (ticketId: number, text: string, fyi?: boolean) => void;
-  /** Held mail for a scheme's Taskmaster (a failed scheduled run); false (no Taskmaster) or none at all, and those wait untold. */
-  tell?: (project: Project, text: string) => boolean;
+  /** Held mail for a scheme's Taskmaster (a failed scheduled run), or a message that wakes it (`wake`: a watched workflow gone red); false (no Taskmaster) or none at all, and those wait untold. */
+  tell?: (project: Project, text: string, wake?: boolean) => boolean;
 }
 
 export class CiHealth {
@@ -705,6 +708,7 @@ export class CiHealth {
     // Dispatched runs count from the first poll that read them, so a deploy doesn't tell a day of old ones.
     const since = this.store.getSetting<number>(DISPATCH_SINCE) ?? (this.store.setSetting(DISPATCH_SINCE, now), now);
     const quiet = new Set(lines(p.ci_quiet));
+    const watch = new Set(lines(p.ci_watch ?? ''));
     const save = () => {
       // Ids GitHub no longer lists are dropped, but only when both lists were read, so a bad answer can't forget them.
       const keep = Array.isArray(scheduled) && Array.isArray(dispatched) ? [...told].filter((id) => listed.some((r) => r.id === id)) : [...told];
@@ -745,12 +749,30 @@ export class CiHealth {
       red[String(r.workflow_id)] = { run: r.id, at: r.created_at };
       save();
     }
-    // Back to green: the first green run on the branch after the red one, a push's or a PR merge's too.
+    // Watched workflows (#774): the newest verdict on the branch, whatever started it, red with no red mark yet starts a streak.
+    if (this.deps.tell && watch.size) {
+      for (const runs of onMain.values()) {
+        const r = runs.filter((x) => x.status === 'completed' && VERDICTS.has(x.conclusion ?? '')).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
+        if (!r || r.conclusion !== 'failure' || !watch.has(workflowFile(r)) || red[String(r.workflow_id)]) continue;
+        const text = this.texts.get(r.id) ?? (await this.runText(p, slug, r, as, 'watch'));
+        this.texts.set(r.id, text);
+        if (this.texts.size > 200) this.texts.delete(this.texts.keys().next().value!);
+        red[String(r.workflow_id)] = { run: r.id, at: r.created_at };
+        save(); // before sending, so a restart can't send it twice
+        if (!this.say(p, r.id, text, true)) {
+          delete red[String(r.workflow_id)]; // no Taskmaster yet: the next poll tries again
+          save();
+          continue;
+        }
+        this.texts.delete(r.id);
+      }
+    }
+    // Back to green: the first green run on the branch after the red one (or the red one re-run green), a push's or a PR merge's too.
     for (const [w, was] of Object.entries(red)) {
       const green = [...(onMain.get(Number(w)) ?? []), ...listed.filter((r) => String(r.workflow_id) === w && r.head_branch === branch)]
-        .filter((r) => r.status === 'completed' && r.conclusion === 'success' && at(r.created_at) > at(was.at)).sort((a, b) => at(a.created_at) - at(b.created_at))[0];
+        .filter((r) => r.status === 'completed' && r.conclusion === 'success' && (at(r.created_at) > at(was.at) || r.id === was.run)).sort((a, b) => at(a.created_at) - at(b.created_at))[0];
       if (!green) continue;
-      if (!quiet.has(workflowFile(green)) && !this.say(p, green.id, `${p.name}'s ${green.name} is back to green on ${branch}: ${runUrl(slug, green)} (${short(green.head_sha)}, ${pacific(ended(green))}), after run ${was.run} failed.`)) continue;
+      if ((!quiet.has(workflowFile(green)) || watch.has(workflowFile(green))) && !this.say(p, green.id, `${p.name}'s ${green.name} is back to green on ${branch}: ${runUrl(slug, green)} (${short(green.head_sha)}, ${pacific(ended(green))}), after run ${was.run} failed.`)) continue;
       delete red[w];
       save();
     }
@@ -758,26 +780,34 @@ export class CiHealth {
   }
 
   /** Held mail for the Taskmaster about `run`: true once it has it; false (no Taskmaster yet, or the send threw) to try again next poll. */
-  private say(p: Project, run: number, text: string): boolean {
+  private say(p: Project, run: number, text: string, wake = false): boolean {
     try {
-      return this.deps.tell!(p, text);
+      return this.deps.tell!(p, text, wake);
     } catch (err) {
       console.error(`Telling ${p.name}'s Taskmaster of run ${run} failed:`, err);
       return false;
     }
   }
 
-  /** What a finished run says to the minion that dispatched it, or (failed) to the Taskmaster: where it failed, GitHub's error lines, its CI-store files. */
-  private async runText(p: Project, slug: string, r: Run, as: GithubEnv, to: 'minion' | 'taskmaster'): Promise<string> {
+  /**
+   * What a finished run says to the minion that dispatched it, or (failed) to the Taskmaster, about an outside run or
+   * (`watch`) a watched workflow gone red on main: where it failed, GitHub's error lines, its CI-store files.
+   */
+  private async runText(p: Project, slug: string, r: Run, as: GithubEnv, to: 'minion' | 'taskmaster' | 'watch'): Promise<string> {
     let where = '';
     let errors: string[] = [];
+    let failed: string[] = [];
     if (r.conclusion === 'failure') {
       try {
-        const job = (await this.jobs(slug, r, as)).find((j) => j.conclusion === 'failure');
-        const step = (job?.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
-        if (job) {
-          where = `, at ${job.name}${step ? ` › ${step}` : ''}`;
-          errors = await this.errorLines(slug, job, as);
+        const place = (job: Job) => {
+          const step = (job.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
+          return `${job.name}${step ? ` › ${step}` : ''}`;
+        };
+        const jobs = (await this.jobs(slug, r, as)).filter((j) => j.conclusion === 'failure');
+        failed = jobs.map(place);
+        if (jobs[0]) {
+          where = `, at ${failed[0]}`;
+          errors = await this.errorLines(slug, jobs[0], as);
         }
       } catch (err) {
         if (err instanceof RateLimited) throw err; // these are niceties: any other failure to read them still tells
@@ -794,6 +824,12 @@ export class CiHealth {
     if (to === 'minion') {
       const how = r.conclusion === 'success' ? 'passed' : r.conclusion === 'failure' ? `failed${where}` : `ended ${r.conclusion}`;
       return `Your dispatched ${r.name} run on ${r.head_branch} ${how} (${short(r.head_sha)}, ${finished}): ${runUrl(slug, r)}${extra ? `\n${extra}` : ''}${r.conclusion === 'failure' ? `\n${failures}` : ''}`;
+    }
+    const by = r.triggering_actor?.login ? ` by ${r.triggering_actor.login}` : '';
+    if (to === 'watch') {
+      const file = workflowFile(r);
+      const jobs = failed.length ? `\nFailing jobs: ${failed.slice(0, 8).join('; ')}${failed.length > 8 ? `; ${failed.length - 8} more` : ''}` : '';
+      return `${p.name}'s ${r.head_branch} went red: ${file} (${r.name}) run ${r.id} failed on ${short(r.head_sha)} (${r.event ?? 'a run'}${by}, ${finished}): ${runUrl(slug, r)}${jobs}${extra ? `\n${extra}` : ''}\n${failures} Later red runs of ${file} won't message you again; you'll hear when it's back to green. Start a fix minion now, or ask people if it's CI itself (a runner, GitHub) rather than the code. It's on the scheme's watched CI workflows (set_project_settings watch_workflows).`;
     }
     const kind = r.event !== 'workflow_dispatch' ? 'scheduled' : `dispatched${r.triggering_actor?.login ? ` (by ${r.triggering_actor.login})` : ''}`;
     return `${p.name}'s ${kind} ${r.name} run on ${r.head_branch} failed on ${short(r.head_sha)}${where} (${finished}): ${runUrl(slug, r)}${extra ? `\n${extra}` : ''}\n${failures} No PR started it, so no land saw this break: start a bug minion for it, or ask people if it's CI itself (a runner, GitHub) rather than the code. To stop these for ${workflowFile(r)}, add it to the scheme's quiet CI workflows (set_project_settings quiet_workflows).`;

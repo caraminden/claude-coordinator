@@ -760,10 +760,14 @@ const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   mandate: (from, person, key, title, quiet, link) => mandateAlert('CI health', from, person, key, title, link, quiet),
   wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi } : {}),
-  // A failed scheduled run (#588), or a dispatched one on main, is held mail for the scheme's Taskmaster (#678), to start a bug minion.
-  tell: (project, text) => {
+  // A failed scheduled run (#588), or a dispatched one on main, is held mail for the scheme's Taskmaster (#678), to start a bug minion;
+  // a watched workflow gone red on main wakes it (#774).
+  tell: (project, text, wake) => {
     const coordinator = store.getCoordinator(project.id);
-    if (coordinator) runner.leaveMail(coordinator.id, APP_NAME, text);
+    if (coordinator) {
+      if (wake) runner.send(coordinator.id, APP_NAME, text);
+      else runner.leaveMail(coordinator.id, APP_NAME, text);
+    }
     return !!coordinator;
   },
 });

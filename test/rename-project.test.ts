@@ -96,3 +96,11 @@ test("PATCH /api/projects/:id saves list groups checked against the scheme's own
   assert.equal(none.status, 200);
   assert.equal(none.data.list_groups, '[]');
 });
+
+test('PATCH /api/projects/:id saves the watched CI workflows, cleaned like the quiet ones (#774)', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Watched' } });
+  const ok = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ci_watch: ' windows.yml\n\ndesktop.yml ' } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.ci_watch, 'windows.yml\ndesktop.yml');
+  assert.equal(ok.data.ci_quiet, '', 'the quiet list stays as it was');
+});

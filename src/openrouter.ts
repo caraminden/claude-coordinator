@@ -104,12 +104,14 @@ interface SpeechModel { id: string; pricing?: Record<string, string>; top_provid
  * input price with no unit (per character, per UTF-8 byte or per token), so it's charged per UTF-8 byte,
  * which is never fewer than the characters or tokens. An output price is per token up to the model's
  * max_completion_tokens, or per second for a model known to price that way, up to its 120 s ceiling;
- * any other output price is refused.
+ * any other output price is refused. A per-second model that also lists a token cap is still bounded:
+ * no clip runs anywhere near max_completion_tokens seconds.
  */
 export function speechEstimate(m: SpeechModel, bytes: number): number | null {
   if (m.id.endsWith(':free')) return 0;
-  const input = Number(m.pricing?.prompt ?? 0);
-  const output = Number(m.pricing?.completion ?? 0);
+  // A missing price is unreadable, not free.
+  const input = Number(m.pricing?.prompt);
+  const output = Number(m.pricing?.completion);
   if (!(input >= 0) || !(output >= 0)) return null;
   const maxTokens = Number(m.top_provider?.max_completion_tokens ?? 0);
   const out = output === 0 ? 0 : PER_SECOND_AUDIO.has(m.id) ? output * SPEECH_SECONDS : maxTokens > 0 ? output * maxTokens : null;

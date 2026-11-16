@@ -442,6 +442,8 @@ test('a speech price with no unit is bounded per UTF-8 byte; output per token up
   assert.equal(speechEstimate(model('google/some-tts'), bytes), null, 'an output price with no token cap and no known per-second rate');
   assert.equal(speechEstimate(model('nobody/unpriced'), bytes), 0);
   assert.equal(speechEstimate(model('fish-audio/s2.1-pro-free:free'), bytes), 0);
+  assert.equal(speechEstimate({ id: 'x/no-output-price', pricing: { prompt: '0.00001' } }, bytes), null, 'a missing price is unreadable, not free');
+  assert.equal(speechEstimate({ id: 'x/variable', pricing: { prompt: '-1', completion: '0' } }, bytes), null);
 });
 
 test('a speech model\'s input limit comes from what OpenRouter documents, else the longest any model takes', () => {

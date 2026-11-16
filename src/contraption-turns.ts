@@ -100,7 +100,7 @@ export interface TurnRequest {
   webSearch: boolean;
   /** The person's online machines as MCP tools, with the system prompt's note on them (#306); `machines: false` drops both (#409). */
   machines: boolean;
-  /** generate_image, edit_image and generate_audio from Citadel's `citadel` server, on the person's own OpenRouter key (#732). */
+  /** generate_image, edit_image, generate_audio and generate_speech from Citadel's `citadel` server, on the person's own OpenRouter key (#732). */
   media: boolean;
   timeoutSec: number;
 }

@@ -208,7 +208,7 @@ export interface RepoCollaborator {
 }
 
 /** One of a person's linked accounts (src/credentials.ts); `secret` is still encrypted. */
-export type OpenrouterCallKind = 'image' | 'effect' | 'music' | 'text';
+export type OpenrouterCallKind = 'image' | 'effect' | 'music' | 'speech' | 'text';
 
 export interface CredentialRow {
   user_id: number;

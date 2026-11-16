@@ -2029,7 +2029,7 @@
   "outsider": "403 Only the minion itself can make media in its folders",
   "tmA": "403 Only the minion itself can make media in its folders",
   "tmB": "403 Only the minion itself can make media in its folders",
-  "m1": "400 tool must be one of: generate_image, edit_image, generate_audio",
+  "m1": "400 tool must be one of: generate_image, edit_image, generate_audio, generate_speech",
   "m2": "403 A minion may only update itself"
  },
  "GET /api/tickets/:minion1/peer": {

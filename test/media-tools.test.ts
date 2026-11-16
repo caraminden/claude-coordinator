@@ -44,8 +44,14 @@ const tools = async (env: Record<string, string>) => (await mcp(env, 'tools/list
 const both = { COORDINATOR_MEDIA: '1', COORDINATOR_CODEX_IMAGES: '1' };
 
 test('the generative media tools are offered, in order', async () => {
-  const media = (await tools(both)).filter((t) => /image|audio/.test(t.name));
-  assert.deepEqual(media.map((t) => t.name), ['generate_image', 'edit_image', 'generate_audio', 'generate_image_codex']);
+  const media = (await tools(both)).filter((t) => /image|audio|speech/.test(t.name));
+  assert.deepEqual(media.map((t) => t.name), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech', 'generate_image_codex']);
+});
+
+test('every generative media tool opens with the made-by-code rule (Cara, 2026-11-14)', async () => {
+  const media = (await tools(both)).filter((t) => /image|audio|speech/.test(t.name));
+  for (const t of media) assert.match(t.description, /^Not the default: (images are drawn|sound is made) with code/, t.name);
+  assert.match(media.find((t) => t.name === 'generate_speech')!.description, /^Not the default: sound is made with code/);
 });
 
 test('generate_image_codex is offered only with its flag, and never to a Taskmaster', async () => {

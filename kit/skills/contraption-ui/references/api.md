@@ -247,7 +247,7 @@ there: Citadel passes it through and never reads it.
 **What the agent can use** (tested): your MCP servers' tools (`mcp__<name>__<tool>`), the person's
 own machines that are online unless `machines` is `false` (their MCP servers, as `mcp__<machine>`;
 a server of yours with the same name wins and the machine is left out), Agent if `agents` is set, WebSearch and WebFetch
-if `webSearch` is `true`, and `mcp__citadel__generate_image`, `edit_image` and `generate_audio` if `media` is `true` (and `generate_image_codex` when the person has Codex). Nothing else: no shell, no files, no Citadel or scheme tools, no user
+if `webSearch` is `true`, and `mcp__citadel__generate_image`, `edit_image`, `generate_audio` and `generate_speech` if `media` is `true` (and `generate_image_codex` when the person has Codex). Nothing else: no shell, no files, no Citadel or scheme tools, no user
 settings, CLAUDE.md, memory, skills or plugins. Each (contraption, person) gets an empty scratch
 folder as its working directory.
 
@@ -331,9 +331,14 @@ Body `{ "person": 3, "text": "…" }`, the turn's own person (tested).
 
 ### Media: images and sounds on the person's OpenRouter
 
-A turn with `media: true` gets three tools from a server Citadel adds, named `citadel`:
-`generate_image`, `edit_image` (an image already in the folder, changed as the prompt says) and
-`generate_audio` (`kind: "effect"` or `"music"`). They're the same tools minions have, run on the
+A turn with `media: true` gets four tools from a server Citadel adds, named `citadel`:
+`generate_image`, `edit_image` (an image already in the folder, changed as the prompt says),
+`generate_audio` (`kind: "effect"` or `"music"`) and `generate_speech` (text read aloud by a
+text-to-speech model: `model`, `input`, optional `voice`, `response_format` `mp3`/`wav`/`pcm`,
+`instructions`, `speed`, and `out`). `input` reaches OpenRouter byte for byte, so inline
+pronunciation markup (Fish's `<|phoneme_start|>…<|phoneme_end|>`, SSML, IPA) goes through
+untouched; input over the model's limit is refused, never cut, and the cost is checked from its
+length in UTF-8 bytes (tested, #808). They're the same tools minions have, run on the
 Citadel server with the OpenRouter key the turn's `person` connected on their account page and
 booked against their monthly cap: a call that would pass the cap, or could cost over $0.50, is
 refused before anything is spent. The key never reaches the turn, the agent or your app.

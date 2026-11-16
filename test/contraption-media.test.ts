@@ -76,7 +76,7 @@ test('the MCP server answers the handshake, lists its tools, ignores notificatio
   const init = await rpc({ id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } });
   assert.deepEqual(init.result, { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'citadel', version: '1' } });
   assert.equal(await rpc({ method: 'notifications/initialized' }), null);
-  assert.deepEqual((await rpc({ id: 2, method: 'tools/list' })).result.tools.map((t: any) => t.name), ['generate_image', 'edit_image', 'generate_audio']);
+  assert.deepEqual((await rpc({ id: 2, method: 'tools/list' })).result.tools.map((t: any) => t.name), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech']);
   assert.ok(MEDIA_TOOL_LIST.every((t) => t.description.includes('openrouter_not_connected')));
   assert.deepEqual((await rpc({ id: 3, method: 'tools/call', params: { name: 'generate_image', arguments: { out: 'a.png' } } })).result, { content: [{ type: 'text', text: 'done' }], isError: false });
   assert.deepEqual(calls, [['generate_image', { out: 'a.png' }]]);
@@ -120,8 +120,8 @@ test('generate_image_codex runs the driver in the person\'s container and copies
   const codex: CodexAt = { container: 'citadel-claude-3', turnsDir, env: { HOME: '/home/x', PATH: '/bin' }, tripwire: { project: 0 }, ensure: async () => void woke++, podman: join(bin, 'podman') };
   const events: [string, any][] = [];
   const turn = { person: 3, name: 'codexy', home: 9, emit: (e: string, d: object) => events.push([e, d]), codex };
-  assert.deepEqual(mediaTools(turn).map((t) => t.name), ['generate_image', 'edit_image', 'generate_audio', CODEX_TOOL]);
-  assert.deepEqual(mediaTools({ ...turn, codex: null }).map((t) => t.name), ['generate_image', 'edit_image', 'generate_audio']);
+  assert.deepEqual(mediaTools(turn).map((t) => t.name), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech', CODEX_TOOL]);
+  assert.deepEqual(mediaTools({ ...turn, codex: null }).map((t) => t.name), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech']);
   const dir = mediaDir(root, 'codexy', 3);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'base.png'), 'base');

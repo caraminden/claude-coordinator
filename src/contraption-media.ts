@@ -1,5 +1,5 @@
 // Media tools on contraption turns (#732, shared/project/specs/media-tools-contraptions.md): a turn that
-// asks for `media: true` gets generate_image, edit_image and generate_audio from an MCP server Citadel
+// asks for `media: true` gets generate_image, edit_image, generate_audio and generate_speech from an MCP server Citadel
 // adds, named `citadel`, which runs them through src/openrouter.ts with the turn person's own key and cap.
 // Files go to a media folder per contraption and person, which the app reads and clears with its key.
 // When the person has Codex, it also gets generate_image_codex (#733's tool): a PNG from Codex's image_gen on
@@ -19,7 +19,7 @@ export const MEDIA_KEEP_MS = 30 * 86_400_000;
 export const MEDIA_PLACE = 'your media folder';
 
 export const MEDIA_TYPE: Record<string, string> = {
-  '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.json': 'application/json',
+  '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.pcm': 'audio/pcm', '.json': 'application/json',
 };
 
 /** Where a contraption's files for one person go. */
@@ -126,6 +126,24 @@ export const MEDIA_TOOL_LIST = [
         overwrite: OVERWRITE,
       },
       required: ['kind', 'prompt', 'out'],
+    },
+  },
+  {
+    name: 'generate_speech',
+    description: `Read text aloud with a text-to-speech model (#808). ${COMMON} The cost is checked from the input's length in UTF-8 bytes before the call.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        model: { type: 'string', description: 'An OpenRouter speech model id, like fish-audio/drama-3, elevenlabs/eleven-v3 or google/gemini-3.8-flash-tts' },
+        input: { type: 'string', description: "The text to read. Sent byte for byte: inline pronunciation markup the model takes (Fish's <|phoneme_start|>klˈɛbkɪtʃ<|phoneme_end|>, SSML, IPA) goes through untouched. Over the model's limit is refused, never cut: split long text" },
+        voice: { type: 'string', description: "Optional: the model's voice id (some models need one)" },
+        response_format: { type: 'string', enum: ['mp3', 'wav', 'pcm'], description: "Optional: taken from out's extension. OpenRouter lists mp3 and pcm; some models give only one (Gemini and HeyGen only pcm), and the rest are refused for free" },
+        instructions: { type: 'string', description: 'Optional: how to read it (tone, pace); only some models (OpenAI, Gemini, Fish) heed it' },
+        speed: { type: 'number', minimum: 0.25, maximum: 4, description: 'Optional: 1 is normal' },
+        out: { type: 'string', description: 'The file to write, a path inside your media folder. .mp3, .wav or .pcm, matching response_format' },
+        overwrite: OVERWRITE,
+      },
+      required: ['model', 'input', 'out'],
     },
   },
 ];

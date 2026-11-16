@@ -1,5 +1,5 @@
-// OpenRouter (#717): each person's own key and monthly cap, for the generate_image, edit_image and
-// generate_audio tools, plus a text client nothing calls yet. Only the server talks to OpenRouter: the key
+// OpenRouter (#717): each person's own key and monthly cap, for the generate_image, edit_image,
+// generate_audio and generate_speech (#808) tools, plus a text client nothing calls yet. Only the server talks to OpenRouter: the key
 // never reaches a turn. Every call is a row in openrouter_calls, reserved at its worst-case price before
 // the request goes out, so a call that could pass the person's cap is refused before any money moves.
 import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
@@ -49,6 +49,11 @@ const INPUT_IMAGE_MEGAPIXELS = 4.2;
 const EFFECT_SECONDS = 60;
 // The models list gives a speech model's price with no unit, and some are per token: only these are known per second.
 const PER_SECOND_AUDIO = new Set([MODELS.effect]);
+/** Seed Audio's documented ceilings (OpenRouter's TTS guide): 3,000 characters in, 120 seconds out. */
+const SEED_INPUT_CHARS = 3000;
+const SPEECH_SECONDS = 120;
+/** The longest input any speech model on OpenRouter lists (Eleven Flash v2.5), for models that list none. */
+const MAX_SPEECH_CHARS = 40_000;
 
 interface PriceLine { billable: string; unit: string; cost_usd: number; variant?: string }
 export interface ImageEndpoint { pricing?: PriceLine[]; supported_parameters?: Record<string, { type: string; values?: string[]; min?: number; max?: number }> }
@@ -90,6 +95,33 @@ export function perRequestPrice(model: { pricing?: Record<string, string>; descr
   if (m) return Number(m[1]);
   const req = Number(model.pricing?.request);
   return req > 0 ? req : null;
+}
+
+interface SpeechModel { id: string; pricing?: Record<string, string>; top_provider?: { max_completion_tokens?: number | null }; description?: string }
+
+/**
+ * The most a speech call could cost, or null when it can't be bounded. OpenRouter lists a speech model's
+ * input price with no unit (per character, per UTF-8 byte or per token), so it's charged per UTF-8 byte,
+ * which is never fewer than the characters or tokens. An output price is per token up to the model's
+ * max_completion_tokens, or per second for a model known to price that way, up to its 120 s ceiling;
+ * any other output price is refused.
+ */
+export function speechEstimate(m: SpeechModel, bytes: number): number | null {
+  if (m.id.endsWith(':free')) return 0;
+  const input = Number(m.pricing?.prompt ?? 0);
+  const output = Number(m.pricing?.completion ?? 0);
+  if (!(input >= 0) || !(output >= 0)) return null;
+  const maxTokens = Number(m.top_provider?.max_completion_tokens ?? 0);
+  const out = output === 0 ? 0 : PER_SECOND_AUDIO.has(m.id) ? output * SPEECH_SECONDS : maxTokens > 0 ? output * maxTokens : null;
+  return out === null ? null : input * bytes + out;
+}
+
+/** How many characters a speech model takes: Seed's documented 3,000, a limit its description names, else the longest any model takes. */
+export function speechLimit(m: SpeechModel): number {
+  if (m.id === MODELS.effect) return SEED_INPUT_CHARS;
+  const said = /([\d,]+)-character/.exec(m.description ?? '');
+  const n = said ? Number(said[1].replace(/,/g, '')) : NaN;
+  return n > 0 ? Math.min(n, MAX_SPEECH_CHARS) : MAX_SPEECH_CHARS;
 }
 
 /** An MP3's length in seconds from its first frame's bitrate. shortcut: assumes constant bitrate, read the Xing header if a VBR model shows up. */
@@ -137,10 +169,11 @@ export interface ToolContext {
 }
 const MINION_PLACE = 'your working directory or a shared folder';
 
-export const MEDIA_TOOLS = ['generate_image', 'edit_image', 'generate_audio'] as const;
+export const MEDIA_TOOLS = ['generate_image', 'edit_image', 'generate_audio', 'generate_speech'] as const;
 export type MediaTool = (typeof MEDIA_TOOLS)[number];
 const IMAGE_EXT = new Set(['.png', '.webp', '.svg']);
 const AUDIO_EXT = new Set(['.mp3', '.wav']);
+const SPEECH_FORMATS = ['mp3', 'wav', 'pcm'];
 export const INPUT_IMAGE = (p: string) => (/\.(png|jpe?g|webp)$/i.test(p) ? 'image' : null);
 const MEDIA_TYPES: Record<string, string> = { 'image/png': '.png', 'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/svg+xml': '.svg' };
 const MAX_INPUT_BYTES = 20 * 1024 * 1024;
@@ -322,6 +355,7 @@ export class OpenRouter {
   async tool(name: MediaTool, args: Record<string, any>, ctx: ToolContext) {
     const { key, cap } = this.key(ctx.userId);
     const userId = ctx.userId!;
+    if (name === 'generate_speech') return this.speech(userId, key, cap, args, ctx);
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
     if (!prompt || prompt.length > 8000) throw new HttpError(400, 'prompt is required, at most 8000 characters');
     if (args.model !== undefined && (typeof args.model !== 'string' || !/^[\w.-]+\/[\w.:-]+$/.test(args.model))) throw new HttpError(400, 'model is an OpenRouter model id, like black-forest-labs/flux-3-image-klein');
@@ -410,6 +444,46 @@ export class OpenRouter {
     }
     this.store.setOpenrouterCallPath(id, paths.join('\n'));
     return { paths, cost_usd: cost, left_usd: this.left(userId, cap), model, ...(warnings.length ? { warnings } : {}) };
+  }
+
+  /**
+   * Text read aloud (#808). `input` goes to OpenRouter exactly as given (phoneme tags, SSML, IPA,
+   * whitespace): never trimmed or rewritten, and refused rather than cut when it's over the model's limit.
+   */
+  private async speech(userId: number, key: string, cap: number, args: Record<string, any>, ctx: ToolContext) {
+    const { input, voice, instructions, speed } = args;
+    if (typeof args.model !== 'string' || !/^[\w.-]+\/[\w.:-]+$/.test(args.model)) throw new HttpError(400, 'model is required: an OpenRouter speech model id, like fish-audio/drama-3');
+    if (typeof input !== 'string' || !input.trim()) throw new HttpError(400, 'input is required: the text to read');
+    if (voice !== undefined && (typeof voice !== 'string' || !voice || voice.length > 200)) throw new HttpError(400, 'voice is the model\'s voice id, a string');
+    if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpError(400, 'instructions is a string, at most 8000 characters');
+    if (speed !== undefined && !(typeof speed === 'number' && speed >= 0.25 && speed <= 4)) throw new HttpError(400, 'speed is a number from 0.25 to 4 (1 is normal)');
+    const out = outPath(args.out, ctx.roots, new Set(SPEECH_FORMATS.map((f) => `.${f}`)), ctx.place ?? MINION_PLACE);
+    const format = args.response_format ?? extname(out).slice(1).toLowerCase();
+    if (!SPEECH_FORMATS.includes(format)) throw new HttpError(400, 'response_format is mp3, wav or pcm');
+    if (extname(out).toLowerCase() !== `.${format}`) throw new HttpError(400, `out must end in .${format} for response_format ${format}`);
+    const model = args.model;
+    const m = await this.model(model);
+    const chars = [...input].length;
+    const limit = speechLimit(m);
+    if (chars > limit) throw new HttpError(400, `input is ${chars.toLocaleString('en-US')} characters, over the ${limit.toLocaleString('en-US')} ${model} takes: split it and make one clip per part.`);
+    const file = target(out, 1, 0, args.overwrite === true);
+    const estimate = speechEstimate(m, Buffer.byteLength(input) + Buffer.byteLength(instructions ?? ''));
+    const id = this.reserve(userId, cap, ctx, 'speech', model, estimate);
+    const { value: bytes, cost } = await this.settled(userId, id, estimate!, async () => {
+      const res = await this.request(key, 'POST', '/audio/speech', {
+        model, input, response_format: format,
+        ...(voice !== undefined ? { voice } : {}), ...(instructions !== undefined ? { instructions } : {}), ...(speed !== undefined ? { speed } : {}),
+      });
+      const bytes = Buffer.from(await res.arrayBuffer());
+      if (!bytes.length) throw new Error('the answer had no audio');
+      return { value: bytes, cost: await this.generationCost(key, res.headers.get('x-generation-id')) };
+    });
+    writeOutput(file, bytes, {
+      tool: 'generate_speech', input, model, response_format: format, cost_usd: cost, date: new Date().toISOString(), licence: licence(model),
+      ...(voice !== undefined ? { voice } : {}), ...(instructions !== undefined ? { instructions } : {}), ...(speed !== undefined ? { speed } : {}),
+    });
+    this.store.setOpenrouterCallPath(id, file);
+    return { paths: [file], cost_usd: cost, left_usd: this.left(userId, cap), model };
   }
 
   /** A sound effect through the speech endpoint: raw MP3 back, no cost in the answer. */

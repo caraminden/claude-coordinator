@@ -888,6 +888,24 @@ const MEDIA_TOOL_LIST = [
       required: ['kind', 'prompt', 'out'],
     },
   },
+  {
+    name: 'generate_speech',
+    description: `${NOT_DEFAULT_AUDIO} Then: read text aloud with a text-to-speech model through OpenRouter (#808). ${MEDIA_COMMON} The cost is checked from the input's length in UTF-8 bytes before the call, since OpenRouter lists speech prices per character, byte or token without saying which.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        model: { type: 'string', description: 'An OpenRouter speech model id, like fish-audio/drama-3, elevenlabs/eleven-v3 or google/gemini-3.8-flash-tts' },
+        input: { type: 'string', description: "The text to read. Sent byte for byte: inline pronunciation markup the model takes (Fish's <|phoneme_start|>klˈɛbkɪtʃ<|phoneme_end|>, SSML, IPA) goes through untouched. Over the model's limit is refused, never cut: split long text" },
+        voice: { type: 'string', description: "Optional: the model's voice id (some models need one)" },
+        response_format: { type: 'string', enum: ['mp3', 'wav', 'pcm'], description: "Optional: taken from out's extension. OpenRouter lists mp3 and pcm; some models give only one (Gemini and HeyGen only pcm), and the rest are refused for free" },
+        instructions: { type: 'string', description: 'Optional: how to read it (tone, pace); only some models (OpenAI, Gemini, Fish) heed it' },
+        speed: { type: 'number', minimum: 0.25, maximum: 4, description: 'Optional: 1 is normal' },
+        out: { type: 'string', description: `${MEDIA_OUT.replace(/\. With n.*/, '')}. .mp3, .wav or .pcm, matching response_format` },
+        overwrite: MEDIA_OVERWRITE,
+      },
+      required: ['model', 'input', 'out'],
+    },
+  },
 ];
 
 /** A PNG through Codex's built-in image_gen on the person's own ChatGPT login (#733): offered only when they have a Codex login a turn can reach. */
@@ -1555,7 +1573,8 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'generate_image':
     case 'edit_image':
-    case 'generate_audio': {
+    case 'generate_audio':
+    case 'generate_speech': {
       const r = await call('POST', `/api/tickets/${TICKET}/openrouter`, { tool: name, args });
       return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.${r.warnings ? `\n${r.warnings.join('\n')}` : ''}`;
     }

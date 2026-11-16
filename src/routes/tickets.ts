@@ -978,7 +978,7 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    // generate_image, edit_image and generate_audio (#717): the server calls OpenRouter on the key of the person this
+    // generate_image, edit_image, generate_audio and generate_speech (#717, #808): the server calls OpenRouter on the key of the person this
     // turn runs for (ticket.person_id), booked against their monthly cap; the turn never sees the key.
     method: 'POST', path: '/api/tickets/:ticket/openrouter', who: ['minion'], refuse: 'Only the minion itself can make media in its folders',
     async handler({ req, res, app, ticket }) {

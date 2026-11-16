@@ -441,7 +441,7 @@ function openrouterCard() {
       'For a hard stop on OpenRouter\'s side too, give the key a credit limit on ', keysPage(), '.');
     if (!st.connected) {
       return card.replaceChildren(title('Not connected', 'off'),
-        h('p', {}, 'Optional. Connect your own OpenRouter key and minions working for you can make images and sounds (generate_image, edit_image, generate_audio). Each call is paid from your key, and Citadel refuses any call that could take you past your monthly cap.'),
+        h('p', {}, 'Optional. Connect your own OpenRouter key and minions working for you can make images, sounds and speech (generate_image, edit_image, generate_audio, generate_speech). Each call is paid from your key, and Citadel refuses any call that could take you past your monthly cap.'),
         h('p', { class: 'small' }, 'Make a key on ', keysPage(), ', then paste it here.'),
         connectForm(st, false), note);
     }

@@ -10,7 +10,7 @@ import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
 import { agentToken, bootServer } from './helpers.ts';
-import { imageEstimate, mediaCode, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt } from '../src/openrouter.ts';
+import { imageEstimate, mediaCode, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt, speechEstimate, speechLimit } from '../src/openrouter.ts';
 import { decodePng, encodePng } from '../src/png-matte.ts';
 
 // OpenRouter (#717): each person's own key and monthly cap. Every call is booked at its worst case
@@ -46,6 +46,12 @@ const MODEL_LIST = [
   { id: 'google/lyria-3-clip-preview', pricing: { prompt: '0', completion: '0' }, description: '30 second duration clips are priced at $0.04 per clip. Lyria 3...', supported_parameters: ['seed'] },
   { id: 'nobody/unpriced', pricing: { prompt: '0', completion: '0' }, description: 'No price here' },
   { id: 'google/some-tts', pricing: { prompt: '0.000001', completion: '0.000009' }, description: 'Speech, priced per token' },
+  // Speech models as OpenRouter's list gives them on 2026-11-16: a price with no unit, and a limit only in some descriptions.
+  { id: 'fish-audio/drama-3', pricing: { prompt: '0.00001', completion: '0' }, top_provider: { context_length: 0, max_completion_tokens: 0 }, description: 'Drama 3 is a text-to-speech model from Fish Audio...' },
+  { id: 'google/gemini-3.8-flash-tts', pricing: { prompt: '0.0000005', completion: '0.000009' }, top_provider: { context_length: 32768, max_completion_tokens: 16384 }, description: 'Gemini TTS' },
+  { id: 'elevenlabs/eleven-v3', pricing: { prompt: '0.00008', completion: '0' }, top_provider: { max_completion_tokens: 0 }, description: 'It supports 70+ languages, and has a 5,000-character request limit.' },
+  { id: 'minimax/speech-2.8-hd', pricing: { prompt: '0.0001', completion: '0' }, top_provider: { max_completion_tokens: 0 }, description: 'MiniMax speech' },
+  { id: 'fish-audio/s2.1-pro-free:free', pricing: { prompt: '0', completion: '0' }, description: 'free' },
 ];
 // 128 kbps MPEG-1 Layer III: 16000 bytes is one second.
 const MP3 = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(15996)]);
@@ -53,10 +59,10 @@ const PNG = Buffer.from('fake png bytes');
 
 /** OpenRouter, faked. `hold` delays POST /images until released; `answer` overrides a path's response. */
 function fakeOpenRouter(answer: Record<string, () => Response | Promise<Response>> = {}) {
-  const calls: { url: string; method: string; auth: string | null; body: any }[] = [];
+  const calls: { url: string; method: string; auth: string | null; body: any; raw: string | null }[] = [];
   const fetch = (async (url: string, init: RequestInit = {}) => {
     const path = url.replace('https://or.test/api/v1', '');
-    calls.push({ url: path, method: init.method ?? 'GET', auth: new Headers(init.headers).get('authorization'), body: init.body ? JSON.parse(String(init.body)) : null });
+    calls.push({ url: path, method: init.method ?? 'GET', auth: new Headers(init.headers).get('authorization'), body: init.body ? JSON.parse(String(init.body)) : null, raw: init.body ? String(init.body) : null });
     const auth = new Headers(init.headers).get('authorization');
     for (const [p, fn] of Object.entries(answer)) if (path === p) return fn();
     if (path === '/key') return auth === `Bearer ${KEY}` ? Response.json({ data: { label: 'sk-or-v1-012...def', limit: 20, limit_reset: 'monthly', usage_monthly: 1.5 } }) : Response.json({ error: { message: 'No auth' } }, { status: 401 });
@@ -313,7 +319,7 @@ test('through the server: a person connects on their account page and their mini
     assert.ok(!JSON.stringify((await srv.call('/api/me/openrouter')).data).includes(KEY.slice(-12)), 'the key never comes back out');
 
     const names = async (media: boolean) => (await mcp(media, 'tools/list')).tools.map((t: any) => t.name);
-    assert.deepEqual((await names(true)).filter((n: string) => /image|audio/.test(n)), ['generate_image', 'edit_image', 'generate_audio']);
+    assert.deepEqual((await names(true)).filter((n: string) => /image|audio|speech/.test(n)), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech']);
     assert.ok(!(await names(false)).includes('generate_image'));
     const made = await mcp(true, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a cat', out: 'art/cat.png', resolution: '1K' } });
     assert.match(made.content[0].text, /^Wrote .*art\/cat\.png with black-forest-labs\/flux-3-image-klein for \$0\.0091; \$2\.99 left this month\.$/);
@@ -400,4 +406,81 @@ test('refusals carry a stable code for apps; a call with no minion or scheme is 
   ({ or, ctx } = await setup());
   await or.tool('generate_image', { prompt: 'x', out: 'x.png' }, { ...ctx, ticketId: null, projectId: null });
   assert.deepEqual(rows().map((r) => [r.ticket_id, r.project_id, r.status]), [[null, null, 'ok']]);
+});
+
+// generate_speech (#808): text read aloud, for TWIReader's voice bake-off and its server.
+const PHONEMES = 'Then  <|phoneme_start|>klˈɛbkɪtʃ<|phoneme_end|> said: <speak><phoneme alphabet="ipa" ph="ˈɹɛ.lən">Relc</phoneme> &amp; "quotes"</speak>\t— 日本 🐉\n';
+
+test('speech input reaches OpenRouter byte for byte: phoneme tags, SSML, IPA and whitespace untouched', async () => {
+  const { or, fake, ctx } = await setup({ answer: {
+    '/audio/speech': () => new Response(MP3, { headers: { 'content-type': 'audio/mpeg', 'x-generation-id': 'gen-s' } }),
+    '/generation?id=gen-s': () => Response.json({ data: { total_cost: 0.0012 } }),
+  } });
+  const r = await or.tool('generate_speech', { model: 'fish-audio/drama-3', input: PHONEMES, voice: 'narrator-1', instructions: 'calm, low', speed: 0.9, out: 'voice/klebkitch.mp3' }, ctx);
+  const sent = fake.calls.find((c) => c.url === '/audio/speech')!;
+  assert.equal(sent.body.input, PHONEMES);
+  assert.ok(sent.raw!.includes('<|phoneme_start|>klˈɛbkɪtʃ<|phoneme_end|>'), 'sent as UTF-8, not escaped');
+  assert.ok(sent.raw!.includes('<phoneme alphabet=\\"ipa\\" ph=\\"ˈɹɛ.lən\\">Relc</phoneme> &amp;'));
+  assert.deepEqual({ ...sent.body, input: undefined }, { model: 'fish-audio/drama-3', input: undefined, voice: 'narrator-1', response_format: 'mp3', instructions: 'calm, low', speed: 0.9 });
+  assert.deepEqual(readFileSync(r.paths[0]), MP3);
+  const note = JSON.parse(readFileSync(`${r.paths[0]}.json`, 'utf8'));
+  assert.equal(note.input, PHONEMES);
+  assert.equal(note.tool, 'generate_speech');
+  assert.equal(r.cost_usd, 0.0012);
+  // Booked at its worst case first: Fish's $10/M per UTF-8 byte, never fewer than the characters.
+  assert.deepEqual(rows().map((x) => [x.kind, x.model, x.status, x.cost_usd]), [['speech', 'fish-audio/drama-3', 'ok', 0.0012]]);
+  assert.ok(Math.abs(rows()[0].estimate_usd - Buffer.byteLength(PHONEMES + 'calm, low') * 1e-5) < 1e-12);
+});
+
+test('a speech price with no unit is bounded per UTF-8 byte; output per token up to the cap, per second up to 120 s, else refused', () => {
+  const bytes = Buffer.byteLength(PHONEMES);
+  assert.ok(bytes > [...PHONEMES].length);
+  const model = (id: string) => MODEL_LIST.find((m) => m.id === id)!;
+  assert.ok(Math.abs(speechEstimate(model('fish-audio/drama-3'), bytes)! - bytes * 1e-5) < 1e-12);
+  assert.ok(Math.abs(speechEstimate(model('google/gemini-3.8-flash-tts'), bytes)! - (bytes * 5e-7 + 16384 * 9e-6)) < 1e-12);
+  assert.ok(Math.abs(speechEstimate(model('bytedance-seed/seed-audio-1-0'), bytes)! - 0.3) < 1e-12);
+  assert.equal(speechEstimate(model('google/some-tts'), bytes), null, 'an output price with no token cap and no known per-second rate');
+  assert.equal(speechEstimate(model('nobody/unpriced'), bytes), 0);
+  assert.equal(speechEstimate(model('fish-audio/s2.1-pro-free:free'), bytes), 0);
+});
+
+test('a speech model\'s input limit comes from what OpenRouter documents, else the longest any model takes', () => {
+  const model = (id: string) => MODEL_LIST.find((m) => m.id === id)!;
+  assert.equal(speechLimit(model('elevenlabs/eleven-v3')), 5000);
+  assert.equal(speechLimit({ id: 'x/y', description: 'and has a 40,000-character request limit.' }), 40000);
+  assert.equal(speechLimit(model('bytedance-seed/seed-audio-1-0')), 3000);
+  assert.equal(speechLimit(model('fish-audio/drama-3')), 40000);
+});
+
+test('generate_speech refuses over the model\'s limit, over $0.50 and unpriced models before anything is sent', async () => {
+  const { or, fake, ctx } = await setup();
+  const said = (n: number) => 'a'.repeat(n);
+  await assert.rejects(or.tool('generate_speech', { model: 'bytedance-seed/seed-audio-1-0', input: said(3001), out: 'a.mp3' }, ctx),
+    (e: HttpError) => e.status === 400 && /3,001 characters/.test(e.message) && /3,000/.test(e.message) && /split/.test(e.message));
+  await assert.rejects(or.tool('generate_speech', { model: 'elevenlabs/eleven-v3', input: '🐉'.repeat(5001), out: 'a.mp3' }, ctx), /5,000/);
+  await assert.rejects(or.tool('generate_speech', { model: 'minimax/speech-2.8-hd', input: said(6000), out: 'a.mp3' }, ctx), (e: HttpError) => mediaCode(e) === 'over_call_limit');
+  await assert.rejects(or.tool('generate_speech', { model: 'google/some-tts', input: 'hi', out: 'a.mp3' }, ctx), /no price/);
+  assert.ok(!fake.calls.some((c) => c.url === '/audio/speech'));
+  assert.deepEqual(rows(), []);
+  // Seed takes 3,000 exactly, booked at its 120-second ceiling.
+  await or.tool('generate_speech', { model: 'bytedance-seed/seed-audio-1-0', input: said(3000), out: 'b.mp3' }, ctx);
+  assert.ok(Math.abs(rows()[0].estimate_usd - 0.3) < 1e-12);
+});
+
+test('generate_speech checks its arguments: model and input required, the format matches out', async () => {
+  const { or, fake, ctx } = await setup();
+  const go = (args: object) => or.tool('generate_speech', { model: 'fish-audio/drama-3', input: 'hello', out: 'a.mp3', ...args }, ctx);
+  await assert.rejects(go({ model: undefined }), /model is required/);
+  await assert.rejects(go({ input: '   ' }), /input is required/);
+  await assert.rejects(go({ input: 7 }), /input is required/);
+  await assert.rejects(go({ out: 'a.ogg' }), /out ends in/);
+  await assert.rejects(go({ response_format: 'flac' }), /mp3, wav or pcm/);
+  await assert.rejects(go({ response_format: 'wav' }), /\.wav/);
+  await assert.rejects(go({ speed: 9 }), /speed/);
+  await assert.rejects(go({ voice: 3 }), /voice/);
+  assert.ok(!fake.calls.some((c) => c.url === '/audio/speech'));
+  const r = await go({ out: 'raw/a.pcm' });
+  assert.equal(fake.calls.find((c) => c.url === '/audio/speech')!.body.response_format, 'pcm');
+  assert.ok(!('voice' in fake.calls.find((c) => c.url === '/audio/speech')!.body), 'no voice sent when none was asked: the provider\'s default');
+  assert.match(r.paths[0], /raw\/a\.pcm$/);
 });

@@ -530,11 +530,12 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (addDirs.length) args.push('--add-dir', ...addDirs);
   if (existsSync(pinned(pins.KIT))) args.push('--plugin-dir', pinned(pins.KIT));
   args.push(...pluginDirArgs(turnPluginDirs(project, ticket), ticket.cwd));
-  // The advisor trial (#817): `claude-sonnet-5-5+opus-advisor` runs Sonnet with Opus as its advisor. Never a Taskmaster's.
+  // The advisor trial (#817): `claude-sonnet-5-5+opus-advisor` runs Sonnet with Opus as its advisor. Never a Taskmaster's or Codex's
+  // (codex-turn.ts maps the plain --model, so Sonnet's Codex pick).
   // Claude Code's CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1, in the service's env, switches the tool off for every turn.
   const advised = advisedModel(model);
   if (advised.model) args.push('--model', advised.model);
-  if (advised.advisor && ticket.kind !== 'coordinator') args.push('--advisor', advised.advisor);
+  if (advised.advisor && ticket.kind !== 'coordinator' && !codex) args.push('--advisor', advised.advisor);
   if (effort) args.push('--effort', effort);
   // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
   let env: Record<string, string> = { ...turnEnv(facts.env.server), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };

@@ -1,84 +1,94 @@
 #!/usr/bin/env node
-// The advisor trial's numbers (#817): minions on Sonnet with an Opus advisor against Sonnet-medium ones.
+// The advisor trial's numbers (#817): turns on Sonnet with an Opus advisor against Sonnet-medium ones.
 // Reads the database read-only and prints markdown, for the trial report in the shared folder's reports/.
 //
 //   node tools/advisor-trial.ts [--since 2026-11-16] [--db <path>]
 //
-// A trial minion is one whose model is claude-sonnet-5-5+opus-advisor now, or that consulted the advisor at least
-// once (so one moved off it still counts; its later turns count too). The baseline is the same window's turns of
-// minions on claude-sonnet-5-5 at medium that never consulted. A consult is a `server_tool_use` block named
-// `advisor` in the turn's events (slimEvent keeps them; usage.iterations is dropped). turns.cost_usd includes
-// the advisor's own cost. Self-review findings, failed lands and redo minions aren't in the database: read
-// the trial minions' chats for those.
+// Each turn counts by the model it really ran on, its own `init` event, not the minion's setting now.
+// A trial minion is one set to claude-sonnet-5-5+opus-advisor now or that consulted at least once; its
+// Sonnet turns are the trial's, and its turns on another model are escalations (moved off it). The
+// baseline is the window's Sonnet turns of every other minion now set to medium effort (no turn records its
+// effort). A consult is a `server_tool_use` block named `advisor` (slimEvent keeps them; usage.iterations is
+// dropped). turns.cost_usd includes the advisor's cost. Self-review findings, failed lands and redo minions
+// aren't in the database: read the trial minions' chats for those.
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
-const ADVISED = 'claude-sonnet-5-5+opus-advisor';
-const { values } = parseArgs({ options: { since: { type: 'string', default: '2026-11-16' }, db: { type: 'string' } } });
-const dataDir = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
-const db = new DatabaseSync(values.db ?? join(dataDir, 'coordinator.db'), { readOnly: true });
-// Midnight Pacific on the day given (PST is UTC-8; the trial runs in November).
-const since = Date.parse(`${values.since}T08:00:00Z`);
-if (Number.isNaN(since)) throw new Error(`--since wants a date like 2026-11-16, not ${values.since}`);
+export const ADVISED = 'claude-sonnet-5-5+opus-advisor';
+const SONNET = 'claude-sonnet-5-5';
 
-type Turn = { id: number; ticket_id: number; event_id: number | null; cost_usd: number };
-const turns = db.prepare('SELECT id, ticket_id, event_id, cost_usd FROM turns WHERE ended_at >= ? ORDER BY ticket_id, id').all(since) as Turn[];
-const tickets = new Map((db.prepare('SELECT t.id, t.number, t.title, t.model, t.effort, t.kind, p.name AS scheme FROM tickets t JOIN projects p ON p.id = t.project_id').all() as any[]).map((t) => [t.id, t]));
+export interface TurnRow { ticket: number; cost: number; model: string | null; consults: number }
+export interface Totals { minions: number; turns: number; cost: number; consults: number; over3: number }
 
-/** Advisor consults in each turn: blocks in the events after the ticket's previous turn, up to its own result event. */
-const consultsOf = (() => {
-  const rows = db.prepare(`SELECT id, ticket_id, data FROM events WHERE kind = 'claude' AND created_at >= ? AND data LIKE '%server_tool_use%' AND data LIKE '%"advisor"%'`).all(since - 86_400_000) as { id: number; ticket_id: number; data: string }[];
-  const at = new Map<number, number[]>();
-  for (const r of rows) {
-    const n = (JSON.parse(r.data).message?.content ?? []).filter((b: any) => b?.type === 'server_tool_use' && b.name === 'advisor').length;
-    if (!at.has(r.ticket_id)) at.set(r.ticket_id, []);
-    for (let i = 0; i < n; i++) at.get(r.ticket_id)!.push(r.id);
+/** Every minion turn ended since `since`, with the model its init event named and its advisor consults. */
+export function trialTurns(db: DatabaseSync, since: number): TurnRow[] {
+  const turns = db.prepare(`SELECT t.ticket_id, t.event_id, t.cost_usd FROM turns t JOIN tickets k ON k.id = t.ticket_id
+    WHERE t.ended_at >= ? AND k.kind != 'coordinator' ORDER BY t.ticket_id, t.id`).all(since) as { ticket_id: number; event_id: number | null; cost_usd: number }[];
+  const out: TurnRow[] = [];
+  let ticket = -1;
+  let from = 0;
+  for (const t of turns) {
+    if (t.ticket_id !== ticket) {
+      ticket = t.ticket_id;
+      from = (db.prepare('SELECT COALESCE(MAX(event_id), 0) AS e FROM turns WHERE ticket_id = ? AND ended_at < ?').get(ticket, since) as { e: number }).e;
+    }
+    const to = t.event_id ?? Number.MAX_SAFE_INTEGER;
+    const events = db.prepare(`SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? AND id <= ?
+      AND (data LIKE '%"subtype":"init"%' OR (data LIKE '%server_tool_use%' AND data LIKE '%"advisor"%')) ORDER BY id`).all(ticket, from, to) as { data: string }[];
+    let model: string | null = null;
+    let consults = 0;
+    for (const e of events) {
+      const ev = JSON.parse(e.data);
+      if (ev.type === 'system' && ev.subtype === 'init') model = ev.model ?? null;
+      else consults += (ev.message?.content ?? []).filter((b: any) => b?.type === 'server_tool_use' && b.name === 'advisor').length;
+    }
+    out.push({ ticket, cost: t.cost_usd, model, consults });
+    if (t.event_id) from = t.event_id;
   }
-  return at;
-})();
-
-const byTicket = new Map<number, { turn: Turn; consults: number }[]>();
-const prev = new Map<number, number>();
-for (const t of turns) {
-  const from = prev.get(t.ticket_id) ?? (db.prepare('SELECT COALESCE(MAX(event_id), 0) AS e FROM turns WHERE ticket_id = ? AND ended_at < ?').get(t.ticket_id, since) as { e: number }).e;
-  const to = t.event_id ?? Infinity;
-  const consults = (consultsOf.get(t.ticket_id) ?? []).filter((e) => e > from && e <= to).length;
-  if (t.event_id) prev.set(t.ticket_id, t.event_id);
-  byTicket.set(t.ticket_id, [...(byTicket.get(t.ticket_id) ?? []), { turn: t, consults }]);
+  return out;
 }
 
-const trial: number[] = [];
-const baseline: number[] = [];
-for (const [id, list] of byTicket) {
-  const t = tickets.get(id);
-  if (!t || t.kind === 'coordinator') continue;
-  if (t.model === ADVISED || list.some((x) => x.consults)) trial.push(id);
-  else if (t.model === 'claude-sonnet-5-5' && t.effort === 'medium') baseline.push(id);
+/** The trial's minions and turns, its escalations, and the Sonnet-medium baseline. */
+export function trialNumbers(db: DatabaseSync, since: number) {
+  const rows = trialTurns(db, since);
+  const settings = new Map((db.prepare('SELECT id, model, effort FROM tickets').all() as { id: number; model: string | null; effort: string | null }[]).map((t) => [t.id, t]));
+  const trialIds = new Set(rows.filter((r) => r.consults || settings.get(r.ticket)?.model === ADVISED).map((r) => r.ticket));
+  const sum = (list: TurnRow[]): Totals => ({
+    minions: new Set(list.map((r) => r.ticket)).size, turns: list.length, cost: list.reduce((s, r) => s + r.cost, 0),
+    consults: list.reduce((s, r) => s + r.consults, 0), over3: list.filter((r) => r.consults > 3).length,
+  });
+  const trial = rows.filter((r) => trialIds.has(r.ticket) && r.model === SONNET);
+  return {
+    trial: sum(trial),
+    escalated: sum(rows.filter((r) => trialIds.has(r.ticket) && r.model !== SONNET)),
+    baseline: sum(rows.filter((r) => !trialIds.has(r.ticket) && r.model === SONNET && settings.get(r.ticket)?.effort === 'medium')),
+    perMinion: [...trialIds].map((id) => ({ id, ...sum(trial.filter((r) => r.ticket === id)), max: Math.max(0, ...trial.filter((r) => r.ticket === id).map((r) => r.consults)), escalated: rows.some((r) => r.ticket === id && r.model !== SONNET) })),
+  };
 }
 
-const money = (n: number) => `$${n.toFixed(2)}`;
-function sum(ids: number[]) {
-  const all = ids.flatMap((id) => byTicket.get(id)!);
-  const cost = all.reduce((s, x) => s + x.turn.cost_usd, 0);
-  const consults = all.reduce((s, x) => s + x.consults, 0);
-  return { minions: ids.length, turns: all.length, cost, perTurn: all.length ? cost / all.length : 0, consults, consultsPerTurn: all.length ? consults / all.length : 0, over3: all.filter((x) => x.consults > 3).length };
+if (import.meta.main) {
+  const { values } = parseArgs({ options: { since: { type: 'string', default: '2026-11-16' }, db: { type: 'string' } } });
+  const dataDir = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
+  const db = new DatabaseSync(values.db ?? join(dataDir, 'coordinator.db'), { readOnly: true });
+  // Midnight Pacific on the day given (PST is UTC-8; the trial runs in November).
+  const since = Date.parse(`${values.since}T08:00:00Z`);
+  if (Number.isNaN(since)) throw new Error(`--since wants a date like 2026-11-16, not ${values.since}`);
+  const n = trialNumbers(db, since);
+  const names = new Map((db.prepare('SELECT t.id, t.number, t.title, t.model, t.effort, p.name AS scheme FROM tickets t JOIN projects p ON p.id = t.project_id').all() as any[]).map((t) => [t.id, t]));
+  const money = (x: number) => `$${x.toFixed(2)}`;
+  const per = (a: number, b: number) => (b ? a / b : 0);
+  const out = [`# Advisor trial numbers since ${values.since} (PST)`, '',
+    '| | minions | turns | cost a turn | consults a turn | turns over 3 consults | total |', '|---|---|---|---|---|---|---|',
+    `| Sonnet + Opus advisor | ${n.trial.minions} | ${n.trial.turns} | ${money(per(n.trial.cost, n.trial.turns))} | ${per(n.trial.consults, n.trial.turns).toFixed(2)} | ${n.trial.over3} | ${money(n.trial.cost)} |`,
+    `| their turns after moving off Sonnet | ${n.escalated.minions} | ${n.escalated.turns} | ${money(per(n.escalated.cost, n.escalated.turns))} | – | – | ${money(n.escalated.cost)} |`,
+    `| Sonnet, minions now at medium, no advisor | ${n.baseline.minions} | ${n.baseline.turns} | ${money(per(n.baseline.cost, n.baseline.turns))} | – | – | ${money(n.baseline.cost)} |`,
+    '', '## Trial minions', '', '| minion | setting now | Sonnet turns | cost a turn | consults (a turn) | max in a turn | moved off |', '|---|---|---|---|---|---|---|'];
+  for (const m of n.perMinion) {
+    const t = names.get(m.id);
+    out.push(`| ${t.scheme} #${t.number} ${String(t.title).replaceAll('|', '/')} | ${t.model ?? 'default'} ${t.effort ?? ''} | ${m.turns} | ${money(per(m.cost, m.turns))} | ${m.consults} (${per(m.consults, m.turns).toFixed(2)}) | ${m.max} | ${m.escalated ? 'yes' : ''} |`);
+  }
+  if (!n.perMinion.length) out.push('| none yet | | | | | | |');
+  console.log(out.join('\n'));
 }
-
-const out: string[] = [`# Advisor trial numbers since ${values.since} (PST)`, ''];
-const a = sum(trial);
-const b = sum(baseline);
-out.push('| | minions | turns | cost a turn | consults a turn | turns over 3 consults | total |', '|---|---|---|---|---|---|---|');
-out.push(`| Sonnet + Opus advisor | ${a.minions} | ${a.turns} | ${money(a.perTurn)} | ${a.consultsPerTurn.toFixed(2)} | ${a.over3} | ${money(a.cost)} |`);
-out.push(`| Sonnet medium, no advisor | ${b.minions} | ${b.turns} | ${money(b.perTurn)} | – | – | ${money(b.cost)} |`);
-out.push('', '## Trial minions', '', '| minion | model now | turns | cost a turn | consults (a turn) | max in a turn |', '|---|---|---|---|---|---|');
-for (const id of trial) {
-  const t = tickets.get(id);
-  const s = sum([id]);
-  const max = Math.max(...byTicket.get(id)!.map((x) => x.consults));
-  out.push(`| ${t.scheme} #${t.number} ${t.title.replaceAll('|', '/')} | ${t.model ?? 'default'} ${t.effort ?? ''} | ${s.turns} | ${money(s.perTurn)} | ${s.consults} (${s.consultsPerTurn.toFixed(2)}) | ${max} |`);
-}
-if (!trial.length) out.push('| none yet | | | | | |');
-out.push('', 'A trial minion whose model now is not the advisor was moved off it: read its chat for why.');
-console.log(out.join('\n'));

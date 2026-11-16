@@ -73,7 +73,6 @@ export function guessType(text) {
   return CLUES.find(([, re]) => re.test(text ?? ''))?.[0] ?? null;
 }
 
-
 /** The table as one line of prose, for the Taskmaster's prompt. */
 export function tableText() {
   const tiers = TIERS.map((t) => `${t.work} ${t.model} at ${t.effort}${t.then ? `, ${t.then}` : ''}`).join('; ');

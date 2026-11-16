@@ -206,6 +206,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000 } =
     alive = false;
   });
   worker.unref(); // after the listeners: adding one refs the worker again
+  console.log(`DB writes run on a worker thread (started in ${readyMs - (until - Date.now())} ms).`);
   return { drain, queued: () => seq - applied(), stop: () => worker.terminate() };
 }
 

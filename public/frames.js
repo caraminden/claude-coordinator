@@ -35,8 +35,8 @@ function fit() {
   strip.replaceChildren(
     h('img', { src: entry?.querySelector('img')?.src ?? `/apps/_citadel/icon/${name}`, alt: '' }),
     h('b', {}, entry?.querySelector('.label')?.textContent || got?.title || name));
-  // In the installed app the window controls take the bar's colour, or the strip's.
-  tintTitleBar(bar && got.color);
+  // In the installed app the window controls take the bar's colour (under a modal's backdrop), or the strip's.
+  tintTitleBar(bar && got.color, got?.backdrop);
   mirrorBar(got, frame);
   if (!bar) return;
   const area = probe.getBoundingClientRect();
@@ -53,7 +53,8 @@ const rect = (r) => (r && ['left', 'top', 'width', 'height'].every((k) => Number
  * own app-region did nothing, so a click on its bar's buttons dragged the window, unless Citadel's page beneath
  * had a control at that spot. So the bar is mirrored here: a drag box over it with a no-drag hole over each of its
  * controls (base.css's list). Later regions win, so #frames, after Citadel's page, overrides the page's regions
- * beneath; the box sits before .frame-nav, so ‹ › × stay clickable.
+ * beneath; the box sits before .frame-nav, so ‹ › × stay clickable. While a modal dialog is open over the bar
+ * (#772) only the title bar strip above it drags, so the dialog's own head and ✕ take clicks.
  */
 function mirrorBar(got, frame) {
   const r = rect(got?.bar);
@@ -61,6 +62,12 @@ function mirrorBar(got, frame) {
   if (!r) return drag.replaceChildren();
   const fr = frame.getBoundingClientRect();
   const place = (el, b, x, y) => (Object.assign(el.style, { left: `${x + b.left}px`, top: `${y + b.top}px`, width: `${b.width}px`, height: `${b.height}px` }), el);
+  if (got.backdrop !== null) {
+    const area = probe.getBoundingClientRect();
+    const left = Math.max(area.left, fr.left);
+    place(drag, { left, top: area.top, width: Math.max(0, area.right - left), height: area.height }, 0, 0);
+    return drag.replaceChildren();
+  }
   place(drag, r, fr.left, fr.top);
   const controls = Array.isArray(got.controls) ? got.controls.map(rect).filter(Boolean) : [];
   drag.replaceChildren(...controls.map((c) => place(h('div'), c, -r.left, -r.top)));
@@ -75,7 +82,7 @@ if (typeof window !== 'undefined') {
     const d = e.data;
     if (!frame || d?.protocol !== FRAME) return;
     if (d.type === 'bar') {
-      bars.set(frame, { title: typeof d.title === 'string' ? d.title : '', bar: rect(d.bar), controls: d.controls, color: typeof d.color === 'string' ? d.color : null });
+      bars.set(frame, { title: typeof d.title === 'string' ? d.title : '', bar: rect(d.bar), controls: d.controls, color: typeof d.color === 'string' ? d.color : null, backdrop: typeof d.backdrop === 'string' ? d.backdrop : null });
       if (!frame.hidden) fit();
     } else if (d.type === 'key' && d.event && typeof d.event === 'object') frameKey(d.event);
     else if (d.type === 'blur') frameKey(null);

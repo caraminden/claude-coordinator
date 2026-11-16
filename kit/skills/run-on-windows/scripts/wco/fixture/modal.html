@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- The WCO rig's modal fixture (#772): a .cui-topbar whose Library button opens a wide, tall Citadel UI dialog, as Peek
+     Auras' Library does, so the dialog runs up to the top of the frame. The checks read window.clicks. -->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WCO modal fixture</title>
+<link rel="stylesheet" href="/apps/_citadel/theme.css">
+<link rel="stylesheet" href="/apps/_citadel/ui/base.css">
+<script type="module" src="/apps/_citadel/rail.js"></script>
+</head><body style="margin:0">
+<header class="cui-topbar">
+  <h1>Modal fixture</h1>
+  <span style="flex:1"></span>
+  <button id="open" class="cui-btn cui-small" type="button">Library</button>
+</header>
+<main style="padding:2rem"><button id="body" type="button">Body button</button></main>
+<dialog id="lib" class="cui-dialog" style="--cui-dialog-width: 920px" aria-labelledby="lib-head">
+  <form method="dialog" class="cui-dialog-head"><h2 id="lib-head">Library</h2><button id="x" class="cui-btn cui-ghost cui-icon" aria-label="Close">✕</button></form>
+  <div id="rows"></div>
+</dialog>
+<script>
+window.clicks = [];
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b) clicks.push(b.id);
+});
+document.getElementById('rows').append(...Array.from({ length: 60 }, (_, i) => Object.assign(document.createElement('p'), { textContent: `Row ${i + 1}` })));
+document.getElementById('open').addEventListener('click', () => document.getElementById('lib').showModal());
+</script>
+</body></html>

@@ -633,17 +633,22 @@ let barQueued = false;
 function reportBar() {
   const bar = document.querySelector('.cui-topbar');
   const box = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; };
+  // A modal dialog over the bar (#772): its backdrop's colour, so Citadel stops dragging by the bar and tints the strip under it.
+  const modal = document.querySelector(':modal');
   post(framedIn, 'bar', {
     title: document.title,
     bar: bar ? box(bar) : null,
     controls: bar ? [...bar.querySelectorAll(CONTROLS)].filter((el) => el.getClientRects().length).map(box) : [],
     color: bar ? getComputedStyle(bar).backgroundColor : null,
+    backdrop: modal ? getComputedStyle(modal, '::backdrop').backgroundColor : null,
   });
   if (watchedBar === undefined) {
     // From the first report, with or without a bar: a page may add its bar as it narrows (ToC's phone header).
     document.addEventListener('scroll', reportSoon, { capture: true, passive: true });
     addEventListener('resize', reportSoon);
     document.fonts?.ready.then(reportSoon);
+    // A dialog opening or closing (showModal and close set and clear its open attribute).
+    new MutationObserver(reportSoon).observe(document.documentElement, { subtree: true, attributeFilter: ['open'] });
   }
   if (bar === watchedBar) return;
   watchedBar = bar;

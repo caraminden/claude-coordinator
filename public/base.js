@@ -115,19 +115,21 @@ export function icon(name) {
  * In the desktop app (#637) the window controls sit on the page's theme colour (app.js's metas), so a
  * contraption's top bar colours them (frames.js, with its computed background colour); null puts the plain colour back.
  * A canvas pixel turns any CSS colour into the hex a theme colour surely takes; a see-through one keeps the plain colour (#694).
+ * `over`, a modal's backdrop (#772), is laid over the colour, so the controls dim with the page under it.
  */
 let pixel = null;
-export function tintTitleBar(color) {
+export function tintTitleBar(color, over) {
   for (const m of document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')) {
     m.dataset.base ??= m.content;
     if (!color || !matchMedia(m.media).matches) { m.content = m.dataset.base; continue; }
     pixel ??= h('canvas', { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true });
+    const fill = (c) => { pixel.fillStyle = 'transparent'; pixel.fillStyle = c; pixel.fillRect(0, 0, 1, 1); };
     pixel.clearRect(0, 0, 1, 1);
-    pixel.fillStyle = m.dataset.base;
-    pixel.fillStyle = color;
-    pixel.fillRect(0, 0, 1, 1);
-    const [r, g, b, a] = pixel.getImageData(0, 0, 1, 1).data;
-    m.content = a < 255 ? m.dataset.base : `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+    fill(color);
+    if (pixel.getImageData(0, 0, 1, 1).data[3] < 255) fill(m.dataset.base);
+    if (over) fill(over);
+    const [r, g, b] = pixel.getImageData(0, 0, 1, 1).data;
+    m.content = `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
   }
 }
 

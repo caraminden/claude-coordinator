@@ -31,12 +31,13 @@ const go = async (hash) => {
   await sleep(1000);
   return ev('return location.hash');
 };
-/** Opens the fixture contraption, on fixture/<page> when given (a file in fixture/), and clears its click log. */
-const openFixture = async (page) => {
+/** Opens the fixture contraption, on fixture/<page> when given (a file in fixture/), else its index, and clears its click log. */
+const openFixture = async (page = '') => {
   await go('#/apps/wco-fixture');
-  if (page) {
-    await ev(`${FRAME} f.contentWindow.location = '/apps/wco-fixture/${page}'; return 1`);
-    for (let i = 0; i < 60 && !(await ev(`${FRAME} return !!(d?.readyState === 'complete' && d.location.pathname.endsWith('${page}') && d.querySelector('.cui-topbar'))`)); i++) await sleep(150);
+  const path = `/apps/wco-fixture/${page}`;
+  if (!(await ev(`${FRAME} return d?.location.pathname === '${path}'`))) {
+    await ev(`${FRAME} f.contentWindow.location.replace('${path}'); return 1`);
+    for (let i = 0; i < 60 && !(await ev(`${FRAME} return !!(d?.readyState === 'complete' && d.location.pathname === '${path}' && d.querySelector('.cui-topbar'))`)); i++) await sleep(150);
     await sleep(800);
   }
   await ev(`${FRAME} w.clicks.length = 0; return 1`);

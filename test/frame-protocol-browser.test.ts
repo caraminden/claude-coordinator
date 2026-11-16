@@ -49,6 +49,12 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   const tell = (test, value) => parent !== window && parent.postMessage({ test, value }, '*');
   new MutationObserver(() => tell('strip', document.documentElement.style.getPropertyValue('--citadel-strip-h')))
     .observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+  // ?modal: a modal dialog over the bar half a second after its load, closed a second later.
+  if (location.search === '?modal') {
+    const d = document.body.appendChild(document.createElement('dialog'));
+    setTimeout(() => d.showModal(), 500);
+    setTimeout(() => d.close(), 1500);
+  }
   // ?late: a second after its load, the bar arrives with a resize.
   if (location.search === '?late') setTimeout(() => { document.querySelector('header').classList.add('cui-topbar'); dispatchEvent(new Event('resize')); }, 1000);
   setInterval(() => {
@@ -125,6 +131,13 @@ test("a contraption's top bar runs up into Citadel's title bar strip, with a dra
   await waitFor(page, "the strip's height in the contraption", `/^\\d+(\\.\\d+)?px$/.test(window.echo.strip ?? '')`);
   // The strip names the app, from the rail (or the page's own title, in its message).
   assert.equal(await page.eval(`document.querySelector('.frame-strip b').textContent`), 'Peek');
+});
+
+test("while a modal dialog is open over a contraption's top bar, its drag box drops its holes for the strip above, and gets them back as it closes", { skip }, async () => {
+  const page = await framer({ width: 1000, height: 600 }, '?modal');
+  await waitFor(page, 'the hole over the bar\'s button', `document.querySelectorAll('.frame-drag > div').length === 1`);
+  await waitFor(page, 'the strip-only drag box under the modal', `!document.querySelector('.frame-drag').hidden && document.querySelectorAll('.frame-drag > div').length === 0`);
+  await waitFor(page, 'the hole back once it closes', `document.querySelectorAll('.frame-drag > div').length === 1`);
 });
 
 test("a top bar a contraption adds on a resize after its load is fitted too", { skip }, async () => {

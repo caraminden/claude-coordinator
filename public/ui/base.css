@@ -270,8 +270,12 @@
    page behind it scrolls, and ui/dialog.js closes it on a backdrop click. */
 :where(.cui-dialog) {
   --cui-dialog-pad: var(--citadel-space-4);
+  /* In an installed app it centres below the title bar strip, clear of the window controls (#772; frames.js tells a
+     framed page the strip's height): the backdrop still covers the strip. */
+  --cui-dialog-top: var(--citadel-strip-h, env(titlebar-area-height, 0px));
   box-sizing: border-box; width: min(var(--cui-dialog-width, 480px), calc(100vw - 2 * var(--citadel-space-3)));
-  max-width: none; max-height: calc(100dvh - 2 * var(--citadel-space-3)); margin: auto;
+  max-width: none; max-height: calc(100dvh - var(--cui-dialog-top) - 2 * var(--citadel-space-3)); margin: auto; top: var(--cui-dialog-top);
+  app-region: no-drag;
   padding: 0 var(--cui-dialog-pad) var(--cui-dialog-pad); overflow-y: auto; overscroll-behavior: contain;
   scroll-padding-top: calc(var(--citadel-control-h) + 3 * var(--citadel-space-2));
   border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg);
@@ -291,7 +295,7 @@
 @media (max-width: 800px) {
   :where(.cui-dialog) {
     --cui-dialog-pad: var(--citadel-space-3);
-    width: calc(100vw - 2 * var(--citadel-space-2)); max-height: calc(100dvh - 2 * var(--citadel-space-2));
+    width: calc(100vw - 2 * var(--citadel-space-2)); max-height: calc(100dvh - var(--cui-dialog-top) - 2 * var(--citadel-space-2));
   }
 }
 

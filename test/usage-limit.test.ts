@@ -424,6 +424,33 @@ test('a turn that hits its account\'s limit carries on at once with the next rea
   }
 });
 
+test('a minion\'s turn names its session to the account pick once it has one, and says where it ran (#793)', async () => {
+  const pat = store.findUser('name', 'Pat')!;
+  accountsFor(pat.id, 'ok');
+  const asked: (string | undefined)[] = [];
+  const ran: [number, string, number][] = [];
+  const place = runner.placeFor!;
+  runner.placeFor = (person, warm) => (asked.push(warm), place(person, warm));
+  runner.onRan = (person, key, n) => void ran.push([person, key, n]);
+  try {
+    const id = minion();
+    setRelease('ok');
+    for (const text of ['go', 'again']) {
+      const before = turnsRun();
+      runner.send(id, 'Pat', text);
+      await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the turn');
+      // The fake claude reports no session: the second turn resumes this one.
+      store.updateTicket(id, { session_id: 'sess-793' });
+    }
+    assert.equal(asked[0], undefined, 'no session yet: it goes where new work goes');
+    assert.equal(asked.at(-1), `ticket:${id}`);
+    assert.deepEqual(ran.at(-1), [pat.id, `ticket:${id}`, 1]);
+  } finally {
+    noAccounts();
+    runner.onRan = undefined;
+  }
+});
+
 test('when every account is limited, the turn waits for the first of them to reset (#779)', async () => {
   const pat = store.findUser('name', 'Pat')!;
   runner.limitFallbackMs = 60 * 60 * 1000;

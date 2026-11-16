@@ -47,7 +47,7 @@ test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies
   assert.equal((items[0].card as any).tool, 'Bash');
 });
 
-test('a card a person handled by typing in the chat leaves the inbox; the Taskmaster, minions and other cards\' clicks don\'t clear it', () => {
+test('a card stays in the inbox past typed messages (#812), relays and other cards\' clicks; only its own answer clears it', () => {
   const store = new Store(join(root, 'typed.sqlite'));
   const p = store.createProject('One', null).id;
   const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
@@ -64,10 +64,10 @@ test('a card a person handled by typing in the chat leaves the inbox; the Taskma
   store.addEvent(clicked, 'plan', { id: 'p-new', summary: 's', plan: 'p', status: 'pending' });
   store.addEvent(clicked, 'user_message', { author: 'Cara', text: 'answers', answer: { questionId: 'q-old', answers: [] } });
 
-  assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['q-relayed', 'p-new']);
+  assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['p-typed', 'q-typed', 'q-relayed', 'p-new']);
 });
 
-test('only a person\'s own message clears a card: another scheme\'s Taskmaster (live or held mail), relays, Mandate and briefs don\'t (#610)', () => {
+test('no message clears a card but its own answer: another scheme\'s Taskmaster (live or held mail), relays, Mandate, briefs and typing (#610, #812)', () => {
   const store = new Store(join(root, 'not-people.sqlite'));
   const p = store.createProject('Peek', null).id;
   const tm = store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' }).id;
@@ -85,7 +85,7 @@ test('only a person\'s own message clears a card: another scheme\'s Taskmaster (
   assert.deepEqual(store.recentCards(p, 10).map((r) => r.reply), [null, null, null]);
 
   store.addEvent(tm, 'user_message', { author: 'Josh', text: 'Centred, go', typed: true });
-  assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['p-brief'], 'a person typing in the chat still handles its cards');
+  assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['q-held-mail', 'q-live-relay', 'p-brief'], 'a person typing in the chat answers no card (#812)');
 });
 
 test('openCardAt: when a minion\'s oldest open card was posted, for the list\'s "?" badge; answered, settled, superseded and dismissed cards don\'t count', () => {
@@ -256,12 +256,12 @@ test('a card addressed to one person (#687) is in their list alone, waits past t
   store.addEvent(parked, 'plan', { id: 'p-josh', summary: 's', plan: 'p', status: 'pending', to: 'Josh' });
   store.addEvent(tm, 'question', { id: 'q-all', questions: [] });
   store.addEvent(elsewhere, 'question', { id: 'q-away', questions: [], to: 'Josh' });
-  // Cara types in the Taskmaster's chat: it handles the card to everyone, not Josh's.
+  // Cara types in the Taskmaster's chat: it answers none of them (#812).
   store.addEvent(tm, 'user_message', { author: 'Cara', text: 'carry on', typed: true });
 
   const ids = (items: { card?: unknown }[]) => items.map((i) => (i.card as any)?.id).sort();
-  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'Cara')), [], 'not in the asker\'s person\'s list');
-  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'josh')), ['p-josh', 'q-josh'], 'the addressee\'s, even on a parked minion');
+  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'Cara')), ['q-all'], 'the card for everyone stays, Josh\'s are not in Cara\'s list');
+  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'josh')), ['p-josh', 'q-all', 'q-josh'], 'the addressee\'s, even on a parked minion');
   assert.equal(inboxCount(store, approvals, citadel, 'Josh', {}), 2);
 
   const there = directCards(store, peek, 'Josh');
@@ -272,7 +272,7 @@ test('a card addressed to one person (#687) is in their list alone, waits past t
 
   // His answer, held as mail for a cold Taskmaster, still answers it.
   store.addEvent(tm, 'user_message', { author: 'Josh', text: 'answers', mail: true, cold: true, answer: { questionId: 'q-josh', answers: [] } });
-  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'Josh')), ['p-josh']);
+  assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'Josh')), ['p-josh', 'q-all']);
   assert.match(store.recentCards(citadel, 10).find((r) => JSON.parse(r.data).id === 'q-josh')!.reply ?? '', /"author":"Josh"/);
   assert.equal(store.recentCards(citadel, 10).find((r) => JSON.parse(r.data).id === 'p-josh')!.reply, null);
 });

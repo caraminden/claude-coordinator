@@ -1,6 +1,5 @@
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 import { Memory } from './memory.ts';
@@ -13,15 +12,6 @@ export const buildOwnerKey = (projectId: number, build: number) => `build-owner:
 export const planKey = (ticketId: number) => `plan:${ticketId}`;
 /** A minion's task-list state just before the furthest chat page start read, so a restart's first open replays only what came since (#613; src/history.ts planBefore). */
 export const pagePlanKey = (ticketId: number) => `plan:${ticketId}:page`;
-
-/**
- * SQL on user_message event `a`: a person wrote it in that chat, so it can answer or handle a card there.
- * Not a relay from another chat (`from`: a minion, this or another scheme's Taskmaster), held mail, a
- * brief, Mandate's hook news, nor a name that isn't a person's (#610).
- */
-const PERSON_WROTE = `json_extract(a.data, '$.from') IS NULL AND json_extract(a.data, '$.mail') IS NULL AND json_extract(a.data, '$.brief') IS NULL
-  AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${[...NOT_PEOPLE, 'Mandate'].map((n) => `'${n.toLowerCase().replace(/'/g, "''")}'`).join(', ')})
-  AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'`;
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** Each project has one long-lived coordinator ticket that manages the others. */
@@ -2275,7 +2265,8 @@ export class Store {
   /**
    * A project's stored cards still waiting on a person, in threads that aren't dismissed: questions
    * nobody has answered (nor the minion settled), and plans still pending. Approval cards live in memory (Approvals.pending).
-   * A person writing in the minion after a card counts as handling it there: typed replies clear it, not just clicks.
+   * Only a card's own answer (a click, a doc Send, a held answer) clears it; a message typed in the chat doesn't (#812),
+   * since it may be about anything. The minion settles a card someone answered by typing (settle_question).
    */
   openCards(projectId: number): EventRow[] {
     return this.openCardsWhere('t.project_id = ?', projectId);
@@ -2342,8 +2333,7 @@ export class Store {
 
   /**
    * A project's newest `limit` question, plan and approval cards, oldest first,
-   * each with its minion and how it was settled: the first person's message after it in its chat that isn't
-   * a click on another card (`reply`), and an approval's result (`result`). For the link check (#531).
+   * each with its minion and how it was settled: the answer to it (`reply`), and an approval's result (`result`). For the link check (#531).
    */
   recentCards(projectId: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
     // Which cards, from the index alone; their rows only for cards not read before. Re-reading the 500 rows every
@@ -2375,7 +2365,7 @@ export class Store {
     // scanning the rest of a long chat held the event loop 1-3 s (#622). By kind: left to itself SQLite walked
     // events_ticket, every event of the chat (56,619 rows for 1,861 messages), 2-3 s from a cold cache after a restart.
     for (const ticket of new Set(cards.map((c) => c.ticket_id))) {
-      const mine = cards.flatMap((c, i) => c.ticket_id === ticket ? [{ cid: c.cid, approval: c.kind === 'approval', to: !!JSON.parse(c.data).to, fate: fates[i] }] : []);
+      const mine = cards.flatMap((c, i) => c.ticket_id === ticket ? [{ cid: c.cid, approval: c.kind === 'approval', fate: fates[i] }] : []);
       const from = (pick: (f: CardFate) => string | null, of = mine) => Math.min(...of.filter((m) => pick(m.fate) == null).map((m) => m.fate.upTo));
       const replyFrom = from((f) => f.reply);
       const replies = replyFrom === Infinity ? [] : this.db.prepare(`
@@ -2383,7 +2373,7 @@ export class Store {
           json_object('author', json_extract(a.data, '$.author'), 'at', a.created_at, 'text', substr(json_extract(a.data, '$.text'), 1, 200),
             'answer', json(json_extract(a.data, '$.answer'))) AS reply
         FROM events a INDEXED BY events_ticket_kind WHERE a.ticket_id = ? AND a.kind = 'user_message' AND a.id > ? AND a.id <= ?
-          AND (${PERSON_WROTE} OR json_extract(a.data, '$.answer.questionId') IS NOT NULL) ORDER BY a.id`)
+          AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) IS NOT NULL ORDER BY a.id`)
         .all(ticket, replyFrom, upTo) as { id: number; card: unknown; reply: string }[];
       // Only an approval gets a result: looking one up for every chat's questions and plans was half a cold call (#759).
       const resultFrom = from((f) => f.result, mine.filter((m) => m.approval));
@@ -2391,9 +2381,9 @@ export class Store {
         SELECT id, json_extract(data, '$.id') AS card, json_set(data, '$.at', created_at) AS result
         FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind = 'approval_result' AND id > ? AND id <= ? ORDER BY id`)
         .all(ticket, resultFrom, upTo) as { id: number; card: unknown; result: string }[];
-      for (const { cid, approval, to, fate } of mine) {
-        // A click on another card answers that card, not this one; a card addressed to one person only its own answer (#687).
-        fate.reply ??= replies.find((a) => a.id > fate.upTo && (a.card ?? (to ? null : cid)) === cid)?.reply ?? null;
+      for (const { cid, approval, fate } of mine) {
+        // Only a click on this card answers it: not one on another card, not a typed message (#812).
+        fate.reply ??= replies.find((a) => a.id > fate.upTo && a.card === cid)?.reply ?? null;
         if (approval) fate.result ??= results.find((r) => r.id > fate.upTo && r.card === cid)?.result ?? null;
         fate.upTo = upTo;
       }
@@ -2473,10 +2463,8 @@ export class Store {
         OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
       AND NOT EXISTS (
         SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id
-          -- an answer held as mail for a cold asker (#687) still answers its card
-          AND (${PERSON_WROTE} OR json_extract(a.data, '$.answer.questionId') IS NOT NULL)
-          -- a click on another card answers that card, not this one; a card addressed to one person (#687) waits for its own answer, whoever types in the chat
-          AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), CASE WHEN json_extract(e.data, '$.to') IS NULL THEN json_extract(e.data, '$.id') END) = json_extract(e.data, '$.id'))
+          -- only this card's own answer settles it, a held one for a cold asker (#687) too; a typed message answers nothing (#812)
+          AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) = json_extract(e.data, '$.id'))
       ORDER BY e.id`).all(JSON.stringify(ids)) as unknown as EventRow[];
     const still = new Set(open.map((e) => e.id));
     for (const i of ids) if (!still.has(i)) this.doneCards.add(i);

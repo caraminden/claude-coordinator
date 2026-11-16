@@ -244,7 +244,7 @@ test('a turn\'s snapshot lists the scheme\'s recently settled cards with who set
   runner.emit(a.id, 'user_message', { author: 'Taskmaster of Peek', text: 'fyi', mail: true, cold: true, from: 99 });
   const plan = runner.emit(a.id, 'plan', { id: 'p1', summary: 'Build it', plan: 'x', status: 'approved', by: 'Josh', at: 1_000 });
   const typed = ask(b, 'q3', 'Name');
-  const reply = runner.emit(b.id, 'user_message', { author: 'Josh', text: 'Call it Keep' });
+  const reply = runner.emit(b.id, 'user_message', { author: 'Josh', text: 'Call it Keep', answer: { questionId: 'q3', answers: [{ other: 'Call it Keep' }] } });
   const dropped = ask(b, 'q4', 'Colour');
   store.updateTicket(b.id, { status: 'closed' });
   runner.approvals.request(a.id, 'Bash', { command: 'ls', description: 'List' });
@@ -260,7 +260,7 @@ test('a turn\'s snapshot lists the scheme\'s recently settled cards with who set
   assert.deepEqual(snap.settled!.map((c) => [c.href, c.kind, c.label, c.how]), [
     [at(a, clicked), 'question', 'Root step', `answered by Cara at ${clockTime(click.created_at)}: Done, I ran it`],
     [at(a, plan), 'plan', 'Build it', `approved by Josh at ${clockTime(1_000)}`],
-    [at(b, typed), 'question', 'Name', `Josh wrote in its chat at ${clockTime(reply.created_at)}: "Call it Keep"`],
+    [at(b, typed), 'question', 'Name', `answered by Josh at ${clockTime(reply.created_at)}: Call it Keep`],
     [at(b, dropped), 'question', 'Colour', `#${b.number} was dismissed`],
     [at(a, approval), 'approval', 'Bash: List', `allowed by Cara at ${clockTime(allowed.created_at)}`],
   ]);
@@ -289,18 +289,18 @@ test('a later snapshot sees replies and results that came after the last one, an
   const click = runner.emit(a.id, 'user_message', { author: 'Cara', text: 'My answers…', answer: { questionId: 'q2', answers: [{ selected: ['B'] }] } });
   runner.emit(a.id, 'user_message', { author: 'Taskmaster', text: 'relay', from: 1 });
   assert.deepEqual(settled(), { Two: `answered by Cara at ${clockTime(click.created_at)}: B` });
-  const typed = runner.emit(a.id, 'user_message', { author: 'Josh', text: 'Go with one' });
+  const typed = runner.emit(a.id, 'user_message', { author: 'Josh', text: 'Go with one', answer: { questionId: 'q1', answers: [{ other: 'Go with one' }] } });
   runner.approvals.decide(a.id, JSON.parse(approval.data).id, true, 'Cara');
   const allowed = store.listEvents(a.id).find((e) => e.kind === 'approval_result')!;
   // Josh's message came after the approval card too, but its result says how it ended.
   assert.deepEqual(settled(), {
-    One: `Josh wrote in its chat at ${clockTime(typed.created_at)}: "Go with one"`,
+    One: `answered by Josh at ${clockTime(typed.created_at)}: Go with one`,
     Two: `answered by Cara at ${clockTime(click.created_at)}: B`,
     'Bash: List': `allowed by Cara at ${clockTime(allowed.created_at)}`,
   });
   // A second reply doesn't replace the first.
   runner.emit(a.id, 'user_message', { author: 'Cara', text: 'Actually two' });
-  assert.equal(settled().One, `Josh wrote in its chat at ${clockTime(typed.created_at)}: "Go with one"`);
+  assert.equal(settled().One, `answered by Josh at ${clockTime(typed.created_at)}: Go with one`);
   assert.ok(q1.id < q2.id);
 });
 
@@ -315,4 +315,28 @@ test('cardWhat: a merge go, a tripwire approval, or the card\'s own kind (#575)'
 
 test('a choices card settled by its page\'s Send reads as picks sent (#804)', () => {
   assert.equal(settledHow('question', { doc: { path: '/w/t.html', title: 'T' }, settled: { at: 1, by: 'Cara', sent: true } }, null, null, null, () => '2:31am'), 'picks sent by Cara at 2:31am');
+});
+
+test('an unrelated message does not settle a card; its own answer does, and is the one reported (#812)', () => {
+  const fake = join(root, 'claude-812');
+  writeFileSync(fake, '#!/bin/sh\nexit 0\n');
+  chmodSync(fake, 0o755);
+  const store = new Store(join(root, 'db-812.sqlite'));
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const p = store.createProject('Citadel', null);
+  const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const a = store.createTicket({ project_id: p.id, title: 'Asker', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const card = runner.emit(a.id, 'question', { id: 'q1', questions: [{ header: 'Policy', question: '?' }] });
+  runner.emit(a.id, 'user_message', { author: 'Cara', text: 'I just heard about code mode…' });
+  const file = join(root, 'refs-812.json');
+  const snap = () => {
+    (runner as any).writeRefs(file, store.getTicket(tm.id)!);
+    return JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs;
+  };
+  assert.equal(snap().cards!.length, 1, 'still waiting after an unrelated message');
+  assert.deepEqual(snap().settled, []);
+  assert.deepEqual(store.openCardsOf(a.id).map((e) => e.id), [card.id]);
+  const click = runner.emit(a.id, 'user_message', { author: 'Cara', text: 'My answers…', answer: { questionId: 'q1', answers: [{ selected: ['Yes'] }] } });
+  assert.equal(snap().cards!.length, 0);
+  assert.equal(snap().settled![0].how, `answered by Cara at ${clockTime(click.created_at)}: Yes`);
 });

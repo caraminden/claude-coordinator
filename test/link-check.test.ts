@@ -179,6 +179,8 @@ test('a reply that asks a choice in prose with no card this turn is sent back; a
   // A card posted this turn, even before the last tool result, covers the question.
   assert.equal(await ask('Should I merge it?', tool('mcp__thread__ask_question'), result), null);
   assert.equal(await ask('Should I merge it?', tool('mcp__thread__propose_plan'), result), null);
+  const meta = line({ type: 'user', isMeta: true, message: { role: 'user', content: 'Base directory for this skill' } });
+  assert.equal(await ask('Should I merge it?', tool('mcp__thread__ask_question'), meta), null, 'a skill\'s meta entry is no new prompt');
   // A card from an earlier turn does not.
   const earlier = [tool('mcp__thread__ask_question'), result, user];
   assert.equal((await ask('Should I merge it?', ...earlier))?.decision, 'block');

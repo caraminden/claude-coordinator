@@ -244,7 +244,7 @@ const meterText = (u) => [u?.session && `5 hours ${pctText(u.session)}`, u?.week
 
 /**
  * Your own Claude plan (#213): turns you start run on it, in a container of your own on the server. Up to three
- * accounts (#779): turns stay on the one in use and move to the next ready one when it hits a limit.
+ * accounts (#779): new and cold turns go to the one whose week resets soonest, or the one pinned (#793).
  */
 function claudeCard() {
   const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading Claude…'));
@@ -302,33 +302,34 @@ function claudeCard() {
         h('div', { class: 'row' }, link('Link Claude')), note);
     }
     const usageFor = (n) => st.usage?.accounts?.find((a) => a.n === n)?.usage ?? (n === (st.usage?.account ?? st.inUse) ? st.usage : null);
-    // "Use now" shows at once and sends behind; a refusal puts the account in use back.
-    const useNow = (a) => h('button', {
-      type: 'button', class: 'secondary small',
+    // Pin and Unpin (#793) show at once and send behind; a refusal puts the pin back.
+    const pin = (a, on) => h('button', {
+      type: 'button', class: 'secondary small', title: on ? 'New minions and cold wakes run on this account while it\'s ready' : 'Let Citadel pick again: soonest weekly reset first',
       onclick: () => optimistic({
         key: 'claude-use',
-        apply: () => render({ ...st, inUse: a.n }),
-        send: () => api('api/me/claude/use', { method: 'POST', body: { account: a.n } }).then((next) => {
+        apply: () => render({ ...st, pinned: on ? a.n : undefined, ...(on && a.ready ? { inUse: a.n } : {}) }),
+        send: () => api('api/me/claude/use', { method: 'POST', body: { account: on ? a.n : null } }).then((next) => {
           render(next);
           renderUsage(next.usage);
         }),
         undo: () => render(st),
-        label: `switch your turns to ${a.email ?? `account ${a.n}`}`,
+        label: on ? `pin ${a.email ?? `account ${a.n}`}` : 'unpin',
       }),
-    }, 'Use now');
+    }, on ? 'Pin' : 'Unpin');
     const now = Date.now();
     const rows = accounts.map((a) => {
       const own = st.host && a.n === 1;
       const [chip, cls] = a.expired ? ['Needs linking again', 'warn']
         : a.limitedUntil > now ? [`Limited until ${clock(a.limitedUntil)}`, 'warn']
-        : a.n === st.inUse ? ['In use', 'use']
+        : a.n === st.pinned ? ['Pinned', 'use']
+        : a.n === st.inUse ? ['Next up', 'use']
         : ['Ready', 'ok'];
       return h('li', { class: `acct${a.n === st.inUse ? ' in-use' : ''}` },
         h('span', { class: 'n' }, String(a.n)),
         h('span', { class: 'who' }, h('strong', {}, own ? 'Server login' : a.email || `Account ${a.n}`), h('span', { class: `link-chip ${cls}` }, chip), a.plan ? h('span', { class: 'muted small' }, a.plan) : ''),
         h('span', { class: 'acts' },
           a.expired && !own ? link('Link again', a.n) : '',
-          a.n !== st.inUse && !a.expired ? useNow(a) : '',
+          accounts.length < 2 ? '' : a.n === st.pinned ? pin(a, false) : a.expired ? '' : pin(a, true),
           own ? '' : unlink(a)),
         h('span', { class: 'meters' }, meterText(usageFor(a.n)) || 'No turns on it yet'));
     });
@@ -338,7 +339,10 @@ function claudeCard() {
     const chip = st.host ? ['Server login', 'ok'] : allExpired ? ['Needs linking again', 'warn'] : accounts.length > 1 ? [`${ready} of ${accounts.length} ready`, ready ? 'ok' : 'warn'] : ['Linked', 'ok'];
     return card.replaceChildren(title(...chip), errLine,
       allExpired ? h('p', {}, 'Anthropic stopped accepting your sign-in (signed out or expired). Your messages wait in the chat until you link again.') : '',
-      accounts.length > 1 || st.host ? h('p', { class: 'small' }, 'Turns stay on the account in use. When it hits a usage limit, they carry on with the next ready one in this order, mid-turn included.') : '',
+      accounts.length > 1 ? h('p', { class: 'small' }, st.pinned
+        ? `Pinned to account ${st.pinned}: new minions and cold wakes run on it while it's ready. If it hits a limit they carry on with another, and come back once it resets. `
+        : 'New minions and cold wakes go to the account whose week resets soonest, so its allowance isn\'t lost at the reset. ',
+      'A minion that ran in the last hour stays on its account, since moving it rereads its whole conversation. A usage limit moves turns at once, mid-turn included.') : '',
       h('ol', { class: 'acct-list' }, rows),
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', disabled: full, title: full ? 'Three accounts at most' : 'Sign in another Claude account of yours',
         onclick: (e) => { e.target.disabled = true; api('api/me/claude', { method: 'POST', body: {} }).then(render).catch((err) => render({ ...st, error: err.message })); } }, 'Link another account'),

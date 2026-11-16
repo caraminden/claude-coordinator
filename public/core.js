@@ -430,6 +430,18 @@ export function combineWindows(accounts, key) {
   return { utilization: util.reduce((x, y) => x + y, 0) / accounts.length, resetsAt: resets.length ? Math.min(...resets) : null };
 }
 
+/** Where a person's new minions start and why (#793), from usageOf's account, why and pinned. */
+export function pickLine(u, accounts) {
+  const a = accounts.find((x) => x.n === u.account);
+  if (!a) return 'No Claude account is ready for new minions.';
+  const reset = a.usage?.weekly?.resetsAt > Date.now() ? ` (${new Date(a.usage.weekly.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })})` : '';
+  const why = u.why === 'pinned' ? 'you pinned it'
+    : u.pinned ? `account ${u.pinned}, which you pinned, is limited`
+    : u.why === 'full' ? 'every account is close to its limit'
+    : `its week resets soonest${reset}`;
+  return `New minions start on ${a.label}: ${why}. Running minions stay on their account while warm.`;
+}
+
 /** Fill in every usage bar from the latest usage report from Claude turns. */
 export function renderUsage(next = usage) {
   usage = next;
@@ -453,8 +465,8 @@ export function renderUsage(next = usage) {
         : `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
       session ? `5-hour window${accounts ? ' (combined)' : ''}: ${sess(session)}` : null,
       `As of the last turn, ${ago(usage.updatedAt)}`,
-      // Several Claude accounts (#779): the bar combines them; the tooltip lists each, ▸ on the one in use.
-      ...(accounts ? ['', ...accounts.map((a) => `${a.n === usage.account ? '▸ ' : ''}${a.label}: ${a.usage?.weekly ? `week ${Math.round(a.usage.weekly.utilization * 100)}%` : 'no turns yet'}${a.usage?.session ? `, 5 hours ${Math.round(a.usage.session.utilization * 100)}%` : ''}`)] : []),
+      // Several Claude accounts (#779): the bar combines them; the tooltip says where new minions start (#793) and lists each, ▸ on that one.
+      ...(accounts ? ['', pickLine(usage, accounts), ...accounts.map((a) => `${a.n === usage.account ? '▸ ' : ''}${a.label}: ${a.usage?.weekly ? `week ${Math.round(a.usage.weekly.utilization * 100)}%` : 'no turns yet'}${a.usage?.session ? `, 5 hours ${Math.round(a.usage.session.utilization * 100)}%` : ''}`)] : []),
     ].filter((line) => line != null).join('\n');
   }
   for (const el of document.querySelectorAll('.usage:not(.codex)')) renderCodexSwitch(renderCodexMeter(el));

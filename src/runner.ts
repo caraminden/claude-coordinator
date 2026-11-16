@@ -3100,12 +3100,14 @@ export class Runner {
    * A person's own plan usage, for their top-bar meter: the server login's, or their container turns', of the
    * account in use. With several accounts (#779) it says which, and carries each account's.
    */
-  usageOf(uid: number | null | undefined): (Usage & { account?: number; accounts?: { n: number; label: string; usage: Usage | null }[] }) | null {
+  usageOf(uid: number | null | undefined): (Usage & { account?: number; why?: string; pinned?: number; accounts?: { n: number; label: string; usage: Usage | null }[] }) | null {
     const payer = this.payerOf(uid);
     const acc = uid ? this.claudeAccounts?.(uid) : null;
     const usage = this.store.getSetting<Usage>(accountUsageKey(payer, acc?.inUse ?? 1));
     if (!acc || acc.accounts.length < 2) return usage;
-    return { ...(usage ?? { weekly: null, session: null, updatedAt: 0 }), account: acc.inUse ?? 1, accounts: acc.accounts.map((a) => ({ ...a, usage: this.store.getSetting<Usage>(accountUsageKey(payer, a.n)) })) };
+    // `account` is where a new or cold turn goes now, and `why` (#793): its week resets soonest, it's pinned, or every account is near full.
+    return { ...(usage ?? { weekly: null, session: null, updatedAt: 0 }), account: acc.inUse ?? 1, ...(acc.why ? { why: acc.why } : {}), ...(acc.pinned ? { pinned: acc.pinned } : {}),
+      accounts: acc.accounts.map((a) => ({ ...a, usage: this.store.getSetting<Usage>(accountUsageKey(payer, a.n)) })) };
   }
 
   /**

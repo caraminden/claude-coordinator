@@ -212,11 +212,17 @@ function fillPage() {
   const body = !loaded ? [h('p', { class: 'muted' }, 'Loading releases…')]
     : scope === 'all' ? allView(ids)
       : schemeCards(scope, true);
+  // On a phone the chips give way to one box naming the scheme you're on, which opens the list of them (#820, Cara
+  // picked take A, 2026-11-16): a strip of 11 chips showed 3 and could hide the one you were on.
+  const picker = h('button', { type: 'button', class: 'rel-pick', 'aria-haspopup': 'dialog', title: 'Pick a scheme', onclick: () => openPicker(scope, chipIds) },
+    pickIcon(scope), h('span', { class: 'rel-pick-name' }, scopeName(scope)),
+    h('span', { class: 'rel-pick-sub' }, scope === 'all' ? `${ids.length} schemes` : targetNames(scope)), h('span', { class: 'rel-pick-caret', 'aria-hidden': 'true' }, '▾'));
   pageEl.replaceChildren(
     h('div', { class: 'ticket-head rel-head' },
-      h('div', { class: 'row' }, close('narrow-only', 'back'), h('h2', {}, `Releases · ${scope === 'all' ? 'All' : schemeName(scope)}`)),
+      h('div', { class: 'row' }, close('narrow-only', 'back'), h('h2', {}, 'Releases', h('span', { class: 'wide-only' }, ` · ${scopeName(scope)}`))),
       h('div', { class: 'head-sub rel-sub' },
         h('nav', { class: 'chips rel-chips', 'aria-label': 'Schemes' }, chip('all', 'All'), chipIds.map((id) => chip(id, schemeName(id)))),
+        picker,
         h('span', { class: 'spacer' }),
         h('span', { class: 'head-nav' },
           h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
@@ -226,6 +232,31 @@ function fillPage() {
   // Brings the highlighted change into view once, so a later update doesn't pull back someone who scrolled away.
   const hl = page?.hl != null && !page.shown && pageEl.querySelector('.rel-card.hl, .rel-change.hl');
   if (hl) { page.shown = true; hl.scrollIntoView({ block: 'nearest' }); }
+}
+
+const scopeName = (scope) => (scope === 'all' ? 'All' : schemeName(scope));
+const targetNames = (id) => (schemes.get(id)?.targets ?? []).map((tv) => tv.target.name).join(' · ');
+/** The scheme's icon for the picker, its initial when it has none (so the names line up), a mark for All. */
+function pickIcon(scope) {
+  if (scope === 'all') return h('span', { class: 'rel-pick-icon all', 'aria-hidden': 'true' }, '∗');
+  // The initial sits under the icon, so it shows while the icon loads or if it fails (TripPresenter's 404s).
+  const p = schemeOf(scope);
+  return h('span', { class: 'rel-pick-icon', 'aria-hidden': 'true' }, schemeName(scope).slice(0, 1), p && iconSrc(p) ? schemeIcon(p) : '');
+}
+
+/** The phone's list of schemes: a sheet along the bottom (the kit's dialog), the one you're on ticked. */
+function openPicker(scope, ids) {
+  const row = (s) => h('a', { class: `rel-opt${scope === s ? ' on' : ''}`, href: pageHref(s), 'aria-current': scope === s ? 'page' : undefined, onclick: () => dialog.close() },
+    pickIcon(s), h('span', { class: 'rel-opt-name' }, scopeName(s)),
+    h('span', { class: 'rel-opt-sub' }, s === 'all' ? 'every scheme' : targetNames(s)), h('span', { class: 'rel-opt-check', 'aria-hidden': 'true' }, scope === s ? '✓' : ''));
+  // new-scheme: project.css's modal that is a sheet along the bottom on phones, as briefstart.js and ultrareview.js use it.
+  const dialog = h('dialog', { class: 'cui-dialog new-scheme rel-sheet', 'aria-labelledby': 'rel-sheet-title' },
+    h('div', { class: 'cui-dialog-head' }, h('h2', { id: 'rel-sheet-title' }, 'Releases of'),
+      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
+    h('nav', { class: 'rel-opts', 'aria-label': 'Schemes' }, row('all'), ids.map(row)));
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
 }
 
 /** A scheme's cards (take D): one per target, then its test copies of no target. */

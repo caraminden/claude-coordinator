@@ -84,7 +84,8 @@ const IMAGE_TYPE = /^image\/(svg\+xml|png|jpeg|webp|gif|x-icon|vnd\.microsoft\.i
 function fetchAppIcon(c: ContraptionRow): Promise<{ body: Buffer; type: string } | { missing: string }> {
   return new Promise((resolve) => {
     const fail = (missing: string) => resolve({ missing });
-    const up = request({ host: '127.0.0.1', port: c.port, path: appIconPath(c), headers: { accept: 'image/*' } }, (r) => {
+    let up: ReturnType<typeof request>;
+    try { up = request({ host: '127.0.0.1', port: c.port, path: appIconPath(c), headers: { accept: 'image/*' } }, (r) => {
       const type = String(r.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
       if (r.statusCode !== 200 || !IMAGE_TYPE.test(type)) { r.resume(); return fail(`${c.title} has no icon`); }
       const chunks: Buffer[] = [];
@@ -96,16 +97,16 @@ function fetchAppIcon(c: ContraptionRow): Promise<{ body: Buffer; type: string }
       });
       r.on('end', () => resolve({ body: Buffer.concat(chunks), type }));
       r.on('error', () => fail(`${c.title} is not answering`));
-    });
+    }); } catch { return fail(`${c.title} has no icon`); } // a path request() refuses
     up.setTimeout(10_000, () => { up.destroy(); fail(`${c.title} is not answering`); });
     up.on('error', () => fail(`${c.title} is not answering`));
     up.end();
   });
 }
 
-/** What goes out with an icon of this type: SVG's inert headers, or the same lockdown for a raster type. */
+/** What goes out with an icon of this type: SVG's inert headers, or the same lockdown (plus a sandbox) for a raster type. */
 export function iconHeaders(type: string) {
-  return type === 'image/svg+xml' ? ICON_HEADERS : { ...ICON_HEADERS, 'Content-Type': type };
+  return type === 'image/svg+xml' ? ICON_HEADERS : { ...ICON_HEADERS, 'Content-Type': type, 'Content-Security-Policy': "sandbox; default-src 'none'" };
 }
 
 /** The icon's bytes and type, read once per change of the file (or of the home app's deploy). */

@@ -374,6 +374,7 @@ const cardPicks = new Map();
 
 export function questionCard(ticketId, card, opts = {}) {
   if (card.notice) return noticeCard(ticketId, card, opts);
+  if (card.doc) return docCard(ticketId, card, opts);
   if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
   const picks = cardPicks.get(card.id);
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
@@ -551,6 +552,32 @@ function noticeCard(ticketId, card, opts) {
       label: 'mark the notice seen',
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {});
   });
+  view.cards.set(card.id, handle);
+  if (card.settled) handle.markSettled(card.settled);
+  return el;
+}
+
+/**
+ * A choices card (#804: ask_question with doc): it names a mock kit page and opens it in the viewer, where the
+ * picks are made; it lists no options of its own, so it can't be mistaken for the page's choices. The page's
+ * Send settles it (routes/files.ts, artifact-send).
+ */
+function docCard(ticketId, card, opts) {
+  const head = whoLine('asks', card, opts);
+  const status = h('span', { class: 'muted' }, 'Pick on the page, then press Send there');
+  const open = h('a', { class: 'button', href: fileHref(ticketId, card.doc.path) }, 'Open the choices');
+  const el = h('div', { class: 'qcard doc' }, head.el, h('div', { class: 'qtitle' }, card.doc.title),
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), open));
+  const handle = {
+    el,
+    markSettled(settled) {
+      el.classList.add('answered');
+      open.classList.add('secondary');
+      open.textContent = 'Open the page';
+      status.textContent = settled?.sent ? `Picks sent by ${settled.by}` : 'Answered in the chat';
+      head.done(settled?.sent ? `picks sent by ${settled.by}` : 'settled in the chat');
+    },
+  };
   view.cards.set(card.id, handle);
   if (card.settled) handle.markSettled(card.settled);
   return el;

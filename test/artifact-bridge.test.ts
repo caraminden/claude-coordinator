@@ -284,6 +284,27 @@ test('artifact_data is offered to minions and Taskmasters, and reads a page', as
   assert.match(result.content[0].text, /^db\/picks\/rogue = \{"pick":1\} \(Taskmaster, \d{4}-\d\d-\d\dT\d\d:\d\dZ\)$/m);
 });
 
+// A choices card (#804): ask_question with doc names a mock kit page with pick bars, and the page's Send settles it.
+writeFileSync(join(root, 'work', 'choices.html'), '<!DOCTYPE html><title>Header takes</title><script src="mockkit.js"></script><div data-pick>A</div><script>mock.picks();</script>');
+const askDoc = (doc: string) => fetch(`${srv.base}/api/tickets/${M.id}/questions`, {
+  method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ doc }),
+}).then(async (r) => ({ status: r.status, data: await r.json() }));
+const cardData = (id: string) => store.listEvents(M.id).filter((e) => e.kind === 'question').map((e) => JSON.parse(e.data)).find((q) => q.id === id);
+let choicesCard = '';
+
+test('a choices card names a page with pick bars, and only such a page (#804)', async () => {
+  assert.match((await askDoc('picker.html')).data.error, /mock kit page with pick bars/);
+  assert.match((await askDoc('notes.md')).data.error, /must be an HTML page/);
+  assert.match((await askDoc('../work-b/theirs.html')).data.error, /must be an HTML page/);
+  const r = await askDoc('choices.html');
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  choicesCard = r.data.id;
+  assert.deepEqual(cardData(choicesCard), { id: choicesCard, questions: [], doc: { path: join(root, 'work', 'choices.html'), title: 'Header takes' } });
+  // It lists no options, so it is answered on its page, not on the card.
+  const answer = await fetch(`${srv.base}/api/tickets/${M.id}/answer`, { method: 'POST', headers: { Cookie: srv.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: choicesCard }) });
+  assert.equal(answer.status, 409);
+});
+
 // These start turns on M and the Taskmaster, which retires the nonce-less agent tokens the tests above use: keep them last.
 const sendPage = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) =>
   fetch(`${srv.base}/api/artifact-send`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -329,4 +350,18 @@ test("a page's Send is refused for another page, an empty text, and anyone but a
   assert.equal((await sendPage({ open: { artifact: PICKER.id }, page, text: 'x' }, { Authorization: `Bearer ${tokens.agentToken(MB.id)}` })).status, 403);
   assert.equal((await sendPage({ open: { artifact: PICKER.id }, page, text: 'x' }, {})).status, 401);
   assert.equal(store.listEvents(M.id).filter((e) => e.kind === 'user_message').length, before, 'nothing was sent');
+});
+
+test("a choices page's Send settles its card in the chat that showed it (#804)", async () => {
+  assert.equal(cardData(choicesCard).settled, undefined);
+  store.syncArtifacts(M, [{ path: 'choices.html', size: 1, mtime: 1 }]);
+  const page = await pageOf(art('choices.html').id);
+  // A Send from another page leaves it waiting.
+  await sendPage({ open: { artifact: PICKER.id }, page: await pageOf(PICKER.id), text: 'Picks on "Picker":' });
+  assert.equal(cardData(choicesCard).settled, undefined);
+  const r = await sendPage({ open: { ticket: M.id, path: 'choices.html' }, page, text: 'Picks on "Header takes":\n- A: Picked' });
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  assert.deepEqual(cardData(choicesCard).settled, { at: cardData(choicesCard).settled.at, by: 'Cara', sent: true });
+  assert.deepEqual(store.listEvents(M.id).filter((e) => e.kind === 'question_result').map((e) => JSON.parse(e.data).id), [choicesCard]);
+  assert.equal(store.openCardsOf(M.id).length, 0);
 });

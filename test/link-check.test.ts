@@ -138,3 +138,23 @@ test('a linked page with its own clipboard or send button is sent back; a kit pa
   // A page named in code is no link.
   assert.equal(await reply(`\`${mine}/clip.html\``), null);
 });
+
+test('a linked choices page with no card that opens it is sent back; its card, open or settled, lets it through (#804)', async () => {
+  writeFileSync(join(mine, 'takes.html'), '<title>Takes</title><script src="mockkit.js"></script><script>mock.boards([]);</script>');
+  writeFileSync(join(mine, 'plain.html'), '<p>no picks</p>');
+  const refsFile = join(root, 'refs-804.json');
+  const withCards = (cards: object[], settled: object[] = []) => {
+    writeFileSync(refsFile, JSON.stringify({ scheme: 'Citadel', others: [], minions: {}, self: 268, cards, settled }));
+    return check({ last_assistant_message: `Pick in [the takes](${mine}/takes.html), or read [this](${mine}/plain.html).` }, { ...cfg, refs: refsFile });
+  };
+  const v = await withCards([]);
+  assert.equal(v?.decision, 'block');
+  assert.ok(v.reason.includes(`- ${join(mine, 'takes.html')}`), v.reason);
+  assert.match(v.reason, /ask_question with doc set to the page's path/);
+  assert.ok(!v.reason.includes('plain.html'), 'a page with no pick bars needs no card');
+  const card = { minion: 268, kind: 'question', label: 'picks on “Takes”', href: '#/p/2/t/268?e=5', doc: join(mine, 'takes.html') };
+  assert.equal(await withCards([card]), null);
+  assert.equal(await withCards([], [{ ...card, how: 'picks sent by Cara at 2:31am' }]), null);
+  // Another page's card doesn't count.
+  assert.equal((await withCards([{ ...card, doc: join(mine, 'other.html') }]))?.decision, 'block');
+});

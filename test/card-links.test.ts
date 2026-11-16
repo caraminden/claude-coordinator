@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cardHref, cardLabel, cardWhat, misplacedCards, staleCards, unlinkedCards, type CardLink, type SettledCard } from '../src/card-links.ts';
+import { cardHref, cardLabel, cardWhat, misplacedCards, settledHow, staleCards, unlinkedCards, type CardLink, type SettledCard } from '../src/card-links.ts';
 import { Store } from '../src/db.ts';
 import { check, SENT_BACK } from '../src/link-check.ts';
 import { clockTime, Runner } from '../src/runner.ts';
@@ -28,6 +28,7 @@ test('cardHref opens a minion\'s or the Taskmaster\'s chat at the card (base.js 
   assert.equal(cardLabel('plan', { summary: 'Build it this way' }), 'Build it this way');
   assert.equal(cardLabel('question', { questions: [{ header: 'Layout' }, { question: 'Which?' }] }), 'Layout, Which?');
   assert.equal(cardLabel('approval', { tool: 'Bash', input: { description: 'Restart' } }), 'Bash: Restart');
+  assert.equal(cardLabel('question', { questions: [], doc: { path: '/w/takes.html', title: 'Header takes' } }), 'picks on “Header takes”');
 });
 
 test('flags a card mentioned without its link: another minion\'s by #N, else this chat\'s own', () => {
@@ -310,4 +311,8 @@ test('cardWhat: a merge go, a tripwire approval, or the card\'s own kind (#575)'
   assert.equal(cardWhat('approval', { tool: 'Bash' }), 'approval');
   assert.equal(cardWhat('question', { questions: [] }), 'question');
   assert.equal(cardWhat('plan', { summary: 's' }), 'plan');
+});
+
+test('a choices card settled by its page\'s Send reads as picks sent (#804)', () => {
+  assert.equal(settledHow('question', { doc: { path: '/w/t.html', title: 'T' }, settled: { at: 1, by: 'Cara', sent: true } }, null, null, null, () => '2:31am'), 'picks sent by Cara at 2:31am');
 });

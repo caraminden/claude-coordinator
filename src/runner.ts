@@ -1655,7 +1655,10 @@ export class Runner {
    */
   relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true): boolean | 'cold' | 'mail' | 'parked' {
     const { held, cold, parked } = this.guard(minionPairKey(from, to), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, false, from, !wake, urgent);
-    if (!held) return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
+    if (!held) {
+      this.copyToTaskmaster(to, author, text);
+      return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
+    }
     const [a, b] = [from, to].map((id) => `#${this.store.getTicket(id)!.number}`);
     const what = `${a}'s message to ${b} ("${clip(text)}")`;
     const note = held === 1
@@ -1663,6 +1666,14 @@ export class Runner {
       : `Also held: ${what}.`;
     for (const id of [from, to]) this.emit(id, 'loop_paused', { minion: id, text: note });
     return true;
+  }
+
+  /** The scheme's Taskmaster sees each message between its minions as held mail that wakes nothing (#783). */
+  private copyToTaskmaster(to: number, author: string, text: string) {
+    const target = this.store.getTicket(to)!;
+    const coordinator = this.store.getCoordinator(target.project_id);
+    const line = text.replace(/\s+/g, ' ');
+    if (coordinator) this.leaveMail(coordinator.id, author, `(to #${target.number}, for your tracking; nothing to do) ${line.length > 200 ? line.slice(0, 200) + '…' : line}`);
   }
 
   /**
@@ -1862,6 +1873,7 @@ export class Runner {
       for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' || pair ? id : ticketId, by, text });
       // Only the Taskmaster's messages to its minion steer; Taskmasters' and minions' to each other queue.
       for (const m of loop.held) {
+        if (pair) this.copyToTaskmaster(m.to, m.author, m.text);
         // A minion dismissed since never reopens for another minion's message (#783): it waits as mail.
         if (m.mail || (pair && this.store.getTicket(m.to)?.status === 'closed')) this.mail(m.to, m.author, m.text, m.from);
         else if (pair) this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, false);

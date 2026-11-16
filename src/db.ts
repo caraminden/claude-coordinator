@@ -2720,12 +2720,6 @@ export class Store {
     this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
   }
 
-  /** The setting keys that start with `prefix`, by a range on the key's index (no LIKE scan). */
-  settingKeys(prefix: string): string[] {
-    const end = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
-    return (this.db.prepare('SELECT key FROM settings WHERE key >= ? AND key < ?').all(prefix, end) as { key: string }[]).map((r) => r.key);
-  }
-
   /** Record a release of a scheme's target (src/releases.ts). */
   addRelease(r: Omit<ReleaseRow, 'id'>): number {
     return Number(this.db.prepare('INSERT INTO releases (project_id, target, version, changes, started_at, live_at, outcome, stages) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')

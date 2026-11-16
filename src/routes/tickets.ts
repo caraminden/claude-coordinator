@@ -877,9 +877,6 @@ export const ticketRoutes: Route[] = [
       if (held !== true) {
         const how = held === 'parked' ? 'Left for' : held ? 'Left held mail for' : 'Sent';
         runner.emit(ticket.id, 'note', { text: `${how} #${target.number} ${target.title}: ${text}` });
-        const coordinator = store.getCoordinator(ticket.project_id);
-        const line = text.replace(/\s+/g, ' ');
-        if (coordinator) runner.leaveMail(coordinator.id, author, `(to #${target.number}, for your tracking; nothing to do) ${line.length > 200 ? line.slice(0, 200) + '…' : line}`);
       }
       return json(res, 202, { held, number: target.number, title: target.title, state: target.state });
     },

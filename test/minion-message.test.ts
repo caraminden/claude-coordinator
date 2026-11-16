@@ -117,6 +117,8 @@ test('a pair of minions is held after 6 either way in 10 minutes; their Taskmast
   const held = await tool(M4.id, 'message_minion', { ticket_id: M1.number, text: 'ping 6', wake: false });
   assert.match(held.text, /Held, not delivered: you and #1/);
   assert.equal(events(M1.id, 'user_message').filter((m) => m.text === 'ping 6').length, 0);
+  const copies = () => events(TM.id, 'user_message').filter((m) => m.text.endsWith(') ping 6')).length;
+  assert.equal(copies(), 0, 'no Taskmaster copy while it is held');
   for (const id of [M1.id, M4.id]) assert.match(events(id, 'loop_paused').at(-1).text, /#4 and #1 have exchanged 6 messages/);
   // Another pair isn't held, and the Taskmaster's own loop with #1 counted none of these.
   assert.doesNotMatch((await tool(M1.id, 'message_minion', { ticket_id: M2.number, text: 'other pair', wake: false })).text, /Held/);
@@ -125,6 +127,7 @@ test('a pair of minions is held after 6 either way in 10 minutes; their Taskmast
   const res = await srv.call(`/api/tickets/${M1.id}/continue`, {});
   assert.equal(res.data.released, 1);
   assert.equal(events(M1.id, 'user_message').filter((m) => m.text === 'ping 6').length, 1);
+  assert.equal(copies(), 1, 'the Taskmaster gets its copy once the message goes through');
 });
 
 test("read_minion shows a minion's line with its worktree and its chat's words, without cards or tool calls", async () => {

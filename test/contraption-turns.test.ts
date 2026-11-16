@@ -84,6 +84,8 @@ take().then((m) => {
       out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: 'Heard.', usage: { input_tokens: 3, output_tokens: 4, cache_read_input_tokens: 5 } });
     });
   }
+  // Limited on the first account only (#785): the second one's folder ends in claude2.
+  if (prompt.includes('first account limited') && !process.env.CLAUDE_CONFIG_DIR.endsWith('claude2')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   if (prompt.includes('plan limit')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   if (prompt.includes('expired')) { out({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 authentication_error OAuth token has expired' }); process.exit(1); }
   if (prompt.includes('crash')) { process.stderr.write('boom\\n'); process.exit(3); }
@@ -183,8 +185,13 @@ for (const c of [mandate, peek]) for (const u of [cara, josh, olive]) store.setC
 const vol = join(root, 'vol-josh');
 const expired: number[] = [];
 let caraCodex: TurnPlace | null = null;
+// Cara's second Claude account (#785): which one turns run on, and what the link was told about limits.
+let caraOn = 1;
+let caraLimits: { n: number; until: number }[] = [];
+let caraSpare = false;
 const places = {
   place(uid: number | null) {
+    if (uid === cara.id && caraOn === 2) return { host: true as const, account: 2, configDir: join(root, 'claude2'), env: { CLAUDE_CONFIG_DIR: join(root, 'claude2') } };
     if (uid === cara.id) return { host: true as const };
     if (uid === josh.id) {
       return { host: false as const, container: 'citadel-claude-t-2', configDir: join(vol, '.claude'), home: vol, turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: homedir(), CLAUDE_CONFIG_DIR: join(vol, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} };
@@ -194,6 +201,12 @@ const places = {
   // Cara's Codex-only container (#341), once a test gives her one.
   codexPlace: (uid: number) => (uid === cara.id ? caraCodex : null),
   expire: (uid: number) => expired.push(uid),
+  limitedView(_uid: number, n: number, until: number) {
+    caraLimits.push({ n, until });
+    const next = n === 1 && caraSpare ? { n: 2, label: 'account 2' } : null;
+    if (next) caraOn = 2;
+    return { next, resetAt: next ? until : until - 3_600_000 };
+  },
 };
 // The server's own environment: what must and mustn't reach a turn.
 const serverEnv = {
@@ -522,7 +535,7 @@ test('the turn_cap and the plan\'s own limit both answer limit; a crash says fai
   for (let i = used; i < 2; i++) assert.equal((await turn(capped, { person: josh.id, session: `cap-${i}` })).at(-1)!.event, 'end');
   assert.equal(errorOf(await turn(capped, { person: josh.id, session: 'cap-3' })), 'limit');
   store.updateContraption('peek-auras', { turn_cap: null });
-  assert.equal(errorOf(await turn(mandate, { session: 'limits', prompt: 'plan limit' })), 'limit');
+  const lim = await turn(mandate, { session: 'limits', prompt: 'plan limit' }); assert.equal(errorOf(lim), 'limit', JSON.stringify(lim.at(-1)));
   const crash = await turn(mandate, { session: 'crash', prompt: 'crash' });
   assert.equal(errorOf(crash), 'failed');
   assert.match(crash.at(-1)!.data.message, /exit 3.*boom/);
@@ -853,4 +866,26 @@ test("the server login's Codex app turns run in its own Codex-only container, ha
     turns.codexWhy = () => "Codex isn't set up on this server";
     caraCodex = null;
   }
+});
+
+test('a limit on the first Claude account marks it and the turn finishes on the second, session and all (#785)', async () => {
+  caraOn = 1; caraLimits = []; caraSpare = true;
+  await turn(mandate, { session: 'move', prompt: 'hello' });
+  const evs = await turn(mandate, { session: 'move', prompt: 'first account limited' });
+  assert.deepEqual(evs.map((e) => e.event).filter((e) => e === 'start' || e === 'error' || e === 'end'), ['start', 'end'], 'one start, no error');
+  assert.deepEqual(caraLimits.map((l) => l.n), [1]);
+  // The first turn's transcript came along, so the resumed session on account 2 still has it.
+  const dirs = readdirSync(join(root, 'claude2', 'projects'));
+  const text = dirs.flatMap((d) => readdirSync(join(root, 'claude2', 'projects', d)).map((f) => readFileSync(join(root, 'claude2', 'projects', d, f), 'utf8'))).join('');
+  assert.match(text, /hello/);
+  assert.match(text, /first account limited/);
+  caraOn = 1; caraSpare = false;
+});
+
+test('every Claude account limited: the turn fails with limit and says which resets first (#785)', async () => {
+  caraOn = 1; caraLimits = []; caraSpare = false;
+  const evs = await turn(mandate, { session: 'all-limited', prompt: 'first account limited' });
+  assert.equal(errorOf(evs), 'limit');
+  assert.match(evs.at(-1)!.data.message, /Another of this person's Claude accounts resets first/);
+  assert.equal(caraLimits.length, 1);
 });

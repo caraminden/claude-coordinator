@@ -13,7 +13,7 @@
 // and the session names are stored. The transcript is the person's own Claude session, in their folder.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
@@ -21,6 +21,7 @@ import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
 import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
+import { clockTime, parseResetTime } from './runner.ts';
 import { MEDIA_SERVER, type CodexAt, type MediaTurn } from './contraption-media.ts';
 import { claudeConfigDir, transcriptPath, validSessionId } from './sessions.ts';
 
@@ -268,6 +269,8 @@ export interface ClaudePlaces {
   /** The server login's Codex-only container (#341), whose place() is the host. */
   codexPlace(uid: number): TurnPlace | null;
   expire(uid: number, account?: number): void;
+  /** A turn on `account` hit its limit, which resets at `until` (ClaudeLink.limitedView, the minions' path): the account turns move on to, or null when none is ready, and the first reset. */
+  limitedView(uid: number, account: number, until: number): { next: { n: number; label: string } | null; resetAt: number } | null;
 }
 
 export class ContraptionTurns {
@@ -444,8 +447,39 @@ export class ContraptionTurns {
     this.live.set(id, live);
     let outcome: string = 'failed';
     let usage: Usage | null = null;
+    // A limit can show up after output went to the app (a long tool loop), so a retry on the next account only
+    // happens while nothing but `start` has gone out; its own `start` is dropped, the app has had one.
+    let sent = false;
+    let retrying = false;
+    const out: Emit = (event, data) => {
+      if (event === 'start' && retrying) return;
+      if (event !== 'start') sent = true;
+      emit(event, data);
+    };
     try {
-      ({ outcome, usage } = await this.turn(c, req, place, at, wantCodex, live, dir, emit));
+      let r = await this.turn(c, req, place, at, wantCodex, live, dir, out, () => !sent);
+      if (r.retry) {
+        // The limit moved this person's turns to their next account: carry the session's transcript over, as a minion's restoreSession does.
+        retrying = true;
+        const next = this.claude.place(req.person);
+        const known = this.store.contraptionSession(c.id, req.person, req.session);
+        if (next && known) {
+          const from = this.scratch(c, req.person, place), to = this.scratch(c, req.person, next);
+          const src = transcriptPath(from.configDir, from.cwd, known.claude_session), dst = transcriptPath(to.configDir, to.cwd, known.claude_session);
+          if (src && dst && src !== dst && existsSync(src)) {
+            mkdirSync(dirname(dst), { recursive: true });
+            copyFileSync(src, dst);
+            if (existsSync(src.replace(/\.jsonl$/, ''))) cpSync(src.replace(/\.jsonl$/, ''), dst.replace(/\.jsonl$/, ''), { recursive: true });
+          }
+        }
+        rmSync(dir.onHost, { recursive: true, force: true }); // turn() makes it again
+        live.replied = false;
+        live.steers.clear();
+        // Only a Claude turn retries, and its `at` is its place.
+        if (next) r = await this.turn(c, req, next, next, wantCodex, live, dir, out, () => false);
+        else out('error', { code: 'limit', message: 'This person has no Claude account to carry on with' });
+      }
+      ({ outcome, usage } = r);
     } catch (err: any) {
       fail('failed', String(err?.message ?? err).slice(0, 300));
     } finally {
@@ -457,7 +491,7 @@ export class ContraptionTurns {
   }
 
   /** `place` is where the person's Claude turns and the session's files are; `at` is where this one runs (they differ only for the server login on Codex). */
-  private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, at: TurnPlace, wantCodex: boolean, live: Live, dir: { onHost: string; inside: string }, emit: Emit): Promise<{ outcome: string; usage: Usage | null }> {
+  private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, at: TurnPlace, wantCodex: boolean, live: Live, dir: { onHost: string; inside: string }, emit: Emit, canRetry: () => boolean): Promise<{ outcome: string; usage: Usage | null; retry?: true }> {
     const where = this.scratch(c, req.person, place);
     mkdirSync(where.onHost, { recursive: true });
     // Its working folder, inside the container it runs in: Codex's app turns run only their MCP tools, so it holds nothing they need.
@@ -701,8 +735,15 @@ export class ContraptionTurns {
       return { outcome: 'end', usage };
     }
     const why = [typeof result?.result === 'string' ? result.result : '', ...(Array.isArray(result?.errors) ? result.errors.map(String) : []), stderr].join('\n').trim();
-    // shortcut: an app turn's limit doesn't move its person's turns to another Claude account (#779); a minion's turn on it does.
-    if (USAGE_LIMIT.test(why)) return error('limit', why.split('\n')[0].slice(0, 300));
+    if (USAGE_LIMIT.test(why)) {
+      let line = why.split('\n')[0].slice(0, 300);
+      // Mark the account, as the runner does (Settings → Account and the minions' turns see it too); a Codex turn's limit is OpenAI's.
+      const until = parseResetTime(why) ?? Date.now() + 60 * 60 * 1000;
+      const r = codex ? null : this.claude.limitedView(req.person, place.account ?? 1, until);
+      if (r?.next && canRetry() && !live.stopped) return { outcome: 'retry', usage, retry: true };
+      if (r && !r.next && r.resetAt < until) line += ` Another of this person's Claude accounts resets first, at ${clockTime(r.resetAt, 'America/Los_Angeles')}.`;
+      return error('limit', line);
+    }
     // A Codex turn's 401 is OpenAI's: it says nothing about the Claude sign-in.
     if (!codex && isAuthFailure(why)) {
       if (!place.host || (place.account ?? 1) > 1) this.claude.expire(req.person, place.account);

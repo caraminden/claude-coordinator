@@ -348,3 +348,22 @@ test('subjectTicket reads a subject the way tools/land.sh does: a leading #N, WI
   assert.equal(subjectTicket('#7: follows #8) oddly (#9)'), '7');
   assert.equal(subjectTicket('no ticket here'), '');
 });
+
+test('turns that stopped on a usage limit are not failed turns, so a burst of them raises no finding', async () => {
+  const { store, a, clock, woken, w, deploy } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  const at = clock.now;
+  deploy(sha('1'), [{ sha: sha('1'), subject: `#${a.number}: thing` }]);
+  const turn = (ended: number, bad: boolean, result?: string) => {
+    const e = store.addEvent(a.id, 'result', { type: 'result', is_error: bad, result, total_cost_usd: 0 });
+    store.recordTurn(a.id, { event_id: e.id, ended_at: ended, session_cost_usd: 0 });
+  };
+  for (let i = 0; i < 10; i++) turn(at - 15 * MIN + i, i === 0);
+  for (let i = 0; i < 10; i++) turn(at + 2 * MIN + i, false);
+  for (let i = 0; i < 8; i++) turn(at + 5 * MIN + i, true, "You've hit your 5-hour limit · resets 3:30pm (America/Los_Angeles)");
+  assert.deepEqual(store.turnOutcomes(at, at + 20 * MIN), { turns: 10, failed: 0, first: null });
+  clock.now = at + 20 * MIN;
+  await w.tick();
+  assert.deepEqual(woken, []);
+});

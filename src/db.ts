@@ -2746,12 +2746,13 @@ export class Store {
 
   /**
    * How turns ended in [from, to) (#724): every finished turn (the turns table) plus every error event (a turn that
-   * couldn't start or crashed), how many of those failed (a result with is_error, or an error), and the first failure's time.
+   * couldn't start or crashed), minus the turns that stopped on a usage limit ("You've hit your 5-hour limit", USAGE_LIMIT: a person's
+   * plan running out says nothing about a deploy, and they are left out of both counts), how many of those failed (a result with is_error, or an error), and the first failure's time.
    */
   turnOutcomes(from: number, to: number): { turns: number; failed: number; first: number | null } {
     const ok = this.db.prepare(`SELECT COUNT(*) AS n, SUM(e.data LIKE '%"is_error":true%') AS bad, MIN(CASE WHEN e.data LIKE '%"is_error":true%' THEN t.ended_at END) AS first
-        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ?`).get(from, to) as { n: number; bad: number | null; first: number | null };
-    const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE id >= ? AND id < ? AND kind = 'error' AND created_at >= ? AND created_at < ?")
+        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND NOT (e.data LIKE '%"is_error":true%' AND e.data LIKE '%hit your %limit%')`).get(from, to) as { n: number; bad: number | null; first: number | null };
+    const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE id >= ? AND id < ? AND kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%'")
       .get(this.eventIdAt(from), this.eventIdAt(to), from, to) as { n: number; first: number | null };
     const firsts = [ok.first, errs.first].filter((f): f is number => f != null);
     return { turns: Number(ok.n) + Number(errs.n), failed: Number(ok.bad ?? 0) + Number(errs.n), first: firsts.length ? Math.min(...firsts) : null };

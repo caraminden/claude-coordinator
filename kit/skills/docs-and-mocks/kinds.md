@@ -20,7 +20,7 @@ People pick between takes, or give each item a verdict.
   the idea, not the content. State is per board; a control above the boards that every take shares
   uses `ctl.set('*', patch)`.
 - **Item verdicts** (art, foes, names): a grid of items, each a `[data-pick]` element with its art
-  and name, and `mock.picks({ collection: 'marks', options: ['keep', 'rework', 'cut'] })`.
+  and name (all of an item's content inside that element), and `mock.picks({ collection: 'marks', options: ['keep', 'rework', 'cut'] })`.
 - **Below the boards:** what every take shares, so no board's note has to repeat it.
 - **The dock** comes by itself: counts and Send.
 - **Critic lines,** when `citadel:critique` judged the takes: each board's note ends with the

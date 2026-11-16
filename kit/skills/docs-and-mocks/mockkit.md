@@ -68,6 +68,7 @@ mock.picks({ collection: 'questions', options: ['yes', 'no'], root: document.get
   row (one `data-pick` item) per person in the same collection.
 - One collection per question set; two sets on a page need two collections or separate roots.
 - The item gets `.picked` and `data-mk-v` when chosen, for styling.
+- Put everything a take shows (heading, blurb, screenshots, captions) inside its `data-pick` element, never loose between elements. The kit boxes that element as one unit with its pick bar at the bottom and turns the whole box green when picked; anything outside it reads as belonging to no take.
 
 ## The dock
 

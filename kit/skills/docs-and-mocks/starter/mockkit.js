@@ -83,6 +83,7 @@
         return b;
       });
       const bar = el('div', { class: 'mk-pickbar' }, el('span', { class: 'mk-opts' }, ...buttons), note, el('div', { class: 'mk-who', 'aria-live': 'polite' }));
+      if (!host.matches('.mk-board, .mk-option, .mk-callout, .mk-take')) host.classList.add('mk-take'); // a take is one boxed unit
       host.append(bar);
       items.set(id, { host, title, bar, note, buttons });
       paint();

@@ -165,7 +165,7 @@ body.mk {
 .mk-boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--mk-board-w, 420px)), 1fr)); gap: 1.25rem; margin: 1.25rem 0; align-items: start; }
 .mk-board { background: var(--mk-panel); border: 1px solid var(--mk-line); border-radius: var(--mk-radius); display: flex; flex-direction: column; min-width: 0; box-shadow: var(--mk-shadow); }
 .mk-board.rec { border-color: color-mix(in srgb, var(--mk-accent) 60%, var(--mk-line)); }
-.mk-board.picked { border-color: var(--mk-good); box-shadow: 0 0 0 1px var(--mk-good); }
+.mk-board.picked { border-color: var(--mk-good); }
 .mk-board > header { padding: 0.8rem 0.95rem 0.6rem; display: grid; gap: 0.2rem; }
 .mk-board > header .mk-board-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 650; font-family: var(--mk-display); }
 .mk-board > header p { margin: 0; font-size: 0.88rem; color: var(--mk-muted); }
@@ -196,6 +196,17 @@ body.mk {
 .mk-pickbar .mk-who { flex-basis: 100%; font-size: 0.78rem; color: var(--mk-muted); min-height: 1em; }
 .mk-item { position: relative; }
 .mk-item > .mk-pickbar { padding-inline: 0; }
+
+/* A take: every [data-pick] element is one boxed unit (heading, blurb, screenshots, pick bar) on a panel,
+   with the page background showing between units. Picked: the whole box turns green, not just the bar. */
+.mk-take { background: var(--mk-panel); border: 1px solid var(--mk-line); border-radius: var(--mk-radius); padding: 1rem 1.1rem 0; margin: 1.5rem 0; box-shadow: var(--mk-shadow); position: relative; }
+.mk-take > :first-child { margin-top: 0; }
+.mk-take img, .mk-take .mk-frame { border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); background: var(--mk-sunk); padding: 0.4rem; box-sizing: border-box; }
+.mk-take figure { margin: 0.9rem 0; }
+.mk-take figcaption { font-size: 0.82rem; color: var(--mk-muted); margin-top: 0.35rem; }
+.mk-take > .mk-pickbar { padding-inline: 0; margin-top: 1rem; border-top: 1px solid var(--mk-line); }
+.mk-take.picked, .mk-board.picked, .mk-option.picked { border-color: var(--mk-good); box-shadow: 0 0 0 1px var(--mk-good); background: color-mix(in srgb, var(--mk-good) 9%, var(--mk-panel)); }
+.mk-take.picked > .mk-pickbar { border-top-color: color-mix(in srgb, var(--mk-good) 35%, var(--mk-line)); }
 
 /* The dock: how many are picked, and Send. Sits at the end of the page; sticks to the bottom once anything is picked. */
 .mk-dock.stuck { position: sticky; bottom: 0; z-index: 5; }

@@ -175,8 +175,10 @@ conflict_fix() {
 # The early check (#770): <onto> <when>. Whether the rebase onto <onto> (--build's merge of it) would stop on a conflict,
 # by git merge-tree, which touches no worktree, index or ref. With $under, as the rebase's --onto leaves it behind. On a
 # conflict it logs the files as conflict() does, says the same refusal, and fails. A git that can't tell (exit 2 and up)
-# counts as clean: the rebase itself decides then. shortcut: a three-way merge, not a replay commit by commit, so a
-# branch that changes a line and changes it back can pass here and still stop in the rebase, which catches it as before.
+# counts as clean: the rebase itself decides then. shortcut: a three-way merge, not a replay commit by commit. A branch
+# that changes a line and changes it back can pass here and still stop in the rebase, which catches it as before; and a
+# branch whose commit main already has as a cherry-pick, with a later commit on the same lines, is refused here though
+# the rebase would skip it: the git rebase the refusal names then goes through clean. Upgrade to a replay if that bites.
 early_check() {
   local out rc=0 files at
   out=$(git merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?

@@ -592,8 +592,10 @@ undo_guard() {
 # The early check: whether <commit> (the branch as it was) would rebase onto $BRANCH's tip cleanly, by git merge-tree,
 # which touches no worktree, index or ref. On a conflict it says the refusal, naming the files, and fails; a git that
 # can't tell (too old, exit 2 and up) counts as clean, and the rebase itself decides. shortcut: a three-way merge, not a
-# replay commit by commit, so a branch that changes a line and changes it back can pass here and still stop in the
-# rebase, which catches it as before.
+# replay commit by commit. A branch that changes a line and changes it back can pass here and still stop in the
+# rebase, which catches it as before; and a branch whose commit main already has as a cherry-pick, with a later commit
+# on the same lines, is refused here though the rebase would skip it: the git rebase the refusal names then goes
+# through clean. Upgrade to a replay if that bites.
 early_conflict() {
   local out rc=0 files
   out=$(git merge-tree --write-tree --name-only --no-messages "refs/heads/$BRANCH" "$1" 2>/dev/null) || rc=$?
@@ -1082,7 +1084,9 @@ while :; do
   queue_look || exit 1
   # While others are ahead, each time main moves: whether the branch would still rebase onto it. A conflict leaves the
   # line at once, so the minion hears now rather than when it reaches the front.
-  if [ "$Q_AHEAD" != 0 ] && [ "$(git rev-parse "refs/heads/$BRANCH")" != "$checked_main" ]; then
+  # Not once its own commit is on main (landed in a batch since batch_landed's look): it would conflict with itself.
+  if [ "$Q_AHEAD" != 0 ] && [ "$(git rev-parse "refs/heads/$BRANCH")" != "$checked_main" ] &&
+    ! { [ -n "$tip" ] && git merge-base --is-ancestor "$tip" "refs/heads/$BRANCH" 2>/dev/null; }; then
     checked_main=$(git rev-parse "refs/heads/$BRANCH")
     early_conflict "$pre" "waiting in line" || exit 1
   fi

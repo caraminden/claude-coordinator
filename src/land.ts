@@ -100,7 +100,8 @@ export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown
  * The early conflict check at hand-off (#770): `tools/land.sh --check <args>` in the worktree, which runs git merge-tree
  * against what the land would rebase onto (main, a build, another scheme's BRANCH). Its refusal when it says the branch
  * would conflict (exit 3), else null: clean, or no verdict (a land.sh from before --check refuses the argument with 1,
- * a hang, a git error), and then the hand-off goes on as before. It only ever saves a wait, never blocks a land.
+ * a hang, a git error), and then the hand-off goes on as before. Its three-way merge can refuse a branch the rebase would
+ * take (a commit main has as a cherry-pick, under a later one on the same lines); the git rebase it names fixes that.
  */
 export function landConflict(cwd: string, env: Record<string, string>, args: string[], timeout = 30_000): Promise<string | null> {
   return new Promise((done) => {

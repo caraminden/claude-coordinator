@@ -149,6 +149,9 @@
     let sent = null;
     let saving = false;
     let btn = null;
+    // Whether what's picked has reached Citadel (#821): saved, saving, or retrying while Citadel restarts.
+    // Pages under an older bridge (no watchSaves) just say they save.
+    let saveState = 'saved';
     // The text last sent, kept across reloads (the bridge scopes localStorage to this page; the title keeps a
     // plain tab apart): the same picks are never posted twice from one page. `pending` is the post in flight,
     // kept in memory only, so a reload mid-send doesn't leave picks marked Sent that never went.
@@ -209,6 +212,7 @@
           }
         });
         ($('.mk-page') ?? document.body).append(node);
+        if (saving) window.citadel?.watchSaves?.((st) => { saveState = st; dock.paint(); });
         this.paint();
       },
       paint() {
@@ -216,7 +220,11 @@
         let picked = 0;
         let notes = 0;
         for (const s of sets) for (const d of s.docs.values()) { if (d.v) picked++; if (d.note) notes++; }
-        const where = saving ? 'saved for the minion to read' : 'not saved or sent: open this page from Citadel to send';
+        const where = !saving ? 'not saved or sent: open this page from Citadel to send'
+          : saveState === 'retrying' ? 'not saved yet: Citadel is restarting, so it keeps trying'
+          : saveState === 'saving' ? 'saving…'
+          : 'saved for the minion to read';
+        node.classList.toggle('mk-unsaved', saving && saveState === 'retrying');
         node.classList.toggle('stuck', picked + notes > 0);
         const now = summary();
         const done = saving && now !== '' && (now === lastSent || now === pending);

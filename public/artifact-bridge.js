@@ -88,13 +88,49 @@
       for (const e of entries) inFlight.set(e.key, e.value);
       sending = sending.catch(() => {}).then(async () => {
         if (!(await ready)) throw new Error(NO_VIEWER);
-        for (let i = 0; i < entries.length; i += 100) await request('write', { entries: entries.slice(i, i + 100) });
+        for (let i = 0; i < entries.length; i += 100) await keep(entries.slice(i, i + 100));
       }).finally(() => {
         for (const e of entries) if (inFlight.get(e.key) === e.value) inFlight.delete(e.key);
+        saves();
       });
+      saves();
       return sending;
     });
+    saves();
     return flushing;
+  }
+
+  // A write Citadel couldn't take because it was down or restarting (the viewer says `retry`) is sent again,
+  // 1 s, 2 s, 4 s … 15 s apart, until it lands (#821): it stays on top of refreshes meanwhile, as in flight.
+  let retrying = false;
+  async function keep(entries) {
+    for (let gap = 1000; ; gap = Math.min(gap * 2, 15000)) {
+      try {
+        await request('write', { entries });
+        retrying = false;
+        return;
+      } catch (err) {
+        if (!err.retry) {
+          retrying = false;
+          throw err;
+        }
+        retrying = true;
+        saves();
+        await new Promise((r) => setTimeout(r, gap));
+      }
+    }
+  }
+
+  // Whether what the page shows is saved (#821): 'saved', 'saving' (on its way) or 'retrying' (Citadel is
+  // down or restarting; it is sent again until it lands). Watchers hear each change.
+  const saveWatchers = new Set();
+  let saveState = 'saved';
+  const nowSaving = () => (retrying ? 'retrying' : queue.size || inFlight.size || flushing ? 'saving' : 'saved');
+  function saves() {
+    const s = nowSaving();
+    if (s === saveState) return;
+    saveState = s;
+    for (const fn of saveWatchers) fn(s);
   }
   let warned = false;
   const warn = (err) => {
@@ -124,8 +160,19 @@
     pending.delete(m.re);
     clearTimeout(p.timer);
     if (m.ok) p.resolve(m.result);
-    else p.reject(new Error(m.error));
+    else p.reject(Object.assign(new Error(m.error), { retry: m.retry === true }));
   });
+
+  // Typing here never reaches Citadel's own document, which waits for a quiet moment before it loads a new
+  // front end (and with it this frame, afresh): tell the viewer, at most once a second (#821).
+  let typedAt = 0;
+  const typing = () => {
+    if (!host || Date.now() - typedAt < 1000) return;
+    typedAt = Date.now();
+    host.postMessage({ bridge: TAG, id: ++seq, op: 'typing', page: cfg.page }, '*');
+  };
+  addEventListener('input', typing, true);
+  addEventListener('keydown', typing, true);
 
   // localStorage kept in the page's store (`localStorage/<key>`); sessionStorage only for this page's life.
   function storageShim(prefix) {
@@ -228,6 +275,14 @@
       delete: (key) => write(String(key), undefined),
       list: async (prefix = '') => [...data.keys()].filter((k) => k.startsWith(prefix)),
       watch: (fn) => watch('', () => fn(), true),
+    },
+    /** 'saved', 'saving' or 'retrying' (Citadel is down or restarting, and it is sent again until it lands). */
+    saveState: () => saveState,
+    /** Call `fn(state)` now and on each change of saveState; returns the unwatch. */
+    watchSaves: (fn) => {
+      saveWatchers.add(fn);
+      fn(saveState);
+      return () => saveWatchers.delete(fn);
     },
     /**
      * Send `text` to the minion that showed this page (a shared page: the one that linked it, else the

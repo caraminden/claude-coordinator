@@ -17,6 +17,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 function page(entries = []) {
   const posted = [];
   const listeners = [];
+  const others = {}; // the page's other listeners (input, keydown), by type
   const host = { postMessage: (m) => posted.push(m) };
   const bars = [];
   const document = {
@@ -26,7 +27,7 @@ function page(entries = []) {
   const ctx = vm.createContext({
     console, document, navigator: {}, crypto: globalThis.crypto,
     setTimeout: (fn, ms = 0) => setTimeout(fn, ms / SCALE), clearTimeout,
-    addEventListener: (type, fn) => type === 'message' && listeners.push(fn),
+    addEventListener: (type, fn) => (type === 'message' ? listeners : (others[type] ??= [])).push(fn),
     localStorage: {}, sessionStorage: {},
   });
   ctx.window = ctx;
@@ -35,6 +36,8 @@ function page(entries = []) {
   const deliver = (data) => { for (const fn of listeners) fn({ source: host, data: { bridge: TAG, ...data } }); };
   return {
     ctx, posted, bars, deliver,
+    /** The page's own events (a key press, typing in a field). */
+    fire: (type) => { for (const fn of others[type] ?? []) fn({ type }); },
     /** Answer the oldest unanswered request of kind `op`. */
     answer(op, result, ok = true) {
       const m = posted.find((p) => p.op === op && !p.answered);
@@ -103,4 +106,54 @@ test('a store refresh keeps writes that are on their way on top (#468 S13-7)', a
   // Once it has landed, a refresh is what the server holds.
   p.deliver({ op: 'changed', entries: [{ key: 'k', value: 'c' }] });
   assert.equal(await p.ctx.citadel.storage.get('k'), 'c');
+});
+
+test('a write Citadel could not take while it restarts stays on the page, on top of refreshes, and is sent again until it lands (#821)', async () => {
+  const p = page([['k', 'a']]);
+  p.answer('hello', { person: 'Cara', entries: [{ key: 'k', value: 'a' }] });
+  await p.ctx.citadel.ready;
+  const states = [];
+  p.ctx.citadel.watchSaves((s) => states.push(s));
+  let landed = false;
+  const set = p.ctx.citadel.storage.set('k', 'b').then(() => { landed = true; });
+  await wait(10);
+  assert.equal(p.ctx.citadel.saveState(), 'saving');
+  const first = p.waiting('write')[0];
+  first.answered = true;
+  p.deliver({ re: first.id, ok: false, error: 'Citadel is restarting, try again in a moment', retry: true });
+  await wait(1);
+  assert.equal(p.ctx.citadel.saveState(), 'retrying');
+  assert.equal(landed, false, 'the write is still on its way, not failed');
+  assert.equal(p.bars.length, 0, 'a restart is not a lost connection');
+  // What the server holds meanwhile doesn't wipe it.
+  p.deliver({ op: 'changed', entries: [{ key: 'k', value: 'a' }] });
+  assert.equal(await p.ctx.citadel.storage.get('k'), 'b');
+  // Sent again, with the same value, once Citadel is back.
+  await wait(40);
+  assert.equal(JSON.stringify(p.waiting('write').map((m) => m.entries)), JSON.stringify([[{ key: 'k', value: 'b' }]]));
+  p.answer('write', { entries: [{ key: 'k', value: 'b' }] });
+  await set;
+  assert.equal(p.ctx.citadel.saveState(), 'saved');
+  assert.deepEqual(states, ['saved', 'saving', 'retrying', 'saved'], 'told now, then on each change');
+});
+
+test('a write the viewer refuses for good still fails at once, and the save state says saved again (#821)', async () => {
+  const p = page();
+  p.answer('hello', { person: 'Cara', entries: [] });
+  await p.ctx.citadel.ready;
+  const set = p.ctx.citadel.storage.set('k', 'x');
+  await wait(10);
+  p.answer('write', 'Too many writes; slow down', false);
+  await assert.rejects(set, /Too many writes/);
+  assert.equal(p.ctx.citadel.saveState(), 'saved');
+});
+
+test('typing on the page tells the viewer, at most once a second, so a new front end does not reload under it (#821)', async () => {
+  const p = page();
+  p.answer('hello', { person: 'Cara', entries: [] });
+  await p.ctx.citadel.ready;
+  p.fire('input');
+  p.fire('keydown');
+  p.fire('input');
+  assert.equal(p.posted.filter((m) => m.op === 'typing').length, 1);
 });

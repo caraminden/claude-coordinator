@@ -218,6 +218,7 @@ body.mk {
 }
 .mk-dock .mk-dock-text { flex: 1 1 14rem; color: var(--mk-muted); }
 .mk-dock .mk-dock-text b { color: var(--mk-ink); }
+.mk-dock.mk-unsaved .mk-dock-text { color: var(--mk-warn); }
 .mk-dock .mk-sent { font-size: 0.85rem; color: var(--mk-good); }
 /* A Send that failed: what went wrong, and Retry. */
 .mk-toast { position: fixed; z-index: 20; left: 50%; bottom: max(1rem, env(safe-area-inset-bottom)); transform: translateX(-50%);

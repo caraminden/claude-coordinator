@@ -12,7 +12,7 @@ import { cleanEntries, injectBridge, linkPageText, LIMITS, writeStore } from '..
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { attachBridge, onArtifactData, readRequest, takeWrite, TAG } from '../public/bridge-host.js';
+import { attachBridge, bridgeTypedAt, bridgeUnsaved, onArtifactData, readRequest, takeWrite, TAG } from '../public/bridge-host.js';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'artifact-bridge-'));
@@ -139,10 +139,58 @@ test("the viewer answers only its own frames' sandboxed pages, with well-formed 
   assert.equal(msg({ op: 'send', text: ' ' }), null);
   assert.equal(msg({ op: 'send', text: 'x'.repeat(10_001) }), null);
   assert.equal(msg({ op: 'send', text: 'Picks: 3' })?.req.text, 'Picks: 3');
+  assert.equal(msg({ op: 'typing' })?.req.op, 'typing');
   // A frame taken out of the page is forgotten.
   frame.iframe.isConnected = false;
   assert.equal(msg({ op: 'hello' }), null);
   assert.equal(frames.size, 0);
+});
+
+test('a write Citadel could not take while it restarts tells the page to try again, and holds a new front end until it lands (#821)', async (t) => {
+  let onMessage: any = null;
+  (globalThis as any).addEventListener = (type: string, fn: any) => { if (type === 'message') onMessage = fn; };
+  t.after(() => { delete (globalThis as any).addEventListener; });
+  let fail: Error | null = new TypeError('Failed to fetch');
+  const api = async () => {
+    if (fail) throw fail;
+    return { store: 's9', entries: [], person: 'Cara' };
+  };
+  const posted: any[] = [];
+  const win = { postMessage: (m: any) => posted.push(m) };
+  const iframe = { isConnected: true, contentWindow: win };
+  attachBridge(iframe, { open: { artifact: 9 }, name: 'p9.html', owner: 'Cara', api });
+  // Taken out at the end, so the next test's viewer starts with no frames (and listens afresh).
+  t.after(() => { iframe.isConnected = false; onArtifactData('none'); });
+  const write = (id: number) => onMessage({ source: win, origin: 'null', data: { bridge: TAG, id, op: 'write', page: 'p9', entries: [{ key: 'k', value: 1 }] } });
+  const settle = () => new Promise((r) => setImmediate(r));
+
+  write(1);
+  await settle();
+  assert.equal(posted.at(-1).ok, false);
+  assert.equal(posted.at(-1).retry, true, 'the network failing is worth retrying');
+  assert.equal(bridgeUnsaved(), true, 'a page holds unsaved writes');
+  fail = Object.assign(new Error('Citadel is restarting, try again in a moment'), { status: 502 });
+  write(2);
+  await settle();
+  assert.equal(posted.at(-1).retry, true, 'a 502 while Citadel restarts too');
+  fail = Object.assign(new Error('Value too big'), { status: 400 });
+  write(3);
+  await settle();
+  assert.ok(!posted.at(-1).retry, 'a refusal is not retried');
+  assert.equal(bridgeUnsaved(), true, 'still unsaved: the retried write has not landed');
+  fail = null;
+  write(4);
+  await settle();
+  assert.equal(posted.at(-1).ok, true);
+  assert.equal(bridgeUnsaved(), false);
+
+  // Typing on the page counts as typing in Citadel, and gets no answer.
+  const n = posted.length;
+  const before = Date.now();
+  onMessage({ source: win, origin: 'null', data: { bridge: TAG, id: 5, op: 'typing', page: 'p9' } });
+  await settle();
+  assert.ok(bridgeTypedAt() >= before);
+  assert.equal(posted.length, n);
 });
 
 test('a frame writes in a burst of 40, then 20 a second', () => {

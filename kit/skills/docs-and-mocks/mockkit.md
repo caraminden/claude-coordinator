@@ -16,7 +16,9 @@ In Citadel's viewer, or a tab its Open button opened, the kit saves through the 
 `window.claude.use('db')`, key `db/<collection>/<id>`, value `{ v, note, by, at }` (`v` the choice,
 `by` the person). Everyone's picks show live. Opened with no way back to Citadel (from disk, a pasted
 link), the page still runs, picks stay in the tab, and the dock's Send becomes Copy, the only
-clipboard path. `mock.ready` resolves `{ saving, person }`.
+clipboard path. `mock.ready` resolves `{ saving, person }`. Picks and notes save as they change and
+survive a Citadel restart: a write made while Citadel is down is sent again until it lands, and the
+dock says "not saved yet" meanwhile (`citadel.saveState()`, `citadel.watchSaves(fn)` for a hand-rolled page).
 
 ## `mock.boards(target, opts)`
 

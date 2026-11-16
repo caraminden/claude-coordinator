@@ -28,7 +28,7 @@ export function readRequest(e, from = frames) {
   const m = e.data;
   if (!frame || e.origin !== 'null' || !m || typeof m !== 'object' || m.bridge !== TAG) return null;
   if (!Number.isSafeInteger(m.id) || typeof m.page !== 'string' || m.page.length > 4000) return null;
-  if (m.op === 'hello' || m.op === 'list') return { frame, req: { id: m.id, op: m.op, page: m.page } };
+  if (m.op === 'hello' || m.op === 'list' || m.op === 'typing') return { frame, req: { id: m.id, op: m.op, page: m.page } };
   if (m.op === 'write' && Array.isArray(m.entries) && m.entries.length && m.entries.length <= MAX_ENTRIES) return { frame, req: { id: m.id, op: 'write', page: m.page, entries: m.entries } };
   if (m.op === 'send' && typeof m.text === 'string' && m.text.trim() && m.text.length <= MAX_TEXT) return { frame, req: { id: m.id, op: 'send', page: m.page, text: m.text } };
   return null;
@@ -43,7 +43,16 @@ export function takeWrite(frame, now = Date.now()) {
   return true;
 }
 
-let call = null;
+// When a page last said someone typed in it, or wrote: Citadel waits for a quiet moment before it loads a
+// new front end, and its own input events never see typing in a frame (#821).
+let typedAt = 0;
+export const bridgeTypedAt = () => typedAt;
+
+/** Whether a page open here holds writes Citadel couldn't take yet (it was restarting): a reload would lose them. */
+export const bridgeUnsaved = () => [...frames].some((f) => alive(f) && f.unsaved);
+
+/** A failure worth sending again: the network, or Caddy's answer while Citadel restarts. */
+const transient = (err) => err instanceof TypeError || [502, 503, 504].includes(err?.status);
 
 const win = (f) => (f.iframe ? f.iframe.contentWindow : f.tab);
 const alive = (f) => (f.iframe ? f.iframe.isConnected : !f.tab.closed);
@@ -54,9 +63,8 @@ const alive = (f) => (f.iframe ? f.iframe.isConnected : !f.tab.closed);
  * who made it. `api` makes the person's own API calls.
  */
 export function attachBridge(iframe, { open, name, owner, api, tab = null }) {
-  call ??= api;
   if (!frames.size) addEventListener('message', onMessage);
-  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, store: null, page: null });
+  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, api, store: null, page: null });
 }
 
 /** Open `src` (an HTML page) in a new tab that keeps its bridge to this viewer; false if the browser refused. */
@@ -77,27 +85,39 @@ async function onMessage(e) {
   // The frame can only hold pages this server sent (the app's CSP is default-src 'self'), and its origin is
   // opaque, so '*' is the only target that reaches it.
   const reply = (body) => e.source.postMessage({ bridge: TAG, re: req.id, ...body }, '*');
+  if (req.op === 'typing') return void (typedAt = Date.now());
   try {
     if (req.op === 'send') {
       // Only on a person's click or key: a page never sends as them by itself. A frame's click reaches
       // this window; a tab's doesn't, so a tab only gets a gap between sends.
       if (frame.iframe && navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       if (frame.tab && Date.now() - (frame.sentAt ?? 0) < TAB_SEND_GAP) throw new Error('Sent a moment ago; wait a few seconds before sending again');
-      const r = await call('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text } });
+      const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text } });
       frame.sentAt = Date.now(); // after it went, so a retry after a failure isn't held back
       return reply({ ok: true, result: { sent: true, to: r.to.label } });
     }
-    if (req.op === 'write' && !takeWrite(frame)) throw new Error('Too many writes; slow down');
-    const r = await storeCall(frame, req.page, req.op === 'write' ? { op: 'write', entries: req.entries } : { op: 'list' });
+    if (req.op === 'write') {
+      if (!takeWrite(frame)) throw new Error('Too many writes; slow down');
+      typedAt = Date.now();
+    }
+    let r;
+    try {
+      r = await storeCall(frame, req.page, req.op === 'write' ? { op: 'write', entries: req.entries } : { op: 'list' });
+    } catch (err) {
+      // The page sends it again until it lands (artifact-bridge.js); until then a reload here would lose it.
+      if (req.op === 'write' && transient(err)) frame.unsaved = true;
+      throw err;
+    }
+    if (req.op === 'write') frame.unsaved = false;
     const result = req.op === 'hello' ? { person: r.person, file: frame.name, owner: frame.owner, entries: r.entries } : { entries: r.entries };
     reply({ ok: true, result });
   } catch (err) {
-    reply({ ok: false, error: err.message });
+    reply({ ok: false, error: err.message, ...(transient(err) ? { retry: true } : {}) });
   }
 }
 
 async function storeCall(frame, page, body) {
-  const r = await call('api/artifact-data', { method: 'POST', body: { open: frame.open, page, ...body } });
+  const r = await frame.api('api/artifact-data', { method: 'POST', body: { open: frame.open, page, ...body } });
   frame.store = r.store;
   frame.page = page;
   return r;

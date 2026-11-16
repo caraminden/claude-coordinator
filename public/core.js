@@ -6,7 +6,7 @@ import { costChip, renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
-import { onArtifactData, tabBridgeOpen } from './bridge-host.js';
+import { bridgeTypedAt, bridgeUnsaved, onArtifactData, tabBridgeOpen } from './bridge-host.js';
 import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
 import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
@@ -367,7 +367,9 @@ document.addEventListener('keydown', () => { lastInputAt = Date.now(); }, true);
 /** What holds a new front end back, in the banner's words, or null when it can load now. */
 function unsentWork() {
   const writing = 'once you have sent or cleared what you are writing';
-  if (sending || Date.now() - lastInputAt < QUIET_MS) return writing;
+  if (sending || Date.now() - Math.max(lastInputAt, bridgeTypedAt()) < QUIET_MS) return writing;
+  // A page's picks that couldn't save while Citadel restarted are sent again from the page; a reload would lose them (#821).
+  if (bridgeUnsaved()) return 'once the page you have open has saved';
   // A contraption's typing never reaches this document, and a reload would rebuild its frame at its start.
   if (framed()) return 'once you leave this app';
   // A page opened with Open saves through this tab, which a reload would forget.

@@ -13,7 +13,7 @@ words, and nothing it doesn't.
 ## Your bounds
 
 Every write lands in one of three places: your worktree, your scheme's main (by the route in
-step 8), and the `## Copies` section of `$COORDINATOR_SHARED_DIR/onboarding.md`. Other schemes
+step 9), and the `## Copies` section of `$COORDINATOR_SHARED_DIR/onboarding.md`. Other schemes
 are read-only, and you read only the files the plan lists to adapt, plus that source's
 CLAUDE.md and glossary for the scrub. The tripwire refuses some of these; the rest are on you:
 

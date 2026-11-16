@@ -14,6 +14,8 @@ dependency: offer it once, with the test you would write, and leave the call to 
 - **New logic** (a parser, a reducer, a rule, a state change, a query): test-first. One failing
   test for one behaviour, watch it go red, just enough code to pass, repeat. A batch of tests
   written up front checks the shape you imagined, not the behaviour you built.
+  citadel:self-review checks the result: it runs new and changed tests against the base and
+  flags any that pass there.
 - **UI and front-end wiring**: no test-first; the scheme's UI checks (screenshots) are the
   proof. Pull a calculation out into a pure function when it deserves a test.
 - **A bug**: citadel:bug-fixing (a failing reproduction first).

@@ -84,7 +84,9 @@ logic, tautologies) is in citadel:test-quality. Two that belong to a bug fix:
 - A test that still passes when the behaviour it names is broken: see it red before the fix
   goes in. With the fix already in, copy the fixed file aside, put the old one back with
   `git show <commit before the fix>:<path> > <path>`, run the test, and copy the fix back. The
-  tripwire refuses `git stash` and `git checkout -- <path>` over uncommitted work.
+  tripwire refuses `git stash` and `git checkout -- <path>` over uncommitted work. Self-review's
+  base check (`citadel:self-review`, step 2) runs the same test against the base and flags it
+  if it passes there.
 - Tolerances wider than the rule needs.
 
 ## Rules

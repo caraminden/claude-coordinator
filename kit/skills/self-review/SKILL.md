@@ -62,6 +62,25 @@ Codex reads whatever repo the command runs in, so a review run from a scratch cl
 diff to the person's plan too. That is by design; cost-check before running it on a throwaway diff.
 Don't re-review after fixes unless a fix grew past a few lines of high-row code.
 
+**Tests against the base (light and deep):** when the diff adds or changes tests, run
+`node <kit>/skills/self-review/scripts/base-check.ts` in the same message as the reviewer (Bash
+timeout 600000). It runs each changed test file once, in a scratch worktree holding the base's code
+and the branch's tests, and judges each new or changed case:
+
+- `red`: it fails without the change, so it tests the change. A file that can't load or build on
+  the base (it imports what the change adds) is red too.
+- `PASSES ON BASE`: a finding for 3. A test that passes without the change pins what the code
+  already does. Make it go red on the base by asserting what the change should do, or keep it
+  and say why in the report: a refactor's safety net, or a regression guard for behaviour that
+  already worked. It doesn't raise the label by itself.
+- `skipped: <why>`: not checked (a stack it can't run, a missing tool, a timeout). Say so in
+  the report; a skip is no pass.
+
+Leave it out for docs-only changes, UI changes the scheme proves by screenshot, and diffs that
+touch no test. When the check command in Project facts runs one file in a way the helper can't
+guess (a wrapper, an env var), pass it as `--cmd '<command with {file}>'`. Its `Result:` line
+goes under the Risk line in 5.
+
 ## 3. Fix what's real
 
 Fix Must-fix and in-scope Should-fix findings, add the test a finding asks for, re-run the tests
@@ -115,7 +134,8 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   the final reply has one line:
   `Risk: medium: <reason>. Door: two-way · Blast radius: server. Not fixed: <finding: why>` (or
   `Not fixed: nothing`), and a critic's result line under it when one ran
-  (`ui-screenshots critic: pass (round 1)`). Every claim in it and in the reply meets "Evidence before claims" in
+  (`ui-screenshots critic: pass (round 1)`) and the base check's
+  (`Base check: 2 red, 1 passes on base (refactor's safety net), 0 skipped`). Every claim in it and in the reply meets "Evidence before claims" in
   `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything

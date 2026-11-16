@@ -351,6 +351,7 @@ test('a landing waiting in line rechecks each time main moves, and leaves the li
     assert.deepEqual(q.landed(), ['f1.txt: 1', 'a.txt: 2', 'f3.txt: 3']);
   } finally {
     for (let i = 1; i <= 4; i++) writeFileSync(gate(i), '');
+    for (const l of lands) l.child.kill('SIGKILL'); // a failed check must not leave landings running past the test
   }
 });
 

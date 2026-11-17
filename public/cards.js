@@ -564,10 +564,14 @@ function noticeCard(ticketId, card, opts) {
  */
 function docCard(ticketId, card, opts) {
   const head = whoLine('asks', card, opts);
-  const status = h('span', { class: 'muted' }, 'Pick on the page, then press Send there');
-  const open = h('a', { class: 'button', href: fileHref(ticketId, card.doc.path) }, 'Open the choices');
-  const el = h('div', { class: 'qcard doc' }, head.el, h('div', { class: 'qtitle' }, card.doc.title),
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), open));
+  const status = h('div', { class: 'muted doc-status' }, 'Pick on the page, then press Send there');
+  const href = fileHref(ticketId, card.doc.path);
+  const open = h('a', { class: 'button doc-open', href }, 'Open the choices');
+  // The page's top (#821, src/doc-preview.ts), its box kept from the start so the chat doesn't jump when
+  // it loads; a page that can't be shot drops it and the card is just the button.
+  const preview = h('a', { class: 'doc-preview', href, tabindex: '-1', 'aria-hidden': 'true' },
+    h('img', { src: `api/tickets/${ticketId}/doc-preview?path=${encodeURIComponent(card.doc.path)}`, alt: '', onerror: () => preview.remove() }));
+  const el = h('div', { class: 'qcard doc' }, head.el, h('div', { class: 'qtitle' }, card.doc.title), preview, open, status);
   const handle = {
     el,
     markSettled(settled) {

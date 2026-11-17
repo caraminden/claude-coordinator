@@ -8,9 +8,8 @@ import { join } from 'node:path';
 /** Opens `url` and returns a JPEG of its top, or throws. */
 export type Shooter = (url: string) => Promise<Buffer>;
 
-/** The page is laid out this wide and shot this tall, then scaled down by SCALE. */
-export const VIEW = { width: 1280, height: 640 };
-const SCALE = 0.75;
+/** The page is laid out this wide and shot this tall: a desktop layout that stays legible at a card's width. */
+export const VIEW = { width: 960, height: 480 };
 const TIMEOUT_MS = 20_000;
 /** Pictures kept on disk; the oldest go first. A page edited many times leaves one per version. */
 const KEEP = 300;
@@ -90,7 +89,7 @@ export const chromiumShooter: Shooter = async (url) => {
   try {
     const page = await openPage(browser.send, url, VIEW.width, { headers: [], cookies: [], settle: 500 });
     await page.s('Emulation.setDeviceMetricsOverride', { ...VIEW, deviceScaleFactor: 1, mobile: false });
-    const { data } = await page.s('Page.captureScreenshot', { format: 'jpeg', quality: 80, clip: { x: 0, y: 0, ...VIEW, scale: SCALE } });
+    const { data } = await page.s('Page.captureScreenshot', { format: 'jpeg', quality: 80, clip: { x: 0, y: 0, ...VIEW, scale: 1 } });
     return Buffer.from(data, 'base64');
   } finally {
     await browser.close();

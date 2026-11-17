@@ -109,17 +109,21 @@ for app in $apps; do
       [[ -f $f && ! -L $f && $name =~ $file_name && $name != *..* ]] || continue
       [[ $name == *-wal || $name == *-shm || $name == *-journal || $name == *.tmp || $name == *.part ]] && continue
       rel=apps/$app/$day_/$name
+      if [[ ! $OUT/$rel -ef $f ]]; then
+        mkdir -p "$OUT/apps/$app/$day_"
+        # A hard link where it can; another filesystem gets a copy. A file the app pruned meanwhile, or one
+        # that can't be read, is left out and named, so one app can't stop Citadel's own set.
+        if ! ln -f -- "$f" "$OUT/$rel" 2>/dev/null; then
+          tmp=$OUT/.app.tmp
+          if ! { cp --reflink=auto -- "$f" "$tmp" && mv -f "$tmp" "$OUT/$rel"; }; then
+            echo "Off-box set: couldn't link or copy $rel, left out" >&2
+            continue
+          fi
+          tmp=""
+        fi
+      fi
       app_want[$rel]=1
       files=$((files + 1))
-      [[ $OUT/$rel -ef $f ]] && continue
-      mkdir -p "$OUT/apps/$app/$day_"
-      # A hard link where it can; another filesystem gets a copy.
-      if ! ln -f -- "$f" "$OUT/$rel" 2>/dev/null; then
-        tmp=$OUT/.app.tmp
-        cp --reflink=auto -- "$f" "$tmp"
-        mv -f "$tmp" "$OUT/$rel"
-        tmp=""
-      fi
     done
   done
   apps_with+=("$app ($files files, ${#days[@]} days)")

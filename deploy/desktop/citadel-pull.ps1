@@ -42,7 +42,7 @@ function Prune([string]$pattern, [int]$keep) {
 
 try {
   # Leftovers of a run that died mid-download.
-  Get-ChildItem -LiteralPath $Dest -File -Recurse | Where-Object { $_.Name -like '*.part*' } | Remove-Item
+  Get-ChildItem -LiteralPath $Dest -File -Recurse | Where-Object { $_.Name -like '*.part' } | Remove-Item
 
   $list = & $Ssh @sshArgs list
   if ($LASTEXITCODE -ne 0) { throw "couldn't reach perigee (ssh exit $LASTEXITCODE)" }

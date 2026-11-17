@@ -396,7 +396,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'taskmaster-split': {
-    about: 'a scheme split into per-person Taskmasters (#919, #920): yours, Josh\'s and the Overlord, each with a chat, an Overlord alert and a card for everyone; sign in as josh with the same password to see his side',
+    about: 'a scheme split into per-person Taskmasters (#919, #920): yours, Josh\'s and the Overlord, each with a chat, an Overlord alert and a card for everyone; to see his side, sign Josh in with an invite link: the copy's password signs in admins only',
     seed(c) {
       const tm = taskmaster(c);
       const josh = c.store.findUser('name', 'Josh') ?? c.store.createUser({ name: 'Josh', login: 'josh' });

@@ -105,3 +105,20 @@ test('a scheme favicon goes to its people only, inert, and is left out when ther
   assert.equal(typeof (await list(srv.cookie)).Plain, 'number');
   assert.equal(await (await get(plain.id, member.cookie)).text(), SVG2);
 });
+
+test('citadel-app.json names the scheme icon: its override, else its source, ahead of the usual places (#840)', async () => {
+  const { findIcon } = await import('../src/scheme-icon.ts');
+  const repo = join(root, 'repos', 'Manifest');
+  mkdirSync(join(repo, 'art'), { recursive: true });
+  mkdirSync(join(repo, 'web', 'public'), { recursive: true });
+  writeFileSync(join(repo, 'web/public/icon.svg'), SVG);
+  writeFileSync(join(repo, 'art/logo.svg'), SVG + ' ');
+  writeFileSync(join(repo, 'art/small.svg'), SVG + '  ');
+  assert.match((await findIcon(repo) as any).file, /web\/public\/icon\.svg$/);
+  writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: 'art/logo.svg' } }));
+  assert.match((await findIcon(repo) as any).file, /art\/logo\.svg$/);
+  writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: 'art/logo.svg', overrides: { scheme: 'art/small.svg' } } }));
+  assert.match((await findIcon(repo) as any).file, /art\/small\.svg$/);
+  writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: '../x.svg' } }));
+  assert.match((await findIcon(repo) as any).file, /web\/public\/icon\.svg$/);
+});

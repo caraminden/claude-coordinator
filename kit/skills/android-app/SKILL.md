@@ -144,3 +144,22 @@ citadel-android down               # when you're done
   WebView version: `adb -s emulator-5554 shell dumpsys webviewupdate`.
 - It renders in software (SwiftShader, no GPU) with guest Vulkan off: fine for screenshots and
   flows, not for frame rates or graphics bugs. Test those on a real phone.
+
+## Icons: one SVG feeds them all
+
+Don't hand-make icons. Keep one SVG (`web/public/icon.svg`, or the path in `citadel-app.json`'s `icon.source`) and run
+`node "${CLAUDE_PLUGIN_ROOT}/skills/android-app/scripts/gen-icons.mjs"` in the app's repo. It writes the web icons
+(`favicon-32.png`, `icon-192.png`, `icon-512.png`, next to the SVG) and, when `android/` exists, the adaptive
+foreground and monochrome layers, round and legacy PNGs and the splash. Citadel shows the same SVG as the scheme's icon.
+Needs `rsvg-convert`; its art is paths on a full-size background `<rect>` (other shapes reach the PNGs but not Android's vector layers).
+
+A scheme overrides any use by naming its own SVG; whatever isn't named is made from the source:
+
+```json
+"icon": { "source": "web/public/icon.svg", "background": "#0a6b6b",
+  "overrides": { "small": "art/glyph-32.svg", "monochrome": "art/mono.svg" } }
+```
+
+Roles: `scheme` (what Citadel shows), `small` (the 32 px favicon), `foreground`, `monochrome`, `legacy`, `round`, `splash`.
+The run writes `.citadel-icons.sha256`; `gen-icons.mjs --check` exits 1 when the committed icons no longer match their
+SVGs, so put it in the app's test or build and they can't drift (it needs no rsvg-convert). Commit the output.

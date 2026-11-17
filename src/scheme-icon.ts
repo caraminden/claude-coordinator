@@ -9,7 +9,7 @@ import type { ContraptionRow, Store } from './db.ts';
 /** Where a scheme's favicon may be, best first: the first that exists is the scheme's icon. */
 export const ICON_PATHS = [
   'assets/icon/icon.svg', 'assets/icon/favicon.svg', 'assets/icon/favicon-48.svg', 'assets/icon/favicon-32.svg',
-  'public/icon.svg', 'public/favicon.svg', 'static/favicon.svg', 'favicon.svg',
+  'web/public/icon.svg', 'public/icon.svg', 'public/favicon.svg', 'static/favicon.svg', 'favicon.svg',
 ];
 export const MAX_ICON_BYTES = 256 * 1024;
 
@@ -29,7 +29,10 @@ export async function findIcon(repoDir: string | null): Promise<Found | { missin
   const root = repoDir && await realpath(repoDir).catch(() => null);
   if (!root) return NO_ICON;
   let refused: { missing: string } | undefined;
-  for (const path of ICON_PATHS) {
+  // citadel-app.json's icon (#840): the scheme's own override for this use, else the source it names, then the usual places.
+  const cfg = await readFile(join(root, 'citadel-app.json'), 'utf8').then((t) => JSON.parse(t).icon, () => null).catch(() => null);
+  const named = [cfg?.overrides?.scheme, cfg?.source].filter((p): p is string => typeof p === 'string' && !!p && !p.startsWith('/') && !p.split('/').includes('..'));
+  for (const path of [...named, ...ICON_PATHS]) {
     // realpath, so neither the file nor a folder on its way can be a symlink out of the checkout.
     const file = await realpath(join(root, path)).catch(() => null);
     if (!file) continue;

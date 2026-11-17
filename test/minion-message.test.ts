@@ -74,6 +74,9 @@ test('a message shows in both chats, labelled with the sender, and the Taskmaste
   assert.equal(got.author, '#1 Sender');
   assert.equal(got.text, 'I changed src/foo.ts: rebase before you touch it');
   assert.match(events(M1.id, 'note').at(-1).text, /^Left held mail for #2 Receiver: I changed src\/foo\.ts/);
+  // The chat's bubble reads "Not sent yet" while the ticket lists the message as held (#910).
+  const heldRow = store.listEvents(M2.id).filter((e) => e.kind === 'user_message').at(-1)!;
+  assert.ok((await srv.call(`/api/tickets/${M2.id}`)).data.ticket.held_ids.includes(heldRow.id));
   const copy = events(TM.id, 'user_message').at(-1);
   assert.equal(copy.mail, true, 'held mail: no Taskmaster turn');
   assert.equal(copy.author, '#1 Sender');

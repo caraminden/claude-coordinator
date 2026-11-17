@@ -1778,6 +1778,7 @@ export class Runner {
     // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
     list.push({ author: `Held mail from ${author}, sent ${sent} UTC`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: cold ? this.personOf?.(author, from) ?? null : null });
     this.store.setSetting(mailKey(to), list);
+    this.broadcastTicket(to); // held_ids now lists it, so its bubble reads "Not sent yet" (#910)
   }
 
   /** Count a message against the loop at `key`: send it (steering a running turn with `steer`; as held mail with `mail`), or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */

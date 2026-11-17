@@ -134,7 +134,7 @@ function renderHistory() {
   const recap = document.getElementById('recap');
   Object.assign(view, {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
-    actions: new Map(), turnActions: [], cards: new Map(), heldCards: [], gruntStarts: new Map(),
+    actions: new Map(), turnActions: [], cards: new Map(), lastPlan: null, heldCards: [], gruntStarts: new Map(),
     // The session started on an earlier page, if there is one.
     sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, folds: [], pendingRequest: [], turnRequest: undefined,
   });

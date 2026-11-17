@@ -3,6 +3,7 @@
 import { account, ago, api, fileHref, fileKind, fileUrl, h, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
 import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
+import { changesLine, collapseRuns, planChanges } from './plan-diff.js';
 import { adoptTicket } from './thread.js';
 import { refreshViewerBar, setViewerGallery } from './artifacts.js';
 
@@ -185,6 +186,21 @@ function notesBody(card) {
   ];
 }
 
+/** A revised plan (#907): what changed against the plan it replaces, the unchanged stretches behind a toggle, the whole plan one tap away. */
+function revisionBody(card, prev, ticketId) {
+  const c = planChanges(prev.plan, card.plan, prev.summary, card.summary);
+  const row = (op, text) => h('div', { class: op === '+' ? 'add' : op === '-' ? 'del' : 'same' }, `${op === ' ' ? '\u00a0' : op} ${text}`);
+  const runs = collapseRuns(c.ops).map((r) => r.gap
+    ? h('details', { class: 'gap' }, h('summary', {}, `${r.gap.length} unchanged line${r.gap.length === 1 ? '' : 's'}`), ...r.gap.map((o) => row(' ', o.text)))
+    : row(r.op, r.text));
+  return [
+    h('div', { class: 'rev-head' }, h('b', {}, 'Changed since the last version'), ` · ${changesLine(c)}`),
+    c.summaryChanged ? h('div', { class: 'rev-summary' }, h('s', {}, prev.summary), ' → ', card.summary) : null,
+    h('div', { class: 'instructions-diff rev-diff' }, ...runs),
+    h('details', {}, h('summary', {}, 'The whole plan'), h('div', {}, markdown(card.plan, ticketId))),
+  ];
+}
+
 /**
  * A plan from Claude waiting for a go: Approve sends it, Revise opens a box for notes that go back
  * to Claude, which answers with a new card. Only people can decide; the card keeps its outcome.
@@ -202,11 +218,13 @@ export function planCard(ticketId, card, opts = {}) {
   const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: m ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
   const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !m }, m ? 'Reject' : 'Send notes');
+  const prev = m ? null : view.lastPlan;
+  if (!m) view.lastPlan = { plan: card.plan ?? '', summary: card.summary ?? '' };
   const head = whoLine(m ? 'proposes machine notes' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
   const el = h('div', { class: 'qcard pcard' },
     head.el,
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : 'Plan'), card.summary),
-    h('div', { class: 'pbody' }, m ? notesBody(card) : markdown(card.plan, ticketId)),
+    h('div', { class: 'pbody' }, m ? notesBody(card) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
     notes, why,
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), revise, approve, cancel, sendNotes));
   let rank = 0;

@@ -118,6 +118,22 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t, e);
     },
   },
+  'plan-revision': {
+    about: 'a minion whose revised plan card shows what changed against the plan it replaced (#907)',
+    seed(c) {
+      const t = minion(c, 'Archive old minions', { note: 'revised plan waiting for a go' });
+      const w = chat(c, t, 10);
+      w.asked('Run the plan back to me before you change anything.');
+      w.init();
+      const v1 = ['## What changes', '', '- A nightly sweep archives minions dismissed more than 30 days ago.', '- The minions list hides them.', '- Nothing is deleted.', '', '## Numbers', '', '- Citadel: 431 over 30 days', '- Delve: 98 over 30 days', '', '## Not doing', '', '1. Deleting worktrees.', '2. Archiving open minions.'];
+      w.put('plan', { id: hex(), status: 'superseded', summary: 'Archive dismissed minions after 30 days', plan: v1.join('\n') });
+      w.asked('Make the window 60 days, and add a toggle to show them.');
+      const v2 = v1.map((l) => l.replace('30 days ago', '60 days ago').replace('over 30 days', 'over 60 days')).filter((l) => !l.startsWith('- Delve')).flatMap((l) => (l === '- The minions list hides them.' ? [l, '- A *Show archived* toggle brings them back.'] : [l]));
+      const e = w.put('plan', { id: hex(), status: 'pending', summary: 'Archive dismissed minions after 60 days, with a show-archived toggle', plan: v2.join('\n') });
+      w.done('Posted the revised plan.');
+      return route(c, t, e);
+    },
+  },
   'choices-card': {
     about: 'a choices card (#804): a mock kit page with three takes to pick from, and the card that opens it',
     seed(c) {

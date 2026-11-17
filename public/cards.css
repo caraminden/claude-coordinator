@@ -112,3 +112,12 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 .answer-ref { display: flex; justify-content: flex-end; }
 .answer-ref button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 0.85em; color: var(--muted); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--control-line)); border-radius: 999px; padding: 0.25rem 0.75rem; cursor: pointer; }
 .answer-ref button:hover { color: var(--ink); }
+
+/* A revised plan: what changed (#907) */
+.pcard .rev-head { margin-bottom: 0.3rem; }
+.pcard .rev-summary { margin-bottom: 0.3rem; color: var(--muted); }
+.pcard .rev-diff .same { color: var(--muted); }
+.pcard .rev-diff .add, .pcard .rev-diff .del { padding-block: 0.1rem; }
+.pcard .rev-diff .del { text-decoration: line-through; }
+.pcard .rev-diff details.gap { margin: 0.2rem 0; }
+.pcard .rev-diff details.gap summary { cursor: pointer; color: var(--muted); }

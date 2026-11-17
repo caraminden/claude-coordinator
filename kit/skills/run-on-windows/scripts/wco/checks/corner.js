@@ -11,7 +11,9 @@ const measure = `
   }
   const meta = [...document.querySelectorAll('meta[name=theme-color]')].filter((m) => matchMedia(m.media || 'all').matches).map((m) => m.content)[0];
   return { area: [t.x, t.y, t.width, t.height], inner: innerWidth, client: document.documentElement.clientWidth, under: out, meta };`;
-for (const route of ROUTES.filter((r) => r.startsWith('#/p/') && !r.includes('99999'))) {
+const pages = ROUTES.filter((r) => r.startsWith('#/p/') && !r.includes('99999'));
+expect('a scheme page to check', pages.length, (n) => n > 0);
+for (const route of pages) {
   for (const width of [1300, 1000, 820]) {
     await send('Browser.setWindowBounds', { windowId: WINDOW, bounds: { left: 20, top: 10, width, height: 800 } });
     await go(route);

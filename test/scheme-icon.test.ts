@@ -119,6 +119,7 @@ test('citadel-app.json names the scheme icon: its override, else its source, ahe
   assert.match((await findIcon(repo) as any).file, /art\/logo\.svg$/);
   writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: 'art/logo.svg', overrides: { scheme: 'art/small.svg' } } }));
   assert.match((await findIcon(repo) as any).file, /art\/small\.svg$/);
-  writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: '../x.svg' } }));
+  writeFileSync(join(root, 'repos', 'x.svg'), SVG + '   ');
+  writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: '../x.svg', overrides: { scheme: join(root, 'repos', 'x.svg') } } }));
   assert.match((await findIcon(repo) as any).file, /web\/public\/icon\.svg$/);
 });

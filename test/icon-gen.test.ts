@@ -57,3 +57,22 @@ test('generates the web and Android set, an override changing only its own outpu
   writeFileSync(join(dir, 'art/small.svg'), SMALL.replace('M96 400', 'M90 400'));
   assert.match(checkIcons(dir).join(' '), /out of date/);
 });
+
+test('refuses what Android layers or the config would get wrong, instead of writing a broken icon', () => {
+  if (!hasRsvg) return;
+  const circle = SRC.replace('</svg>', '<circle cx="256" cy="256" r="10" fill="#fff"/></svg>');
+  assert.throws(() => generateIcons(repo('c1', null, { 'web/public/icon.svg': circle, 'android/x': '' })), /<path> elements only.*<circle>/);
+  assert.throws(() => generateIcons(repo('c2', null, { 'web/public/icon.svg': SRC.replace('#fff"', 'white"'), 'android/x': '' })), /must be #rgb/);
+  assert.throws(() => resolveIcons(repo('c3', { icon: { background: 'red"/><x' } })), /background/);
+  assert.throws(() => resolveIcons(repo('c4', { icon: { webDir: '../out' } })), /inside the repo/);
+});
+
+test('the web icons keep the whole art (no crop) and a small first rect is art, not the background', () => {
+  if (!hasRsvg) return;
+  const edge = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="0" y="0" width="10" height="10" fill="#f00"/><rect width="100" height="100" fill="#00f"/></svg>';
+  const dir = repo('e', null, { 'web/public/icon.svg': edge });
+  generateIcons(dir);
+  const px = (x: number, y: number) => execFileSync('magick', [join(dir, 'web/public/icon-192.png'), '-format', `%[hex:p{${x},${y}}]`, 'info:']).toString();
+  assert.equal(px(2, 2).slice(0, 6), 'FF0000'); // the corner square is drawn at the very edge, not cropped
+  assert.equal(px(150, 150).slice(0, 6), '0000FF');
+});

@@ -15,6 +15,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export const ROLES = ['scheme', 'small', 'foreground', 'monochrome', 'legacy', 'round', 'splash'];
 export const DEFAULT_SOURCES = ['web/public/icon.svg', 'assets/icon/icon.svg', 'public/icon.svg', 'icon.svg'];
+const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 const LOCK = '.citadel-icons.sha256';
 
 const inside = (root, p) => { const r = relative(root, resolve(root, p)); return !!r && !r.startsWith('..') && !isAbsolute(r); };
@@ -42,7 +43,15 @@ export function resolveIcons(dir) {
     if (!ROLES.includes(role)) throw new Error(`unknown icon role "${role}" (roles: ${ROLES.join(', ')})`);
     roles[role] = file(p, `override ${role}`);
   }
-  const dirOf = (v, d, what) => { if (v === undefined) return d; if (typeof v !== 'string' || !inside(root, v)) throw new Error(`icon ${what} must be a folder inside the repo`); return v; };
+  if (cfg.background !== undefined && !HEX.test(cfg.background)) throw new Error('icon background must be a #rgb or #rrggbb colour');
+  const dirOf = (v, d, what) => {
+    if (v === undefined) return d;
+    if (typeof v !== 'string' || !inside(root, v)) throw new Error(`icon ${what} must be a folder inside the repo`);
+    // a folder that exists must not be a link out of the repo (the generator writes and deletes in it)
+    let up = join(root, v); while (!existsSync(up) && up !== root) up = dirname(up);
+    if (!(realpathSync(up) + '/').startsWith(root + '/')) throw new Error(`icon ${what} ${v} points outside the repo`);
+    return v;
+  };
   return { source, roles, background: cfg.background, webDir: dirOf(cfg.webDir, dirname(source) === '.' ? '.' : dirname(source), 'webDir'), androidRes: dirOf(cfg.androidRes, 'android/app/src/main/res', 'androidRes') };
 }
 
@@ -52,9 +61,15 @@ function parseSvg(text) {
   const [, , w, h] = vb;
   let inner = text.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
   let bg;
-  inner = inner.replace(/<rect\b([^>]*)\/>/, (m, a) => { const f = a.match(/fill="(#[0-9a-fA-F]+)"/); if (f && !bg && !/\b(x|y)="[1-9]/.test(a)) { bg = f[1]; return ''; } return m; });
+  // The background is the first <rect> that covers the whole viewBox (100%, or the viewBox's own width and height).
+  inner = inner.replace(/<rect\b([^>]*)\/>/g, (m, a) => {
+    const f = a.match(/fill="(#[0-9a-fA-F]{3,8})"/), at = (n) => a.match(new RegExp(`\\b${n}="([^"]*)"`))?.[1];
+    const covers = (v, full) => v === '100%' || Number(v) === full, zero = (v) => v === undefined || Number(v) === 0;
+    if (f && !bg && covers(at('width'), w) && covers(at('height'), h) && zero(at('x')) && zero(at('y'))) { bg = f[1]; return ''; }
+    return m;
+  });
   const paths = [...inner.matchAll(/<path\s+([^>]*?)\/?>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map((x) => [x[1], x[2]])));
-  return { w, h, inner, bg, paths };
+  return { w, h, inner, bg, paths, other: [...new Set([...inner.matchAll(/<(circle|rect|ellipse|line|polygon|polyline|g|use|text|image)\b/g)].map((m) => m[1]))] };
 }
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -71,7 +86,7 @@ export function buildIcons(dir) {
   // The art centred in a w×h canvas so its half-width (80% of the viewBox's short half-side) is `frac` of the canvas's.
   const place = (s, w, h, frac) => `<g transform="translate(${w / 2} ${h / 2}) scale(${(Math.min(w, h) / 2 * frac) / (Math.min(s.w, s.h) / 2 * 0.8)}) translate(${-s.w / 2} ${-s.h / 2})">${s.inner}</g>`;
   // A whole icon (its own background) at w×h, for the web set.
-  const full = (role, px) => { const s = svgOf(role); return rsvg(wrap(px, px, `<rect width="${px}" height="${px}" fill="${s.bg ?? BG}"/>${place(s, px, px, 0.8 * 1.25)}`), px, px); };
+  const full = (role, px) => { const s = svgOf(role); return rsvg(wrap(px, px, `<rect width="${px}" height="${px}" fill="${s.bg ?? BG}"/>${place(s, px, px, 0.8)}`), px, px); };
   const webDir = cfg.webDir;
   out[`${webDir}/favicon-32.png`] = full('small', 32);
   out[`${webDir}/icon-192.png`] = full('scheme', 192);
@@ -81,9 +96,12 @@ export function buildIcons(dir) {
     const res = cfg.androidRes;
     const vector = (role, colorOf) => {
       const s = svgOf(role);
+      if (!s.paths.length || s.other.length) throw new Error(`${cfg.roles[role]}: Android's ${role} layer is built from <path> elements only (after the background <rect>); found ${s.other.length ? '<' + s.other.join('>, <') + '>' : 'no paths'}. Convert shapes to paths.`);
       const k = 30 / (Math.min(s.w, s.h) / 2 * 0.8); // adaptive layers are 108dp; content stays in a 30dp radius
       const body = s.paths.map((p) => {
-        const fill = p.fill && p.fill !== 'none' ? `\n        android:fillColor="${colorOf(p.fill)}"` : '';
+        for (const c of [p.fill, p.stroke]) if (c && c !== 'none' && !HEX.test(c)) throw new Error(`${cfg.roles[role]}: colour "${c}" must be #rgb or #rrggbb for Android`);
+        const f = p.fill ?? (p.stroke ? 'none' : '#000000'); // SVG's default fill is black
+        const fill = f !== 'none' ? `\n        android:fillColor="${colorOf(f)}"` : '';
         const stroke = p.stroke ? `\n        android:strokeColor="${colorOf(p.stroke)}"\n        android:strokeWidth="${p['stroke-width'] ?? 1}"\n        android:strokeLineCap="round"` : '';
         return `    <path${fill}${stroke}\n        android:pathData="${esc(p.d ?? '')}"/>`;
       }).join('\n');

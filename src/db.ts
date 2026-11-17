@@ -1196,6 +1196,10 @@ export class Store {
     // NORMAL: in WAL mode it fsyncs at checkpoints, not on every commit, which a busy disk made cost 150-300 ms
     // each. A power cut can lose the last few seconds of writes; an app crash loses nothing (#470, Cara 2026-11-10).
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
+    // FAST zeroes a freed cell's bytes inside its page at no extra I/O: an update, a REPLACE or a page split left the old
+    // cell's text in the page's free space, so a swept audit row's prompt outlived the sweep (#844, #836). dropAudit
+    // turns it fully on, which also zeroes whole freed pages, a cost the 1.3 GB database's other prunes don't need.
+    this.db.exec('PRAGMA main.secure_delete = FAST;');
     if (opts.writer) {
       this.db.prepare('ATTACH DATABASE ? AS state').run(this.statePath);
       this.db.exec('PRAGMA state.synchronous = NORMAL; PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
@@ -1822,11 +1826,11 @@ export class Store {
   /** secure_delete zeroes the rows' pages in the database file (#844). Their text can stay in the WAL until later
    * writes reuse it, and in backups for as long as those are kept (deploy/backup.sh). */
   private dropAudit(where: string, ...args: (number | string)[]) {
-    this.db.exec('PRAGMA secure_delete = ON');
+    this.db.exec('PRAGMA main.secure_delete = ON');
     try {
       this.db.prepare(`DELETE FROM contraption_turn_audit WHERE ${where}`).run(...args);
     } finally {
-      this.db.exec('PRAGMA secure_delete = OFF');
+      this.db.exec('PRAGMA main.secure_delete = FAST');
     }
   }
 

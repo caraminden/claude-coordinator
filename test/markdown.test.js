@@ -333,3 +333,28 @@ test('markdownLine: one line per block, "• " for items, no links, emphasis kep
   assert.equal(markdownLine('<b>x</b> & y'), '&lt;b&gt;x&lt;/b&gt; &amp; y');
   assert.equal(markdownLine('Working on **it', { streaming: true }), 'Working on <strong>it</strong>');
 });
+
+// #898: a fenced block tagged with where it runs gets a header (label + tone); any other tag draws as before.
+test('a shell-tagged fence says where it runs', () => {
+  const pre = (tag, tone, label) =>
+    `<pre class="cui-shell" data-tone="${tone}" data-label="${label}"><code class="language-${tag}">x</code></pre>`;
+  assert.equal(md('```powershell-admin\nx\n```'), pre('powershell-admin', 'admin', 'PowerShell · Admin · Windows · Run as administrator'));
+  assert.equal(md('```powershell\nx\n```'), pre('powershell', 'powershell', 'PowerShell · Windows'));
+  assert.equal(md('```wsl\nx\n```'), pre('wsl', 'wsl', 'WSL · bash (Linux on your desktop)'));
+  assert.equal(md('```fish\nx\n```'), pre('fish', 'fish', 'perigee · fish'));
+  assert.equal(md('```bash\nx\n```'), pre('bash', 'bash', 'bash'));
+  assert.equal(md('```cmd\nx\n```'), pre('cmd', 'cmd', 'cmd · Windows'));
+});
+
+test('shell aliases share the tone, tags are case-insensitive, one tone each', () => {
+  const tone = (tag) => /data-tone="(\w+)"/.exec(md('```' + tag + '\nx\n```'))?.[1];
+  for (const a of ['ps1', 'pwsh', 'PowerShell']) assert.equal(tone(a), 'powershell');
+  for (const a of ['sh', 'zsh', 'console', 'shell']) assert.equal(tone(a), 'bash');
+  assert.equal(tone('pwsh-admin'), 'admin');
+  assert.equal(new Set(['powershell-admin', 'powershell', 'wsl', 'fish', 'bash', 'cmd'].map(tone)).size, 6);
+});
+
+test('an unknown or missing tag gets no header', () => {
+  assert.equal(md('```js\nx\n```'), '<pre><code class="language-js">x</code></pre>');
+  assert.equal(md('```\nx\n```'), '<pre><code>x</code></pre>');
+});

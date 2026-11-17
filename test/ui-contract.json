@@ -175,6 +175,7 @@
       "cui-front-matter",
       "cui-link",
       "cui-md",
+      "cui-shell",
       "cui-table",
       "cui-task"
     ],

@@ -417,10 +417,12 @@ export class LiveWaiters {
   private async checkRelays(): Promise<void> {
     const ready: Relay[] = [];
     for (const r of this.relays()) if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.head })) ready.push(r);
-    if (!ready.length) return;
-    // Dropped before sending, so a send that throws can't deliver one twice; read again for any queued meanwhile.
-    this.store.setSetting(RELAYS, this.relays().filter((r) => !ready.some((o) => o.id === r.id)));
-    for (const r of ready) {
+    // Dropped before sending, so a send that throws can't deliver one twice; read again: one cancelled meanwhile stays cancelled.
+    const now = this.relays();
+    const go = ready.filter((r) => now.some((o) => o.id === r.id));
+    if (!go.length) return;
+    this.store.setSetting(RELAYS, now.filter((r) => !go.some((o) => o.id === r.id)));
+    for (const r of go) {
       try {
         this.deliver(r);
       } catch (err) {

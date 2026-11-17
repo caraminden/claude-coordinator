@@ -386,7 +386,8 @@ function changeList(projectId, tv) {
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
   // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
   const firstLater = rows.findIndex((r) => r.c?.later);
-  const after = firstLater > 0 && n.number != null ? `After ${releaseName(n).toLowerCase()}: in line` : firstLater > 0 ? 'After this release: in line' : '';
+  const inLine = ['line', 'land'].includes(rows[firstLater]?.c?.stage) ? ': in line' : '';
+  const after = firstLater > 0 ? `After ${n.number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
   return h('ol', { class: 'rel-changes' }, rows.flatMap(({ c, e }, i) => [...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row({ c, e }, i)]));
   function row({ c, e }, i) {
     const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}`;
@@ -548,7 +549,7 @@ export function releaseChip(t) {
       return h('span', { class: 'rel-chip' },
         n != null ? versionLink(tv.next, 'rel-ver', true) : '',
         h('a', { class: 'rel-chip-open', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, 'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
-          stageTrack(tv.next.stages, c, { mini: true }), ...(c.later ? [h('b', { class: 'waits' }, 'in line'), ' ', h('span', { class: 'muted' }, c.brief ?? 'next release')] : changeNow(tv.next, c)), h('span', { 'aria-hidden': 'true' }, '›')));
+          stageTrack(tv.next.stages, c, { mini: true }), ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, 'in line'), ' ', h('span', { class: 'muted' }, c.brief ?? 'next release')] : changeNow(tv.next, c)), h('span', { 'aria-hidden': 'true' }, '›')));
     }
   }
   if (t.ship?.stage === 'build' && t.build) {

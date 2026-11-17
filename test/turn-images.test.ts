@@ -13,7 +13,14 @@ const data = join(root, 'data');
 const outside = join(root, 'outside');
 mkdirSync(data);
 mkdirSync(outside);
-const png = (path: string, size: string) => assert.equal(spawnSync('magick', ['-size', size, 'xc:red', path]).status, 0);
+const hasMagick = !spawnSync('magick', ['-version']).error;
+const skipNoMagick = hasMagick ? {} : { skip: 'ImageMagick (magick) is not installed here' };
+// A real 1x1 PNG: the checks that refuse before decoding need no magick.
+const PNG1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', 'base64');
+const png = (path: string, size: string) => {
+  if (!hasMagick) return writeFileSync(path, PNG1);
+  assert.equal(spawnSync('magick', ['-size', size, 'xc:red', path]).status, 0);
+};
 png(join(data, 'big.png'), '3000x2000');
 png(join(data, 'small.png'), '100x50');
 png(join(outside, 'secret.png'), '10x10');
@@ -25,7 +32,7 @@ const refused = async (paths: unknown, status: number, re: RegExp) => {
   await assert.rejects(loadImages(paths, data), (e: any) => e.status === status && re.test(e.message));
 };
 
-test('downscales to 1568 on the long side as JPEG', async () => {
+test('downscales to 1568 on the long side as JPEG', skipNoMagick, async () => {
   const [big, small] = await loadImages([join(data, 'big.png'), 'small.png'], data);
   assert.equal(big.media_type, 'image/jpeg');
   const dim = (b64: string) => spawnSync('magick', ['jpeg:-', '-format', '%w %h', 'info:'], { input: Buffer.from(b64, 'base64') }).stdout.toString();
@@ -78,7 +85,7 @@ test('an SVG renamed .png is refused, not rendered', async () => {
   await refused(['x.png'], 400, /isn't a PNG/);
 });
 
-test('a name with brackets works', async () => {
+test('a name with brackets works', skipNoMagick, async () => {
   png(join(data, 'a[1].png'), '20x20');
   assert.equal((await loadImages(['a[1].png'], data)).length, 1);
 });

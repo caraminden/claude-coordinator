@@ -385,7 +385,7 @@ test('askWhy: every kind of Needs-you item says why it is there and since when (
 
 test('progressWhy: a release says its stage, what it waits on, since when and its usual (#906)', () => {
   assert.equal(progressWhy({ stage: 'deploy', since: NOW - 3 * MIN, usual: 240, waitingOn: null, text: 'deploying' }, 'Deploy', NOW), 'Deploy: deploying.\nSince 3:57 AM PST, 3m so far; usually ~4m.');
-  assert.equal(progressWhy({ stage: 'line', since: NOW - 9 * MIN, usual: null, waitingOn: '2nd in line, behind #620', text: '' }, 'Line', NOW), 'Line: Waiting on 2nd in line, behind #620.\nSince 3:51 AM PST, 9m so far; no estimate while it waits.');
+  assert.equal(progressWhy({ stage: 'line', since: NOW - 9 * MIN, usual: null, waitingOn: '2nd in line, behind #620', text: '' }, 'Line', NOW), 'Line: 2nd in line, behind #620.\nSince 3:51 AM PST, 9m so far; no estimate while it waits.');
 });
 
 test('pacific and span: clock times are Pacific with the day once old; spans read short (#906)', () => {

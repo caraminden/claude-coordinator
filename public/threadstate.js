@@ -184,7 +184,7 @@ export function askWhy(item, t, now = Date.now()) {
  * (Pacific) and its usual length. `p` is src/releases.ts's Progress; `stage` the stage's name in words.
  */
 export function progressWhy(p, stage, now = Date.now()) {
-  const what = p.waitingOn ? `Waiting on ${p.waitingOn}` : p.text;
+  const what = p.waitingOn ?? p.text; // waitingOn is already a sentence ("2 changes … wait on a version bump")
   const usual = p.usual ? `; usually ~${span(p.usual * 1000)}` : p.waitingOn ? '; no estimate while it waits' : '';
   return `${stage}${what ? `: ${what}` : ''}.\nSince ${pacific(p.since, now)}, ${span(now - p.since)} so far${usual}.`;
 }

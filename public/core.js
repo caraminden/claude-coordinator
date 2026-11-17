@@ -752,11 +752,14 @@ export async function catchUpEvents() {
 export function onTicketUpdate(ticket) {
   if (view?.kind !== 'project') return;
   if (view.projectId !== ticket.project_id) return inboxOtherTicket(ticket);
-  // Each person has their own Taskmaster (#919): the others' updates only refresh their entry in view.taskmasters,
-  // and never replace this person's own.
-  const tm = ticket.kind === 'coordinator' && view.taskmasters?.find((t) => t.id === ticket.id);
-  if (tm) tm.ticket = ticket;
-  if (ticket.kind === 'coordinator' && view.coordinator && ticket.id !== view.coordinator.id) return;
+  // Each person has their own Taskmaster (#919): the others' updates only refresh their entry in view.taskmasters.
+  if (ticket.kind === 'coordinator' && view.coordinator && ticket.id !== view.coordinator.id) {
+    // Another person's Taskmaster or the Overlord: its cards still count in Needs you.
+    const tm = view.taskmasters?.find((t) => t.id === ticket.id);
+    const before = tm?.ticket;
+    if (tm) tm.ticket = ticket;
+    return void inboxTicket(before, ticket);
+  }
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);
   if (ticket.kind === 'coordinator') view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);

@@ -1,6 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { presenceHead } from './presence.js';
-import { ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight, icon, isCoordinator, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
+import { account, ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight, icon, isCoordinator, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { mergedView } from './mine.js';
 import { toast } from './ui/status.js';
 import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
@@ -497,6 +497,8 @@ export function renderTicketHead() {
       location.hash = `#/p/${t.project_id}`;
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
+  // Out of a minion's touched set (#919): your Taskmaster stops hearing from it until you touch it again.
+  if (!coord && account?.id != null && t.touched?.includes(account.id)) actions.unshift(leaveButton(t));
   actions.unshift(ultraButton(t));
   const state = headState(t);
   // Titled too, since a narrow line may cut it short. While it works (its turn or the server, #727),
@@ -563,9 +565,26 @@ function headState(t) {
 /** Take the ticket the server returned after a send or a card's answer, if that chat is still open. */
 export function adoptTicket(ticketId, ticket) {
   if (view?.id !== ticketId) return;
+  // Your message went to your own Taskmaster instead (#919 makes it, splitting the scheme, on a member's first write):
+  // open the scheme again, which now opens yours. shortcut: a whole reload, once per person per scheme; fine at that rate.
+  if (ticket.id !== ticketId && isCoordinator(ticket)) return void location.reload();
   view.ticket = ticket;
   renderTicketHead();
   catchUpEvents().catch(() => {});
+}
+
+function leaveButton(t) {
+  const mark = (inIt) => {
+    const now = view.tickets?.get(t.id) ?? t;
+    now.touched = inIt ? [...new Set([...(now.touched ?? []), account.id])] : (now.touched ?? []).filter((id) => id !== account.id);
+    if (view.ticket?.id === t.id) renderTicketHead();
+  };
+  return h('button', { type: 'button', class: 'secondary act-leave', title: 'Stop hearing from this minion in your Taskmaster. Messaging it or answering its cards brings you back.', onclick: () => optimistic({
+    label: 'leave this minion',
+    apply: () => mark(false),
+    send: () => api(`api/tickets/${t.id}/leave`, { method: 'POST', body: {} }),
+    undo: () => mark(true),
+  }) }, 'Leave');
 }
 
 /** Ask for a Taskmaster's fresh session (#406): the button goes at once, and comes back if the server refuses. */

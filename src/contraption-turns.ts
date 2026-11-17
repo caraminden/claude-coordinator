@@ -11,7 +11,7 @@
 // Citadel keeps no turn content: the prompt, the contraption's system prompt and its MCP headers sit in a
 // private turn folder that is deleted when the turn ends, and only the meter (src/db.ts contraption_turns)
 // and the session names are stored. The transcript is the person's own Claude session, in their folder.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -428,8 +428,9 @@ export class ContraptionTurns {
   }
 
   /** A blind turn's folder and every transcript it left (its cwd is never used again, so nothing could resume them). */
-  private dropBlind(person: number, blind: Blind) {
+  private dropBlind(person: number, blind: Blind, at: TurnPlace) {
     if (blind.root) rmSync(blind.root, { recursive: true, force: true });
+    else if (at.container) spawnSync(this.podman, ['exec', at.container, 'rm', '-rf', blind.cwd], { stdio: 'ignore', timeout: 10_000 });
     for (const dir of this.claude.configDirs(person)) rmSync(join(dir, 'projects', projectSlug(blind.cwd)), { recursive: true, force: true });
   }
 
@@ -507,7 +508,7 @@ export class ContraptionTurns {
       this.live.delete(id);
       this.names.delete(key);
       rmSync(dir.onHost, { recursive: true, force: true });
-      if (blind) this.dropBlind(req.person, blind);
+      if (blind) this.dropBlind(req.person, blind, at);
       this.store.endContraptionTurn(id, outcome, usage);
     }
   }
@@ -615,7 +616,8 @@ export class ContraptionTurns {
     delete env.SSH_AUTH_SOCK;
     // Nothing of the login in the process (the model sees no env without a shell, but a tool it's given might); the config dir stays, it holds the sign-in.
     if (blind) for (const v of ['USER', 'LOGNAME', 'SHELL', 'USERNAME']) delete env[v];
-    if (blind?.root) env.HOME = blind.root;
+    // HOME moves to the empty folder, so the sign-in must not be looked up through it.
+    if (blind?.root) Object.assign(env, { HOME: blind.root, CLAUDE_CONFIG_DIR: where.configDir });
     if (req.agents && (req.agents.model ?? req.model)) env.CLAUDE_CODE_SUBAGENT_MODEL = (req.agents.model ?? req.model)!;
     let argv = args({ ...req, system }, dir.inside, claudeSession, resume);
     if (codex) {

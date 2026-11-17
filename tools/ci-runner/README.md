@@ -419,7 +419,12 @@ back to 10000 within 20 seconds. So any distro on that PC needs it, once, from P
 wsl -d <distro> -u root -- systemctl mask --now systemd-timesyncd
 ```
 
-`wsl -l -v` lists the distros. To look at the clock from a CI job without root: the tick is `adjtimex`'s `tick`
+`wsl -l -v` lists the distros. A distro added later turns timesyncd on again, so `keep-wsl-up.ps1` also registers
+the task **Citadel WSL clock** (#900): every 5 minutes it masks `systemd-timesyncd` in each distro that is running
+(it starts none, and leaves alone any distro where WSL doesn't keep the clock), and writes each one it masked to
+`%LOCALAPPDATA%\citadel-wsl-clock.log`. Running `keep-wsl-up.ps1` again picks it up.
+
+To look at the clock from a CI job without root: the tick is `adjtimex`'s `tick`
 field (10000 when nothing is wrong), and a timesyncd in another distro shows as a UDP socket in `/proc/net/udp`
 that opens for a tenth of a second every 32 s, with the wall clock stepping as it closes. The clock now follows
 the Windows clock, so it is as right as that is (a steady 0.4 s behind NTP once it had settled, 2026-11-11).

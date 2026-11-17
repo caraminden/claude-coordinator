@@ -11,7 +11,7 @@ import type { TurnPlace } from '../src/claude-link.ts';
 import { codexSwitchKey } from '../src/codex.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, jsonLines, until, stopTurns, testPins } from './helpers.ts';
+import { bootServer, jsonLines, lines, until, stopTurns, testPins } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'contraption-turns-'));
 after(async () => {
@@ -697,7 +697,7 @@ test('a kept turn writes the prompt, tool calls and reply to the home scheme\'s 
   const files = readdirSync(dir);
   assert.equal(files.length, 1);
   assert.match(files[0], /^[0-9a-f]{12}-k1-[0-9a-f]{8}\.jsonl$/, 'named by a hashed person, the session and its Claude session');
-  const [t] = readFileSync(join(dir, files[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const [t] = jsonLines(join(dir, files[0]));
   assert.equal(t.n, 1);
   assert.equal(typeof t.turn, 'number', 'the turn id, the key #844\'s audit rows share');
   assert.equal(t.prompt, 'Move my dentist to Thursday.');
@@ -705,7 +705,7 @@ test('a kept turn writes the prompt, tool calls and reply to the home scheme\'s 
   assert.match(t.text, /Moved it[\s\S]*to Thursday\./);
   assert.equal(t.system.length, 64, 'a hash of the system text, not the text');
   for (let i = 0; i < 6; i++) await turn(app, { session: 'k1', system: 'Be an aura.', keep: true });
-  assert.equal(readFileSync(join(dir, files[0]), 'utf8').trim().split('\n').length, 5, 'only the first five');
+  assert.equal(lines(join(dir, files[0])).length, 5, 'only the first five');
   // Without keep, on an app with no home scheme, or for a person who opted out: nothing.
   await turn(app, { session: 'k2' });
   await turn(mandate, { session: 'k3', keep: true });

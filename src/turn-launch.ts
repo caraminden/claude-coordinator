@@ -101,7 +101,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   symlinkSync(process.execPath, join(MCP_DIR, 'bin', TURN_NODE));
   // citadel-replay (#836): reruns kept app chats; its shim runs the pinned replay.ts beside it.
   pinnedCopy('replay.ts');
-  cpSync(join(import.meta.dirname, '..', 'tools', 'citadel-replay'), join(MCP_DIR, 'bin', 'citadel-replay'));
+  const REPLAY_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-replay');
+  if (existsSync(REPLAY_BIN)) cpSync(REPLAY_BIN, join(MCP_DIR, 'bin', 'citadel-replay'));
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');

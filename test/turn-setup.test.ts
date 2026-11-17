@@ -418,7 +418,7 @@ test("only the scheme whose code this server runs hears about deploys, pending-d
     const served = await turn('ticket', 'connected', {}, repo);
     assert.equal(served.env.COORDINATOR_DEPLOYS, '1');
     assert.match(served.system, /deployed and waiting in pending-deploy/);
-    assert.match(served.system, /run `citadel-dev-copy start`.*Stop your other processes by pid/);
+    assert.match(served.system, /use `citadel-dev-copy start\|seed\|env\|stop`.*Stop your other processes by pid/);
     for (const other of [await turn('ticket', 'connected'), await turn('ticket', 'connected', {}, join(root, 'big-scheme', 'repo'))]) {
       assert.equal(other.env.COORDINATOR_DEPLOYS, undefined);
       assert.doesNotMatch(other.system, /deploy\.sh|pending-deploy|citadel-dev-copy/);

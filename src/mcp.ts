@@ -32,7 +32,7 @@ const MAX_TEXT = 4000;
 const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
 import { NEEDS, NEED_LINES } from './needs.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
-const URGENT = { type: 'boolean', description: 'true: wake it even when it is cold (idle over 55 minutes). Only when you are blocked waiting on its reply, or it is a person\'s go, pick or run-back to pass on. Anything else to a cold one stays held mail, read on its next turn (a person\'s message, or within 3 hours)' };
+const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idle over 55 minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
 
@@ -70,7 +70,7 @@ const REPLIES = {
   items: { type: 'string', maxLength: 40 },
   maxItems: 3,
   description:
-    'Up to 3 one-tap replies, each at most 40 characters, e.g. ["Merge it", "Make it live"]: buttons people tap to send that text as their own message, for when the obvious next step only needs their go. Not for a choice between options: ask_question does that. They go away once anyone writes or the next turn starts; [] or null takes them away now.',
+    'Up to 3 one-tap replies, e.g. ["Merge it"], that send that text as the person\'s own message, for when the next step only needs their go (a choice between options is ask_question). They go away once anyone writes or the next turn starts; [] or null clears them.',
 };
 
 const BUILD = {
@@ -82,12 +82,12 @@ const BUILD = {
 // Cara, 2026-11-14: "we should ALWAYS make an intentional choice about model"): the table is in the Taskmaster's prompt.
 const MODEL_IDS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5+opus-advisor', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'];
 /** The advisor trial's brief to the Taskmaster (#817; handoff from #813): whom it starts on the advisor. Here, not in public/model-table.js, as turns run a pinned copy of this file that carries only ./ imports. */
-const ADVISOR_TRIAL = 'claude-sonnet-5-5+opus-advisor is the advisor trial (#817): Sonnet runs the turn and consults Opus at hard points (~$0.35 a consult at an 85k context). Until its report ends it, start about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high on it at medium, and move a stalled Sonnet-medium minion to it before Opus medium. Never a Taskmaster. `node tools/advisor-trial.ts` reads its numbers.';
+const ADVISOR_TRIAL = 'claude-sonnet-5-5+opus-advisor: Sonnet runs the turn and consults Opus at hard points; the model table says when. Never a Taskmaster.';
 const EFFORT_IDS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODEL = {
   type: 'string',
   enum: MODEL_IDS,
-  description: `The model for the minion's turns, as in its composer. Required: pick it on purpose from the model table in your prompt, by the kind of work (mostly its type). The gpt-6 ones are Codex, only for a person who asked for it. ${ADVISOR_TRIAL}`,
+  description: `The model for the minion's turns, from the model table in your prompt. Required. gpt-6-* are Codex, only on a person's ask. ${ADVISOR_TRIAL}`,
 };
 const EFFORT = {
   type: 'string',
@@ -120,13 +120,13 @@ const SCHEDULE_GATE = {
 };
 const WORKFLOW = {
   type: ['boolean', 'null'],
-  description: "true lets the minion's turns call Claude Code's Workflow tool (scripted fan-out of agents), as in its composer; off by default, since it adds about 2k tokens to every API call. Set it when creating the minion: flipping it later breaks its prompt cache once.",
+  description: "true lets the minion's turns call Claude Code's Workflow tool (about 2k tokens on every call). Set it at creation: changing it later breaks the prompt cache once.",
 };
 
 const PLUGIN_FOLDERS = {
   type: ['array', 'null'],
   items: { type: 'string' },
-  description: "Extra plugin folders this minion loads on top of its scheme's, picked from the scheme's optional plugin folders (get_project_settings lists them), e.g. Chrome DevTools for UI work. Each costs tokens and memory on every turn, so pick one only when the work needs it. Set it when creating the minion: changing it later breaks its prompt cache once. [] or null clears them.",
+  description: "Extra optional plugin folders from get_project_settings (e.g. DevTools for UI work); each costs tokens every turn. Set at creation: changing it later breaks the prompt cache once. [] or null clears.",
 };
 
 const PROPERTIES = {
@@ -176,7 +176,7 @@ const WHEN_CI_PASSES = {
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for any choice you would otherwise put in prose: a go (merge, land, start, close; a lone go may be a reply button instead), A or B, or an offer of work not done yet ("want me to…"). Tuning details are yours to pick. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. When the choice is visual or has several parts, make a choices page instead (citadel:docs-and-mocks, mock.picks or mock.boards) and ask with `doc` set to its path and no questions: the card opens the page, people pick there, and the page\'s Send settles the card. Every choices page you link comes with this card. To get a password, API key or token from a person, never ask them to type it into the chat: ask with `secret` and no questions, and the card takes it in a masked field and saves it. You get back only its name, and your turns read it from the env var $CITADEL_SECRET_<NAME>; use it in commands without printing it. After calling it, finish your turn with a short reply and wait: the card shows below your reply, even when you asked early in a long turn (say "the card below", never "above"), and the answers arrive as the next message. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below". The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345).',
+    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type). Use it for any choice you would otherwise put in prose: a go (a lone go may be a reply button instead), A or B, or an offer of work not done yet ("want me to…"); tuning details are yours. Each question marks the option you would pick with `recommended: true` (exactly one; any number on multiSelect), first; a question without one is refused. Options may carry an image, shown as a gallery. A visual or multi-part choice goes on a choices page (citadel:docs-and-mocks): pass `doc` with its path and no questions, and its Send settles the card. For a password, API key or token, pass `secret` and no questions: a masked field; you get only the name, read from $CITADEL_SECRET_<NAME>. After calling it, end your turn with a short reply; the answers arrive as the next message. The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345) ("below" this turn, "above" later).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -187,8 +187,8 @@ const ASK_QUESTION = {
         items: {
           type: 'object',
           properties: {
-            question: { type: 'string', maxLength: 500, description: 'The full question, ending in "?", at most 500 characters' },
-            header: { type: 'string', maxLength: 24, description: 'A very short label for the card, at most 24 characters, e.g. "Layout"' },
+            question: { type: 'string', maxLength: 500, description: 'The full question, ending in "?"' },
+            header: { type: 'string', maxLength: 24, description: 'A very short label for the card, e.g. "Layout"' },
             multiSelect: { type: 'boolean', description: 'true if several options can be picked (default false)' },
             options: {
               type: 'array',
@@ -197,13 +197,13 @@ const ASK_QUESTION = {
               items: {
                 type: 'object',
                 properties: {
-                  label: { type: 'string', maxLength: 80, description: 'The choice, 1 to 5 words (at most 80 characters)' },
-                  description: { type: 'string', maxLength: 300, description: 'What picking it means, or its trade-off, at most 300 characters' },
+                  label: { type: 'string', maxLength: 80, description: 'The choice, 1 to 5 words' },
+                  description: { type: 'string', maxLength: 300, description: 'What picking it means, or its trade-off' },
                   image: {
                     type: 'string',
                     maxLength: 1000,
                     description:
-                      'Optional picture of this option: path to an image, GIF or video (png, jpg, gif, webp, avif, svg, mp4, webm, mov) you made in your working directory or shared folder, absolute or relative to your working directory. Shown as a thumbnail people can open full size.',
+                      'Optional picture: a path in your working directory or shared folder to a png, jpg, gif, webp, avif, svg, mp4, webm or mov, shown as a thumbnail.',
                   },
                   recommended: { type: 'boolean', description: 'true on the option you recommend; the card labels it "(Recommended)". Leave the words out of the label.' },
                 },
@@ -423,12 +423,12 @@ const TOOLS = [
         message: { type: 'string', maxLength: 100000, description: 'First message to the new minion, at most 100,000 characters' },
         start_after: {
           type: 'integer',
-          description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. Messages to it are held until it starts, then read with its brief; message_ticket with unpark starts it early.",
+          description: "A minion number (#N) to chain after: this one is created parked with its message held (messages to it too, read with its brief), and starts by itself on a branch caught up to main once #N is live (or merged, see start_when). If #N is dismissed unmerged it stays parked and you are told; message_ticket with unpark starts it early.",
         },
         start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
         parent: {
           type: ['integer', 'null'],
-          description: "The minion number (#N, in this scheme) this one is started for: pass it whenever a minion asked for it, in its message or a handoff it wrote. The new minion shows as from #N and gets #N's build unless build is given. Left out, it is the minion whose message you are answering, if any; null for none.",
+          description: "The #N this minion is started for: it shows as from #N and inherits its build unless build is given. Default: the minion whose message you are answering; null for none.",
         },
         build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, else the start_after minion's, if any. A build whose branch build/<n> exists sets its base and target: the minion starts from build/<n> and merges into it, never main.` },
         build_owner: { type: 'boolean', description: 'true for the build minion of a new build: it makes build/<n>, keeps the list of what is in, takes main in daily and lands the build with one go card. Needs build.' },
@@ -460,7 +460,7 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. For long text, write a file in your scheme's shared folder and send it with file and a one-line summary. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1352,13 +1352,13 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this scheme's Taskmaster, waking it by default: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
+      "Send a message to this scheme's Taskmaster, waking it by default: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
   },
   {
     name: 'message_minion',
     description:
-      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over 55 minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After 6 messages either way between two minions in 10 minutes, the next is held until a person continues. Find who owns a file or a piece of work with list_tickets and read_minion.",
+      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over 55 minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After 6 messages either way between two minions in 10 minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1458,7 +1458,7 @@ const THREAD_TOOLS = [
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile (a GitHub notice that needs no action, like its PR merging, doesn't count); its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open in state complete, and the server closes them once a member has opened them after your final reply. close_self on a complete minion refuses and says so. It refuses while a question or plan card is open or the state is try or complete; a state ready is cleared. Setting state complete, try or ready after it cancels the dismissal, and so does the state in your final reply's status line, which is applied after this call. Never announce a close in prose ("closing this minion"): call this tool, and if it refuses or the minion stays open, say plainly why you are staying open.`,
+      `Dismiss this minion when the turn ends, once its work is merged and nothing needs deploying${DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Never announce a close in prose: call this, and if it refuses or the minion stays open, say why.`,
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Merged abc1234; live after the restart"' } },

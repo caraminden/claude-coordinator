@@ -110,6 +110,14 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   assert.equal((await bearer(tmAlpha, `/api/projects/${bravo}/contraption-turns`)).status, 403, "another scheme's");
   const minion = (await srv.call(`/api/projects/${alpha}/tickets`, { message: 'A minion' })).data.id;
   assert.equal((await bearer(minion, `/api/projects/${alpha}/contraption-turns`)).status, 403, 'a minion');
+  // Getting the app gave Alpha its weekly app turns check (#844); that check's current run reads the audit.
+  const checks = (await srv.call(`/api/projects/${alpha}/schedules`)).data.schedules.filter((s: any) => s.template === 'app-turns');
+  assert.equal(checks.length, 1);
+  const { DatabaseSync } = await import('node:sqlite');
+  const rw = new DatabaseSync(join(srv.data, 'coordinator.db'));
+  rw.prepare('UPDATE schedules SET last_ticket_id = ? WHERE id = ?').run(minion, checks[0].id);
+  rw.close();
+  assert.equal((await bearer(minion, `/api/projects/${alpha}/contraption-turns`)).status, 200, "the check's run");
 
   // Its contraption_turns tool: the turns as text, with the verdict and the payload.
   const tool = async (args: object) => {

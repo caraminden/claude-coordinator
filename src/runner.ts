@@ -39,6 +39,7 @@ import { homedir } from 'node:os';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
+import { isAppTurnsRun } from './schedules.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -2331,6 +2332,7 @@ export class Runner {
         codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
+        appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
         everyScheme,
         claudeBin: this.claudeBin,
       });

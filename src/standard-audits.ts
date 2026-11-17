@@ -105,3 +105,28 @@ export function backfillStandardAudits(store: Store, dataDir: string, templates:
   store.setSetting(BACKFILL_KEY, now);
   return done;
 }
+
+/**
+ * The weekly app turns check (kit/schedules/app-turns.md) for a scheme home to an app (Cara, 2026-11-16: "automatically
+ * add this turn audit and the audit of the audit to new schemes when they add a contraption"). Once per scheme, so a
+ * check someone deletes stays deleted; a scheme that already has one is left alone. Returns a line when it added one.
+ */
+export function addAppTurnsCheck(store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()): string | null {
+  const key = `app_turns_check:${projectId}`;
+  const p = store.getProject(projectId);
+  if (!p || store.getSetting(key)) return null;
+  store.setSetting(key, now);
+  if (store.schedules.list(p.id).some((s) => s.template === 'app-turns')) return null;
+  const t = templates.get('app-turns');
+  if (!t) throw new Error('kit/schedules/app-turns.md is missing');
+  const owner = p.owner_id == null ? undefined : store.getUser(p.owner_id);
+  const fields = templateFields(t, p, '', templateVars(store, dataDir, p.id));
+  store.schedules.create({ project_id: p.id, ...fields, created_by: owner?.name ?? 'Citadel' }, now);
+  return `${p.name}: added "${t.name}" (${fields.cron})`;
+}
+
+/** At boot: every scheme already home to an app gets its check (once each, as above). */
+export function addAppTurnsChecks(store: Store, dataDir: string): string[] {
+  const homes = new Set(store.listContraptions().map((c) => c.home_scheme).filter((id): id is number => id !== null));
+  return [...homes].map((id) => addAppTurnsCheck(store, dataDir, id)).filter((l): l is string => !!l);
+}

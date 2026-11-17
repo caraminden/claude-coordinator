@@ -25,6 +25,8 @@ import { HttpError, json, oneOf, readJson, send, SECURITY_HEADERS, str, type App
 import { GLOBAL_OWNER } from '../properties.ts';
 import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
+import { addAppTurnsCheck } from '../standard-audits.ts';
+import { isAppTurnsRun } from '../schedules.ts';
 
 // Names the turn API (section 4) and the rail take under /api/contraptions/.
 const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay', 'home', 'minions', 'media', 'openrouter']);
@@ -408,12 +410,13 @@ export const contraptionRoutes: Route[] = [
     return json(res, 200, { ok: true });
   }),
   // A scheme's turn audit (#844): its home apps' turns, newest first, for its own Taskmaster's contraption_turns (Cara,
-  // 2026-11-16: "Taskmaster can read it"; its page went the same day: "Remove the page"). Members and admins may read
-  // it too; never a minion or an app.
+  // 2026-11-16: "Taskmaster can read it"; its page went the same day: "Remove the page"), and for the run of its weekly
+  // app turns check now working (kit/schedules/app-turns.md). Members and admins may read it too; no other minion, no app.
   // `?before=<turn id>` pages, `?app=` filters.
   {
-    method: 'GET', path: '/api/projects/:project/contraption-turns', who: ['person', 'taskmaster'],
-    handler({ res, app, project, url }) {
+    method: 'GET', path: '/api/projects/:project/contraption-turns', who: ['person', 'taskmaster', 'minion'],
+    handler({ res, app, project, url, caller }) {
+      if (caller && caller.kind !== 'coordinator' && !isAppTurnsRun(app.store, caller)) throw new HttpError(403, "Only the scheme's Taskmaster and its app turns check read the turn audit");
       const before = url.searchParams.get('before');
       const turns = app.store.schemeTurnAudit(project.id, { before: before ? Number(before) || 0 : undefined, contraption: url.searchParams.get('app') || undefined, limit: AUDIT_PAGE + 1 });
       const apps = app.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => ({ name: c.name, title: c.title }));
@@ -485,6 +488,7 @@ export const contraptionRoutes: Route[] = [
         default_model: f.default_model ?? null, turn_cap: f.turn_cap ?? null, repo: f.repo ?? null, branch: f.branch ?? null, folder: f.folder ?? null,
       });
       void app.releases.refresh(true); // its App row shows up at once (#627)
+      if (c.home_scheme !== null) addAppTurnsCheck(app.store, app.dataDir, c.home_scheme);
       return json(res, 201, view(app, c));
     },
   }),
@@ -495,7 +499,9 @@ export const contraptionRoutes: Route[] = [
       const c = contraption(app, params.name);
       app.store.updateContraption(c.name, fields(app, await readJson(req), false));
       void app.releases.refresh(true); // a new home scheme or repo moves its row (#627)
-      return json(res, 200, view(app, contraption(app, c.name)));
+      const now = contraption(app, c.name);
+      if (now.home_scheme !== null) addAppTurnsCheck(app.store, app.dataDir, now.home_scheme);
+      return json(res, 200, view(app, now));
     },
   }),
   admin({

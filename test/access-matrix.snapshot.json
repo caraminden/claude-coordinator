@@ -1250,8 +1250,8 @@
   "outsider": "404 No such scheme",
   "tmA": "200",
   "tmB": "403 Outside this Taskmaster's scheme",
-  "m1": "403 A minion may only update itself",
-  "m2": "403 A minion may only update itself"
+  "m1": "403 Only the scheme's Taskmaster and its app turns check read the turn audit",
+  "m2": "403 Only the scheme's Taskmaster and its app turns check read the turn audit"
  },
  "POST /api/projects/:p/github": {
   "anon": "401 Not logged in",

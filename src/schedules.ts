@@ -196,7 +196,7 @@ export interface ScheduleTemplate {
 
 export const TEMPLATE_DIR = join(import.meta.dirname, '..', 'kit', 'schedules');
 
-/** The kit's schedule templates by slug, read fresh (four small files) so a deploy's kit edit applies at once. */
+/** The kit's schedule templates by slug, read fresh (a few small files) so a deploy's kit edit applies at once. */
 export function loadTemplates(dir = TEMPLATE_DIR): Map<string, ScheduleTemplate> {
   const out = new Map<string, ScheduleTemplate>();
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.md')).sort()) {
@@ -248,6 +248,11 @@ export function templateFields(t: ScheduleTemplate, project: Pick<Project, 'id' 
     name: t.name, type: t.type, model: t.model, effort: t.effort, min_minions: t.min_minions,
     cron: staggerCron(t.cron, t.stagger, project.id - 1), template: t.slug, notes: notes.trim(), brief: renderTemplate(t, notes, v),
   };
+}
+
+/** Whether a minion is the run of its scheme's app turns check (kit/schedules/app-turns.md) that is working now: the one minion that reads the turn audit (#844). */
+export function isAppTurnsRun(store: Pick<Store, 'schedules'>, ticket: { id: number; project_id: number }): boolean {
+  return store.schedules.list(ticket.project_id).some((s) => s.template === 'app-turns' && s.last_ticket_id === ticket.id);
 }
 
 /** The values a scheme's templates fill in. Citadel's shared folder is found by the scheme's name. */
@@ -456,6 +461,15 @@ export class ScheduledRuns {
       const skip = `Skipped ${pacific(now)}: ${minions} minion${minions === 1 ? '' : 's'} since ${pacific(store.schedules.since(s))} (needs ${s.min_minions})`;
       console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
       return store.schedules.ran(s.id, { skip }, now);
+    }
+    // The app turns check (#844) skips, as free as the gate above, a stretch with no app turns to read.
+    if (s.template === 'app-turns') {
+      const newest = store.schemeTurnAudit(s.project_id, { limit: 1 })[0];
+      if (!newest || newest.at <= store.schedules.since(s)) {
+        const skip = `Skipped ${pacific(now)}: no app turns since ${pacific(store.schedules.since(s))}`;
+        console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
+        return store.schedules.ran(s.id, { skip }, now);
+      }
     }
     try {
       // A standard audit renders its kit template now, so a template fix reaches every scheme's next run (#799).

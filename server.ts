@@ -35,7 +35,7 @@ import { type Chain, githubPrs, LiveWaiters, pacificTime, runsRepo, startChained
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
-import { backfillStandardAudits } from './src/standard-audits.ts';
+import { addAppTurnsChecks, backfillStandardAudits } from './src/standard-audits.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
@@ -497,6 +497,7 @@ const scheduledRuns = new ScheduledRuns({ store, newMinion, runner, broadcast, b
 // Once per database (#799): the hand-made audits follow kit/schedules/, and each scheme gets the ones its repo fits.
 try {
   for (const line of backfillStandardAudits(store, DATA_DIR)) console.log(`Standard audits (#799): ${line}`);
+  for (const line of addAppTurnsChecks(store, DATA_DIR)) console.log(`App turns check (#844): ${line}`);
 } catch (err) {
   console.error('Standard audits (#799) backfill failed; it tries again at the next start:', err);
 }

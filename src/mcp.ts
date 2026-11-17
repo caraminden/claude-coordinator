@@ -112,7 +112,7 @@ export function closeSelfResult(cleared: boolean): string {
     + 'Do not announce the close in prose. If you do stay open, say plainly why ("Staying open in state ready for you to do X"; a complete minion closes by itself once a member has seen it). Finish your reply now.';
 }
 
-export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check'] as const;
+export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns'] as const;
 const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
   gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },
@@ -513,7 +513,7 @@ const TOOLS = [
   {
     name: 'schedule_audit',
     description:
-      "Add one of the kit's standard audits to this scheme (kit/schedules/<template>.md, #799): it brings its name, time (staggered by scheme), model, effort and activity gate, and each run renders the kit's current text with this scheme's name, then your notes. Add one only where the repo shows what it needs. code-health: app code people build on, not only notes, docs or an empty scaffold. test-audit: a test suite. monthly-retro: minions working in the scheme. upstream-check: a THIRD_PARTY.md with a Copies table, or a \"## Copies\" table in onboarding.md. A scheme has each at most once; update_schedule changes it.",
+      "Add one of the kit's standard audits to this scheme (kit/schedules/<template>.md, #799): it brings its name, time (staggered by scheme), model, effort and activity gate, and each run renders the kit's current text with this scheme's name, then your notes. Add one only where the repo shows what it needs. code-health: app code people build on, not only notes, docs or an empty scaffold. test-audit: a test suite. monthly-retro: minions working in the scheme. upstream-check: a THIRD_PARTY.md with a Copies table, or a \"## Copies\" table in onboarding.md. app-turns: a scheme home to an app; Citadel adds it by itself when the scheme gets its first app. A scheme has each at most once; update_schedule changes it.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -2021,9 +2021,9 @@ function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
-  const audit = HOME_CONTRAPTIONS.length ? [CONTRAPTION_TURNS] : [];
+  const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

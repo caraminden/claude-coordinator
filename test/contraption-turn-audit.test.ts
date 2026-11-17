@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
-import { bootServer } from './helpers.ts';
+import { agentToken, bootServer } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'turn-audit-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -92,4 +94,43 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   assert.notEqual(byKey.status, 200);
   // The admin reads Bravo's.
   assert.deepEqual((await srv.call(`/api/projects/${bravo}/contraption-turns`)).data.turns.map((t: any) => t.id), [elsewhere]);
+
+  // Alpha's Taskmaster reads Alpha's turns (Cara, 2026-11-16: "Taskmaster can read it"), not Bravo's; its minions don't.
+  const tmOf = async (project: number) => {
+    await srv.call(`/api/projects/${project}`);
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
+    const row = db.prepare("SELECT id FROM tickets WHERE project_id = ? AND kind = 'coordinator'").get(project) as { id: number };
+    db.close();
+    return row.id;
+  };
+  const tmAlpha = await tmOf(alpha);
+  const bearer = (id: number, path: string) => fetch(srv.base + path, { headers: { Authorization: `Bearer ${agentToken(srv.data, id)}` } });
+  assert.equal((await bearer(tmAlpha, `/api/projects/${alpha}/contraption-turns`)).status, 200);
+  assert.equal((await bearer(tmAlpha, `/api/projects/${bravo}/contraption-turns`)).status, 403, "another scheme's");
+  const minion = (await srv.call(`/api/projects/${alpha}/tickets`, { message: 'A minion' })).data.id;
+  assert.equal((await bearer(minion, `/api/projects/${alpha}/contraption-turns`)).status, 403, 'a minion');
+
+  // Its contraption_turns tool: the turns as text, with the verdict and the payload.
+  const tool = async (args: object) => {
+    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+      env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(srv.data, tmAlpha), COORDINATOR_PROJECT: String(alpha), COORDINATOR_TICKET: String(tmAlpha), COORDINATOR_ROLE: 'coordinator', COORDINATOR_HOME_CONTRAPTIONS: 'voice' },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    try {
+      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'contraption_turns', arguments: args } }) + '\n');
+      const r = await reply;
+      return r.result?.content?.[0]?.text ?? JSON.stringify(r);
+    } finally {
+      child.kill();
+    }
+  };
+  const listed = await tool({});
+  assert.match(listed, new RegExp(`^Turn ${id} · voice · for Cara · .* · blind · fell back: named a person$`, 'm'));
+  assert.match(listed, /^Prompt: Read the vowel\.$/m);
+  assert.match(listed, /^Output: You said: Read the vowel\.$/m);
+  assert.ok(!listed.includes('Bravo words'));
+  assert.match(await tool({ turn: id }), /^System: Word feedback for a voice exercise\.$/m);
+  assert.match(await tool({ turn: elsewhere }), /No turn \d+ in this scheme/);
 });

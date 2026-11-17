@@ -399,10 +399,11 @@ export const contraptionRoutes: Route[] = [
     if (!app.contraptionTurns.cancel(c.id, Number(params.turn))) throw new HttpError(404, 'No such turn running');
     return json(res, 200, { ok: true });
   }),
-  // A scheme's turn audit page (#844): its home apps' turns, newest first. A person's route on a :project, so only the
-  // scheme's members (and admins) read it; never a minion, Taskmaster or app. `?before=<turn id>` pages, `?app=` filters.
+  // A scheme's turn audit (#844): its home apps' turns, newest first. Its members (and admins) read it on the page, its
+  // own Taskmaster through contraption_turns (Cara, 2026-11-16: "Taskmaster can read it"); never a minion or an app.
+  // `?before=<turn id>` pages, `?app=` filters.
   {
-    method: 'GET', path: '/api/projects/:project/contraption-turns', who: ['person'],
+    method: 'GET', path: '/api/projects/:project/contraption-turns', who: ['person', 'taskmaster'],
     handler({ res, app, project, url }) {
       const before = url.searchParams.get('before');
       const turns = app.store.schemeTurnAudit(project.id, { before: before ? Number(before) || 0 : undefined, contraption: url.searchParams.get('app') || undefined, limit: AUDIT_PAGE + 1 });

@@ -1,5 +1,5 @@
 // Settings → App turns (#844): every model call the scheme's contraptions make, as sent and as answered, with the
-// app's own verdict. Text only; members of the scheme see it, nobody else (GET api/projects/:id/contraption-turns).
+// app's own verdict. Text only; members of the scheme see it, and its Taskmaster through contraption_turns (GET api/projects/:id/contraption-turns).
 import { api, h, icon, view } from './base.js';
 import { settingsTabs } from './settings.js';
 
@@ -14,7 +14,7 @@ function row(t) {
   const [tone, word, tip] = t.verdict === 'pass' ? ['ok', 'Passed', 'The app checked the reply and used it']
     : t.verdict === 'fallback' ? ['warn', 'Fell back', 'The app used its rule text in place of the reply']
     : ['neutral', 'No verdict', 'The app has not posted a verdict for this turn'];
-  const ended = t.outcome && t.outcome !== 'ok' ? t.outcome : '';
+  const ended = t.outcome && t.outcome !== 'end' ? t.outcome : '';
   return h('div', { class: 'turn-row' },
     h('div', { class: 'turn-head' },
       h('span', { class: 'name' }, t.contraption_title || t.contraption),

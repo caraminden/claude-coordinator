@@ -843,6 +843,28 @@ const CONTRAPTION_READ = {
   },
 };
 
+/** The scheme's contraption turn audit (#844), for its Taskmaster: what each app's model calls were sent and answered. */
+const CONTRAPTION_TURNS = {
+  name: 'contraption_turns',
+  description: `Read this scheme's contraption turn audit: every model call its apps (${HOME_CONTRAPTIONS.join(', ')}) made in the last 14 days, newest first, with whom it was for, the model, whether it ran blind, the system text, prompt and output, and the app's verdict (passed, or fell back to its rule text, with its reason). Use it to check an app's prompts and replies, or why it fell back. Without turn it lists up to 30 turns with each text cut short; with turn it returns that one whole. The payloads hold players' own words: read them here, and never copy them into a file, a commit, a handoff or another scheme.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      app: { type: 'string', description: 'Only this app\'s turns.', ...(HOME_CONTRAPTIONS.length ? { enum: HOME_CONTRAPTIONS } : {}) },
+      before: { type: 'integer', description: 'Turns older than this turn id: the next page.' },
+      turn: { type: 'integer', description: 'One turn by id, with its texts whole.' },
+    },
+  },
+};
+const AUDIT_CUT = 400;
+function turnText(t: any, whole: boolean): string {
+  const at = new Date(t.at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  const verdict = t.verdict === 'pass' ? 'passed' : t.verdict === 'fallback' ? 'fell back' : 'no verdict';
+  const head = [`Turn ${t.id}`, t.contraption, `for ${t.person ?? 'someone removed'}`, at, t.model, t.blind && 'blind', t.outcome && t.outcome !== 'end' && t.outcome, verdict + (t.verdict_reason ? `: ${t.verdict_reason}` : '')];
+  const text = (label: string, v: string) => `${label}: ${whole || v.length <= AUDIT_CUT ? v : `${v.slice(0, AUDIT_CUT)}… (${v.length} characters: turn ${t.id} for all)`}`;
+  return [head.filter(Boolean).join(' · '), ...(whole ? [text('System', t.system)] : []), text('Prompt', t.prompt), text('Output', t.output), ...(t.images ? [`${t.images} image(s) sent, not kept`] : [])].join('\n');
+}
+
 /** Search by meaning over the scheme's chats (#331): offered only where the server indexes them. */
 const MEMORY = process.env.COORDINATOR_MEMORY === '1';
 const SEARCH_MEMORY = {
@@ -1627,6 +1649,20 @@ async function runTool(name: string, args: any): Promise<string> {
       const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
       return memoryText((await call('GET', `/api/projects/${PROJECT}/memory?${q}`)).hits);
     }
+    case 'contraption_turns': {
+      const q = new URLSearchParams();
+      if (args.app) q.set('app', String(args.app));
+      // One turn: the page just above it, so its first row is the turn if it is this scheme's.
+      if (args.turn) q.set('before', String(Number(args.turn) + 1));
+      else if (args.before) q.set('before', String(Number(args.before)));
+      const r = await call('GET', `/api/projects/${PROJECT}/contraption-turns?${q}`);
+      if (args.turn) {
+        const t = r.turns[0];
+        return t?.id === Number(args.turn) ? turnText(t, true) : `No turn ${args.turn} in this scheme's audit (kept ${r.keep_days} days).`;
+      }
+      if (!r.turns.length) return `No turns in the last ${r.keep_days} days.`;
+      return r.turns.map((t: any) => turnText(t, false)).join('\n\n') + (r.more ? `\n\nOlder turns: before: ${r.turns.at(-1).id}.` : '');
+    }
     case 'contraption_read': {
       if (typeof args.app !== 'string' || !args.app) throw new Error('app is required, like mandate');
       const r = await call('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
@@ -1957,7 +1993,8 @@ function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...host];
+  const audit = HOME_CONTRAPTIONS.length ? [CONTRAPTION_TURNS] : [];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
   return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 

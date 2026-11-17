@@ -4,7 +4,7 @@
 import { join } from 'node:path';
 import type { ContraptionRow, Machine, Project } from '../db.ts';
 import { HttpError, json, readJson, type App, type Ctx, type Route } from '../http.ts';
-import { cleanKind, jobInputs, type Actor, type Choice } from '../machine-jobs.ts';
+import { cleanKind, jobInputs, jobMachinesFor, type Actor, type Choice } from '../machine-jobs.ts';
 import { ensureCoordinator } from './projects.ts';
 import { projectSharedDir } from '../workspace.ts';
 
@@ -22,7 +22,7 @@ const jobId = (ctx: Ctx) => {
 function jobMachine(app: App, name: unknown, project: Project): Machine {
   if (typeof name !== 'string' || !name) throw new HttpError(400, 'machine is required: the machine\'s name');
   const m = app.store.listMachines().find((x) => x.name === name.toLowerCase());
-  if (!m || !app.store.machineProjects(m.id).includes(project.id)) throw new HttpError(404, `No machine called ${name} is lent to ${project.name}`);
+  if (!m || !jobMachinesFor(app.store, project.id).includes(m.name)) throw new HttpError(404, `No machine called ${name} runs jobs for ${project.name}: it must be lent to it, and its owner's machine-agent.json needs a jobs block`);
   return m;
 }
 

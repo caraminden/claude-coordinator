@@ -6,7 +6,7 @@
 // which covers job hours only.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream, promises as fs } from 'node:fs';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Machine, MachineJob, Store, User } from './db.ts';
@@ -758,5 +758,7 @@ export async function jobInputs(paths: unknown, roots: string[]): Promise<{ name
   return out;
 }
 
-/** Whether `child` is inside `parent` (both real paths). */
-export const inside = (parent: string, child: string) => { const r = relative(parent, child); return !!r && !r.startsWith('..') && !isAbsolute(r); };
+/** The machines a scheme's minions may queue jobs on: granted to it, not a CI runner host, with a jobs block. */
+export function jobMachinesFor(store: Store, projectId: number): string[] {
+  return store.listMachines().filter((m) => storedOffer(m) && !m.last_check?.includes('"runners":true') && store.machineGranted(m.id, projectId)).map((m) => m.name);
+}

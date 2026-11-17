@@ -421,6 +421,8 @@ export interface TurnFacts {
   typer: { id: number; login: string } | null;
   /** The contraptions its scheme is home to (#266). */
   homeContraptions: string[];
+  /** Machines this minion may queue jobs on (#857): queue_job, job_status and stop_job are offered only with one. */
+  jobMachines?: string[];
   /** It is the run of its scheme's app turns check working now: offered contraption_turns (#844). */
   appTurnsRun?: boolean;
   /** For the Citadel scheme's Taskmaster on a Citadel member's ask, what it may read in every scheme (#656); else null. */
@@ -597,6 +599,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (facts.appTurnsRun) env.COORDINATOR_APP_TURNS_RUN = '1';
   // A minion may propose new notes for the machines its turn got (#617).
   if (ticket.kind !== 'coordinator' && machines.length) env.COORDINATOR_MACHINES = machines.map((m) => m.name).join(',');
+  if (facts.jobMachines?.length) env.COORDINATOR_JOB_MACHINES = facts.jobMachines.join(',');
   const configDir = place.host ? claudeConfigDir(env) : place.configDir;
   let command = place.host ? facts.claudeBin : resolveClaude(facts.claudeBin);
   if (codex) {

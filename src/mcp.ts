@@ -27,6 +27,7 @@ const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean);
 // The machines this minion's turn got (#617): it may propose new notes for them.
 const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean);
+const JOB_MACHINES = (process.env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
 const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
@@ -276,6 +277,50 @@ const PROPOSE_MACHINE_NOTES = {
     },
     required: ['machine', 'notes'],
   },
+};
+
+const QUEUE_JOB = {
+  name: 'queue_job',
+  description:
+    "Queue a container job on a person's machine (#857), usually for its GPU. A kind is the recipe: an image pinned by digest, a command, which of the owner's named folders it reads (mounted read-only at /private/<name>), GPU, network, resumable, and a top limit; inputs (files from your worktree or shared folders) land read-only in /in, and what it writes to /out uploads to the scheme's shared folder as jobs/<id>/ (2 GB per job). A new recipe puts a go card to the machine's owner in this chat; one they always allow queues at once. Jobs run in the machine's job hours (Pacific nights by default), one at a time; when \"now\" asks the owner to start it outside them and always takes a card. You are woken when it ends or is refused: end your turn meanwhile.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      machine: { type: 'string', enum: JOB_MACHINES, description: 'The machine' },
+      kind: {
+        type: 'object',
+        description: 'The recipe; any change to it but its name needs a new go',
+        properties: {
+          name: { type: 'string', maxLength: 60, description: 'A short name, e.g. "whisperx-chapters"' },
+          image: { type: 'string', description: 'Fully qualified and pinned by digest: registry/name@sha256:<64 hex>' },
+          command: { type: 'array', items: { type: 'string' }, description: 'The command, one argument per item' },
+          reads: { type: 'array', items: { type: 'string' }, description: "The owner's folder names it reads (machine-agent.json's jobs.folders); none by default" },
+          gpu: { type: 'boolean', description: 'Gets the GPU (default true)' },
+          network: { type: 'boolean', description: 'Gets the network (default false)' },
+          resumable: { type: 'boolean', description: 'Its program skips work already in /out or /state when started again, so Pause can stop it and free the VRAM (default false)' },
+          max_limit_h: { type: 'number', description: 'Its top time limit in hours (at most the machine allows, 12 h unless its owner says more)' },
+        },
+        required: ['name', 'image', 'command', 'max_limit_h'],
+      },
+      inputs: { type: 'array', items: { type: 'string' }, description: 'File paths (absolute, or relative to your worktree), at most 50 and 2 GB in all' },
+      limit_min: { type: 'number', description: "This job's limit in minutes, at most the kind's top limit (default: the kind's)" },
+      when: { type: 'string', enum: ['hours', 'now'], description: '"hours" (default) or "now", which needs a reason and always asks the owner' },
+      reason: { type: 'string', maxLength: 200, description: 'Why, shown on the go card; required with "now"' },
+    },
+    required: ['machine', 'kind'],
+  },
+};
+
+const JOB_STATUS = {
+  name: 'job_status',
+  description: "A job's state, why it waits, its time and GPU time against its limit, its last log lines and its outputs; without an id, this minion's recent jobs.",
+  inputSchema: { type: 'object', properties: { id: { type: 'number', description: 'The job number' } } },
+};
+
+const STOP_JOB = {
+  name: 'stop_job',
+  description: 'Stop a job this minion queued: one waiting ends at once, one running is stopped on the machine; what it uploaded stays.',
+  inputSchema: { type: 'object', properties: { id: { type: 'number', description: 'The job number' } }, required: ['id'] },
 };
 
 const STRIKE_TEXT = {
@@ -1806,6 +1851,26 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!items.length) return 'Nothing in the catalogue.';
       return items.map((c: any) => `${c.kind} ${c.name} (${c.source})${c.in_kit && c.source !== 'kit' ? ' [kit has one]' : ''}: ${c.description || 'no description'}`).join('\n');
     }
+    case 'queue_job': {
+      const j = await call('POST', `/api/tickets/${TICKET}/jobs`, { machine: args.machine, kind: args.kind, inputs: args.inputs, limit_min: args.limit_min, when: args.when, reason: args.reason });
+      return `Job #${j.id} is ${j.state === 'needs-go' ? `waiting on ${j.machine}'s owner's go: the card is in this chat` : `queued (${j.waits ?? 'starting'})`}. You are woken when it ends or is refused; end your turn when nothing else needs doing.`;
+    }
+    case 'job_status': {
+      const { jobs } = await call('GET', `/api/tickets/${TICKET}/jobs`);
+      const pick = args.id === undefined ? jobs : jobs.filter((j: any) => j.id === args.id);
+      if (!pick.length) return args.id === undefined ? 'This minion has queued no jobs.' : `No job #${args.id} of this minion's.`;
+      const min = (s: number) => `${Math.round(s / 60)} min`;
+      return pick.map((j: any) => [
+        `#${j.id} ${j.kind.name} on ${j.machine}: ${j.state}${j.waits ? ` (${j.waits})` : ''}${j.paused_by ? ` (paused by ${j.paused_by})` : ''}${j.error ? `; ${j.error}` : ''}`,
+        `  ran ${min(j.run_s)} of ${min(j.limit_s)}, GPU busy ${min(j.gpu_busy_s)}${j.gpu_pct !== null ? `, GPU ${j.gpu_pct}% ${j.vram_mb ?? '?'} MB now` : ''}${j.exit_code !== null ? `, exit ${j.exit_code}` : ''}`,
+        ...(j.outputs.length ? [`  outputs: ${j.outputs.map((o: any) => `${o.path} (${o.size} B${o.uploaded ? '' : ', not uploaded'})`).join(', ')}${j.upload_bytes ? ` in the shared folder's jobs/${j.id}/` : ''}`] : []),
+        ...(args.id !== undefined && j.log_tail ? [`  log:\n${j.log_tail}`] : []),
+      ].join('\n')).join('\n');
+    }
+    case 'stop_job': {
+      const j = await call('POST', `/api/tickets/${TICKET}/jobs/${Number(args.id)}/stop`, {});
+      return `Job #${j.id} is ${j.state === 'stopped' ? 'stopped' : 'being stopped on the machine; you are woken when it ends'}.`;
+    }
     case 'propose_machine_notes': {
       const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
@@ -2023,7 +2088,7 @@ function toolListAll() {
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

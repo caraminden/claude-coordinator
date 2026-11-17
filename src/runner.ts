@@ -2,6 +2,7 @@
 // src/turn-wrapper.ts in a transient systemd unit of its own (or, without units, a detached child),
 // with its input and output in a turn folder the server tails, so a server restart doesn't stop it.
 import { execFile, spawn } from 'node:child_process';
+import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
@@ -2229,6 +2230,8 @@ export class Runner {
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
     // a turn no one asked for gets none, and a ride-along message doesn't bring its sender's machines.
     const machines = ticket.kind === 'coordinator' ? [] : this.machines(project, askers.length ? [asker!] : []);
+    // Machines a minion may queue jobs on (#857): lent to this scheme with a jobs block; the owner's go card is the gate.
+    const jobMachines = ticket.kind === 'coordinator' ? [] : jobMachinesFor(this.store, project.id);
     // Codex (#337): a Codex pick, or the sender's "Enable Codex override" (which maps a Claude pick by tier),
     // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why. The server
     // login's Codex turns run in its own container, never on the host (#341): only there is Codex's hook.
@@ -2267,7 +2270,7 @@ export class Runner {
     // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
     const everyScheme = this.everySchemeFor(project, ticket, asker);
     const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
-    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id)));
+    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), jobMachines));
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
     // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
     let tmp: string | null = null;
@@ -2332,6 +2335,7 @@ export class Runner {
         codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
+        jobMachines,
         appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
         everyScheme,
         claudeBin: this.claudeBin,

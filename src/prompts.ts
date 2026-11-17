@@ -190,7 +190,7 @@ export function buildLines(b: BuildRole | null): string[] {
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false): string {
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false, jobMachines: string[] = []): string {
   if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir, builds, everyScheme), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
@@ -239,6 +239,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'Wherever the instructions say to run tools/land.sh (but not a build minion\'s --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, posts the shipped line and dismisses or parks you on a clean land, and wakes you with its output if it fails.',
     ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),
+    ...(jobMachines.length ? [jobsLine(jobMachines)] : []),
     ...approvalNote(project),
     'People read your replies in a web UI, often later. When you finish a turn, end on what you did; what you need from people goes in a card or is named by the link of the one waiting, no closing prose question; a blocker is stated in the reply.',
     ...instructionLayers(project, appText),
@@ -264,6 +265,11 @@ export type TurnMachine = Machine & { servers?: MachineServer[] };
 /** The MCP servers a turn gets from a machine: its own under its name, its workspace tools as <name>-ws. */
 export function machineServers(m: TurnMachine): { name: string; server: MachineServer }[] {
   return (m.servers ?? ['mcp']).map((server) => ({ name: server === 'ws' ? `${m.name}${WS_SUFFIX}` : m.name, server }));
+}
+
+/** Machines whose owners let jobs run on them (#857): queue_job's one line. */
+function jobsLine(names: string[]): string {
+  return `GPU jobs: ${names.join(', ')} run container jobs (an image pinned by digest) with queue_job; its owner gives each new recipe a go on a card in your chat, and jobs run in its job hours unless you ask for now with a reason. You are woken when one ends; results land in the shared folder's jobs/<id>/. job_status reads it, stop_job stops it.`;
 }
 
 /** Which people's computers lend this turn their MCP tools. */

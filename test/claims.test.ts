@@ -136,5 +136,6 @@ test('the Taskmaster\'s claim, release and list_claims tools, and list_tickets s
   assert.match(await tool('claim', { name: 'pipeline-lane' }), /^Error: pipeline-lane is held by #/);
   assert.match(await tool('list_tickets'), new RegExp(`\\nClaims:\\npipeline-lane: #${m.number} `));
   assert.match(await tool('release', { name: 'pipeline-lane' }), /^Released: pipeline-lane/);
+  assert.match(await tool('claim', { name: 'release-train' }), /^Claimed: release-train: the Taskmaster, taken by /, 'a Taskmaster holding it is named, not #null');
   assert.equal(await tool('release', { name: 'pipeline-lane' }), 'Nobody held pipeline-lane.');
 });

@@ -2095,7 +2095,7 @@ function scheduleLine(s: any): string {
 
 /** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */
 function claimLine(c: any) {
-  return `${c.name}: #${c.holder_number} ${c.holder_title}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}`;
+  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}`;
 }
 
 /** list_tickets and read_ticket with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */

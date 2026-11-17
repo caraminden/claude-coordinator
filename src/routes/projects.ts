@@ -375,8 +375,12 @@ function searchProject(app: App, projectId: number, q: string, ticketId?: number
 
 /** A claim as the tools and the page show it: its holder's number and title and a Pacific time beside the ids. */
 export function claimView(app: App, c: Claim) {
-  const t = app.store.getTicket(c.holder);
-  return { ...c, holder_number: t?.number ?? null, holder_title: t?.title ?? '', since_text: `since ${pacific(c.since)}` };
+  const { store } = app;
+  const t = store.getTicket(c.holder);
+  // A Taskmaster that took a claim for itself has no number: name it (#921).
+  const holder_name = t?.kind !== 'coordinator' ? `#${t?.number ?? c.holder} ${t?.title ?? ''}`.trim()
+    : t.coordinator_of != null ? `${store.getUser(t.coordinator_of)?.name ?? 'a person'}'s Taskmaster` : store.isSplit(t.project_id) ? 'the Overlord' : 'the Taskmaster';
+  return { ...c, holder_number: t?.number ?? null, holder_title: t?.title ?? '', holder_name, since_text: `since ${pacific(c.since)}` };
 }
 
 const PEOPLE_AND_TASKMASTER = ['person', 'taskmaster'] as const;
@@ -1140,7 +1144,7 @@ export const projectRoutes: Route[] = [
       const { claim, held } = app.store.claims.take(project.id, name, holder.id, session.name, note);
       if (held) {
         const v = claimView(app, held);
-        throw new HttpError(409, `${name} is held by #${v.holder_number} ${v.holder_title}, taken by ${v.taken_by} ${v.since_text}${held.note ? ` (${held.note})` : ''}. Release it first if it should move.`);
+        throw new HttpError(409, `${name} is held by ${v.holder_name}, taken by ${v.taken_by} ${v.since_text}${held.note ? ` (${held.note})` : ''}. Release it first if it should move.`);
       }
       app.broadcast({ type: 'claims', projectId: project.id });
       return json(res, 201, { claim: claimView(app, claim) });

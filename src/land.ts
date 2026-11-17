@@ -348,6 +348,8 @@ export interface HandoffDeps {
     emit(id: number, kind: string, data: unknown): unknown;
     send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean }): void;
     close(id: number, text: string): Promise<void>;
+    unpark(id: number, by: string, author: string, quiet?: boolean): boolean;
+    relayMinion(from: number, to: number, author: string, text: string, urgent?: boolean, wake?: boolean, unparked?: boolean): unknown;
     closeAfterTurn(id: number, reason: string | null): boolean;
     keptOpen(id: number, atCall?: boolean): string | null;
     isRunning(id: number): boolean;
@@ -358,6 +360,8 @@ export interface HandoffDeps {
   };
   /** Who the server's messages are from. */
   from: string;
+  /** The minion that owns build/<n> for this minion's scheme, if one is set. */
+  buildOwner?(id: number, build: number): number | null;
   /** Park the minion until its scheme's CI runners are back; false when it has none to watch. */
   runnersBack(id: number, reason: string): boolean;
   /** Whether the server already runs this minion's branch (a restart that went live before land.sh's end was read). */
@@ -399,6 +403,23 @@ export class LandHandoffs {
     }
   }
 
+  /**
+   * A feeder's merge into build/<n> is the build minion's main event: it gets one message that wakes it, parked or
+   * cold alike (urgent, and unparked first), so it never sits parked after its feeders are in.
+   */
+  private wakeBuildOwner(id: number, into: string | null, what: string) {
+    const n = Number(/^build\/(\d+)$/.exec(into ?? '')?.[1]);
+    if (!n) return;
+    const { store, runner } = this.d;
+    const owner = this.d.buildOwner?.(id, n);
+    const o = owner ? store.getTicket(owner) : null;
+    const t = store.getTicket(id) as { number?: number; title?: string } | null | undefined;
+    if (!owner || owner === id || !o || o.status === 'closed' || !t?.number) return;
+    const by = `#${t.number}`;
+    const parked = o.state === 'parked' && runner.unpark(owner, by, `${by} ${t.title}`, true);
+    runner.relayMinion(id, owner, `${by} ${t.title}`, `${by} ${t.title} merged into ${into}: ${what}`, true, true, parked);
+  }
+
   private async settle(id: number, run: Landing, h: Handoff & { args: string[] }) {
     const { store, runner, from } = this.d;
     const r = landResult(run.output, run.code!);
@@ -438,6 +459,7 @@ export class LandHandoffs {
     const deploys = apps.length ? await deployApps(id, apps, r.commit, this.d.deployOps!) : [];
     const failed = deploys.filter((d) => !d.ok);
     runner.emit(id, 'note', { text: `Shipped ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
+    this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`);
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;
     if (r.kind === 'restart' && !h.stayOpen) {

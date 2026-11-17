@@ -353,6 +353,20 @@ export interface SavedView {
 }
 
 /** A contraption's row (src/contraptions.ts). open_paths and relay_paths are JSON arrays of paths. */
+export interface ContraptionErrorRow {
+  contraption_id: number;
+  day: string;
+  kind: 'tool' | 'http' | 'log';
+  key: string;
+  count: number;
+  sample: string;
+  first_at: number;
+  last_at: number;
+  name: string;
+  title: string;
+  home_scheme: number | null;
+}
+
 export interface ContraptionRow {
   id: number;
   name: string;
@@ -851,6 +865,20 @@ CREATE TABLE IF NOT EXISTS contraption_turns (
   cache_write_tokens INTEGER
 );
 CREATE INDEX IF NOT EXISTS contraption_turns_day ON contraption_turns(contraption_id, user_id, started_at);
+-- Contraptions' errors by Pacific day (#835, src/contraption-errors.ts): failed agent tool calls (tool), 5xx answers
+-- through the proxy (http) and journal error lines (log), grouped by key (numbers and ids out), with a count and the
+-- first scrubbed sample line. Never a prompt or reply. Kept 30 days.
+CREATE TABLE IF NOT EXISTS contraption_errors (
+  contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  count INTEGER NOT NULL,
+  sample TEXT NOT NULL,
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  PRIMARY KEY (contraption_id, day, kind, key)
+);
 -- One row per release of a scheme's target (#625, specs/release-monitor.md): the version people got, the minions
 -- in it (JSON [{ ticketId, number, title, stages }]), when its first change started on its way and went live,
 -- how it ended, and each stage's length in s (JSON { stage: s }). src/releases.ts writes and reads them.
@@ -1688,6 +1716,23 @@ export class Store {
 
   deleteContraptionSession(contraptionId: number, userId: number, name: string): boolean {
     return this.db.prepare('DELETE FROM contraption_sessions WHERE contraption_id = ? AND user_id = ? AND name = ?').run(contraptionId, userId, name).changes > 0;
+  }
+
+  /** One more of a contraption's errors on a day (#835); the first one's sample stays. */
+  addContraptionError(contraptionId: number, day: string, kind: string, key: string, sample: string, at: number) {
+    this.db.prepare(`INSERT INTO contraption_errors (contraption_id, day, kind, key, count, sample, first_at, last_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+      ON CONFLICT (contraption_id, day, kind, key) DO UPDATE SET count = count + 1, last_at = excluded.last_at`).run(contraptionId, day, kind, key, sample, at, at);
+  }
+
+  /** A day's contraption errors with their app's name, title and home scheme, biggest first. */
+  contraptionErrors(day: string): ContraptionErrorRow[] {
+    return this.db.prepare(`SELECT e.*, c.name, c.title, c.home_scheme FROM contraption_errors e JOIN contraptions c ON c.id = e.contraption_id
+      WHERE e.day = ? ORDER BY e.count DESC, e.first_at`).all(day) as unknown as ContraptionErrorRow[];
+  }
+
+  /** Drop contraption errors from days before `day`. */
+  pruneContraptionErrors(day: string) {
+    this.db.prepare('DELETE FROM contraption_errors WHERE day < ?').run(day);
   }
 
   /** A contraption turn's meter row, at its start (so it counts towards the day's cap at once). */

@@ -210,6 +210,9 @@ export interface RepoCollaborator {
   updated_at: number;
 }
 
+/** A saved secret (src/secrets.ts); `value` is still encrypted. */
+export interface SecretRow { scope: 'person' | 'scheme'; owner_id: number; name: string; value: string; updated_by: number | null; created_at: number; updated_at: number }
+
 /** One of a person's linked accounts (src/credentials.ts); `secret` is still encrypted. */
 export type OpenrouterCallKind = 'image' | 'effect' | 'music' | 'speech' | 'text';
 
@@ -795,6 +798,20 @@ CREATE TABLE IF NOT EXISTS credentials (
   failed_at INTEGER,
   PRIMARY KEY (user_id, kind)
 );
+-- Secrets people saved (src/secrets.ts, #838): a person's own (scope 'person', owner_id their user id) or a
+-- scheme's (scope 'scheme', owner_id its project id). value is AES-256-GCM keyed from SESSION_SECRET and bound to
+-- its row, like credentials; off-box copies drop the table's rows (deploy/offbox.sh). No foreign keys: owner_id
+-- names a user or a project by scope.
+CREATE TABLE IF NOT EXISTS stored_secrets (
+  scope TEXT NOT NULL,
+  owner_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_by INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (scope, owner_id, name)
+);
 -- Each person's OpenRouter calls (src/openrouter.ts, #717): booked pending at their worst-case price before the
 -- request, then ok at the real cost, failed (refused, nothing billed) or unknown (may have been billed: counted at
 -- the estimate). The monthly cap sums them. No foreign keys: the spend outlives a closed minion.
@@ -1132,6 +1149,7 @@ export const SCHEMA_HISTORY = [
   [57, 'contraption_errors (#835)'],
   [58, 'outside_spend (#839)'],
   [59, 'contraption_turn_audit (#844)'],
+  [60, 'stored_secrets (#838)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1587,6 +1605,26 @@ export class Store {
     this.db.prepare(`INSERT INTO credentials (user_id, kind, secret, meta, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, kind) DO UPDATE SET secret = excluded.secret, meta = excluded.meta, updated_at = excluded.updated_at, failed_at = NULL`)
       .run(userId, kind, secret, JSON.stringify(meta), now, now);
+  }
+
+  getSecret(scope: string, ownerId: number, name: string): SecretRow | undefined {
+    return this.db.prepare('SELECT * FROM stored_secrets WHERE scope = ? AND owner_id = ? AND name = ?').get(scope, ownerId, name) as SecretRow | undefined;
+  }
+
+  /** One owner's secrets, by name. */
+  listSecrets(scope: string, ownerId: number): SecretRow[] {
+    return this.db.prepare('SELECT * FROM stored_secrets WHERE scope = ? AND owner_id = ? ORDER BY name').all(scope, ownerId) as unknown as SecretRow[];
+  }
+
+  putSecret(scope: string, ownerId: number, name: string, value: string, by: number | null) {
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO stored_secrets (scope, owner_id, name, value, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(scope, owner_id, name) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+      .run(scope, ownerId, name, value, by, now, now);
+  }
+
+  deleteSecret(scope: string, ownerId: number, name: string): boolean {
+    return this.db.prepare('DELETE FROM stored_secrets WHERE scope = ? AND owner_id = ? AND name = ?').run(scope, ownerId, name).changes > 0;
   }
 
   /** The account refused it (revoked, or it can't be decrypted): kept, so Settings can say "link again". */

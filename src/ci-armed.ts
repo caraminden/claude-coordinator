@@ -12,7 +12,7 @@ import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
-export interface Card { questions: unknown[]; kind?: 'merge'; to?: string; notice?: string; doc?: { path: string; title: string } }
+export interface Card { questions: unknown[]; kind?: 'merge'; to?: string; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string } }
 export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean } }
 
 export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
@@ -21,13 +21,13 @@ const short = (sha: string) => sha.slice(0, 7);
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
 export function postCard(app: App, ticket: Ticket, card: Card): { id: string; href: string } {
   const { runner } = app;
-  const { questions, kind, to, notice, doc } = card;
+  const { questions, kind, to, notice, doc, secret } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
-    id, questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}),
+    id, questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}),
   });
   runner.broadcastTicket(ticket.id);
-  app.notify(ticket.id, { kind: 'question', questions: notice ? [{ question: notice }] : doc ? [{ question: `Make your picks on “${doc.title}”` }] : questions, eventId: event.id, ...(to ? { to } : {}) });
+  app.notify(ticket.id, { kind: 'question', questions: notice ? [{ question: notice }] : doc ? [{ question: `Make your picks on “${doc.title}”` }] : secret ? [{ question: `Save a secret as ${secret.name}` }] : questions, eventId: event.id, ...(to ? { to } : {}) });
   return { id, href: cardHref(ticket, event.id) };
 }
 

@@ -15,6 +15,7 @@ import { AUDIT_DAYS, parseTurn, TurnError } from '../contraption-turns.ts';
 import { loadImages } from '../turn-images.ts';
 import { listMedia, mcpMessage, mediaDir, mediaFile, mediaTools, MEDIA_TYPE, runMediaTool } from '../contraption-media.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
+import { secretName } from '../secrets.ts';
 import { ServiceError } from '../app-services.ts';
 import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
@@ -292,6 +293,17 @@ export const contraptionRoutes: Route[] = [
   fromContraption('GET', '/api/contraptions/home', ({ res, app, url }, c) => {
     const { scheme, member } = homeOf(app, c, enabledPerson(app, c, url));
     return json(res, 200, { id: scheme.id, name: scheme.name, member });
+  }),
+  // #838: a secret by name for one of its people: their own, else its home scheme's if they're a member. Never logged.
+  fromContraption('GET', '/api/contraptions/secrets/:name', ({ res, app, url, params }, c) => {
+    const name = secretName(decodeURIComponent(params.name));
+    const person = enabledPerson(app, c, url);
+    const own = app.secrets.get('person', person, name);
+    if (own !== null) return json(res, 200, { name, scope: 'person', value: own });
+    const home = c.home_scheme === null ? null : homeOf(app, c, person);
+    const shared = home?.member ? app.secrets.get('scheme', home.scheme.id, name) : null;
+    if (shared === null) throw new HttpError(404, `No secret called ${name} for that person`);
+    return json(res, 200, { name, scope: 'scheme', value: shared });
   }),
   fromContraption('GET', '/api/contraptions/minions', ({ req, res, app, url }, c) => {
     const scheme = memberHome(app, c, url);

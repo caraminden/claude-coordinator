@@ -4,6 +4,7 @@ import type { User } from '../db.ts';
 import type { IncomingMessage } from 'node:http';
 import { clientIp, HttpError, isSecure, json, readJson, type App, type Route } from '../http.ts';
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
+import { secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 
 /** A person as Settings → People shows them: never a hash or a token. */
@@ -24,6 +25,16 @@ const codexState = (app: App, uid: number) => ({ ...app.codex.status(uid), overr
 function uidOf(session: { uid?: number }): number {
   if (typeof session.uid !== 'number') throw new HttpError(400, 'Sign in again first');
   return session.uid;
+}
+
+/** Whose secret a PUT or DELETE names: your own, or a scheme's you're a member of (an admin counts, as everywhere). */
+function secretOwner(app: App, session: { uid?: number; admin?: boolean }, body: any): [SecretScope, number] {
+  if (body.scope === 'person' || body.scope == null) return ['person', uidOf(session)];
+  if (body.scope !== 'scheme') throw new HttpError(400, 'scope is person or scheme');
+  const project = Number.isInteger(body.project) ? app.store.getProject(body.project) : undefined;
+  if (!project) throw new HttpError(400, 'A scheme secret needs project: the scheme\'s id');
+  if (!app.store.canSee(session, project.id)) throw new HttpError(403, `Only ${project.name}'s members change its secrets`);
+  return ['scheme', project.id];
 }
 
 /** Where GitHub sends people back: the address they reached Citadel at, which must be a callback URL of the OAuth App and of the GitHub App. */
@@ -178,6 +189,33 @@ export const peopleRoutes: Route[] = [
     async handler({ res, app, session }) {
       await app.github.unlink(uidOf(session));
       return json(res, 200, await app.github.status(uidOf(session)));
+    },
+  },
+  // Saved secrets (src/secrets.ts, #838): your own, and those of each scheme you're in. Names only: a value goes in
+  // (Save, Replace) and never comes back out to a browser.
+  {
+    method: 'GET', path: '/api/secrets', who: ['person'],
+    handler({ res, app, session }) {
+      const uid = uidOf(session);
+      const schemes = app.store.listProjects().filter((p) => app.store.canSee(session, p.id));
+      return json(res, 200, {
+        person: app.secrets.list('person', uid),
+        schemes: schemes.flatMap((p) => app.secrets.list('scheme', p.id).map((s) => ({ ...s, project_name: p.name }))),
+      });
+    },
+  },
+  {
+    method: ['PUT', 'DELETE'], path: '/api/secrets', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const body = (await readJson(req)) ?? {};
+      const [scope, owner] = secretOwner(app, session, body);
+      const name = secretName(body.name);
+      if (req.method === 'DELETE') {
+        if (!app.secrets.remove(scope, owner, name)) throw new HttpError(404, `No secret called ${name}`);
+      } else {
+        app.secrets.put(scope, owner, name, secretValue(body.value), uidOf(session));
+      }
+      return json(res, 200, { name, scope, ...(scope === 'scheme' ? { project: owner } : {}) });
     },
   },
   // Your own OpenRouter key and monthly cap (src/openrouter.ts, #717): connect (checked with OpenRouter, then sealed),

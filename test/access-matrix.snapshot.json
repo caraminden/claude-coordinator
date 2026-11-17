@@ -429,6 +429,16 @@
   "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
+ "GET /api/contraptions/secrets/nope": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
  "GET /api/contraptions/sessions?person=1": {
   "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
@@ -1812,6 +1822,36 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "DELETE /api/secrets": {
+  "anon": "401 Not logged in",
+  "person": "400 A secret's name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY",
+  "member": "400 A secret's name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY",
+  "outsider": "400 A secret's name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/secrets": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/secrets": {
+  "anon": "401 Not logged in",
+  "person": "400 A secret's name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY",
+  "member": "400 A secret's name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY",
+  "outsider": "400 A secret's name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/stream": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -2200,6 +2240,16 @@
   "tmA": "403 Only the minion itself can ask in its chat",
   "tmB": "403 Only the minion itself can ask in its chat",
   "m1": "400 questions must be a list of 1 to 4 questions",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/secret": {
+  "anon": "401 Not logged in",
+  "person": "404 No such secret card",
+  "member": "404 No such secret card",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people save secrets",
+  "tmB": "403 Only people save secrets",
+  "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/seen": {
@@ -2769,6 +2819,16 @@
   "outsider": "403 Only the minion itself can ask in its chat",
   "tmA": "400 questions must be a list of 1 to 4 questions",
   "tmB": "403 Only the minion itself can ask in its chat",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/secret": {
+  "anon": "401 Not logged in",
+  "person": "404 No such secret card",
+  "member": "404 No such secret card",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people save secrets",
+  "tmB": "403 Only people save secrets",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

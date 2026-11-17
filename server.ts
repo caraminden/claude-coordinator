@@ -46,6 +46,7 @@ import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
 import { Credentials } from './src/credentials.ts';
+import { Secrets } from './src/secrets.ts';
 import { OpenRouter } from './src/openrouter.ts';
 import { OutsideSpend } from './src/outside-spend.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
@@ -195,6 +196,8 @@ const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
 const openrouter = new OpenRouter(store, credentials);
 // Outside-API spend and its optional per-scheme cap (#839): crossing the cap tells the scheme's Taskmaster chat and pushes; nothing stops.
 const outsideSpend = new OutsideSpend(store);
+// Passwords and keys people save from a secret card or Settings (#838).
+const secrets = new Secrets(store, process.env.SESSION_SECRET ?? '');
 // Only the live data dir writes the real key folders: a dev copy registering "mandate" mustn't overwrite the live one's files.
 const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '',
   process.env.CITADEL_CONTRAPTIONS_DIR || (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
@@ -383,6 +386,7 @@ runner.hostJobs = () => landings.running() + contraptionTurns.running() + servic
 runner.personOf = messagePerson(store);
 runner.mediaFor = (person) => openrouter.connected(person);
 runner.githubFor = (person, dir) => githubLink.forTurn(person ? store.getUser(person) ?? null : null, dir);
+runner.secretsFor = (project, person) => secrets.forTurn(project, person);
 
 // ---------- push notifications ----------
 
@@ -1012,7 +1016,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

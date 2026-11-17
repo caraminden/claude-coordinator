@@ -34,6 +34,7 @@ import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
 import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '../ultrareview.ts';
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { machineNotes, patchMachine } from './machines.ts';
 import { LINE_FIELDS } from './projects.ts';
@@ -123,6 +124,15 @@ export const DEPLOY_FAILURE = 'deploy-failure';
 const SAYS_RECOMMENDED = /\s*\((recommended|rec\.?)\)\s*$/i;
 // A description that opens with "Recommended." flags its option when none is flagged (#481); the words go, the card shows them.
 const DESCRIBED_RECOMMENDED = /^\s*recommended(?:\s*[.:;,!\u2013\u2014-]+\s*|\s*$)/i;
+
+interface SecretAsk { name: string; scope: SecretScope; why?: string }
+
+/** A secret card's ask (#838): the name it saves under, whose it is (the answerer's own unless "scheme"), and why. */
+function secretAsk(raw: any): SecretAsk {
+  if (!raw || typeof raw !== 'object') throw new HttpError(400, 'secret must be an object with a name');
+  const scope = oneOf(raw.scope ?? 'person', ['person', 'scheme'], 'secret.scope') as SecretScope;
+  return { name: secretName(raw.name), scope, ...(raw.why ? { why: str(raw.why, 'secret.why', 300) } : {}) };
+}
 
 /**
  * A question card from Claude: 1 to 4 questions, each with 2 to 6 options, one of them recommended
@@ -511,10 +521,12 @@ export const ticketRoutes: Route[] = [
       // A choices page (#804): the card opens it, its pick bars ask, and its Send settles the card.
       const doc = body.doc != null && body.questions == null ? await choicesDoc(app, ticket, body.doc) : null;
       const notice = to && body.questions == null && !doc ? str(body.notice, 'Notice', 500) : null;
-      const questions = notice || doc ? [] : await cleanQuestions(app, ticket, body.questions);
+      // A secret card (#838): a masked field whose value goes to the secret store, never the chat.
+      const secret = body.secret != null && body.questions == null && !doc && !notice ? secretAsk(body.secret) : null;
+      const questions = notice || doc || secret ? [] : await cleanQuestions(app, ticket, body.questions);
       // A card asking for the go to merge or land says so, for the minions list's chip (#575).
       const kind = oneOf(body.kind ?? null, ['merge'], 'kind') as 'merge' | null;
-      const card = { questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}) };
+      const card = { questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
       const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
       if (armed) return json(res, 202, { armed });
@@ -581,6 +593,7 @@ export const ticketRoutes: Route[] = [
       const data = JSON.parse(card.data);
       if (data.settled) throw new HttpError(409, data.settled.by ? `${data.settled.by} already marked this seen` : 'Claude took this as answered in the chat');
       if (data.doc) throw new HttpError(409, 'This card is answered on its page: open it and press Send there');
+      if (data.secret) throw new HttpError(409, 'This card takes a secret: type it into its field and press Save');
       // A notice (#687): Got it takes it out of the addressee's list, and sends the asker nothing.
       if (data.notice) {
         const settled = { at: Date.now(), by: session.name };
@@ -598,6 +611,32 @@ export const ticketRoutes: Route[] = [
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
       deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, { answer: { questionId: body.questionId, answers } });
+      personWrote(ctx);
+      return json(res, 202, ticketView(app, id));
+    },
+  },
+  {
+    method: 'POST', path: '/api/tickets/:ticket/secret', who: ['person'], refuse: 'Only people save secrets',
+    async handler(ctx) {
+      const { req, res, app, session, ticket } = ctx;
+      const { id } = ticket;
+      const { store, runner, secrets } = app;
+      // A secret card's Save (#838): the value goes to the store, and the minion hears only the name it was saved as.
+      const body = await readJson(req);
+      const card = store.eventsOfKinds(id, ['question']).find((e) => JSON.parse(e.data).id === body.questionId);
+      const data = card ? JSON.parse(card.data) : null;
+      if (!data?.secret) throw new HttpError(404, 'No such secret card');
+      if (data.settled) throw new HttpError(409, data.settled.saved ? `Already saved as ${data.settled.saved}` : 'This card was settled in the chat');
+      const value = secretValue(body.value);
+      const { name, scope } = data.secret as SecretAsk;
+      if (scope === 'person' && !session.uid) throw new HttpError(403, 'Sign in as yourself to save your own secret');
+      const owner = scope === 'scheme' ? ticket.project_id : session.uid!;
+      secrets.put(scope, owner, name, value, session.uid ?? null);
+      const settled = { at: Date.now(), by: session.name, saved: name, scope };
+      store.setEventData(card!.id, { ...data, settled });
+      runner.emit(id, 'question_result', { id: data.id, settled });
+      const whose = scope === 'scheme' ? 'for this scheme: every turn in it gets' : `as my own: turns that run as me (${session.name}) get`;
+      deliverAnswer(app, id, session.name, `I typed the secret into your card. It's saved as \`${name}\` ${whose} it in the env var $${SECRET_ENV_PREFIX}${name}, from the next turn on. Its value isn't in this chat: use the variable, and never print it.`, { answer: { questionId: data.id, secret: name } });
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },

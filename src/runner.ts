@@ -30,6 +30,7 @@ import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_C
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
+import { hideSecrets, hideSecretsIn, secretEnv } from './secrets.ts';
 import { takeStatus, type StatusFields } from './status-trailer.ts';
 import { appFolder, slotsOf } from './app-services.ts';
 import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
@@ -656,6 +657,10 @@ export class Runner {
   personOf?: (author: string, from?: number) => number | null;
   /** A turn's GitHub env and prompt line for its person (src/github-link.ts forTurn); null with linking not set up. */
   githubFor?: (person: number | null, turnDir: string) => TurnGithub | null;
+  /** The secrets a turn of `project` running as `person` gets (src/secrets.ts, #838): its env vars, and the values its output hides. */
+  secretsFor?: (project: number, person: number | null) => Map<string, string>;
+  /** Each running turn's secrets, read once per turn (or once after a restart, on its next line). */
+  private turnSecrets = new Map<number, Map<string, string>>();
   /** The contraptions' key folders (server.ts sets the live one's). */
   contraptionKeys = DEFAULT_CONTRAPTIONS_DIR;
 
@@ -2280,6 +2285,9 @@ export class Runner {
     const heavy = this.heavyEnv(ticket, person);
     // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
     const github = this.githubFor?.(person, dir) ?? null;
+    // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
+    const secrets = this.secretsFor?.(project.id, person) ?? new Map<string, string>();
+    this.turnSecrets.set(ticket.id, secrets);
     // Back on Claude after Codex turns: they come first, verbatim, and their thread goes once this turn succeeds.
     const codexThread = this.store.getSetting<CodexThread>(codexThreadKey(ticket.id));
     const handBack = !codex && codexThread ? [{ author: 'System', text: toClaudePreamble(fitLog(readParts(codexThread.log))), images: [] }] : [];
@@ -2309,7 +2317,7 @@ export class Runner {
           openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
         codex: codex ? { thread: same || null } : null,
         codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
-        env: { server: process.env, coordinator, heavy, github: github?.env ?? null },
+        env: { server: process.env, coordinator, heavy, github: github?.env ?? null, secrets: secretEnv(secrets) },
         memory: this.memoryScheme(project.id),
         media: !!this.mediaFor?.(person),
         // A Codex turn has image_gen itself; a host turn reaches Codex only through the person's Codex container.
@@ -2569,6 +2577,7 @@ export class Runner {
     clearTimeout(live.stopTimer);
     this.turns.delete(ticketId);
     this.spends.delete(ticketId);
+    this.turnSecrets.delete(ticketId);
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     this.store.deleteSetting(turnKey(ticketId));
     const stopped = !!turn?.stopped;
@@ -2805,16 +2814,31 @@ export class Runner {
     return true;
   }
 
+  /** The secrets of `ticketId`'s running turn: as launched, or (a turn followed after a restart) read now. */
+  private secretsOfTurn(ticketId: number): Map<string, string> {
+    let secrets = this.turnSecrets.get(ticketId);
+    if (!secrets) {
+      const t = this.store.getTicket(ticketId);
+      const person = this.store.getSetting<TurnState>(turnKey(ticketId))?.person ?? null;
+      secrets = t && this.secretsFor ? this.secretsFor(t.project_id, person) : new Map<string, string>();
+      this.turnSecrets.set(ticketId, secrets);
+    }
+    return secrets;
+  }
+
   private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {
     if (!line.trim()) return;
     let ev: any;
+    const secrets = this.secretsOfTurn(ticketId);
     try {
       ev = JSON.parse(line);
     } catch {
-      this.emit(ticketId, 'note', { text: line });
+      this.emit(ticketId, 'note', { text: hideSecrets(line, secrets) });
       return;
     }
     if (!ev || typeof ev !== 'object') return;
+    // A turn that prints a saved secret (#838) never puts it in the chat, its reply or its activity line.
+    if (secrets.size) ev = hideSecretsIn(ev, secrets);
     if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info, ticketId);
     if (ev.type === 'codex_waiting') return this.emit(ticketId, 'note', { text: CODEX_WAITING });
     if (ev.type === 'codex_gate') return console.log(`[codex] minion ${ticketId}: login check waited ${Number(ev.waited_ms) || 0} ms${ev.refreshed ? ', refreshed the login' : ''}${ev.serial ? ', runs serial' : ''}`);

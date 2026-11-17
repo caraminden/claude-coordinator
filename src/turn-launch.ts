@@ -404,7 +404,7 @@ export interface TurnFacts {
   /** The container a host turn's Codex reviews run in (#398). */
   codexReview: { container: string; turnsDir: string; env: Record<string, string> } | null;
   /** Its environment's sources: the server's own (filtered by turnEnv), how its MCP server reaches the API, citadel-heavy's, and the person's GitHub login. */
-  env: { server: NodeJS.ProcessEnv; coordinator: Record<string, string>; heavy: Record<string, string>; github: Record<string, string> | null };
+  env: { server: NodeJS.ProcessEnv; coordinator: Record<string, string>; heavy: Record<string, string>; github: Record<string, string> | null; secrets?: Record<string, string> };
   /** It is in the scheme whose code this server runs, so deploys mean something. */
   deploys: boolean;
   /** Its scheme has semantic memory. */
@@ -572,6 +572,8 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (facts.codexImages && ticket.kind !== 'coordinator') env.COORDINATOR_CODEX_IMAGES = '1';
   // The person's own GitHub token (or none, so it can't push).
   if (facts.env.github) env = { ...env, ...facts.env.github };
+  // Saved secrets (#838): CITADEL_SECRET_<NAME>, and CITADEL_SECRET_NAMES listing them.
+  if (facts.env.secrets) env = { ...env, ...facts.env.secrets };
   // Grunts on a Fable turn default to Opus, not Fable (#705, Cara 2026-11-14: "No Fable for helper Grunts"):
   // general-purpose Grunts were most of a week's $691 of Fable Grunts. An Agent call's own `model` (self-review's
   // `fable` reviewers and finding-checkers) and an agent definition's `model:`, `inherit` included, still win.

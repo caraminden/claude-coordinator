@@ -9,7 +9,7 @@ import type { ContraptionRow, Store } from './db.ts';
 /** Where a scheme's favicon may be, best first: the first that exists is the scheme's icon. */
 export const ICON_PATHS = [
   'assets/icon/icon.svg', 'assets/icon/favicon.svg', 'assets/icon/favicon-48.svg', 'assets/icon/favicon-32.svg',
-  'web/public/icon.svg', 'public/icon.svg', 'public/favicon.svg', 'static/favicon.svg', 'favicon.svg',
+  'web/public/icon.svg', 'app/web/public/icon.svg', 'public/icon.svg', 'public/favicon.svg', 'static/favicon.svg', 'favicon.svg',
 ];
 export const MAX_ICON_BYTES = 256 * 1024;
 
@@ -84,11 +84,15 @@ const appCache = new Map<number, { key: string; body: Buffer; type: string }>();
 /** Image types an app's icon may be served as; an SVG keeps the inert headers, the rest are sandboxed too. */
 const IMAGE_TYPE = /^image\/(svg\+xml|png|jpeg|webp|gif|x-icon|vnd\.microsoft\.icon)$/;
 
-function fetchAppIcon(c: ContraptionRow): Promise<{ body: Buffer; type: string } | { missing: string }> {
+/** The signed X-Citadel-Identity for the app, for the person asking, or null (none to sign with: the fetch goes unsigned). */
+export type IdentityFor = (c: ContraptionRow) => string | null;
+
+/** An app that gates its routes answers 401 to an unsigned fetch, so the fetch carries the asker's identity, as the rail's icon proxy does (src/apps.ts). */
+function fetchAppIcon(c: ContraptionRow, identity: string | null): Promise<{ body: Buffer; type: string } | { missing: string }> {
   return new Promise((resolve) => {
     const fail = (missing: string) => resolve({ missing });
     let up: ReturnType<typeof request>;
-    try { up = request({ host: '127.0.0.1', port: c.port, path: appIconPath(c), headers: { accept: 'image/*' } }, (r) => {
+    try { up = request({ host: '127.0.0.1', port: c.port, path: appIconPath(c), headers: identity ? { accept: 'image/*', 'x-citadel-identity': identity } : { accept: 'image/*' } }, (r) => {
       const type = String(r.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
       if (r.statusCode !== 200 || !IMAGE_TYPE.test(type)) { r.resume(); return fail(`${c.title} has no icon`); }
       const chunks: Buffer[] = [];
@@ -113,7 +117,7 @@ export function iconHeaders(type: string) {
 }
 
 /** The icon's bytes and type, read once per change of the file (or of the home app's deploy). */
-export async function readIcon(projectId: number, repoDir: string | null, store?: Store): Promise<{ body: Buffer; type: string } | { missing: string }> {
+export async function readIcon(projectId: number, repoDir: string | null, store?: Store, identityFor?: IdentityFor): Promise<{ body: Buffer; type: string } | { missing: string }> {
   const found = await findIcon(repoDir);
   if (!('file' in found)) {
     cache.delete(projectId);
@@ -122,7 +126,7 @@ export async function readIcon(projectId: number, repoDir: string | null, store?
     const key = `${c.id}:${c.icon}:${appVersion(store, c)}`;
     const hit = appCache.get(projectId);
     if (hit?.key === key) return hit;
-    const got = await fetchAppIcon(c);
+    const got = await fetchAppIcon(c, identityFor?.(c) ?? null);
     if ('missing' in got) return got;
     appCache.set(projectId, { key, ...got });
     return got;

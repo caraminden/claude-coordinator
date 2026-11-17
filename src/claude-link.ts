@@ -4,11 +4,12 @@
 // Their turns run in it (src/runner.ts, placeFor) at the same paths as on the host. The server
 // login's owner keeps running on the host. The credential row (kind claude_runner) holds only
 // Citadel's bookkeeping: container, volume path, email and plan.
-import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
+import { execResult } from './exec.ts';
 import { appFolder, slotsOf } from './app-services.ts';
 import { Containers, specHash, type CmdResult, type ContainerSpec, type Mount } from './containers.ts';
 import type { Credentials } from './credentials.ts';
@@ -565,8 +566,7 @@ export class ClaudeLink {
   private claudeCmd(uid: number, n: number, args: string[]): Promise<CmdResult> {
     if (this.serverLogin(uid)) {
       const env = this.hostEnv(this.hostFolder(uid, n));
-      return new Promise((resolve) => execFile(resolveClaude(this.claudeBin), args, { env, timeout: 30_000 }, (err: any, stdout, stderr) =>
-        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr || err?.message || '') })));
+      return execResult(resolveClaude(this.claudeBin), args, { env, timeout: 30_000 }).then((r) => ({ code: r.code, stdout: r.out, stderr: r.err || r.fail }));
     }
     return this.containers.exec(this.name(uid), [resolveClaude(this.claudeBin), ...args], { env: { CLAUDE_CONFIG_DIR: join(this.home, accountDir(n)) }, timeout: 30_000 });
   }

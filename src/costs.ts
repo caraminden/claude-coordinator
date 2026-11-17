@@ -1,5 +1,6 @@
 // What Claude turns cost per day, at API prices (src/db.ts Turn). Days are the server's local days.
-import type { Store } from './db.ts';
+import { APP_NAME } from './appname.ts';
+import type { SpendRowRaw, Store } from './db.ts';
 
 /** How many days the summary covers, today included. */
 export const COST_DAYS = 7;
@@ -102,4 +103,99 @@ export function dayBudget(store: Store, weekly: { utilization: number; resetsAt:
   const budget = spent / weekly.utilization / 7;
   if (budget !== last) store.setSetting(LAST_BUDGET, budget);
   return budget;
+}
+
+/** "Opus 5.5" for claude-opus-5-5 (a dated or "+advisor" id too), "Opus" for the bare alias, anything else as it is. */
+export function modelName(id: string): string {
+  const cap = (w: string) => w[0].toUpperCase() + w.slice(1);
+  const m = /^claude-([a-z]+)-(\d+)-(\d{1,2})(?!\d)/.exec(id);
+  if (m) return `${cap(m[1])} ${m[2]}.${m[3]}`;
+  return /^(opus|sonnet|haiku|fable)$/.test(id) ? cap(id) : id;
+}
+
+/** One slice of a week's spend: this week's dollars, the week before's, and how much of this week's is estimated. */
+export interface Slice {
+  name: string;
+  usd: number;
+  lastWeek: number;
+  /** Dollars of `usd` from turns before the split was kept, counted under the minion's own model (#905). */
+  estimated: number;
+}
+
+export interface WhereItWent {
+  since: number;
+  until: number;
+  total: number;
+  lastWeek: number;
+  /** The weekly limit at API prices that 100% stands for, for shares; null until a meter can price it. */
+  weekUsd: number | null;
+  models: Slice[];
+  schemes: (Slice & { id: number })[];
+  kinds: Slice[];
+  /** The 10 minions that cost the most this week. */
+  top: { id: number; project_id: number; kind: string; scheme: string; number: number | null; title: string; usd: number }[];
+}
+
+/** The kind of work a turn was: keepalive pings, Taskmasters, scheduled runs, else the minion's `type`. */
+function kindOf(r: SpendRowRaw): string {
+  if (r.keepalive) return 'Keepalive pings';
+  if (r.kind === 'coordinator') return 'Taskmasters';
+  if (r.created_by === APP_NAME) return 'Scheduled runs';
+  return r.type ? r.type[0].toUpperCase() + r.type.slice(1) : 'No type';
+}
+
+/**
+ * Where one payer's spend went (#905): the last 7 days against the 7 before, by model (Grunts' models apart), scheme,
+ * kind of work, and the top 10 minions. Turns from before the split count under their minion's model, marked estimated.
+ */
+export function whereItWent(store: Store, payer: number | null, weekUsd: number | null, now = Date.now()): WhereItWent {
+  const week = 7 * 86400_000;
+  const projects = new Map(store.listProjects().map((p) => [p.id, p.name]));
+  const group = <K>(rows: [SpendRowRaw, number, boolean][], key: (r: SpendRowRaw) => K, name: (k: K) => string, cur: boolean) => {
+    const out = new Map<K, Slice>();
+    for (const [r, usd, est] of rows) {
+      const k = key(r);
+      const s = out.get(k) ?? out.set(k, { name: name(k), usd: 0, lastWeek: 0, estimated: 0 }).get(k)!;
+      if (cur) { s.usd += usd; if (est) s.estimated += usd; } else s.lastWeek += usd;
+    }
+    return out;
+  };
+  const rows = (since: number, until: number) => store.spendRows(payer, since, until).map((r): [SpendRowRaw, number, boolean] =>
+    [{ ...r, model: modelName(r.model ?? r.minion_model ?? 'claude-opus-5-5') }, r.cost, r.model === null]);
+  const cur = rows(now - week, now), prev = rows(now - 2 * week, now - week);
+  const merge = <K>(key: (r: SpendRowRaw) => K, name: (k: K) => string) => {
+    const m = group(cur, key, name, true);
+    for (const [k, s] of group(prev, key, name, false)) (m.get(k) ?? m.set(k, { ...s, lastWeek: 0 }).get(k)!).lastWeek = s.lastWeek;
+    return [...m.entries()].sort(([, a], [, b]) => b.usd - a.usd || b.lastWeek - a.lastWeek);
+  };
+  const minions = new Map<number, WhereItWent['top'][number]>();
+  for (const [r, usd] of cur) {
+    const m = minions.get(r.ticket_id) ?? minions.set(r.ticket_id, { id: r.ticket_id, project_id: r.project_id, kind: r.kind, scheme: projects.get(r.project_id) ?? `Scheme ${r.project_id}`, number: r.number, title: r.title, usd: 0 }).get(r.ticket_id)!;
+    m.usd += usd;
+  }
+  const sum = (rs: [SpendRowRaw, number, boolean][]) => rs.reduce((a, [, usd]) => a + usd, 0);
+  return {
+    since: now - week, until: now, total: sum(cur), lastWeek: sum(prev), weekUsd,
+    models: merge((r) => r.model!, (k) => k).map(([, s]) => s),
+    schemes: merge((r) => r.project_id, (id) => projects.get(id) ?? `Scheme ${id}`).map(([id, s]) => ({ ...s, id })),
+    kinds: merge(kindOf, (k) => k).map(([, s]) => s),
+    top: [...minions.values()].sort((a, b) => b.usd - a.usd).slice(0, 10),
+  };
+}
+
+/**
+ * One account's weekly limit at API prices for a payer (#905): what their turns on the account in use cost since its week
+ * opened, scaled up by how full its meter is. While the meter is too coarse, the payer's last estimate stands in (the
+ * server login's falls back to dayBudget's); null before any.
+ */
+export function weekLimit(store: Store, payer: number | null, usage: { weekly: { utilization: number; resetsAt: number | null } | null; account?: number } | null | undefined, now = Date.now()): number | null {
+  const key = `week_usd:${payer ?? 'host'}`;
+  const last = store.getSetting<number>(key) ?? (payer === null ? (store.getSetting<number>(LAST_BUDGET) ?? 0) * 7 || null : null);
+  const w = usage?.weekly;
+  if (!w?.resetsAt || w.resetsAt <= now || w.utilization < MIN_UTILIZATION) return last;
+  const spent = store.accountSpend(payer, usage?.account ?? 1, w.resetsAt - 7 * 86400_000);
+  if (!spent) return last; // null: the window reaches back before turns kept their account
+  const usd = spent / w.utilization;
+  if (usd !== last) store.setSetting(key, usd);
+  return usd;
 }

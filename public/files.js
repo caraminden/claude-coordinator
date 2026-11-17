@@ -47,6 +47,8 @@ function items() {
   const pending = s.pending.map((p) => ({ key: `u:${p.path}`, folder: folderOf(p.path), where: dirOf(p.path) || 'top level', pending: p, name: p.file.name, kind: fileKind(p.file.name) ?? 'text', size: p.file.size, mtime: p.at, path: p.path }));
   return [...pending, ...[...shared, ...linked].sort((a, b) => b.mtime - a.mtime)];
 }
+/** Previews (key@mtime) whose body 404ed: their Open and Download stay off (#882); a newer copy starts fresh. */
+const goneKeys = new Set();
 const pick = (f) => ({ name: f.name, kind: f.kind, size: f.size, mtime: f.mtime, path: f.path, missing: !!f.missing, pinned: !!f.pinned_at });
 
 /** The folders, in the README's order, with their counts. */
@@ -245,13 +247,18 @@ function renderPreview(all) {
     h('h3', {}, it.name),
     h('div', { class: 'meta' }, `${it.where} · ${formatSize(it.size)} · ${ago(it.mtime)}`),
     h('div', { class: 'row' },
-      h('a', { class: 'button secondary', href: it.href }, 'Open'),
-      h('a', { class: 'button secondary', href: `${it.src}&download` }, 'Download'),
+      goneKeys.has(id) ? '' : h('a', { class: 'button secondary', href: it.href }, 'Open'),
+      goneKeys.has(id) ? '' : h('a', { class: 'button secondary', href: `${it.src}&download` }, 'Download'),
       h('span', { class: 'spacer' }),
       pinButton(it.file)));
   if (el.dataset.key === id) return el.firstChild.replaceWith(head);
   el.dataset.key = id;
-  el.replaceChildren(head, previewBody(it.file, it.src));
+  el.replaceChildren(head, previewBody(it.file, it.src, () => {
+    goneKeys.add(id);
+    if (el.dataset.key !== id) return; // another file is showing by now
+    const now = el.querySelector('.files-preview-head .row');
+    now?.querySelectorAll('a.button').forEach((a) => a.remove());
+  }));
 }
 
 // ---------- upload ----------

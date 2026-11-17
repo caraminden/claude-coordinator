@@ -248,8 +248,8 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
   const zone = el('div', { class: 'cui-upload-drop' },
     el('span', {}, label),
     el('span', { class: 'cui-upload-pick' },
-      el('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => pickFiles.click() }, 'Choose files'),
-      folders ? el('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => pickFolder.click() }, 'Choose a folder') : ''));
+      el('button', { type: 'button', class: 'cui-btn', onclick: () => pickFiles.click() }, 'Choose files'),
+      folders ? el('button', { type: 'button', class: 'cui-btn', onclick: () => pickFolder.click() }, 'Choose a folder') : ''));
   const box = el('div', { class: 'cui-upload' }, zone, pickFiles, pickFolder, left, total, list);
   root.append(box);
 
@@ -274,7 +274,7 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
 
   function add(files, skipped) {
     // A new batch clears the finished rows of the last one.
-    for (const r of rows.filter((r) => r.up && (r.up.state === 'done' || r.up.state === 'cancelled'))) {
+    for (const r of rows.filter((r) => ['done', 'cancelled'].includes(stateOf(r)))) {
       r.node.remove();
       rows.splice(rows.indexOf(r), 1);
     }
@@ -299,7 +299,9 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     const toggle = el('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => {
       if (!r.up) r.held = !r.held;
       else if (r.up.state === 'sending') r.up.pause();
-      else r.up.resume();
+      else if (r.queued) r.queued = false; // waiting for its turn: Pause leaves it paused
+      else r.queued = true; // Resume: next() starts it when nothing else is sending
+
       draw(r);
       next();
     } });
@@ -318,7 +320,7 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     return r;
   }
 
-  const stateOf = (r) => (r.cancelled ? 'cancelled' : r.up ? r.up.state : r.held ? 'paused' : 'waiting');
+  const stateOf = (r) => (r.cancelled ? 'cancelled' : r.up ? (r.up.state === 'paused' && r.queued ? 'waiting' : r.up.state) : r.held ? 'paused' : 'waiting');
   const anyRunning = () => rows.some((r) => ['sending', 'waiting'].includes(stateOf(r)));
 
   function draw(r) {
@@ -355,6 +357,11 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     if (rows.some((r) => stateOf(r) === 'sending')) return drawTotal();
     const r = rows.find((r) => stateOf(r) === 'waiting');
     if (!r) return drawTotal();
+    if (r.up) { // a paused file that was told to resume
+      r.queued = false;
+      r.up.resume();
+      return draw(r);
+    }
     // Once it stops sending (done, paused by hand or after its retries, cancelled) the next file gets its turn.
     r.up = startUpload(endpoint, r.file, { folder: r.folder, onChange: (u) => r.up && (draw(r), u.state !== 'sending' && next()) });
     r.up.done.then((result) => result && onDone?.(result, r.file));
@@ -364,6 +371,7 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
   function pauseAll() {
     for (const r of rows) {
       if (!r.up && !r.cancelled) r.held = true;
+      r.queued = false;
       if (r.up?.state === 'sending') r.up.pause();
       draw(r);
     }
@@ -371,7 +379,7 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
   function resumeAll() {
     for (const r of rows) {
       r.held = false;
-      if (r.up?.state === 'paused') r.up.resume();
+      if (r.up?.state === 'paused') r.queued = true;
       draw(r);
     }
     next();

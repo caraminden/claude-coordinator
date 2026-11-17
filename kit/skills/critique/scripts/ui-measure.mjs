@@ -234,6 +234,7 @@ function inPage(opts) {
   };
   const FIELDS = new Set(['input', 'select', 'textarea']);
   const MEDIA = new Set(['svg', 'img', 'canvas', 'video', 'picture', 'progress', 'meter', 'input', 'select', 'textarea']);
+  const PICTURES = new Set(['img', 'canvas', 'video', 'picture']);
   const contentRects = (box) => {
     const rects = [];
     const walk = (node) => {
@@ -248,7 +249,7 @@ function inPage(opts) {
           if (s.display === 'none' || s.position === 'absolute' || s.position === 'fixed' || !visible(ch)) continue;
           if (MEDIA.has(ch.localName) || isBox(ch)) {
             const x = ch.getBoundingClientRect();
-            if (x.width > 0 && x.height > 0) rects.push({ x, own: !isBox(ch) });
+            if (x.width > 0 && x.height > 0) rects.push({ x, own: !isBox(ch), pic: PICTURES.has(ch.localName) });
           } else walk(ch);
         }
       }
@@ -278,6 +279,8 @@ function inPage(opts) {
       const items = contentRects(el);
       // Only boxes inside: they get measured themselves.
       if (!items.some((i) => i.own)) continue;
+      // Only pictures inside (a frame strip's thumbnail, an avatar): the rule is about text and icons, and a picture fills its box.
+      if (items.every((i) => i.pic)) continue;
       const rects = items.map((i) => i.x);
       const tall = rects.reduce((a, b) => (b.height > a.height ? b : a));
       // More than one row of content (an item clear of the tallest one's band): a panel, not a bar or chip.

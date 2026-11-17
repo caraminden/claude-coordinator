@@ -47,11 +47,13 @@ before(async () => {
     if (path === '/') return res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
     const file = normalize(join(pub, path));
     if (!file.startsWith(pub) || !file.endsWith('.js')) return res.writeHead(404).end();
+    let body: Buffer;
     try {
-      res.writeHead(200, { 'content-type': 'text/javascript' }).end(readFileSync(file));
+      body = readFileSync(file);
     } catch {
-      res.writeHead(404).end();
+      return res.writeHead(404).end(); // read first: a 200 already sent can't become a 404, and the import would hang
     }
+    res.writeHead(200, { 'content-type': 'text/javascript' }).end(body);
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
@@ -231,6 +233,46 @@ test('reopening a dismissed minion that still waits on you puts it back in Needs
   await page.eval(`echo('idle')`);
   await settle(400);
   assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true });
+});
+
+// #890: installing moves the open tab into the app window without a reload, so a colour app.js added only when the page
+// loaded installed never came, and the controls sat on a white box. The page has them from the start, for the app only.
+test('the window controls take the page colour from the first load, and a browser tab gets no theme colour', () => {
+  const metas = [...readFileSync(join(pub, 'index.html'), 'utf8').matchAll(/<meta name="theme-color" content="([^"]+)" media="([^"]+)">/g)].map((m) => ({ colour: m[1], media: m[2] }));
+  for (const [scheme, colour] of [['light', '#f6f5f2'], ['dark', '#161514']]) {
+    const first = metas.find((m) => m.media.includes('window-controls-overlay') && m.media.includes(scheme));
+    assert.equal(first?.colour, colour, `the ${scheme} page colour, for the title bar overlay`);
+  }
+  assert.ok(metas.length && metas.every((m) => /\(display-mode: (standalone|window-controls-overlay)\)/.test(m.media)), 'each names an installed display mode, so tabs stay as they were');
+});
+
+test('the installed app shows the title bar hint once: gone for good on close or when the title bar is hidden, never in a tab', { skip }, async () => {
+  const page = await open();
+  // Headless Chromium has no app window, so the overlay and the display-mode query are stand-ins that fire like the real ones.
+  const run = (expr: string) => page.eval(`(async () => {
+    const { wcoHint } = await import('/wco-hint.js');
+    const fake = (k, v) => Object.assign(new EventTarget(), { [k]: v });
+    window.wco ??= fake('visible', false);
+    window.installed ??= fake('matches', true);
+    window.desktop ??= { value: true };
+    window.start = () => wcoHint(wco, installed, () => desktop.value);
+    window.hint = () => !!document.querySelector('.wco-hint');
+    return ${expr};
+  })()`);
+  await run('(localStorage.clear(), installed.matches = false, start(), hint())').then((v) => assert.equal(v, false, 'a browser tab gets no hint'));
+  assert.equal(await run('(installed.matches = true, installed.dispatchEvent(new Event("change")), hint())'), true, 'installing from the tab shows it without a reload');
+  assert.equal(await run('(document.querySelector(".wco-hint button").click(), hint())'), false, 'its ✕ closes it');
+  assert.equal(await run('(start(), hint())'), false, 'and it stays closed on the next launch');
+  assert.equal(await run('(localStorage.clear(), start(), hint())'), true, 'a fresh profile shows it again');
+  assert.equal(await run('(wco.visible = true, wco.dispatchEvent(new Event("geometrychange")), hint())'), false, 'hiding the title bar takes it away');
+  assert.equal(await run('(wco.visible = false, start(), hint())'), false, 'and for good, even with the title bar back');
+  assert.equal(await run('(localStorage.clear(), wco.visible = true, start(), hint())'), false, 'an app that opens with it hidden needs no hint');
+  assert.equal(await run('(wco.visible = false, installed.dispatchEvent(new Event("change")), hint())'), false, 'nor when they show the title bar after');
+  // Installed on a phone or tablet (standalone matches there too, and Chrome may expose the overlay): no title bar to hide.
+  assert.equal(await run('(localStorage.clear(), desktop.value = false, installed.matches = true, start(), hint())'), false, 'an installed phone app gets no hint');
+  assert.equal(await run('(installed.dispatchEvent(new Event("change")), hint())'), false, 'not on a later display-mode change either');
+  assert.equal(await run('(desktop.value = true, installed.dispatchEvent(new Event("change")), hint())'), true, 'an installed desktop app with the title bar showing still gets it');
+  assert.equal(await run('(document.querySelectorAll(".wco-hint").forEach((n) => n.remove()), localStorage.clear(), installed.matches = false, start(), hint())'), false, 'a desktop browser tab gets none');
 });
 
 // #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through

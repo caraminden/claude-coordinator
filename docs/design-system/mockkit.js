@@ -173,7 +173,7 @@
         const btn = el('button', { type: 'button', class: 'mk-btn primary' }, saving ? 'Send picks to the minion' : 'Copy picks');
         text = el('span', { class: 'mk-dock-text' });
         sent = el('span', { class: 'mk-sent', 'aria-live': 'polite' });
-        node = el('div', { class: 'mk-dock' }, text, sent, btn);
+        node = el('div', { class: 'mk-dock' }, el('div', { class: 'mk-dock-msg' }, text, sent), btn);
         btn.addEventListener('click', async () => {
           const body = summary();
           if (!body) return void (sent.textContent = 'Nothing picked yet');

@@ -119,6 +119,22 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t, e);
     },
   },
+  'plan-revision': {
+    about: 'a minion whose revised plan card shows what changed against the plan it replaced (#907)',
+    seed(c) {
+      const t = minion(c, 'Archive old minions', { note: 'revised plan waiting for a go' });
+      const w = chat(c, t, 10);
+      w.asked('Run the plan back to me before you change anything.');
+      w.init();
+      const v1 = ['## What changes', '', '- A nightly sweep archives minions dismissed more than 30 days ago.', '- The minions list hides them.', '- Nothing is deleted.', '', '## Numbers', '', '- Citadel: 431 over 30 days', '- Delve: 98 over 30 days', '', '## Not doing', '', '1. Deleting worktrees.', '2. Archiving open minions.'];
+      w.put('plan', { id: hex(), status: 'superseded', summary: 'Archive dismissed minions after 30 days', plan: v1.join('\n') });
+      w.asked('Make the window 60 days, and add a toggle to show them.');
+      const v2 = v1.map((l) => l.replace('30 days ago', '60 days ago').replace('over 30 days', 'over 60 days')).filter((l) => !l.startsWith('- Delve')).flatMap((l) => (l === '- The minions list hides them.' ? [l, '- A *Show archived* toggle brings them back.'] : [l]));
+      const e = w.put('plan', { id: hex(), status: 'pending', summary: 'Archive dismissed minions after 60 days, with a show-archived toggle', plan: v2.join('\n') });
+      w.done('Posted the revised plan.');
+      return route(c, t, e);
+    },
+  },
   'choices-card': {
     about: 'a choices card (#804): a mock kit page with three takes to pick from, and the card that opens it',
     seed(c) {
@@ -238,6 +254,10 @@ mock.boards('#takes', { boards: [
       w.asked('Pick this up once #700 is live.');
       w.init();
       w.said('Parked until #700 is live; Citadel wakes me then.');
+      // One message already read (no longer held) and one still waiting: the bubble says "Not sent yet" with Unpark and send (#910).
+      c.store.addEvent(t.id, 'user_message', { text: 'Also keep the old redirect.', author: c.who, mail: true, parked: true });
+      const row = c.store.addEvent(t.id, 'user_message', { text: 'Please start with the docs page first.', author: c.who, mail: true, parked: true });
+      c.store.setSetting(`mail:${t.id}`, [{ author: c.who, text: 'Please start with the docs page first.', images: [], id: row.id, parked: '2026-11-17 19:35' }]);
       return route(c, t);
     },
   },
@@ -401,6 +421,23 @@ mock.boards('#takes', { boards: [
       w.call('Read', { file_path: 'public/ui/badge.css' }, '.badge {}');
       w.said(`#${t.number} is live. Delve's Taskmaster asked for the same fix; it reaches them through Citadel UI on their next load, so nothing to start.`);
       return route(c, t);
+    },
+  },
+  'minion-copies': {
+    about: 'the Taskmaster chat with a run of copies of minion-to-minion messages (one grouped row), a person\'s message, then a second run (#924)',
+    seed(c) {
+      const tm = taskmaster(c);
+      const [a, b, d] = [1, 2, 3].map((i) => minion(c, `Feeder ${i}`));
+      const w = chat(c, tm, 4);
+      w.asked('Where do the feeders stand?');
+      const copy = (from: typeof a, to: typeof a, text: string) => w.put('minion_copy', { author: `#${from.number} ${from.title}`, from: from.number, to: to.number, text });
+      copy(a, b, 'I changed src/foo.ts: rebase before you touch it');
+      copy(b, a, 'Rebased, thanks. Taking the tests next.');
+      copy(a, d, 'Heads up: the schema column is renamed on main.');
+      copy(d, b, 'Seen; I will carry it into my branch.');
+      w.said('Nothing for me to do on those.');
+      copy(b, d, 'Done on my side.');
+      return `#/p/${c.project.id}`;
     },
   },
   'wco-fixture': {

@@ -52,10 +52,10 @@
   desktop can't be read or captured, so screen tests need this, and an unlocked session.
 
 .EXAMPLE
-  .\add-runner.ps1 -Scheme "Peek Auras" -CitadelUrl '<the address the Machines page shows>' -Count 4
+  .\add-runner.ps1 -Scheme "Peek Auras" -CitadelUrl 'http://perigee.tail59477f.ts.net:8574' -Count 4
 
 .EXAMPLE
-  .\add-runner.ps1 -Scheme "Peek Auras" -CitadelUrl '<the address the Machines page shows>' -Session -Visible
+  .\add-runner.ps1 -Scheme "Peek Auras" -CitadelUrl 'http://perigee.tail59477f.ts.net:8574' -Session -Visible
 #>
 [CmdletBinding()]
 param(

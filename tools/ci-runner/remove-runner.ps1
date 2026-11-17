@@ -31,7 +31,7 @@
   That machine's token (ccm_...). Defaults to the CC_MACHINE_TOKEN environment variable.
 
 .EXAMPLE
-  .\remove-runner.ps1 -Scheme "Peek Auras" -CitadelUrl '<the address the Machines page shows>'
+  .\remove-runner.ps1 -Scheme "Peek Auras" -CitadelUrl 'http://perigee.tail59477f.ts.net:8574'
 #>
 [CmdletBinding()]
 param(

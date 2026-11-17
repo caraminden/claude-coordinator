@@ -3,12 +3,13 @@ import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, sch
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciWarning } from './ci-desktop.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, projectTitle, pushControls, renderGithubStrip } from './settings.js';
-import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
+import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
 import { chatSection, chatView, mountChat, renderTicketHead } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
+import { usagePage } from './where.js';
 import { forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { schedulesButton, showSchedules } from './schedules.js';
@@ -68,6 +69,7 @@ function renderCrumbs(main) {
       : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
+      : main.kind === 'usage' ? [projectLink, ' / ', settingsLink, ' / ', 'Usage']
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
@@ -165,7 +167,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions'), schedulesButton()),
-    newTicketForm(projectId),
     h('div', { id: 'github-strip', class: 'github-strip', hidden: true }),
     h('div', { id: 'hidden-note', class: 'hidden-note', hidden: true }),
     inboxStrip(),
@@ -177,8 +178,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('div', { id: 'threads' }),
     h('div', { class: 'schedules-pane' }));
   showSchedules(sidebar);
-  // Don't hide a half-written new thread behind a collapsed sidebar.
-  if (sidebar.querySelector('.new-thread textarea').value) sidebar.open = true;
   for (const [name, el] of [['shelf', shelf], ['threads', sidebar]]) {
     el.addEventListener('toggle', () => {
       if (!narrowQuery.matches) savePanelState({ ...loadPanelState(), [name]: el.open });
@@ -200,6 +199,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'contraptions' ? contraptionsPage()
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
+    : main.kind === 'usage' ? usagePage()
     : main.kind === 'releases' ? releasesPage()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)

@@ -6,7 +6,8 @@
   backup key (which can only list and fetch, see deploy/offbox-serve.sh), checks every download
   against its checksum, then keeps the newest $Dailies dailies, $Weeklies weeklies and $States
   session-state copies. Contraptions' own nightly backups (#828) land in apps\<app>\<day>\, and each
-  app keeps its newest $Dailies days. A run that can't reach perigee prunes nothing. It exits 1 on any failure
+  app keeps its newest $Dailies days. Android apps' release keys (#837) land in keys\ and are never pruned or
+  replaced: a key here that perigee's no longer matches is kept and the run fails. A run that can't reach perigee prunes nothing. It exits 1 on any failure
   or when the newest daily is over 2 days old, so Task Scheduler's "Last Run Result" shows it.
   Works in Windows PowerShell 5.1 and PowerShell 7.
 #>
@@ -34,6 +35,8 @@ $weekly = '^coordinator-weekly-\d{4}-W\d{2}\.db$'
 $state = '^state-\d{4}-\d{2}-\d{2}\.db$'
 # The same rule as offbox-serve.sh: apps/<contraption>/<day>/<file>, plain names, no `..`. Checked case-sensitively.
 $app = '^apps/[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?/\d{4}-\d{2}-\d{2}/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'
+# An Android app's release key or its password file (#837), as offbox-serve.sh allows.
+$releaseKey = '^keys/[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?-release\.(?:jks|pass)$'
 
 function Prune([string]$pattern, [int]$keep) {
   Get-ChildItem -LiteralPath $Dest -File | Where-Object { $_.Name -match $pattern } | Sort-Object Name -Descending |
@@ -52,12 +55,16 @@ try {
     if ($line -notmatch '^([0-9a-f]{64})\s+\*?(\S+)$') { continue }
     $hash = $Matches[1]; $name = $Matches[2]
     $isApp = $name -cmatch $app -and $name -notlike '*..*'
-    if ($name -notmatch $daily -and $name -notmatch $weekly -and $name -notmatch $state -and -not $isApp) { Log "Skipping unexpected name $name"; continue }
+    $isKey = $name -cmatch $releaseKey
+    if ($name -notmatch $daily -and $name -notmatch $weekly -and $name -notmatch $state -and -not $isApp -and -not $isKey) { Log "Skipping unexpected name $name"; continue }
     $offered++
     $target = Join-Path $Dest ($name -replace '/', [IO.Path]::DirectorySeparatorChar)
-    if ($isApp) { New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null }
+    if ($isApp -or $isKey) { New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null }
+    $have = Test-Path -LiteralPath $target
     # Same name, other checksum: perigee re-ran its backup that day, so fetch it again.
-    if ((Test-Path -LiteralPath $target) -and (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash.ToLower() -eq $hash) { continue }
+    if ($have -and (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash.ToLower() -eq $hash) { continue }
+    # A release key is never replaced: the copy here may be the only one that can still sign the app's updates.
+    if ($have -and $isKey) { Log "FAILED $name`: perigee's copy differs from the one here, which is kept; check perigee's ~/.config/citadel-android"; $failed++; continue }
     $part = "$target.part"
     # Copy ssh's stdout stream straight to the file: PowerShell pipes and Start-Process's redirect both
     # treat it as text and change the bytes.
@@ -86,7 +93,7 @@ try {
   Prune $daily $Dailies
   Prune $weekly $Weeklies
   Prune $state $States
-  # Each app keeps its newest $Dailies days. An app gone from perigee keeps what it has here.
+  # Each app keeps its newest $Dailies days. An app gone from perigee keeps what it has here. keys\ is never pruned.
   $apps = Join-Path $Dest 'apps'
   if (Test-Path -LiteralPath $apps) {
     foreach ($a in Get-ChildItem -LiteralPath $apps -Directory) {

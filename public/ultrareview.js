@@ -2,19 +2,20 @@
 // branch or on an area of the scheme's repo, and the findings land in this chat. It spends a free run or
 // usage credits, so the dialog says so and the server only takes it from a person who confirmed.
 import { api, h } from './base.js';
+import { openDialog } from './ui/dialog.js';
 
 const COST = 'It uses one of your 3 free ultra reviews, or about $5-25 in usage credits once those are gone. Citadel can\'t see how many free runs you have left, and a run counts as soon as it starts, even if it fails.';
 
 /** The header's button: every open chat can review an area; a minion with a branch can also review that. */
 export function ultraButton(t) {
   if (t.status === 'closed') return '';
-  return h('button', { type: 'button', class: 'secondary act-ultra', title: 'Run an ultra review on your own Claude account: this branch, or an area of the repo', onclick: () => openDialog(t) },
+  return h('button', { type: 'button', class: 'secondary act-ultra', title: 'Run an ultra review on your own Claude account: this branch, or an area of the repo', onclick: () => openUltra(t) },
     'Ultra', h('span', { class: 'wide-only' }, ' review'));
 }
 
 const fmt = (n) => n.toLocaleString('en-US');
 
-function openDialog(t) {
+function openUltra(t) {
   const hasBranch = t.kind !== 'coordinator' && !!t.branch;
   const radio = (value, label, extra = {}) => h('label', { class: 'ur-mode' }, h('input', { type: 'radio', name: 'mode', value, ...extra }), label);
   const branchOpt = radio('branch', hasBranch ? h('span', {}, 'This minion\'s branch ', h('code', {}, t.branch)) : 'This minion\'s branch (none)', { checked: hasBranch, disabled: !hasBranch });
@@ -32,11 +33,7 @@ function openDialog(t) {
     err,
     h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }),
       h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn));
-  const dialog = h('dialog', { class: 'cui-dialog new-scheme ultra-review', 'aria-label': 'Ultra review' },
-    h('div', { class: 'cui-dialog-head' }, h('h2', {}, 'Ultra review'),
-      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
-    form);
-  dialog.addEventListener('close', () => dialog.remove());
+  const dialog = openDialog({ title: 'Ultra review', className: 'new-scheme ultra-review', body: form });
 
   const mode = () => form.elements.mode.value;
   const pathList = () => paths.value.split(/[\s,]+/).filter(Boolean);
@@ -97,8 +94,6 @@ function openDialog(t) {
       btn.textContent = 'Start ultra review';
     }
   });
-  document.body.append(dialog);
-  dialog.showModal();
   check();
   (hasBranch ? btn : paths).focus();
 }

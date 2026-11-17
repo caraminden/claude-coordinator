@@ -111,3 +111,10 @@ test("a later message's bad line doesn't let an earlier message's line stand", a
   assert.deepEqual(t.replies, []);
   assert.ok((await notes()).some((n) => /status line was ignored \(not JSON/.test(n)));
 });
+
+test('an over-long note or reply is clipped to its limit, not refused', () => {
+  const r = takeStatus(`<!-- status: {"state":"complete","note":"${'n'.repeat(87)}","replies":["${'r'.repeat(50)}"]} -->`);
+  assert.equal((r.status!.note as string).length, 60);
+  assert.ok((r.status!.note as string).endsWith('…'));
+  assert.equal(((r.status!.replies as string[])[0]).length, 40);
+});

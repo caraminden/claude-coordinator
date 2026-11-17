@@ -31,3 +31,9 @@ test('a browser tab or a desktop window keeps its contraption', () => {
   assert.equal(opensOnCitadel({ phoneApp: false, hash: mandate }), false);
   assert.equal(opensOnCitadel({ phoneApp: false, hash: mandate, away: 10 * 60_000 }), false);
 });
+
+// #892: a contraption's page is on its own host (the frame's src redirects there), so its mic needs the delegation to name any origin.
+test('a contraption frame may use the microphone, camera, clipboard and fullscreen on whatever host it ends on', async () => {
+  const { FRAME_ALLOW } = await import('../public/frames.js');
+  for (const f of ['microphone', 'camera', 'clipboard-read', 'clipboard-write', 'fullscreen']) assert.match(FRAME_ALLOW, new RegExp(`(^|; )${f} \\*(;|$)`));
+});

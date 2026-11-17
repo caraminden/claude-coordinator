@@ -4,6 +4,7 @@ import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 import { Memory } from './memory.ts';
+import type { KeepaliveRow } from './keepalive.ts';
 
 /** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
 export const askerKey = (ticketId: number) => `asker:${ticketId}`;
@@ -381,6 +382,29 @@ export interface Turn {
   cache_write_tokens: number | null;
   /** Whose plan paid (Runner.payerOf): null for the server login's, else that person's id. */
   payer: number | null;
+  /** 1 for a hidden keepalive turn (#862), costed apart; null for a real turn. */
+  keepalive: number | null;
+  /** Which of the payer's Claude accounts ran it (#779); null for turns from before #905 and Codex turns. */
+  account: number | null;
+}
+
+/** Store.spendRows: a turn's spend on one model, with its minion's facts (#905). */
+export interface SpendRowRaw {
+  turn_id: number;
+  ticket_id: number;
+  account: number | null;
+  keepalive: number | null;
+  project_id: number;
+  number: number | null;
+  title: string;
+  kind: string;
+  created_by: string;
+  /** The model the minion's session last ran, or its picked one: an older turn's estimate. */
+  minion_model: string | null;
+  /** Null for a turn from before the split was kept. */
+  model: string | null;
+  cost: number;
+  type: string | null;
 }
 
 /** What a turn's result event says, for Store.recordTurn. */
@@ -392,6 +416,10 @@ export interface TurnResult {
   duration_ms?: number | null;
   usage?: any;
   payer?: number | null;
+  keepalive?: boolean;
+  account?: number | null;
+  /** The result's `modelUsage`: each model's running session cost, Grunts' models included (#905). */
+  modelUsage?: any;
 }
 
 /** A person's own named property filter in a scheme (#194): key → the values ticked for it. */
@@ -742,10 +770,18 @@ CREATE TABLE IF NOT EXISTS turns (
   output_tokens INTEGER,
   cache_read_tokens INTEGER,
   cache_write_tokens INTEGER,
-  payer INTEGER
+  payer INTEGER,
+  keepalive INTEGER
 );
 CREATE INDEX IF NOT EXISTS turns_ticket ON turns(ticket_id, id);
 CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
+CREATE TABLE IF NOT EXISTS turn_models (
+  turn_id INTEGER NOT NULL REFERENCES turns(id),
+  model TEXT NOT NULL,
+  cost_usd REAL NOT NULL,
+  session_cost_usd REAL NOT NULL,
+  PRIMARY KEY (turn_id, model)
+);
 CREATE TABLE IF NOT EXISTS instruction_history (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
@@ -1180,6 +1216,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'last_check', 'ALTER TABLE machines ADD COLUMN last_check TEXT'],
   ['machines', 'lend', 'ALTER TABLE machines ADD COLUMN lend TEXT'],
   ['turns', 'payer', 'ALTER TABLE turns ADD COLUMN payer INTEGER'],
+  ['turns', 'keepalive', 'ALTER TABLE turns ADD COLUMN keepalive INTEGER'],
+  ['turns', 'account', 'ALTER TABLE turns ADD COLUMN account INTEGER'],
   ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
   ['contraptions', 'repo', 'ALTER TABLE contraptions ADD COLUMN repo TEXT'],
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
@@ -1253,7 +1291,8 @@ export const SCHEMA_HISTORY = [
   [58, 'outside_spend (#839)'],
   [59, 'contraption_turn_audit (#844)'],
   [60, 'stored_secrets (#838)'],
-  [61, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings, cara-desktop-* owners (#857)'],
+  [61, 'turns.keepalive (#862)'],
+  [62, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings, cara-desktop-* owners (#857)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2088,6 +2127,7 @@ export class Store {
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM github_seen WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM turn_models WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
     this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
@@ -2487,9 +2527,10 @@ export class Store {
     }
   }
 
-  /** A chat's newest plan card, or undefined. */
+  /** A chat's newest plan card, or undefined: a real plan, not a machine's notes (#617) or a release key card (#837), which ride the same event kind. */
   latestPlan(ticketId: number): EventRow | undefined {
-    return this.db.prepare("SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' ORDER BY id DESC LIMIT 1").get(ticketId) as unknown as EventRow | undefined;
+    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' AND json_extract(data, '$.machine') IS NULL
+      AND json_extract(data, '$.releaseKey') IS NULL ORDER BY id DESC LIMIT 1`).get(ticketId) as unknown as EventRow | undefined;
   }
 
   /** The backup chat's lines (src/backup.ts): the newest `limit` messages, notes, errors and replies with text after `afterId`, oldest first. */
@@ -2877,18 +2918,43 @@ export class Store {
    */
   recordTurn(ticketId: number, r: TurnResult): Turn {
     const prev = this.db
-      .prepare('SELECT session_id, session_cost_usd FROM turns WHERE ticket_id = ? ORDER BY id DESC LIMIT 1')
-      .get(ticketId) as { session_id: string | null; session_cost_usd: number } | undefined;
+      .prepare('SELECT id, session_id, session_cost_usd FROM turns WHERE ticket_id = ? ORDER BY id DESC LIMIT 1')
+      .get(ticketId) as { id: number; session_id: string | null; session_cost_usd: number } | undefined;
     const sameSession = prev && (prev.session_id ?? null) === (r.session_id ?? null);
     const base = sameSession && prev.session_cost_usd <= r.session_cost_usd ? prev.session_cost_usd : 0;
     const u = r.usage ?? null;
     const n = (v: unknown) => (typeof v === 'number' ? v : null);
     const row = this.db
       .prepare(`INSERT INTO turns (ticket_id, event_id, session_id, ended_at, cost_usd, session_cost_usd, duration_ms,
-          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
+          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer, keepalive, account) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
       .get(ticketId, r.event_id ?? null, r.session_id ?? null, r.ended_at, r.session_cost_usd - base, r.session_cost_usd,
-        n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens), r.payer ?? null);
-    return row as unknown as Turn;
+        n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens), r.payer ?? null, r.keepalive ? 1 : null,
+        n(r.account)) as unknown as Turn;
+    // Each model's running total, less its total at the session's previous turn, as the whole turn's cost is (#905).
+    const models = r.modelUsage && typeof r.modelUsage === 'object' ? Object.entries(r.modelUsage) : [];
+    const was = this.db.prepare('SELECT session_cost_usd FROM turn_models WHERE turn_id = ? AND model = ?');
+    const add = this.db.prepare('INSERT INTO turn_models (turn_id, model, cost_usd, session_cost_usd) VALUES (?, ?, ?, ?)');
+    const totals = models.flatMap(([model, m]) => {
+      const total = (m as any)?.costUSD;
+      return typeof total === 'number' && Number.isFinite(total) && total >= 0 && model ? [[model.slice(0, 100), total] as const] : [];
+    });
+    // The session's previous turn ran before the split was kept: its share of each model is unknown, so split this turn's cost pro rata.
+    const unsplit = base > 0 && !this.db.prepare('SELECT 1 FROM turn_models WHERE turn_id = ?').get(prev!.id);
+    const sum = totals.reduce((a, [, t]) => a + t, 0);
+    for (const [model, total] of totals) {
+      const before = base > 0 && !unsplit ? (was.get(prev!.id, model) as { session_cost_usd: number } | undefined)?.session_cost_usd ?? 0 : 0;
+      add.run(row.id, model, unsplit ? (sum ? row.cost_usd * total / sum : 0) : before <= total ? total - before : total, total);
+    }
+    return row;
+  }
+
+  /** Minions' turns that ended since `since`, oldest first, for the keepalive readout and its miss check (#862). */
+  minionTurnsSince(since: number): KeepaliveRow[] {
+    return this.db
+      .prepare(`SELECT t.ticket_id, t.ended_at, t.duration_ms, t.cost_usd, t.input_tokens, t.output_tokens,
+          t.cache_read_tokens, t.cache_write_tokens, t.keepalive FROM turns t JOIN tickets k ON k.id = t.ticket_id
+          WHERE t.ended_at >= ? AND k.kind != 'coordinator' ORDER BY t.ended_at, t.id`)
+      .all(since) as unknown as KeepaliveRow[];
   }
 
   /**
@@ -2987,6 +3053,29 @@ export class Store {
       .all(since) as unknown as { payer: number | null; project_id: number; cost: number }[];
   }
 
+  /** What one payer's turns on one of their accounts cost since `since`; a turn from before #905 kept no account and counts as account 1's. */
+  accountSpend(payer: number | null, account: number, since: number): number | null {
+    // Turns kept no account before #905, so a window holding one of those can't be split by account (keepalive pings keep none, and cost next to nothing).
+    if (this.db.prepare('SELECT 1 FROM turns WHERE payer IS ? AND ended_at >= ? AND account IS NULL AND keepalive IS NULL LIMIT 1').get(payer, since)) return null;
+    return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE payer IS ? AND ended_at >= ? AND ${account === 1 ? '(account IS NULL OR account = 1)' : 'account = ?'}`)
+      .get(payer, since, ...(account === 1 ? [] : [account])) as { c: number }).c;
+  }
+
+  /**
+   * One payer's turns that ended in [since, until), one row per model each turn ran (#905), with what "where it went" groups
+   * them by. A turn from before the split was kept has one row, `model` null, its whole cost under `cost`.
+   */
+  spendRows(payer: number | null, since: number, until: number): SpendRowRaw[] {
+    return this.db
+      .prepare(`SELECT u.id AS turn_id, u.ticket_id, u.account, u.keepalive, k.project_id, k.number, k.title, k.kind, k.created_by,
+          coalesce(k.last_model, k.model) AS minion_model, m.model, coalesce(m.cost_usd, u.cost_usd) AS cost,
+          (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
+            WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type
+        FROM turns u JOIN tickets k ON k.id = u.ticket_id LEFT JOIN turn_models m ON m.turn_id = u.id
+        WHERE u.ended_at >= ? AND u.ended_at < ? AND u.payer IS ?`)
+      .all(since, until, payer) as unknown as SpendRowRaw[];
+  }
+
   /** Record a health reading (#724); every 100th insert also drops rows past HEALTH_KEEP_MS and HEALTH_MAX_ROWS. */
   addHealthEvent(kind: string, at: number, commit: string | null, detail: string) {
     const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };
@@ -3028,7 +3117,7 @@ export class Store {
    */
   turnOutcomes(from: number, to: number): { turns: number; failed: number; first: number | null } {
     const ok = this.db.prepare(`SELECT COUNT(*) AS n, SUM(e.data LIKE '%"is_error":true%') AS bad, MIN(CASE WHEN e.data LIKE '%"is_error":true%' THEN t.ended_at END) AS first
-        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND NOT COALESCE(e.data LIKE '%"is_error":true%' AND e.data LIKE '%hit your %limit%', 0)`).get(from, to) as { n: number; bad: number | null; first: number | null };
+        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND NOT COALESCE(e.data LIKE '%"is_error":true%' AND e.data LIKE '%hit your %limit%', 0)`).get(from, to) as { n: number; bad: number | null; first: number | null };
     const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE id >= ? AND id < ? AND kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%'")
       .get(this.eventIdAt(from), this.eventIdAt(to), from, to) as { n: number; first: number | null };
     const firsts = [ok.first, errs.first].filter((f): f is number => f != null);

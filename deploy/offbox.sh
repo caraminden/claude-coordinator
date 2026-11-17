@@ -11,6 +11,7 @@
 #   lists, no logins).
 # - SHA256SUMS, the list the desktop reads and checks each download against.
 # - every registered contraption's newest nightly backups, as hard links under apps/ (#828, below).
+# - every Android app's release key and its password file, as hard links under keys/ (#837, below).
 # Safe to run again: copies already made are kept unless their backup is newer, files gone from backups go here too.
 set -euo pipefail
 umask 077
@@ -144,6 +145,36 @@ fi
 mapfile -t app_files < <(printf '%s\n' "${!app_want[@]}" | sort)
 [[ ${app_files[0]:-} ]] && want+=("${app_files[@]}")
 
+# Every Android app's release key (#837; Cara, 2026-11-17, "Every release key"): keys/<app>-release.jks and its
+# .pass from $KEY_DIR, as hard links (mode 600, no extra disk), for as long as each exists there. A lost key means
+# every phone has to uninstall the app to take its next update. Only those two names: nothing else in that folder
+# (mandate-google-services.json and the like) goes. Nothing here ever writes into a link, so the key itself is never touched.
+KEY_DIR=${KEY_DIR:-$HOME/.config/citadel-android}
+keys=()
+for f in "$KEY_DIR"/*-release.jks "$KEY_DIR"/*-release.pass; do
+  name=$(basename "$f")
+  [[ -f $f && ! -L $f && ${name%-release.*} =~ $app_name ]] || continue
+  rel=keys/$name
+  if [[ ! $OUT/$rel -ef $f ]]; then
+    mkdir -p "$OUT/keys"
+    if ! ln -f -- "$f" "$OUT/$rel" 2>/dev/null; then
+      tmp=$OUT/.key.tmp
+      if ! { cp -- "$f" "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$OUT/$rel"; }; then
+        echo "Off-box set: couldn't link or copy $rel, left out" >&2
+        continue
+      fi
+      tmp=""
+    fi
+  fi
+  keys+=("$rel")
+done
+if [[ -d $OUT/keys ]]; then
+  for f in "$OUT/keys"/* "$OUT/keys"/.[!.]*; do
+    [[ " ${keys[*]} " == *" ${f#"$OUT"/} "* && -f $f && ! -L $f ]] || rm -rf -- "$f"
+  done
+fi
+((${#keys[@]})) && want+=("${keys[@]}")
+
 sums=$OUT/.SHA256SUMS.tmp
 (cd "$OUT" && for name in "${want[@]}"; do sha256sum -- "$name"; done) >"$sums"
 mv -f "$sums" "$OUT/SHA256SUMS"
@@ -152,4 +183,5 @@ list() { local s; s=$(printf '%s, ' "$@"); echo "${s%, }"; }
 ((${#apps_with[@]})) && echo "App backups: $(list "${apps_with[@]}")"
 ((${#apps_stale[@]})) && echo "App backups not from today (a job that runs after this one, or one that stopped): $(list "${apps_stale[@]}")"
 ((${#apps_without[@]})) && echo "Apps with no nightly backups, skipped: $(list "${apps_without[@]}")"
+((${#keys[@]})) && echo "Release keys: $((${#keys[@]})) files"
 exit 0

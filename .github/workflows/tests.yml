@@ -27,8 +27,9 @@ permissions:
 jobs:
   test:
     runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux"]') }}
-    # land.sh gives up on the run after 6 minutes (LAND_CI_TIMEOUT); this only stops one nobody waits for. The
-    # suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits up to 30 more for the lands.
+    # land.sh gives up on the run after 6 minutes (LAND_CI_TIMEOUT), the clock step's up to 2 min included; this only
+    # stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits
+    # up to 30 more for the lands.
     timeout-minutes: ${{ startsWith(github.ref, 'refs/heads/land/') && 12 || 45 }}
     steps:
       - uses: actions/checkout@v4
@@ -66,21 +67,27 @@ jobs:
       # to the Windows clock while a distro's systemd-timesyncd steps it to NTP, and chrony retunes the kernel tick
       # after every step. On 2026-11-11 the clocks ran 7% fast, then 2% slow after a reboot, with the wall clock
       # stepped every 32 s, and timing tests failed at random. The raw clock is the one nothing adjusts (measured
-      # then: within 0.005% of NTP).
+      # then: within 0.005% of NTP). A skew that passes (the keeper settling after a distro starts) gets 2 minutes
+      # before the step fails (#900); tools/land.sh reads this step's failure by its name, so keep the two in step.
       - name: the runner's clock
         run: |
           python3 -c "
           import time as t
-          a, b = t.monotonic(), t.clock_gettime(t.CLOCK_MONOTONIC_RAW); t.sleep(2)
-          d = (t.monotonic() - a) / (t.clock_gettime(t.CLOCK_MONOTONIC_RAW) - b) - 1
-          print(f'the clock runs {d:+.2%} against the raw clock')
-          if abs(d) > 0.01: raise SystemExit(3)" && exit 0 || rc=$?
+          raw = lambda: t.clock_gettime(t.CLOCK_MONOTONIC_RAW)
+          end = raw() + 120
+          while True:
+              a, b = t.monotonic(), raw(); t.sleep(2)
+              d = (t.monotonic() - a) / (raw() - b) - 1
+              print(f'the clock runs {d:+.2%} against the raw clock', flush=True)
+              if abs(d) <= 0.01: break
+              if raw() > end: raise SystemExit(3)
+              t.sleep(8)" && exit 0 || rc=$?
           [ "$rc" = 3 ] || exit "$rc"
           echo "The kernel clock is skewed: a systemd-timesyncd in some WSL distro on this PC is fighting WSL's own clock keeper."
           echo "Here it is $(systemctl is-active systemd-timesyncd 2>&1), $(systemctl is-enabled systemd-timesyncd 2>&1). It must be masked in every distro (wsl -l -v lists them)."
           echo "On the desktop, in PowerShell, for each:"
           echo "  wsl -d <distro> -u root -- systemctl mask --now systemd-timesyncd"
-          echo "The clock settles within a minute (tools/ci-runner/README.md, Citadel's own tests)."
+          echo "The clock settles within a minute of that (tools/ci-runner/README.md, Citadel's own tests)."
           exit 1
       # test/ps1-lint.test.ts skips without pwsh and PSScriptAnalyzer, so a failed install fails the job
       # rather than quietly dropping the lint. Both go in the runner's own home (no root), once.

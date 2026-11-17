@@ -22,7 +22,7 @@ function folder(slots?: number, pressure = 5) {
   const dir = join(root, `locks-${n++}`);
   const pressureFile = `${dir}-pressure`;
   setPressure(pressureFile, psi(pressure));
-  const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots), CITADEL_HEAVY_PRESSURE: pressureFile, CITADEL_HEAVY_POLL: '0.1', CITADEL_HEAVY_MAX_PRESSURE: undefined, CITADEL_HEAVY_LOAD_WAIT: undefined };
+  const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots), CITADEL_HEAVY_PRESSURE: pressureFile, CITADEL_HEAVY_POLL: '0.1', CITADEL_HEAVY_MAX_PRESSURE: undefined, CITADEL_HEAVY_LOAD_WAIT: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_WHAT: undefined };
   return { dir, env, pressureFile };
 }
 type Job = { child: ChildProcess; err: () => string; done: Promise<number | null> };
@@ -106,6 +106,46 @@ test('the slots file tunes how many run at once, and a nested call runs in the o
   // With the one slot held by the outer call, the inner one would wait forever if it queued.
   const nested = spawnSync(heavy, [heavy, 'echo', 'inner'], { env, encoding: 'utf8', timeout: 10_000 });
   assert.equal(nested.stdout, 'inner\n');
+});
+
+// Deploy builds (#885): a contraption's deploy waited behind minions' suites for 15-20 min per step, for seconds of work.
+test('a priority job goes ahead of the jobs waiting in line, and the one it passes says why', async () => {
+  const { env } = folder(1);
+  const go = join(root, 'go-first');
+  const order = join(root, 'first-order');
+  const a = job(env, 'suite', `${touch(join(root, 'first-up'))}; ${waitFor(go)}`);
+  await until('the slot held', () => existsSync(join(root, 'first-up')));
+  const b = job(env, 'Peek #4', `echo minion >> '${order}'`);
+  await until('the minion job at the head of the line', () => /all heavy slots \(1\) are busy/.test(b.err()));
+  const c = job({ ...env, CITADEL_HEAVY_PRIORITY: '1' }, 'voice deploy', `echo deploy >> '${order}'`);
+  try {
+    await until('the deploy waiting for the slot', () => /all heavy slots \(1\) are busy/.test(c.err()));
+    await new Promise((r) => setTimeout(r, 300)); // a few of the head's polls, so it has seen the deploy waiting
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await a.done, 0);
+  assert.equal(await c.done, 0);
+  assert.equal(await b.done, 0);
+  assert.equal(readFileSync(order, 'utf8'), 'deploy\nminion\n', 'the deploy took the freed slot first');
+  assert.match(b.err(), /voice deploy goes first/);
+});
+
+test('a priority job skips the load wait, and CITADEL_HEAVY_WHAT names its hold', () => {
+  const { dir, env } = folder(2, 90);
+  const r = spawnSync(heavy, ['true'], { env: { ...env, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHO: 'voice deploy', CITADEL_HEAVY_WHAT: 'build: npm ci; npm run build' }, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(r.status, 0, r.stderr);
+  const line = readFileSync(join(dir, 'history'), 'utf8').trim().split('\t');
+  assert.deepEqual(line.slice(1, 4), ['voice deploy', 'build: npm ci; npm run build', 'none'], 'admitted at once, on the busy box');
+});
+
+test("a priority waiter's marker that stopped being freshened doesn't hold the line up", () => {
+  const { dir, env } = folder(1);
+  spawnSync(heavy, ['true'], { env });
+  writeFileSync(join(dir, 'first'), 'a deploy killed while it waited\n');
+  const old = Date.now() / 1000 - 600;
+  utimesSync(join(dir, 'first'), old, old);
+  assert.equal(spawnSync(heavy, ['true'], { env, timeout: 10_000 }).status, 0);
 });
 
 test('without a usable lock folder it warns and runs anyway', () => {

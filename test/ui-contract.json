@@ -25,7 +25,8 @@
       "mountComposer"
     ],
     "dialog.js": [
-      "mountDialogs"
+      "mountDialogs",
+      "openDialog"
     ],
     "media.js": [
       "clock",
@@ -174,6 +175,7 @@
       "cui-front-matter",
       "cui-link",
       "cui-md",
+      "cui-shell",
       "cui-table",
       "cui-task"
     ],
@@ -198,7 +200,9 @@
       "cui-pan-label",
       "cui-pan-look",
       "cui-pan-map",
+      "cui-pan-over",
       "cui-pan-shade",
+      "cui-pan-stage",
       "cui-pan-view",
       "cui-pan-win",
       "cui-panner",

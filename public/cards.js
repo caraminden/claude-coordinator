@@ -3,6 +3,7 @@
 import { account, ago, api, fileHref, fileKind, fileUrl, h, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
 import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
+import { changesLine, collapseRuns, planChanges } from './plan-diff.js';
 import { adoptTicket } from './thread.js';
 import { refreshViewerBar, setViewerGallery } from './artifacts.js';
 import { jobRecipe } from './jobs.js';
@@ -186,6 +187,21 @@ function notesBody(card) {
   ];
 }
 
+/** A revised plan (#907): what changed against the plan it replaces, the unchanged stretches behind a toggle, the whole plan one tap away. */
+function revisionBody(card, prev, ticketId) {
+  const c = planChanges(prev.plan, card.plan, prev.summary, card.summary);
+  const row = (op, text) => h('div', { class: op === '+' ? 'add' : op === '-' ? 'del' : 'same' }, `${op === ' ' ? '\u00a0' : op} ${text}`);
+  const runs = collapseRuns(c.ops).map((r) => r.gap
+    ? h('details', { class: 'gap' }, h('summary', {}, `${r.gap.length} unchanged line${r.gap.length === 1 ? '' : 's'}`), ...r.gap.map((o) => row(' ', o.text)))
+    : row(r.op, r.text));
+  return [
+    h('div', { class: 'rev-head' }, h('b', {}, 'Changed since the last version'), ` · ${changesLine(c)}`),
+    c.summaryChanged ? h('div', { class: 'rev-summary' }, h('s', {}, prev.summary), ' → ', card.summary) : null,
+    h('div', { class: 'instructions-diff rev-diff' }, ...runs),
+    h('details', {}, h('summary', {}, 'The whole plan'), h('div', {}, markdown(card.plan, ticketId))),
+  ];
+}
+
 /**
  * A plan from Claude waiting for a go: Approve sends it, Revise opens a box for notes that go back
  * to Claude, which answers with a new card. Only people can decide; the card keeps its outcome.
@@ -193,21 +209,28 @@ function notesBody(card) {
 export function planCard(ticketId, card, opts = {}) {
   // A machine's notes card (#617): only its owner or an admin approves; anyone may reject, with an optional reason.
   const m = card.machine;
+  // A release key card (#837): approved or rejected like a machine's notes, by any member of the app's scheme.
+  const k = card.releaseKey;
+  const fixed = m || k;
   const mayApprove = !m || !!account?.admin || (m.owner != null && m.owner === me);
   // Said beside the greyed-out Approve, not only in its tooltip, so a phone or keyboard shows why.
   const hint = mayApprove ? '' : `Only ${m.owner ? `${m.owner} (its owner)` : 'an admin'}${m.owner ? ' or an admin' : ''} can approve`;
   const status = h('span', { class: 'muted', role: 'status' });
   const why = h('div', { class: 'muted small', hidden: !hint }, hint);
   const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, 'Approve');
-  const revise = h('button', { type: 'button', class: 'small secondary' }, m ? 'Reject' : 'Revise');
-  const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: m ? 'Why? (optional)' : 'What should change?', hidden: true });
+  const revise = h('button', { type: 'button', class: 'small secondary' }, fixed ? 'Reject' : 'Revise');
+  const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: fixed ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
-  const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !m }, m ? 'Reject' : 'Send notes');
-  const head = whoLine(m ? 'proposes machine notes' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
+  const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !fixed }, fixed ? 'Reject' : 'Send notes');
+  // Diffed against the plan before it unless that one was approved: a later plan after a go is new work, not a revision.
+  const prev = fixed || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
+  const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
+  if (!fixed) view.lastPlan = mine;
+  const head = whoLine(m ? 'proposes machine notes' : k ? 'asks for a release key' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
   const el = h('div', { class: 'qcard pcard' },
     head.el,
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : 'Plan'), card.summary),
-    h('div', { class: 'pbody' }, m ? notesBody(card) : markdown(card.plan, ticketId)),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : 'Plan'), card.summary),
+    h('div', { class: 'pbody' }, m ? notesBody(card) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
     notes, why,
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), revise, approve, cancel, sendNotes));
   let rank = 0;
@@ -232,7 +255,7 @@ export function planCard(ticketId, card, opts = {}) {
         approve.hidden = revise.hidden = true;
         el.classList.add('answered');
         why.hidden = true;
-        status.textContent = verdict === 'approve' ? 'Approved' : m ? 'Rejected' : 'Revision sent';
+        status.textContent = verdict === 'approve' ? (k ? 'Making the key…' : 'Approved') : fixed ? 'Rejected' : 'Revision sent';
       },
       send: () => api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: text } }),
       undo: () => {
@@ -244,31 +267,34 @@ export function planCard(ticketId, card, opts = {}) {
         status.textContent = '';
         if (verdict === 'revise') editing(true);
       },
-      label: m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
+      label: m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
   };
   approve.addEventListener('click', () => decide('approve'));
   revise.addEventListener('click', () => editing(true));
   cancel.addEventListener('click', () => editing(false));
   sendNotes.addEventListener('click', () => decide('revise'));
-  notes.addEventListener('input', () => { sendNotes.disabled = !m && !notes.value.trim(); });
+  notes.addEventListener('input', () => { sendNotes.disabled = !fixed && !notes.value.trim(); });
   notes.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (m || notes.value.trim())) { e.preventDefault(); decide('revise'); }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (fixed || notes.value.trim())) { e.preventDefault(); decide('revise'); }
   });
   const handle = {
     el,
+    status: card.status,
     settle(r) {
       // The stored card already has its latest outcome, so replayed older results are ignored.
       if ((PLAN_RANK[r.status] ?? 0) <= rank) return;
       rank = PLAN_RANK[r.status];
+      handle.status = r.status;
       editing(false);
       el.classList.add('answered', `p-${r.status}`);
       why.hidden = true;
       approve.hidden = revise.hidden = true;
-      status.textContent = planOutcome(r, m);
+      status.textContent = planOutcome(r, fixed);
       if (r.by) head.done(`${r.status === 'approved' ? 'approved' : 'sent back'} by ${r.by}`);
     },
   };
+  mine.handle = handle;
   view.cards.set(card.id, handle);
   if (card.status !== 'pending') handle.settle(card);
   return el;
@@ -408,6 +434,14 @@ export function questionCard(ticketId, card, opts = {}) {
     sendBtn.hidden = on;
     if (pictures) refreshViewerBar();
   };
+  // Once the picks are complete, bring the Send button clear of the sticky message box: on a phone it
+  // sat under it, and the only Send on screen sent a chat message instead of the answer.
+  const revealSend = () => {
+    if (sendBtn.disabled) return;
+    const box = document.querySelector('.composer');
+    sendBtn.style.scrollMarginBottom = `${(box?.offsetHeight || 0) + 12}px`;
+    sendBtn.scrollIntoView({ block: 'nearest' });
+  };
   const send = () => {
     if (answered || !ready()) return;
     const answers = picks.map((p) => ({ selected: [...p.selected], other: p.other.trim() }));
@@ -452,6 +486,7 @@ export function questionCard(ticketId, card, opts = {}) {
           sel.add(o.label);
         }
         refresh();
+        revealSend();
       };
       // Opening a picture hands the viewer this question's pictures, to step through and pick from; a
       // click that opens it in a new tab instead leaves the viewer as it is.

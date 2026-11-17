@@ -27,6 +27,7 @@ import type { ChunkedUploads } from './chunked-uploads.ts';
 import type { CiStore } from './ci-store.ts';
 import type { Previews } from './previews.ts';
 import type { Releases } from './releases.ts';
+import type { ApkBuilds } from './apk-build.ts';
 import type { AutoDeploy } from './auto-deploy.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
@@ -229,6 +230,7 @@ export interface App {
   releases: Releases;
   /** Auto-deploy and the release cards' Deploy button (src/auto-deploy.ts, #629). */
   autoDeploy: AutoDeploy;
+  apkBuilds: ApkBuilds;
   machines: MachineRelay;
   /** Jobs on people's own machines (src/machine-jobs.ts, #857). */
   jobs: MachineJobs;

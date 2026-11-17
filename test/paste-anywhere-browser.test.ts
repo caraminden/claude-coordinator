@@ -93,22 +93,22 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
 
     // Clicking (tapping) the thumbnail shows it full size; a click off the picture closes it.
     await click(page, width, '.attachments .thumb .zoom');
-    await waitFor(page, 'the viewer', '!!document.querySelector("dialog.image-zoom[open]")');
-    assert.equal(await page.eval(`document.querySelector('dialog.image-zoom img').src === document.querySelector('.attachments .thumb img').src`), true);
-    assert.ok(await page.eval<number>(`document.querySelector('dialog.image-zoom img').getBoundingClientRect().width`) > 300, 'larger than the thumbnail');
+    await waitFor(page, 'the viewer', '!!document.querySelector("dialog.cui-lightbox[open]")');
+    assert.equal(await page.eval(`document.querySelector('dialog.cui-lightbox img').src === document.querySelector('.attachments .thumb img').src`), true);
+    assert.ok(await page.eval<number>(`document.querySelector('dialog.cui-lightbox img').getBoundingClientRect().width`) > 300, 'larger than the thumbnail');
     await shoot(page, `${label}-zoom.png`);
-    await press(page, width, 10, 790);
-    await waitFor(page, 'the viewer to close on a click outside', '!document.querySelector("dialog.image-zoom")');
+    await press(page, width, 4, 796); // the kit lightbox leaves 12 px of backdrop round it (8 px on a phone)
+    await waitFor(page, 'the viewer to close on a click outside', '!document.querySelector("dialog.cui-lightbox")');
     // Esc closes it too.
     await click(page, width, '.attachments .thumb .zoom');
-    await waitFor(page, 'the viewer again', '!!document.querySelector("dialog.image-zoom[open]")');
+    await waitFor(page, 'the viewer again', '!!document.querySelector("dialog.cui-lightbox[open]")');
     await page.key('Escape');
-    await waitFor(page, 'the viewer to close on Esc', '!document.querySelector("dialog.image-zoom")');
+    await waitFor(page, 'the viewer to close on Esc', '!document.querySelector("dialog.cui-lightbox")');
 
     // ✕ removes the image and opens nothing.
     await click(page, width, '.attachments .thumb .remove');
     await waitFor(page, 'the image removed', '!document.querySelector(".attachments .thumb")');
-    assert.equal(await page.eval('!!document.querySelector("dialog.image-zoom")'), false);
+    assert.equal(await page.eval('!!document.querySelector("dialog.cui-lightbox")'), false);
     assert.equal(await page.eval(`${box}.value`), 'draft and more');
   });
 }
@@ -130,10 +130,10 @@ test('a paste into Find in chat stays there; a paste in an open dialog without t
   await paste(page, { image: true });
   await waitFor(page, 'the thumbnail', '!!document.querySelector(".attachments .thumb .zoom")');
   await page.eval(`document.querySelector('.attachments .thumb .zoom').click()`);
-  await waitFor(page, 'the viewer', '!!document.querySelector("dialog.image-zoom[open]")');
+  await waitFor(page, 'the viewer', '!!document.querySelector("dialog.cui-lightbox[open]")');
   assert.equal(await paste(page, { text: 'nope' }), false, 'the image viewer over it keeps the paste');
   assert.equal(await page.eval(`${box}.value`), 'in');
-  await page.eval(`document.querySelector('dialog.image-zoom').close()`);
+  await page.eval(`document.querySelector('dialog.cui-lightbox').close()`);
 
   // A dialog without the chat keeps its paste too.
   await page.eval(`(() => { const d = document.createElement('dialog'); d.innerHTML = '<p>other</p>'; document.body.append(d); d.showModal(); document.activeElement?.blur(); })()`);

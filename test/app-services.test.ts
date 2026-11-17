@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
-import { AppServices, heavyWaited, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
+import { AppServices, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
 import { fakeSystemd } from './helpers.ts';
+import { until } from './wait.ts';
 
 // Citadel writes and runs contraptions' user services (#266). Everything here runs against a stand-in
 // systemctl and a temp unit folder: never the real ones.
@@ -18,6 +19,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const heavyDir = join(root, 'heavy');
 process.env.CITADEL_HEAVY_DIR = heavyDir;
 process.env.CITADEL_HEAVY_MAX_PRESSURE = '101'; // the box's own load doesn't hold these up
+process.env.CITADEL_HEAVY_POLL = '0.1';
 const heavyHistory = () => (existsSync(join(heavyDir, 'history')) ? readFileSync(join(heavyDir, 'history'), 'utf8') : '');
 
 const MANIFEST = {
@@ -116,20 +118,6 @@ beforeEach(() => {
   mkdirSync(unitDir, { recursive: true });
   fake = fakeSystemd(join(root, `systemd${n}`));
   services = new AppServices(opts());
-});
-
-test("a step's wait in line for a heavy slot is read from citadel-heavy's history, so it doesn't count against build_timeout (#847)", async () => {
-  const began = Date.now();
-  const stamp = (ms: number) => spawnSync('date', [`-d@${Math.floor(ms / 1000)}`, '+%FT%T%z'], { encoding: 'utf8' }).stdout.trim();
-  mkdirSync(heavyDir, { recursive: true });
-  appendFileSync(join(heavyDir, 'history'), [
-    `${stamp(began - 60_000)}\twait-app deploy\tsh -c old\tslots\t99\t1\t0\t5\n`,
-    `${stamp(began)}\tother deploy\tsh -c x\tslots\t50\t1\t0\t5\n`,
-    `${stamp(began + 1000)}\twait-app deploy\tsh -c make\tslots\t42\t3\t0\t5\n`,
-  ].join(''));
-  assert.equal(await heavyWaited('wait-app deploy', began), 42, 'its own line from this step, in the +hhmm timestamps the script writes');
-  assert.equal(await heavyWaited('wait-app deploy', began + 10 * 60_000), 0, 'none since the step began');
-  assert.equal(await heavyWaited('nobody deploy', began), 0);
 });
 
 test("disk use (#847): measured in the background with each manifest's warning line, the free disk read on demand", async () => {
@@ -379,9 +367,53 @@ test('a first deploy clones, builds without Citadel\'s environment, installs and
     assert.ok(fake.calls().includes(`--user restart citadel-app-${name}.service`));
     // Each step in its own unit, out of Citadel's cgroup, and in a heavy slot named for the app (#847).
     assert.equal(fake.calls().filter((x) => x.startsWith(`run --user --wait --collect --unit=citadel-build-${name}.service `)).length, 3);
-    assert.equal(heavyHistory().split('\n').filter((l) => l.split('\t')[1] === `${name} deploy`).length, 3, heavyHistory());
+    assert.equal(heavyHistory().split('\n').filter((l) => l.split('\t')[1] === `${name} deploy`).length, 1, `one hold for all three steps (#885): ${heavyHistory()}`);
+    assert.match(env, /^CITADEL_HEAVY_HELD=1$/m, 'a step that calls citadel-heavy itself runs in the deploy\'s slot');
     assert.ok(!existsSync(join(home, 'deploy-logs', name, 'deploying.json')), 'its marker goes when it ends');
   } finally {
+    svc.close();
+  }
+});
+
+// #885: each step waited in line on its own, behind minions' suites, 15-20 min a step for seconds of work.
+test("a deploy build holds one heavy slot for all its steps and goes ahead of minions' jobs waiting in line", async () => {
+  const name = `app${++repoN}`;
+  const order = join(root, `${name}-order`);
+  const go = join(root, `${name}-go`);
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([`echo step1 >> '${order}'`, `sleep 0.3; echo step2 >> '${order}'`]) });
+  writeFileSync(join(heavyDir, 'slots'), '1\n');
+  const heavyJob = (who: string, script: string) => {
+    const child = spawn(opts().heavy, ['sh', '-c', script], { env: { ...process.env, CITADEL_HEAVY_WHO: who }, stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    child.stderr!.on('data', (b) => (err += b));
+    return { err: () => err, done: new Promise((ok) => child.on('close', ok)) };
+  };
+  const svc = await listening();
+  const suite = heavyJob('suite', `touch '${order}-up'; i=0; while [ ! -e '${go}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done`);
+  try {
+    await until('the slot held', () => existsSync(`${order}-up`));
+    const minion = heavyJob('Peek #4', `echo minion >> '${order}'`);
+    await until('a minion job at the head of the line', () => /are busy/.test(minion.err()));
+    services.deploy({ ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow, 'Cara');
+    // Only the finished wait-<pid>-<n>: citadel-heavy writes it as .tmp and moves it in place, and a .tmp seen
+    // before its mv left the second look with nothing (CI, 2026-11-17).
+    const deployWait = () => readdirSync(heavyDir).filter((f) => /^wait-[0-9-]+$/.test(f)).map((f) => join(heavyDir, f))
+      .find((p) => { try { return readFileSync(p, 'utf8').startsWith(`${name} deploy\n`); } catch { return false; } });
+    await until('the deploy waiting for the slot', () => !!deployWait());
+    // A whole look at the slots with the deploy still in line: the waiting job touches its file at each one.
+    const waitFile = deployWait()!;
+    const seen = statSync(waitFile).mtimeMs;
+    await until('the deploy to look at the slots again', () => statSync(waitFile).mtimeMs > seen, 15_000);
+    writeFileSync(go, '');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    await minion.done;
+    assert.equal(readFileSync(order, 'utf8'), 'step1\nstep2\nminion\n', 'the deploy went first and kept the slot between its steps');
+  } finally {
+    writeFileSync(go, '');
+    await suite.done;
+    rmSync(join(heavyDir, 'slots'), { force: true });
     svc.close();
   }
 });
@@ -409,7 +441,7 @@ test('a deploy waits for a build an earlier deploy left running, so two never bu
   try {
     const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     services.deploy(c, 'Cara', [], undefined, { uid: 7 });
-    await new Promise((res) => setTimeout(res, 300));
+    await until('the deploy to say it waits', async () => (await services.lastDeploy(name))?.said.some((l) => /still running in citadel-build-/.test(l)));
     const mid = await services.lastDeploy(name);
     assert.equal(mid!.state, 'running');
     assert.ok(mid!.said.some((l) => /still running in citadel-build-.*waiting for it to end/.test(l)), mid!.said.join('\n'));
@@ -860,6 +892,63 @@ test('a deploy refuses a folder with local changes, another origin, a missing br
     d = await done(name);
     assert.match(d.said.join('\n'), /has commits cara\/.*'s main doesn't: a deploy only goes forward, so nothing changed\./);
     assert.equal(git(folder, 'rev-parse', 'HEAD'), local);
+  } finally {
+    svc.close();
+  }
+});
+
+// #915: a member's private repo is out of the box's login's reach; only their own GitHub link gets in.
+test("a deploy clones and fetches with its home scheme owner's GitHub link, which never reaches the build, .git/config or the log", async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`alex/${name}`);
+  r.push({ '.gitignore': 'env.txt\n', 'citadel-app.json': appManifest(['env > env.txt']) });
+  const token = `ghu_${'T'.repeat(36)}`;
+  // The "GitHub" URL leads nowhere; only the owner's env (standing in for their token) is let through to the repo.
+  const hidden = `file://${join(root, 'private')}/`;
+  services = new AppServices({ ...opts(), gitUrl: (repo) => `${hidden}${repo}.git` });
+  const c = { ...row(name, 1), repo: `alex/${name}`, branch: null, folder: null, home_scheme: 9 } as ContraptionRow;
+  const asked: (number | null)[] = [];
+  const owner = { GH_TOKEN: token, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(root, 'remotes')}/.insteadOf`, GIT_CONFIG_VALUE_0: hidden };
+  services.githubAs = (x) => (asked.push(x.home_scheme), owner);
+  const svc = await listening();
+  try {
+    services.deploy({ ...c, port: svc.port }, 'Alex');
+    let d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    r.push({ 'later.txt': 'x' });
+    services.deploy({ ...c, port: svc.port }, 'Alex');
+    d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.equal(d.to, git(join(root, 'work', `alex/${name}`), 'rev-parse', 'HEAD'), 'the fetch went through too');
+    assert.deepEqual(asked, [9, 9], 'asked for the home scheme owner\'s link on each deploy');
+    const slots = join(home, 'apps', `.${name}`);
+    const env = readFileSync(join(liveSlot(name), 'env.txt'), 'utf8');
+    assert.doesNotMatch(env, /GH_TOKEN|GIT_CONFIG_/, 'the build never sees the owner\'s login');
+    for (const slot of ['a', 'b']) assert.ok(!git(join(slots, slot), 'config', '--list', '--show-origin').includes(token), `${slot}'s git config`);
+    assert.ok(!readFileSync(join(slots, 'a', '.git', 'config'), 'utf8').includes(token));
+    for (const f of readdirSync(join(home, 'deploy-logs', name))) assert.ok(!readFileSync(join(home, 'deploy-logs', name, f), 'utf8').includes(token), f);
+
+    // Without the owner's link it's the box's login, which can't see the repo: "Repository not found".
+    services.githubAs = () => undefined;
+    r.push({ 'more.txt': 'x' });
+    services.deploy({ ...c, port: svc.port }, 'Alex');
+    assert.match((await done(name)).said.join('\n'), /Fetching alex\/.* failed/);
+  } finally {
+    svc.close();
+  }
+});
+
+test("a deploy whose owner's link can't reach the repo tries again with the box's login, and says so (#915)", async () => {
+  const name = `app${++repoN}`;
+  remote(`cara/${name}`).push({ 'citadel-app.json': appManifest([]) });
+  // A limited link where the App isn't installed: GitHub answers "not found".
+  services.githubAs = () => ({ GH_TOKEN: `ghu_${'U'.repeat(36)}`, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(root, 'nowhere')}/.insteadOf`, GIT_CONFIG_VALUE_0: `file://${join(root, 'remotes')}/` });
+  const svc = await listening();
+  try {
+    services.deploy({ ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.match(d.said.join('\n'), /home scheme owner's GitHub link couldn't reach cara\/app\d+: trying Citadel's own login/);
   } finally {
     svc.close();
   }

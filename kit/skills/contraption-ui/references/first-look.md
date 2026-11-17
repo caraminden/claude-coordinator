@@ -186,3 +186,24 @@ make it grey, and white or black anywhere. Screenshot dark on its own; don't ass
 Body text is `text`; secondary text is `muted`, never lighter and never `opacity`. Text in a tone or
 hue is mixed into `text` (80% for a chip, 78% for a tag), never the raw tone on its own tint. A
 custom accent or accent-2 passes the checks in 1.
+
+## 10. One standout, and an own shape
+
+**One standout per view.** Rules 1 to 9 give every view its colour; on top, one thing is allowed to
+be memorable: a stat tile, the empty-state mark, a gradient, one animated or glowing moment. Say
+which in your reply, and keep the rest quiet. Before you screenshot, take one decoration off.
+
+**An own shape (optional).** An app may set its radii and heading face once, on `:root` next to its
+accent, with the reason in your first reply (a bakery's soft 14/18/22; a terminal tool's square 2/3/4).
+Keep the order `sm` < `radius` < `lg`, and the square tags of rule 5 stay 4 px:
+
+```css
+:root {
+  --citadel-radius-sm: 3px; --citadel-radius: 4px; --citadel-radius-lg: 6px;
+}
+h1, h2, h3, .cui-topbar-title { font-family: "Fraunces", var(--citadel-font); }
+```
+
+Load a face from your own app (never a CDN), with a fallback to `--citadel-font`. Body text, sizes
+and spacing stay Citadel's. The token names are pinned by the contract; their values were always
+yours to set.

@@ -74,6 +74,18 @@ Every modal (rule 22), from `ui/base.css` and `ui/dialog.js`:
 - **Open it with `showModal()`.** `show()` gives a non-modal box with no backdrop, no Escape and no lock.
 - The body's padding is the dialog's own (`--cui-dialog-pad`, 16 px, 12 px on a phone); a footer of
   buttons is a plain row at the end of the body, scrolling with it.
+- **Built from script:** `openDialog({ title, body, className, keep, onClose })` from the same module
+  makes the whole thing (head, ✕, `aria-labelledby`), opens it and removes it when it closes (`keep: true`
+  leaves it in the page). `body` is a node, a string or a list of them; `className` adds your own classes
+  for sizing. Citadel's own dialogs and the kit's `lightbox` use it, so reach for it before writing the
+  markup above by hand (Cara, 2026-11-17: "using reusable components").
+
+```js
+import { openDialog } from '/apps/_citadel/ui/dialog.js';
+const dialog = openDialog({ title: 'Rename', body: form });
+form.onsubmit = () => { save(); dialog.close(); };
+```
+
 - Naming it and moving focus are yours: [component-checks.md](component-checks.md#dialog-anything-that-blocks-the-page-until-its-answered).
 
 **Switch** (an on/off setting that takes effect at once; a choice sent with a form stays a checkbox):

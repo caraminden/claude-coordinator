@@ -7,9 +7,12 @@
 import { ago, api, fileUrl, h, icon, schemeIcon, view } from './base.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { iconSrc } from './schemes.js';
+import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
 import { segTrack, TRACK } from './wait.js';
+import { progressWhy } from './threadstate.js';
+import { mountTips } from './ui/tip.js';
 
 /** projectId → { projectId, targets: TargetView[], testCopies } for every scheme this person can see (src/releases.ts). */
 let schemes = new Map();
@@ -115,9 +118,15 @@ function versionLink(r, cls = 'rel-ver', short = false) {
 // ---------- the Schemes list ----------
 
 /** The whole release's estimate: "~3m", "waiting" while a stage waits, else the stage it's at. */
+let relTips = null;
+/** A row's estimate, whose tap or hover says why (#906): what it waits on, since when, against usual. */
 function estimate(next) {
-  if (next.waitingOn) return h('span', { class: 'rel-est waits' }, 'waiting');
-  return h('span', { class: 'rel-est' }, next.eta ? etaText(next.eta, { since: next.since, full: false }) : stageName(next.stage));
+  relTips ??= mountTips(document.body, { selector: '.rel-row .rel-est[data-tip]', tapOpens: true });
+  const tip = { tabindex: 0, 'data-tip': progressWhy(next, stageName(next.stage)) };
+  if (next.waitingOn) return h('span', { class: 'rel-est waits', ...tip }, 'waiting');
+  const el = h('span', { class: 'rel-est', ...tip }, next.eta ? etaText(next.eta, { since: next.since, full: false }) : stageName(next.stage));
+  el.querySelector('.rel-eta')?.removeAttribute('title'); // the popover says it, on a phone too
+  return el;
 }
 
 /** Remember where the page was opened from, for its ×. */
@@ -137,7 +146,7 @@ export function releaseRows(projectId) {
     return h('div', {
       class: 'rel-row',
       // The whole row opens the scheme's page (Josh: "clicking any of the releases would take you to that schemes detail page"); its release link opens the release.
-      onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = href; } },
+      onclick: (e) => { if (!e.target.closest('a') && !e.defaultPrevented) { opening(); location.hash = href; } }, // a tap on the estimate opens its why
     },
     h('a', { class: 'rel-name', href, onclick: opening }, tv.target.name),
     estimate(tv.next),
@@ -249,14 +258,9 @@ function openPicker(scope, ids) {
   const row = (s) => h('a', { class: `rel-opt${scope === s ? ' on' : ''}`, href: pageHref(s), 'aria-current': scope === s ? 'page' : undefined, onclick: () => dialog.close() },
     pickIcon(s), h('span', { class: 'rel-opt-name' }, scopeName(s)),
     h('span', { class: 'rel-opt-sub' }, s === 'all' ? 'every scheme' : targetNames(s)), h('span', { class: 'rel-opt-check', 'aria-hidden': 'true' }, scope === s ? '✓' : ''));
-  // new-scheme: project.css's modal that is a sheet along the bottom on phones, as briefstart.js and ultrareview.js use it.
-  const dialog = h('dialog', { class: 'cui-dialog new-scheme rel-sheet', 'aria-labelledby': 'rel-sheet-title' },
-    h('div', { class: 'cui-dialog-head' }, h('h2', { id: 'rel-sheet-title' }, 'Releases of'),
-      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
-    h('nav', { class: 'rel-opts', 'aria-label': 'Schemes' }, row('all'), ids.map(row)));
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  // new-scheme: project.css's sizing, a sheet along the bottom on phones, as briefstart.js and ultrareview.js use it.
+  const dialog = openDialog({ title: 'Releases of', className: 'new-scheme rel-sheet',
+    body: h('nav', { class: 'rel-opts', 'aria-label': 'Schemes' }, row('all'), ids.map(row)) });
 }
 
 /** A scheme's cards (take D): one per target, then its test copies of no target. */
@@ -279,6 +283,7 @@ function targetCard(projectId, tv, alone) {
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
       cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
     deployBar(projectId, tv),
+    keyBar(projectId, tv),
     h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : n?.name ?? 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
@@ -366,6 +371,31 @@ function deployBar(projectId, tv) {
     d.due && !busy ? h('span', { class: 'muted' }, 'deploys by itself ', etaText(d.due)) : '');
 }
 
+/** Apps whose Make release key was pressed here, until the server's view stops offering it: "projectId/app". */
+const makingKeys = new Set();
+
+/**
+ * A keyless Capacitor app's Make release key button (#837; Cara, 2026-11-17, "Both"): any member of its scheme makes the
+ * key on the server, which never sends it or its password back. "Making the key…" shows at once; a refusal puts the
+ * button back with a toast and Retry.
+ */
+function keyBar(projectId, tv) {
+  const app = tv.releaseKey;
+  if (!app) return '';
+  const key = `${projectId}/${app}`;
+  const press = () => optimistic({
+    key: `release-key:${key}`,
+    apply: () => { makingKeys.add(key); redraw(); },
+    send: () => api('api/releases/release-key', { method: 'POST', body: { projectId, contraption: app } }),
+    undo: () => { makingKeys.delete(key); redraw(); },
+    label: `make ${schemeName(projectId)} ${tv.target.name}'s release key`,
+  }).then(() => makingKeys.delete(key), () => {});
+  return h('div', { class: 'rel-deploy rel-key' },
+    makingKeys.has(key) ? h('span', { class: 'rel-deploying', role: 'status' }, 'Making the key…')
+      : h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Make its Android signing key on the server. It is never replaced, and it goes off-box nightly.' }, 'Make release key'),
+    h('span', { class: 'muted' }, 'No release key yet, so its Android app isn\'t built.'));
+}
+
 /**
  * The changes on their way and the land line as one list (Josh, 2026-11-13: "this feels like we wrote the same UI twice?
  * can we consolidate into one list?"): those past the line first, then the line in its order, the lock's holder at its
@@ -384,7 +414,12 @@ function changeList(projectId, tv) {
   ].sort((a, b) => a.i - b.i); // stable: the changes past the line (-1) keep their furthest-along-first order
   if (!rows.length) return '';
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
-  return h('ol', { class: 'rel-changes' }, rows.map(({ c, e }, i) => {
+  // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
+  const firstLater = rows.findIndex((r) => r.c?.later);
+  const inLine = ['line', 'land'].includes(rows[firstLater]?.c?.stage) ? ': in line' : '';
+  const after = firstLater > 0 ? `After ${n.number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
+  return h('ol', { class: 'rel-changes' }, rows.flatMap(({ c, e }, i) => [...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row({ c, e }, i)]));
+  function row({ c, e }, i) {
     const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}`;
     const pos = h('span', { class: 'rel-pos' }, String(i + 1));
     if (c) {
@@ -398,7 +433,7 @@ function changeList(projectId, tv) {
       h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
         e.holds ? [h('b', { class: 'work' }, stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
           : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)])));
-  }));
+  }
 }
 
 /** Citadel changes whose preview was requested here and isn't in the server's test copies yet: their ticket ids. */
@@ -544,7 +579,7 @@ export function releaseChip(t) {
       return h('span', { class: 'rel-chip' },
         n != null ? versionLink(tv.next, 'rel-ver', true) : '',
         h('a', { class: 'rel-chip-open', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, 'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
-          stageTrack(tv.next.stages, c, { mini: true }), ...changeNow(tv.next, c), h('span', { 'aria-hidden': 'true' }, '›')));
+          stageTrack(tv.next.stages, c, { mini: true }), ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, 'in line'), ' ', h('span', { class: 'muted' }, c.brief ?? 'next release')] : changeNow(tv.next, c)), h('span', { 'aria-hidden': 'true' }, '›')));
     }
   }
   if (t.ship?.stage === 'build' && t.build) {
@@ -565,7 +600,9 @@ export function pendingRelease(t) {
     // A change past the build under way (`later`) goes out in the one after, which has no number yet.
     const tpl = tv.target.numbering?.name;
     const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';
-    return { name: c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text };
+    // Still in the line past the one under way: many releases may stand between, so no release is named (the row's subtitle says the place).
+    const inLine = c.later && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn));
+    return { name: inLine ? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text };
   }
   return null;
 }

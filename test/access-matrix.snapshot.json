@@ -559,6 +559,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/costs/mine": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "409 No person asked for this turn, so there is no one whose spend to show",
+  "tmB": "409 No person asked for this turn, so there is no one whose spend to show",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/files/t1-0.zzzzzz.forged/report.md": {
   "anon": "403 This link has expired; open the file from Citadel again",
   "person": "404 That file is no longer there",
@@ -1972,6 +1982,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/releases/release-key": {
+  "anon": "401 Not logged in",
+  "person": "404 No such scheme",
+  "member": "404 No such scheme",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "DELETE /api/schedules/:s": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -2119,6 +2139,16 @@
   "outsider": "404 No such minion",
   "tmA": "200",
   "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/check": {
+  "anon": "401 Not logged in",
+  "person": "409 No turn is running.",
+  "member": "409 No turn is running.",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -2452,6 +2482,16 @@
   "m1": "200",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/release-key": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "member": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "outsider": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "tmA": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "tmB": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "m1": "400 contraption is required",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/secret": {
   "anon": "401 Not logged in",
   "person": "404 No such secret card",
@@ -2739,6 +2779,16 @@
   "outsider": "404 No such minion",
   "tmA": "200",
   "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/check": {
+  "anon": "401 Not logged in",
+  "person": "409 No turn is running.",
+  "member": "409 No turn is running.",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -3069,6 +3119,16 @@
   "outsider": "403 Only a minion queues a relay",
   "tmA": "403 Only a minion queues a relay",
   "tmB": "403 Only a minion queues a relay",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/release-key": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "member": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "outsider": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "tmA": "400 contraption is required",
+  "tmB": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

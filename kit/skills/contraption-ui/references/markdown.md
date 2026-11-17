@@ -29,6 +29,10 @@ reply sits under your page's headings; a document passes 1), and hooks `link(hre
 - Fenced code blocks drawn by `markdownElement`/`updateMarkdown` get a Copy button
   (`.cui-copy`, top right, shown on hover; always on a phone) that copies the code exactly. For
   your own Copy buttons, `copyText(text)` resolves whether it worked and also works on plain http.
+- A fence tagged with where it runs gets a coloured header saying so (#898): `powershell-admin` (amber, "Run as
+  administrator"), `powershell` (`ps1`, `pwsh`), `wsl`, `fish` (perigee), `bash` (`sh`, `zsh`, `shell`, `console`), `cmd`.
+  Any other tag draws plain. **Rule for agents: every command a person runs by hand goes in its own fenced block
+  tagged with where it runs (`powershell-admin`, `powershell`, `wsl`, `fish` on perigee, `bash`, `cmd`), one shell per block.**
 - Styles come only through `markdownElement`/`updateMarkdown`; `renderMarkdown` alone is a string,
   for tests and servers. Preact: `updateMarkdown(ref.current, text, opts)` in a `useEffect`, with
   nothing rendered into that element.

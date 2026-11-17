@@ -53,6 +53,7 @@ import { Secrets } from './src/secrets.ts';
 import { OpenRouter } from './src/openrouter.ts';
 import { OutsideSpend } from './src/outside-spend.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
+import { AlertWakes, type AlertPart } from './src/alert-wakes.ts';
 import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
@@ -75,7 +76,7 @@ import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
-import { Waits } from './src/waits.ts';
+import { Waits, readHeavy } from './src/waits.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { dispatch, OldApk, OtherKey, publish } from './src/apk-release.ts';
@@ -293,6 +294,11 @@ waiters.prs = githubPrs(githubOf);
 const timedWakes = new TimedWakes(store, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
 if (!BOOT_CHECK) timedWakes.arm();
 mainSync.as = githubOf;
+// A contraption's deploy clones and fetches its repo the same way, as its home scheme's owner (#915).
+services.githubAs = (c) => {
+  const p = c.home_scheme != null ? store.getProject(c.home_scheme) : undefined;
+  return p?.repo_dir ? githubOf(p.repo_dir) : undefined;
+};
 runner.liveHead = () => waiters.head;
 // After each deploy, compare health before and after it and wake the minions that shipped a regression (#724). No model.
 deployWatch = new DeployWatch({
@@ -538,6 +544,8 @@ try {
 if (!BOOT_CHECK) setInterval(() => void safely('schedules', () => scheduledRuns.runDue()), 30_000).unref();
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fresh sessions', () => runner.freshSweep()), 60_000).unref();
+// Waiting minions' prompt caches stay warm in working hours (#862, src/keepalive.ts).
+if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('keepalives', () => runner.keepaliveSweep()), 60_000).unref();
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('cold mail', () => runner.coldSweep()), 60_000).unref();
 // Dismissed minions' build output (#336) and worktrees (#660): those dismissed before clearing on dismissal, or whose clearing
 // failed. Off the boot's hot path, then daily. A preview's rows point at the live worktrees, so never there.
@@ -610,7 +618,7 @@ const citadelServer = new CitadelServer({
 });
 // Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
 const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) => join(services.opts.home, '.local/share', name, 'android', 'latest.json') });
-const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name) });
+const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name), heavy: () => readHeavy(join(DATA_DIR, 'projects', '.heavy')) });
 // A Capacitor app's APK, built and published once a deploy carrying a change to it is live (#837, src/apk-build.ts).
 const apkBuilds = new ApkBuilds({
   home: services.opts.home, folder: (row) => services.folder(row), dataDir: (row) => services.dataDir(row),
@@ -683,7 +691,9 @@ const testCopyReader = new TestCopyReader({
   }),
 });
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv), inFlight: (views) => {
+  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
+  // A keyless Capacitor app's card offers Make release key (#837): the app's own card, as it has no Android one until its first APK.
+  releaseKey: (tv) => { const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null; return name && apkBuilds.keyless(name) ? name : null; }, inFlight: (views) => {
     landsInFlight.attach(views);
     prsInFlight.attach(views);
   },
@@ -857,13 +867,30 @@ github.onPr = (id, repo, as, pr) => {
 };
 runner.openPr = (id) => prs.get(id)?.state === 'OPEN';
 if (!BOOT_CHECK) github.start();
-/** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log. */
-async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false): Promise<boolean> {
+// Alarm items wake the Taskmaster they're about (#869, src/alert-wakes.ts): its scheme's, or for Citadel-wide senders
+// (id 0: CI health, timers with no home scheme) the live checkout's scheme's. Its item links that chat, where it explains.
+const alertScheme = (from: number) => from || store.listProjects().find((p) => liveSlug && repoSlug(p.repo_url) === liveSlug)?.id || 0;
+const alertWakes = new AlertWakes(store, {
+  wake: (from, text) => {
+    const scheme = alertScheme(from);
+    if (!scheme || !store.getCoordinator(scheme)) return false;
+    tellHome(scheme, text);
+    return true;
+  },
+});
+if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('alert wakes', async () => alertWakes.tick()), 20_000).unref();
+/** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log; `parts`, an alert's problems for its Taskmaster's wake. */
+async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false, parts?: AlertPart[]): Promise<boolean> {
   const c = store.getContraption('mandate');
   const identity = c && contraptions.signIdentity(c.name, person, { name: `scheme-${project.id}`, title: project.name });
   if (!c || !identity) return false;
+  const wakes = title !== null && !quiet;
+  const scheme = wakes ? alertScheme(project.id) : 0;
+  if (scheme && store.getCoordinator(scheme)) link = `/c/#/p/${scheme}`;
   try {
     const { status, answer } = await callMandate(c, identity, key, title === null ? undefined : { title, alert: !quiet, link });
+    if (status === 200 && wakes) alertWakes.raise({ from: project, key, title, link, person: person.name, parts });
+    else if (status === 200 && title === null) alertWakes.clear(project, key);
     // 403: she switched the scheme off in Mandate, which keeps it off; asking again won't change that.
     if (status === 200 || status === 403) return true;
     console.error(`${what}: Mandate answered ${status} for ${person.name}'s ${key}:`, JSON.stringify(answer).slice(0, 300));
@@ -877,7 +904,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 // its scheme); no turn runs.
 const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
-  mandate: (from, person, key, title, quiet, link) => mandateAlert('CI health', from, person, key, title, link, quiet),
+  mandate: (from, person, key, title, quiet, link, parts) => mandateAlert('CI health', from, person, key, title, link, quiet, parts),
   wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi } : {}),
   // A failed scheduled run (#588), or a dispatched one on main, is held mail for the scheme's Taskmaster (#678), to start a bug minion;
   // a watched workflow gone red on main wakes it (#774).
@@ -1091,7 +1118,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

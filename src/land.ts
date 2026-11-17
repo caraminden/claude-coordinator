@@ -39,6 +39,10 @@ export interface Handoff {
   go?: string;
   /** False: the scheme's apps aren't deployed after the land (#712), for a change with nothing to serve. */
   deploy?: false;
+  /** True (#909): the brief has more pieces for this minion, so a clean land leaves it open (ready) instead of dismissing it. */
+  stayOpen?: true;
+  /** With stayOpen: what it waits on next; it is then parked, not ready. */
+  waitingOn?: string;
 }
 
 /** At most this many test files in one call: a feeder names the few its change touched. */
@@ -223,15 +227,26 @@ export class Landings {
 /** What a finished land.sh run means for the minion that handed it off. */
 export interface LandResult {
   /** live: deployed and live now; restart: deployed, live after a queued restart; landed: done with no deploy
-   * (another scheme's land.sh, or a merge into a build); no-ci: exit 75, CI gave no verdict; failed: anything else. */
-  kind: 'live' | 'restart' | 'landed' | 'no-ci' | 'failed';
+   * (another scheme's land.sh, or a merge into a build); no-ci: exit 75, CI gave no verdict; failed: anything else;
+   * unpushed: the kit template's land.sh moved the branch locally, then its push to origin failed (#911). */
+  kind: 'live' | 'restart' | 'landed' | 'no-ci' | 'failed' | 'unpushed';
   /** The commit main moved to and its subject, from land.sh's "main is now at" line. */
   commit?: string;
   subject?: string;
+  /** With unpushed: the branch that moved, and what git said. */
+  branch?: string;
+  error?: string;
 }
 
 export function landResult(output: string, code: number): LandResult {
   if (code === 75) return { kind: 'no-ci' };
+  // The kit template's "<branch> moved, but the push to origin failed: <git's output>", which runs on until land.sh's next line.
+  const unpushed = code !== 0 && /^land: (\S+) moved, but the push to origin failed: ([\s\S]*?)(?:\n(?=land: )|\n?(?![\s\S]))/m.exec(output);
+  if (unpushed) {
+    const branch = unpushed[1];
+    const at = [...output.matchAll(/^land: (\S+) is now at ([0-9a-f]{7,40}) "(.*)"$/gm)].filter((m) => m[1] === branch).pop();
+    return { kind: 'unpushed', branch, error: unpushed[2].trim(), ...(at ? { commit: at[2], subject: at[3] } : {}) };
+  }
   if (code !== 0) return { kind: 'failed' };
   const at = [...output.matchAll(/main is now at ([0-9a-f]{7,40}) "(.*)"/g)].pop();
   const commit = at ? { commit: at[1], subject: at[2] } : {};
@@ -394,6 +409,16 @@ export class LandHandoffs {
       runner.send(id, from, `Your handed-off land didn't go through: tools/land.sh exited ${run.code} (main only moved if its output says so). Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`);
       return;
     }
+    if (r.kind === 'unpushed') {
+      // It landed: the minion pushes it (its turn runs as its person's GitHub login) rather than landing it again.
+      const what = r.commit ? `${r.commit} "${r.subject}"` : `the branch's new tip`;
+      const apps = h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
+      store.updateTicket(id, { state: null, note: 'landed locally; push to origin failed' });
+      runner.broadcastTicket(id);
+      runner.emit(id, 'note', { text: `Shipped ${what}: ${h.summary.trim().replace(/[.\s]+$/, '')}. Risk ${h.risk}. Landed locally, not pushed to origin: the push failed.` });
+      runner.send(id, from, `Your handed-off land merged, but isn't on GitHub: ${r.branch} moved locally to ${what}, and the push to origin failed: ${r.error}\n\nDon't hand it off again: nothing is left to land. Push it from your worktree with \`git push origin ${r.branch}\` (branches are shared with the main checkout; the next land retries it too). "Repository not found" or a 403 means the GitHub login can't reach the repo: tell the person, never try another login. If origin's ${r.branch} moved on its own (non-fast-forward), a person merges it first. close_self once it's pushed.${apps.length ? ` The scheme's apps (${apps.join(', ')}) weren't deployed for it: deploy_contraption once it's pushed.` : ''}\n\n${tail()}`);
+      return;
+    }
     if (r.kind === 'no-ci') {
       store.updateTicket(id, { state: 'parked', note: 'land parked: waiting for CI runners' });
       runner.broadcastTicket(id);
@@ -415,7 +440,7 @@ export class LandHandoffs {
     runner.emit(id, 'note', { text: `Shipped ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;
-    if (r.kind === 'restart') {
+    if (r.kind === 'restart' && !h.stayOpen) {
       store.updateTicket(id, { state: 'pending-deploy', note: 'deployed, live after the restart' });
       runner.deployPending(id);
       runner.broadcastTicket(id);
@@ -431,11 +456,19 @@ export class LandHandoffs {
     }
     // Someone wrote while it was in line (a person, a relay): the minion answers them before it goes.
     if (this.d.landings.wasTalked(id)) {
-      if (r.kind !== 'restart') {
+      if (r.kind !== 'restart' || h.stayOpen) {
         store.updateTicket(id, { state: null, note: null });
         runner.broadcastTicket(id);
       }
-      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`);
+      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`);
+      return;
+    }
+    if (h.stayOpen) {
+      // More pieces to do in this minion (#909): the shipped line is out, and it stays open, ready for the next one.
+      store.updateTicket(id, h.waitingOn
+        ? { state: 'parked', note: `landed; waiting on: ${h.waitingOn}`.slice(0, 120) }
+        : { state: 'ready', note: r.kind === 'restart' ? 'landed, live after the restart; open for the next piece' : 'landed; open for the next piece' });
+      runner.broadcastTicket(id);
       return;
     }
     if (r.kind === 'restart') {

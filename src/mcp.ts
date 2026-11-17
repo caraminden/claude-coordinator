@@ -438,6 +438,11 @@ const CI_FILES = {
 const TOOLS = [
   LIST_TICKETS,
   {
+    name: 'usage_split',
+    description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings) and the 10 costliest minions, each as a share of the person's weekly limit, all their Claude accounts together, with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'read_ticket',
     description: "Read a minion's details, its worktree, the link to each of its cards waiting on people (link a card wherever you mention it) and the most recent messages in its conversation. With live: true, read what its turn is doing now instead: the tool call it waits on and for how long, or that it waits on the model, a person's card, the usage limit or the land line, its queued messages, and its last few tool calls with their output trimmed. Use it to tell a hung minion from a busy one; its session transcript isn't readable from here.",
     inputSchema: {
@@ -705,7 +710,7 @@ const TOOLS = [
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort and/or onboarding step; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
+      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -736,6 +741,9 @@ const TOOLS = [
         },
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
         onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },
+        name: { type: 'string', description: "Rename this scheme (never another). Refused if another scheme has the name. Nothing else changes: everything goes by the scheme's id, and your chat gets a note. Old \"<scheme> #N\" text keeps the old name." },
+        repo_url: { type: 'string', description: "Record this scheme's repo URL (https:// or git@). Clones nothing and re-points no checkout: a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. Refused when one is set, unless replace_repo is true." },
+        replace_repo: { type: 'boolean', description: 'true to let repo_url replace a repo that is already set.' },
         onboarding_mode: { type: 'string', enum: ['first-run', 'tune-up'], description: 'tune-up, with onboarding interview, when people ask you to tune up this scheme: it brings back your onboarding section, for a scheme that is set up already.' },
       },
     },
@@ -834,6 +842,19 @@ const CONTRAPTION_TOOLS = [
 const PUBLISH_RELEASE = {
   name: 'publish_release',
   description: `Publish a contraption's Android release, as the Deploy button on its card on the Releases page does, on the ${APP_NAME} server (so it works from a container turn too). It takes the newest signed release APK newer than the published build (from the CI store, or the run's GitHub artifact), checks it is signed with the same key as the published APK (refused if not: phones won't update across keys), copies it into the contraption's android/ feed and points latest.json at it, so installed phones see the update. With no such APK yet but a version bumped on main, it starts the release workflow instead; call it again once that run has signed. Who published which build from which run is kept and told to the scheme's Taskmaster.${HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      contraption: { type: 'string', ...(HOME_CONTRAPTIONS.length ? { enum: HOME_CONTRAPTIONS } : {}) },
+    },
+    required: ['contraption'],
+  },
+};
+
+/** A home contraption's Android release key, made on the server once a member approves (#837). */
+const MAKE_RELEASE_KEY = {
+  name: 'make_release_key',
+  description: `Ask for a contraption's Android release key: posts a card in this chat that any member of this scheme approves, which makes the key on the ${APP_NAME} server (a keystore and a random password in ~/.config/citadel-android, readable only by ${APP_NAME}) and starts its first APK build. Call it when you're told a Capacitor app has no release key yet. Neither the key nor its password ever comes back to you or goes in a chat or a repo. A key is never replaced, so it is refused for an app that has one. Members can also press Make release key on the app's card on the Releases page. Link every mention of the card, as with propose_plan.${HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -1054,6 +1075,28 @@ async function openTwins(title: string, message: string): Promise<{ number: numb
   if (!res?.ok) return [];
   const { hits } = (await res.json().catch(() => ({}))) as { hits?: any[] };
   return (hits ?? []).filter((h) => h.twin);
+}
+
+/** usage_split's answer (#905): each slice as a share of the week (all accounts together) with its dollars, against last week. */
+export function usageSplitText(w: any): string {
+  const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
+  const pct = (n: number) => { const p = (n / w.weekUsd) * 100; return p && p < 0.1 ? '<0.1' : p < 10 ? p.toFixed(1) : String(Math.round(p)); };
+  const amount = (n: number) => (w.weekUsd ? `${pct(n)}% (${usd(n)})` : usd(n));
+  const line = (s: any) => `- ${s.name}: ${amount(s.usd)}, last week ${amount(s.lastWeek)}${s.estimated > 0.005 ? `, ${usd(s.estimated)} estimated` : ''}`;
+  const fable = (k: 'usd' | 'lastWeek', all: number) => {
+    const f = w.models.filter((m: any) => m.name.startsWith('Fable')).reduce((a: number, m: any) => a + m[k], 0);
+    return all ? `${Math.round((f / all) * 100)}%` : '0%';
+  };
+  const estimated = w.models.reduce((a: number, m: any) => a + m.estimated, 0);
+  return [
+    `Last 7 days: ${amount(w.total)}; the 7 before: ${amount(w.lastWeek)}. ${w.weekUsd ? `100% is the weekly limit of ${w.accounts > 1 ? `all ${w.accounts} Claude accounts together` : 'the Claude account'}, about ${usd(w.weekUsd)} at API prices.` : 'No weekly meter can price a share yet, so dollars at API prices only.'}`,
+    `Fable's share of spend: ${fable('usd', w.total)} this week, ${fable('lastWeek', w.lastWeek)} last week.`,
+    'By model:', ...w.models.map(line),
+    'By scheme:', ...w.schemes.map(line),
+    'By kind of work:', ...w.kinds.map(line),
+    'Costliest minions this week:', ...w.top.map((m: any) => `- ${m.number === null ? `ticket ${m.id}` : `#${m.number}`} ${m.title} (${m.scheme}): ${amount(m.usd)}`),
+    ...(estimated > 0.005 ? [`${usd(estimated)} of this week is from turns before the split was kept (2026-11-17), counted under each minion's own model.`] : []),
+  ].join('\n');
 }
 
 /** search_memory's answer: each hit as a header line and its text, cut so a call stays small. */
@@ -1424,7 +1467,7 @@ const THREAD_TOOLS = [
   {
     name: 'hand_off_land',
     description:
-      `Hand your land to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed. Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${HOME_CONTRAPTIONS.length ? ` A land on main first deploys each of ${HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state. Same arguments as tools/land.sh's forms.`,
+      `Hand your land to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed. Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${HOME_CONTRAPTIONS.length ? ` A land on main first deploys each of ${HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} With stay_open: true none of that dismisses you (use it only when your brief has more pieces for this minion). If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state. Same arguments as tools/land.sh's forms.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1432,6 +1475,8 @@ const THREAD_TOOLS = [
         risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label" },
         risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
         go: { type: 'string', maxLength: 200, description: 'With risk high, required: who gave the go to land and when, e.g. "Cara, 3:05 PM PST"' },
+        stay_open: { type: 'boolean', description: 'true: a clean land still deploys and posts the shipped line, but this minion is not dismissed: it stays open in state ready for the next piece. Only when your brief has more pieces to do in this minion; leave it out otherwise (the default dismisses you on land). A failed land is unchanged' },
+        waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: what the next piece waits on, e.g. "the schema piece landing". The minion is then parked on it instead of ready' },
         ...LAND_PROPS,
         ...(HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: `false: don't deploy ${HOME_CONTRAPTIONS.join(', ')} after the land, for a change with nothing to serve (a PC-only build, say). Default true` } } : {}),
       },
@@ -1655,10 +1700,15 @@ async function runTool(name: string, args: any): Promise<string> {
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
       if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, onboarding, onboarding_mode or a mix');
+      if (args.name !== undefined) body.name = args.name;
+      if (args.repo_url !== undefined) {
+        body.repo_url = args.repo_url;
+        if (args.replace_repo === true) body.replace_repo = true;
+      }
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, onboarding, onboarding_mode, name, repo_url or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
     }
     case 'approve':
       return approve(args);
@@ -1706,6 +1756,8 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'generate_image_codex':
       return codexImage(args);
+    case 'usage_split':
+      return usageSplitText(await call('GET', '/api/costs/mine'));
     case 'report_spend': {
       const r = await call('POST', `/api/tickets/${TICKET}/spend`, args);
       return `Booked $${Number(args.usd).toFixed(4)} on ${args.service}: $${Number(r.month_usd).toFixed(2)} this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? " (over it; the scheme's members were told)" : ''}`}.`;
@@ -1733,6 +1785,10 @@ async function runTool(name: string, args: any): Promise<string> {
       if (typeof args.app !== 'string' || !args.app) throw new Error('app is required, like mandate');
       const r = await call('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
       return readText(args.app, args.command, r);
+    }
+    case 'make_release_key': {
+      const { href } = await call('POST', `/api/tickets/${TICKET}/release-key`, { contraption: args.contraption });
+      return `The release key card is in the chat; its link is ${href}. Link every mention of it, e.g. [the key card below](${href}). Any member of this scheme can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
     case 'publish_release':
       return (await call('POST', `/api/projects/${PROJECT}/releases/publish`, { contraption: args.contraption })).said;
@@ -1922,10 +1978,10 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};
-      for (const k of ['summary', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build', 'deploy'] as const) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ['summary', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       await call('POST', `/api/tickets/${TICKET}/land/handoff`, body);
-      return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state: the server posts the shipped line and dismisses this minion (or sets pending-deploy) on a clean land, or wakes you with the end of its output if it fails.';
+      return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state: the server posts the shipped line and ' + (args.stay_open === true ? 'leaves this minion open (stay_open)' : 'dismisses this minion (or sets pending-deploy)') + ' on a clean land, or wakes you with the end of its output if it fails.';
     }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).
@@ -2084,11 +2140,11 @@ function toolList() {
 
 function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
-  const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
+  const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

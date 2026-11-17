@@ -421,3 +421,25 @@ test('a card posted before #812 that someone answered by typing stays handled, s
   assert.equal(e.id <= TYPED_HANDLES_UP_TO, true);
   assert.deepEqual(store.openCards(p), []);
 });
+
+test('a running turn gone quiet (#906) is in its requester\'s Needs you only, whoever it is assigned to, until it talks again', () => {
+  const store = new Store(join(root, 'quiet.sqlite'));
+  store.typedHandlesUpTo = 0;
+  const approvals = new Approvals(() => {});
+  const p = store.createProject('One', null).id;
+  const asked = store.createTicket({ project_id: p, title: 'asked by Josh', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  store.props.set('minion', asked, p, { requestedBy: 'Josh', assigned: 'Cara' }, 'Cara');
+  const made = store.createTicket({ project_id: p, title: 'made by Cara', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const talking = store.createTicket({ project_id: p, title: 'talking', permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  for (const id of [asked, made, talking]) store.updateTicket(id, { status: 'running' });
+  store.setSetting(`turn:${asked}`, { resumes: 0, quiet: 1000 });
+  store.setSetting(`turn:${made}`, { resumes: 0, quiet: 2000 });
+  store.setSetting(`turn:${talking}`, { resumes: 0 });
+
+  const quiet = (person: string) => inboxItems(store, approvals, p, person).filter((i) => i.kind === 'quiet').map((i) => [i.ticketId, i.at, i.key]);
+  assert.deepEqual(quiet('josh'), [[asked, 1000, `quiet:${asked}:1000`]], 'the requester, though it is assigned to Cara');
+  assert.deepEqual(quiet('Cara'), [[made, 2000, `quiet:${made}:2000`]], 'no requestedBy: whoever created it');
+  assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 1);
+  store.updateTicket(made, { status: 'idle', state: 'parked' });
+  assert.deepEqual(quiet('Cara'), [], 'a turn that ended is not quiet');
+});

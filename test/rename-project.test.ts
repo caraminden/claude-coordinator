@@ -73,6 +73,28 @@ test('PATCH /api/projects/:id renames, with friendly errors', async () => {
   assert.ok(texts.includes('Cara renamed the scheme from "Old name" to "New name".'), 'the coordinator hears about it');
 });
 
+test('PATCH sets a scheme\'s repo_url, refuses to replace one without replace_repo, and notes what a person still does', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Repoless' } });
+  await call(`/api/projects/${p.id}`);
+  const bad = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'ftp://nope' } });
+  assert.equal(bad.status, 400);
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'https://tok:x@github.com/me/one' } })).status, 400, 'no login in the URL');
+  const ok = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: ' https://github.com/me/one ' } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.repo_url, 'https://github.com/me/one');
+  assert.equal(ok.data.repo_dir, null, 'no clone is made or re-pointed');
+  const clash = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'https://github.com/me/two', name: 'Renamed too' } });
+  assert.equal(clash.status, 409);
+  assert.match(clash.data.error, /replace_repo/);
+  assert.equal((await call(`/api/projects/${p.id}`)).data.project.name, 'Repoless', 'a refused repo saves nothing');
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'https://github.com/me/one' } })).status, 200, 'the same URL is no change');
+  const swap = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'https://github.com/me/two', replace_repo: true } });
+  assert.equal(swap.data.repo_url, 'https://github.com/me/two');
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  assert.ok(notes.some((t: string) => /set the scheme's repo to https:\/\/github.com\/me\/one.*clone/.test(t)), notes.join('\n'));
+});
+
 test('GET /api/projects/:id/instructions/history shows the last saves with their diffs', async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'History' } });
   await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: 'keep\nold' } });

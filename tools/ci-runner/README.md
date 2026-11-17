@@ -83,7 +83,7 @@ who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` show
    `$u` and the token in place of `ccm_…`:
 
    ```powershell
-   $u = '<the address the Machines page shows>'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-runner-agent.ps1" -CitadelUrl $u -MachineToken 'ccm_…'
+   $u = 'http://perigee.tail59477f.ts.net:8574'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-runner-agent.ps1" -CitadelUrl $u -MachineToken 'ccm_…'
    ```
 
    It checks that Node 18+ and Git for Windows are there, creates and locks the folder,
@@ -156,7 +156,7 @@ must sit beside `add-runner.ps1`: the agent's folder has both once the agent is 
 after #370, or download both:
 
 ```powershell
-$u = '<the address the Machines page shows>'; $d = "$env:TEMP\citadel-ci"; mkdir -Force $d | Out-Null
+$u = 'http://perigee.tail59477f.ts.net:8574'; $d = "$env:TEMP\citadel-ci"; mkdir -Force $d | Out-Null
 foreach ($f in 'add-runner.ps1', 'start-runner.ps1') { iwr "$u/ci-runner/$f" -UseBasicParsing -OutFile "$d\$f" }
 $env:CC_MACHINE_TOKEN = 'ccm_…'
 powershell -NoProfile -ExecutionPolicy Bypass -File "$d\add-runner.ps1" -Scheme "Peek Auras" -CitadelUrl $u -Session -Visible
@@ -258,10 +258,11 @@ there and tell the minion**: the PC is never restarted for this.
    networkingMode=mirrored
    ```
 
-4. **Keep it up.** Back in a normal PowerShell (not the distro), with the address the Machines page shows:
+4. **Keep it up.** Back in a normal PowerShell (not the distro), with the address the Machines page shows, already filled in below
+   (`http://perigee.tail59477f.ts.net:8574`, the live server's `MACHINES_URL`; the log's "Machines connect at" line shows it):
 
    ```powershell
-   $u = '<the address the Machines page shows>'; iwr "$u/ci-runner/keep-wsl-up.ps1" -UseBasicParsing -OutFile "$env:TEMP\keep-wsl-up.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\keep-wsl-up.ps1"
+   $u = 'http://perigee.tail59477f.ts.net:8574'; iwr "$u/ci-runner/keep-wsl-up.ps1" -UseBasicParsing -OutFile "$env:TEMP\keep-wsl-up.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\keep-wsl-up.ps1"
    ```
 
    It registers the task **Citadel WSL runners** for you and says when `citadel-ci` is Running.
@@ -396,7 +397,9 @@ their units with `systemd-run --user` as they do on perigee. As root in the dist
 `loginctl enable-linger ci-claude-coordinator-4590fb` (the user `ci_runners` made; the workflow's step names it
 when it's missing).
 
-The workflow's step "the runner's clock" fails when the distro's kernel clock runs more than 1% off its raw clock.
+The workflow's step "the runner's clock" fails when the distro's kernel clock runs more than 1% off its raw clock
+for 2 minutes (it measures again every 10 s, #900). `land.sh` reads that failure as `runner clock`, not a red: it falls back to the suite on
+perigee and leaves its CI-down note, so the landings of the next 10 minutes don't each spend a run learning it.
 That happens when two programs keep the same clock (#542). Every WSL distro on the PC shares one kernel, so one
 clock. WSL's own init (3.x) runs a chrony outside the distros, where `ps` doesn't show it, that steers that clock
 to the Windows clock every 8 s. Ubuntu also turns `systemd-timesyncd` on in WSL, in each distro, which steers it
@@ -416,7 +419,12 @@ back to 10000 within 20 seconds. So any distro on that PC needs it, once, from P
 wsl -d <distro> -u root -- systemctl mask --now systemd-timesyncd
 ```
 
-`wsl -l -v` lists the distros. To look at the clock from a CI job without root: the tick is `adjtimex`'s `tick`
+`wsl -l -v` lists the distros. A distro added later turns timesyncd on again, so `keep-wsl-up.ps1` also registers
+the task **Citadel WSL clock** (#900): every 5 minutes it masks `systemd-timesyncd` in each distro that is running
+(it starts none, and leaves alone any distro where WSL doesn't keep the clock), and writes each one it masked to
+`%LOCALAPPDATA%\citadel-wsl-clock.log`. Running `keep-wsl-up.ps1` again picks it up.
+
+To look at the clock from a CI job without root: the tick is `adjtimex`'s `tick`
 field (10000 when nothing is wrong), and a timesyncd in another distro shows as a UDP socket in `/proc/net/udp`
 that opens for a tenth of a second every 32 s, with the wall clock stepping as it closes. The clock now follows
 the Windows clock, so it is as right as that is (a steady 0.4 s behind NTP once it had settled, 2026-11-11).

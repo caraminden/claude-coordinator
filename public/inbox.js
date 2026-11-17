@@ -3,6 +3,8 @@
 import { ago, api, h, isCoordinator, isSeen, jumpHref, me, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, turnMoved } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
+import { askWhy } from './threadstate.js';
+import { mountTips } from './ui/tip.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
 const inbox = { projectId: null, items: [], timer: 0, countsTimer: 0 };
@@ -72,7 +74,7 @@ export function inboxOtherTicket(ticket) {
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
-const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', ready: '✅ Ready', complete: '🏁 Complete', try: '🧪 Try it', replies: '💬 Reply' };
+const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', ready: '✅ Ready', complete: '🏁 Complete', try: '🧪 Try it', replies: '💬 Reply', quiet: '💤 Quiet' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
@@ -88,12 +90,16 @@ export function inboxStrip() {
 
 /** A scheme's pill for the scheme lists: the spinner while a turn runs, then the Needs-you count (schemePill says what shows); hidden when neither. */
 export function schemeCount(p) {
+  // No words on the pill (Cara, 2026-11-17): its reason is the popover, hover or a long press, as a tap opens the scheme (#906).
+  pillTips ??= mountTips(document.body, { selector: '.scheme-count[data-tip]', acts: '.scheme-count' });
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
   const { need, busy, working, fresh, label } = schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p);
-  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, title: label || null, 'aria-label': label || null },
+  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
     busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
     need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
 }
+
+let pillTips = null;
 
 // The items each scheme last told the server you saw (sorted keys, joined), so a redraw with nothing new writes nothing.
 const seenSent = new Map();
@@ -179,20 +185,25 @@ export function renderInbox() {
  * A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited. One from
  * another scheme (a card addressed to you there, #687) names that scheme.
  */
+let inboxTips = null;
 function inboxRow(items) {
   const { from } = items[0];
   const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
   const asks = new Map();
   for (const i of items) {
     const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.kind === 'state' ? t.state : i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind;
-    asks.set(ask, (asks.get(ask) ?? 0) + 1);
+    // The chip's popover says why it's here (#906): the newest of its kind.
+    const was = asks.get(ask);
+    asks.set(ask, { n: (was?.n ?? 0) + 1, why: was && was.at > i.at ? was.why : askWhy(i, t), at: Math.max(was?.at ?? 0, i.at) });
   }
+  // A tap on a chip opens its why, not the minion (tip.js tapOpens).
+  inboxTips ??= mountTips(document.body, { selector: '.inbox-row .chip[data-tip]', tapOpens: true });
   const seen = items.every(faded);
   const target = rowTarget(items);
   return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t) },
     h('span', { class: 'name' }, from ? `${from.scheme} ` : '',
       isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
-    h('span', { class: 'asks' }, [...asks].map(([ask, n]) => h('span', { class: 'chip' }, n > 1 ? `${ask} ×${n}` : ask))),
+    h('span', { class: 'asks' }, [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask))),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.
     h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))));
 }

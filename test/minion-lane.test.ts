@@ -83,6 +83,7 @@ function makeRunner() {
   r.resumeGapMs = 10;
   r.limitDelayMs = 0;
   r.limitGapMs = 0;
+  r.limitProvenGapMs = 0;
   return r;
 }
 

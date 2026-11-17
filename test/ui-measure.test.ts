@@ -23,6 +23,7 @@ const PAGES: Record<string, string> = {
 <p>Read <a href="#x">this link</a> in a sentence, and a long id that wraps: <span style="overflow-wrap:anywhere">${'a'.repeat(120)}</span>.</p>
 <div style="border:1px solid #888;padding:8px"><p style="margin:0">a panel</p><div style="border-top:1px solid #ccc;margin-top:8px">with a rule inside</div></div>
 <div style="width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" data-tip-overflow>${'Truncated on purpose '.repeat(3)}</div>
+<button id="frame" style="display:block;width:80px;height:40px;padding:0;border:0;background:#ddd"><canvas width="80" height="40" style="display:block;width:100%;height:100%"></canvas></button>
 <dialog id="d" style="padding:12px"><div style="position:sticky;top:0"><button class="btn" aria-label="Close">✕</button></div><div style="height:900px">body</div></dialog>
 <div style="overflow-x:auto"><table><tr><td style="white-space:nowrap">${'wide cell '.repeat(40)}</td></tr></table></div>
 <p>A <a href="https://x.io/a">https://x.io/a</a>, <a href="https://x.io/b" title="https://x.io/b">a titled one</a>, <code>curl https://x.io/c</code>, version 1.10.1234/5.</p>

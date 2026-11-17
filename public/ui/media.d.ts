@@ -23,13 +23,29 @@ export interface ScrubberOptions {
   onEnd?: (ms: number | null) => void;
   /** false: don't jump to the Start pin when the clip loads. */
   seekToStart?: boolean;
+  /**
+   * What a pin does that would cross the other: 'drop' (default) clears the other pin; 'refuse' keeps both old pins, sets
+   * nothing and calls onRefuse, so the app can say why.
+   */
+  order?: 'drop' | 'refuse';
+  /** order 'refuse': the pin that was turned down, and where the person tried to put it (ms). */
+  onRefuse?: (which: 'start' | 'end', ms: number) => void;
+  /** false: playing up to the End pin doesn't stop there (to edit the pins past it). Default true. */
+  stopAtEnd?: boolean;
+  /** The keys that pin, as they are written on the keyboard (default S and E; case doesn't matter). null drops one, false both; the tooltip names only what works. */
+  pinKeys?: { start?: string | null; end?: string | null } | false;
+  /**
+   * A person's own play, pause or seek on the bar, the strip, the keys or a click on the video (sec is where a seek went).
+   * The app's own toggle(), seek() and step() don't call it, so an app that seeks the video itself can tell the two apart.
+   */
+  onUser?: (kind: 'play' | 'pause' | 'seek', sec?: number) => void;
 }
 
 export interface Scrubber {
   /** The bar: put it under the video. */
   el: HTMLElement;
   video: HTMLVideoElement;
-  /** Play or pause (from the End pin, play starts again at the Start). */
+  /** Play or pause (from the End pin, or from the clip's end with a Start pin and no End, play starts again at the Start). Quiet: onUser doesn't hear it. */
   toggle(): void;
   seek(sec: number): void;
   /** Move by sec, back when negative. */
@@ -60,12 +76,29 @@ export interface PannerOptions {
   duration?: number;
   /** The bar's label (default "Panorama · pans end to end, Space pauses"). */
   label?: string;
+  /** true: pan one leg (pan's direction, end to end; from a spot you looked at, to the next end), then stop there paused. */
+  once?: boolean;
+  /** A leg ended (1 for the first, then 2, …). With once, the pan has stopped. Not called while it's paused or the picture fits. */
+  onLeg?: (leg: number) => void;
+  /** Where the pan is in the leg it's on, 0 to 1, on every frame it moves. */
+  onProgress?: (fraction: number) => void;
+  /** A person paused or resumed it: Pause, Space, a press or swipe on the picture, a scroll, the slider or the mini-map. Not called for pause()/play()/look() or for once's own stop. */
+  onPause?: (paused: boolean) => void;
+  /** Whether the picture shows whole (true) or pans (false): once it's known, and whenever it changes. */
+  onFit?: (fits: boolean) => void;
 }
 
 export interface Panner {
   /** The panner, in the img's old place. */
   el: HTMLElement;
   img: HTMLImageElement;
+  /**
+   * The app's layer over the picture and above the bar (`.cui-pan-over`): same box as the picture, presses pass through it, and
+   * what you put on it takes presses again (`pointer-events: auto` is on its children). Put a caption or a note in it.
+   */
+  readonly overlay: HTMLElement;
+  /** The picture shows whole, without the bar (see onFit). */
+  readonly fits: boolean;
   toggle(): void;
   play(): void;
   pause(): void;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -92,4 +93,29 @@ test('an in-memory store has no worker', () => {
   const s = new Store(':memory:');
   assert.equal(checkpointOffThread(s), null);
   s.db.close();
+});
+
+// #860: walFrames() opened and closed an fd on -shm every 10 s, which dropped the process's POSIX locks on it,
+// SQLite's included; the next process to open the database then truncated the -shm under the server's mmap (SIGBUS).
+test("reading the WAL length keeps SQLite's -shm locks, so other processes opening the database cannot crash this one", () => {
+  const dir = mkdtempSync(join(root, 'shm-'));
+  const script = join(dir, 'child.ts');
+  writeFileSync(script, `
+    import { DatabaseSync } from 'node:sqlite';
+    import { spawn } from 'node:child_process';
+    import { walFrames } from ${JSON.stringify(new URL('../src/checkpoint.ts', import.meta.url).href)};
+    const p = process.argv[2], ms = 6000;
+    const db = new DatabaseSync(p);
+    db.exec("PRAGMA journal_mode=WAL; CREATE TABLE t(x); INSERT INTO t VALUES (1)");
+    const q = db.prepare('SELECT count(*) FROM t');
+    const opener = "const d = new (require('node:sqlite').DatabaseSync)(process.argv[1]); d.exec('INSERT INTO t VALUES (2)'); d.close()";
+    const t0 = Date.now();
+    const other = () => { if (Date.now() - t0 < ms) spawn(process.execPath, ['-e', opener, p], { stdio: 'ignore' }).on('exit', other); };
+    for (let i = 0; i < 4; i++) other();
+    const spin = () => { for (let i = 0; i < 200; i++) { walFrames(p); q.all(); } if (Date.now() - t0 < ms) setImmediate(spin); };
+    spin();
+  `);
+  const r = spawnSync(process.execPath, [script, join(dir, 'x.db')], { encoding: 'utf8', timeout: 60_000 });
+  assert.equal(r.signal, null, `the process died with ${r.signal}`);
+  assert.equal(r.status, 0, r.stderr);
 });

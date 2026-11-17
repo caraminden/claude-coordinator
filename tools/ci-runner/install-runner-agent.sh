@@ -27,7 +27,7 @@ log=/var/log/citadel-runner-agent.log
 
 die() { echo "install-runner-agent: $*" >&2; exit 1; }
 
-[[ -n $url ]] || die 'usage: install-runner-agent.sh <the address the Machines page shows>'
+[[ -n $url ]] || die 'usage: install-runner-agent.sh http://perigee.tail59477f.ts.net:8574'
 [[ $(id -u) == 0 ]] || die 'Run this as root: in PowerShell, wsl -d citadel-ci -u root'
 token=${CC_MACHINE_TOKEN:-}
 if [[ -z $token ]]; then read -rsp 'Machine token (ccm_..., from the Machines page): ' token; echo; fi

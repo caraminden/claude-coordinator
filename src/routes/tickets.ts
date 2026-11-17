@@ -549,6 +549,13 @@ export const ticketRoutes: Route[] = [
       // A card asking for the go to merge or land says so, for the minions list's chip (#575).
       const kind = oneOf(body.kind ?? null, ['merge'], 'kind') as 'merge' | null;
       const card = { questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
+      // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
+      // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
+      if (body.for_everyone === true) {
+        if (ticket.kind !== 'coordinator' || !questions.length || to || body.when_ci_passes === true) throw new HttpError(400, 'for_everyone is a Taskmaster\'s question card, with no to or when_ci_passes');
+        const overlord = ticket.coordinator_of != null ? app.store.getOverlord(ticket.project_id) : undefined;
+        if (overlord) return json(res, 201, postCard(app, overlord, { ...card, asker: ticket.id }));
+      }
       // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
       const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
       if (armed) return json(res, 202, { armed });
@@ -632,8 +639,14 @@ export const ticketRoutes: Route[] = [
         const picked = selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
-      deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, { answer: { questionId: body.questionId, answers } });
-      runner.echoOverlordAnswer(ticket, session.name, text);
+      const answer = { answer: { questionId: body.questionId, answers } };
+      // A Taskmaster's card for everyone (#921): kept where the card is, acted on by the Taskmaster that asked.
+      const asker = data.asker != null ? store.getTicket(data.asker) : undefined;
+      if (asker && asker.status !== 'closed') {
+        runner.recordAnswer(id, session.name, `My answers to the question card:\n\n${text}`, answer);
+        deliverAnswer(app, asker.id, session.name, `My answers to your question card for everyone (in the Overlord's chat):\n\n${text}`, {});
+      } else deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, answer);
+      runner.echoOverlordAnswer(ticket, session.name, text, asker && asker.status !== 'closed' ? asker.id : id);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },

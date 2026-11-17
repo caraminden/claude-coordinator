@@ -2366,13 +2366,22 @@ export class Runner {
     return !!ticket && ticket.kind === 'coordinator' && ticket.coordinator_of == null && this.store.isSplit(ticket.project_id);
   }
 
-  /** An answer to an Overlord's card wakes only the Overlord; each person's own Taskmaster hears it as held mail (#921). */
-  echoOverlordAnswer(overlord: Ticket, by: string, text: string) {
+  /**
+   * An answer to an Overlord's card wakes only the Taskmaster that acts on it (`actor`: the Overlord, or the person's
+   * Taskmaster that asked for everyone); every other Taskmaster in the scheme hears it as held mail (#921).
+   */
+  echoOverlordAnswer(overlord: Ticket, by: string, text: string, actor = overlord.id) {
     if (!this.isOverlord(overlord)) return;
     const line = text.length > 600 ? text.slice(0, 600) + '…' : text;
     for (const tm of this.store.listCoordinators(overlord.project_id)) {
-      if (tm.id !== overlord.id) this.leaveMail(tm.id, by, `(for your tracking; nothing to do) ${by} answered the Overlord's card:\n${line}`);
+      if (tm.id !== actor) this.leaveMail(tm.id, by, `(for your tracking; nothing to do) ${by} answered the Overlord's card:\n${line}`);
     }
+  }
+
+  /** A card's answer kept in its chat without waking it: a for-everyone card's answer wakes its asker instead (#921). */
+  recordAnswer(ticketId: number, author: string, text: string, extra: object) {
+    this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...extra });
+    this.broadcastTicket(ticketId);
   }
 
   private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0) {

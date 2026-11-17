@@ -132,6 +132,40 @@ test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't;
   }
 });
 
+test("a person's Taskmaster asks for everyone: the card sits with the Overlord, and its answer wakes the asker (Cara: \"Asker acts on it\")", async () => {
+  const ownCara = db.coordinatorFor(Shared.id, Cara.id)!;
+  const ownJosh = db.coordinatorFor(Shared.id, Josh.id)!;
+  const ask = (ticketId: number, extra: object = {}) => fetch(`${srv.base}/api/tickets/${ticketId}/questions`, {
+    method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, ticketId)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questions: [{ question: 'Freeze lands over the weekend?', options: [{ label: 'Yes', recommended: true }, { label: 'No' }] }], for_everyone: true, ...extra }),
+  });
+  const res = await ask(ownJosh.id);
+  assert.equal(res.status, 201);
+  const { id, href } = (await res.json()) as { id: string; href: string };
+  assert.ok(href.includes(`e=`) && !cards(ownJosh.id).some((c) => c.id === id), "not in Josh's own chat");
+  const card = cards(overlord.id).find((c) => c.id === id);
+  assert.equal(card.everyone, true);
+  assert.equal(card.asker, ownJosh.id);
+  assert.equal((await ask(ownJosh.id, { to: 'Cara' })).status, 400, 'a card for everyone has no one addressee');
+  assert.equal((await ask(joshWork.id)).status, 400, 'only a Taskmaster asks for everyone');
+
+  const answered = await fetch(`${srv.base}/api/tickets/${overlord.id}/answer`, {
+    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: id, answers: [{ selected: ['No'] }] }),
+  });
+  assert.equal(answered.status, 202);
+  const told = await until(() => events(ownJosh.id).filter((e) => e.kind === 'user_message' && !e.data.mail).map((e) => String(e.data.text)), (t) => t.some((x) => x.includes('Freeze lands')));
+  assert.ok(told.some((t) => /for everyone[\s\S]*Freeze lands over the weekend\?\n→ No/.test(t)), told.join('\n'));
+  const lord = events(overlord.id).filter((e) => e.kind === 'user_message');
+  assert.ok(lord.some((e) => e.data.answer?.questionId === id && !e.data.mail), "the answer is in the Overlord's chat, where the card is");
+  assert.ok(lord.some((e) => e.data.mail && String(e.data.text).includes('Freeze lands')), 'the Overlord hears it as held mail');
+  assert.ok(mail(ownCara.id).some((t) => t.includes('Freeze lands')), "so does Cara's own");
+  assert.ok(!mail(ownJosh.id).some((t) => t.includes('Freeze lands')), 'the asker gets it once, as its wake');
+  const again = await fetch(`${srv.base}/api/tickets/${overlord.id}/answer`, {
+    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: id, answers: [{ selected: ['Yes'] }] }),
+  });
+  assert.equal(again.status, 409, 'one answer settles it for everyone');
+});
+
 test("an Overlord turn runs for whoever started it, else the scheme's owner, never its last person (Cara's R4)", () => {
   const s = new Store(join(root, 'r4.db'));
   const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });

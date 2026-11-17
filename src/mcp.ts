@@ -593,7 +593,11 @@ const TOOLS = [
     description: "Interrupt a minion's running turn and drop its queued messages.",
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
-  ASK_QUESTION,
+  // A Taskmaster's ask_question also asks for everyone (#921).
+  { ...ASK_QUESTION, inputSchema: { ...ASK_QUESTION.inputSchema, properties: { ...ASK_QUESTION.inputSchema.properties, for_everyone: {
+    type: 'boolean',
+    description: "true: a question for the whole scheme, not just your person (the pipeline lane, a Citadel-wide rule, a build). The card goes to the Overlord's chat, which every member sees, and the first answer settles it for everyone; the answer still comes back to you, and you act on it. Questions only: no to, doc, notice, secret or when_ci_passes. Ignored before the scheme has per-person Taskmasters.",
+  } } } },
   SETTLE_QUESTION,
   PROPOSE_PLAN,
   {
@@ -1848,9 +1852,10 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice), ask on a choices page (doc) or ask for a secret (secret)');
       const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
-      const { id: questionId, href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci });
+      const everyone = args.for_everyone === true ? { for_everyone: true } : {};
+      const { id: questionId, href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci, ...everyone });
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
-      return `The question card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the card below](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
+      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'settle_question': {
       const { settled } = await call('POST', `/api/tickets/${TICKET}/settle`, { questionId: args.question_id ?? null });

@@ -6,6 +6,8 @@
  *  - Proposal without a card: the final text proposes work (a heading or lead-in with "propos",
  *    "recommend", "next steps" or "follow-up") and the turn asked nobody anything: no ask_question,
  *    propose_plan, or message to the Taskmaster or a minion.
+ *  - Placeholder in a command: a fenced block tagged powershell, powershell-admin, wsl, fish, bash or
+ *    cmd holds a `<like this>` placeholder. Values you can look up go in filled (Cara, 2026-11-17, #900).
  * A trial: each hit writes one `would refuse` line to the retro log and refuses nothing. The weekly
  * process digest counts them and how many were false alarms; refusal turns on only for a check with
  * under one false alarm in five. A `Process:` line in the final text (self-review's, not `none`) is also
@@ -104,7 +106,23 @@ export function answerCheck(turn: Turn): string[] {
   // A link to a card (#/p/2/t/475?e=399793) means the proposal already has one, maybe from an earlier turn.
   const acted = /\]\(#\/p\/\d+\/t\/\d+\?e=\d+\)/.test(text) || turn.toolCalls.some((name) => ACTIONS.some((a) => name === a || name.endsWith(`__${a}`)));
   if (!acted && proposalLine(text)) hits.push(`proposal without a card · ${quote}`);
+  const placeholder = placeholderInCommand(text);
+  if (placeholder) hits.push(`placeholder in a command · "${placeholder.slice(0, 120)}"`);
   return hits;
+}
+
+const SHELL_TAGS = new Set(['powershell', 'powershell-admin', 'wsl', 'fish', 'bash', 'cmd']);
+// `<name ...>`: not a redirect (`<file >out`, `2>&1`, `<<EOF`): the `<` follows no `<` or word character, and the `>` follows no space or digit.
+const PLACEHOLDER = /(?<![<\w])<[A-Za-z][^<>\n]*[^<>\s\d]>/;
+
+/** The first `<placeholder>` in a fenced block tagged with a shell, as its line, or null. */
+export function placeholderInCommand(text: string): string | null {
+  const fence = /^[ \t]*```([\w-]+)[^\n]*\n([\s\S]*?)^[ \t]*```/gm;
+  for (const m of text.matchAll(fence)) {
+    if (!SHELL_TAGS.has(m[1].toLowerCase())) continue;
+    for (const line of m[2].split('\n')) if (PLACEHOLDER.test(line)) return line.trim();
+  }
+  return null;
 }
 
 /** The text of a `Process:` line (self-review's last line) at the start of a line, or null for none or no such line. */

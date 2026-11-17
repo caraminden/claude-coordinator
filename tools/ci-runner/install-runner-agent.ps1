@@ -30,7 +30,7 @@
   The token (ccm_...) of the machine you added for this agent on the Machines page. Defaults to CC_MACHINE_TOKEN.
 
 .EXAMPLE
-  .\install-runner-agent.ps1 -CitadelUrl '<the address the Machines page shows>' -MachineToken ccm_12_...
+  .\install-runner-agent.ps1 -CitadelUrl 'http://perigee.tail59477f.ts.net:8574' -MachineToken ccm_12_...
 #>
 [CmdletBinding()]
 param(

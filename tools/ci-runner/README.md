@@ -83,7 +83,7 @@ who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` show
    `$u` and the token in place of `ccm_…`:
 
    ```powershell
-   $u = '<the address the Machines page shows>'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-runner-agent.ps1" -CitadelUrl $u -MachineToken 'ccm_…'
+   $u = 'http://perigee.tail59477f.ts.net:8574'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-runner-agent.ps1" -CitadelUrl $u -MachineToken 'ccm_…'
    ```
 
    It checks that Node 18+ and Git for Windows are there, creates and locks the folder,
@@ -156,7 +156,7 @@ must sit beside `add-runner.ps1`: the agent's folder has both once the agent is 
 after #370, or download both:
 
 ```powershell
-$u = '<the address the Machines page shows>'; $d = "$env:TEMP\citadel-ci"; mkdir -Force $d | Out-Null
+$u = 'http://perigee.tail59477f.ts.net:8574'; $d = "$env:TEMP\citadel-ci"; mkdir -Force $d | Out-Null
 foreach ($f in 'add-runner.ps1', 'start-runner.ps1') { iwr "$u/ci-runner/$f" -UseBasicParsing -OutFile "$d\$f" }
 $env:CC_MACHINE_TOKEN = 'ccm_…'
 powershell -NoProfile -ExecutionPolicy Bypass -File "$d\add-runner.ps1" -Scheme "Peek Auras" -CitadelUrl $u -Session -Visible
@@ -258,10 +258,11 @@ there and tell the minion**: the PC is never restarted for this.
    networkingMode=mirrored
    ```
 
-4. **Keep it up.** Back in a normal PowerShell (not the distro), with the address the Machines page shows:
+4. **Keep it up.** Back in a normal PowerShell (not the distro), with the address the Machines page shows, already filled in below
+   (`http://perigee.tail59477f.ts.net:8574`, the live server's `MACHINES_URL`; the log's "Machines connect at" line shows it):
 
    ```powershell
-   $u = '<the address the Machines page shows>'; iwr "$u/ci-runner/keep-wsl-up.ps1" -UseBasicParsing -OutFile "$env:TEMP\keep-wsl-up.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\keep-wsl-up.ps1"
+   $u = 'http://perigee.tail59477f.ts.net:8574'; iwr "$u/ci-runner/keep-wsl-up.ps1" -UseBasicParsing -OutFile "$env:TEMP\keep-wsl-up.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\keep-wsl-up.ps1"
    ```
 
    It registers the task **Citadel WSL runners** for you and says when `citadel-ci` is Running.

@@ -49,14 +49,15 @@ skips what is done.
    If it asks for a UNIX user name and password, give any; nothing uses them. Type `exit` when it opens a shell.
 
 2. **Setup, first run.** Open a root shell in the distro and paste the setup line, with the address Citadel's
-   Machines page shows for agents (the same one the CI runners' steps use):
+   Machines page shows for agents (the same one the CI runners' steps use), already filled in below
+   (`http://perigee.tail59477f.ts.net:8574`, the live server's `MACHINES_URL`; the log's "Machines connect at" line shows it):
 
    ```powershell
    wsl -d citadel-android -u root
    ```
 
    ```bash
-   u='<the address the Machines page shows>'; f=$(mktemp) && curl -fsSL "$u/android-desktop/setup.sh" -o "$f" && bash "$f" "$u"
+   u='http://perigee.tail59477f.ts.net:8574'; f=$(mktemp) && curl -fsSL "$u/android-desktop/setup.sh" -o "$f" && bash "$f" "$u"
    ```
 
    It writes `/etc/wsl.conf` and stops. Restart the distro and open it again:
@@ -86,7 +87,7 @@ skips what is done.
 6. **Keep it up.** In a normal PowerShell (not the distro), with the same address:
 
    ```powershell
-   $u = '<the address the Machines page shows>'; iwr "$u/ci-runner/keep-wsl-up.ps1" -UseBasicParsing -OutFile "$env:TEMP\keep-wsl-up.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\keep-wsl-up.ps1" -Distro citadel-android
+   $u = 'http://perigee.tail59477f.ts.net:8574'; iwr "$u/ci-runner/keep-wsl-up.ps1" -UseBasicParsing -OutFile "$env:TEMP\keep-wsl-up.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\keep-wsl-up.ps1" -Distro citadel-android
    ```
 
    It registers the logon task **Citadel WSL citadel-android**, which holds the distro open: WSL stops a distro

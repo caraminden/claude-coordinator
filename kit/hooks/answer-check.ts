@@ -111,7 +111,7 @@ export function answerCheck(turn: Turn): string[] {
   return hits;
 }
 
-const SHELL_TAGS = new Set(['powershell', 'powershell-admin', 'wsl', 'fish', 'bash', 'cmd']);
+const SHELL_TAGS = new Set(['powershell', 'powershell-admin', 'wsl', 'fish', 'bash', 'cmd', 'sh', 'zsh', 'pwsh']);
 // `<name ...>`: not a redirect (`<file >out`, `2>&1`, `<<EOF`): the `<` follows no `<` or word character, and the `>` follows no space or digit.
 const PLACEHOLDER = /(?<![<\w])<[A-Za-z][^<>\n]*[^<>\s\d]>/;
 

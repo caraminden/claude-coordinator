@@ -48,7 +48,9 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   password in `<app>-release.pass` beside it. Both are mode 600.
 - Never copy either into a repo, the shared folder, a chat or a log. Container homes don't have
   `~/.config/citadel-android`, so release builds run in a host turn.
-- For each release:
+- A Capacitor app's releases build themselves (Delivery below). Its release build type has no
+  `signingConfig`, so Gradle writes `app-release-unsigned.apk` and Citadel signs it with the key.
+- A hand release (a plain Gradle app, or a one-off):
   1. Bump `versionCode` (and `versionName`) in `app/build.gradle`.
   2. `citadel-heavy ./gradlew assembleRelease`.
   3. Sign with `apksigner` from `$ANDROID_HOME/build-tools/36.1.0/`, then verify:
@@ -65,17 +67,39 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
 
 ## Delivery
 
-- The app serves the signed APK and `android/latest.json` (`{ "versionCode": N, "apk": "<url>" }`)
-  under a contraption **open path** (its `open_paths`), so the phone's browser downloads them
-  without Citadel's cookie. The tailnet keeps them private.
+- **A Capacitor contraption publishes itself after every deploy** (every land on main deploys it).
+  Once the deploy is live, Citadel checks whether `android/`, `capacitor.config.*` or the
+  Capacitor `webDir` changed since the published APK. If so, it builds a release APK in its own
+  checkout (`~/.cache/citadel-apk/<app>/`, log in `build.log` there), signs it with the app's
+  release key and publishes it. A change elsewhere (the server, a web layer loaded from
+  `server.url`) builds nothing.
+  - **versionCode is the commit count on main** (`git rev-list --count HEAD`), set at build time
+    by Citadel's Gradle init script (`-Pcitadel.versionCode=N`). Leave `versionCode` in
+    `build.gradle` alone; `versionName` is read from it.
+  - Needs: the app's release key (above), `npm ci` in its `citadel-app.json` build steps (the
+    build uses the live slot's `node_modules`), and a release build type with no `signingConfig`.
+  - A failed build, or one with no key yet, tells the scheme's Taskmaster once per commit and
+    publishes nothing. A risky release manifest flag (above) is told but still publishes.
+  - Each build shows on the Releases page. An app whose `apk:` release target has a CI workflow
+    (Mandate) keeps that path instead.
+- The feed is in the contraption's `DATA_DIR/android/`: `latest.json` and the newest three
+  `<app>-<N>.apk`. `latest.json` is `{ "versionCode": N, "apk": "<app>-N.apk", "versionName": "1.2",
+  "commit": "<sha>" }`, `apk` relative to the feed. The app serves that folder under a contraption
+  **open path** (its `open_paths`, e.g. `android/(<app>-\d+\.apk|latest\.json)`), so the phone's
+  browser downloads them without Citadel's cookie. The tailnet keeps them private.
 - A signed APK built in CI reaches perigee through Citadel's CI store, not a GitHub artifact: the
   release workflow uploads it as kind `release` (the `citadel:ci-store` skill).
-- Publish it into the contraption's feed with the `publish_release` tool (from any turn, container
-  ones too) or the Deploy button on its card on the Releases page, not by copying files. Both refuse
-  an APK signed with a different key from the published one, and record who published it.
-- The web layer compares `App.getInfo().build` with `latest.json`. When it's behind, it shows
-  "Update the app", which opens the APK URL in the system browser, and Android's installer takes
-  it from there. A web-only change needs no new APK.
+- Publish a CI or hand-built APK into the contraption's feed with the `publish_release` tool (from
+  any turn, container ones too) or the Deploy button on its card on the Releases page, not by
+  copying files. Both refuse an APK signed with a different key from the published one, and
+  record who published it.
+- **The update banner is Citadel UI's `update.js`**: in the web layer,
+  `import { mountUpdate } from '/apps/_citadel/ui/update.js'; mountUpdate();` (with base.css).
+  Inside the Android app only, it compares `App.getInfo().build` (`@capacitor/app`) with
+  `latest.json`. When it's behind, it shows "Update the app", which opens the APK in the system
+  browser through `@capacitor/browser` (or `open: (url) => …` for a plugin of the app's own), and
+  Android's installer takes it from there. `checkUpdate()` returns the update without drawing
+  anything. A web-only change needs no new APK.
 - The first install needs "Install unknown apps" allowed for the friend's browser.
 - A plain Gradle app with no contraption: copy the signed `.apk` into the folder your prompt names
   for files you show people, and link it in chat (`[App 1.3](<path>.apk)`). The card downloads it,

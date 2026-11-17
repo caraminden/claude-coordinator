@@ -1,0 +1,12 @@
+// #837: Citadel's APK build numbers a Capacitor app by its commit count without touching its build.gradle.
+// gradlew --init-script src/apk-version.init.gradle -Pcitadel.versionCode=N (AGP ignores android.injected.version.code
+// outside the IDE). Groovy calls the variant API dynamically, so the init script needs no AGP on its classpath.
+allprojects {
+  plugins.withId('com.android.application') {
+    def code = providers.gradleProperty('citadel.versionCode').get().toInteger()
+    def components = extensions.getByName('androidComponents')
+    components.onVariants(components.selector().all()) { variant ->
+      variant.outputs.each { it.versionCode.set(code) }
+    }
+  }
+}

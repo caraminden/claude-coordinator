@@ -47,6 +47,10 @@
       "mountTips",
       "placeTip"
     ],
+    "update.js": [
+      "checkUpdate",
+      "mountUpdate"
+    ],
     "upload.js": [
       "droppedFiles",
       "formatBytes",

@@ -75,6 +75,7 @@ import { Waits } from './src/waits.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { dispatch, OldApk, OtherKey, publish } from './src/apk-release.ts';
+import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
@@ -556,8 +557,22 @@ const citadelServer = new CitadelServer({
 // Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
 const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) => join(services.opts.home, '.local/share', name, 'android', 'latest.json') });
 const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name) });
+// A Capacitor app's APK, built and published once a deploy carrying a change to it is live (#837, src/apk-build.ts).
+const apkBuilds = new ApkBuilds({
+  home: services.opts.home, folder: (row) => services.folder(row), dataDir: (row) => services.dataDir(row),
+  cacheDir: join(services.opts.home, '.cache/citadel-apk'), keyDir: join(services.opts.home, '.config/citadel-android'),
+  heavy: join(import.meta.dirname, 'tools/citadel-heavy'),
+  ciRelease: (row) => targetFinder.list('apk').some((t) => t.contraption === row.name && !!t.workflow),
+  published: (row, code, _commit, by) => {
+    if (row.home_scheme != null) store.recordApkPublish({ projectId: row.home_scheme, contraption: row.name, versionCode: code, runId: 0, by, uid: null });
+    void releases.refresh();
+  },
+  tell: (row, text) => row.home_scheme != null && tellHome(row.home_scheme, text),
+});
 services.onDeploy = (view) => {
   if (view.finished_at === null) return releases.poll();
+  const live = view.state === 'deployed' && !services.opts.off ? store.getContraption(view.name) : undefined;
+  if (live) void apkBuilds.schedule(live, view.by);
   contraptionReader.record(view).catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err)).finally(() => void releases.refresh());
   // Nobody watches an auto-deploy (#629), so one that didn't go live is told to the app's home Taskmaster.
   const row = view.by === AUTO_BY && view.state !== 'deployed' ? store.getContraption(view.name) : undefined;
@@ -724,6 +739,10 @@ store.pruneArtifacts(isArtifact);
 // A preview's copy already holds what these sweeps would find, and they read the live folders.
 // The vocabulary docs follow the registry; the first run replaces the hand-written ones (kept aside).
 if (!PREVIEW) writeVocabularies().catch((err) => console.error('Could not write the property vocabularies:', err));
+// A build a restart cut off, or a deploy from before #837: each Capacitor app's APK catches up with its live commit.
+if (!PREVIEW && !BOOT_CHECK && !services.opts.off) setTimeout(() => {
+  for (const c of store.listContraptions()) if (c.repo) void apkBuilds.schedule(c, AUTO_BY);
+}, 60_000).unref();
 if (!PREVIEW) void safely('startup sweep', async () => {
   for (const p of store.listProjects()) {
     for (const t of store.listTickets(p.id)) {

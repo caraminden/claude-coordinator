@@ -384,7 +384,11 @@ function changeList(projectId, tv) {
   ].sort((a, b) => a.i - b.i); // stable: the changes past the line (-1) keep their furthest-along-first order
   if (!rows.length) return '';
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
-  return h('ol', { class: 'rel-changes' }, rows.map(({ c, e }, i) => {
+  // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
+  const firstLater = rows.findIndex((r) => r.c?.later);
+  const after = firstLater > 0 && n.number != null ? `After ${releaseName(n).toLowerCase()}: in line` : firstLater > 0 ? 'After this release: in line' : '';
+  return h('ol', { class: 'rel-changes' }, rows.flatMap(({ c, e }, i) => [...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row({ c, e }, i)]));
+  function row({ c, e }, i) {
     const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}`;
     const pos = h('span', { class: 'rel-pos' }, String(i + 1));
     if (c) {
@@ -398,7 +402,7 @@ function changeList(projectId, tv) {
       h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
         e.holds ? [h('b', { class: 'work' }, stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
           : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)])));
-  }));
+  }
 }
 
 /** Citadel changes whose preview was requested here and isn't in the server's test copies yet: their ticket ids. */
@@ -544,7 +548,7 @@ export function releaseChip(t) {
       return h('span', { class: 'rel-chip' },
         n != null ? versionLink(tv.next, 'rel-ver', true) : '',
         h('a', { class: 'rel-chip-open', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, 'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
-          stageTrack(tv.next.stages, c, { mini: true }), ...changeNow(tv.next, c), h('span', { 'aria-hidden': 'true' }, '›')));
+          stageTrack(tv.next.stages, c, { mini: true }), ...(c.later ? [h('b', { class: 'waits' }, 'in line'), ' ', h('span', { class: 'muted' }, c.brief ?? 'next release')] : changeNow(tv.next, c)), h('span', { 'aria-hidden': 'true' }, '›')));
     }
   }
   if (t.ship?.stage === 'build' && t.build) {

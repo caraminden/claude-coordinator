@@ -409,6 +409,8 @@ export class CitadelServer implements Reader {
       if (pr) changes.push({ ticketId: t.id, number: t.number, title: t.title, ...pr, ...(t.status !== 'closed' && t.cwd ? { canPreview: true } : {}) });
     }
     changes.sort((a, b) => TRACK.indexOf(b.stage) - TRACK.indexOf(a.stage) || a.since - b.since);
+    // Lands go one at a time and each starts its own deploy, so only the lead is in the release under way (#888).
+    changes.forEach((c, i) => { if (i > 0 && c.stage === 'line') c.later = true; });
     this.track(changes);
 
     let next: Next | null = null;

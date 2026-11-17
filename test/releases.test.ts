@@ -82,6 +82,7 @@ test('the next release: the furthest-along change leads, with its stage, usual, 
   // One list on the card (Josh, 2026-11-13): its order says the line, so a waiting change's short words are its place alone.
   assert.equal(n.changes[1].brief, '2nd');
   assert.deepEqual(t.line.map((e) => e.place), ['next', '2nd']);
+  assert.deepEqual(n.changes.map((c) => !!c.later), [false, true], 'the one waiting for the lock goes out in the release after, so it has no number');
 });
 
 test('a change offers a preview while its minion is open with a worktree, not once dismissed (#638)', () => {

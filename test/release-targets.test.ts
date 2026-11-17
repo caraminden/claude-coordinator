@@ -947,6 +947,8 @@ test('handed-off lands list in line order, not minion-number order (#766)', asyn
   const got = (vs[0].next as { changes: { title: string; brief?: string }[] } | null)?.changes ?? [];
   assert.deepEqual(got.map((c) => c.brief ?? 'landing'), ['landing', '2nd', '3rd', '4th', '5th']);
   assert.deepEqual(got.map((c) => c.title), ['Change 0', 'Change 1', 'Change 4', 'Change 3', 'Change 2']);
+  // Only the change landing now is in the release under way; the rest of the line goes out after it, so none carries its number.
+  assert.deepEqual((got as { later?: boolean }[]).map((c) => !!c.later), [false, true, true, true, true]);
 });
 
 test('a handed-off land is on its targets from the hand-off: in line, then landing, ahead of what is on main (#764)', async () => {

@@ -842,7 +842,8 @@ export class LandsInFlight {
         if (tv.next) {
           // Its own release leads: what is on main is further along than a land. A release already building can't take it.
           const stages = tv.next.stages.some((s) => s.name === 'land') ? tv.next.stages : [{ name: 'land', usual: null }, ...tv.next.stages];
-          const later = tv.next.changes.some((c) => !c.waitingOn && !c.later && c.stage !== 'land');
+          // A land in the line is one at a time: the one landing (or any build's change not waiting) leads, so the rest go out after it.
+          const later = tv.next.changes.some((c) => !c.later && (!c.waitingOn || c.stage === 'land'));
           tv.next = { ...tv.next, stages, changes: [...tv.next.changes, later ? { ...change, later } : change] };
           continue;
         }

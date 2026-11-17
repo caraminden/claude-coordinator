@@ -497,6 +497,7 @@ CI_WORKFLOW=.github/workflows/tests.yml
 CI_LABEL=citadel-ci-linux
 CI_REF=land/$branch
 CI_STEP='the full suite' # the workflow's step that runs the tests; a run that fails in any other never ran them
+CI_CLOCK_STEP="the runner's clock" # the workflow's step that fails on a skewed runner clock
 CI_DOWN=${LAND_CI_DOWN:-600} # how long one landing's unanswered wait for CI spares the next ones theirs
 CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI_POLL:-5}
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
@@ -568,6 +569,8 @@ ci_gate() {
     failure)
       # Red only when the tests ran: a run that failed setting up (no user manager, a download) says nothing about this commit.
       step=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq '[.jobs[].steps[] | select(.conclusion == "failure") | .name][0] // empty' 2>/dev/null) || step=''
+      # A skewed clock (#900) lasts hours, until the distro behind it stops: the note spares the next landings a run each.
+      [ "$step" != "$CI_CLOCK_STEP" ] || { why="runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran ($ci_url); a systemd-timesyncd in a WSL distro on Cara's desktop must be masked (tools/ci-runner/README.md)"; ci_down; return 2; }
       [ "${step:-$CI_STEP}" = "$CI_STEP" ] || { why="the CI run failed in its setup step \"$step\", before any test ran ($ci_url): the runner needs fixing"; return 2; }
       return 1 ;;
     timed_out) return 1 ;;

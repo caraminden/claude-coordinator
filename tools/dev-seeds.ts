@@ -422,6 +422,23 @@ mock.boards('#takes', { boards: [
       return route(c, t);
     },
   },
+  'minion-copies': {
+    about: 'the Taskmaster chat with a run of copies of minion-to-minion messages (one grouped row), a person\'s message, then a second run (#924)',
+    seed(c) {
+      const tm = taskmaster(c);
+      const [a, b, d] = [1, 2, 3].map((i) => minion(c, `Feeder ${i}`));
+      const w = chat(c, tm, 4);
+      w.asked('Where do the feeders stand?');
+      const copy = (from: typeof a, to: typeof a, text: string) => w.put('minion_copy', { author: `#${from.number} ${from.title}`, from: from.number, to: to.number, text });
+      copy(a, b, 'I changed src/foo.ts: rebase before you touch it');
+      copy(b, a, 'Rebased, thanks. Taking the tests next.');
+      copy(a, d, 'Heads up: the schema column is renamed on main.');
+      copy(d, b, 'Seen; I will carry it into my branch.');
+      w.said('Nothing for me to do on those.');
+      copy(b, d, 'Done on my side.');
+      return `#/p/${c.project.id}`;
+    },
+  },
   'wco-fixture': {
     about: 'the run-on-windows WCO rig\'s fixture contraption (open, at port $WCO_FIXTURE_PORT) and a minion with an artifact',
     seed(c) {

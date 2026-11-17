@@ -73,7 +73,7 @@ import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
-import { Waits } from './src/waits.ts';
+import { Waits, readHeavy } from './src/waits.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { dispatch, OldApk, OtherKey, publish } from './src/apk-release.ts';
@@ -578,7 +578,7 @@ const citadelServer = new CitadelServer({
 });
 // Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
 const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) => join(services.opts.home, '.local/share', name, 'android', 'latest.json') });
-const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name) });
+const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name), heavy: () => readHeavy(join(DATA_DIR, 'projects', '.heavy')) });
 // A Capacitor app's APK, built and published once a deploy carrying a change to it is live (#837, src/apk-build.ts).
 const apkBuilds = new ApkBuilds({
   home: services.opts.home, folder: (row) => services.folder(row), dataDir: (row) => services.dataDir(row),

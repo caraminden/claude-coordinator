@@ -9,7 +9,7 @@ import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, LandsInFlight, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { ApkReader, buildWait, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, LandsInFlight, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { CITADEL_TARGET, named, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
@@ -1011,4 +1011,13 @@ test('named: a template names each numbered release; a next with no number is "N
   const plain = { ...tv, target: { ...tv.target, numbering: undefined }, current: r(5), next: null, recent: [] };
   named(plain);
   assert.equal((plain.current as { name?: string }).name, undefined, 'no template: the page says "Release 5"');
+});
+
+test('a deploy build in the heavy queue says what it waits on, not "running long" (Cara, 2026-11-17)', () => {
+  const job = (who: string, reason?: string) => ({ who, what: 'npm ci', since: 1, ...(reason && { reason }) });
+  const heavy = { holders: [], waiters: [job('Citadel #5 (cara)'), job('voice deploy'), job('mandate deploy', 'load')] };
+  assert.equal(buildWait(heavy, 'voice deploy'), 'in line for a build slot · 1 ahead');
+  assert.equal(buildWait(heavy, 'mandate deploy'), 'perigee is busy · waiting for load to ease');
+  assert.equal(buildWait({ holders: [], waiters: [job('voice deploy')] }, 'voice deploy'), 'in line for a build slot · next');
+  assert.equal(buildWait(heavy, 'peek deploy'), null, 'not queued: it is running, so "running long" stays honest');
 });

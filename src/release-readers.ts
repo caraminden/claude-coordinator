@@ -11,7 +11,7 @@ import { verdict, type PrSnapshot } from './github.ts';
 import { CITADEL_TARGET, git, landedIn, releaseOf, type Change, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
-import { median } from './waits.ts';
+import { median, readHeavy } from './waits.ts';
 
 const RECENT = 5;
 /** How many earlier releases a card lists under Previous releases (Cara, 2026-11-12: "Previous releases could have links to old builds"). */
@@ -73,7 +73,17 @@ export interface ContraptionDeps {
   folder: (row: ContraptionRow) => string;
   /** Its deploy running now. */
   running: (name: string) => DeployView | null;
+  /** The heavy queue's holders and waiters (citadel-heavy's files), to tell a build waiting in line from one running long. */
+  heavy?: () => ReturnType<typeof readHeavy>;
   now?: () => number;
+}
+
+/** What a deploy's build is waiting on in the heavy queue (waiter "<app> deploy"), in words; null when it isn't waiting. */
+export function buildWait(heavy: ReturnType<typeof readHeavy>, who: string): string | null {
+  const i = heavy.waiters.findIndex((w) => w.who === who);
+  if (i < 0) return null;
+  if (heavy.waiters[i].reason === 'load') return 'perigee is busy · waiting for load to ease';
+  return i === 0 ? 'in line for a build slot · next' : `in line for a build slot · ${i} ahead`;
 }
 
 /**
@@ -171,7 +181,8 @@ export class ContraptionReader implements Reader {
       if (run) {
         const [stage, since] = Object.entries(run.stages).sort((a, b) => b[1] - a[1])[0] ?? ['build', run.started_at];
         // The drain waits for the app's running agent turns (up to 3 min): outside the pipeline, so no estimate.
-        const waits = stage === 'drain' ? 'its running agent turns to end' : null;
+        const queued = stage === 'build' && this.d.heavy ? buildWait(this.d.heavy(), `${row.name} deploy`) : null;
+        const waits = stage === 'drain' ? 'its running agent turns to end' : queued;
         lead = { stage, since, usual: waits ? null : usual(stage), waitingOn: waits, text: waits ?? run.said.at(-1) ?? 'deploying' };
       } else if (s?.ahead) {
         // Say what sends it out (#629's Deploy button and auto-deploy) rather than "a deploy call" (Cara, 2026-11-12: "What does 'waiting for a deploy call' mean?").

@@ -342,12 +342,22 @@ interface LimitResume {
   tries: number;
   /** Messages people sent while it waited; they go into the resume. */
   queued?: QueuedMessage[];
-  /** The account's time zone from Claude's words, for saying the time. */
-  tz?: string;
   /** Several accounts all limited (#819): each one's reset, so the banner says which limit is which. */
   accounts?: LimitedAccount[];
   /** Its person switched to Codex: it resumes on Codex now (#337). */
   codex?: true;
+  /** A turn on its plan got through, so the limit is gone: it resumes limitProvenGapMs after the last, not limitGapMs. */
+  proven?: true;
+}
+
+/** The usage-limit wait to resume next, and when: each wait is due at its own time or, if later, its gap after the last resume. */
+export function nextLimitResume(list: LimitResume[], lastResume: number, gap: number, provenGap: number): { wait: LimitResume; due: number } | null {
+  let best: { wait: LimitResume; due: number } | null = null;
+  for (const wait of list) {
+    const due = Math.max(wait.at, lastResume + (wait.proven ? provenGap : gap));
+    if (!best || due < best.due || (due === best.due && wait.at < best.wait.at)) best = { wait, due };
+  }
+  return best;
 }
 const RESUME_ACCOUNT_PROMPT =
   `Your last turn stopped at a Claude account's usage limit (or its sign-in ran out), so this turn carries on with another of your person's Claude accounts. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
@@ -359,11 +369,11 @@ const RESUME_LIMIT_PROMPT =
 export interface AllLimited { resetAt: number; accounts: LimitedAccount[] }
 
 /** The note for a minion whose accounts are all limited: which one is out until when, and which reset it waits for. */
-export function allLimitedText(accounts: LimitedAccount[], at: number, tz?: string): string {
-  const out = (a: LimitedAccount) => `${a.here ? `This account (${a.label})` : a.label} is out until ${clockTime(a.until, tz)}${a.kind ? ` (${a.kind})` : ''}.`;
+export function allLimitedText(accounts: LimitedAccount[], at: number): string {
+  const out = (a: LimitedAccount) => `${a.here ? `This account (${a.label})` : a.label} is out until ${clockTime(a.until)}${a.kind ? ` (${a.kind})` : ''}.`;
   const first = accounts.reduce((m, a) => (a.until < m.until ? a : m));
   const when = accounts.length > 1 ? `when ${first.label}'s limit resets` : 'when it resets';
-  return `${[...accounts].sort((a, b) => Number(!!b.here) - Number(!!a.here) || a.until - b.until).map(out).join(' ')} This minion carries on at ${clockTime(at, tz)}, ${when} (or sooner once a turn gets through); a person's message tries now.`;
+  return `${[...accounts].sort((a, b) => Number(!!b.here) - Number(!!a.here) || a.until - b.until).map(out).join(' ')} This minion carries on at ${clockTime(at)}, ${when} (or sooner once a turn gets through); a person's message tries now.`;
 }
 
 /** When "resets 3:30pm (America/Los_Angeles)" next comes round after `now`, or null for words without a plain time of day. */
@@ -398,8 +408,8 @@ function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   return f;
 }
 
-/** "3:31pm", in the account's zone when Claude named it; "Fri 3:31pm" on another day, "Thu, Nov 5 3:31pm" six days or more out (a weekly limit). */
-export function clockTime(ms: number, tz?: string, now = Date.now()): string {
+/** "3:31pm", in Pacific unless a zone is given (people read Pacific, whatever zone Claude's limit message named); "Fri 3:31pm" on another day, "Thu, Nov 5 3:31pm" six days or more out (a weekly limit). */
+export function clockTime(ms: number, tz = 'America/Los_Angeles', now = Date.now()): string {
   const say = (timeZone?: string) => {
     const time = dateFormat({ hour: 'numeric', minute: '2-digit', timeZone }).format(ms).replace(' ', '').toLowerCase();
     const day = (at: number) => dateFormat({ timeZone }).format(at);
@@ -410,7 +420,7 @@ export function clockTime(ms: number, tz?: string, now = Date.now()): string {
   try {
     return say(tz);
   } catch {
-    return say();
+    return say('America/Los_Angeles');
   }
 }
 
@@ -544,6 +554,8 @@ export class Runner {
   /** After the usage limit resets, before the first minion resumes; then between resumes, so they don't all hit it again at once. */
   limitDelayMs = 60_000;
   limitGapMs = 30_000;
+  /** The gap once a turn has got through: the limit is proven gone. */
+  limitProvenGapMs = 5_000;
   /** When Claude's words don't say when the limit resets. */
   limitFallbackMs = 60 * 60 * 1000;
   private limitTimer?: NodeJS.Timeout;
@@ -1491,12 +1503,12 @@ export class Runner {
   }
 
   /** Wait for the limit to reset, a while after `resetAt` and spaced from the minions already waiting; returns when it resumes. */
-  private waitForLimit(ticketId: number, resetAt: number, tries: number, tz?: string, accounts?: LimitedAccount[]): number {
+  private waitForLimit(ticketId: number, resetAt: number, tries: number, accounts?: LimitedAccount[]): number {
     const list = this.limitResumes().filter((w) => w.ticket !== ticketId);
     let at = resetAt + this.limitDelayMs;
     for (const w of [...list].sort((a, b) => a.at - b.at)) if (Math.abs(w.at - at) < this.limitGapMs) at = w.at + this.limitGapMs;
     const queued = this.queues.get(ticketId);
-    list.push({ ticket: ticketId, at, tries, ...(queued?.length ? { queued } : {}), ...(tz ? { tz } : {}), ...(accounts?.length ? { accounts } : {}) });
+    list.push({ ticket: ticketId, at, tries, ...(queued?.length ? { queued } : {}), ...(accounts?.length ? { accounts } : {}) });
     this.saveLimitResumes(list);
     return at;
   }
@@ -1542,28 +1554,29 @@ export class Runner {
     };
     const now = Date.now();
     const early = list.filter((w) => w.at > now && !w.codex && onPlan(w.ticket));
-    for (const w of early) w.at = now;
-    const back = gaveUp.filter((t) => onPlan(t.id)).map((t) => ({ ticket: t.id, at: now, tries: 1 }));
+    for (const w of early) { w.at = now; w.proven = true; }
+    const back = gaveUp.filter((t) => onPlan(t.id)).map((t) => ({ ticket: t.id, at: now, tries: 1, proven: true as const }));
     if (early.length || back.length) this.saveLimitResumes([...list, ...back]);
   }
 
-  /** Time the next usage-limit resume: the earliest due, and never sooner than limitGapMs after the last. */
+  /** Time the next usage-limit resume: the earliest due, and never sooner than a gap after the last (limitGapMs, or limitProvenGapMs for waits a turn getting through released). */
   private armLimitTimer() {
     clearTimeout(this.limitTimer);
     const list = this.limitResumes();
     if (!list.length) return;
-    const due = Math.max(Math.min(...list.map((w) => w.at)), this.lastLimitResume + this.limitGapMs);
+    const due = nextLimitResume(list, this.lastLimitResume, this.limitGapMs, this.limitProvenGapMs)!.due;
     // setTimeout overflows past 24.8 days; a weekly limit is at most 7.
     this.limitTimer = setTimeout(() => this.limitResumeNext(), Math.min(Math.max(0, due - Date.now()), 2 ** 31 - 1));
     this.limitTimer.unref();
   }
 
   private limitResumeNext() {
-    const list = this.limitResumes().sort((a, b) => a.at - b.at);
-    const w = list[0];
-    if (!w || w.at > Date.now()) return this.armLimitTimer();
+    const list = this.limitResumes();
+    const next = nextLimitResume(list, this.lastLimitResume, this.limitGapMs, this.limitProvenGapMs);
+    const w = next?.wait;
+    if (!w || next.due > Date.now()) return this.armLimitTimer();
     this.lastLimitResume = Date.now();
-    this.saveLimitResumes(list.slice(1));
+    this.saveLimitResumes(list.filter((x) => x !== w));
     // No turn runs while it waits: starting one ends the wait (startTurn).
     this.resume(w.ticket, 0, w.tries, !!w.codex);
   }
@@ -1655,7 +1668,7 @@ export class Runner {
       this.next(ticketId);
       const wait = this.limitWait(ticketId);
       if (wait) {
-        this.emit(ticketId, 'note', { text: `Held for the resume at ${clockTime(wait.at, wait.tz)}, after the usage limit resets.` });
+        this.emit(ticketId, 'note', { text: `Held for the resume at ${clockTime(wait.at)}, after the usage limit resets.` });
         this.broadcastTicket(ticketId);
       }
       return;
@@ -2897,7 +2910,6 @@ export class Runner {
     // A deploy still waiting to go live keeps its state, so the deploy can dismiss the minion.
     const keepState = this.store.getTicket(ticketId)?.state === 'pending-deploy';
     if (reason && USAGE_LIMIT.test(reason)) {
-      const tz = /\(([\w/+-]+)\)/.exec(reason)?.[1];
       if (limitTries >= MAX_LIMIT_RESUMES) {
         this.emit(ticketId, 'note', { text: `${reason}\nIt has already resumed ${limitTries} times in a row after the usage limit, so it waits for a message now.` });
         if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit: gave up after ${limitTries} tries, send a message` });
@@ -2907,10 +2919,10 @@ export class Runner {
       // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
       // Every one of several accounts limited (#779): the first of them to reset.
       const resetAt = allLimited?.resetAt ?? this.limitResetAt(reason, usage, codexReset);
-      const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz, allLimited?.accounts);
-      const tail = allLimited?.accounts.length ? allLimitedText(allLimited.accounts, at, tz) : `It resumes by itself at ${clockTime(at, tz)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.`;
+      const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, allLimited?.accounts);
+      const tail = allLimited?.accounts.length ? allLimitedText(allLimited.accounts, at) : `It resumes by itself at ${clockTime(at)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.`;
       this.emit(ticketId, 'note', { text: `${reason}\n${tail}` });
-      if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit, resumes ${clockTime(at, tz)}` });
+      if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit, resumes ${clockTime(at)}` });
       return;
     }
     if (reason && ACCOUNT_ERROR.test(reason)) {

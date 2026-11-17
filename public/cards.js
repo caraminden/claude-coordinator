@@ -406,6 +406,14 @@ export function questionCard(ticketId, card, opts = {}) {
     sendBtn.hidden = on;
     if (pictures) refreshViewerBar();
   };
+  // Once the picks are complete, bring the Send button clear of the sticky message box: on a phone it
+  // sat under it, and the only Send on screen sent a chat message instead of the answer.
+  const revealSend = () => {
+    if (sendBtn.disabled) return;
+    const box = document.querySelector('.composer');
+    sendBtn.style.scrollMarginBottom = `${(box?.offsetHeight || 0) + 12}px`;
+    sendBtn.scrollIntoView({ block: 'nearest' });
+  };
   const send = () => {
     if (answered || !ready()) return;
     const answers = picks.map((p) => ({ selected: [...p.selected], other: p.other.trim() }));
@@ -450,6 +458,7 @@ export function questionCard(ticketId, card, opts = {}) {
           sel.add(o.label);
         }
         refresh();
+        revealSend();
       };
       // Opening a picture hands the viewer this question's pictures, to step through and pick from; a
       // click that opens it in a new tab instead leaves the viewer as it is.

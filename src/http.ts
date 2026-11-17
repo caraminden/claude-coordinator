@@ -15,6 +15,7 @@ import type { BranchStatus } from './branch.ts';
 import type { Builds } from './builds.ts';
 import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket } from './db.ts';
 import type { MachineRelay } from './machines.ts';
+import type { MachineJobs } from './machine-jobs.ts';
 import type { GithubLink } from './github-link.ts';
 import type { OpenRouter } from './openrouter.ts';
 import type { OutsideSpend } from './outside-spend.ts';
@@ -229,6 +230,8 @@ export interface App {
   /** Auto-deploy and the release cards' Deploy button (src/auto-deploy.ts, #629). */
   autoDeploy: AutoDeploy;
   machines: MachineRelay;
+  /** Jobs on people's own machines (src/machine-jobs.ts, #857). */
+  jobs: MachineJobs;
   pusher: Pusher;
   /** People's own GitHub links (src/github-link.ts). */
   github: GithubLink;

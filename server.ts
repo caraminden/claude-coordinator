@@ -20,10 +20,11 @@ import { UltraReviews } from './src/ultrareview.ts';
 import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
-import { ciFinished } from './src/ci-armed.ts';
+import { ciFinished, postCard } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
+import { MachineJobs } from './src/machine-jobs.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
@@ -40,6 +41,7 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
+import { jobRoutes } from './src/routes/jobs.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
 import { CiStore } from './src/ci-store.ts';
 import { CiMirror, ghDownload } from './src/ci-mirror.ts';
@@ -331,6 +333,36 @@ function liveOn(head: string | null) {
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
+// Jobs on a person's own machine (#857): the queue of record, its go cards in the asking minion's chat (a
+// contraption's in its home scheme's Taskmaster chat), and results in the scheme's shared folder or the app's DATA_DIR.
+const jobs = new MachineJobs({
+  store, broadcast,
+  send: (id, msg) => machines.sendJob(id, msg),
+  online: (id) => machines.isOnline(id),
+  postCard: (job, card) => {
+    const ticket = job.ticket_id !== null ? store.getTicket(job.ticket_id) : store.getCoordinator(job.project_id);
+    return ticket ? { ticket: ticket.id, question: postCard(app, ticket, { ...card, job: job.id }).id } : null;
+  },
+  settleCard: (card, by, line) => {
+    const e = store.eventsOfKinds(card.ticket, ['question']).find((q) => JSON.parse(q.data).id === card.question);
+    const q = e && JSON.parse(e.data);
+    if (!e || q.settled) return;
+    const settled = { at: Date.now(), by };
+    store.setEventData(e.id, { ...q, settled });
+    runner.emit(card.ticket, 'question_result', { id: q.id, settled });
+    runner.emit(card.ticket, 'note', { text: line });
+    runner.broadcastTicket(card.ticket);
+  },
+  wake: (id, text) => runner.send(id, APP_NAME, text),
+  note: (id, text) => { runner.emit(id, 'note', { text }); runner.broadcastTicket(id); },
+  resultsDir: (job) => {
+    if (job.contraption_id === null) return join(projectSharedDir(DATA_DIR, job.project_id), 'jobs', String(job.id));
+    const c = store.listContraptions().find((r) => r.id === job.contraption_id);
+    return c ? join(services.dataDir(c), 'jobs', String(job.id)) : null;
+  },
+});
+machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
+if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 runner.refuseTurn = (ticket, author, from) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from);
@@ -1057,7 +1089,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {
@@ -1078,7 +1110,7 @@ runner.onStatusTrailer = (id, fields) => {
 };
 // What a minion armed for CI goes out when CI passes, with no turn (#715).
 github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;

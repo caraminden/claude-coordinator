@@ -39,6 +39,7 @@ import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketVi
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { machineNotes, patchMachine } from './machines.ts';
+import { MachineJobs } from '../machine-jobs.ts';
 import { ensureCoordinator, LINE_FIELDS, schemeTarget } from './projects.ts';
 import { pacificTime, parseWakeTime, type Relay } from '../wake.ts';
 import { gitOut } from '../git.ts';
@@ -607,6 +608,16 @@ export const ticketRoutes: Route[] = [
       }
       const { questions } = data;
       const answers = cleanAnswers(questions, body.answers);
+      // A machine job's go card (#857): only the machine's owner or an admin answers it, and their pick is the job's go.
+      // The minion that asked hears it held, with no turn: it is woken when the job ends or is refused.
+      if (data.job) {
+        const choice = MachineJobs.choiceOf(answers[0]?.selected[0] ?? '');
+        if (!choice) throw new HttpError(400, 'Pick one of the card\'s options');
+        app.jobs.decide(data.job, choice, { uid: session.uid ?? -1, name: session.name, admin: !!session.admin }, true);
+        runner.send(id, session.name, `My answer to job #${data.job}'s go card: ${answers[0].selected[0]}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
+        runner.broadcastTicket(id);
+        return json(res, 202, ticketView(app, id));
+      }
       const text = questions.map((q: any, i: number) => {
         const { selected, other } = answers[i];
         // The text typed with a pick expands on it; typed alone, it is the answer.

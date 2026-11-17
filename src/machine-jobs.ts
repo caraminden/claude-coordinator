@@ -154,7 +154,7 @@ export function cleanSettings(old: JobSettings, body: any, now = Date.now()): Jo
     if (body.until !== null && (!Number.isFinite(body.until) || body.until <= now || body.until > now + 7 * 24 * 3600_000)) throw new HttpError(400, 'until must be a time in the next 7 days (ms), or null');
     next.until = body.until;
   }
-  if (body.paused !== undefined) next.paused = bool(body.paused, 'paused').valueOf();
+  if (body.paused !== undefined) next.paused = bool(body.paused, 'paused');
   return next;
 }
 
@@ -316,7 +316,12 @@ export class MachineJobs {
     const view = this.view(job);
     this.d.broadcast({ type: 'machine_job', projectId: job.project_id, job: view });
     const owner = this.ownerOf(this.machineOf(job));
-    if (owner && !owner.admin && !this.store.canSee({ uid: owner.id, admin: false }, job.project_id)) this.d.broadcast({ type: 'machine_job', to: owner.id, job: view });
+    if (owner && !this.store.canSee({ uid: owner.id, admin: this.store.isAdmin(owner) }, job.project_id)) this.d.broadcast({ type: 'machine_job', to: owner.id, job: view });
+  }
+
+  /** A machine's agent went away: its queued jobs now wait on it. */
+  offline(machineId: number) {
+    this.changedMachine(machineId);
   }
 
   /** Every queued job on a machine changes its "waits" when the machine does: tell the viewers. */
@@ -373,7 +378,8 @@ export class MachineJobs {
     const owner = this.ownerOf(m);
     const card = this.d.postCard(job, {
       questions: [{ header: 'GPU job go', question, options: CHOICES.map(({ label, description }, i) => ({ label, description, ...(i === (job.run_when === 'now' ? 1 : 0) ? { recommended: true } : {}) })) }],
-      ...(owner ? { to: owner.name } : {}),
+      // Addressed to its owner when they are in the scheme; otherwise it waits in the chat and on their Machines page.
+      ...(owner && this.store.canSee({ uid: owner.id, admin: this.store.isAdmin(owner) }, job.project_id) ? { to: owner.name } : {}),
     });
     if (card) this.store.updateMachineJob(job.id, { card: JSON.stringify(card) });
   }
@@ -627,10 +633,11 @@ export class MachineJobs {
    * agent lost failed ("the machine restarted"); one the agent runs that ended here, or that this server never
    * started, is told to stop. Then start what may start.
    */
-  reconcile(m: Machine, known: { id: number; state: string }[]) {
+  reconcile(m: Machine, known: { id: number; state: string }[], since: number) {
     const knows = new Map(known.map((k) => [k.id, k.state]));
     for (const j of this.store.machineJobs({ machine: m.id, states: ACTIVE }, 50)) {
-      if (knows.has(j.id)) continue;
+      // One started on this connection may not be in the agent's list yet: only one from before it can be lost.
+      if (knows.has(j.id) || (j.started_at ?? 0) >= since) continue;
       this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error: 'the machine restarted' });
       this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${m.name} failed: the machine restarted and lost it.`);
     }
@@ -641,9 +648,9 @@ export class MachineJobs {
         if (!(ENDED as readonly string[]).includes(state as JobState)) this.d.send(m.id, { type: 'job.stop', id });
         continue;
       }
-      // Paused here while it was offline (or a stop asked of it then): tell it again.
-      if (j.state === 'paused' && state === 'running') this.d.send(m.id, { type: 'job.pause', id });
-      if (j.error && /by /.test(j.error) && !(ENDED as readonly string[]).includes(state as JobState)) this.d.send(m.id, { type: 'job.stop', id });
+      // A stop asked while it was offline (stopJob and the limit set error), or a pause: tell it again.
+      if (j.error && !(ENDED as readonly string[]).includes(state as JobState)) this.d.send(m.id, { type: 'job.stop', id });
+      else if (j.state === 'paused' && state === 'running') this.d.send(m.id, { type: 'job.pause', id });
     }
     this.pump(m.id);
     this.changedMachine(m.id);

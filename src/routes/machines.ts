@@ -135,6 +135,14 @@ export const agentRoutes: Route[] = [
     return json(res, 202, {});
   }),
   agent('POST', '/api/machines/upload', machineUpload),
+  // Jobs (#857, shared/project/specs/desktop-gpu-jobs.md "Wire contract"): one input file with the job's token, the
+  // job's state every 10 s and on every change, and one result file, streamed to disk under the job's caps.
+  agent('GET', '/api/machines/job-input', ({ req, res, url, app }, machine) => app.jobs.input(machine, req, res, url)),
+  agent('POST', '/api/machines/job-state', async ({ req, res, app }, machine) => {
+    app.jobs.report(machine, await readJson(req, 100_000));
+    return json(res, 202, {});
+  }),
+  agent('POST', '/api/machines/job-upload', async ({ req, res, url, app }, machine) => json(res, 201, await app.jobs.upload(machine, req, url))),
   // A CI runner registration token for a scheme's repo (#320): tools/ci-runner/add-runner.ps1 calls it. With kind 'delete', a
   // runner's name and its label it hands out no token: Citadel takes that runner off GitHub itself (#476, remove-runner.ps1).
   agent('POST', '/api/machines/runner-token', async ({ req, res, app }, machine) => {

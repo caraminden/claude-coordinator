@@ -16,6 +16,7 @@ import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { lendsMachine } from './access.ts';
 import type { Machine, Store } from './db.ts';
+import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from './machine-jobs.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
@@ -266,6 +267,8 @@ export class MachineRelay {
   private onChange: () => void;
   private startedAt = Date.now();
   private shown = '';
+  /** The jobs queue's hooks (#857), set once by the server: an agent's report of the jobs it knows, and an agent gone. */
+  jobHooks: { info(machine: Machine, known: { id: number; state: string }[], since: number): void; offline(machineId: number): void } | null = null;
 
   constructor(store: Store, onChange: () => void) {
     this.store = store;
@@ -343,7 +346,19 @@ export class MachineRelay {
       runners: agent ? agent.runners : !!check?.runners,
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
+      /** What its owner's machine-agent.json lets jobs use (#857), or null: no jobs there. */
+      jobs: storedOffer(machine),
+      job_settings: storedSettings(machine),
     };
+  }
+
+  /** Send a job message (#857) to a machine's agent, if one with a jobs block is connected. */
+  sendJob(machineId: number, msg: AgentJobMessage): boolean {
+    const agent = this.agents.get(machineId);
+    const machine = this.store.getMachine(machineId);
+    if (!agent || agent.runners || !machine || !storedOffer(machine)) return false;
+    agent.res.write(`data: ${JSON.stringify({ job: msg })}\n\n`);
+    return true;
   }
 
   list() {
@@ -404,6 +419,7 @@ export class MachineRelay {
     agent.res.end();
     if (this.store.getMachine(machineId)) this.store.updateMachine(machineId, { last_seen_at: Date.now() });
     this.onChange();
+    this.jobHooks?.offline(machineId);
   }
 
   /** The agent says it is awake. False if it isn't connected. */
@@ -420,7 +436,7 @@ export class MachineRelay {
   }
 
   /** The agent says what it offers: its servers, and the workspaces in its config. False if it isn't connected. */
-  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown }): boolean {
+  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown }): boolean {
     const agent = this.agents.get(machine.id);
     if (!agent) return false;
     // A runner agent offers no MCP server or workspaces, whatever it says.
@@ -431,6 +447,13 @@ export class MachineRelay {
     agent.servers = agent.managed ? [...(agent.found.length ? ['mcp' as const] : []), ...(agent.workspaces.length ? ['ws' as const] : [])]
       : (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
     agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
+    // Its owner's jobs block (#857), or none; with one it also says which jobs it knows, which the queue reconciles.
+    const offer = cleanOffer(body.jobs);
+    this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
+    if (offer) {
+      const known = (Array.isArray(body.known_jobs) ? body.known_jobs : []).slice(0, 100).flatMap((k: any) => (Number.isInteger(k?.id) && typeof k.state === 'string' ? [{ id: k.id as number, state: k.state.slice(0, 20) as string }] : []));
+      this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
+    }
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
       if (!storedLend(machine)) {

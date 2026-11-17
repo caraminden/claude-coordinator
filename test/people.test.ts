@@ -1,7 +1,7 @@
 // Per-person logins and who sees what: signing in, invites, scheme owners and members, the live stream
 // and push filtered by membership, and turns only for people allowed on the server's Claude login.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -375,4 +375,22 @@ test("Codex news goes to its own person, the server login's owner too, whose pay
   assert.equal(josh.seen.split('"type":"codex"').length, 2, "Josh gets only his own");
   cara.stop();
   josh.stop();
+});
+
+test("turning off kept app chats deletes the person's kept files and no one else's, and /api/me says so (#836)", async () => {
+  const { keptFile, keptDir } = await import('../src/replay-keep.ts');
+  assert.equal((await as('Cara', '/api/contraptions', { name: 'kept', title: 'Kept', port: 9199, home_scheme: 2 })).status, 201);
+  const dir = keptDir(srv.data, { name: 'kept', home_scheme: 2 })!;
+  mkdirSync(dir, { recursive: true });
+  const josh = keptFile(dir, people.Josh.id, 'aura', 'aaaaaaaa');
+  const olive = keptFile(dir, people.Olive.id, 'aura', 'bbbbbbbb');
+  for (const f of [josh, olive]) writeFileSync(f, '{}\n');
+  assert.equal((await as('Josh', '/api/me')).data.keepChats, true, 'on by default');
+  assert.equal((await as('Josh', '/api/me/replay', { keep: 'no' }, 'PUT')).status, 400);
+  assert.equal((await as('Josh', '/api/me/replay', { keep: false }, 'PUT')).status, 200);
+  assert.ok(!existsSync(josh));
+  assert.ok(existsSync(olive));
+  assert.equal((await as('Josh', '/api/me')).data.keepChats, false);
+  await as('Josh', '/api/me/replay', { keep: true }, 'PUT');
+  assert.equal((await as('Josh', '/api/me')).data.keepChats, true);
 });

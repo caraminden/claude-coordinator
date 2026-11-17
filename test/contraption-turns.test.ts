@@ -687,6 +687,55 @@ test("a stream's session id that isn't one is never stored, and one stored befor
   assert.equal(turns.deleteSession(mandate, cara.id, 'odd'), 'deleted');
 });
 
+// Kept chats (#836): an app's `keep: true` turns, the session's first KEEP_TURNS, in its home scheme's shared folder.
+test('a kept turn writes the prompt, tool calls and reply to the home scheme\'s .replay folder, first five turns only', async () => {
+  const home = store.createProject('Peek', null);
+  const app = contraptions.register({ name: 'kept-app', ...fields, home_scheme: home.id });
+  store.setContraptionUser(app.id, cara.id, true, cara.id);
+  const dir = join(data, 'projects', String(home.id), 'shared', 'project', '.replay', 'kept-app');
+  await turn(app, { session: 'k1', system: 'Be an aura.', keep: true });
+  const files = readdirSync(dir);
+  assert.equal(files.length, 1);
+  assert.match(files[0], /^[0-9a-f]{12}-k1-[0-9a-f]{8}\.jsonl$/, 'named by a hashed person, the session and its Claude session');
+  const [t] = readFileSync(join(dir, files[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(t.n, 1);
+  assert.equal(typeof t.turn, 'number', 'the turn id, the key #844\'s audit rows share');
+  assert.equal(t.prompt, 'Move my dentist to Thursday.');
+  assert.deepEqual(t.calls, [{ name: 'mcp__mandate__move', input: { to: 'Thursday' }, ok: true, result: 'SECRET TOOL OUTPUT' }]);
+  assert.match(t.text, /Moved it[\s\S]*to Thursday\./);
+  assert.equal(t.system.length, 64, 'a hash of the system text, not the text');
+  for (let i = 0; i < 6; i++) await turn(app, { session: 'k1', system: 'Be an aura.', keep: true });
+  assert.equal(readFileSync(join(dir, files[0]), 'utf8').trim().split('\n').length, 5, 'only the first five');
+  // Without keep, on an app with no home scheme, or for a person who opted out: nothing.
+  await turn(app, { session: 'k2' });
+  await turn(mandate, { session: 'k3', keep: true });
+  store.setSetting(`replay_optout:${cara.id}`, true);
+  await turn(app, { session: 'k4', keep: true });
+  store.setSetting(`replay_optout:${cara.id}`, false);
+  assert.deepEqual(readdirSync(dir), files);
+  assert.ok(!existsSync(join(data, 'projects', 'null')));
+  // Deleting the session deletes what was kept of it.
+  assert.equal(turns.deleteSession(app, cara.id, 'k1'), 'deleted');
+  assert.deepEqual(readdirSync(dir), []);
+  assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', keep: true, blind: true }, mandate), /not both/);
+  assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', keep: 'yes' }, mandate), /keep must be true or false/);
+});
+
+test('a person who opts out while a kept turn runs has nothing of it kept', async () => {
+  const home = store.createProject('Peek race', null);
+  const app = contraptions.register({ name: 'kept-race', ...fields, home_scheme: home.id });
+  store.setContraptionUser(app.id, cara.id, true, cara.id);
+  const dir = join(data, 'projects', String(home.id), 'shared', 'project', '.replay', 'kept-race');
+  const seen = () => readFileSync(log, 'utf8').split('\n').filter((l) => l.includes('linger then opt out')).length;
+  const before = seen();
+  const running = turn(app, { session: 'r1', keep: true, prompt: 'linger then opt out' });
+  while (seen() === before) await new Promise((r) => setTimeout(r, 20));
+  store.setSetting(`replay_optout:${cara.id}`, true); // its reply is out; claude is still exiting
+  await running;
+  store.setSetting(`replay_optout:${cara.id}`, false);
+  assert.ok(!existsSync(dir) || readdirSync(dir).length === 0, 'nothing kept after the opt-out');
+});
+
 test('deleting a session forgets the name and deletes its transcript', async () => {
   const id = (await turn(mandate, { session: 'aura-gone' }))[0].data.claudeSession;
   const file = join(claudeDir, 'projects', join(data, 'contraption-scratch', 'mandate', String(cara.id)).replace(/[^a-zA-Z0-9]/g, '-'), `${id}.jsonl`);

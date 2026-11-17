@@ -1013,6 +1013,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "PUT /api/me/replay": {
+  "anon": "401 Not logged in",
+  "person": "400 keep must be true or false",
+  "member": "400 keep must be true or false",
+  "outsider": "400 keep must be true or false",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/nonsense": {
   "anon": "401 Not logged in",
   "person": "404 Not found",

@@ -54,6 +54,7 @@ import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
+import { sweepKept } from './src/replay-keep.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
@@ -503,6 +504,10 @@ if (!BOOT_CHECK && !PREVIEW) {
   const sweepContraptionMedia = () => void safely('contraption media sweep', async () => void sweepMedia(join(DATA_DIR, 'contraption-media')));
   setTimeout(sweepContraptionMedia, 10 * 60_000).unref();
   setInterval(sweepContraptionMedia, 24 * 60 * 60_000).unref();
+  // Kept chats for replay past 30 days (#836), apps that stopped keeping included.
+  const sweepReplay = () => void safely('kept chats sweep', async () => sweepKept(DATA_DIR));
+  setTimeout(sweepReplay, 10 * 60_000).unref();
+  setInterval(sweepReplay, 24 * 60 * 60_000).unref();
 }
 // Contraption turns' audit rows past AUDIT_DAYS (#844), soon after boot and then daily. Previews and dev copies (BOOT_CHECK) don't sweep: they live hours and are deleted when stopped.
 if (!BOOT_CHECK) {

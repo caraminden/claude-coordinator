@@ -99,6 +99,9 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   // node under another name, so ananicy-cpp's stock `node` rule (SCHED_IDLE) misses the wrapper, claude under it and the MCP servers (#506, deploy/priority.md).
   mkdirSync(join(MCP_DIR, 'bin'), { recursive: true });
   symlinkSync(process.execPath, join(MCP_DIR, 'bin', TURN_NODE));
+  // citadel-replay (#836): reruns kept app chats; its shim runs the pinned replay.ts beside it.
+  pinnedCopy('replay.ts');
+  cpSync(join(import.meta.dirname, '..', 'tools', 'citadel-replay'), join(MCP_DIR, 'bin', 'citadel-replay'));
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');

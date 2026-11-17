@@ -13,6 +13,8 @@
 // place that does is the audit (#844, contraption_turn_audit): the system text, prompt and reply as the model got
 // and gave them, never tool calls or MCP headers, for the home scheme's members to read, kept AUDIT_DAYS. The
 // transcript is the person's own Claude session, in their folder.
+// The other is a turn the app sends with `keep: true` (#836): src/replay-keep.ts keeps the session's first few turns
+// in the app's home scheme's shared folder for replay tests, unless the person opted out.
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -25,7 +27,9 @@ import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexM
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
 import { clockTime, parseResetTime } from './runner.ts';
 import type { ImageBlock } from './turn-images.ts';
-import { MEDIA_SERVER, type CodexAt, type MediaTurn } from './contraption-media.ts';
+import { type CodexAt, type MediaTurn } from './contraption-media.ts';
+import { args, mcpConfig, settings, toolNamesPrompt, userLine, MEDIA_SERVER } from './contraption-args.ts';
+import { keepTurn, keptDir, keptFile, dropKeptSession, optOutKey, sha256, cap, wantsKeep, type KeptCall } from './replay-keep.ts';
 import { claudeConfigDir, projectSlug, transcriptPath, validSessionId } from './sessions.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
@@ -62,15 +66,7 @@ export function machinesPrompt(machines: PersonMachine[]): string {
   ].join('\n\n');
 }
 
-/**
- * The naming rule for a turn's MCP tools (#763): an app's own prompt tends to name them bare (`reference`), and now and
- * then the model calls one that way, which Claude Code refuses with "No such tool available".
- */
-export function toolNamesPrompt(servers: string[]): string {
-  if (!servers.length) return '';
-  const full = servers.map((s) => `mcp__${s}__<tool>`).join(', ');
-  return `Your tools' full names are ${full}. Where these instructions name a tool without that prefix, such as \`x\`, call it by its full name (mcp__${servers[0]}__x): a bare name fails with "No such tool available".`;
-}
+export { args, mcpConfig, settings, toolNamesPrompt, userLine };
 
 export type TurnErrorCode = 'not_enabled' | 'no_plan' | 'limit' | 'busy' | 'timeout' | 'canceled' | 'bad_request' | 'failed';
 
@@ -107,6 +103,8 @@ export interface TurnRequest {
   media: boolean;
   /** A turn whose context names no person or app (VoiceAnalyzer #26): a neutral empty folder, `system` as the whole system prompt, no machines, always fresh, never Codex. */
   blind: boolean;
+  /** Keep this turn for replay tests if it is among its session's first few (#836, src/replay-keep.ts). */
+  keep: boolean;
   /** Paths in the app's data folder (#834); the route loads them into `imageBlocks` before the turn starts. */
   images: string[];
   imageBlocks?: ImageBlock[];
@@ -186,66 +184,14 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   if (body.images !== undefined && (!Array.isArray(body.images) || body.images.some((p: unknown) => typeof p !== 'string'))) bad('images must be a list of paths');
   if (body.blind !== undefined && typeof body.blind !== 'boolean') bad('blind must be true or false');
   if (body.blind === true && isCodexModel(model)) bad('A blind turn runs on Claude only: pick a Claude model');
+  if (body.keep !== undefined && typeof body.keep !== 'boolean') bad('keep must be true or false');
+  if (body.keep === true && body.blind === true) bad('A blind turn has no session to keep: send keep or blind, not both');
   if (body.media === true && mcp.some((s) => s.name === MEDIA_SERVER)) bad(`With media: true, ${MEDIA_SERVER} is Citadel's server: call yours something else`);
   return {
     person: body.person, session: body.session, fresh: body.fresh === true || body.blind === true, prompt: body.prompt, system: body.system ?? '', model,
     compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), mcp, agents,
-    webSearch: body.webSearch === true, machines: body.machines !== false && body.blind !== true, media: body.media === true, blind: body.blind === true, images: body.images ?? [], timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
+    webSearch: body.webSearch === true, machines: body.machines !== false && body.blind !== true, media: body.media === true, blind: body.blind === true, keep: body.keep === true, images: body.images ?? [], timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
-}
-
-/** The built-in tools a turn gets: Agent and WebSearch/WebFetch, each only if asked for. */
-function builtins(req: TurnRequest): string[] {
-  return [...(req.agents ? ['Agent'] : []), ...(req.webSearch ? ['WebSearch', 'WebFetch'] : [])];
-}
-
-/** The `claude` arguments for a turn: only the contraption's MCP servers and (maybe) Agent and web search, nothing of the user's or Citadel's. */
-export function args(req: TurnRequest, dir: string, claudeSession: string, resume: boolean): string[] {
-  const a = [
-    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    // Messages in as minion turns take them, so the app can steer the turn; each is echoed back once claude takes it in.
-    '--input-format', 'stream-json', '--replay-user-messages',
-    // No user, project or local settings: no CLAUDE.md, hooks, plugins, permissions or MCP servers of theirs.
-    '--setting-sources', '',
-    // The built-in tools: Agent and web search if asked for, else none. Subagents get no more than this.
-    '--tools', builtins(req).join(','),
-    '--strict-mcp-config', '--mcp-config', join(dir, 'mcp.json'),
-    '--settings', join(dir, 'settings.json'),
-    '--permission-mode', 'dontAsk',
-    '--disable-slash-commands',
-    // A resumed session gets this turn's system text, not its first one's (#618).
-    '--system-prompt-snapshot', 'off',
-  ];
-  // Blind: the app's text is the whole prompt, not an addition to Claude Code's own.
-  if (req.system) a.push(req.blind ? '--system-prompt-file' : '--append-system-prompt-file', join(dir, 'system.md'));
-  if (req.model) a.push('--model', req.model);
-  a.push(resume ? '--resume' : '--session-id', claudeSession);
-  return a;
-}
-
-/** The contraption's MCP servers as `--mcp-config` takes them: HTTP on its own port, headers as sent. */
-export function mcpConfig(port: number, servers: McpServer[]) {
-  return { mcpServers: Object.fromEntries(servers.map((s) => [s.name, { type: 'http', url: `http://127.0.0.1:${port}${s.path}`, headers: s.headers }])) };
-}
-
-/** The turn's --settings: what it may use, where it compacts, and the Agent cap's hook. */
-export function settings(req: TurnRequest, hook: { node: string; script: string; slots: string } | null, machines: string[] = []) {
-  const allow = [...req.mcp, ...machines.map((name) => ({ name })), ...(req.media ? [{ name: MEDIA_SERVER }] : [])].map((s) => `mcp__${s.name}`);
-  allow.push(...builtins(req));
-  const out: Record<string, unknown> = {
-    permissions: { allow, defaultMode: 'dontAsk' },
-    autoCompactWindow: req.compactWindow,
-    autoMemoryEnabled: false,
-    syncClaudeAiSkills: false,
-    disableClaudeAiConnectors: true,
-    enableAllProjectMcpServers: false,
-  };
-  if (req.agents && hook) {
-    const command = [hook.node, hook.script, hook.slots, String(req.agents.max)].map((s) => `'${s}'`).join(' ');
-    const on = [{ matcher: '^(Agent|Task)$', hooks: [{ type: 'command', command, timeout: 10 }] }];
-    out.hooks = { PreToolUse: on, PostToolUse: on, PostToolUseFailure: on };
-  }
-  return out;
 }
 
 /** Midnight today, server time: turn_cap counts from here. */
@@ -284,9 +230,6 @@ const AUDIT_TEXT_MAX = 100_000;
 const clip = (text: string) => (text.length > AUDIT_TEXT_MAX ? `${text.slice(0, AUDIT_TEXT_MAX)}\n[… ${text.length - AUDIT_TEXT_MAX} more characters not kept]` : text);
 /** Between a turn's prompt and a message its person sent while it ran, in the audit's prompt text. */
 export const AUDIT_STEER = '\n\n--- sent during the turn ---\n';
-
-/** One message as claude's stream-json input takes it; claude echoes `uuid` back once it takes it in. */
-export const userLine = (text: string, uuid?: string, images: ImageBlock[] = []) => JSON.stringify({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } })), { type: 'text', text }] } }) + '\n';
 
 /** An app session as the account pick knows it (ClaudePlaces.place). */
 const appWarmKey = (contraption: number, session: string) => `app:${contraption}:${session}`;
@@ -585,6 +528,10 @@ export class ContraptionTurns {
     // The name can never get back to the session it leaves, so that session's transcript goes.
     if (known && !resume) this.dropTranscript(where, known.claude_session);
     if (!blind) this.store.putContraptionSession(c.id, req.person, req.session, claudeSession);
+    // A kept turn (#836): what it streams, written once it ends well. Not a blind one's, nor an opted-out person's.
+    const keepDir = req.keep && !blind && !this.store.getSetting<boolean>(optOutKey(req.person)) ? keptDir(this.dataDir, c) : null;
+    const keepAt = keepDir ? keptFile(keepDir, req.person, req.session, claudeSession) : null;
+    const kept = keepAt && wantsKeep(keepAt) ? { calls: new Map<string, KeptCall>(), text: '' } : null;
 
     // Private: it holds the prompt, the contraption's system prompt and its MCP tokens until the turn ends.
     mkdirSync(dir.onHost, { recursive: true, mode: 0o700 });
@@ -723,8 +670,10 @@ export class ContraptionTurns {
           if (b?.type === 'tool_use') {
             tools.set(String(b.id), String(b.name));
             emit('tool', { id: b.id, name: b.name, input: b.input, parent });
+            kept?.calls.set(String(b.id), { name: String(b.name), input: b.input, ok: null, result: null });
           }
           else if (b?.type === 'text' && !parent && typeof b.text === 'string') {
+            if (kept) kept.text += (kept.text ? '\n\n' : '') + b.text;
             // Text the partial stream missed (it is off, or cut short): the rest of it, once.
             const all = (said.get(mid) ?? '') + b.text;
             said.set(mid, all);
@@ -740,6 +689,8 @@ export class ContraptionTurns {
       } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
         for (const b of ev.message.content) {
           if (b?.type !== 'tool_result') continue;
+          const call = kept?.calls.get(String(b.tool_use_id));
+          if (call) Object.assign(call, { ok: !b.is_error, result: cap(blockText(b.content)) });
           // A failed call carries the error the agent saw (a refusal before the tool ran has no other trace, #624); output never goes out.
           if (b.is_error) {
             const error = blockText(b.content).slice(0, TOOL_ERROR_MAX);
@@ -816,6 +767,15 @@ export class ContraptionTurns {
     if (live.stopped === 'canceled') return error('canceled', 'The turn was stopped');
     if (result && !result.is_error) {
       emit('end', { stop: result.stop_reason ?? result.subtype ?? 'end_turn', usage: total, provider, model });
+      // shortcut: steers that reached the turn aren't kept, so a replay sends only the first prompt; keep them if replays of steered turns matter.
+      // Checked again at the end: the person may have opted out, or deleted the session, while the turn ran.
+      if (kept && keepAt && !this.store.getSetting(optOutKey(req.person)) && this.store.contraptionSession(c.id, req.person, req.session)) {
+        try {
+          keepTurn(keepAt, { at: Date.now(), turn: live.id, prompt: req.prompt, images: req.imageBlocks?.length ?? 0, system: sha256(req.system), model: req.model, servers: Object.keys(config.mcpServers), agents: !!req.agents, webSearch: req.webSearch, compactWindow: req.compactWindow, calls: [...kept.calls.values()], text: cap(kept.text), stop: String(result.stop_reason ?? result.subtype ?? 'end_turn') });
+        } catch (err: any) {
+          console.warn(`contraption ${c.name}: couldn't keep a turn for replay: ${err?.code ?? 'error'}`); // no content in the log
+        }
+      }
       return { outcome: 'end', usage };
     }
     const why = [typeof result?.result === 'string' ? result.result : '', ...(Array.isArray(result?.errors) ? result.errors.map(String) : []), stderr].join('\n').trim();
@@ -911,6 +871,7 @@ export class ContraptionTurns {
     if (place) this.dropTranscript(this.scratch(c, person, place), s.claude_session);
     this.dropCodex(codexKey(c.id, person, name), place ? codexLogFile(this.scratch(c, person, place).onHost, name) : null);
     this.store.deleteContraptionSession(c.id, person, name);
+    dropKeptSession(keptDir(this.dataDir, c), person, name);
     return 'deleted';
   }
 }

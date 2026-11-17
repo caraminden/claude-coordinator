@@ -229,7 +229,26 @@ export function accountPage() {
   return page(
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
       account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you link your Claude below.']),
-    form, claudeCard(), codexCard(), githubCard(), openrouterCard(), secretsCard());
+    form, claudeCard(), codexCard(), githubCard(), openrouterCard(), secretsCard(), replayCard());
+}
+
+/** Kept app chats (#836): a person's way to keep their app chats out of replay tests. */
+function replayCard() {
+  const box = h('input', { type: 'checkbox', checked: account?.keepChats !== false });
+  box.onchange = () => {
+    const keep = box.checked;
+    const set = (v) => { box.checked = v; if (account) account.keepChats = v; };
+    optimistic({
+      key: 'replay', sets: 'replay',
+      apply: () => set(keep),
+      send: () => api('api/me/replay', { method: 'PUT', body: { keep } }),
+      undo: () => set(!keep),
+      label: keep ? 'keep your app chats for replay tests' : 'stop keeping your app chats',
+    });
+  };
+  return h('div', { class: 'account-card replay-card' }, h('h3', {}, 'App chats for replay tests'),
+    h('label', { class: 'toggle' }, box, 'Keep my first few turns of app chats when the app asks'),
+    h('p', { class: 'muted small' }, 'An app can keep the first five turns of a chat (what you typed, what its agent did and said) in its scheme\'s files for 30 days, so its developers can rerun them when they change the agent\'s prompt. They aren\'t listed in Files, and deleting the chat deletes them. Turning this off deletes what was kept of yours and keeps nothing more.'));
 }
 
 /** A plan's week as of its last turn: "41%, resets Mon 9:00 AM", or null before its first turn. */

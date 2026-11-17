@@ -13,7 +13,8 @@ import { HttpError } from './http.ts';
 import { INPUT_IMAGE, mediaCode, outPath, refusal, target, writeOutput, type MediaTool, type OpenRouter } from './openrouter.ts';
 
 /** The MCP server's name on the turn: its tools show as mcp__citadel__<tool>. */
-export const MEDIA_SERVER = 'citadel';
+import { MEDIA_SERVER } from './contraption-args.ts';
+export { MEDIA_SERVER };
 /** Media files are kept this long from when they were written (overwriting one starts again). */
 export const MEDIA_KEEP_MS = 30 * 86_400_000;
 export const MEDIA_PLACE = 'your media folder';

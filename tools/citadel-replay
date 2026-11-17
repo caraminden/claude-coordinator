@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Rerun kept app chats with an old and a new system prompt (#836): src/replay.ts, and the citadel:replay skill.
+# On a turn's PATH it sits in the pin's bin/ with replay.ts one folder up; in the repo, in tools/ beside src/.
+here=$(dirname "$(readlink -f "$0")")
+script=$here/../replay.ts
+[ -f "$script" ] || script=$here/../src/replay.ts
+exec node "$script" "$@"

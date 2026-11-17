@@ -6,6 +6,7 @@ import { clientIp, HttpError, isSecure, json, readJson, type App, type Route } f
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
 import { secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
+import { dropKeptPerson, keptDirs, optOutKey } from '../replay-keep.ts';
 
 /** A person as Settings → People shows them: never a hash or a token. */
 function personView(app: App, u: User) {
@@ -332,6 +333,18 @@ export const peopleRoutes: Route[] = [
       const why = app.runner.setCodexSwitch(uid, on);
       if (why) throw new HttpError(400, `Can't switch to Codex: ${why}.`);
       return json(res, 200, app.runner.codexView(uid));
+    },
+  },
+  // Kept app chats (#836): on by default; turning it off deletes what was kept of the person's and keeps no more.
+  {
+    method: 'PUT', path: '/api/me/replay', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const uid = uidOf(session);
+      const { keep } = await readJson(req);
+      if (typeof keep !== 'boolean') throw new HttpError(400, 'keep must be true or false');
+      app.store.setSetting(optOutKey(uid), !keep);
+      if (!keep) dropKeptPerson(keptDirs(app.dataDir), uid);
+      return json(res, 200, { keep });
     },
   },
   { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, members(app, project.id)) },

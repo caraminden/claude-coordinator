@@ -9,6 +9,7 @@ import type { Store } from '../db.ts';
 import { mayReceive } from '../access.ts';
 import { randomUUID } from 'node:crypto';
 import { clientIp, HttpError, isSecure, json, readJson, str, type Ctx, type Route } from '../http.ts';
+import { optOutKey } from '../replay-keep.ts';
 
 const MAX_CLIENTS = 100;
 
@@ -36,7 +37,7 @@ export async function newPasswordHash(v: unknown): Promise<string> {
 /** Who you are, as the front end needs it. */
 function meView({ store, claude, runner }: Ctx['app'], session: Ctx['session']) {
   const user = session.uid ? store.getUser(session.uid) : undefined;
-  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns: !!user?.server_login || (!!user && claude.linked(user.id) === 'linked'), payer: runner.payerOf(user?.id) };
+  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns: !!user?.server_login || (!!user && claude.linked(user.id) === 'linked'), payer: runner.payerOf(user?.id), keepChats: !!user && !store.getSetting<boolean>(optOutKey(user.id)) };
 }
 
 export const appRoutes: Route[] = [

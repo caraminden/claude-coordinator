@@ -277,7 +277,8 @@ h2[data-shape="star"] .mk-glyph { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68
 .mk-take figure { margin: 0.9rem 0; }
 .mk-take figcaption { font-size: 0.82rem; color: var(--mk-muted); margin-top: 0.35rem; }
 .mk-take > .mk-pickbar { padding-inline: 0; margin-top: 1rem; border-top: 1px solid var(--mk-line); }
-:is(.mk-take, .mk-option, .mk-board)[data-mk-v] { --mk-picked: var(--mk-good); }
+:is(.mk-take, .mk-option, .mk-board)[data-mk-v] { --mk-picked: var(--mk-accent); }
+:is(.mk-take, .mk-option, .mk-board):is([data-mk-v="go"], [data-mk-v="yes"], [data-mk-v="keep"], [data-mk-v="pick"]) { --mk-picked: var(--mk-good); }
 :is(.mk-take, .mk-option, .mk-board):is([data-mk-v="later"], [data-mk-v="maybe"], [data-mk-v="rework"]) { --mk-picked: var(--mk-warn); }
 :is(.mk-take, .mk-option, .mk-board):is([data-mk-v="skip"], [data-mk-v="no"], [data-mk-v="cut"]) { --mk-picked: var(--mk-bad); }
 .mk :is(.mk-take, .mk-option, .mk-board)[data-mk-v] { border-color: var(--mk-picked); box-shadow: 0 0 0 1px var(--mk-picked); background: color-mix(in srgb, var(--mk-picked) 9%, var(--mk-panel)); }

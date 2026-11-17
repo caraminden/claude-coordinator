@@ -72,8 +72,8 @@ mock.picks({ collection: 'questions', options: ['yes', 'no'], root: document.get
 - The item gets `.picked` and `data-mk-v` when chosen, for styling.
 - The buttons are one segmented control, and each choice wears its tone: `go`, `yes`, `keep` and
   `pick` are good with a drawn tick, `later`, `maybe` and `rework` warn with a ring, `skip`, `no`
-  and `cut` bad with a cross. Use those values where they fit; any other value gets the accent and
-  no mark.
+  and `cut` bad with a cross. Use those values where they fit; any other value gets the accent, on
+  its button and its picked box, and no mark.
 - Put everything a take shows (heading, blurb, screenshots, captions) inside its `data-pick` element, never loose between elements. The kit boxes that element as one unit with its pick bar at the bottom and turns the whole box the picked choice's tone (green for go, amber for later, red for skip); anything outside it reads as belonging to no take.
 
 ## The dock

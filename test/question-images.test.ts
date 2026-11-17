@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until, stopProcs, stopTurns } from './helpers.ts';
+import { bootServer, jsonLines, withoutTurnNote, until, stopProcs, stopTurns } from './helpers.ts';
 
 // Option pictures on question cards and comments on files, through the real server. A stand-in
 // `claude -p` records each turn's prompt, folder and thread token, then ends the turn.
@@ -108,7 +108,7 @@ test('a comment on a file is a chat message from the person that wakes the threa
   const before = turns().length;
   await call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', body: { path: 'report.md', text: 'Shorter, please.', quote: 'The long intro' } });
   const next = (await until('the comment\'s turn', () => turns().length > before && turns())).at(-1);
-  assert.deepEqual(next.prompt.message.content, [{ type: 'text', text: '[Cara on report.md]: > The long intro\n\nShorter, please.' }]);
+  assert.deepEqual(withoutTurnNote(next.prompt.message.content), [{ type: 'text', text: '[Cara on report.md]: > The long intro\n\nShorter, please.' }]);
   const message = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').at(-1);
   assert.deepEqual(JSON.parse(message.data), { author: 'Cara', text: '> The long intro\n\nShorter, please.', comment: { path: 'report.md', about: 'report.md' } });
   await idle(ticket.id);
@@ -124,7 +124,7 @@ test('a thread can message its coordinator, which wakes with the thread named', 
   const before = turns().length;
   await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'Send #2 the handoff', need: 'ask' } });
   const next = (await until('the coordinator\'s turn', () => turns().length > before && turns())).at(-1);
-  assert.match(next.prompt.message.content[0].text, /^\[#1 .+\]: Send #2 the handoff$/);
+  assert.match(withoutTurnNote(next.prompt.message.content)[0].text, /^\[#1 .+\]: Send #2 the handoff$/);
   assert.notEqual(next.token, turn.token);
   // Let the coordinator's turn end here, or its wind-down writes into root while after() deletes it.
   await idle(Number(next.token.split('.')[0]));

@@ -319,8 +319,12 @@ test('through the server: a person connects on their account page and their mini
     assert.ok(!JSON.stringify((await srv.call('/api/me/openrouter')).data).includes(KEY.slice(-12)), 'the key never comes back out');
 
     const names = async (media: boolean) => (await mcp(media, 'tools/list')).tools.map((t: any) => t.name);
-    assert.deepEqual((await names(true)).filter((n: string) => /image|audio|speech/.test(n)), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech']);
-    assert.ok(!(await names(false)).includes('generate_image'));
+    assert.deepEqual((await names(true)).filter((n: string) => /^(generate_image|edit_image|generate_audio|generate_speech)$/.test(n)), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech']);
+    // Listed whatever the turn's person has, so one scheme's minions share a tool list (#878); the call refuses instead.
+    assert.deepEqual(await names(false), await names(true));
+    const unlinked = await mcp(false, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a cat', out: 'art/cat.png' } });
+    assert.ok(unlinked.isError);
+    assert.match(unlinked.content[0].text, /hasn't connected OpenRouter/);
     const made = await mcp(true, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a cat', out: 'art/cat.png', resolution: '1K' } });
     assert.match(made.content[0].text, /^Wrote .*art\/cat\.png with black-forest-labs\/flux-3-image-klein for \$0\.0091; \$2\.99 left this month\.$/);
     assert.deepEqual(readFileSync(join(wt, 'art', 'cat.png')), PNG);

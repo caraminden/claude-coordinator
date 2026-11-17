@@ -34,7 +34,12 @@ const { createInterface } = require('node:readline');
 const { appendFileSync, readFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 // A contraption turn with no system prompt has no file.
-const system = args.includes('--append-system-prompt-file') ? readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8') : '';
+const systemFile = args.includes('--append-system-prompt-file') ? args[args.indexOf('--append-system-prompt-file') + 1] : null;
+const system = systemFile ? readFileSync(systemFile, 'utf8') : '';
+// The turn's first message, from prompt.jsonl beside it: a minion's own lines open it, its machines' included (#878).
+const promptFile = systemFile && require('node:path').join(require('node:path').dirname(systemFile), 'prompt.jsonl');
+// A contraption turn's system prompt holds its machines itself, and no prompt.jsonl sits beside it.
+const message = promptFile && require('node:fs').existsSync(promptFile) ? JSON.parse(readFileSync(promptFile, 'utf8').split('\\n')[0]).message.content.map((b) => b.text ?? '').join('\\n') : '';
 const config = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
 const allow = JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')).permissions.allow;
 const report = (r) => appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify(r) + '\\n');
@@ -63,7 +68,7 @@ process.stdin.resume();
     }
     p.stdin.end();
   }
-  report({ args, system, allow, results, token: process.env.COORDINATOR_TOKEN });
+  report({ args, system, message, allow, results, token: process.env.COORDINATOR_TOKEN });
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 })().catch((err) => { report({ args, error: String(err) }); process.exit(1); });

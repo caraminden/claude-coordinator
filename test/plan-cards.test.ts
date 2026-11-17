@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until, stopProcs, stopTurns } from './helpers.ts';
+import { bootServer, jsonLines, withoutTurnNote, until, stopProcs, stopTurns } from './helpers.ts';
 
 // Plan cards through the real server: a minion proposes, only a person approves or sends it back,
 // and a newer plan supersedes the open one. A stand-in `claude -p` records each turn's prompt and
@@ -80,7 +80,7 @@ test('Revise needs notes, sends them to the minion, and the next plan supersedes
   const before = turns().length;
   await call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId: id, verdict: 'revise', notes: 'Drop step one.' } });
   const next = (await until('the revise turn', () => turns().length > before && turns())).at(-1);
-  assert.match(next.prompt.message.content[0].text, /^\[Cara\]: Revise the plan \("First plan"\) before building:\n\nDrop step one\./);
+  assert.match(withoutTurnNote(next.prompt.message.content)[0].text, /^\[Cara\]: Revise the plan \("First plan"\) before building:\n\nDrop step one\./);
   await idle(ticket.id);
   // The revise turn got a new token, and the first turn's stopped working.
   assert.notEqual(next.token, turn.token);
@@ -102,7 +102,7 @@ test('Approve sends the go once and records who and when', async () => {
   const t0 = Date.now();
   await call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId: id, verdict: 'approve' } });
   const next = (await until('the go turn', () => turns().length > before && turns())).at(-1);
-  assert.equal(next.prompt.message.content[0].text, '[Cara]: Plan approved: build it this way. ("Second plan")');
+  assert.equal(withoutTurnNote(next.prompt.message.content)[0].text, '[Cara]: Plan approved: build it this way. ("Second plan")');
   const approved = (await plans())[1];
   assert.equal(approved.status, 'approved');
   assert.equal(approved.by, 'Cara');

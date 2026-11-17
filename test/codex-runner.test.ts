@@ -45,7 +45,8 @@ const at = args.indexOf('--resume');
 const resume = at >= 0 ? args[at + 1] : null;
 const dir = join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
 require('node:readline').createInterface({ input: process.stdin }).once('line', (line) => {
-  const text = JSON.parse(line).message.content.map((b) => b.text ?? '').join('\\n');
+  const blocks = JSON.parse(line).message.content;
+  const text = blocks.map((b) => b.text ?? '').join('\\n');
   const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : null;
   // The turn's Codex config, which names the container a host turn's Codex review runs in (#398).
   const codex = process.env.CITADEL_CODEX_TRIPWIRE ? JSON.parse(readFileSync(process.env.CITADEL_CODEX_TRIPWIRE, 'utf8')) : null;
@@ -58,7 +59,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   }
   const id = resume ?? 'sess-1';
   mkdirSync(dir, { recursive: true });
-  appendFileSync(join(dir, id + '.jsonl'), JSON.stringify({ type: 'user', message: { role: 'user', content: text } }) + '\\n' + JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'CLAUDE REPLY' }] } }) + '\\n');
+  appendFileSync(join(dir, id + '.jsonl'), JSON.stringify({ type: 'user', message: { role: 'user', content: blocks } }) + '\\n' + JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'CLAUDE REPLY' }] } }) + '\\n');
   console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: id, model: 'claude-opus-5-5' }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done', session_id: id }));
   process.exit(0);
@@ -148,6 +149,9 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   const said = first.input.map((i: any) => i.text).join('\n');
   assert.match(said, /<conversation>[\s\S]*\[Message\] \[Josh\]: first ask[\s\S]*\[Claude\] CLAUDE REPLY[\s\S]*<\/conversation>/);
   assert.match(said, /second ask/);
+  const [handed, fresh] = said.split('</conversation>');
+  assert.doesNotMatch(handed, /You are a minion working on/, "the hand-over leaves out Claude's past turn notes (#878)");
+  assert.match(fresh, /^\n\[System\]: You are a minion working on #\d+/, 'the new message carries its own');
   const kept = store.getSetting<CodexThread>(codexThreadKey(t.id))!;
   assert.equal(kept.thread, 'th1');
   assert.equal(kept.person, josh.id);
@@ -169,6 +173,7 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   const back = calls().filter((c) => c.who === 'claude')[1];
   assert.equal(back.resume, 'sess-1');
   assert.equal(back.model, 'claude-opus-5-5');
+  assert.doesNotMatch(back.text.split('<codex-turns>')[1].split('</codex-turns>')[0], /You are a minion working on/, "the hand-back leaves out the Codex turns' notes");
   assert.match(back.text, /<codex-turns>[\s\S]*second ask[\s\S]*CODEX OUTPUT[\s\S]*CODEX REPLY[\s\S]*third ask[\s\S]*<\/codex-turns>[\s\S]*fourth ask/);
   assert.equal(store.getSetting(codexThreadKey(t.id)), null, 'Claude has the Codex turns now');
 });

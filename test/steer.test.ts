@@ -28,7 +28,8 @@ let replied = false;
 let closed = false;
 const rl = require('node:readline').createInterface({ input: process.stdin });
 rl.on('line', (l) => {
-  const text = JSON.parse(l).message.content[0].text;
+  // Past the [System] note of the minion's own lines that opens a turn's first message (#878).
+  const text = JSON.parse(l).message.content.find((b) => !b.text.startsWith('[System]: You are a minion working on #')).text;
   appendFileSync('seen.txt', text + '\\n');
   console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'got ' + text }] } }));
 });

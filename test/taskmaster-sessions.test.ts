@@ -169,6 +169,7 @@ test("a personal Taskmaster's turns run for its person; a card answer from someo
   const { store, Cara, Josh } = people('turn-person.db');
   const p = store.createProject('Shared', null, Cara.id);
   coordinator(store, p.id);
+  store.addMember(p.id, Josh.id);
   const josh = store.splitScheme(p.id, Josh.id);
   const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
   runner.personOf = (author) => store.findUser('name', author)?.id ?? null;
@@ -177,6 +178,9 @@ test("a personal Taskmaster's turns run for its person; a card answer from someo
   assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'hi', images: [], typed: true, own: true }]), Josh.id, "someone else's words are content");
   assert.equal(turnPerson(josh, [{ author: '#4 Work', text: 'done', images: [], from: 12 }]), Josh.id);
   assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'My answers', images: [], own: true }]), Cara.id);
+  // #211: taken out of the scheme, Josh no longer pays for his old Taskmaster's turns; the owner does.
+  store.removeMember(p.id, Josh.id);
+  assert.equal(turnPerson(josh, [{ author: '#4 Work', text: 'done', images: [], from: 12 }]), Cara.id);
 });
 
 test("the digest rides at the head of a Taskmaster's next turn, once", async () => {
@@ -266,6 +270,10 @@ function describeServer() {
     const overlord = db.getOverlord(Shared.id)!;
     await post(`/api/tickets/${overlord.id}/messages`, { text: 'for the Overlord', after: true }, { cookie: cookies(Josh) });
     assert.ok(said(overlord.id, 'for the Overlord'));
+    // The scheme page opens each person's own Taskmaster, as the scheme list does.
+    const page = async (u: { id: number; name: string }) => (await (await fetch(`${srv.base}/api/projects/${Shared.id}?tickets=open`, { headers: { Cookie: cookies(u) } })).json()).coordinator.id;
+    assert.equal(await page(Josh), josh.id);
+    assert.equal(await page(Cara), sharedTm.id);
   });
 
   test('in a one-person scheme a message to the Taskmaster changes nothing', async () => {
@@ -354,5 +362,19 @@ function describeServer() {
     assert.ok(said(delveTm.id, 'from josh'));
     await post('/api/taskmaster', { scheme: 'Shared', text: 'reply to josh', need: 'fyi' }, { bearer: tokens.agentToken(delveTm.id) });
     assert.ok(said(josh.id, 'reply to josh'), 'a reply returns to the Taskmaster that sent');
+    await post('/api/taskmaster', { scheme: 'Shared', text: 'second from delve', need: 'fyi' }, { bearer: tokens.agentToken(delveTm.id) });
+    assert.ok(said(overlord.id, 'second from delve'), 'the reply route is used once');
+    // Once Delve splits too, a personal Taskmaster reaches its own person's there.
+    r = await post(`/api/tickets/${delveTm.id}/messages`, { text: 'Josh in Delve', after: true }, { cookie: cookies(Josh) });
+    assert.equal(r.status, 202, JSON.stringify(r.data));
+    const joshDelve = db.coordinatorFor(Delve.id, Josh.id)!;
+    assert.equal(joshDelve.coordinator_of, Josh.id);
+    // Delve's last wrote to Josh's ('reply to josh'), so his next message there is the reply; the one after reaches his own.
+    await post('/api/taskmaster', { scheme: 'Delve', text: 'josh replies', need: 'fyi' }, { bearer: tokens.agentToken(josh.id) });
+    assert.ok(said(delveTm.id, 'josh replies'));
+    await post('/api/taskmaster', { scheme: 'Delve', text: 'josh to his own', need: 'fyi' }, { bearer: tokens.agentToken(josh.id) });
+    assert.ok(said(joshDelve.id, 'josh to his own'));
+    await post('/api/taskmaster', { scheme: 'Delve', text: 'cara to hers', need: 'fyi' }, { bearer: tokens.agentToken(sharedTm.id) });
+    assert.ok(said(delveTm.id, 'cara to hers'), "Cara's Taskmaster in Delve is the old row");
   });
 }

@@ -2332,7 +2332,10 @@ export class Runner {
     // A person's own Taskmaster (#919) runs for them; a card answered there by someone else wakes it on theirs (R5).
     if (ticket.kind === 'coordinator' && ticket.coordinator_of != null) {
       const answer = batch.find((m) => m.own && !m.typed && !m.from);
-      return (answer && this.personOf?.(answer.author)) || ticket.coordinator_of;
+      const p = (answer && this.personOf?.(answer.author)) || ticket.coordinator_of;
+      // #211: someone taken out of the scheme (or deleted) no longer pays for its turns; its owner does.
+      const user = this.store.getUser(p);
+      return user && this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? p : project.owner_id;
     }
     for (const m of batch) {
       const p = this.personOf?.(m.author, m.from);

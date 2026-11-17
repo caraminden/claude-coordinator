@@ -140,12 +140,12 @@ export async function ensureCoordinatorFor(app: App, project: Project, personId:
   return mine;
 }
 
-/** Which Taskmaster of `project` last wrote to scheme `to`: where `to`'s reply goes (#919). */
+/** Which Taskmaster of scheme `project` last wrote to Taskmaster `to`: where `to`'s next message there goes, once (#919). */
 const replyKey = (to: number, project: number) => `taskmaster_reply:${to}:${project}`;
 
 /**
  * The Taskmaster of `project` a message_taskmaster from `from` reaches (#919): with `person`, that member's own,
- * else the Overlord; without, the one that last wrote from `project` to `from`'s scheme (a reply), else the sender's
+ * else the Overlord; without, the one of `project` that last wrote to `from` (a reply, once), else the sender's
  * person's own, else the Overlord. An unsplit scheme has just the one.
  */
 async function taskmasterTo(app: App, from: Ticket, own: Project, project: Project, person: unknown): Promise<Ticket> {
@@ -157,12 +157,13 @@ async function taskmasterTo(app: App, from: Ticket, own: Project, project: Proje
     if (!user) throw new HttpError(400, `No person called "${raw}"; leave person out for the scheme's Overlord`);
     return store.coordinatorFor(project.id, user.id) ?? only;
   }
-  const back = store.getTicket(store.getSetting<number>(replyKey(own.id, project.id)) ?? 0);
+  const back = store.getTicket(store.getSetting<number>(replyKey(from.id, project.id)) ?? 0);
+  store.deleteSetting(replyKey(from.id, project.id));
   if (back?.kind === 'coordinator' && back.project_id === project.id) return back;
   return store.coordinatorFor(project.id, from.coordinator_of) ?? only;
 }
 
-/** ", Josh's" or ", the Overlord" after a split scheme's Taskmaster's name, so the receiver knows who wrote. */
+/** " (Josh's)" or " (the Overlord)" after a split scheme's Taskmaster's name, so the receiver knows who wrote. */
 function senderLabel(app: App, from: Ticket): string {
   if (!app.store.isSplit(from.project_id)) return '';
   return from.coordinator_of == null ? ' (the Overlord)' : ` (${app.store.getUser(from.coordinator_of)?.name ?? 'someone'}'s)`;
@@ -564,7 +565,9 @@ export const projectRoutes: Route[] = [
     // ?tickets=open leaves the dismissed minions out (`dismissed` counts them), and ?tickets=closed sends only them: the page
     // draws the scheme from the open ones and fetches the dismissed behind it, 80% of Citadel's payload (#538).
     async handler({ res, url, app, session, caller, project }) {
-      const coordinator = await ensureCoordinator(app, project);
+      // A person gets their own Taskmaster once the scheme is split (#919), as the scheme list's coordinator_id does.
+      const only = await ensureCoordinator(app, project);
+      const coordinator = caller ? only : (app.store.coordinatorFor(project.id, session.uid ?? null) ?? only);
       const which = url.searchParams.get('tickets');
       // ?number=N sends only that minion: the Taskmaster's tools turn a number into an id this way, on each call (#609).
       const number = url.searchParams.has('number') ? Number(url.searchParams.get('number')) : null;
@@ -726,7 +729,7 @@ export const projectRoutes: Route[] = [
     async handler({ res, app, session, project }) {
       if (onboardingOpen(project)) throw new HttpError(409, `${project.onboarding_mode === 'tune-up' ? 'A tune-up' : 'Setup'} is under way already`);
       // The Taskmaster first, so a failure there can't leave onboarding open with nobody told.
-      const coordinator = await ensureCoordinator(app, project);
+      const coordinator = await ensureCoordinatorFor(app, project, session.uid);
       if (onboardingOpen(app.store.getProject(project.id)!)) throw new HttpError(409, 'A tune-up is under way already');
       app.store.setProjectSettings(project.id, { onboarding: 'interview', onboarding_mode: 'tune-up' });
       app.runner.send(coordinator.id, session.name, 'Tune up this scheme: onboarding is on again, in tune-up mode.');
@@ -976,7 +979,7 @@ export const projectRoutes: Route[] = [
       if (r.proposed) {
         app.registryChanged(project.id, false);
         const what = body.value === undefined ? `a new key \`${body.key}\`` : `\`${body.key}: ${body.value}\``;
-        const coordinator = await ensureCoordinator(app, project);
+        const coordinator = await ensureCoordinatorFor(app, project, null); // the registry is the Overlord's (#919)
         app.runner.send(coordinator.id, actor.name, `Property proposal: ${what}. Reason: ${body.reason}\n\nApprove or reject it with review_property (new keys need a person: ask them).`, []);
       }
       return json(ctx.res, 200, r);
@@ -1108,7 +1111,7 @@ export const projectRoutes: Route[] = [
       const attached = file ? `\n${APP_NAME} copied a file it attached into your scheme's shared folder, where your minions can read it too: ${file.path} (${byteSize(file.size)})` : '';
       const { held, left, cold } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true, need);
       // A reply from that scheme comes back to this Taskmaster, not to whichever of its scheme's is default (#919).
-      if (!held) store.setSetting(replyKey(project.id, own.id), from.id);
+      if (!held) store.setSetting(replyKey(to.id, own.id), from.id);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
       if (!held) runner.emit(from.id, 'note', { need, text: `${wake && !cold ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });

@@ -745,6 +745,8 @@ export async function catchUpEvents() {
 export function onTicketUpdate(ticket) {
   if (view?.kind !== 'project') return;
   if (view.projectId !== ticket.project_id) return inboxOtherTicket(ticket);
+  // Another person's Taskmaster or the Overlord (#919) never replaces this person's own; #920 shows them.
+  if (ticket.kind === 'coordinator' && view.coordinator && ticket.id !== view.coordinator.id) return;
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);
   if (ticket.kind === 'coordinator') view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);

@@ -1259,7 +1259,7 @@ export const ticketRoutes: Route[] = [
         to = { minion: m.id, number: m.number };
       } else {
         const { project } = schemeTarget(app, ticket, target);
-        to = { scheme: project.name, taskmaster: (await ensureCoordinator(app, project)).id };
+        to = { scheme: project.name, taskmaster: (await ensureCoordinatorFor(app, project, null)).id }; // not for a member: the Overlord (#919)
       }
       const commit = body.commit == null || body.commit === ''
         ? (ticket.cwd ? await gitOut(['rev-parse', 'HEAD'], ticket.cwd) : null)

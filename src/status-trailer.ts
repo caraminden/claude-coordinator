@@ -5,6 +5,10 @@
 // Only at the very end of the text, so an example quoted earlier in a reply stays put; its body can't cross a `-->`.
 const TRAILER = /\s*`?<!--\s*status:\s*((?:(?!-->)[\s\S])*?)\s*-->`?\s*$/;
 
+/** The limits the tool descriptions and the prompt state: a note's characters, and a reply button's. */
+export const NOTE_MAX = 60;
+export const REPLY_MAX = 40;
+
 /** The label fields a trailer may set; title and build stay with set_thread_status. */
 export type StatusFields = { state?: unknown; note?: unknown; replies?: unknown };
 
@@ -24,5 +28,8 @@ export function takeStatus(text: string): { text: string; status: StatusFields |
   }
   const status: StatusFields = {};
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) for (const k of ['state', 'note', 'replies'] as const) if (k in parsed) status[k] = parsed[k];
+  // An over-long note or reply is clipped, not refused: a refusal arrives after the turn is over, too late to fix, and drops the state with it.
+  if (typeof status.note === 'string' && status.note.length > NOTE_MAX) status.note = `${status.note.slice(0, NOTE_MAX - 1).trimEnd()}…`;
+  if (Array.isArray(status.replies)) status.replies = status.replies.map((r) => (typeof r === 'string' && r.length > REPLY_MAX ? `${r.slice(0, REPLY_MAX - 1).trimEnd()}…` : r));
   return Object.keys(status).length ? { text: rest, status, bad: null } : { text: rest, status: null, bad: `no state, note or replies in ${m[1].slice(0, 80)}` };
 }

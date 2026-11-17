@@ -80,21 +80,24 @@ export function byteSize(n: number): string {
 }
 
 /** How a session can put files in front of people: links in its reply that the app turns into previews. */
-function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string | null): string[] {
-  const where = `inside your working directory${[filesDir, sharedDir].filter(Boolean).map((d) => ` or in ${d}`).join('')}`;
+function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string | null, filesInTurn = false): string[] {
+  // A minion's own files folder is named in its turn message (#878), so this text is the same for every minion in the scheme.
+  const where = `inside your working directory${filesInTurn ? ' or in your files folder (named in each turn\'s [System] note)' : ''}${[filesDir, sharedDir].filter(Boolean).map((d) => ` or in ${d}`).join('')}`;
   return [
     `You can show people files (documents, images, GIFs, videos, web pages, PDFs, and zip or other archives to download) by linking them in your reply with a path ${where}; the app turns those links into previews that open the file in place of the chat:`,
     '- Link files by absolute path, never `../`: a relative link resolves against your working directory and breaks at the wrong depth.',
     '- `![caption](path)` shows an inline preview: use it for images, GIFs and videos.',
     '- `[title](path)` shows a card: use it for documents, web pages and PDFs. A card for a .zip, .7z, .tar, .gz or .apk file downloads it when clicked.',
-    filesDir
-      ? `Put files you fetch from elsewhere or make only to show people (not part of the work in your branch) in ${filesDir}, so they never end up in a commit. Files elsewhere on disk can't be shown; copy them there first.`
-      : '',
+    filesDir ? filesLine(filesDir) : '',
     'Linking a file is the only way people see it; they cannot browse your folders. Files you link are also listed in the scheme\'s artifacts, so link only what is meant for people, not files you made for your own use (test pages, scratch notes, fixtures).',
     sharedDir
       ? `${sharedDir} is a folder every minion in the scheme and the Taskmaster can read and write. Put handoffs, specs and notes that other minions should be able to find there (for example a handoff file a fresh minion can start from), and look there before starting related work. Keep scratch files, build output and secrets out of it. Its documents, pages, pictures and clips are listed in the scheme's Files view. Its inbox/ holds files people uploaded there (unless they picked another folder) and files other schemes' ${AGENT_NAME}s sent this scheme through ${APP_NAME}: look there first when someone says they shared or dropped a file.`
       : '',
   ].filter(Boolean);
+}
+
+function filesLine(filesDir: string): string {
+  return `Put files you fetch from elsewhere or make only to show people (not part of the work in your branch) in ${filesDir}, so they never end up in a commit. Files elsewhere on disk can't be shown; copy them there first.`;
 }
 
 /** The Citadel-wide instructions, set in the app for every scheme; right before the scheme's own. */
@@ -122,11 +125,6 @@ function projectInstructions(project: Project, layered: boolean): string[] {
     '',
     text,
   ];
-}
-
-/** Both layers of people's instructions, Citadel-wide first, for the end of a prompt. */
-function instructionLayers(project: Project, appText: string): string[] {
-  return [...appInstructions(appText), ...projectInstructions(project, !!appText.trim())];
 }
 
 /**
@@ -186,64 +184,92 @@ export function buildLines(b: BuildRole | null): string[] {
   ];
 }
 
+/** A prompt's named parts, in order, each a list of lines: the hash log hashes each one (#878). */
+export type PromptSections = Record<string, string[]>;
+
+/** A prompt's text from its parts. */
+export const promptText = (parts: PromptSections): string => Object.values(parts).flat().join('\n');
+
+/** system-prompt.md: the same for every minion of a scheme with the same personal layer (#878). Arguments as promptParts. */
+export const systemPrompt = (...args: Parameters<typeof promptParts>): string => promptText(promptParts(...args).system);
+
+/** The per-minion and volatile lines for the start of every turn's message (#878); '' when there are none. Arguments as promptParts. */
+export const turnContext = (...args: Parameters<typeof promptParts>): string => promptText(promptParts(...args).turn);
+
 /**
+ * A turn's prompt in two halves (#878): `system` for system-prompt.md, the same across a scheme's minions and turns,
+ * and `turn` for the start of the turn message: who and where the minion is, and what changes between turns.
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir, builds, everyScheme), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
-  const where = ticket.branch
-    ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
-    : 'Your working directory is a dedicated folder for this minion.';
-  return [
-    // No title here (#704): it changes whenever the minion retitles itself, and any changed byte in the system prompt makes the next turn rewrite the whole cached context.  A minion that needs the current title has read_ticket.
-    `You are a minion working on #${ticket.number} in scheme "${project.name}".`,
-    `You are managed by ${APP_NAME}, a shared web app where several people chat with you. The scheme's Taskmaster is the Claude session that coordinates the scheme's minions.`,
-    'Subagents you start with the Agent tool are called Grunts. When you brief a Grunt, include this line, since Grunts don\'t see this prompt:',
-    ROLE_FRAMING,
-    'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
-    where,
-    ...buildLines(build),
+export function promptParts(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false): { system: PromptSections; turn: PromptSections } {
+  const layers = { app: appInstructions(appText), scheme: projectInstructions(project, !!appText.trim()) };
+  if (ticket.kind === 'coordinator') {
+    return {
+      system: { taskmaster: [coordinatorPrompt(project, ticketsDir, memoryDir, builds)], onboarding: [onboardingPrompt(project, sharedDir, surveys)], files: showingFiles(ticket, filesDir, sharedDir), ...layers },
+      // It flips with whether the asker is a member (#656), so it rides the turn message (#878).
+      turn: { everyScheme: project.id === GLOBAL_OWNER ? [everySchemeLine(everyScheme)] : [] },
+    };
+  }
+  return {
+    // Nothing per minion or volatile (#704, #878): any changed byte here makes the next turn rewrite the whole cached context.
+    system: {
+      base: [
+        `You are managed by ${APP_NAME}, a shared web app where several people chat with you. The scheme's Taskmaster is the Claude session that coordinates the scheme's minions.`,
+        'Subagents you start with the Agent tool are called Grunts. When you brief a Grunt, include this line, since Grunts don\'t see this prompt:',
+        ROLE_FRAMING,
+        'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
+        'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with TaskCreate before starting it:',
+        '- Make 3 to 7 tasks that are conceptual chunks someone skimming would follow ("Find where the sidebar text comes from", "Make the readout show phases", "Test it on a copy"), not individual commands.',
+        '- Give each a one-sentence description of what it involves and why, a short activeForm ("Finding where the sidebar text comes from"), and metadata.estimate: your guess of its minutes, which fills the readout\'s bar. Guess your own working minutes, not a person\'s, and guess short: half of all steps finish in under 3 minutes and three quarters in under 7; land and self-review steps run longer (half by 5, nine in ten by 30); only about one step in eleven passes 20.',
+        '- Mark each task in_progress with TaskUpdate when you start it. When you finish it, mark it completed and set metadata.outcome to one plain sentence on what it found, decided or changed.',
+        '- If the plan changes, add, reword or delete tasks so the list stays true.',
+        'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
+        ...CHAT_FACTS,
+        'Send TaskUpdate and set_thread_status in the same message as a real tool call (a Read, Edit, Bash and so on), never on their own: a lone one costs a whole extra round trip. Mark a task completed and start the next one in the same message as that next step\'s first real call.',
+        // The tools' own descriptions (always loaded, src/mcp.ts ALWAYS_LOAD) carry how ask_question, set_thread_status and close_self work (#760): these lines say only what those don't.
+        'A choice for people (a go, A or B, an offer: "want me to…") gets an `ask_question` card; a lone go may be a `set_thread_status` reply. A visual or multi-part choice goes on a choices page (docs-and-mocks) via `doc`. If a typed answer or a newer card replaces it, call `settle_question`.',
+        'When people want to hear your plan before you build, post it with the `propose_plan` tool (mcp__thread): a card with Approve and Revise that only a person can approve, shown below your reply. Then end your turn and write no code until the go arrives as the next message.',
+        'Keep your line in the scheme\'s minions list (number, short title, state, note) accurate with the `set_thread_status` tool (mcp__thread). Your starting title may just be the opening words of the first message; replace it early in your first turn with the short ask.',
+        'Your minion carries properties from the scheme\'s registry (`list_properties`, mcp__thread): a `type` (feature, bug, art, ideation, design, research, chore or other), a `stage`, and the scheme\'s own keys. Set them with `set_properties` once the work is clear, and keep `type` right; if no type fits, set `other` and ask with a card whether it stays. To assign this minion to a person, set `assigned` to their login. Show properties as `key: value`.',
+        'End every turn\'s final reply with a status line, not a set_thread_status call: `<!-- status: {"state":"ready","note":"…","replies":[…]} -->`, its state, note and replies as set_thread_status defines them. State null when you are simply waiting on an answer; complete\'s note says what is left ("nothing left" or what to read, linked in your reply); replies are gos worded as the tapper\'s instruction to you, never while a card or plan waits.',
+        'Scratch files go in $TMPDIR (your own temp folder, also a working directory) or your worktree. Claude Code asks a person before an `rm` whose target it cannot pin down (a glob after `cd`, `rm -rf *`, a bare `$d/*`), whatever the permission mode, so give `rm` absolute paths in a call with no `cd`: `rm -rf "$TMPDIR/out" && mkdir -p "$TMPDIR/out"`, and `"${d:?}"/*` for a variable.',
+        'The tripwire refuses these habits, so skip them: `git checkout`/`restore`/`stash` on a path or work in progress (make a WIP commit; `git show HEAD:path` to look, `git show HEAD:./path > path` to put one file back); bare `env` or `printenv` (`env | cut -d= -f1` lists names, `[ -n "$NAME" ] && echo set` checks one); an rm or mv path it can\'t pin down (a variable the command didn\'t set; spell it out); SQL piped into sqlite3 on the live database (pass it as an argument).',
+        `${deploys ? 'For a dev copy of Citadel, run `citadel-dev-copy start` (a copy of the live data, `--data empty` for none; it prints the URL, a sign-in and the pid; `eval "$(citadel-dev-copy env)"` hands a script DEV_URL and DEV_COOKIE), `citadel-dev-copy seed <state>` for a waiting card, a turn mid-run and other states the data lacks (`seed --list`; add new ones to tools/dev-seeds.ts, not a scratch seed script) and `citadel-dev-copy stop`, never server.ts by hand. To shoot or drive a page there (click, fill, wait for text, read back), use `node tools/ui-shot.ts <#route> --step \'<verb> <selector>\'` (its header lists the steps), not a browser script of your own. ' : ''}Stop your ${deploys ? 'other ' : ''}processes by pid (\`$!\` when you start one, or \`ss -ltnp 'sport = :<port>'\`), never by name: every turn, ${APP_NAME} and its apps run as one account, so \`pkill\` or \`killall\` would hit other minions and ${APP_NAME} itself (the tripwire blocks them).`,
+        'While your own background job runs, wait inside the turn with one blocking `citadel-wait pid <pid>` (or `port <n>`, `file <path>`, `cmd \'<test>\'`) and a Bash timeout of 600000, repeated until it ends (exit 124: still going), never `sleep N; check`: ending the turn may kill the job. A Grunt whose result you need now runs with `run_in_background: false`.',
+        'When each lookup result only tells you the next lookup (grep, read the match, grep again; a query keyed on the last), do every hop in one Bash or `python3 -I` script that prints only the answer, capped (`| head -50`). A question that needs 5 or more files read goes to an `Explore` Grunt on Sonnet, briefed for the conclusion and the exact lines, not file dumps.',
+        HEAVY_LINE,
+        `${deploys ? 'Once your change is live, or deployed and waiting in pending-deploy,' : 'Once your work is finished'} and nothing is left for a person to answer, try, read or do by hand, end the minion in that same turn (${deploys ? 'pending-deploy after tools/deploy.sh, close_self otherwise' : 'close_self'}): do not leave it in state ready or complete for a "looks good" or an "are we good?". People ask the Taskmaster those. When the change only works after a person does something by hand (setup on their own machine, installing a service, a console setting), skip ${deploys ? 'pending-deploy and ' : ''}close_self: ask that person with a card (walk through it now, or later), stay open in state null or ready, and close once they have done the steps or say you can close. Telling the Taskmaster the steps does not count. A result for people to read stays in state complete: the server closes it once a member has seen it. Never announce a close in words; if close_self isn't called, say why.`,
+        'Tell or ask another minion of this scheme with `message_minion` (mcp__thread); `list_tickets` and `read_minion` find who owns what. The Taskmaster (`message_coordinator`) is for what only it can do: starting, closing or reopening minions, a decision, another scheme. Wake a minion parked on you: `message_minion` `unpark: true`. Parked on one: note its #N. Give each a `need`; don\'t report landing (it is shown). Urgent only when blocked on its reply or for a go.',
+        'A proposal always ends in an action: when your turn suggests work, post it as a card (ask_question or propose_plan). For handoffs, send their paths to the Taskmaster (message_coordinator) and post one multi-select `ask_question` card, one option per handoff. Never leave a proposal as prose alone.',
+        'When you are proven wrong in a disagreement with the Taskmaster (by a test, git, the live state, a person), strike your own wrong words with `strike_text` (mcp__thread), quoting them exactly; in your reply, also write the wrong words as `~~…~~` with the fix right after.',
+        `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
+        `A note for another scheme's Taskmaster or a minion once you are live: queue it with \`relay_when_live\` (mcp__thread) before hand_off_land, not by asking the Taskmaster; your Taskmaster sees it now.`,
+        'Wherever the instructions say to run tools/land.sh (but not a build minion\'s --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, posts the shipped line and dismisses or parks you on a clean land, and wakes you with its output if it fails.',
+      ],
+      files: showingFiles(ticket, null, sharedDir, !!filesDir),
+      approval: approvalNote(project),
+      close: ['People read your replies in a web UI, often later. When you finish a turn, end on what you did; what you need from people goes in a card or is named by the link of the one waiting, no closing prose question; a blocker is stated in the reply.',],
+      ...layers,
+      personal: personalInstructions(personal, project),
+    },
+    turn: {
+      // No title (#704): it changes whenever the minion retitles itself; read_ticket has it.
+      minion: [`You are a minion working on #${ticket.number} in scheme "${project.name}".`],
+      where: [ticket.branch
+        ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
+        : 'Your working directory is a dedicated folder for this minion.'],
+      build: buildLines(build),
     // Parked on start_after (#261): messages wait for its start (#718); a card's answer or a notice still wakes it.
-    ...(held ? [`You are parked: your brief is held until ${held}. Handle what woke you (a card's answer, a notice) without starting the work; Unpark on your page (or the Taskmaster's message_ticket with unpark) starts you with your brief. End the turn with the state and note you have now.`] : []),
-    'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with TaskCreate before starting it:',
-    '- Make 3 to 7 tasks that are conceptual chunks someone skimming would follow ("Find where the sidebar text comes from", "Make the readout show phases", "Test it on a copy"), not individual commands.',
-    '- Give each a one-sentence description of what it involves and why, a short activeForm ("Finding where the sidebar text comes from"), and metadata.estimate: your guess of its minutes, which fills the readout\'s bar. Guess your own working minutes, not a person\'s, and guess short: half of all steps finish in under 3 minutes and three quarters in under 7; land and self-review steps run longer (half by 5, nine in ten by 30); only about one step in eleven passes 20.',
-    '- Mark each task in_progress with TaskUpdate when you start it. When you finish it, mark it completed and set metadata.outcome to one plain sentence on what it found, decided or changed.',
-    '- If the plan changes, add, reword or delete tasks so the list stays true.',
-    'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
-    ...CHAT_FACTS,
-    'Send TaskUpdate and set_thread_status in the same message as a real tool call (a Read, Edit, Bash and so on), never on their own: a lone one costs a whole extra round trip. Mark a task completed and start the next one in the same message as that next step\'s first real call.',
-    // The tools' own descriptions (always loaded, src/mcp.ts ALWAYS_LOAD) carry how ask_question, set_thread_status and close_self work (#760): these lines say only what those don't.
-    'A choice for people (a go, A or B, an offer: "want me to…") gets an `ask_question` card; a lone go may be a `set_thread_status` reply. A visual or multi-part choice goes on a choices page (docs-and-mocks) via `doc`. If a typed answer or a newer card replaces it, call `settle_question`.',
-    'When people want to hear your plan before you build, post it with the `propose_plan` tool (mcp__thread): a card with Approve and Revise that only a person can approve, shown below your reply. Then end your turn and write no code until the go arrives as the next message.',
-    'Keep your line in the scheme\'s minions list (number, short title, state, note) accurate with the `set_thread_status` tool (mcp__thread). Your starting title may just be the opening words of the first message; replace it early in your first turn with the short ask.',
-    'Your minion carries properties from the scheme\'s registry (`list_properties`, mcp__thread): a `type` (feature, bug, art, ideation, design, research, chore or other), a `stage`, and the scheme\'s own keys. Set them with `set_properties` once the work is clear, and keep `type` right; if no type fits, set `other` and ask with a card whether it stays. To assign this minion to a person, set `assigned` to their login. Show properties as `key: value`.',
-    'End every turn\'s final reply with a status line, not a set_thread_status call: `<!-- status: {"state":"ready","note":"…","replies":[…]} -->`, its state, note and replies as set_thread_status defines them. State null when you are simply waiting on an answer; complete\'s note says what is left ("nothing left" or what to read, linked in your reply); replies are gos worded as the tapper\'s instruction to you, never while a card or plan waits.',
+    held: held ? [`You are parked: your brief is held until ${held}. Handle what woke you (a card's answer, a notice) without starting the work; Unpark on your page (or the Taskmaster's message_ticket with unpark) starts you with your brief. End the turn with the state and note you have now.`] : [],
     // The details only while the branch has an open PR (#760): the line changes once when one opens, costing one cache rewrite.
-    openPr
+    pr: [openPr
       ? 'When your branch has an open GitHub pull request, the app messages you as "[GitHub]: ..." when CI on its head commit passes, fails or doesn\'t start (GitHub runs no CI on a PR that conflicts with its base), someone reviews or comments, or it is merged or closed (where CI runs only as a change lands, a PR has none), so don\'t wait on CI in a turn or a background loop: set state outside, end the turn, and act on those messages as the scheme expects (fix a red build, answer a review). For a red CI run, `ci-failures [<run id> | <sha> | <branch>] [-R owner/repo]` prints its failing tests with diffs (`--list`: recent runs). A workflow you dispatch on your branch (`gh workflow run <file> --ref <branch>`) is watched the same way.'
-      : 'When you open a GitHub pull request or dispatch a workflow on your branch, the app messages you as "[GitHub]: ..." on its CI, reviews and merge: don\'t wait on CI in a turn or a background loop; set state outside and end the turn.',
-    'Scratch files go in $TMPDIR (your own temp folder, also a working directory) or your worktree. Claude Code asks a person before an `rm` whose target it cannot pin down (a glob after `cd`, `rm -rf *`, a bare `$d/*`), whatever the permission mode, so give `rm` absolute paths in a call with no `cd`: `rm -rf "$TMPDIR/out" && mkdir -p "$TMPDIR/out"`, and `"${d:?}"/*` for a variable.',
-    'The tripwire refuses these habits, so skip them: `git checkout`/`restore`/`stash` on a path or work in progress (make a WIP commit; `git show HEAD:path` to look, `git show HEAD:./path > path` to put one file back); bare `env` or `printenv` (`env | cut -d= -f1` lists names, `[ -n "$NAME" ] && echo set` checks one); an rm or mv path it can\'t pin down (a variable the command didn\'t set; spell it out); SQL piped into sqlite3 on the live database (pass it as an argument).',
-    `${deploys ? 'For a dev copy of Citadel, run `citadel-dev-copy start` (a copy of the live data, `--data empty` for none; it prints the URL, a sign-in and the pid; `eval "$(citadel-dev-copy env)"` hands a script DEV_URL and DEV_COOKIE), `citadel-dev-copy seed <state>` for a waiting card, a turn mid-run and other states the data lacks (`seed --list`; add new ones to tools/dev-seeds.ts, not a scratch seed script) and `citadel-dev-copy stop`, never server.ts by hand. To shoot or drive a page there (click, fill, wait for text, read back), use `node tools/ui-shot.ts <#route> --step \'<verb> <selector>\'` (its header lists the steps), not a browser script of your own. ' : ''}Stop your ${deploys ? 'other ' : ''}processes by pid (\`$!\` when you start one, or \`ss -ltnp 'sport = :<port>'\`), never by name: every turn, ${APP_NAME} and its apps run as one account, so \`pkill\` or \`killall\` would hit other minions and ${APP_NAME} itself (the tripwire blocks them).`,
-    'While your own background job runs, wait inside the turn with one blocking `citadel-wait pid <pid>` (or `port <n>`, `file <path>`, `cmd \'<test>\'`) and a Bash timeout of 600000, repeated until it ends (exit 124: still going), never `sleep N; check`: ending the turn may kill the job. A Grunt whose result you need now runs with `run_in_background: false`.',
-    'When each lookup result only tells you the next lookup (grep, read the match, grep again; a query keyed on the last), do every hop in one Bash or `python3 -I` script that prints only the answer, capped (`| head -50`). A question that needs 5 or more files read goes to an `Explore` Grunt on Sonnet, briefed for the conclusion and the exact lines, not file dumps.',
-    HEAVY_LINE,
-    `${deploys ? 'Once your change is live, or deployed and waiting in pending-deploy,' : 'Once your work is finished'} and nothing is left for a person to answer, try, read or do by hand, end the minion in that same turn (${deploys ? 'pending-deploy after tools/deploy.sh, close_self otherwise' : 'close_self'}): do not leave it in state ready or complete for a "looks good" or an "are we good?". People ask the Taskmaster those. When the change only works after a person does something by hand (setup on their own machine, installing a service, a console setting), skip ${deploys ? 'pending-deploy and ' : ''}close_self: ask that person with a card (walk through it now, or later), stay open in state null or ready, and close once they have done the steps or say you can close. Telling the Taskmaster the steps does not count. A result for people to read stays in state complete: the server closes it once a member has seen it. Never announce a close in words; if close_self isn't called, say why.`,
-    'Tell or ask another minion of this scheme with `message_minion` (mcp__thread); `list_tickets` and `read_minion` find who owns what. The Taskmaster (`message_coordinator`) is for what only it can do: starting, closing or reopening minions, a decision, another scheme. Wake a minion parked on you: `message_minion` `unpark: true`. Parked on one: note its #N. Give each a `need`; don\'t report landing (it is shown). Urgent only when blocked on its reply or for a go.',
-    'A proposal always ends in an action: when your turn suggests work, post it as a card (ask_question or propose_plan). For handoffs, send their paths to the Taskmaster (message_coordinator) and post one multi-select `ask_question` card, one option per handoff. Never leave a proposal as prose alone.',
-    'When you are proven wrong in a disagreement with the Taskmaster (by a test, git, the live state, a person), strike your own wrong words with `strike_text` (mcp__thread), quoting them exactly; in your reply, also write the wrong words as `~~…~~` with the fix right after.',
-    `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
-    `A note for another scheme's Taskmaster or a minion once you are live: queue it with \`relay_when_live\` (mcp__thread) before hand_off_land, not by asking the Taskmaster; your Taskmaster sees it now.`,
-    'Wherever the instructions say to run tools/land.sh (but not a build minion\'s --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, posts the shipped line and dismisses or parks you on a clean land, and wakes you with its output if it fails.',
-    ...showingFiles(ticket, filesDir, sharedDir),
-    ...machineTools(machines),
-    ...approvalNote(project),
-    'People read your replies in a web UI, often later. When you finish a turn, end on what you did; what you need from people goes in a card or is named by the link of the one waiting, no closing prose question; a blocker is stated in the reply.',
-    ...instructionLayers(project, appText),
-    ...personalInstructions(personal, project),
-  ].join('\n');
+      : 'When you open a GitHub pull request or dispatch a workflow on your branch, the app messages you as "[GitHub]: ..." on its CI, reviews and merge: don\'t wait on CI in a turn or a background loop; set state outside and end the turn.'],
+      files: filesDir ? [filesLine(filesDir)] : [],
+      machines: machineTools(machines),
+    },
+  };
 }
 
 /** Which tool calls wait for a person's OK in this project. */
@@ -301,7 +327,7 @@ function everySchemeLine(view: EverySchemeView | null): string {
   ].filter(Boolean).join(' ');
 }
 
-function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null, builds = false, everyScheme: EverySchemeView | null = null): string {
+function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null, builds = false): string {
   return [
     `You are the Taskmaster for scheme "${project.name}" in ${APP_NAME}, a shared web app where several people chat with Claude Code sessions called minions.`,
     ROLE_FRAMING,
@@ -321,7 +347,6 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       ? `The scheme's main checkout is at ${project.repo_dir} and minion worktrees are under ${ticketsDir}, one folder per minion, named by an internal id, not its number: read_ticket shows each one's worktree. You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`.`
       : `This scheme has no git repo; each minion gets a plain folder under ${ticketsDir}. You may read them for context, but do not edit them: edits there are denied.`,
     project.id === GLOBAL_OWNER ? `The live checkout, the code this server runs right now, is at ${CHECKOUT}: read it the same way (Read, ls, grep, git -C), never edit it.` : '',
-    project.id === GLOBAL_OWNER ? everySchemeLine(everyScheme) : '',
     "To see what a running minion is doing (hung or busy, and on what), call read_ticket with live: true; minions' session transcripts aren't readable here. A turn run for a person who has their own Claude login runs in their container: there the host_check tool reads the live database (secrets masked), the journal and service status, and the live checkout is mounted read-only at its own path.",
     'Read-only shell commands (grep, ls, find, cat, head, wc, `git -C <folder> log|status|diff|show`, `git -C <folder> fetch` in the scheme repo (worktrees share its refs, so fetch there), `sqlite3 -readonly -safe`, gh reads, `curl -s http://127.0.0.1:8573/api/health`, uptime, ps, free, df, `ss -ltn`, `systemctl --user status`, `journalctl --user`) run here and in the data folder with absolute paths, piped as you like; `cd <folder> && …`, a shell loop or a path in a variable is denied, since their insides can\'t be checked: run one command per folder instead.',
     memoryDir

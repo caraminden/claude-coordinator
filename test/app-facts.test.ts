@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
-import { systemPrompt } from '../src/prompts.ts';
+import { systemPrompt, turnContext } from '../src/prompts.ts';
 import { TRIPWIRE_BLOCKS } from '../src/tripwire-blocks.ts';
 
 // How the app behaves (the chat, links, the tripwire) is the same in every scheme, so the built-in
@@ -29,8 +29,8 @@ test('deploy lines show only when the server runs the scheme', () => {
 });
 
 /** The thread MCP server's tools, with or without COORDINATOR_DEPLOYS. */
-async function threadTools(deploys: boolean): Promise<any[]> {
-  const env: Record<string, string | undefined> = { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: 'x', COORDINATOR_PROJECT: '3', COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '5', COORDINATOR_DEPLOYS: deploys ? '1' : undefined };
+async function threadTools(deploys: boolean, more: Record<string, string> = {}): Promise<any[]> {
+  const env: Record<string, string | undefined> = { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: 'x', COORDINATOR_PROJECT: '3', COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '5', COORDINATOR_DEPLOYS: deploys ? '1' : undefined, ...more };
   const mcp = spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], { env, stdio: ['pipe', 'pipe', 'inherit'] });
   try {
     const reply = new Promise<any>((r) => createInterface({ input: mcp.stdout! }).once('line', (l) => r(JSON.parse(l))));
@@ -53,10 +53,11 @@ test("a minion's MCP tools mention deploys and offer previews only when the serv
   }
 });
 
-test('a minion parked on start_after is told what it waits on', () => {
-  const held = systemPrompt(project, minion, null, null, '/tickets', null, [], false, '', "#3 Leader's work is merged");
-  assert.ok(held.includes("#3 Leader's work is merged"));
-  assert.ok(!systemPrompt(project, minion, null, null, '/tickets', null).includes("#3 Leader's work is merged"));
+test('a minion parked on start_after is told what it waits on, in its turn message (#878)', () => {
+  const args = [project, minion, null, null, '/tickets', null, [], false, '', "#3 Leader's work is merged"] as const;
+  assert.ok(turnContext(...args).includes("#3 Leader's work is merged"));
+  assert.ok(!systemPrompt(...args).includes("#3 Leader's work is merged"));
+  assert.ok(!turnContext(project, minion, null, null, '/tickets', null).includes("#3 Leader's work is merged"));
 });
 
 test('a minion\'s system prompt is byte-identical when its title, state, note or properties change (#704)', () => {
@@ -65,4 +66,22 @@ test('a minion\'s system prompt is byte-identical when its title, state, note or
   const after = render({ ...minion, title: 'A completely new title', state: 'ready', note: 'waiting on a pick', replies: ['Merge it'], props: { type: 'bug', stage: 'review' } });
   assert.equal(after, before);
   assert.ok(!before.includes('"T"'));
+});
+
+// Lever A (#878): two minions of a scheme share one cached system prompt and one tool list, so nothing about the
+// minion, its sender or what is online right now reaches system-prompt.md or the thread server's tools/list.
+test('two minions of one scheme get a byte-identical system prompt and tool list; what differs is in their turn messages (#878)', async () => {
+  const machine = { id: 1, name: 'josh-box', notes: 'The GPU box.', owner_id: 2, servers: ['mcp', 'ws'] } as any;
+  const a = [project, { ...minion, number: 5, branch: 'ticket/5-t', build: 2 }, '/shared/5', '/shared/project', '/tickets', '/memory', [machine], true, 'App rule.', null, [], { build: 2, branch: 'build/2', owner: false }, true, null, null, true] as const;
+  const b = [project, { ...minion, id: 9, number: 9, branch: 'ticket/9-other', title: 'Other' }, '/shared/9', '/shared/project', '/tickets', '/memory', [], true, 'App rule.', null, [], null, true, null, null, false] as const;
+  assert.equal(systemPrompt(...a), systemPrompt(...b));
+  for (const varies of ['#5', '#9', 'ticket/5-t', 'ticket/9-other', '/shared/5', '/shared/9', 'josh-box', 'The GPU box.', 'build/2', 'ci-failures']) assert.ok(!systemPrompt(...a).includes(varies), varies);
+  const [ca, cb] = [turnContext(...a), turnContext(...b)];
+  for (const has of ['#5', 'ticket/5-t', '/shared/5', 'josh-box', 'The GPU box.', 'feeder in Build 2', 'ci-failures']) assert.ok(ca.includes(has), has);
+  for (const has of ['#9', 'ticket/9-other', '/shared/9', 'When you open a GitHub pull request']) assert.ok(cb.includes(has), has);
+  assert.ok(!cb.includes('josh-box') && !cb.includes('Build 2'));
+  // One sends with OpenRouter and a Codex login and has a machine online; the other has none of them.
+  const toolsA = await threadTools(true, { COORDINATOR_MACHINES: 'josh-box', COORDINATOR_MEDIA: '1', COORDINATOR_CODEX_IMAGES: '1', COORDINATOR_TICKET: '5' });
+  const toolsB = await threadTools(true, { COORDINATOR_TICKET: '9' });
+  assert.equal(JSON.stringify(toolsA), JSON.stringify(toolsB));
 });

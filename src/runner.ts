@@ -26,7 +26,8 @@ import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
-import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
+import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
@@ -158,6 +159,8 @@ interface TurnState {
   account?: number;
   /** Who asked for it (Store.turnAsker), which a non-member's relay keeps apart from `person`. */
   asker?: number | null;
+  /** What it was launched with (#878), its Claude Code version added from the init event; saved with its row in turns. */
+  hashes?: PromptHashes;
   /**
    * The one person whose own typed message it answers (#268): the only person mandate_item may post for.
    * null for a turn no one typed for (GitHub, a relay, a wake, a resume, a contraption's ask), 0 once
@@ -2267,7 +2270,10 @@ export class Runner {
     // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
     const everyScheme = this.everySchemeFor(project, ticket, asker);
     const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
-    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id)));
+    // Two halves (#878): system-prompt.md, the same for every minion of the scheme, and the per-minion and volatile lines that open the turn message.
+    const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id));
+    writeFileSync(join(dir, 'system-prompt.md'), promptText(parts.system));
+    const context = promptText(parts.turn);
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
     // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
     let tmp: string | null = null;
@@ -2307,7 +2313,7 @@ export class Runner {
     if (cancelled) this.store.deleteSetting(closeCancelledKey(ticket.id));
     const cancelledLine = cancelled ? [{ author: 'System', text: `Your close_self in your last turn was cancelled: ${cancelled}, so this minion is still open. Once nothing is left for people, call close_self again.`, images: [] }] : [];
     const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
-      : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...handBack, ...cancelledLine, ...batch]);
+      : promptMessage([...(context ? [{ author: 'System', text: context, images: [] }] : []), ...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...handBack, ...cancelledLine, ...batch]);
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     const typer = typedBy ? this.store.getUser(typedBy) : undefined;
@@ -2347,6 +2353,7 @@ export class Runner {
       this.onTurnError(ticket.id, err.message, event.id);
       return;
     }
+    const hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person));
     // Written before anything of the minion's changes below, so a launch that can't be written leaves who it runs for as it was.
     for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
     const { command, args, env, configDir } = plan;
@@ -2422,7 +2429,7 @@ export class Runner {
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
@@ -2893,6 +2900,10 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.mcp_servers)) this.checkMcp(ticketId, ev.mcp_servers);
+    if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.claude_code_version === 'string') {
+      const hashes = this.store.getSetting<TurnState>(turnKey(ticketId))?.hashes;
+      if (hashes) this.saveTurn(ticketId, { hashes: { ...hashes, claude: ev.claude_code_version } });
+    }
     const slim = slimEvent(ev);
     if (!slim) return;
     const progress = this.progressFor(ticketId);
@@ -2911,10 +2922,11 @@ export class Runner {
     // shortcut: a turn stopped, or the server restarted, before the result keeps both versions; rare, so left.
     if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
+      const state = this.store.getSetting<TurnState>(turnKey(ticketId));
       const turn = this.store.recordTurn(ticketId, {
         event_id: row.id, session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: row.created_at,
         session_cost_usd: ev.total_cost_usd, duration_ms: ev.duration_ms, usage: ev.usage,
-        payer: this.payerOf(this.store.getSetting<TurnState>(turnKey(ticketId))?.person),
+        payer: this.payerOf(state?.person), hashes: state?.hashes ?? null,
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
     }

@@ -4,6 +4,7 @@ import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 import { Memory } from './memory.ts';
+import type { PromptHashes } from './prompt-hashes.ts';
 
 /** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
 export const askerKey = (ticketId: number) => `asker:${ticketId}`;
@@ -332,6 +333,8 @@ export interface Turn {
   cache_write_tokens: number | null;
   /** Whose plan paid (Runner.payerOf): null for the server login's, else that person's id. */
   payer: number | null;
+  /** Its hash log as JSON (#878): Store.promptHashes parses it. */
+  prompt_hashes: string | null;
 }
 
 /** What a turn's result event says, for Store.recordTurn. */
@@ -343,6 +346,8 @@ export interface TurnResult {
   duration_ms?: number | null;
   usage?: any;
   payer?: number | null;
+  /** What it was launched with (#878, src/prompt-hashes.ts). */
+  hashes?: PromptHashes | null;
 }
 
 /** A person's own named property filter in a scheme (#194): key → the values ticked for it. */
@@ -643,7 +648,8 @@ CREATE TABLE IF NOT EXISTS turns (
   output_tokens INTEGER,
   cache_read_tokens INTEGER,
   cache_write_tokens INTEGER,
-  payer INTEGER
+  payer INTEGER,
+  prompt_hashes TEXT
 );
 CREATE INDEX IF NOT EXISTS turns_ticket ON turns(ticket_id, id);
 CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
@@ -1077,6 +1083,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'last_check', 'ALTER TABLE machines ADD COLUMN last_check TEXT'],
   ['machines', 'lend', 'ALTER TABLE machines ADD COLUMN lend TEXT'],
   ['turns', 'payer', 'ALTER TABLE turns ADD COLUMN payer INTEGER'],
+  ['turns', 'prompt_hashes', 'ALTER TABLE turns ADD COLUMN prompt_hashes TEXT'],
   ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
   ['contraptions', 'repo', 'ALTER TABLE contraptions ADD COLUMN repo TEXT'],
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
@@ -1150,6 +1157,7 @@ export const SCHEMA_HISTORY = [
   [58, 'outside_spend (#839)'],
   [59, 'contraption_turn_audit (#844)'],
   [60, 'stored_secrets (#838)'],
+  [61, 'turns.prompt_hashes (#878)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2781,10 +2789,18 @@ export class Store {
     const n = (v: unknown) => (typeof v === 'number' ? v : null);
     const row = this.db
       .prepare(`INSERT INTO turns (ticket_id, event_id, session_id, ended_at, cost_usd, session_cost_usd, duration_ms,
-          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
+          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer, prompt_hashes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
       .get(ticketId, r.event_id ?? null, r.session_id ?? null, r.ended_at, r.session_cost_usd - base, r.session_cost_usd,
-        n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens), r.payer ?? null);
+        n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens), r.payer ?? null,
+        r.hashes ? JSON.stringify(r.hashes) : null);
     return row as unknown as Turn;
+  }
+
+  /** A minion's latest turns' hash logs (#878), newest first, with how much of each turn's prompt came from the cache. */
+  promptHashes(ticketId: number, limit = 1): { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; hashes: PromptHashes }[] {
+    const rows = this.db.prepare(`SELECT ended_at, cache_read_tokens, cache_write_tokens, prompt_hashes FROM turns
+        WHERE ticket_id = ? AND prompt_hashes IS NOT NULL ORDER BY id DESC LIMIT ?`).all(ticketId, limit) as any[];
+    return rows.map(({ prompt_hashes, ...r }) => ({ ...r, hashes: JSON.parse(prompt_hashes) }));
   }
 
   /**

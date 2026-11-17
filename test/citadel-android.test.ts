@@ -32,7 +32,7 @@ mkdirSync(join(sdk, 'platform-tools'), { recursive: true });
 writeFileSync(join(sdk, 'platform-tools', 'adb'), adb);
 chmodSync(join(sdk, 'platform-tools', 'adb'), 0o755);
 mkdirSync(join(sdk, 'emulator'));
-writeFileSync(join(sdk, 'emulator', 'emulator'), `#!/bin/sh\necho $$ >'${sdk}/emu.pid'\nexec sleep 60\n`);
+writeFileSync(join(sdk, 'emulator', 'emulator'), `#!/bin/sh\necho "$*" >'${sdk}/emu.args'\necho $$ >'${sdk}/emu.pid'\nexec sleep 60\n`);
 chmodSync(join(sdk, 'emulator', 'emulator'), 0o755);
 // The helper only checks that something listens where the adb server would.
 const server = createServer((s) => s.end());
@@ -133,6 +133,11 @@ test('serve stops the emulator once nobody has used it for the idle time, and en
     assert.equal(await s.done, 0);
     assert.match(s.out(), /unused for \d+s; stopping/);
     assert.ok(!alive(pid), 'the emulator is gone');
+    // The mic's gRPC port (#843): every method but injectAudio needs a token nobody here holds.
+    const args = readFileSync(join(sdk, 'emu.args'), 'utf8');
+    assert.match(args, / -audio none /);
+    assert.match(args, new RegExp(` -grpc 18591 -grpc-use-jwt -grpc-allowlist ${join(locks, 'android-grpc.json')} `));
+    assert.deepEqual(JSON.parse(readFileSync(join(locks, 'android-grpc.json'), 'utf8')), { unprotected: ['/android.emulation.control.EmulatorController/injectAudio'], allowlist: [] });
   } finally {
     if (alive(pid)) process.kill(pid);
   }

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Http2ServerRequest } from 'node:http2';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { audioFrame, inject, parseWav, peak, recording, toneWav, WORKLET } from '../tools/citadel-android-mic.ts';
+import { audioFrame, inject, parseWav, peak, play, recording, toneWav, WORKLET } from '../tools/citadel-android-mic.ts';
 
 // tools/citadel-android-mic.ts (#843): the emulator's synthetic mic, without an emulator.
 const root = mkdtempSync(join(tmpdir(), 'android-mic-'));
@@ -117,6 +117,35 @@ test('inject fails with the emulator\'s reason, or when nothing listens', async 
   } finally { await emu.close(); }
   await assert.rejects(inject(parseWav(toneWav(440, 0.05)), 0, emu.port), /no emulator microphone on 127\.0\.0\.1:\d+/);
   assert.equal(audioFrame(Buffer.alloc(4), null).readUInt32BE(1), 6, 'a frame\'s length counts the message only');
+});
+
+test('play never feeds the mic before an app records, and stops when adb fails', async () => {
+  // A stub adb whose `dumpsys audio` is a file the test writes; play runs it from $ANDROID_HOME.
+  const sdk = join(root, 'play-sdk'), dumpsys = join(sdk, 'dumpsys');
+  mkdirSync(join(sdk, 'platform-tools'), { recursive: true });
+  writeFileSync(join(sdk, 'platform-tools', 'adb'), `#!/bin/sh\n[ -e '${sdk}/fail' ] && { echo 'device offline' >&2; exit 1; }\ncat '${dumpsys}'\n`);
+  chmodSync(join(sdk, 'platform-tools', 'adb'), 0o755);
+  const home = process.env.ANDROID_HOME;
+  process.env.ANDROID_HOME = sdk;
+  const emu = await emulator(0);
+  const pcm = parseWav(toneWav(440, 0.1));
+  try {
+    writeFileSync(dumpsys, 'RecordActivityMonitor dump time: 9:00:00 PM\n\n\nEvents log: recording activity received by AudioService\n');
+    await assert.rejects(play(pcm, 0, 1, undefined, emu.port), /nothing on the emulator opened the mic in 1 s/);
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await play(pcm, 0, 1, cancelled.signal, emu.port);
+    assert.equal(emu.got.path, undefined, 'nothing reached the mic');
+    writeFileSync(join(sdk, 'fail'), '');
+    await assert.rejects(play(pcm, 0, 1, undefined, emu.port), /adb couldn't reach the phone \(device offline\)/);
+    rmSync(join(sdk, 'fail'));
+    writeFileSync(dumpsys, 'RecordActivityMonitor dump time: 9:00:00 PM\nriid 7; active? true\n  session:1 -- pack:com.android.chrome\n\nEvents log: recording activity received by AudioService\n');
+    await play(pcm, 0, 1, undefined, emu.port);
+    assert.equal(Buffer.concat(messages(emu.got.body).map((m) => m.get(0x1a)!)).length, pcm.data.length);
+  } finally {
+    await emu.close();
+    if (home === undefined) delete process.env.ANDROID_HOME; else process.env.ANDROID_HOME = home;
+  }
 });
 
 /** Runs the check page's AudioWorklet on 128-sample blocks, as Web Audio would, and returns what it posted. */

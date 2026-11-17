@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The only thing the desktop emulator's SSH key may run on perigee (#533): its line in ~/.ssh/authorized_keys
 # names this script as its command, so whatever the desktop asks for arrives here as SSH_ORIGINAL_COMMAND.
-# (The tunnel itself runs no command; the same line limits it to three loopback ports.)
+# (The tunnel itself runs no command; the same line limits it to four loopback ports.)
 #   facts     what the emulator must share with perigee: the adb key perigee's adb server signs in with (the
 #             emulator lets in the key it finds in its own home, and wants the private half to do it), and
 #             the console token `sms` and `down` send from here. Both go only to the emulator's own distro,

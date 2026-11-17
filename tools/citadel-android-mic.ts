@@ -12,9 +12,15 @@ import { join } from 'node:path';
 
 export const GRPC_PORT = Number(process.env.CITADEL_ANDROID_GRPC || 18591);
 const MAX_RATE = 48000; // the emulator refuses more (INVALID_ARGUMENT)
-const adb = (...a: string[]) => spawnSync(join(process.env.ANDROID_HOME || join(process.env.HOME!, '.local/share/android-sdk'), 'platform-tools', 'adb'), ['-s', `emulator-${process.env.CITADEL_ANDROID_PORT || 5554}`, ...a], { encoding: 'utf8', timeout: 15000 });
+const adbRun = (...a: string[]) => spawnSync(join(process.env.ANDROID_HOME || join(process.env.HOME!, '.local/share/android-sdk'), 'platform-tools', 'adb'), ['-s', `emulator-${process.env.CITADEL_ANDROID_PORT || 5554}`, ...a], { encoding: 'utf8', timeout: 15000 });
 
 /** Whether an app on the emulator has the mic open, from `dumpsys audio`'s RecordActivityMonitor section. */
+const adb = (...a: string[]) => {
+  const r = adbRun(...a);
+  if (r.error || r.status !== 0) throw new Error(`adb couldn't reach the phone (${(r.error?.message || r.stderr || `exit ${r.status}`).trim()}): is it up?`);
+  return r.stdout;
+};
+
 export const recording = (dumpsys: string) => /^RecordActivityMonitor[^\n]*\n(?:(?!Events log)[^\n]*\n)*?riid \d+; active\? true/m.test(dumpsys);
 
 export type Pcm = { rate: number; channels: 1 | 2; data: Buffer };
@@ -107,9 +113,9 @@ export function inject(pcm: Pcm, seconds = 0, port = GRPC_PORT, stop?: AbortSign
  * while nothing records, so this never injects before. Gives up `seconds` (or the WAV's length) plus 10 s after it
  * starts, since the emulator stops pulling audio, and the stream stalls, once the app stops recording.
  */
-export async function play(pcm: Pcm, seconds = 0, wait = 120, cancel?: AbortSignal): Promise<void> {
+export async function play(pcm: Pcm, seconds = 0, wait = 120, cancel?: AbortSignal, port = GRPC_PORT): Promise<void> {
   const t0 = Date.now();
-  while (!recording(adb('shell', 'dumpsys', 'audio').stdout || '')) {
+  while (!recording(adb('shell', 'dumpsys', 'audio'))) {
     if (cancel?.aborted) return;
     if (Date.now() - t0 > wait * 1000) throw new Error(`nothing on the emulator opened the mic in ${wait} s; start recording in the app, then run it again (or start mic first and record within ${wait} s)`);
     await new Promise((r) => setTimeout(r, 500));
@@ -117,8 +123,10 @@ export async function play(pcm: Pcm, seconds = 0, wait = 120, cancel?: AbortSign
   if (cancel?.aborted) return;
   const stop = new AbortController();
   cancel?.addEventListener('abort', () => stop.abort());
-  const limit = setTimeout(() => stop.abort(), ((seconds || pcm.data.length / (2 * pcm.channels * pcm.rate)) + 10) * 1000);
-  try { await inject(pcm, seconds, GRPC_PORT, stop.signal); } finally { clearTimeout(limit); }
+  let cut = false;
+  const limit = setTimeout(() => { cut = true; stop.abort(); }, ((seconds || pcm.data.length / (2 * pcm.channels * pcm.rate)) + 10) * 1000);
+  try { await inject(pcm, seconds, port, stop.signal); } finally { clearTimeout(limit); }
+  if (cut) throw new Error('the phone stopped taking the audio before the end: did the app stop recording?');
 }
 
 /** The strongest frequency between 50 Hz and 8 kHz, in 5 Hz steps (Goertzel), and the level in dBFS. */
@@ -198,9 +206,9 @@ async function check(hz: number): Promise<number> {
   const stop = new AbortController();
   let playing: Promise<unknown> = Promise.resolve();
   try {
-    adb('reverse', `tcp:${port}`, `tcp:${port}`);
+    adbRun('reverse', `tcp:${port}`, `tcp:${port}`);
     // Chrome needs the Android mic permission, and a fresh start so it reads `up`'s flags (no permission prompt).
-    adb('shell', 'pm grant com.android.chrome android.permission.RECORD_AUDIO; am force-stop com.android.chrome');
+    adbRun('shell', 'pm grant com.android.chrome android.permission.RECORD_AUDIO; am force-stop com.android.chrome');
     if (!step('open', `http://localhost:${port}/?t=${Date.now()}`)) return 1;
     // The tone starts once the page has the mic open: the emulator has no input stream to feed before that.
     // A minute at most; it stops as soon as the page has its recording.
@@ -217,7 +225,7 @@ async function check(hz: number): Promise<number> {
   } finally {
     stop.abort();
     await playing;
-    adb('reverse', '--remove', `tcp:${port}`);
+    adbRun('reverse', '--remove', `tcp:${port}`);
     server.close();
   }
 }
@@ -235,7 +243,9 @@ if (import.meta.main) {
       if (!(s >= 0 && s <= 600)) fail('mic <file.wav> [seconds up to 600]', 2);
       await play(parseWav(readFileSync(a[0])), s);
     } else if (cmd === 'check') {
-      process.exit(await check(Number(a[0] || 1000)));
+      const hz = Number(a[0] || 1000);
+      if (!(hz >= 50 && hz <= 8000)) fail('mic-check [hz from 50 to 8000]', 2);
+      process.exit(await check(hz));
     } else fail('usage: citadel-android tone <hz> <seconds> <out.wav> [rate] | mic <file.wav> [seconds] | mic-check [hz]', 2);
   } catch (e) { fail((e as Error).message); }
 }

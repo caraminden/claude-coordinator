@@ -308,7 +308,9 @@ case "$cmd" in
     [ $# -ge 1 ] && [ $# -le 2 ] && [ -f "$1" ] || { say "usage: citadel-android mic <file.wav> [seconds]   (plays once an app records; loops to fill seconds)"; exit 2; }
     # The screen stays ours for the lease, but not locked: the same turn's open, install and shot run while it plays.
     take_screen; up; keep_screen; exec 9>&-
-    node "$mic" play "$@"; s=$?; touch "$used"; exit $s ;;
+    # Renewed while it plays, so a long play keeps the screen from other turns' steps.
+    ( trap 'kill $n 2>/dev/null; exit 0' TERM; while :; do sleep 60 & n=$!; wait $n; keep_screen; done ) & renew=$!
+    node "$mic" play "$@"; s=$?; kill "$renew"; wait "$renew" 2>/dev/null; keep_screen; exit $s ;;
   mic-check) exec node "$mic" check "$@" ;;
   *)
     say "usage: citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down | tone <hz> <seconds> <out.wav> [rate] | mic <file.wav> [seconds] | mic-check [hz]"

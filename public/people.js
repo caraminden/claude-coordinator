@@ -421,7 +421,7 @@ function secretsCard() {
     const replace = h('button', { type: 'button', class: 'secondary small' }, 'Replace');
     const del = h('button', { type: 'button', class: 'secondary small' }, 'Delete');
     const el = h('div', { class: 'secret-item' },
-      h('div', { class: 'row' }, h('code', {}, s.name), h('span', { class: 'muted small' }, `${s.scope === 'scheme' ? s.project_name : 'yours'} · ${s.updated_by ? `${s.updated_by}, ` : ''}${ago(s.updated_at)}`),
+      h('div', { class: 'row' }, h('code', {}, s.name), h('span', { class: 'muted small' }, `${s.scope === 'scheme' ? `${s.project_name} (scheme)` : 'yours'} · ${s.updated_by ? `${s.updated_by}, ` : ''}${ago(s.updated_at)}`),
         h('span', { class: 'spacer' }), replace, del), status);
     replace.onclick = () => {
       const value = valueInput();

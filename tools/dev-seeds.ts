@@ -144,6 +144,21 @@ mock.boards('#takes', { boards: [
       return route(c, t, e);
     },
   },
+  'secret-card': {
+    about: 'a secret card (#838): a masked field whose value goes to the secret store, and a settled one saved earlier',
+    seed(c) {
+      const t = minion(c, 'Log in to the reader site', { note: 'needs the site password' });
+      const w = chat(c, t, 6);
+      w.asked('Log in to the reader site and fetch the latest chapter.');
+      w.init();
+      w.said('The site wants a password. Save it on the card below and I\'ll use it from the env.');
+      const settled = { at: Date.now() - 3_600_000, by: 'Josh', saved: 'READER_USER', scope: 'scheme' };
+      w.put('question', { id: hex(), questions: [], secret: { name: 'READER_USER', scope: 'scheme', why: 'The username for the reader site.' }, settled });
+      const e = w.put('question', { id: hex(), questions: [], secret: { name: 'READER_SITE_PW', scope: 'person', why: 'The reader site\'s password, for logging in as you.' } });
+      w.done('Asked with a secret card.');
+      return route(c, t, e);
+    },
+  },
   'direct-card': {
     about: 'cards addressed to one person (#687): a question and a notice to you, a question to Josh, and one to you from a second scheme',
     seed(c) {

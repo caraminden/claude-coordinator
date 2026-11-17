@@ -55,6 +55,21 @@ test('a run token is taken only when GitHub signed it for this store and it has 
   await refused('nonsense', /not a JWT/);
 });
 
+test('a run token checked while GitHub\'s keys can\'t be read is a retryable 503 that blames the read, and the read is tried again soon', async () => {
+  // #846: a fresh process whose first read of the keys timed out refused a real token as "a key GitHub doesn't list".
+  let t = Date.now(), reads = 0;
+  const answers: (() => Promise<any>)[] = [async () => { throw new Error('The operation was aborted due to timeout'); }, async () => [], async () => jwks];
+  const tokens = new RunTokens(() => (reads++, answers.shift()!()), () => t);
+  const unread = (why: RegExp) => assert.rejects(tokens.check(runToken()), (err: any) => err.status === 503 && /couldn't read GitHub's signing keys/.test(err.message) && why.test(err.message) && !/Not a GitHub run token/.test(err.message));
+  await unread(/aborted due to timeout/);
+  t += 10_000;
+  // An empty list is no better than none.
+  await unread(/no keys/);
+  t += 10_000;
+  assert.equal((await tokens.check(runToken())).runId, 4349);
+  assert.equal(reads, 3);
+});
+
 test('an upload\'s name, kind and target are checked before anything is written', () => {
   assert.deepEqual(uploadAsk('mandate-7.apk', new URLSearchParams('kind=release')), { name: 'mandate-7.apk', kind: 'release', target: '' });
   for (const name of ['', '.hidden', '..', 'a/b', 'a\\b', 'x'.repeat(151), 'a b']) assert.throws(() => uploadAsk(name, new URLSearchParams('kind=build')), /name is/, name);

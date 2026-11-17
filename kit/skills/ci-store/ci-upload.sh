@@ -71,7 +71,8 @@ token=$(printf '%s' "$answer" | sed -n 's/.*"value" *: *"\([^"]*\)".*/\1/p')
 echo "::add-mask::$token"
 
 url="$store/api/ci-store/$name?kind=$kind${target:+&target=$target}"
-# 503: the store is taking other jobs' uploads and has no room to take this one beside them yet.
+# 503: the store is taking other jobs' uploads and has no room to take this one beside them yet, or it
+# couldn't read GitHub's signing keys to check the run token (it tries again within seconds).
 for try in 1 2 3 4 5 6; do
   code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
     curl -sS --config - --max-time 1800 --connect-timeout 15 -T "$file" -o "$tmp/answer" -w '%{http_code}' "$url") || give_up "the store at $store didn't answer"

@@ -47,6 +47,8 @@ export const AUDIENCE = 'citadel-ci-store';
 export const NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,149}$/;
 const KEYS_MS = 60 * 60_000;
 const KEYS_RETRY_MS = 60_000;
+/** After a failed read: soon enough that the uploader's next try (30 s later, on the 503) gets a fresh one. */
+const KEYS_FAILED_RETRY_MS = 5_000;
 const CLOCK_SKEW_S = 60;
 
 /** What a run token says about the job that holds it. */
@@ -67,6 +69,8 @@ type Jwk = JsonWebKey & { kid?: string };
 export class RunTokens {
   private keys = new Map<string, Jwk>();
   private fetched = 0;
+  /** Why the last read of the keys failed; '' once one worked. */
+  private failed = '';
   private reading: Promise<void> | null = null;
   private fetchKeys: () => Promise<Jwk[]>;
   private now: () => number;
@@ -78,12 +82,20 @@ export class RunTokens {
 
   private async key(kid: string): Promise<Jwk | undefined> {
     const age = this.now() - this.fetched;
-    if (!this.reading && (age > KEYS_MS || (!this.keys.has(kid) && age > KEYS_RETRY_MS))) {
+    if (!this.reading && (age > KEYS_MS || (!this.keys.has(kid) && age > (this.failed ? KEYS_FAILED_RETRY_MS : KEYS_RETRY_MS)))) {
       this.fetched = this.now();
       this.reading = this.fetchKeys()
-        .then((keys) => void (this.keys = new Map(keys.filter((k) => k.kid && k.kty === 'RSA').map((k) => [k.kid!, k]))))
-        // The keys held still verify; with none, the upload is refused.
-        .catch((err: any) => console.warn(`CI store: reading GitHub's signing keys failed: ${err?.message ?? err}`))
+        .then((keys) => {
+          const got = new Map(keys.filter((k) => k.kid && k.kty === 'RSA').map((k) => [k.kid!, k]));
+          if (!got.size) throw new Error('GitHub listed no keys');
+          this.keys = got;
+          this.failed = '';
+        })
+        // The keys held still verify; a token none of them signed gets a 503 naming this, not a 401 blaming the token.
+        .catch((err: any) => {
+          this.failed = String(err?.message ?? err);
+          console.warn(`CI store: reading GitHub's signing keys failed: ${this.failed}`);
+        })
         .finally(() => (this.reading = null));
     }
     // Uploads that arrive while the keys are being read wait for that read, not refused for a key not yet here.
@@ -106,6 +118,7 @@ export class RunTokens {
     // RS256 only, whatever the token's own header asks for: the header never picks the algorithm.
     if (head?.alg !== 'RS256' || typeof head.kid !== 'string') throw bad('not signed the way GitHub signs');
     const jwk = await this.key(head.kid);
+    if (!jwk && this.failed) throw new HttpError(503, `Citadel couldn't read GitHub's signing keys (${this.failed}), so it couldn't check the run token; try again in a minute`);
     if (!jwk) throw bad('signed with a key GitHub doesn\'t list');
     let ok = false;
     try {

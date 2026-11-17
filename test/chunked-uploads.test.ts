@@ -191,3 +191,69 @@ test('the free-disk floor counts what uploads under way still have to send; a st
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('the kit\'s client (ui/upload.js) pauses, resumes after a reload from where it got to, and cancels', async () => {
+  // The page's globals, over the real server: fetch and an XMLHttpRequest that carry the session, and localStorage.
+  const plain = globalThis.fetch;
+  const withCookie = (o: RequestInit = {}) => ({ ...o, headers: { ...(o.headers as object), Cookie: srv.cookie } });
+  const stored = new Map<string, string>();
+  class Xhr {
+    upload: { onprogress: ((e: { loaded: number }) => void) | null } = { onprogress: null };
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    status = 0;
+    responseText = '';
+    #how = ['', ''];
+    #stop = new AbortController();
+    open(method: string, url: string) {
+      this.#how = [method, url];
+    }
+    abort() {
+      this.#stop.abort();
+    }
+    send(body: Blob) {
+      plain(this.#how[1], withCookie({ method: this.#how[0], body, signal: this.#stop.signal })).then(async (r) => {
+        this.status = r.status;
+        this.responseText = await r.text();
+        this.upload.onprogress?.({ loaded: body.size });
+        this.onload?.();
+      }, () => (this.#stop.signal.aborted ? this.onabort : this.onerror)?.());
+    }
+  }
+  Object.assign(globalThis, {
+    fetch: (url: string, o?: RequestInit) => plain(url, withCookie(o)),
+    XMLHttpRequest: Xhr,
+    localStorage: { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => stored.set(k, v), removeItem: (k: string) => stored.delete(k) },
+  });
+  try {
+    const { startUpload } = await import('../public/ui/upload.js');
+    const endpoint = `${srv.base}/api/projects/${project}/shared/uploads`;
+    const data = randomBytes(2 * CHUNK_SIZE + 100);
+    const file = new File([data], 'photos.bin', { lastModified: 1 });
+
+    // Paused once the first chunk is in: it stays at that offset.
+    const first = startUpload(endpoint, file, { folder: 'inbox/Kit', onChange: (u: any) => u.sent >= CHUNK_SIZE && u.pause() });
+    for (let i = 0; i < 100 && first.state !== 'paused'; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(first.state, 'paused');
+    const id = JSON.parse([...stored.values()][0]).id;
+    assert.equal((await ask(`127.0.0.1:${port}`, 'GET', `/api/projects/${project}/shared/uploads/${id}`, { Cookie: srv.cookie })).body.offset, CHUNK_SIZE);
+
+    // A reload: a new client for the same file picks the upload up rather than starting another.
+    const second = startUpload(endpoint, file, { folder: 'inbox/Kit' });
+    const result: any = await second.done;
+    assert.equal(result.path, 'inbox/Kit/photos.bin');
+    assert.equal(result.size, data.length);
+    assert.ok(readFileSync(join(projectSharedDir(srv.data, project), 'inbox/Kit/photos.bin')).equals(data));
+    assert.deepEqual(readdirSync(join(projectSharedDir(srv.data, project), 'inbox/Kit')), ['photos.bin']);
+    assert.equal(stored.size, 0, 'a finished upload is forgotten');
+
+    // Cancelled: done answers null and the server lets it go.
+    const third = startUpload(endpoint, new File([data], 'gone.bin'), { onChange: (u: any) => u.sent > 0 && u.cancel() });
+    assert.equal(await third.done, null);
+    for (let i = 0; i < 50 && readdirSync(join(root, 'data', 'chunked')).length; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(readdirSync(join(root, 'data', 'chunked')), []);
+  } finally {
+    Object.assign(globalThis, { fetch: plain, XMLHttpRequest: undefined, localStorage: undefined });
+  }
+});

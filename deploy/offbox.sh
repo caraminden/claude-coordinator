@@ -8,6 +8,7 @@
 # - only the newest state-<day>.db, as a hard link (claude_state holds transcripts, memory and task
 #   lists, no logins).
 # - SHA256SUMS, the list the desktop reads and checks each download against.
+# - every registered contraption's newest nightly backups, as hard links under apps/ (#828, below).
 # Safe to run again: copies already made are kept unless their backup is newer, files gone from backups go here too.
 set -euo pipefail
 umask 077
@@ -77,7 +78,67 @@ for f in "$OUT"/*.db; do
   [[ " ${want[*]} " == *" $name "* ]] || rm -f -- "$f"
 done
 
+# Contraptions' own nightly backups (#828), every registered app's, all its people's data included.
+# The convention: an app's data folder is $APPS_DATA/<name> (Citadel sets DATA_DIR so on its units), and
+# a nightly backup job writes finished copies into backups/<YYYY-MM-DD>/ there (Mandate's does, at 03:30).
+# The newest $APP_DAYS of those folders come here as hard links, as apps/<name>/<day>/<file>: no extra
+# disk on perigee. Only plain files with plain names: never a SQLite -wal, -shm or -journal, a dotfile or a
+# half-written .tmp or .part. An app with no dated folders is skipped and named in the run's output.
+APPS_DATA=${APPS_DATA:-$HOME/.local/share}
+APP_DAYS=${APP_DAYS:-7}
+app_name='^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$' # CONTRAPTION_NAME in src/contraptions.ts
+file_name='^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'  # what offbox-serve.sh and citadel-pull.ps1 accept
+declare -A app_want=()
+apps_with=() apps_without=() apps_stale=()
+today=$(date +%F)
+apps=$(sqlite3 -readonly "$DATA_DIR/coordinator.db" ".timeout 30000" "SELECT name FROM contraptions ORDER BY name" 2>/dev/null) ||
+  { echo "Off-box set: couldn't read the contraptions registry, so no app backups this run" >&2; apps=""; }
+for app in $apps; do
+  [[ $app =~ $app_name ]] || continue
+  days=()
+  for d in "$APPS_DATA/$app/backups"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do
+    [[ -d $d && ! -L $d ]] && days+=("$(basename "$d")")
+  done
+  if ((${#days[@]} == 0)); then apps_without+=("$app"); continue; fi
+  mapfile -t days < <(printf '%s\n' "${days[@]}" | sort -r | head -n "$APP_DAYS")
+  [[ ${days[0]} == "$today" ]] || apps_stale+=("$app (newest ${days[0]})")
+  files=0
+  for day_ in "${days[@]}"; do
+    for f in "$APPS_DATA/$app/backups/$day_"/*; do
+      name=$(basename "$f")
+      [[ -f $f && ! -L $f && $name =~ $file_name && $name != *..* ]] || continue
+      [[ $name == *-wal || $name == *-shm || $name == *-journal || $name == *.tmp || $name == *.part ]] && continue
+      rel=apps/$app/$day_/$name
+      app_want[$rel]=1
+      files=$((files + 1))
+      [[ $OUT/$rel -ef $f ]] && continue
+      mkdir -p "$OUT/apps/$app/$day_"
+      # A hard link where it can; another filesystem gets a copy.
+      if ! ln -f -- "$f" "$OUT/$rel" 2>/dev/null; then
+        tmp=$OUT/.app.tmp
+        cp --reflink=auto -- "$f" "$tmp"
+        mv -f "$tmp" "$OUT/$rel"
+        tmp=""
+      fi
+    done
+  done
+  apps_with+=("$app ($files files, ${#days[@]} days)")
+done
+if [[ -d $OUT/apps ]]; then
+  while IFS= read -r -d '' f; do
+    [[ -n ${app_want[${f#"$OUT"/}]:-} ]] || rm -f -- "$f"
+  done < <(find "$OUT/apps" \( -type f -o -type l \) -print0)
+  find "$OUT/apps" -mindepth 1 -type d -empty -delete
+fi
+mapfile -t app_files < <(printf '%s\n' "${!app_want[@]}" | sort)
+[[ ${app_files[0]:-} ]] && want+=("${app_files[@]}")
+
 sums=$OUT/.SHA256SUMS.tmp
 (cd "$OUT" && for name in "${want[@]}"; do sha256sum -- "$name"; done) >"$sums"
 mv -f "$sums" "$OUT/SHA256SUMS"
 echo "Off-box set: ${#want[@]} files, $(du -shL "$OUT" | cut -f1)"
+list() { local s; s=$(printf '%s, ' "$@"); echo "${s%, }"; }
+((${#apps_with[@]})) && echo "App backups: $(list "${apps_with[@]}")"
+((${#apps_stale[@]})) && echo "App backups not from today (a job that runs after this one, or one that stopped): $(list "${apps_stale[@]}")"
+((${#apps_without[@]})) && echo "Apps with no nightly backups, skipped: $(list "${apps_without[@]}")"
+exit 0

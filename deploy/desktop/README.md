@@ -10,12 +10,19 @@ Each night at 04:00 perigee's `deploy/backup.sh` backs up Citadel, then `deploy/
   push subscriptions, and contraption keys sealed under `SESSION_SECRET`, which never leaves perigee.
   After a restore from this copy, everyone links GitHub again.
 - the newest session-state copy (`state-<day>.db`, about 1.7 GB: minion transcripts, memory, task lists).
+- every contraption's own nightly backups (#828), all its people's data as it is, under
+  `apps/<app>/<day>/`: the newest 7 days of each registered app's `~/.local/share/<app>/backups/<day>/`
+  folders (hard links on perigee, so no extra disk). Only apps whose nightly job writes dated folders there
+  count (today that's Mandate, at 03:30); the run's output names the apps it skipped and any whose newest
+  folder isn't from today. These are copied as the app wrote them: whatever secrets an app keeps in its
+  backups travel too.
 - `SHA256SUMS`, the list the desktop checks every download against.
 
 The desktop pulls that folder over SSH with a key that can do nothing but list and fetch it
 (`deploy/offbox-serve.sh` is its forced command). perigee holds no key to the desktop. The desktop keeps
-14 dailies, 8 weeklies and 2 session-state copies in `%USERPROFILE%\CitadelBackups`, and logs each run to
-`pull.log` there.
+14 dailies, 8 weeklies and 2 session-state copies in `%USERPROFILE%\CitadelBackups`, plus 14 days of
+each app's backups in `apps\<app>\<day>\` (an app gone from perigee keeps what the desktop has), and logs
+each run to `pull.log` there.
 
 ## Setup (once, about 10 minutes)
 

@@ -250,7 +250,8 @@ Session state (`claude_state`, most of the bytes) lives in `state.db` beside
 dailies and no weeklies. Previews, boot-check and the pre-deploy copy copy only
 `coordinator.db`. Then `deploy/offbox.sh` refreshes `$DATA_DIR/offbox/`, the copy
 set Cara's Windows desktop pulls each morning over SSH (dailies and weeklies with
-linked-account secrets stripped, plus the newest `state-*`); setup is in
+linked-account secrets stripped, the newest `state-*`, and each contraption's
+newest 7 days of `~/.local/share/<app>/backups/<day>/`); setup is in
 `deploy/desktop/README.md`. To restore, stop the service and copy a backup over
 `coordinator.db` (and a `state-*` one over `state.db`), removing their
 `-wal`/`-shm`.

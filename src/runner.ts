@@ -37,6 +37,7 @@ import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { CACHE_TTL_MS, KEEPALIVE_AFTER_MS, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, SERIES_CAP_MS, WEEK_MS, changedParts, claudeStamp, contextText, fingerprint, inWindow, keepaliveKey, missed, prefixParts, reportText, tooManyMisses, treeHash, turnDate, weekReport, type KeepaliveSeries } from './keepalive.ts';
 import { homedir } from 'node:os';
+import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
@@ -179,6 +180,8 @@ interface TurnState {
   handoff?: true;
   /** Its estimated cost so far and the alerts fired (#723, src/spend-alert.ts). */
   spend?: SpendState;
+  /** Since when it has been quiet (#906, src/quiet.ts), for the requester's Needs you; cleared by its next output. */
+  quiet?: number;
   /** A hidden keepalive turn (#862): messages wait behind it, and a restart drops it. */
   keepalive?: true;
   /** The fingerprint of its cached prefix and its parts (src/keepalive.ts), which a real turn's end starts a keepalive series from. */
@@ -198,6 +201,8 @@ interface LiveTurn {
   timer: NodeJS.Timeout;
   ticks: number;
   stopTimer?: NodeJS.Timeout;
+  /** What it last did and the tool calls still open (#906): when it counts as quiet. */
+  activity: Activity;
   /** Stopped before its claude had started (no pid.json): signalled once it has. */
   stopPending?: boolean;
   /** Resolves once the turn has ended and its session is saved: its step on the minion's lane. */
@@ -762,6 +767,8 @@ export class Runner {
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turnStartedAt(ticket.id),
+      // What the running turn last did and whether it has gone quiet (#906): the chip's popover says so.
+      activity: this.activityOf(ticket.id),
       // The running turn's unanswered spend alert (#723), for the list row's badge.
       spend_alert: this.spendAlert(ticket),
       step_ratio: ratio,
@@ -1959,6 +1966,41 @@ export class Runner {
     return coordinator ? [minion.id, coordinator.id] : [minion.id];
   }
 
+  /** Since when the turn has been quiet (src/quiet.ts), or null. */
+  private quietSince(live: LiveTurn, now = Date.now()): number | null {
+    const at = quietAt(live.activity);
+    return now >= at ? at : null;
+  }
+
+  /** Save and show a turn going quiet or talking again: the list's chip and the requester's Needs you read it. */
+  private checkQuiet(ticketId: number, live: LiveTurn) {
+    const since = this.quietSince(live);
+    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (!turn || (turn.quiet ?? null) === since) return;
+    this.saveTurn(ticketId, { quiet: since ?? undefined });
+    this.broadcastTicket(ticketId);
+  }
+
+  /** What a running turn last did (#906): its last output, the longest-open tool call, and since when it's quiet. */
+  activityOf(ticketId: number) {
+    const live = this.turns.get(ticketId);
+    if (!live) return null;
+    const tool = longestTool(live.activity);
+    return { at: live.activity.at, tool: tool && { name: tool.name, label: tool.label, started: tool.started, limit: tool.limit }, quiet_since: this.quietSince(live) };
+  }
+
+  /** "Is this still going?" (#906): a look at the running turn's process, read from /proc; no message, no model call. */
+  async checkTurn(ticketId: number): Promise<ProcCheck | null> {
+    const live = this.turns.get(ticketId);
+    if (!live) return null;
+    if (live.container) return { verdict: 'unknown', text: "This turn runs in a container, so the server can't look at its process." };
+    let pid: number | null = null;
+    try {
+      pid = Number(JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8')).claude) || null;
+    } catch { /* not started yet */ }
+    return checkProcess(pid);
+  }
+
   /** When the running turn started, or null: what a spend card names to act on its own turn only (#723). */
   turnStartedAt(ticketId: number): number | null {
     return this.turns.get(ticketId)?.startedAt ?? null;
@@ -2634,6 +2676,8 @@ export class Runner {
       dir: turn.dir!, unit: turn.unit ?? null, offset: turn.offset ?? 0, startedAt: turn.startedAt ?? Date.now(),
       configDir: turn.configDir ?? claudeConfigDir(process.env), chosenEffort: !!turn.chosenEffort, container: turn.container ?? null, ticks: 0,
       timer: setInterval(() => this.poll(ticketId), this.pollMs), ended, end, had: null,
+      // After a restart the clock starts again: what ran before isn't known.
+      activity: { at: Date.now(), tools: [] },
     };
     // The server's listener keeps the process up; a Runner alone (a test) can exit with turns followed.
     live.timer.unref();
@@ -2657,6 +2701,7 @@ export class Runner {
         live.stopPending = false;
         this.signal(live, 'SIGTERM');
       }
+      if (live.ticks % 40 === 0) this.checkQuiet(ticketId, live);
       // Gone without a word: killed with its unit (out of memory, say).
       if (++live.ticks % 20 === 0 && this.gone(live)) {
         this.readStream(ticketId, live, true);
@@ -3011,6 +3056,11 @@ export class Runner {
     // A turn that prints a saved secret (#838) never puts it in the chat, its reply or its activity line.
     if (secrets.size) ev = hideSecretsIn(ev, secrets);
     if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info, ticketId);
+    const live = this.turns.get(ticketId);
+    if (live) {
+      live.activity = noteEvent(live.activity, ev, Date.now());
+      if (this.quietSince(live) === null && this.store.getSetting<TurnState>(turnKey(ticketId))?.quiet) this.checkQuiet(ticketId, live);
+    }
     // A keepalive (#862) shows nothing: only its session id and its cost are kept.
     if (this.keepalives.has(ticketId)) {
       if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) this.store.updateTicket(ticketId, { session_id: ev.session_id });

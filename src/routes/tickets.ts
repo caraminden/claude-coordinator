@@ -857,6 +857,15 @@ export const ticketRoutes: Route[] = [
       return json(res, 200, { stopped: runner.stop(id) });
     },
   },
+  // "Is this still going?" on a quiet turn's chip (#906): a look at its process, no message and no model call.
+  {
+    method: 'POST', path: '/api/tickets/:ticket/check', who: ['person'],
+    async handler(ctx) {
+      const { res, app, ticket } = ctx;
+      const check = await app.runner.checkTurn(ticket.id);
+      return check ? json(res, 200, check) : json(res, 409, { error: 'No turn is running.' });
+    },
+  },
   // A spend alert card's Stop and Keep going (#723): each names its turn's start, so a card left over from an earlier
   // turn can't stop or mute a later one.
   {

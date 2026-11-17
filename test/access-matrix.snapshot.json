@@ -1992,6 +1992,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/check": {
+  "anon": "401 Not logged in",
+  "person": "409 No turn is running.",
+  "member": "409 No turn is running.",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/close": {
   "anon": "401 Not logged in",
   "person": "403 A minion may only be dismissed by itself",
@@ -2589,6 +2599,16 @@
   "outsider": "404 No such minion",
   "tmA": "200",
   "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/check": {
+  "anon": "401 Not logged in",
+  "person": "409 No turn is running.",
+  "member": "409 No turn is running.",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

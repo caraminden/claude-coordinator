@@ -959,7 +959,7 @@ export function appendEvent(event, scroll = true) {
   } else if (event.kind === 'job') {
     // The card follows the bottom of the chat (Cara's pick, 2026-11-17): each time the job starts, pauses or ends
     // it comes down here, and where it was keeps a one-line note.
-    const old = log.querySelector(`[data-job-card="${data.job}"]`);
+    const old = log.querySelector(`.jobcard[data-job-card="${data.job}"]`);
     if (old) {
       const note = jobMovedNote(data, jumpHref(view.ticket, event.id));
       Object.assign(note.dataset, old.dataset);

@@ -162,7 +162,7 @@ function body(v) {
       h('span', {}, 'GPU busy ', b(duration(v.gpu_busy_s))),
       v.started_at ? h('span', { class: 'muted' }, `started ${pacific(v.started_at)}`) : null));
     // A Stop the agent hasn't acted on yet: the server keeps the state until the agent reports it ended.
-    if (v.error) out.push(h('p', { class: 'jc-why' }, `Stopping: ${v.error}`));
+    if (v.error) out.push(h('p', { class: 'jc-why' }, `Stopping, waiting for the machine (${v.error})`));
     else if (v.state === 'uploading') out.push(h('p', { class: 'jc-why' }, 'Sending its results back'));
     if (v.state === 'paused') out.push(...pausedParts(v));
   } else {
@@ -439,8 +439,9 @@ function newSection(machineId) {
       v.state === 'running' || v.state === 'paused' ? bar(Math.min(100, (run / v.limit_s) * 100)) : '');
     let card = '';
     if (isOpen) {
-      if (!st.cards.has(v.id)) st.cards.set(v.id, jobCard(v.id, v, 'machines'));
+      // Kept while it stays live; one redraw() let go of (closed, or the page left) is built again.
       card = st.cards.get(v.id);
+      if (!card || !drawn.get(v.id)?.has(card)) st.cards.set(v.id, card = jobCard(v.id, v, 'machines'));
     }
     return h('div', { class: `mjobs-item ${tone(v.state)}${isOpen ? ' open' : ''}` }, btn, card);
   }

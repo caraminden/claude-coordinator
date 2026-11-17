@@ -313,6 +313,11 @@ export class AppServices {
     this.opts = opts;
   }
 
+  /** The app's DATA_DIR (#834): the only place a turn's images may come from. */
+  dataDir(row: Pick<ContraptionRow, 'name'>): string {
+    return join(this.opts.home, '.local/share', row.name);
+  }
+
   /** The app's folder: where its repo is checked out; default ~/apps/<name>. */
   folder(row: Pick<ContraptionRow, 'name' | 'folder'>): string {
     return appFolder(row, this.opts.home);

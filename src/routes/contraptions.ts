@@ -11,6 +11,7 @@ import { adminAskRefusal } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, askFiles, askLine, askMessage, askSummary, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
+import { loadImages } from '../turn-images.ts';
 import { listMedia, mcpMessage, mediaDir, mediaFile, mediaTools, MEDIA_TYPE, runMediaTool } from '../contraption-media.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import { ServiceError } from '../app-services.ts';
@@ -308,6 +309,8 @@ export const contraptionRoutes: Route[] = [
   }),
   fromContraption('POST', '/api/contraptions/turns', async ({ req, res, app }, c) => {
     const body = await readJson(req, 4_000_000);
+    // Before the stream opens, so a refused image is a plain HTTP 400 or 413 (#834).
+    const imageBlocks = body && typeof body === 'object' && body.images !== undefined ? await loadImages(body.images, app.services.dataDir(c)) : [];
     const emit = eventStream(req, res);
     // The contraption hung up: stop its turn rather than run it for nobody.
     let turn: number | null = null;
@@ -320,7 +323,7 @@ export const contraptionRoutes: Route[] = [
       if (turn !== null) app.contraptionTurns.cancel(c.id, turn);
     });
     try {
-      await app.contraptionTurns.run(c, parseTurn(body, c), (event, data) => {
+      await app.contraptionTurns.run(c, { ...parseTurn(body, c), imageBlocks }, (event, data) => {
         if (event === 'start') {
           turn = (data as { turn: number }).turn;
           if (gone) app.contraptionTurns.cancel(c.id, turn);

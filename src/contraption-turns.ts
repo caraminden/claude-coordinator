@@ -22,6 +22,7 @@ import type { ContraptionRow, Store } from './db.ts';
 import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
 import { clockTime, parseResetTime } from './runner.ts';
+import type { ImageBlock } from './turn-images.ts';
 import { MEDIA_SERVER, type CodexAt, type MediaTurn } from './contraption-media.ts';
 import { claudeConfigDir, projectSlug, transcriptPath, validSessionId } from './sessions.ts';
 
@@ -104,6 +105,9 @@ export interface TurnRequest {
   media: boolean;
   /** A turn whose context names no person or app (VoiceAnalyzer #26): a neutral empty folder, `system` as the whole system prompt, no machines, always fresh, never Codex. */
   blind: boolean;
+  /** Paths in the app's data folder (#834); the route loads them into `imageBlocks` before the turn starts. */
+  images: string[];
+  imageBlocks?: ImageBlock[];
   timeoutSec: number;
 }
 
@@ -177,13 +181,14 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   if (body.webSearch !== undefined && typeof body.webSearch !== 'boolean') bad('webSearch must be true or false');
   if (body.machines !== undefined && typeof body.machines !== 'boolean') bad('machines must be true or false');
   if (body.media !== undefined && typeof body.media !== 'boolean') bad('media must be true or false');
+  if (body.images !== undefined && (!Array.isArray(body.images) || body.images.some((p: unknown) => typeof p !== 'string'))) bad('images must be a list of paths');
   if (body.blind !== undefined && typeof body.blind !== 'boolean') bad('blind must be true or false');
   if (body.blind === true && isCodexModel(model)) bad('A blind turn runs on Claude only: pick a Claude model');
   if (body.media === true && mcp.some((s) => s.name === MEDIA_SERVER)) bad(`With media: true, ${MEDIA_SERVER} is Citadel's server: call yours something else`);
   return {
     person: body.person, session: body.session, fresh: body.fresh === true || body.blind === true, prompt: body.prompt, system: body.system ?? '', model,
     compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), mcp, agents,
-    webSearch: body.webSearch === true, machines: body.machines !== false && body.blind !== true, media: body.media === true, blind: body.blind === true, timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
+    webSearch: body.webSearch === true, machines: body.machines !== false && body.blind !== true, media: body.media === true, blind: body.blind === true, images: body.images ?? [], timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
 
@@ -270,7 +275,7 @@ interface Live {
 }
 
 /** One message as claude's stream-json input takes it; claude echoes `uuid` back once it takes it in. */
-const userLine = (text: string, uuid?: string) => JSON.stringify({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: [{ type: 'text', text }] } }) + '\n';
+export const userLine = (text: string, uuid?: string, images: ImageBlock[] = []) => JSON.stringify({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } })), { type: 'text', text }] } }) + '\n';
 
 /** An app session as the account pick knows it (ClaudePlaces.place). */
 const appWarmKey = (contraption: number, session: string) => `app:${contraption}:${session}`;
@@ -464,6 +469,7 @@ export class ContraptionTurns {
     // The server login's Codex turns run in its Codex-only container (#341); its Claude turns, and the session's bookkeeping, stay on the host.
     // A blind turn is Claude's only (Codex's own prompt and folder aren't proven clean), whatever the switch says.
     const wantCodex = isCodexModel(req.model) || (!req.blind && !!this.store.getSetting<boolean>(codexSwitchKey(req.person)));
+    if (wantCodex && req.imageBlocks?.length) return fail('bad_request', 'images need a Claude turn: this one runs on Codex');
     const at = (wantCodex && place.host && !this.codexWhy(req.person) && this.claude.codexPlace(req.person)) || place;
 
     // Busy only once the turn is recorded, so a throw here can't leave the name busy until a restart (#468 S04-8).
@@ -655,7 +661,7 @@ export class ContraptionTurns {
     emit('start', { turn: live.id, session: req.session, claudeSession, provider, model });
     child.stdin!.on('error', () => {}); // claude exited without reading it all
     // Open until the reply is out, as the turn wrapper keeps a minion turn's: steer() writes to it meanwhile.
-    child.stdin!.write(userLine(prompt));
+    child.stdin!.write(userLine(prompt, undefined, req.imageBlocks));
     const timer = setTimeout(() => this.stop(live, 'timeout'), req.timeoutSec * 1000);
 
     let result: any = null;

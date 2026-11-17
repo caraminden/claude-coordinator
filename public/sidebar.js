@@ -405,7 +405,7 @@ function cardBadge(cards, spend = null) {
     if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey) window.open(new URL(cards[0].href, location.href).href, '_blank');
     else openHash(cards[0].href);
   };
-  const what = spend ? `spend alert: this turn passed $${spend.stage} and has used about $${spend.usd}` : `${cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
+  const what = spend ? `spend alert: this turn passed $${spend.stage} and has used about $${spend.usd}` : `${cards[0].what ?? cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
   return h('span', {
     class: `card-badge${spend ? ' spend' : ''}`, role: 'link', tabindex: 0,
     title: cards.length > 1 ? `${cards.length} cards wait on you: open the oldest, the ${what}` : `Open the ${what}`,

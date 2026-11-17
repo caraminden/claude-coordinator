@@ -16,17 +16,19 @@ export const CHECKPOINT_MS = 10_000;
 export const WAL_PAGES = 2000;
 export const MAX_WAIT_MS = 10 * 60_000;
 
+// One -shm fd per database, opened once and never closed (#860). Closing any fd on a file drops every POSIX lock
+// this process holds on it, SQLite's own included: with its -shm locks gone, the next process to open the database
+// took itself for the first, truncated the -shm and re-initialised it, and the server's mmap of it died with SIGBUS.
+const shmFds = new Map<string, number>();
+
 /** How many frames a database's WAL holds, from its wal-index (-shm) header: mxFrame, 4 bytes at 16 in the machine's byte order. Null if unreadable. */
 export function walFrames(dbPath: string): number | null {
   try {
-    const fd = openSync(`${dbPath}-shm`, 'r');
-    try {
-      const b = Buffer.alloc(4);
-      if (readSync(fd, b, 0, 4, 16) < 4) return null;
-      return endianness() === 'LE' ? b.readUInt32LE() : b.readUInt32BE();
-    } finally {
-      closeSync(fd);
-    }
+    let fd = shmFds.get(dbPath);
+    if (fd === undefined) shmFds.set(dbPath, (fd = openSync(`${dbPath}-shm`, 'r')));
+    const b = Buffer.alloc(4);
+    if (readSync(fd, b, 0, 4, 16) < 4) return null;
+    return endianness() === 'LE' ? b.readUInt32LE() : b.readUInt32BE();
   } catch {
     return null;
   }
@@ -61,6 +63,7 @@ if (!isMainThread && workerData?.checkpoint) {
         const frames = walFrames(paths[i]);
         if (frames !== null && frames < walPages && Date.now() - last[i] < maxWaitMs) {
           // Not yet: only make what's in the WAL safe from a power cut, as the checkpoint's own fsync did.
+          // Closing this fd is safe, unlike one on -shm or the database: SQLite takes no locks on the -wal file.
           const fd = openSync(`${paths[i]}-wal`, 'r');
           try { fsyncSync(fd); } finally { closeSync(fd); }
           return;

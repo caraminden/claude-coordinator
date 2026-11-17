@@ -208,8 +208,8 @@ else's plan. Citadel keeps a meter (contraption, person, session name, start, en
 counts), the session names, and for 14 days the turn's audit: the system text and prompt as sent
 (with any messages sent during the turn), the reply's text, the model that ran, whether it ran
 blind, how many images went with it (never the images) and your verdict. Each text over 100,000
-characters is cut there, with a note saying how much. Your home scheme's Taskmaster reads the audit with its `contraption_turns` tool (ask it); nobody
-else does (not its minions), and it is never logged anywhere else, though Citadel's own
+characters is cut there, with a note saying how much. Your home scheme's Taskmaster reads the audit with its `contraption_turns` tool (ask it), and its
+members may read it through Citadel's API; nobody else does (not its minions), and it is never logged anywhere else, though Citadel's own
 database backups hold it as long as they are kept. It holds no tool calls or tool results.
 Deleting a session deletes its audit rows (tested).
 

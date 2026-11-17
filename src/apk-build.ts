@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { androidEnv } from './claude-link.ts';
 import { apksigner, install, OldApk, OtherKey, signers } from './apk-release.ts';
 import type { ContraptionRow } from './db.ts';
+import { hasKey, keyFiles, makeReleaseKey, type Keytool } from './release-key.ts';
 import { gradleVersion } from './release-readers.ts';
 
 /** The whole build, the wait for a heavy slot included: past it the build is stopped and told. */
@@ -74,6 +75,7 @@ export interface ApkBuildDeps {
   tell: (row: ContraptionRow, text: string) => void;
   run?: Runner;
   certs?: (apk: string) => Promise<string[]>;
+  keytool?: Keytool;
 }
 
 /** What one check came to, for the log and the tests. */
@@ -114,6 +116,22 @@ export class ApkBuilds {
     })();
   }
 
+  /** Whether `name` is a Capacitor app whose last check found no release key: the Releases page offers to make it. */
+  keyless(name: string): boolean {
+    return existsSync(join(this.d.cacheDir, name, 'key-missing-told')) && !hasKey(this.d.keyDir, name);
+  }
+
+  /**
+   * Make `row`'s release key (src/release-key.ts; throws when it has one) and build its APK at once: the commit the
+   * missing key failed at is forgotten. The make_release_key card's Approve and the Releases page's button both come here.
+   * Resolves once the key is made, to the build it started.
+   */
+  async makeKey(row: ContraptionRow, by: string): Promise<{ building: Promise<void> }> {
+    await makeReleaseKey(this.d.keyDir, row.name, { home: this.d.home, keytool: this.d.keytool });
+    for (const f of ['key-missing-told', 'failed-at']) rmSync(join(this.d.cacheDir, row.name, f), { force: true });
+    return { building: this.schedule(row, by) };
+  }
+
   /** Whether `row`'s APK is behind its live commit, and if so build and publish it. */
   async check(row: ContraptionRow, by: string): Promise<Outcome> {
     if (this.d.ciRelease(row)) return { skipped: 'a release workflow signs its APKs' };
@@ -145,14 +163,13 @@ export class ApkBuilds {
       this.d.tell(row, `${row.title}'s Android build at ${commit.slice(0, 9)} wasn't published: ${why}${end ? `\n\nThe end of its build log (${join(this.d.cacheDir, row.name, 'build.log')}):\n${end}` : ''}\n\nIt's tried again once a deploy carries a newer commit.`);
       return { failed: why };
     };
-    const key = join(this.d.keyDir, `${row.name}-release.jks`);
-    const pass = join(this.d.keyDir, `${row.name}-release.pass`);
+    const { jks: key, pass } = keyFiles(this.d.keyDir, row.name);
     // A missing key is told once, not per commit (a night of deploys woke the Taskmaster ten times): the marker stays until a check finds the key.
     const keyTold = join(dir, 'key-missing-told');
     if (existsSync(key) && existsSync(pass)) rmSync(keyTold, { force: true });
     else {
       if (existsSync(keyTold)) return { skipped: 'no release key yet, already told' };
-      const out = fail(`it has no release key yet (${key} and its .pass). A person makes it once, as the citadel:android-app skill says; until then no APK is built after its deploys.`);
+      const out = fail(`it has no release key yet (${key} and its .pass). A member makes it with Make release key on its Releases card, or approves the card make_release_key posts; until then no APK is built after its deploys.`);
       writeFileSync(keyTold, commit);
       return out;
     }

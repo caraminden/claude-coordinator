@@ -68,6 +68,7 @@ function builder(o: { ciRelease?: boolean; fail?: string } = {}) {
     published: (row, code, c) => published.push([row.name, code, c]),
     tell: (_row, text) => told.push(text),
     run, certs: async () => ['k1'],
+    keytool: async (args) => writeFileSync(args[args.indexOf('-keystore') + 1], 'jks'),
   });
   return { b, calls, told, published };
 }
@@ -152,6 +153,20 @@ test('a missing release key is told once, not once per commit; it tells again on
   commit(live, { 'android/app/a.txt': '4' });
   await b.check(row, '#5');
   assert.equal(told.length, 2, 'the key went missing again: told again');
+});
+
+test("makeKey makes a keyless app's key, forgets the told notice and builds at once; keyless names it until then", async () => {
+  const { row, data } = app('newkey');
+  const { b, told } = builder();
+  assert.equal(b.keyless('newkey'), false, 'not known as a Capacitor app until a check reads it');
+  assert.ok('failed' in (await b.check(row, '#1')));
+  assert.equal(told.length, 1);
+  assert.match(told[0], /Make release key|make_release_key/);
+  assert.equal(b.keyless('newkey'), true);
+  await (await b.makeKey(row, 'Cara')).building;
+  assert.equal(b.keyless('newkey'), false);
+  assert.equal(feed(data).versionCode, 1, 'the commit the notice failed at builds now');
+  await assert.rejects(b.makeKey(row, 'Cara'), /already has a release key/);
 });
 
 test('a failed Gradle build publishes nothing and tells the end of its log; an app a release workflow signs is left alone', async () => {

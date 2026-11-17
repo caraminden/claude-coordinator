@@ -897,6 +897,12 @@ export const projectRoutes: Route[] = [
         const coordinator = store.ownerCoordinator(store.getTicket(id)!);
         if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} started #${store.getTicket(id)!.number} from ${brief.heading || 'the handoff'} in ${basename(brief.path)}` });
       }
+      // A split scheme's other Taskmasters read it in their next turn's digest (#919).
+      if (store.isSplit(project.id)) {
+        const by = caller?.kind === 'coordinator' ? caller : null;
+        const who = !by ? session.name : by.coordinator_of == null ? 'The Overlord' : `${store.getUser(by.coordinator_of)?.name ?? 'Someone'}'s ${AGENT_NAME}`;
+        store.noteDigest(project.id, by?.id ?? 0, `${who} started #${store.getTicket(id)!.number} ${title}`);
+      }
       if (follow) {
         const { leader, when } = follow;
         waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base, since: follow.since });

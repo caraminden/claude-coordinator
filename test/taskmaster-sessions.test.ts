@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, PASSWORD, SECRET, type Booted, stopTurns, testPins } from './helpers.ts';
+import { bootServer, jsonLines, PASSWORD, SECRET, type Booted, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
 // Per-person Taskmasters (#919, Build 3): a scheme splits the first time a second member writes to its
@@ -179,6 +179,33 @@ test("a personal Taskmaster's turns run for its person; a card answer from someo
   assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'My answers', images: [], own: true }]), Cara.id);
 });
 
+test("the digest rides at the head of a Taskmaster's next turn, once", async () => {
+  process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
+  const prompts = join(root, 'prompts.jsonl');
+  const fake = join(root, 'claude-fake');
+  writeFileSync(fake, `#!${process.execPath}
+require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
+  require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
+  process.exit(0);
+});
+`);
+  chmodSync(fake, 0o755);
+  const { store, Cara, Josh } = people('digest-turn.db');
+  const p = store.createProject('Shared', null, Cara.id);
+  const cara = coordinator(store, p.id);
+  const josh = store.splitScheme(p.id, Josh.id);
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  store.noteDigest(p.id, josh.id, "Josh's Taskmaster started #4 Lairs");
+  const texts = () => jsonLines(prompts).map((l) => l.message.content.map((c: any) => c.text).join('\n'));
+  runner.send(cara.id, 'Cara', 'hello');
+  await until('the first turn', () => texts().length === 1 && !runner.isRunning(cara.id));
+  assert.match(texts()[0], /other Taskmasters:\n- Josh's Taskmaster started #4 Lairs[\s\S]*hello/);
+  runner.send(cara.id, 'Cara', 'again');
+  await until('the second turn', () => texts().length === 2 && !runner.isRunning(cara.id));
+  assert.doesNotMatch(texts()[1], /Lairs/);
+});
+
 // Through the server: a person's message, message_coordinator, a handover and message_taskmaster.
 describeServer();
 
@@ -298,6 +325,17 @@ function describeServer() {
     assert.equal(r.status, 200, JSON.stringify(r.data));
     await post(`/api/tickets/${work.id}/coordinator`, { text: 'after Rachel left', need: 'ask' }, { bearer: tokens.agentToken(work.id) });
     assert.equal(said(rachel.id, 'after Rachel left'), undefined);
+  });
+
+  test("a split scheme's starts and handovers reach the other Taskmasters' next turn as a digest", async () => {
+    const josh = db.coordinatorFor(Shared.id, Josh.id)!;
+    const r = await post(`/api/projects/${Shared.id}/tickets`, { title: 'Lairs', message: 'Build lairs', model: 'claude-sonnet-5-5', effort: 'medium', properties: { type: 'feature' } }, { bearer: tokens.agentToken(josh.id) });
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+    await stopTurns(dir);
+    const lines = db.digestFor(sharedTm.id);
+    assert.ok(lines.some((l) => l === `Josh's Taskmaster started #${r.data.number} Lairs`), JSON.stringify(lines));
+    assert.ok(lines.some((l) => /handed #\d+ to Josh/.test(l)), 'the earlier handover too');
+    assert.ok(!db.digestFor(josh.id).some((l) => l.includes('Lairs')), 'not in its own');
   });
 
   test('message_taskmaster "for" a member reaches theirs, else the Overlord; with no one, the sender\'s person', async () => {

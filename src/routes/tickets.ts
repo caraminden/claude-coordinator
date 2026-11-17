@@ -865,6 +865,7 @@ export const ticketRoutes: Route[] = [
           // Split: both owners' Taskmasters hear it as held mail.
           const tms = new Set([was ?? null, store.minionOwner(ticket)].map((uid) => store.coordinatorFor(ticket.project_id, uid)?.id));
           for (const tm of tms) if (tm != null) runner.leaveMail(tm, by, text);
+          store.noteDigest(ticket.project_id, agent?.kind === 'coordinator' ? agent.id : 0, text);
         }
       }
       runner.broadcastTicket(id);

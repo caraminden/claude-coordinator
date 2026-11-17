@@ -627,6 +627,37 @@ on every one of them.
 Mandate alone may call `scheme-<id>` at `/mandate-hook`, to tell a scheme its person ticked one of
 the scheme's items.
 
+## Jobs on a person's machine: `/api/contraptions/jobs`
+
+Your server can queue a container job (usually for a GPU) on a machine lent to your home scheme
+whose owner's `machine-agent.json` has a `jobs` block. The owner gets a go card in your home
+scheme's Taskmaster chat and answers "Run in job hours", "Run now", "Always allow this kind" or
+"No"; jobs run one at a time per machine, in its job hours (23:00 to 08:00 Pacific by default)
+unless the owner said "now". A change to the kind (anything but its name) asks again.
+
+- **`POST /api/contraptions/jobs`** `{ machine, kind, inputs?, limit_min?, when?, reason?, person? }`
+  answers `201` with the job (below).
+  - `kind`: `{ name, image, command: [args], reads?: [folder names], gpu? (true), network? (false), resumable? (false), max_limit_h }`.
+    `image` is fully qualified and pinned by digest (`registry/name@sha256:<64 hex>`).
+  - `inputs`: file paths inside your `DATA_DIR` (absolute or relative to it), at most 50 and 2 GB
+    in all; they land read-only in the container's `/in`.
+  - `when`: `"hours"` (default) or `"now"`, which needs `reason` and always asks the owner.
+  - `person`: the Citadel user id it's for, shown on the card.
+- **`GET /api/contraptions/jobs/<id>`** answers the job, plus `results: "jobs/<id>"`.
+- **`POST /api/contraptions/jobs/<id>/stop`**: a waiting job ends at once; a running one is stopped
+  on the machine.
+
+A job: `{ id, machine, state, waits, kind, inputs, limit_s, when, reason, go, go_by, paused_by,
+run_s, gpu_busy_s, gpu_pct, vram_mb, log_tail, exit_code, error, outputs: [{ path, size, uploaded }],
+upload_bytes, created_at, started_at, ended_at }`. `state` is one of `needs-go`, `queued`,
+`starting`, `running`, `paused`, `uploading`, `done`, `failed`, `stopped`, `refused`; `waits` says
+why a queued one hasn't started ("machine offline", "outside job hours (opens 23:00 PST)",
+"behind job #N", "machine paused"). Poll `GET` for the end; there is no callback yet.
+
+What the job writes to `/out` lands in your `DATA_DIR/jobs/<id>/` (2 GB per job, 20 GB of results
+per scheme; results older than 14 days are deleted). Another app's job answers 404. No home scheme
+gets 409; a machine not lent to it, or without a `jobs` block, 404.
+
 ## Saved secrets: `GET /api/contraptions/secrets/<name>`
 
 A password or key a person saved in Citadel (Settings → Your account → Secrets, or a minion's secret card),
@@ -876,12 +907,15 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 | Build | 1 to 60 minutes, default 20, not counting the wait for a heavy slot |
 | `$CITADEL_HEAVY` hold | 10 minutes; one slot for all apps together |
 | Disk measure | every 30 minutes |
+| Job inputs, results | 50 files and 2 GB; 2 GB per job, 20 GB per scheme, kept 14 days |
+| Job limit | the kind's `max_limit_h`, at most the machine's (12 h unless its owner says more) |
 | Health wait | 60 s |
 
 ## What changed since 2026-11-02
 
 Newest first.
 
+- **2026-11-16:** Jobs on a person's machine, usually for its GPU: `POST /api/contraptions/jobs`, `GET` and `stop` on one, with the owner's go card in your home scheme's Taskmaster chat and results in `DATA_DIR/jobs/<id>/` ("Jobs on a person's machine").
 - **2026-11-16:** `$CITADEL_HEAVY <command>` runs a heavy step of your service or timers in a shared
   slot, capped at 10 minutes a hold; `disk_warn_gb` in `citadel-app.json`, and
   `GET /api/contraptions/disk` for your `DATA_DIR` size and the free disk ("Heavy steps and disk

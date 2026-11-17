@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
+import { Claims } from './claims.ts';
 import { Memory } from './memory.ts';
 import type { KeepaliveRow } from './keepalive.ts';
 
@@ -1215,6 +1216,7 @@ export const SCHEMA_HISTORY = [
   [60, 'stored_secrets (#838)'],
   [61, 'turns.keepalive (#862)'],
   [62, 'tickets.coordinator_of, one_coordinator per person, ticket_touches, taskmaster_digest (#919)'],
+  [63, 'claims (#921)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1247,6 +1249,8 @@ export class Store {
   props: Registry;
   /** Scheduled minions (src/schedules.ts). */
   schedules: Schedules;
+  /** Single-holder duties such as the pipeline lane (src/claims.ts, #921). */
+  claims: Claims;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
   /** The database file; the runner keeps its turn folders beside it. */
@@ -1270,6 +1274,7 @@ export class Store {
       this.db.exec('PRAGMA state.synchronous = NORMAL; PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
       this.props = new Registry(this.db);
       this.schedules = new Schedules(this.db);
+      this.claims = new Claims(this.db);
       this.memory = new Memory(this);
       return;
     }
@@ -1294,6 +1299,7 @@ export class Store {
     this.props.seed();
     this.settleBuilds();
     this.schedules = new Schedules(this.db);
+    this.claims = new Claims(this.db);
     this.memory = new Memory(this);
     this.serverLoginOwnerOnly();
     this.groupByType();
@@ -2183,6 +2189,7 @@ export class Store {
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
     this.memory.deleteTicket(id);
+    this.claims.releaseHeldBy(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 

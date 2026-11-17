@@ -1253,6 +1253,36 @@
   "m1": "400 op must be add, list or remove",
   "m2": "400 op must be add, list or remove"
  },
+ "GET /api/projects/:p/claims": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "200"
+ },
+ "POST /api/projects/:p/claims": {
+  "anon": "401 Not logged in",
+  "person": "400 A claim name is lowercase words joined by hyphens, at most 40 characters, e.g. pipeline-lane",
+  "member": "400 A claim name is lowercase words joined by hyphens, at most 40 characters, e.g. pipeline-lane",
+  "outsider": "404 No such scheme",
+  "tmA": "400 A claim name is lowercase words joined by hyphens, at most 40 characters, e.g. pipeline-lane",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/projects/:p/claims/nope": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/contraption-turns": {
   "anon": "401 Not logged in",
   "person": "200",

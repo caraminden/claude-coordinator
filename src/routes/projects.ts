@@ -17,6 +17,8 @@ import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
+import { claimName, type Claim } from '../claims.ts';
+import { pacific } from '../pacific.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -342,6 +344,12 @@ function searchProject(app: App, projectId: number, q: string, ticketId?: number
     hits.set(ev.ticket_id, { ticketId: ev.ticket_id, eventId: ev.id, oldestId: ev.id, at: ev.created_at, snippet, matches: 1 });
   }
   return [...hits.values()].slice(0, 100);
+}
+
+/** A claim as the tools and the page show it: its holder's number and title and a Pacific time beside the ids. */
+export function claimView(app: App, c: Claim) {
+  const t = app.store.getTicket(c.holder);
+  return { ...c, holder_number: t?.number ?? null, holder_title: t?.title ?? '', since_text: `since ${pacific(c.since)}` };
 }
 
 const PEOPLE_AND_TASKMASTER = ['person', 'taskmaster'] as const;
@@ -1082,6 +1090,41 @@ export const projectRoutes: Route[] = [
       const s = app.store.schedules.create({ project_id: project.id, ...(fields as Required<typeof fields>), ...extra, created_by: session.name });
       app.broadcast({ type: 'schedules', projectId: project.id });
       return json(res, 201, scheduleView(app, s));
+    },
+  },
+  // Claims (#921): the pipeline lane and other single-holder duties. Everyone in the scheme reads them; people and
+  // Taskmasters take and free them (every member decides alike, so any of them frees one whoever holds it).
+  {
+    method: 'GET', path: '/api/projects/:project/claims', who: ['person', 'taskmaster', 'minion'],
+    handler: ({ res, app, project }) => json(res, 200, { claims: app.store.claims.list(project.id).map((c) => claimView(app, c)) }),
+  },
+  {
+    method: 'POST', path: '/api/projects/:project/claims', who: PEOPLE_AND_TASKMASTER, refuse: 'Only people and Taskmasters take claims; ask your Taskmaster',
+    async handler({ req, res, app, session, caller, project }) {
+      const body = await readJson(req);
+      const name = claimName(body.name);
+      const note = body.note == null ? '' : str(body.note, 'Note', 300);
+      let holder = caller;
+      if (body.minion != null) {
+        holder = app.store.getTicketByNumber(project.id, Number(body.minion));
+        if (!holder || holder.kind === 'coordinator' || holder.status === 'closed') throw new HttpError(400, `No open minion #${Number(body.minion)} in this scheme`);
+      }
+      if (!holder) throw new HttpError(400, 'Name the minion that holds it (minion: its number)');
+      const { claim, held } = app.store.claims.take(project.id, name, holder.id, session.name, note);
+      if (held) {
+        const v = claimView(app, held);
+        throw new HttpError(409, `${name} is held by #${v.holder_number} ${v.holder_title}, taken by ${v.taken_by} ${v.since_text}${held.note ? ` (${held.note})` : ''}. Release it first if it should move.`);
+      }
+      app.broadcast({ type: 'claims', projectId: project.id });
+      return json(res, 201, { claim: claimView(app, claim) });
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/projects/:project/claims/:name', who: PEOPLE_AND_TASKMASTER,
+    handler({ res, app, project, params }) {
+      const released = app.store.claims.release(project.id, claimName(decodeURIComponent(params.name)));
+      if (released) app.broadcast({ type: 'claims', projectId: project.id });
+      return json(res, 200, { released: released ? claimView(app, released) : null });
     },
   },
   // Edit, pause or resume, or delete a schedule; runs it already started stay.

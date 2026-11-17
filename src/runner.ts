@@ -42,6 +42,7 @@ import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, pl
 import { packPlan, unpackPlan } from './history.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
+import { overlordOrLead } from './overlord.ts';
 import { clockTime, parseResetTime } from './pacific.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -812,6 +813,16 @@ export class Runner {
     };
   }
 
+  /** A dismissed minion's claims (#921) free themselves; whoever keeps the scheme's claims hears so as held mail. */
+  private freeClaims(ticketId: number) {
+    const freed = this.store.claims.releaseHeldBy(ticketId);
+    const minion = this.store.getTicket(ticketId);
+    const keeper = minion && freed.length ? overlordOrLead(this.store, minion.project_id) : undefined;
+    if (!keeper) return;
+    for (const c of freed) this.leaveMail(keeper.id, `#${minion!.number} ${minion!.title}`, `(nothing to do unless something waits on it) ${c.name} is free: #${minion!.number}, its holder, was dismissed.`);
+    this.broadcast({ type: 'claims', projectId: minion!.project_id });
+  }
+
   /**
    * Close a ticket that is not running. Its worktree and branch are kept. Its temp folder, preview and
    * build output (#336) go on its lane, after its last turn's save; resolves once they are gone.
@@ -824,6 +835,7 @@ export class Runner {
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
+    this.freeClaims(ticketId);
     return this.lanes.run(ticketId, 'dismissal cleanup', async () => {
       const ticket = this.store.getTicket(ticketId);
       // Reopened while this waited (the status route): its temp folder is in use again.

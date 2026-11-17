@@ -494,6 +494,29 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { summary: { type: 'string', maxLength: 20000, description: 'The handoff your next session starts from, at most 20,000 characters' } }, required: ['summary'] },
   },
   {
+    name: 'claim',
+    description: "Take a single-holder duty for a minion, e.g. the pipeline lane (`pipeline-lane`): a row every Taskmaster in the scheme sees, not a note in memory. Refused while another holds it (the answer names the holder). It frees itself when its minion is dismissed. Without `minion` you hold it yourself.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Lowercase words joined by hyphens, e.g. pipeline-lane' },
+        minion: { type: 'integer', description: 'The minion that holds it (#N as a number); leave out to hold it yourself' },
+        note: { type: 'string', maxLength: 300, description: 'Optional: what it is held for' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'release',
+    description: 'Free a claim, whoever holds it, e.g. once the pipeline lane\'s minion has landed or a fix for a broken land must jump the lane.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'The claim, e.g. pipeline-lane' } }, required: ['name'] },
+  },
+  {
+    name: 'list_claims',
+    description: 'List the scheme\'s claims: each duty, its holder and since when. list_tickets shows them too.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'list_schedules',
     description: "List this scheme's scheduled minions: when each runs, when it runs next, and its last run.",
     inputSchema: { type: 'object', properties: {} },
@@ -1553,7 +1576,20 @@ async function runTool(name: string, args: any): Promise<string> {
       const head = at === PROJECT ? [] : [otherScheme(scheme)];
       // The morning count (#835): yesterday's contraption errors and the shared-folder file that lists them.
       if (errors) head.push(`Contraption errors yesterday (${errors.day}): ${errors.total}, ${errors.apps.map((a: any) => `${a.title} ${a.count}`).join(', ')}. Grouped with a sample each in the shared folder's ${errors.file}.`);
-      return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.'].join('\n');
+      const claims = at === PROJECT ? (await call('GET', `/api/projects/${at}/claims`)).claims : [];
+      return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.', ...(claims.length ? ['Claims:', ...claims.map(claimLine)] : [])].join('\n');
+    }
+    case 'claim': {
+      const r = await call('POST', `/api/projects/${PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null });
+      return `Claimed: ${claimLine(r.claim)}`;
+    }
+    case 'release': {
+      const r = await call('DELETE', `/api/projects/${PROJECT}/claims/${encodeURIComponent(String(args.name ?? ''))}`);
+      return r.released ? `Released: ${claimLine(r.released)}` : `Nobody held ${args.name}.`;
+    }
+    case 'list_claims': {
+      const { claims } = await call('GET', `/api/projects/${PROJECT}/claims`);
+      return claims.length ? claims.map(claimLine).join('\n') : 'No claims: every duty is free.';
     }
     case 'read_ticket': {
       const at = schemeOf(args);
@@ -2050,6 +2086,11 @@ function scheduleLine(s: any): string {
   const gate = s.min_minions != null ? `; skips under ${s.min_minions} minions${s.gate_scope === 'all' ? ' across all schemes' : ''}` : '';
   const kind = s.template ? `; standard audit ${s.template}${s.notes ? ' with notes' : ''}` : '';
   return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
+}
+
+/** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */
+function claimLine(c: any) {
+  return `${c.name}: #${c.holder_number} ${c.holder_title}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}`;
 }
 
 /** list_tickets and read_ticket with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */

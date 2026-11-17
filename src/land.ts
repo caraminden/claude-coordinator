@@ -237,7 +237,7 @@ export interface LandResult {
 export function landResult(output: string, code: number): LandResult {
   if (code === 75) return { kind: 'no-ci' };
   // The kit template's "<branch> moved, but the push to origin failed: <git's output>", which runs on until land.sh's next line.
-  const unpushed = code !== 0 && /^land: (\S+) moved, but the push to origin failed: ([\s\S]*?)\n(?=land: |$)/m.exec(output);
+  const unpushed = code !== 0 && /^land: (\S+) moved, but the push to origin failed: ([\s\S]*?)(?:\n(?=land: )|\n?(?![\s\S]))/m.exec(output);
   if (unpushed) {
     const branch = unpushed[1];
     const at = [...output.matchAll(/^land: (\S+) is now at ([0-9a-f]{7,40}) "(.*)"$/gm)].filter((m) => m[1] === branch).pop();
@@ -408,10 +408,11 @@ export class LandHandoffs {
     if (r.kind === 'unpushed') {
       // It landed: the minion pushes it (its turn runs as its person's GitHub login) rather than landing it again.
       const what = r.commit ? `${r.commit} "${r.subject}"` : `the branch's new tip`;
+      const apps = h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
       store.updateTicket(id, { state: null, note: 'landed locally; push to origin failed' });
       runner.broadcastTicket(id);
       runner.emit(id, 'note', { text: `Shipped ${what}: ${h.summary.trim().replace(/[.\s]+$/, '')}. Risk ${h.risk}. Landed locally, not pushed to origin: the push failed.` });
-      runner.send(id, from, `Your handed-off land merged, but isn't on GitHub: ${r.branch} moved locally to ${what}, and the push to origin failed: ${r.error}\n\nDon't hand it off again: nothing is left to land. Push it from your worktree with \`git push origin ${r.branch}\` (branches are shared with the main checkout; the next land retries it too). "Repository not found" or a 403 means the GitHub login can't reach the repo: tell the person, never try another login. If origin's ${r.branch} moved on its own (non-fast-forward), a person merges it first. close_self once it's pushed.\n\n${tail()}`);
+      runner.send(id, from, `Your handed-off land merged, but isn't on GitHub: ${r.branch} moved locally to ${what}, and the push to origin failed: ${r.error}\n\nDon't hand it off again: nothing is left to land. Push it from your worktree with \`git push origin ${r.branch}\` (branches are shared with the main checkout; the next land retries it too). "Repository not found" or a 403 means the GitHub login can't reach the repo: tell the person, never try another login. If origin's ${r.branch} moved on its own (non-fast-forward), a person merges it first. close_self once it's pushed.${apps.length ? ` The scheme's apps (${apps.join(', ')}) weren't deployed for it: deploy_contraption once it's pushed.` : ''}\n\n${tail()}`);
       return;
     }
     if (r.kind === 'no-ci') {

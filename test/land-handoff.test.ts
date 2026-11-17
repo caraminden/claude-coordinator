@@ -130,6 +130,7 @@ test('a land whose branch moved but whose push to origin failed says it landed l
   assert.ok(s.notes.some((n) => n.startsWith('Shipped d1a5c2f "#15: seed the tree"') && /not pushed to origin/i.test(n)), 'the shipped line says it landed but is not pushed');
   assert.equal(s.ticket.state, null, 'left open for the minion to push');
   assert.ok(!s.did.some((d) => d.startsWith('close')), 'not dismissed');
+  assert.equal(landResult('land: master moved, but the push to origin failed: error: one\n\nhint: two\n', 1).error, 'error: one\n\nhint: two', "a blank line in git's output doesn't cut it short");
   assert.deepEqual(landResult(out, 1), { kind: 'unpushed', commit: 'd1a5c2f', subject: '#15: seed the tree', branch: 'master', error: "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found" });
 });
 

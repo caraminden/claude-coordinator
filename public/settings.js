@@ -8,6 +8,7 @@ import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { instructionCost } from './prompt-cost.js';
+import { machineJobsSection } from './jobs.js';
 
 // ---------- push notifications ----------
 
@@ -1208,6 +1209,7 @@ function machineBody(m) {
         h('span', {}, [m.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on'))),
       kv('Notes', machineNotes(m))),
+    m.jobs ? machineJobsSection(m) : '',
     h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, remove));
 }
 

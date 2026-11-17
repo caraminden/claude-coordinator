@@ -5,6 +5,7 @@ import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 import { adoptTicket } from './thread.js';
 import { refreshViewerBar, setViewerGallery } from './artifacts.js';
+import { jobRecipe } from './jobs.js';
 
 /**
  * Who Claude speaks as in this chat: the scheme's Taskmaster in its own chat ("The Delve Taskmaster
@@ -386,7 +387,8 @@ export function questionCard(ticketId, card, opts = {}) {
   const pictures = card.questions.some((q) => q.options.some((o) => o.image));
   const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });
-  const el = h('div', { class: 'qcard' });
+  // A machine job's go card: the job's card in the chat links here (#859).
+  const el = h('div', { class: 'qcard', ...(card.job ? { 'data-go-job': card.job } : {}) });
   let answered = false;
 
   const ready = () => picks.every((p) => p.selected.size || p.other.trim());
@@ -480,6 +482,7 @@ export function questionCard(ticketId, card, opts = {}) {
       return h('div', { class: 'q', 'data-q': i },
         h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', q.question,
           q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
+        card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
         gallery
           ? h('div', { class: 'opts gallery' }, q.options.map((o) => {
             const thumb = o.image && optionThumb(ticketId, o, browse(o));

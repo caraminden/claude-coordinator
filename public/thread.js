@@ -1,6 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { presenceHead } from './presence.js';
-import { ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight, icon, isCoordinator, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
+import { ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight, icon, isCoordinator, jumpHref, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar } from './sidebar.js';
@@ -9,6 +9,7 @@ import { EMPTY_TRACK, rowState, SHIP, workingBy, workingLabel } from './threadst
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
+import { jobCard, jobMovedNote } from './jobs.js';
 import { recapEvent, showRecap } from './recap.js';
 import { noteStrike, struckSource } from './strike.js';
 import { narrationSorter } from './narration.js';
@@ -955,6 +956,16 @@ export function appendEvent(event, scroll = true) {
     if (bubble) showTakenBack(bubble, data.by, false);
   } else if (event.kind === 'question') {
     nodes.push(stamped(questionCard(event.ticket_id, data, { at: event.created_at }), event));
+  } else if (event.kind === 'job') {
+    // The card follows the bottom of the chat (Cara's pick, 2026-11-17): each time the job starts, pauses or ends
+    // it comes down here, and where it was keeps a one-line note.
+    const old = log.querySelector(`[data-job-card="${data.job}"]`);
+    if (old) {
+      const note = jobMovedNote(data, jumpHref(view.ticket, event.id));
+      Object.assign(note.dataset, old.dataset);
+      old.replaceWith(note);
+    }
+    nodes.push(jobCard(data.job, data.view, 'chat'));
   } else if (event.kind === 'approval') {
     nodes.push(stamped(approvalCard(event.ticket_id, data), event));
   } else if (event.kind === 'plan') {

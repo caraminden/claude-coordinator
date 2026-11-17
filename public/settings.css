@@ -287,3 +287,34 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .my-layers > .l-scheme { border-left-color: var(--cat-2); }
 .my-layers > .l-mine { border-left-color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 8%, var(--panel)); }
 .my-limits { margin: 0.3rem 0 0; padding-left: 1.2rem; max-width: 75ch; }
+
+/* A machine's Jobs section (#859): GPU use from the running job, job hours, the one-off window, the Pause switch,
+   the always-allowed kinds, and compact rows that open into the job's card. */
+.mjobs { margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
+.mjobs-head { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.mjobs-gpu { display: flex; align-items: center; gap: 0.5rem; font-variant-numeric: tabular-nums; font-size: var(--size-small); }
+.mjobs-meter { display: block; width: 90px; height: 8px; background: var(--code-bg); border-radius: 4px; overflow: hidden; }
+.mjobs-meter span { display: block; height: 100%; background: var(--running); }
+.mjobs-settings, .mjobs-kinds { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: center; margin-bottom: 0.6rem; }
+.mjobs-settings .row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.mjobs-settings input[type=time] { width: auto; }
+.mjobs-pause { margin: 0; cursor: pointer; }
+.mjobs-pause input { width: auto; margin: 0; }
+.mjobs-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.mjobs-chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 2px 4px 2px 10px; border: 1px solid var(--line); border-radius: var(--radius-pill); font-size: var(--size-small); }
+.mjobs-chip button { min-height: 0; padding: 2px 8px; border-radius: var(--radius-pill); }
+.mjobs-item { margin-bottom: 4px; }
+.mjobs-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 4px 10px; align-items: center; width: 100%; text-align: left; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 12px; cursor: pointer; }
+.mjobs-row:hover, .mjobs-item.open .mjobs-row { border-color: var(--control-line); }
+.mjobs-row .jc-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--jt); }
+.mjobs-row .text { display: flex; flex-direction: column; min-width: 0; }
+.mjobs-row .name { font-weight: 600; font-size: var(--size-small); }
+.mjobs-row .meta { color: var(--muted); font-size: var(--size-meta); overflow-wrap: anywhere; }
+.mjobs-row .right { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mjobs-row .jc-bar { grid-column: 2 / -1; height: 4px; margin: 2px 0 0; }
+.mjobs-item .jobcard { margin: 4px 0 8px; }
+@media (max-width: 520px) {
+  .mjobs-settings, .mjobs-kinds { grid-template-columns: 1fr; gap: 0.2rem; }
+  .mjobs-row { grid-template-columns: 14px 1fr; }
+  .mjobs-row .right { grid-column: 2; }
+}

@@ -112,3 +112,39 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 .answer-ref { display: flex; justify-content: flex-end; }
 .answer-ref button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 0.85em; color: var(--muted); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--control-line)); border-radius: 999px; padding: 0.25rem 0.75rem; cursor: pointer; }
 .answer-ref button:hover { color: var(--ink); }
+
+/* A machine job's live card (#859): in the chat that asked for it, and opened from a row on the Machines page.
+   Its left edge, pill and a row's dot take the state's colour from --jt. */
+.jt-held { --jt: var(--held); }
+.jt-waiting { --jt: var(--waiting); }
+.jt-running { --jt: var(--running); }
+.jt-done { --jt: var(--done); }
+.jt-failed { --jt: var(--error); }
+.jt-ended { --jt: var(--closed); }
+.jobcard { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--jt, var(--line)); border-radius: var(--radius); padding: 10px 14px; margin: 0.5rem 0; font-size: var(--size-small); }
+.jobcard .jc-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.jobcard .jc-kind { font-weight: 600; font-size: var(--size-body); }
+.jobcard .jc-pill { font-size: var(--size-meta); line-height: 1.3; padding: 2px 8px; border-radius: var(--radius-pill); color: var(--jt); border: 1px solid var(--jt); }
+.jobcard .jc-where { margin-left: auto; font-size: var(--size-meta); color: var(--muted); }
+.jobcard .jc-why { margin: 6px 0 0; }
+.jc-bar { display: block; position: relative; height: 6px; background: var(--code-bg); border-radius: 3px; margin: 8px 0 4px; overflow: hidden; }
+.jc-bar span { position: absolute; inset: 0 auto 0 0; background: var(--jt, var(--running)); border-radius: 3px; }
+.jobcard .jc-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.jobcard .jc-facts b { font-weight: 600; }
+.jobcard .jc-warn { margin: 8px 0 0; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--notice-bg); border-left: 3px solid var(--notice-bar); }
+.jobcard .jc-log { margin: 8px 0 0; }
+.jobcard .jc-logbtn { font: inherit; font-size: var(--size-meta); color: var(--muted); background: none; border: 0; padding: 4px 0; min-height: 0; cursor: pointer; }
+.jobcard .jc-log pre { margin: 4px 0 0; padding: 8px 10px; background: var(--code-bg); border-radius: var(--radius-sm); font: 12px/1.4 var(--mono); white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow: auto; }
+.jobcard .jc-files { margin: 6px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
+.jobcard .jc-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.note.jc-moved { font-size: var(--size-meta); }
+/* The go card's recipe: what runs, what it reads, and why now. */
+.qcard .jc-recipe { display: grid; grid-template-columns: 7.5rem 1fr; gap: 4px 12px; margin: 8px 0; font-size: var(--size-small); }
+.qcard .jc-recipe dt { color: var(--muted); }
+.qcard .jc-recipe dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.qcard .jc-recipe code { font-size: 12px; }
+@media (max-width: 520px) {
+  .jobcard .jc-where { margin-left: 0; width: 100%; }
+  .qcard .jc-recipe { grid-template-columns: 1fr; gap: 0 0; }
+  .qcard .jc-recipe dd { margin-bottom: 6px; }
+}

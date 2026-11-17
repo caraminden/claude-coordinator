@@ -17,6 +17,7 @@ import { loadReleases, onReleases } from './releases.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { renderModelPicker, uploadsRunning } from './composer.js';
 import { filesUploading } from './files.js';
+import { onJobUpdate } from './jobs.js';
 import { linkifyHtml, markdownElement } from './ui/markdown.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
@@ -335,6 +336,7 @@ function connectStream(catchUp = false) {
     }
     if (msg.type === 'seen-items' && msg.name === me) onSeenItems(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
+    if (msg.type === 'machine_job') onJobUpdate(msg.job);
     if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) { view.builds = msg.builds; renderSidebar(); }
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };

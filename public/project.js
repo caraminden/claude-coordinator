@@ -9,6 +9,7 @@ import { filesView, renderFiles } from './files.js';
 import { chatSection, chatView, mountChat, renderTicketHead } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
+import { usagePage } from './where.js';
 import { forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { schedulesButton, showSchedules } from './schedules.js';
@@ -68,6 +69,7 @@ function renderCrumbs(main) {
       : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
+      : main.kind === 'usage' ? [projectLink, ' / ', settingsLink, ' / ', 'Usage']
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
@@ -197,6 +199,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'contraptions' ? contraptionsPage()
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
+    : main.kind === 'usage' ? usagePage()
     : main.kind === 'releases' ? releasesPage()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)

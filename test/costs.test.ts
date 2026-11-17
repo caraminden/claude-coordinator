@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { costDays, dayBudget, localDay, modelName, spendSplit, whereItWent } from '../src/costs.ts';
+import { costDays, dayBudget, localDay, modelName, spendSplit, weekLimit, whereItWent } from '../src/costs.ts';
 import { Store } from '../src/db.ts';
 import { usageSplitText } from '../src/mcp.ts';
 
@@ -212,4 +212,21 @@ test("usage_split's text gives shares of one account's week with dollars, and Fa
   assert.match(text, /- Opus 5\.5: 6\.0% \(\$30\), last week 8\.0% \(\$40\), \$10 estimated/);
   assert.match(text, /- #12 Big one \(Citadel\): 4\.0% \(\$20\)/);
   assert.match(usageSplitText({ total: 1, lastWeek: 0, weekUsd: null, models: [], schemes: [], kinds: [], top: [] }), /^Last 7 days: \$1\.00; .* dollars at API prices only/);
+});
+
+test("one account's week is priced from that account's turns since its reset, once turns keep their account (#905)", () => {
+  const { store, t } = setup('weeklimit');
+  const now = Date.now();
+  const meter = (utilization: number, account: number) => ({ weekly: { utilization, resetsAt: now + 4 * 86400_000 }, account });
+  // Before #905 turns kept no account: a window reaching back to them can't be split, so nothing is priced yet.
+  store.recordTurn(t.id, { session_id: 'old', ended_at: now - 2 * 86400_000, session_cost_usd: 500, payer: 7 });
+  store.recordTurn(t.id, { session_id: 'a2', ended_at: now - 3600_000, session_cost_usd: 10, payer: 7, account: 2 });
+  assert.equal(weekLimit(store, 7, meter(0.5, 2), now), null);
+  // A meter that reset after the first turn with an account: account 2's turns since then over its utilization.
+  const fresh = { weekly: { utilization: 0.5, resetsAt: now + 7 * 86400_000 - 2 * 3600_000 }, account: 2 };
+  store.recordTurn(t.id, { session_id: 'a1', ended_at: now - 1800_000, session_cost_usd: 30, payer: 7, account: 1 });
+  close(weekLimit(store, 7, fresh, now)!, 10 / 0.5);
+  // Too little of the meter used to price it, or another payer: the last estimate stands, or none.
+  close(weekLimit(store, 7, meter(0.01, 2), now)!, 20);
+  assert.equal(weekLimit(store, 8, fresh, now), null);
 });

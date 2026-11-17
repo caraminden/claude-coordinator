@@ -293,7 +293,9 @@ h2 { font-size: 1.15rem; margin: 0; }
 .cost-pop .usd { display: inline-block; min-width: 3.6rem; margin-left: 0.5rem; color: var(--muted); font-size: 0.85em; }
 .cost-pop .warn { color: var(--waiting); font-weight: 600; }
 /* "Where it went" (#905, public/where.js): one hue per table, so bars in the accent and no legend; numbers tabular so rows never shift. */
-.where { display: grid; gap: 0.35rem; font-variant-numeric: tabular-nums; min-width: min(30rem, calc(100vw - 32px)); }
+.where { display: grid; gap: 0.35rem; font-variant-numeric: tabular-nums; max-width: 52rem; }
+/* Hold the page's height while the summary loads, so the tables don't push the page around when they arrive. */
+.where-slot.loading { min-height: 60rem; }
 .where h4 { margin: 0.6rem 0 0; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .where-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1.2rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--line); }
 .where-total { display: grid; gap: 0.1rem; }
@@ -309,8 +311,9 @@ h2 { font-size: 1.15rem; margin: 0; }
 .where-table .num b { font-weight: 600; }
 .where-table .last { color: var(--muted); }
 .where-table .bar-col { width: 30%; min-width: 3rem; padding-left: 0; padding-right: 0; }
-.where-table .bar { display: block; height: 0.55rem; border-radius: 0 4px 4px 0; background: var(--accent); }
+.where-table .bar { display: block; width: var(--pct, 0); height: 0.55rem; border-radius: 0 4px 4px 0; background: var(--accent); }
 .where-table .est, .where-table .scheme { color: var(--muted); font-size: 0.85em; }
+.where .where-total .usd { margin-left: 0; }
 .where .usd { display: inline-block; min-width: 3.6rem; margin-left: 0.5rem; color: var(--muted); font-size: 0.85em; }
 .where .foot { margin: 0.4rem 0 0; padding-top: 0.4rem; border-top: 1px solid var(--line); font-size: 0.8rem; line-height: 1.45; color: var(--muted); }
 @media (max-width: 600px) { .where-table .bar-col { display: none; } .where-table tbody th { max-width: 9rem; } }

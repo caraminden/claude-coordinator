@@ -2949,7 +2949,9 @@ export class Store {
   }
 
   /** What one payer's turns on one of their accounts cost since `since`; a turn from before #905 kept no account and counts as account 1's. */
-  accountSpend(payer: number | null, account: number, since: number): number {
+  accountSpend(payer: number | null, account: number, since: number): number | null {
+    // Turns kept no account before #905, so a window holding one of those can't be split by account (keepalive pings keep none, and cost next to nothing).
+    if (this.db.prepare('SELECT 1 FROM turns WHERE payer IS ? AND ended_at >= ? AND account IS NULL AND keepalive IS NULL LIMIT 1').get(payer, since)) return null;
     return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE payer IS ? AND ended_at >= ? AND ${account === 1 ? '(account IS NULL OR account = 1)' : 'account = ?'}`)
       .get(payer, since, ...(account === 1 ? [] : [account])) as { c: number }).c;
   }

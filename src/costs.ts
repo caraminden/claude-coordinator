@@ -194,7 +194,7 @@ export function weekLimit(store: Store, payer: number | null, usage: { weekly: {
   const w = usage?.weekly;
   if (!w?.resetsAt || w.resetsAt <= now || w.utilization < MIN_UTILIZATION) return last;
   const spent = store.accountSpend(payer, usage?.account ?? 1, w.resetsAt - 7 * 86400_000);
-  if (!(spent > 0)) return last;
+  if (!spent) return last; // null: the window reaches back before turns kept their account
   const usd = spent / w.utilization;
   if (usd !== last) store.setSetting(key, usd);
   return usd;

@@ -20,6 +20,7 @@ the test on purpose.
 - [Your home scheme and its minions](#your-home-scheme-and-its-minions)
 - [The relay: calling another contraption](#the-relay-calling-another-contraption)
 - [Embeddings: `POST /api/contraptions/embed`](#embeddings-post-apicontraptionsembed)
+- [Saved secrets: `GET /api/contraptions/secrets/<name>`](#saved-secrets-get-apicontraptionssecretsname)
 - [Sessions reading a person's data: `/app-api/read`](#sessions-reading-a-persons-data-app-apiread)
 - [Big uploads: `/apps/_citadel/uploads/<name>`](#big-uploads-apps_citadeluploadsname)
 - [What Citadel serves your pages](#what-citadel-serves-your-pages)
@@ -622,6 +623,20 @@ on every one of them.
 Mandate alone may call `scheme-<id>` at `/mandate-hook`, to tell a scheme its person ticked one of
 the scheme's items.
 
+## Saved secrets: `GET /api/contraptions/secrets/<name>`
+
+A password or key a person saved in Citadel (Settings → Your account → Secrets, or a minion's secret card),
+for your server to use on their behalf: never ask for one in your own pages, and never put one in your
+repo or `citadel-app.json`. From your server, with your bearer key:
+`GET /api/contraptions/secrets/AZURE_SPEECH_KEY?person=3` → `{ "name": "AZURE_SPEECH_KEY", "scope":
+"person" | "scheme", "value": "…" }` (tested).
+
+- The person's own secret of that name first, then your home scheme's.
+- Names are a letter then letters, digits or underscores, at most 64, case-insensitive
+  (`azure_key` is `AZURE_KEY`).
+- 404 when neither has it, 403 when the person isn't one of yours.
+- Keep the value in memory, never in a log, a page or your data dir.
+
 ## Embeddings: `POST /api/contraptions/embed`
 
 For searching your own data by meaning, with the same local model Citadel's memory uses
@@ -818,6 +833,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-16:** `GET /api/contraptions/secrets/<name>?person=` reads a password or key a person saved
+  in Citadel, theirs first, then your home scheme's ("Saved secrets").
 - **2026-11-16:** Citadel keeps each turn's text for 14 days for your home scheme's members to read
   (Settings → App turns), and `POST /api/contraptions/turns/<turn>/verdict` records whether your
   check passed the reply or you fell back to your own text ("Verdict").

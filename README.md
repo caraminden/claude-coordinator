@@ -33,6 +33,13 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   the Claude plan of the person who sent its messages: the server's own login for
   its owner (the first admin), and everyone else's own linked Claude (below). A
   message from someone who hasn't linked is kept with a note.
+- Passwords and keys go in the secret store (`src/secrets.ts`, #838), never a chat: a minion asks
+  with a secret card (ask_question `secret`), people add, replace and delete theirs and their schemes'
+  in Settings → Your account, and the message box asks before sending text that looks like one
+  (`public/secret-check.js`). Values are sealed in `stored_secrets`, never shown again, dropped from
+  off-box copies, and reach turns only as `$CITADEL_SECRET_<NAME>` env vars (the scheme's, then the
+  person's own over them), with any value that shows up in a turn's output masked before it's stored.
+  Contraptions read them by name (`GET /api/contraptions/secrets/<name>`).
 - Every stream event is stored in SQLite and pushed to browsers over
   server-sent events.
 - Messages sent while a turn is running are queued and sent together as the

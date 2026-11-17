@@ -339,9 +339,8 @@ export function threadRow(t, href = threadHref(t)) {
 function ownerChip(t, coord) {
   const owner = !coord && String(t.properties?.assigned ?? '').trim();
   if (!owner) return '';
-  const mine = owner.toLowerCase() === me?.toLowerCase();
-  if (mine) return ''; // your own initial on every row says nothing; only other people's mark a row (#881)
-  return h('span', { class: `owner${mine ? ' mine' : ''}`, title: mine ? 'Yours' : `${owner}'s`, 'aria-label': `Owner: ${owner}` }, owner[0].toUpperCase());
+  if (owner.toLowerCase() === me?.toLowerCase()) return ''; // your own initial on every row says nothing; only other people's mark a row (#881)
+  return h('span', { class: 'owner', title: `${owner}'s`, 'aria-label': `Owner: ${owner}` }, owner[0].toUpperCase());
 }
 
 /**

@@ -86,12 +86,15 @@ export const chromiumShooter: Shooter = async (url) => {
   const bin = findChrome();
   if (!bin) throw new Error('no chrome-headless-shell in ~/.cache/ms-playwright');
   const browser = launch(bin);
+  // A page stuck in a loop never answers DevTools: killing the browser fails the shot and leaves no process behind.
+  const kill = setTimeout(() => void browser.close(), TIMEOUT_MS - 2000);
   try {
     const page = await openPage(browser.send, url, VIEW.width, { headers: [], cookies: [], settle: 500 });
     await page.s('Emulation.setDeviceMetricsOverride', { ...VIEW, deviceScaleFactor: 1, mobile: false });
     const { data } = await page.s('Page.captureScreenshot', { format: 'jpeg', quality: 80, clip: { x: 0, y: 0, ...VIEW, scale: 1 } });
     return Buffer.from(data, 'base64');
   } finally {
+    clearTimeout(kill);
     await browser.close();
   }
 };

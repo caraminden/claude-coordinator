@@ -298,7 +298,7 @@ h2[data-shape="star"] .mk-glyph { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68
 /* Nothing here moves on its own (#914): the button is pinned right at a fixed width, and the message keeps a reserved
    height (lines of text + one for the Sent / error line), so a longer or shorter status never shifts the button. */
 .mk-dock { display: grid; grid-template-columns: minmax(0, 1fr) auto; flex-wrap: nowrap; }
-.mk-dock > button { min-width: 14rem; white-space: nowrap; justify-self: end; }
+.mk-dock > button { width: 16rem; box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; justify-self: end; }
 .mk-dock .mk-dock-msg { min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
 .mk-dock .mk-dock-text { font-variant-numeric: tabular-nums; line-height: 1.4rem; min-height: 1.4rem; }
 .mk-dock .mk-sent { height: 1.4rem; line-height: 1.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

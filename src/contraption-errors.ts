@@ -4,7 +4,7 @@
 // tool calls and real chats ~10 to disabled tools before anyone noticed; this makes that visible every day.
 // The file is reports/contraption-errors/<day>.md in the app's home scheme's shared folder, rewritten every 10 minutes
 // while the day has new errors and once more when it ends; the scheme's list_tickets shows yesterday's count.
-import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContraptionErrorRow, ContraptionRow, Store } from './db.ts';
 import { pacific } from './pacific.ts';
@@ -12,8 +12,6 @@ import { redact } from './timer-alerts.ts';
 
 const POLL_MS = 10 * 60_000;
 const DAY_MS = 86_400_000;
-/** Rows and files older than this many days go. */
-const KEEP_DAYS = 30;
 /** Ended days written at once after a long stop, at most. */
 const CATCH_UP_DAYS = 7;
 export const DIGEST_DIR = 'reports/contraption-errors';
@@ -113,27 +111,27 @@ export class ErrorDigest {
     setTimeout(run, 60_000).unref?.();
   }
 
-  /** Read the journals on, write the days that changed, and once a day the ended ones in full and prune. */
+  /**
+   * Read the journals on, write the days that changed, and once a day the ended ones in full.
+   * shortcut: rows and files are kept for good (a few thousand small rows and one file per scheme a day a year); add retention if they grow.
+   */
   async tick() {
     if (this.busy) return;
     this.busy = true;
     try {
       if (this.deps.journal) await this.readJournals();
       const today = pacificDay(this.now());
-      const cutoff = addDays(today, -KEEP_DAYS);
       const yesterday = addDays(today, -1);
       const last = this.store.getSetting<string>(FINAL);
       const written = new Set<string>();
       if (!last || last < yesterday) {
-        this.store.pruneContraptionErrors(cutoff);
-        this.pruneFiles(cutoff);
         const from = last && last >= addDays(today, -CATCH_UP_DAYS) ? addDays(last, 1) : yesterday;
         for (let d = from; d <= yesterday; d = addDays(d, 1)) this.write(d, true), written.add(d);
         this.store.setSetting(FINAL, yesterday);
       }
       const days = [...this.dirty];
       this.dirty.clear();
-      for (const d of days) if (d >= cutoff && !written.has(d)) this.write(d, false);
+      for (const d of days) if (!written.has(d)) this.write(d, false);
     } finally {
       this.busy = false;
     }
@@ -178,20 +176,6 @@ export class ErrorDigest {
       const file = join(folder, `${day}.md`);
       writeFileSync(`${file}.tmp`, render(project?.name ?? 'This scheme', day, apps, mine, this.now(), all));
       renameSync(`${file}.tmp`, file);
-    }
-  }
-
-  private pruneFiles(cutoff: string) {
-    for (const scheme of this.owners().keys()) {
-      const dir = this.deps.sharedDir(scheme);
-      if (!dir) continue;
-      let names: string[];
-      try {
-        names = readdirSync(join(dir, DIGEST_DIR));
-      } catch {
-        continue;
-      }
-      for (const f of names) if (/^\d{4}-\d\d-\d\d\.md$/.test(f) && f.slice(0, 10) < cutoff) rmSync(join(dir, DIGEST_DIR, f), { force: true });
     }
   }
 

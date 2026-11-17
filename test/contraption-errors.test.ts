@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -114,22 +114,4 @@ test('counts per app, day and group, written to the owning scheme\'s shared fold
   // The Taskmaster's morning count: yesterday's total for its scheme's apps, and the file.
   assert.deepEqual(digest.summary(peekScheme.id, NOV17), { day: '2026-11-16', total: 1, apps: [{ title: 'Peek Auras', count: 1 }], file: 'reports/contraption-errors/2026-11-16.md' });
   assert.equal(digest.summary(quiet.id, NOV17), null, 'nothing to say');
-});
-
-test('old days go: rows and files past 30 days', async () => {
-  const store = new Store(join(root, 'prune.db'));
-  const josh = store.createUser({ name: 'Josh', login: 'josh' });
-  const scheme = store.createProject('P', null, josh.id);
-  const c = new Contraptions(store, 's'.repeat(40), join(root, 'keys2'));
-  const app = c.register({ name: 'p', title: 'P', port: 9301, icon: null, home_scheme: scheme.id, open_paths: '[]', default_model: null, turn_cap: null });
-  const dir = join(root, 'shared-prune', 'reports', 'contraption-errors');
-  mkdirSync(dir, { recursive: true });
-  for (const f of ['2026-10-01.md', '2026-11-01.md', 'notes.md']) writeFileSync(join(dir, f), 'x');
-  let now = Date.UTC(2026, 9, 1, 20);
-  const digest = new ErrorDigest(store, { sharedDir: () => join(root, 'shared-prune'), now: () => now });
-  digest.toolError(app, 'Bash', 'exit 1');
-  now = NOV17;
-  await digest.tick();
-  assert.deepEqual(store.contraptionErrors('2026-10-01'), []);
-  assert.deepEqual(readdirSync(dir).sort(), ['2026-11-01.md', '2026-11-16.md', 'notes.md']);
 });

@@ -867,7 +867,7 @@ CREATE TABLE IF NOT EXISTS contraption_turns (
 CREATE INDEX IF NOT EXISTS contraption_turns_day ON contraption_turns(contraption_id, user_id, started_at);
 -- Contraptions' errors by Pacific day (#835, src/contraption-errors.ts): failed agent tool calls (tool), 5xx answers
 -- through the proxy (http) and journal error lines (log), grouped by key (numbers and ids out), with a count and the
--- first scrubbed sample line. Never a prompt or reply. Kept 30 days.
+-- first scrubbed sample line. Never a prompt or reply.
 CREATE TABLE IF NOT EXISTS contraption_errors (
   contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
   day TEXT NOT NULL,
@@ -1728,11 +1728,6 @@ export class Store {
   contraptionErrors(day: string): ContraptionErrorRow[] {
     return this.db.prepare(`SELECT e.*, c.name, c.title, c.home_scheme FROM contraption_errors e JOIN contraptions c ON c.id = e.contraption_id
       WHERE e.day = ? ORDER BY e.count DESC, e.first_at`).all(day) as unknown as ContraptionErrorRow[];
-  }
-
-  /** Drop contraption errors from days before `day`. */
-  pruneContraptionErrors(day: string) {
-    this.db.prepare('DELETE FROM contraption_errors WHERE day < ?').run(day);
   }
 
   /** A contraption turn's meter row, at its start (so it counts towards the day's cap at once). */

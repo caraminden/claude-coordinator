@@ -11,6 +11,8 @@ export interface ForwardOptions {
   maxBody?: number;
   /** Edit the service's answer headers in place before they go to the browser. */
   answer?: (headers: IncomingHttpHeaders) => void;
+  /** Told of a 5xx answer, or a 502 with `note` when the service didn't answer (the error digest, #835). */
+  failed?: (status: number, note?: string) => void;
 }
 
 export function forward(req: IncomingMessage, res: ServerResponse, port: number, path: string, headers: OutgoingHttpHeaders, opts: ForwardOptions) {
@@ -21,6 +23,7 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
     const out = { ...up.headers };
     opts.answer?.(out);
     res.writeHead(up.statusCode ?? 502, out);
+    if ((up.statusCode ?? 502) >= 500) opts.failed?.(up.statusCode ?? 502);
     // An event stream's headers go out now, not with its first event.
     res.flushHeaders();
     up.pipe(res);
@@ -29,8 +32,10 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
   });
   upstream.on('error', () => {
     if (ended) return;
-    if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain' }).end(`${opts.what} is not answering`);
-    else res.destroy();
+    if (!res.headersSent) {
+      opts.failed?.(502, 'not answering');
+      res.writeHead(502, { 'Content-Type': 'text/plain' }).end(`${opts.what} is not answering`);
+    } else res.destroy();
   });
   // A closed tab ends its long-lived stream on the service too.
   res.on('close', () => upstream.destroy());

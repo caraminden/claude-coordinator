@@ -514,7 +514,9 @@ export const projectRoutes: Route[] = [
           // A minion also gets each one's worktree (#783), to find who owns a file; the Taskmaster's read_ticket shows it.
           return { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), ...(caller && caller.kind !== 'coordinator' && t.cwd ? { worktree: t.cwd } : {}) };
         });
-      return json(res, 200, { tickets, scheme: project.name });
+      // Yesterday's contraption errors for the Taskmaster's look at the scheme (#835); none when there were none.
+      const errors = app.errorDigest?.summary(project.id) ?? null;
+      return json(res, 200, { tickets, scheme: project.name, ...(errors ? { errors } : {}) });
     },
   },
   {

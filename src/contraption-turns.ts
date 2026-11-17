@@ -318,6 +318,8 @@ export class ContraptionTurns {
   onCodexUsage: (person: number, limits: unknown) => void = () => {};
   /** A Claude turn's `rate_limit_info` on `account` of `payer` (null: the server login), for the account pick's meters (Runner.recordUsage, #793). */
   onUsage: (info: unknown, payer: number | null, person: number, account: number) => void = () => {};
+  /** A tool call that came back is_error, for the daily error digest (src/contraption-errors.ts, #835): set by server.ts. */
+  onToolError: (c: ContraptionRow, tool: string, error: string) => void = () => {};
 
   constructor(store: Store, contraptions: Contraptions, claude: ClaudePlaces, opts: { dataDir: string; claudeBin: string; podman?: string; env?: NodeJS.ProcessEnv }) {
     this.store = store;
@@ -671,6 +673,8 @@ export class ContraptionTurns {
     let stderr = '';
     const streamed = new Map<string, string>();
     const said = new Map<string, string>();
+    // Tool names by call id, so a failed call's digest line names its tool.
+    const tools = new Map<string, string>();
     let message = '';
     let waited = false;
     const handle = (ev: any) => {
@@ -701,7 +705,10 @@ export class ContraptionTurns {
       } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
         const mid = String(ev.message.id ?? '');
         for (const b of ev.message.content) {
-          if (b?.type === 'tool_use') emit('tool', { id: b.id, name: b.name, input: b.input, parent });
+          if (b?.type === 'tool_use') {
+            tools.set(String(b.id), String(b.name));
+            emit('tool', { id: b.id, name: b.name, input: b.input, parent });
+          }
           else if (b?.type === 'text' && !parent && typeof b.text === 'string') {
             // Text the partial stream missed (it is off, or cut short): the rest of it, once.
             const all = (said.get(mid) ?? '') + b.text;
@@ -719,7 +726,11 @@ export class ContraptionTurns {
         for (const b of ev.message.content) {
           if (b?.type !== 'tool_result') continue;
           // A failed call carries the error the agent saw (a refusal before the tool ran has no other trace, #624); output never goes out.
-          if (b.is_error) emit('tool_result', { id: b.tool_use_id, ok: false, parent, error: blockText(b.content).slice(0, TOOL_ERROR_MAX) });
+          if (b.is_error) {
+            const error = blockText(b.content).slice(0, TOOL_ERROR_MAX);
+            emit('tool_result', { id: b.tool_use_id, ok: false, parent, error });
+            this.onToolError(c, tools.get(String(b.tool_use_id)) ?? 'tool', error);
+          }
           else emit('tool_result', { id: b.tool_use_id, ok: true, parent });
         }
       } else if (ev.type === 'result') {

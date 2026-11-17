@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
+import { pacificDay } from '../src/contraption-errors.ts';
+import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs } from './helpers.ts';
 
@@ -36,6 +38,11 @@ for (const t of [M2, GONE]) {
   store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'c1', name: 'TaskCreate', input: { subject: 'Map' } }] } });
   store.addEvent(t.id, 'claude', { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'Task #1 created successfully: Map' }] } });
 }
+
+// A contraption of scheme A with errors yesterday (Pacific), for the morning count (#835).
+const yesterday = new Date(Date.parse(`${pacificDay(Date.now())}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+const app = new Contraptions(store, 's'.repeat(40), join(root, 'keys')).register({ name: 'peek', title: 'Peek', port: 9401, icon: null, home_scheme: A.id, open_paths: '[]', default_model: null, turn_cap: null });
+for (let i = 0; i < 3; i++) store.addContraptionError(app.id, yesterday, 'tool', 'Bash: exit #', 'Bash: exit 1', Date.now() - 86_400_000);
 
 const tokens = new Auth(PASSWORD, SECRET);
 let srv: Booted;
@@ -73,6 +80,11 @@ test('a minion lists its own scheme, leaving out dismissed ones unless asked', a
   const all = await tool('list_tickets', { include_closed: true });
   assert.match(all.text, /#3 Dismissed one .*status: closed/);
   assert.doesNotMatch(all.text, /Other scheme/);
+});
+
+test("the list's first line counts the scheme's contraption errors yesterday and names the file (#835)", async () => {
+  const { text } = await tool('list_tickets', {});
+  assert.equal(text.split('\n')[0], `Contraption errors yesterday (${yesterday}): 3, Peek 3. Grouped with a sample each in the shared folder's reports/contraption-errors/${yesterday}.md.`);
 });
 
 test('a minion still cannot read another minion', async () => {

@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { createServer, request, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -38,6 +39,7 @@ const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
     res.write('data: one\n\n');
     return void setTimeout(() => res.socket!.destroy(), 100);
   }
+  if (path.startsWith('/apps/stub/boom/')) return void res.writeHead(500).end('boom');
   if (path === '/apps/stub/cookie') res.setHeader('Set-Cookie', ['cc_session=forged; Path=/', 'stub=1; Path=/apps/stub/']);
   let size = 0;
   req.on('data', (c) => (size += c.length));
@@ -310,6 +312,16 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   assert.deepEqual((await (await get('/api/contraptions/mine', asCara())).json()).map((c: { name: string }) => c.name), ['stub']);
   // Nothing enabled: an empty list, so no rail.
   assert.deepEqual(await (await get('/api/contraptions/mine', { Cookie: olive.cookie })).json(), []);
+});
+
+test('a 5xx answer counts in the error digest, grouped by path with ids out and no query (#835)', async () => {
+  for (const id of [17, 9000]) assert.equal((await get(`/apps/stub/boom/${id}?token=abc`, asCara())).status, 500);
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
+  try {
+    assert.deepEqual(db.prepare("SELECT kind, key, count FROM contraption_errors WHERE kind = 'http'").all().map((r) => ({ ...r })), [{ kind: 'http', key: '500 GET /apps/stub/boom/#', count: 2 }]);
+  } finally {
+    db.close();
+  }
 });
 
 test('unknown contraptions are 404 and the bare name gets its slash', async () => {

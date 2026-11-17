@@ -322,8 +322,12 @@ test('webSearch: true adds WebSearch and WebFetch to the tools and the allow lis
   assert.equal(argAfter(lastRun().argv, '--tools'), '', 'false is the default: no built-in tools');
 });
 
-test('a failed tool call\'s result carries the error the agent saw, cut to TOOL_ERROR_MAX (#624)', async () => {
+test('a failed tool call\'s result carries the error the agent saw, cut to TOOL_ERROR_MAX (#624), and goes to the error digest with its tool (#835)', async () => {
+  const digest: string[] = [];
+  turns.onToolError = (c, tool, error) => digest.push(`${c.name} ${tool} ${error.slice(0, 40)}`);
   const evs = await turn(mandate, { session: 'refused', prompt: 'Get refused.', mcp: [{ name: 'mandate', path: '/mcp' }] });
+  turns.onToolError = () => {};
+  assert.deepEqual(digest, ['mandate mcp__mandate__list MCP error -32001: Request timed outyyyyy', 'mandate mcp__mandate__list No such tool available: mcp__mandate__li']);
   const results = evs.filter((e) => e.event === 'tool_result').map((e) => e.data);
   assert.equal(results.length, 2);
   assert.deepEqual({ ...results[0], error: undefined }, { id: 'r1', ok: false, parent: null, error: undefined });

@@ -857,6 +857,34 @@ export class AppServices {
     return r.out.split('\n').filter((l) => l.trim() && !l.startsWith(`${unit}:`) && !/^(Starting|Started|Finished|Failed to start) /.test(l));
   }
 
+  /**
+   * Its units' journal entries after `cursor` (null: the last 10 minutes), at most the newest 1,000, and the cursor
+   * to read on from, for the error digest (#835). Entries come as JSON, so a line is one entry however it looks.
+   */
+  async journalSince(row: ContraptionRow, cursor: string | null): Promise<{ entries: { at: number; unit: string; text: string; priority: number }[]; cursor: string | null }> {
+    this.guard();
+    const units = (await this.owned(row.name)).flatMap((f) => ['-u', f]);
+    if (!units.length) units.push('-u', `${unitName(row.name)}.service`);
+    const from = cursor ? [`--after-cursor=${cursor}`] : ['--since', `@${Math.floor(Date.now() / 1000) - 600}`];
+    const r = await run(this.opts.journalctl, ['--user', ...units, ...from, '-n', '1000', '--no-pager', '-o', 'json']);
+    if (r.code) throw new Error(`journalctl failed: ${(r.err || r.out).trim().slice(0, 300)}`);
+    const entries = [];
+    let next = cursor;
+    for (const line of r.out.split('\n')) {
+      let e: any;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof e.__CURSOR === 'string') next = e.__CURSOR;
+      // A message that isn't valid UTF-8 comes as an array of bytes: not worth a digest line.
+      if (typeof e.MESSAGE !== 'string') continue;
+      entries.push({ at: Math.floor(Number(e.__REALTIME_TIMESTAMP) / 1000) || Date.now(), unit: String(e.USER_UNIT ?? e._SYSTEMD_USER_UNIT ?? ''), text: e.MESSAGE, priority: Number(e.PRIORITY ?? 6) });
+    }
+    return { entries, cursor: next };
+  }
+
   /** The last lines of its units' journal. */
   async logs(row: ContraptionRow, lines = 100): Promise<string> {
     this.guard();

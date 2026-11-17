@@ -88,6 +88,8 @@ export class AppProxy {
   private domain: string | null;
   /** Gated requests and websockets still open, so disabling someone also ends what they have open. */
   private open = new Map<{ destroy(): void }, { name: string; uid: number }>();
+  /** A 5xx answer from a contraption, for the daily error digest (src/contraption-errors.ts, #835): set by server.ts. */
+  onServerError: (row: ContraptionRow, status: number, method: string, path: string, note?: string) => void = () => {};
 
   constructor(store: Store, contraptions: Contraptions, auth: Auth, domain: string | null = null) {
     this.store = store;
@@ -124,7 +126,8 @@ export class AppProxy {
     const a = host !== null && url.pathname.startsWith('/_citadel/') ? this.enter(req, url, host) : this.admit(req, url, host);
     if ('status' in a) return void res.writeHead(a.status, a.headers).end(a.body);
     this.track(res, a);
-    forward(req, res, a.row.port, a.path, a.headers, this.options(a.row, a.renewed, a.sandboxed));
+    const failed = (status: number, note?: string) => this.onServerError(a.row, status, req.method ?? 'GET', a.path, note);
+    forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed });
   }
 
   /** Serve a request that asks to upgrade (a websocket): the same gate, then a tunnel. */

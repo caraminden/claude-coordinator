@@ -5,6 +5,7 @@ import type { CodexLink } from './codex-link.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { AppServices } from './app-services.ts';
 import type { ContraptionTurns } from './contraption-turns.ts';
+import type { ErrorDigest } from './contraption-errors.ts';
 import type { Landings } from './land.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzip } from 'node:zlib';
@@ -250,6 +251,8 @@ export interface App {
   services: AppServices;
   /** Contraption turns: the turn API's engine (src/contraption-turns.ts). */
   contraptionTurns: ContraptionTurns;
+  /** Contraptions' daily error digest (#835): yesterday's count goes in the scheme's list_tickets. Absent in tests that build no server. */
+  errorDigest?: ErrorDigest;
   /** land.sh runs for container turns' land tool (src/land.ts). */
   landings: Landings;
   /** Ultra reviews people start on their own Claude login (src/ultrareview.ts, #432). */

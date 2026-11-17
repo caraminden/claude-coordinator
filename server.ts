@@ -61,6 +61,7 @@ import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { TimerAlerts } from './src/timer-alerts.ts';
+import { ErrorDigest } from './src/contraption-errors.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
@@ -866,6 +867,14 @@ const timerAlerts = new TimerAlerts(store, {
   mandate: (from, person, key, title, link) => mandateAlert('Timer alerts', from, person, key, title, link),
 });
 if (!BOOT_CHECK && !services.opts.off) timerAlerts.start();
+// Every contraption's errors in a daily file in its home scheme's shared folder (#835): failed agent tool calls, 5xx
+// answers through the proxy (set on the proxy below) and its journals' error lines; list_tickets shows yesterday's count.
+const errorDigest = new ErrorDigest(store, {
+  sharedDir: (id) => projectSharedDir(DATA_DIR, id),
+  journal: services.opts.off ? undefined : (row, cursor) => services.journalSince(row, cursor),
+});
+contraptionTurns.onToolError = (c, tool, error) => void safely('error digest', () => errorDigest.toolError(c, tool, error));
+if (!BOOT_CHECK && !PREVIEW) errorDigest.start();
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);
@@ -983,7 +992,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {
@@ -1012,6 +1021,7 @@ const BACKUP_SCHEME = 2;
 // Contraptions' own services under /apps/<name>/, on their own hosts with APPS_DOMAIN (src/apps.ts).
 contraptions.appsDomain = APPS_DOMAIN;
 const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN);
+apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
 if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
 const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;

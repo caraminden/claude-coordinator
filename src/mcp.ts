@@ -317,7 +317,7 @@ const ARTIFACT_TOOLS = [
 
 const LIST_TICKETS = {
   name: 'list_tickets',
-  description: 'List the minions in this scheme with their status and latest activity, and the link to each card waiting on people (link a card wherever you mention it).',
+  description: 'List the minions in this scheme with their status and latest activity, and the link to each card waiting on people (link a card wherever you mention it). When the scheme\'s contraptions had errors yesterday, a first line counts them and names the digest file.',
   inputSchema: {
     type: 'object',
     properties: { include_closed: { type: 'boolean', description: 'Include dismissed minions (default false)' } },
@@ -1437,8 +1437,10 @@ async function runTool(name: string, args: any): Promise<string> {
   switch (name) {
     case 'list_tickets': {
       const at = schemeOf(args);
-      const { tickets, scheme } = await call('GET', `/api/projects/${at}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
+      const { tickets, scheme, errors } = await call('GET', `/api/projects/${at}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
       const head = at === PROJECT ? [] : [otherScheme(scheme)];
+      // The morning count (#835): yesterday's contraption errors and the shared-folder file that lists them.
+      if (errors) head.push(`Contraption errors yesterday (${errors.day}): ${errors.total}, ${errors.apps.map((a: any) => `${a.title} ${a.count}`).join(', ')}. Grouped with a sample each in the shared folder's ${errors.file}.`);
       return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.'].join('\n');
     }
     case 'read_ticket': {

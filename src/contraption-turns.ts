@@ -8,9 +8,11 @@
 // (#332). It runs in an empty scratch folder per (contraption, person), with no user or project
 // settings, CLAUDE.md, memory, skills, plugins or other MCP servers: see args() and settings().
 //
-// Citadel keeps no turn content: the prompt, the contraption's system prompt and its MCP headers sit in a
-// private turn folder that is deleted when the turn ends, and only the meter (src/db.ts contraption_turns)
-// and the session names are stored. The transcript is the person's own Claude session, in their folder.
+// The prompt, the contraption's system prompt and its MCP headers sit in a private turn folder that is deleted
+// when the turn ends. The meter (src/db.ts contraption_turns) and the session names hold no turn text. The one
+// place that does is the audit (#844, contraption_turn_audit): the system text, prompt and reply as the model got
+// and gave them, never tool calls or MCP headers, for the home scheme's members to read, kept AUDIT_DAYS. The
+// transcript is the person's own Claude session, in their folder.
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -272,7 +274,16 @@ interface Live {
   steers: Set<string>;
   /** Set when it asked for media (#732): who and where its media calls go, and its event stream for the `media` event. */
   media: MediaTurn | null;
+  /** What the model got and said, for the audit row (#844): set once claude is about to start. */
+  audit: { model: string | null; system: string; prompt: string; output: string } | null;
 }
+
+/** How long a turn's audit row is kept (#844), and how much of each text it holds. */
+export const AUDIT_DAYS = 14;
+const AUDIT_TEXT_MAX = 100_000;
+const clip = (text: string) => (text.length > AUDIT_TEXT_MAX ? `${text.slice(0, AUDIT_TEXT_MAX)}\n[… ${text.length - AUDIT_TEXT_MAX} more characters not kept]` : text);
+/** Between a turn's prompt and a message its person sent while it ran, in the audit's prompt text. */
+export const AUDIT_STEER = '\n\n--- sent during the turn ---\n';
 
 /** One message as claude's stream-json input takes it; claude echoes `uuid` back once it takes it in. */
 export const userLine = (text: string, uuid?: string, images: ImageBlock[] = []) => JSON.stringify({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } })), { type: 'text', text }] } }) + '\n';
@@ -481,7 +492,7 @@ export class ContraptionTurns {
       ? { root: mkdtempSync(join(BLIND_ROOT, 't-')), cwd: '' } : { root: null, cwd: join(BLIND_ROOT, `t-${randomBytes(6).toString('hex')}`) };
     if (blind?.root) blind.cwd = join(blind.root, 'w');
     const dir = this.turnDir(id, at, blind);
-    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set(),
+    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set(), audit: null,
       media: req.media ? { person: req.person, name: c.name, home: c.home_scheme, emit, codex: this.codexAt(req.person, place) } : null };
     this.names.add(key);
     this.live.set(id, live);
@@ -494,6 +505,7 @@ export class ContraptionTurns {
     const out: Emit = (event, data) => {
       if (event === 'start' && retrying) return;
       if (event !== 'start') sent = true;
+      if (event === 'text' && live.audit && (data as { parent: string | null }).parent === null) live.audit.output += (data as { delta: string }).delta;
       emit(event, data);
     };
     try {
@@ -518,6 +530,8 @@ export class ContraptionTurns {
       rmSync(dir.onHost, { recursive: true, force: true });
       if (blind) this.dropBlind(req.person, blind, at);
       this.store.endContraptionTurn(id, outcome, usage);
+      const a = live.audit;
+      if (a) this.store.putTurnAudit(id, { model: a.model, blind: req.blind, images: req.imageBlocks?.length ?? 0, system: clip(a.system), prompt: clip(a.prompt), output: clip(a.output) });
     }
   }
 
@@ -628,6 +642,7 @@ export class ContraptionTurns {
     if (blind?.root) Object.assign(env, { HOME: blind.root, CLAUDE_CONFIG_DIR: where.configDir });
     if (req.agents && (req.agents.model ?? req.model)) env.CLAUDE_CODE_SUBAGENT_MODEL = (req.agents.model ?? req.model)!;
     let argv = args({ ...req, system }, dir.inside, claudeSession, resume);
+    live.audit = { model, system, prompt, output: '' };
     if (codex) {
       env.CITADEL_CODEX_TRIPWIRE = join(dir.inside, 'codex-tripwire.json');
       // The shim reads claude's flags; --resume/--session-id are Claude's own session, which the Codex turns leave alone.
@@ -681,7 +696,7 @@ export class ContraptionTurns {
       // A Grunt's events name the Agent call that started it; the top level's name none.
       const parent = ev.parent_tool_use_id ? String(ev.parent_tool_use_id) : null;
       // The full name of the model it runs (an alias, or none for the account's default, in start), for end.
-      if (ev.type === 'system' && ev.subtype === 'init' && !parent && typeof ev.model === 'string' && MODEL.test(ev.model)) model = ev.model;
+      if (ev.type === 'system' && ev.subtype === 'init' && !parent && typeof ev.model === 'string' && MODEL.test(ev.model)) { model = ev.model; if (live.audit) live.audit.model = model; }
       if (ev.type === 'codex_waiting') {
         waited = true;
       } else if (ev.type === 'codex_rate_limits') {
@@ -874,6 +889,7 @@ export class ContraptionTurns {
     const id = randomUUID();
     live.steers.add(id);
     live.child.stdin.write(userLine(text, id));
+    if (live.audit) live.audit.prompt += AUDIT_STEER + text;
     return { steered: true, id };
   }
 
@@ -888,6 +904,7 @@ export class ContraptionTurns {
    */
   deleteSession(c: ContraptionRow, person: number, name: string): 'deleted' | 'busy' | 'missing' {
     if (this.names.has(this.key(c.id, person, name))) return 'busy';
+    this.store.deleteTurnAudit(c.id, person, name); // blind turns keep no session, so before the check
     const s = this.store.contraptionSession(c.id, person, name);
     if (!s) return 'missing';
     const place = this.claude.place(person, appWarmKey(c.id, name));

@@ -404,6 +404,25 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}`;
     },
   },
+  'turn-audit': {
+    about: 'Settings → App turns (#844): a voice app in Seeded with three turns: one passed, one blind that fell back with a reason, one with no verdict',
+    seed(c) {
+      const app = c.store.getContraption('voice-seed') ?? c.store.createContraption({ name: 'voice-seed', title: 'Voice practice', icon: null, port: 1, home_scheme: c.project.id, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: 'haiku', turn_cap: null, identity_public: '', identity_private: '', key_hash: `voice-seed-${hex()}`, keys_at: Date.now() });
+      const user = c.store.listUsers().find((u) => u.name === c.who) ?? c.store.listUsers()[0];
+      const turns = [
+        { blind: false, system: 'You coach a voice student.\n\nKeep feedback to two sentences.', prompt: 'Here is the pitch track for "ah" held 4 s: steady at 210 Hz, drops to 190 Hz at the end.', output: 'Nice and steady for most of it. Try keeping the breath going so the end doesn\'t sag.', verdict: ['pass', null] },
+        { blind: true, system: 'Word this feedback for a voice exercise. Do not mention any person.', prompt: 'Resonance: forward. Pitch: 180-200 Hz. Weight: light.', output: 'Your coach would love how forward that sounded.', verdict: ['fallback', 'named a person'] },
+        { blind: false, system: 'You coach a voice student.', prompt: 'Read the vowel chart aloud.', output: 'Ready when you are.', verdict: null },
+      ] as const;
+      for (const t of turns) {
+        const id = c.store.startContraptionTurn(app.id, user.id, `ex-${hex()}`);
+        c.store.endContraptionTurn(id, 'ok', { input: 120, output: 40, cacheRead: 0, cacheWrite: 0 });
+        c.store.putTurnAudit(id, { model: 'haiku', blind: t.blind, images: 0, system: t.system, prompt: t.prompt, output: t.output });
+        if (t.verdict) c.store.setTurnVerdict(id, t.verdict[0], t.verdict[1]);
+      }
+      return `#/p/${c.project.id}/turns`;
+    },
+  },
   'inbox-full': {
     about: 'a Needs-you inbox of 25 minions waiting on people, enough to scroll it open (#668)',
     seed(c) {

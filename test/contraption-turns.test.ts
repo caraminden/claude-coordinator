@@ -1,6 +1,6 @@
 // The turn API (src/contraption-turns.ts, the brief's section 4): who a turn runs for and on whose
 // Claude, what the turn can reach (read off the real claude invocation), sessions, busy, caps, cancel,
-// and that Citadel keeps no turn text.
+// and that Citadel keeps no turn text outside the 14-day audit (#844).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -538,6 +538,43 @@ test('a running turn takes a message from its own person, says when claude took 
   assert.equal(turns.steer(mandate.id, 99_999, cara.id, 'Hi.'), null);
 });
 
+test('every turn leaves an audit row (#844): the system text and prompt as claude got them, steers, the reply, model and blind; no tool calls', async () => {
+  const evs = await turn(mandate, { session: 'audited', system: 'You are the Acolyte.', mcp: [{ name: 'mandate', path: '/mcp' }] });
+  const id = evs[0].data.turn;
+  const row = store.turnAudit(id)!;
+  assert.equal(row.system, lastRun().system, 'the whole system text Citadel sent, its tool-names line included');
+  assert.match(row.system, /^You are the Acolyte\.\n\n.*mcp__mandate__/s);
+  assert.equal(row.prompt, 'Move my dentist to Thursday.');
+  assert.equal(row.output, 'Moved it to Thursday.', 'top-level text only, each message once');
+  assert.equal(row.model, 'claude-haiku-test'); // the model that ran, from claude's init, not the alias asked for
+  assert.equal(row.blind, 0);
+  assert.equal(row.verdict, null);
+  assert.ok(!JSON.stringify(row).includes('SECRET TOOL OUTPUT'));
+  // A steer is part of what the model got.
+  const steered: Ev[] = [];
+  const running = turns.run(mandate, parseTurn({ person: cara.id, session: 'steered-audit', prompt: 'steer me' }, mandate), (event, data) => steered.push({ event, data }));
+  const sid = (await until('the turn to start', () => steered.find((e) => e.event === 'start'))).data.turn;
+  turns.steer(mandate.id, sid, cara.id, 'Make it Friday.');
+  await running;
+  assert.match(store.turnAudit(sid)!.prompt, /^steer me\n\n.*Make it Friday\.$/s);
+  assert.match(store.turnAudit(sid)!.output, /Heard: Make it Friday\./);
+  // A blind turn says so.
+  const blind = await turn(mandate, { session: 'audit-blind', blind: true, system: 'Neutral.' });
+  assert.deepEqual([store.turnAudit(blind[0].data.turn)!.blind, store.turnAudit(blind[0].data.turn)!.system], [1, 'Neutral.']);
+});
+
+test('an audit row goes with its session, and every row goes once its days are up (#844)', async () => {
+  const id = (await turn(mandate, { session: 'audit-gone' }))[0].data.turn;
+  const keep = (await turn(mandate, { session: 'audit-stays' }))[0].data.turn;
+  assert.ok(store.turnAudit(id));
+  assert.equal(turns.deleteSession(mandate, cara.id, 'audit-gone'), 'deleted');
+  assert.equal(store.turnAudit(id), undefined);
+  assert.ok(store.turnAudit(keep), "another session's stays");
+  store.sweepTurnAudit(Date.now() - 60_000);
+  assert.ok(store.turnAudit(keep), 'a minute old is inside its days');
+  assert.ok(store.getContraptionTurn(keep), 'and the meter row is never touched');
+});
+
 test('a turn whose reply is out takes no message', async () => {
   const evs: Ev[] = [];
   const running = turns.run(mandate, parseTurn({ person: cara.id, session: 'lingering', prompt: 'linger' }, mandate), (event, data) => evs.push({ event, data }));
@@ -750,7 +787,13 @@ test('requests are checked before anything runs', () => {
   assert.deepEqual(parseTurn({ person: 1, session: 's', prompt: 'p', agents: { max: 3 } }, mandate).agents, { max: 3, model: null });
 });
 
-test('Citadel\'s database holds no turn text afterwards', () => {
+// #844 reverses the old rule (Cara, 2026-11-16, VoiceAnalyzer #41's "Build (C4)"): turn text is kept, in the audit
+// table only, for AUDIT_DAYS. Outside it there is none, and once the audit is swept there is none anywhere, files included.
+test('Citadel\'s database holds no turn text outside the audit, and none at all once the audit is swept', () => {
+  const audit = JSON.stringify(store.db.prepare('SELECT * FROM contraption_turn_audit').all());
+  assert.ok(audit.includes('dentist') && !audit.includes('SECRET TOOL OUTPUT'), 'the audit holds prompts, never tool output');
+  for (const t of ['contraption_turns', 'contraption_sessions']) assert.ok(!JSON.stringify(store.db.prepare(`SELECT * FROM ${t}`).all()).includes('dentist'), t);
+  store.sweepTurnAudit(Date.now() + 1);
   const words = ['dentist', 'Acolyte', 'per-turn-token', 'Moved it', 'Thursday', 'SECRET TOOL OUTPUT'];
   const tables = (store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
   for (const t of tables) {
@@ -889,6 +932,8 @@ test("on Codex (#337) a contraption turn runs the shim in its own mode with only
     await turn(mandate, { person: josh.id, session: 'on-codex', prompt: 'back on claude', mcp: [{ name: 'mandate', path: '/mcp' }] });
     assert.match(lastRun().prompt, /<codex-turns>[\s\S]*CODEX ASK one[\s\S]*CODEX MOVED IT[\s\S]*CODEX ASK two[\s\S]*<\/codex-turns>[\s\S]*back on claude/);
     assert.equal(store.getSetting(`codex:contraption:${mandate.id}:${josh.id}:on-codex`), null, 'Claude has them now');
+    // The audit (#844) keeps prompts and replies by design; the handover itself must never pass through the database.
+    store.sweepTurnAudit(Date.now() + 1);
     store.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     for (const f of readdirSync(data).filter((n) => n.startsWith('coordinator.db'))) {
       const bytes = readFileSync(join(data, f)).toString('latin1');

@@ -11,7 +11,7 @@ import { APP_NAME } from '../appname.ts';
 import { adminAskRefusal } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, askFiles, askLine, askMessage, askSummary, saveAskFiles } from '../contraption-asks.ts';
-import { parseTurn, TurnError } from '../contraption-turns.ts';
+import { AUDIT_DAYS, parseTurn, TurnError } from '../contraption-turns.ts';
 import { loadImages } from '../turn-images.ts';
 import { listMedia, mcpMessage, mediaDir, mediaFile, mediaTools, MEDIA_TYPE, runMediaTool } from '../contraption-media.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
@@ -254,6 +254,10 @@ const EMBED_CHARS = 4000;
 
 /** The most minions one list read names. */
 const MINIONS_MAX = 50;
+/** How long an app's verdict reason may be (#844). */
+const VERDICT_REASON_MAX = 2000;
+/** Turns per page of a scheme's turn audit. */
+const AUDIT_PAGE = 30;
 
 /** Server-sent events, one at a time, unbuffered. */
 function eventStream(req: IncomingMessage, res: Ctx['res']) {
@@ -381,6 +385,34 @@ export const contraptionRoutes: Route[] = [
   },
   fromContraption('POST', '/api/contraptions/turns/:turn/cancel', ({ res, app, params }, c) => {
     if (!app.contraptionTurns.cancel(c.id, Number(params.turn))) throw new HttpError(404, 'No such turn running');
+    return json(res, 200, { ok: true });
+  }),
+  // A scheme's turn audit page (#844): its home apps' turns, newest first. A person's route on a :project, so only the
+  // scheme's members (and admins) read it; never a minion, Taskmaster or app. `?before=<turn id>` pages, `?app=` filters.
+  {
+    method: 'GET', path: '/api/projects/:project/contraption-turns', who: ['person'],
+    handler({ res, app, project, url }) {
+      const before = url.searchParams.get('before');
+      const turns = app.store.schemeTurnAudit(project.id, { before: before ? Number(before) || 0 : undefined, contraption: url.searchParams.get('app') || undefined, limit: AUDIT_PAGE + 1 });
+      const apps = app.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => ({ name: c.name, title: c.title }));
+      return json(res, 200, {
+        turns: turns.slice(0, AUDIT_PAGE).map(({ turn_id, ...t }) => ({ id: turn_id, ...t, blind: !!t.blind })),
+        more: turns.length > AUDIT_PAGE, apps, keep_days: AUDIT_DAYS,
+      });
+    },
+  },
+  // The app's verdict on a turn's reply, after its own output check (#844): { verdict: 'pass' | 'fallback', reason? }.
+  // Shown on the home scheme's turn audit page; a later call replaces it.
+  fromContraption('POST', '/api/contraptions/turns/:turn/verdict', async ({ req, res, app, params }, c) => {
+    const body = await readJson(req);
+    if (body?.verdict !== 'pass' && body?.verdict !== 'fallback') throw new HttpError(400, 'verdict must be pass or fallback');
+    if (body.reason !== undefined && body.reason !== null && (typeof body.reason !== 'string' || body.reason.length > VERDICT_REASON_MAX)) {
+      throw new HttpError(400, `reason must be text of at most ${VERDICT_REASON_MAX} characters`);
+    }
+    const turn = Number(params.turn);
+    const row = Number.isInteger(turn) ? app.store.getContraptionTurn(turn) : undefined;
+    if (row?.contraption_id !== c.id || !app.store.turnAudit(turn)) throw new HttpError(404, 'No such turn, or its audit row is gone');
+    app.store.setTurnVerdict(turn, body.verdict, body.reason?.trim() || null);
     return json(res, 200, { ok: true });
   }),
   // Steer a running turn as its person: { person, text } → { steered: true, id } (its `taken` event carries

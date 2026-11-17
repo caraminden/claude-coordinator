@@ -203,8 +203,14 @@ These rules hold for every route below (tested):
 
 Runs one agent turn for one of your people, on **their** linked Claude (in their own container, or
 on the host for the server's owner), and streams its events back. There is no fallback to anyone
-else's plan. Citadel keeps no prompt, reply or tool content: only a meter (contraption, person,
-session name, start, end, outcome, token counts) and the session names (tested).
+else's plan. Citadel keeps a meter (contraption, person, session name, start, end, outcome, token
+counts), the session names, and for 14 days the turn's audit: the system text and prompt as sent
+(with any messages sent during the turn), the reply's text, the model that ran, whether it ran
+blind, how many images went with it (never the images) and your verdict. Each text over 100,000
+characters is cut there, with a note saying how much. Your home scheme's members read the audit in
+Settings → App turns; nobody else does, and it is never logged anywhere else, though Citadel's own
+database backups hold it as long as they are kept. It holds no tool calls or tool results.
+Deleting a session deletes its audit rows (tested).
 
 ### Start a turn: `POST /api/contraptions/turns`
 
@@ -325,6 +331,22 @@ Body `{ "person": 3, "text": "…" }`, the turn's own person (tested).
 | `400` | No `person` or blank `text` |
 | `403` | Not the turn's own person |
 | `404` | No such turn of yours |
+
+### Verdict: `POST /api/contraptions/turns/<turn>/verdict`
+
+Optional. After you check a turn's reply, say whether you used it, so your scheme's members can see
+on Settings → App turns whether the model's words reached your people. Body `{ "verdict": "pass" }`
+when the reply passed your check and you used it, or `{ "verdict": "fallback", "reason": "named a
+person" }` when you used your own rule text in its place. `reason` is optional, up to 2000
+characters; say which check failed, not the player's words. A later call replaces the earlier one.
+
+| Answer | Meaning |
+|---|---|
+| `200 { "ok": true }` | Saved |
+| `400` | `verdict` isn't `pass` or `fallback`, or `reason` is too long |
+| `404` | No such turn of yours, or its audit is already gone (14 days, or its session was deleted) |
+
+`<turn>` is the `turn` from the `start` event; it works once the turn has ended (tested).
 
 ### Sessions
 
@@ -779,6 +801,7 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 | Turns a day | the registry's `turn_cap`, per person |
 | Media call | $0.50 worst case, within the person's own monthly cap ($0 on Codex, within their Codex pace); files kept 30 days |
 | Restart wait for running turns | 3 minutes |
+| Turn audit kept, text kept, verdict reason | 14 days, 100,000 characters each, 2000 characters |
 | Ask files | 20 files, 16 MiB decoded |
 | Ask text, summary, item | 10,000, 200, 100 characters |
 | Asks per person per 10 minutes | 10 bug/feature, 60 data |
@@ -795,6 +818,9 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-16:** Citadel keeps each turn's text for 14 days for your home scheme's members to read
+  (Settings → App turns), and `POST /api/contraptions/turns/<turn>/verdict` records whether your
+  check passed the reply or you fell back to your own text ("Verdict").
 - **2026-11-16:** `POST /api/contraptions/spend` books what an outside API cost to the home scheme's
   monthly bill, with an optional cap that warns without stopping ("Spend on outside APIs").
 - **2026-11-16:** Big uploads: files of any size from the page into your `DATA_DIR/uploads/<login>/`,

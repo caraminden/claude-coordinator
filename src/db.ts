@@ -401,6 +401,21 @@ export interface ContraptionSession {
 }
 
 /** One contraption turn on the usage meter. outcome: 'end' or the error code it ended with. */
+/** A contraption turn's audit row (#844, src/contraption-turns.ts): what the model got and said, and the app's verdict. */
+export interface TurnAuditRow {
+  turn_id: number;
+  at: number;
+  model: string | null;
+  blind: number;
+  images: number;
+  system: string;
+  prompt: string;
+  output: string;
+  verdict: 'pass' | 'fallback' | null;
+  verdict_reason: string | null;
+  verdict_at: number | null;
+}
+
 export interface ContraptionTurnRow {
   id: number;
   contraption_id: number;
@@ -878,6 +893,23 @@ CREATE TABLE IF NOT EXISTS contraption_turns (
   cache_write_tokens INTEGER
 );
 CREATE INDEX IF NOT EXISTS contraption_turns_day ON contraption_turns(contraption_id, user_id, started_at);
+-- The turn audit (#844, src/contraption-turns.ts): each contraption turn's system text, prompt and reply as the model
+-- got and gave them, and the app's verdict on the reply. Kept apart from the meter above, which never holds text; only
+-- members of the app's home scheme read it, and rows go after AUDIT_DAYS or with their session.
+CREATE TABLE IF NOT EXISTS contraption_turn_audit (
+  turn_id INTEGER PRIMARY KEY REFERENCES contraption_turns(id) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  model TEXT,
+  blind INTEGER NOT NULL,
+  images INTEGER NOT NULL,
+  system TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  output TEXT NOT NULL,
+  verdict TEXT,
+  verdict_reason TEXT,
+  verdict_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS contraption_turn_audit_at ON contraption_turn_audit(at);
 -- Contraptions' errors by Pacific day (#835, src/contraption-errors.ts): failed agent tool calls (tool), 5xx answers
 -- through the proxy (http) and journal error lines (log), grouped by key (numbers and ids out), with a count and the
 -- first scrubbed sample line. Never a prompt or reply.
@@ -1099,6 +1131,7 @@ export const SCHEMA_HISTORY = [
   [56, 'schedules.template, notes; standard audits backfill (#799)'],
   [57, 'contraption_errors (#835)'],
   [58, 'outside_spend (#839)'],
+  [59, 'contraption_turn_audit (#844)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1731,6 +1764,49 @@ export class Store {
 
   deleteContraptionSession(contraptionId: number, userId: number, name: string): boolean {
     return this.db.prepare('DELETE FROM contraption_sessions WHERE contraption_id = ? AND user_id = ? AND name = ?').run(contraptionId, userId, name).changes > 0;
+  }
+
+  /** A finished turn's audit row (#844). */
+  putTurnAudit(turnId: number, row: { model: string | null; blind: boolean; images: number; system: string; prompt: string; output: string }) {
+    this.db.prepare('INSERT OR REPLACE INTO contraption_turn_audit (turn_id, at, model, blind, images, system, prompt, output) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(turnId, Date.now(), row.model, row.blind ? 1 : 0, row.images, row.system, row.prompt, row.output);
+  }
+
+  turnAudit(turnId: number): TurnAuditRow | undefined {
+    return this.db.prepare('SELECT * FROM contraption_turn_audit WHERE turn_id = ?').get(turnId) as unknown as TurnAuditRow | undefined;
+  }
+
+  /** The app's verdict on its turn's reply (#844): it passed the app's output check, or the app fell back to its own text. */
+  setTurnVerdict(turnId: number, verdict: 'pass' | 'fallback', reason: string | null) {
+    this.db.prepare('UPDATE contraption_turn_audit SET verdict = ?, verdict_reason = ?, verdict_at = ? WHERE turn_id = ?').run(verdict, reason, Date.now(), turnId);
+  }
+
+  /** secure_delete zeroes the rows' pages in the database file (#844). Their text can stay in the WAL until later
+   * writes reuse it, and in backups for as long as those are kept (deploy/backup.sh). */
+  private dropAudit(where: string, ...args: (number | string)[]) {
+    this.db.exec('PRAGMA secure_delete = ON');
+    try {
+      this.db.prepare(`DELETE FROM contraption_turn_audit WHERE ${where}`).run(...args);
+    } finally {
+      this.db.exec('PRAGMA secure_delete = OFF');
+    }
+  }
+
+  sweepTurnAudit(before: number) {
+    this.dropAudit('at < ?', before);
+  }
+
+  /** A session's audit rows, when the app deletes the session. */
+  deleteTurnAudit(contraptionId: number, userId: number, session: string) {
+    this.dropAudit('turn_id IN (SELECT id FROM contraption_turns WHERE contraption_id = ? AND user_id = ? AND session = ?)', contraptionId, userId, session);
+  }
+
+  /** A scheme's audit page (#844): its home apps' turns, newest first, `limit` of them before turn `before`, one app's if named. */
+  schemeTurnAudit(projectId: number, opts: { before?: number; contraption?: string; limit: number }) {
+    return this.db.prepare(`SELECT a.*, t.session, t.outcome, t.started_at, c.name AS contraption, c.title AS contraption_title, u.name AS person
+      FROM contraption_turn_audit a JOIN contraption_turns t ON t.id = a.turn_id JOIN contraptions c ON c.id = t.contraption_id JOIN users u ON u.id = t.user_id
+      WHERE c.home_scheme = ? AND a.turn_id < ? AND (? IS NULL OR c.name = ?) ORDER BY a.turn_id DESC LIMIT ?`)
+      .all(projectId, opts.before ?? Number.MAX_SAFE_INTEGER, opts.contraption ?? null, opts.contraption ?? null, opts.limit) as unknown as (TurnAuditRow & { session: string; outcome: string | null; started_at: number; contraption: string; contraption_title: string; person: string })[];
   }
 
   /** One more of a contraption's errors on a day (#835); the first one's sample stays. */

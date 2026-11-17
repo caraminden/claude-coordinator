@@ -14,6 +14,7 @@ import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.j
 import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
+import { turnAuditPage } from './turn-audit.js';
 import { contraptionsPage } from './contraptions.js';
 import { releasesPage, setReleasesPage } from './releases.js';
 import { toast } from './ui/status.js';
@@ -66,6 +67,7 @@ function renderCrumbs(main) {
       : main.kind === 'members' ? [projectLink, ' / ', settingsLink, ' / ', 'Members']
       : main.kind === 'people' ? [projectLink, ' / ', settingsLink, ' / ', 'People']
       : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
+      : main.kind === 'turns' ? [projectLink, ' / ', settingsLink, ' / ', 'App turns']
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
@@ -198,6 +200,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'members' ? membersPage()
     : main.kind === 'people' ? peoplePage()
     : main.kind === 'contraptions' ? contraptionsPage()
+    : main.kind === 'turns' ? turnAuditPage()
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'releases' ? releasesPage()

@@ -16,7 +16,7 @@ export const WRITES = [
   'setProjectSettings', 'updateUser', 'deleteUser', 'putCredential', 'failCredential', 'deleteCredential',
   'finishOpenrouterCall', 'setOpenrouterCallPath', 'sweepOpenrouterCalls', 'adoptOwnerless', 'addMember', 'removeMember',
   'putRepoCollaborator', 'deleteRepoCollaborator', 'updateContraption', 'setContraptionUser', 'putContraptionSession',
-  'endContraptionTurn', 'setProjectHidden', 'setListOrder', 'setSeenItems', 'deleteProject', 'setTicketDir', 'deleteTicket',
+  'endContraptionTurn', 'putTurnAudit', 'setTurnVerdict', 'sweepTurnAudit', 'deleteTurnAudit', 'setProjectHidden', 'setListOrder', 'setSeenItems', 'deleteProject', 'setTicketDir', 'deleteTicket',
   'updateTicketQuietly', 'updateTicket', 'setLastActivity', 'setEventData', 'setArtifactPinned', 'deleteCiFile',
   'publishCiFile', 'recordApkPublish', 'setSharedPin', 'writeArtifactData', 'deleteClaudeState', 'setTicketPinned',
   'settleBrief', 'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting',

@@ -489,6 +489,16 @@
   "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
+ "POST /api/contraptions/turns/1/verdict": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
  "GET /api/costs": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1202,6 +1212,16 @@
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "400 op must be add, list or remove",
   "m2": "400 op must be add, list or remove"
+ },
+ "GET /api/projects/:p/contraption-turns": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "POST /api/projects/:p/github": {
   "anon": "401 Not logged in",

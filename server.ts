@@ -51,7 +51,7 @@ import { OutsideSpend } from './src/outside-spend.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
-import { ContraptionTurns } from './src/contraption-turns.ts';
+import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
@@ -498,6 +498,12 @@ if (!BOOT_CHECK && !PREVIEW) {
   const sweepContraptionMedia = () => void safely('contraption media sweep', async () => void sweepMedia(join(DATA_DIR, 'contraption-media')));
   setTimeout(sweepContraptionMedia, 10 * 60_000).unref();
   setInterval(sweepContraptionMedia, 24 * 60 * 60_000).unref();
+}
+// Contraption turns' audit rows past AUDIT_DAYS (#844), soon after boot and then daily. Previews and dev copies (BOOT_CHECK) don't sweep: they live hours and are deleted when stopped.
+if (!BOOT_CHECK) {
+  const sweepTurnAudit = () => void safely('turn audit sweep', () => store.sweepTurnAudit(Date.now() - AUDIT_DAYS * 24 * 60 * 60_000));
+  setTimeout(sweepTurnAudit, 5 * 60_000).unref();
+  setInterval(sweepTurnAudit, 24 * 60 * 60_000).unref();
 }
 
 // Steps' times from before step_times (#571), once, a minute after boot.

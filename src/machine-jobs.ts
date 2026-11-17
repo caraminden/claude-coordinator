@@ -367,16 +367,22 @@ export class MachineJobs {
     const inputs = (JSON.parse(job.inputs) as { name: string; size: number }[]);
     const mb = (n: number) => `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0)} MB`;
     const h = (s: number) => (s % 3600 ? `${Math.round(s / 60)} min` : `${s / 3600} h`);
-    const lines = [
-      `${job.asked_by} wants to run job #${job.id} "${k.name}" on ${m.name}${job.run_when === 'now' ? ' NOW' : ' in job hours'}${job.reason ? ` (${job.reason})` : ''}.`,
-      `Image ${k.image}`,
-      `Command ${k.command.join(' ')}`,
-      `Reads ${k.reads.length ? k.reads.join(', ') : 'none of your folders'}; GPU ${k.gpu ? 'yes' : 'no'}; network ${k.network ? 'yes' : 'no'}; limit ${h(job.limit_s)}`,
-      `Inputs ${inputs.length ? inputs.map((i) => `${i.name} (${mb(i.size)})`).join(', ') : 'none'}`,
-    ];
-    let question = lines.join('\n');
-    // A card's question is at most 500 characters: the command and inputs give way first, and the job's page has them whole.
-    if (question.length > 500) question = `${question.slice(0, 497)}…`;
+    const line = {
+      who: `${job.asked_by} wants to run job #${job.id} "${k.name}" on ${m.name}${job.run_when === 'now' ? ' NOW' : ' in job hours'}${job.reason ? ` (${job.reason})` : ''}.`,
+      reads: `Reads ${k.reads.length ? k.reads.join(', ') : 'none of your folders'}; GPU ${k.gpu ? 'yes' : 'no'}; network ${k.network ? 'yes' : 'no'}; limit ${h(job.limit_s)}`,
+      image: `Image ${k.image}`,
+      command: `Command ${k.command.join(' ')}`,
+      inputs: `Inputs ${inputs.length ? inputs.map((i) => `${i.name} (${mb(i.size)})`).join(', ') : 'none'}`,
+    };
+    // A card's question is at most 500 characters. What it reads, GPU, network and the image stay whole; the inputs,
+    // then the command, then the reason give way (down to 40 characters each), and the job's page has them whole.
+    let over = Object.values(line).join('\n').length - 500;
+    for (const key of ['inputs', 'command', 'who'] as const) {
+      const cut = Math.min(over, line[key].length - 40);
+      if (cut > 0) { line[key] = `${line[key].slice(0, line[key].length - cut - 1)}…`; over -= cut; }
+    }
+    let question = [line.who, line.reads, line.image, line.command, line.inputs].join('\n');
+    if (question.length > 500) question = `${question.slice(0, 499)}…`;
     const owner = this.ownerOf(m);
     const card = this.d.postCard(job, {
       questions: [{ header: 'GPU job go', question, options: CHOICES.map(({ label, description }, i) => ({ label, description, ...(i === (job.run_when === 'now' ? 1 : 0) ? { recommended: true } : {}) })) }],
@@ -458,7 +464,9 @@ export class MachineJobs {
     if (job.state !== 'paused') throw new HttpError(409, `Job #${id} is ${job.state}, not paused`);
     if (storedSettings(m).paused) throw new HttpError(409, `${m.name}'s jobs are paused: switch the machine's Pause off first`);
     if (!this.d.send(m.id, { type: 'job.resume', id })) throw new HttpError(409, `${m.name} is offline`);
-    this.store.updateMachineJob(id, { state: 'running', paused_by: null, live_at: this.now() });
+    // Resumed outside job hours by a person: it runs now, or the next pump would pause it again.
+    const now = !hoursOpen(storedSettings(m), this.now()) && job.go !== 'now' ? { go: 'now', go_by: who.name } : {};
+    this.store.updateMachineJob(id, { state: 'running', paused_by: null, live_at: this.now(), ...now });
     this.changed(id);
     return this.store.getMachineJob(id)!;
   }
@@ -608,12 +616,14 @@ export class MachineJobs {
       log_tail: typeof body.log_tail === 'string' ? body.log_tail.slice(-LOG_TAIL) : '',
     };
     const ended = (ENDED as readonly string[]).includes(state);
-    // A pause the server asked for stays the server's: the agent saying "paused" keeps who paused it.
+    // A pause stays the server's: a "running" report sent before the agent got job.pause (a resumable kind's grace)
+    // leaves it paused, and the agent saying "paused" keeps who paused it, so job hours can resume it.
+    const held = job.state === 'paused' && state === 'running';
     this.store.updateMachineJob(id, {
-      state, live: JSON.stringify(live), live_at: now,
+      state: held ? 'paused' : state, live: JSON.stringify(live), live_at: now,
       run_s: Math.round(num(body.run_s) ?? job.run_s), server_run_s: Math.round(job.server_run_s + gap), gpu_busy_s: Math.round(num(body.gpu_busy_s) ?? job.gpu_busy_s),
       ...(state === 'paused' && !job.paused_by ? { paused_by: 'owner' } : {}),
-      ...(state !== 'paused' ? { paused_by: null } : {}),
+      ...(state !== 'paused' && !held ? { paused_by: null } : {}),
       ...(outputs ? { outputs: JSON.stringify(outputs) } : {}),
       ...(ended ? { ended_at: now, input_token_hash: null, exit_code: Number.isInteger(body.exit_code) ? body.exit_code : null, error: typeof body.error === 'string' ? body.error.slice(0, 2000) : job.error } : {}),
     });
@@ -630,8 +640,8 @@ export class MachineJobs {
   }
 
   /**
-   * The agent connected and said which jobs it knows (the contract's reconcile; `known` is null for an agent with no
-   * jobs block, which knows none). The server is the queue of record: a job it thinks is on the machine that the
+   * The agent connected and said which jobs it knows (the contract's reconcile; `known` is empty for an agent that
+   * dropped its jobs block, which knows none). The server is the queue of record: a job it thinks is on the machine that the
    * agent lost failed ("the machine restarted"); one the agent runs that ended here, or that this server never
    * started, is told to stop. Then start what may start.
    */

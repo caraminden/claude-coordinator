@@ -1334,7 +1334,6 @@ export class Store {
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.lendingLists();
-    this.ownDesktops();
     this.noteSchemaVersion();
   }
 
@@ -1406,17 +1405,6 @@ export class Store {
    * a person's own machine added there starts lent to no scheme, and a scheme whose switch was turned off there
    * keeps its place on the lists. Says what it did, for the deploy's notes.
    */
-  /**
-   * Cara's desktop agents (cara-desktop-ci-runners, cara-desktop-linux) were added before machines had owners (#306), so
-   * their owner_id is null and a job's go card (#857) had no one to go to. Give each the person who added it, by name;
-   * once set, never again. Neither lends a turn anything today (a runner host, and one with nothing ticked), so who gets
-   * them is unchanged.
-   */
-  private ownDesktops() {
-    this.db.prepare(`UPDATE machines SET owner_id = (SELECT id FROM users WHERE users.name = machines.created_by)
-      WHERE owner_id IS NULL AND name LIKE 'cara-desktop-%' AND EXISTS (SELECT 1 FROM users WHERE users.name = machines.created_by)`).run();
-  }
-
   private lendingLists() {
     const first = (this.getSetting<number>('schema_version') ?? 0) < 34;
     const machines = (this.db.prepare('SELECT * FROM machines ORDER BY id').all() as unknown as Machine[]).filter((m) => first || (!m.scoped && m.owner_id === null));

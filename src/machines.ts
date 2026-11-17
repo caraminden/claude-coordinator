@@ -450,8 +450,9 @@ export class MachineRelay {
     // Its owner's jobs block (#857), or none; with one it also says which jobs it knows, which the queue reconciles.
     const offer = cleanOffer(body.jobs);
     this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
-    if (offer) {
-      const known = (Array.isArray(body.known_jobs) ? body.known_jobs : []).slice(0, 100).flatMap((k: any) => (Number.isInteger(k?.id) && typeof k.state === 'string' ? [{ id: k.id as number, state: k.state.slice(0, 20) as string }] : []));
+    // One that had a block and comes back without it knows no jobs: the ones it ran are lost.
+    if (offer || machine.jobs) {
+      const known = (offer && Array.isArray(body.known_jobs) ? body.known_jobs : []).slice(0, 100).flatMap((k: any) => (Number.isInteger(k?.id) && typeof k.state === 'string' ? [{ id: k.id as number, state: k.state.slice(0, 20) as string }] : []));
       this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
     }
     if (agent.managed) {

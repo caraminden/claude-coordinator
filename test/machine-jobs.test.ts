@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
-import { hoursOpen, kindHash, pacificClock, type JobKind } from '../src/machine-jobs.ts';
+import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, pacificClock, type JobKind } from '../src/machine-jobs.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until } from './helpers.ts';
 
@@ -326,6 +326,17 @@ test('on reconnect the server reconciles: a lost job failed, one it ended is tol
   assert.equal((await job(j.id)).state, 'failed');
   assert.equal((await job(j.id)).error, 'the machine restarted');
   await until('job.stop for the old job', () => agent.jobs('job.stop').some((s) => s.id === 1));
+  // One that comes back with no jobs block at all knows none: its running job is lost too.
+  const k = await queue({});
+  await until('job.start', () => agent.jobs('job.start').some((s) => s.id === k.id));
+  await state(k.id, 'running');
+  agent.close();
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
+  agent = await wakes(() => connect(boxToken, {}));
+  assert.equal((await job(k.id)).error, 'the machine restarted');
+  agent.close();
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
+  agent = await connect(boxToken, OFFER);
 });
 
 test('a contraption queues on its home scheme\'s machine, and can\'t read or stop another app\'s job', async () => {
@@ -337,4 +348,83 @@ test('a contraption queues on its home scheme\'s machine, and can\'t read or sto
   await assert.rejects(app('appb', `/api/contraptions/jobs/${j.id}/stop`, {}), /404/);
   await assert.rejects(app('appa', '/api/contraptions/jobs', { machine: 'josh-gpu', kind: KIND, inputs: ['/etc/passwd'] }), /400/);
   assert.equal((await app('appa', `/api/contraptions/jobs/${j.id}/stop`, {})).state, 'stopped');
+});
+
+test('on the clock: hours pause and resume a job, a late "running" keeps the pause, the limit stops it, old results are swept', async () => {
+  const dir = join(root, 'clock');
+  mkdirSync(dir);
+  const store = new Store(join(dir, 'coordinator.db'));
+  const owner = store.createUser({ name: 'Owner', login: 'owner' });
+  const who = { uid: owner.id, name: 'Owner', admin: false };
+  const p = store.createProject('U', null, owner.id);
+  const id0 = store.createMachine('gpu-box', 'x', 'Owner', owner.id).id;
+  store.updateMachine(id0, { jobs: JSON.stringify({ folders: [], max_limit_h: 12, max_disk_gb: null, gpu: true }) });
+  let t = Date.now();
+  const sent: any[] = [];
+  const cards: any[] = [];
+  const jobs = new MachineJobs({
+    store, send: (_m, msg) => (sent.push(msg), true), online: () => true, broadcast() {}, postCard: (_j, c) => (cards.push(c), null), settleCard() {}, wake() {}, note() {},
+    resultsDir: (j) => join(dir, 'jobs', String(j.id)), now: () => t,
+  });
+  const m = () => store.getMachine(id0)!;
+  const setHours = (open: boolean) => {
+    const now = pacificClock(t).minutes;
+    store.updateMachine(id0, { job_settings: JSON.stringify({ ...DEFAULT_SETTINGS, ...(open ? { start: hhmm(now - 60), end: hhmm(now + 120) } : { start: hhmm(now + 120), end: hhmm(now + 180) }) }) });
+  };
+  const last = () => sent.at(-1);
+  const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: true, max_limit_s: 3600 };
+  setHours(true);
+  const j = jobs.queue({ machine: m(), projectId: p.id, ticketId: null, contraptionId: null, askedBy: 'test', kind, inputs: [], limitS: 600, when: 'hours', reason: '' });
+  jobs.decide(j.id, 'hours', who);
+  assert.equal(last().type, 'job.start');
+  jobs.report(m(), { id: j.id, state: 'running', run_s: 0 });
+
+  // Hours close: paused by the hours; a "running" sent before the agent got job.pause doesn't undo that.
+  setHours(false);
+  jobs.tickAll();
+  assert.deepEqual(last(), { type: 'job.pause', id: j.id });
+  jobs.report(m(), { id: j.id, state: 'running', run_s: 10 });
+  jobs.report(m(), { id: j.id, state: 'paused', run_s: 10 });
+  assert.deepEqual([store.getMachineJob(j.id)!.state, store.getMachineJob(j.id)!.paused_by], ['paused', 'hours']);
+  // Hours open: resumed.
+  setHours(true);
+  jobs.tickAll();
+  assert.deepEqual(last(), { type: 'job.resume', id: j.id });
+  assert.equal(store.getMachineJob(j.id)!.state, 'running');
+  // The owner's Resume outside hours sticks: it runs now.
+  setHours(false);
+  jobs.tickAll();
+  assert.equal(store.getMachineJob(j.id)!.paused_by, 'hours');
+  jobs.resume(j.id, who);
+  jobs.tickAll();
+  assert.deepEqual([store.getMachineJob(j.id)!.state, store.getMachineJob(j.id)!.go], ['running', 'now']);
+
+  // Past its 10 min limit and the 2 min grace, the server stops it itself.
+  jobs.report(m(), { id: j.id, state: 'running', run_s: 600 + 119 });
+  assert.equal(last().type, 'job.resume', 'inside the grace it runs on');
+  jobs.report(m(), { id: j.id, state: 'running', run_s: 600 + 121 });
+  assert.deepEqual(last(), { type: 'job.stop', id: j.id });
+  jobs.report(m(), { id: j.id, state: 'stopped', run_s: 721 });
+  assert.match(store.getMachineJob(j.id)!.error ?? '', /over its 10 min limit/);
+
+  // Results are kept 14 days from when the job ended, then deleted here.
+  mkdirSync(join(dir, 'jobs', String(j.id)), { recursive: true });
+  writeFileSync(join(dir, 'jobs', String(j.id), 'out.json'), '{}');
+  t += 13 * 24 * 3600_000;
+  await jobs.sweep();
+  assert.ok(existsSync(join(dir, 'jobs', String(j.id), 'out.json')), 'kept at 13 days');
+  t += 2 * 24 * 3600_000;
+  await jobs.sweep();
+  assert.equal(existsSync(join(dir, 'jobs', String(j.id))), false, 'swept at 15 days');
+  assert.ok(store.getMachineJob(j.id)!.swept_at);
+
+  // A card's 500 characters: a long reason and command give way, never what it reads, GPU, network or the image.
+  jobs.queue({ machine: m(), projectId: p.id, ticketId: null, contraptionId: null, askedBy: 'test', kind: { ...kind, command: ['python', 'x'.repeat(900)] }, inputs: [], limitS: 600, when: 'now', reason: 'r'.repeat(200) });
+  const q: string = cards.at(-1).questions[0].question;
+  assert.ok(q.length <= 500, `${q.length} characters`);
+  assert.match(q, /Reads none of your folders; GPU yes; network no; limit 10 min/);
+  assert.match(q, new RegExp(`Image docker\\.io/x/y@sha256:a{64}`));
+  assert.match(q, /Command python x+…/);
+  assert.match(q, /\nInputs none$/, 'the inputs line stays, cut to fit if it must');
+  store.db.close();
 });

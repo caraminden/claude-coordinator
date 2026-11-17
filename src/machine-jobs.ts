@@ -248,11 +248,22 @@ export interface JobDeps {
   wake(ticketId: number, text: string): void;
   /** A line in the minion's chat that wakes nobody. */
   note(ticketId: number, text: string): void;
-  /** A minion's job was queued: put its live job card in that minion's chat, after the go card. */
-  placed?(job: MachineJob): void;
+  /** Put a minion's live job card at the bottom of its chat: when queued (after the go card), and again each time it starts, pauses or ends. */
+  placed?(job: MachineJob, stage: JobStage): void;
   /** Where a job's results go: the scheme's shared folder's jobs/<id>/ for a minion's, the app's DATA_DIR/jobs/<id>/ for a contraption's. */
   resultsDir(job: MachineJob): string | null;
   now?: () => number;
+}
+
+/**
+ * Where a job's card stands in its minion's chat (#859, Cara's pick "The card follows the bottom"): a change of
+ * stage moves the card to the bottom, and its old place becomes a one-line note. Starting and uploading don't move it.
+ */
+export type JobStage = 'waiting' | 'running' | 'paused' | 'ended';
+export function jobStage(state: string): JobStage {
+  if (state === 'needs-go' || state === 'queued') return 'waiting';
+  if (state === 'paused') return 'paused';
+  return (ENDED as readonly string[]).includes(state) ? 'ended' : 'running';
 }
 
 const tokenHash = (t: string) => createHash('sha256').update(t).digest('hex');
@@ -319,10 +330,28 @@ export class MachineJobs {
   private changed(id: number) {
     const job = this.store.getMachineJob(id);
     if (!job) return;
+    this.place(job);
     const view = this.view(job);
     this.d.broadcast({ type: 'machine_job', projectId: job.project_id, job: view });
     const owner = this.ownerOf(this.machineOf(job));
     if (owner && !this.store.canSee({ uid: owner.id, admin: this.store.isAdmin(owner) }, job.project_id)) this.d.broadcast({ type: 'machine_job', to: owner.id, job: view });
+  }
+
+  /** The stage each live minion's job card was last put at the bottom for; read back from the chat after a restart. */
+  private stages = new Map<number, JobStage>();
+  private place(job: MachineJob) {
+    if (job.ticket_id === null || !this.d.placed) return;
+    const stage = jobStage(job.state);
+    // 'starting' (the go given, the machine told) is still waiting to the eye, and moves nothing until it runs.
+    const shown = job.state === 'starting' ? 'waiting' : stage;
+    let last = this.stages.get(job.id);
+    if (last === undefined) {
+      const ev = this.store.eventsOfKinds(job.ticket_id, ['job']).map((e) => JSON.parse(e.data)).filter((d) => d.job === job.id).at(-1);
+      last = ev ? (ev.stage ?? 'waiting') : undefined;
+    }
+    if (last !== shown) this.d.placed(job, shown);
+    if (shown === 'ended') this.stages.delete(job.id);
+    else this.stages.set(job.id, shown);
   }
 
   /** A machine's agent went away: its queued jobs now wait on it. */
@@ -360,7 +389,6 @@ export class MachineJobs {
       ...(standing ? { go: 'standing' as const, go_by: this.store.jobKind(q.machine.id, hash)!.allowed_by } : {}),
     });
     if (!standing) this.askOwner(job, q.machine);
-    if (job.ticket_id !== null) this.d.placed?.(job);
     this.changed(job.id);
     this.pump(q.machine.id);
     return this.store.getMachineJob(job.id)!;

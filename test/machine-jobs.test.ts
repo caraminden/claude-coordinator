@@ -207,6 +207,9 @@ test('no job.start without its owner\'s go: someone else\'s answer is refused, t
   assert.equal(await (await input(start.input_token)).text(), 'RIFF fake audio');
   assert.equal((await state(j.id, 'running')).status, 202);
   assert.equal((await job(j.id)).state, 'running');
+  // Starting doesn't move the card; running does, once, however often the agent reports (#859, "the card follows the bottom").
+  await state(j.id, 'running', { gpu_pct: 80 });
+  assert.deepEqual((await events('job')).filter((e) => e.job === j.id).map((e) => e.stage), ['waiting', 'running']);
 });
 
 test('one job at a time: a second one with its go waits behind the first', async () => {
@@ -281,6 +284,7 @@ test('only the owner (or an admin) pauses, resumes and stops; paused time is the
   await until('job.stop', () => agent.jobs('job.stop').some((s) => s.id === j.id));
   await wakes(() => state(j.id, 'stopped'));
   assert.equal((await job(j.id)).state, 'stopped');
+  assert.deepEqual((await events('job')).filter((e) => e.job === j.id).map((e) => e.stage), ['waiting', 'running', 'paused', 'running', 'ended']);
 });
 
 test('results upload under the job\'s and the scheme\'s caps', async () => {

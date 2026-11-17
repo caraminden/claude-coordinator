@@ -21,9 +21,11 @@ const PILL = { 'needs-go': 'needs go', queued: 'queued', starting: 'starting', r
 /** The machine's owner or an admin: the only people with buttons on a job (spec, "who decides"). */
 export const mayAct = (v) => !!account && (account.admin || (v.decider_id != null && account.id === v.decider_id));
 
-/** A clock time people read: always Pacific, labelled (Citadel-wide rule). */
+/** A clock time people read: always Pacific, labelled (Citadel-wide rule), with the day once it's over 12 hours ago. */
 export function pacific(ms) {
-  return ms ? new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '';
+  if (!ms) return '';
+  if (Math.abs(Date.now() - ms) > 12 * 3600e3) return pacificDay(ms);
+  return new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 }
 /** A day and time, for a job list row: "Nov 16, 11:00 PM PST". */
 export function pacificDay(ms) {
@@ -167,7 +169,7 @@ function body(v) {
     const run = v.run_s;
     if (v.state === 'done') out.push(facts(h('span', {}, 'Done in ', b(duration(run))), h('span', {}, 'GPU busy ', b(duration(v.gpu_busy_s))), h('span', { class: 'muted' }, `finished ${pacific(v.ended_at)}`)));
     else if (v.state === 'refused') out.push(facts(h('span', {}, `Refused${v.go_by ? ` by ${v.go_by}` : ''}`), h('span', { class: 'muted' }, pacific(v.ended_at))));
-    else out.push(facts(h('span', {}, v.state === 'failed' ? 'Failed after ' : 'Stopped after ', b(duration(run))), v.exit_code != null ? h('span', {}, `exit ${v.exit_code}`) : null, h('span', { class: 'muted' }, pacific(v.ended_at))));
+    else out.push(facts(h('span', {}, v.state === 'failed' ? 'Failed after ' : 'Stopped after ', b(duration(run))), v.exit_code != null ? h('span', {}, `exit ${v.exit_code}`) : null, h('span', { class: 'muted' }, `ended ${pacific(v.ended_at)}`)));
     if (v.error) out.push(h('p', { class: 'jc-why' }, v.error));
     if (v.state === 'done') out.push(results(v));
   }
@@ -274,9 +276,9 @@ export function act(v, action) {
 
 /** The one-line note a card leaves where it was, when it moves to the bottom of the chat. */
 export function jobMovedNote(data, href) {
-  const what = { waiting: 'was queued', running: 'started', paused: 'paused' }[data.stage] ?? 'changed';
+  const what = { waiting: 'was queued', running: 'started', paused: 'paused', ended: 'ended' }[data.stage] ?? 'changed';
   const name = data.view?.kind?.name ? ` (${data.view.kind.name})` : '';
-  return h('div', { class: 'note jc-moved' }, `Job #${data.job}${name} ${what} here; its card is `, h('a', { href }, 'further down'));
+  return h('div', { class: 'note jc-moved' }, `Job #${data.job}${name} ${what}: its card moved `, h('a', { href }, 'further down'));
 }
 
 /** The go card's question, laid out: what runs, what it reads, GPU and network, the limit, inputs and why now. */
@@ -292,8 +294,7 @@ export function jobRecipe(r) {
     row('GPU · network', `${r.kind.gpu ? 'GPU on' : 'GPU off'} · ${r.kind.network ? 'network on' : 'network off'}`),
     row('Limit', limitText(r.limit_s)),
     row('Inputs', r.inputs.length ? r.inputs.map((i, n) => h('span', {}, n ? ', ' : '', i.name, h('span', { class: 'muted' }, ` (${formatSize(i.size)})`))) : 'none'),
-    row('When', r.when === 'now' ? h('span', {}, h('b', {}, 'Now'), `: ${r.reason}`) : 'In job hours'),
-    row('Machine', r.machine));
+    row('When', r.when === 'now' ? h('span', {}, h('b', {}, 'Now'), `: ${r.reason}`) : 'In job hours'));
 }
 
 /** Every job of a minion, for its chat: one fetch fills the cards that came without a view. */
@@ -365,9 +366,10 @@ function newSection(machineId) {
       : h('span', { class: 'muted' }, a ? `Job #${a.id} is ${a.state}` : 'No job running');
     head.replaceChildren(h('b', {}, 'Jobs'), gpu);
   }
-  function drawSettings() {
+  function drawSettings(force = false) {
     // Someone typing a time keeps what they typed; the next redraw after they leave the field catches up.
-    if (settingsEl.contains(document.activeElement)) return;
+    const typing = document.activeElement;
+    if (typing?.type === 'time' && settingsEl.contains(typing) && !force) return;
     const set = st.settings;
     const zone = new Date().toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'short' }).split(' ').pop();
     const time = (key) => {

@@ -480,7 +480,8 @@ export function questionCard(ticketId, card, opts = {}) {
       // With pictures, the options are a gallery of tiles, each a thumbnail over its label.
       const gallery = q.options.some((o) => o.image);
       return h('div', { class: 'q', 'data-q': i },
-        h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', q.question,
+        // A job's go card lays its recipe out whole (#859) in place of the question's 500-character summary.
+        h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : q.question,
           q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
         card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
         gallery

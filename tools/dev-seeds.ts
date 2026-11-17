@@ -6,6 +6,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Project, Store, Ticket } from '../src/db.ts';
 import { projectDir } from '../src/workspace.ts';
+import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -417,6 +418,62 @@ mock.boards('#takes', { boards: [
       chat(c, t, 1).said(`[The artifact](${file})`);
       c.store.syncArtifacts(t, [{ path: 'wco-artifact.html', size: page.length, mtime: Date.now() }]);
       return `#/p/${c.project.id}`;
+    },
+  },
+  'gpu-jobs': {
+    about: 'a minion\'s GPU jobs on a seeded desktop in every state (needs go, queued outside hours, running, paused resumable and frozen, done, failed), and that desktop on the Machines page (#859)',
+    seed(c) {
+      const owner = c.store.listUsers().find((u) => u.name === c.who);
+      const m = c.store.createMachine(`seeded-desktop-${hex().slice(0, 4)}`, hex(), c.who, owner?.id ?? null);
+      c.store.updateMachine(m.id, { jobs: JSON.stringify({ folders: ['audiobooks', 'models'], max_limit_h: 8, gpu: true }), job_settings: JSON.stringify({ start: '23:00', end: '08:00', until: null, paused: false }) });
+      c.store.setMachineProjects(m.id, [c.project.id]);
+      const t = minion(c, 'Transcribe the audiobook', { note: 'GPU jobs on the desktop' });
+      const machine = c.store.getMachine(m.id)!;
+      const w = chat(c, t, 30);
+      const now = Date.now();
+      const kinds: Record<string, JobKind> = {
+        whisperx: { name: 'whisperx', image: 'ghcr.io/m-bain/whisperx:3.3', command: ['whisperx', '--model', 'large-v3', '/in/chapter.wav', '-o', '/out'], reads: ['audiobooks'], gpu: true, network: false, resumable: true, max_limit_s: 4 * 3600 } as JobKind,
+        tts: { name: 'xtts-render', image: 'ghcr.io/coqui-ai/xtts:0.22', command: ['python', 'render.py', '--voice', '/in/voice.wav'], reads: ['models'], gpu: true, network: false, resumable: false, max_limit_s: 6 * 3600 } as JobKind,
+      };
+      c.store.allowJobKind(m.id, kindHash(kinds.whisperx), 'whisperx', JSON.stringify(kinds.whisperx), c.who);
+      const add = (kind: JobKind, state: string, fields: Parameters<Store['updateMachineJob']>[1], ago: number, when: 'hours' | 'now' = 'hours', reason = '') => {
+        const j = c.store.addMachineJob({ machine_id: m.id, project_id: c.project.id, ticket_id: t.id, contraption_id: null, asked_by: `#${t.number} ${t.title}`, kind_name: kind.name, kind: JSON.stringify(kind), kind_hash: kindHash(kind), inputs: JSON.stringify([{ name: 'chapter-07.wav', size: 412_000_000, sha256: hex(), path: '/dev/null' }]), limit_s: 2 * 3600, run_when: when, reason, state, created_at: now - ago });
+        c.store.updateMachineJob(j.id, fields);
+        return c.store.getMachineJob(j.id)!;
+      };
+      const log = (lines: string[]) => lines.join('\n');
+      const jobs = [
+        add(kinds.whisperx, 'done', { go: 'standing', go_by: c.who, started_at: now - 5 * 3600e3, ended_at: now - 4.2 * 3600e3, run_s: 2830, gpu_busy_s: 2510, outputs: JSON.stringify([{ path: 'chapter-05.srt', size: 48_210, uploaded: true }, { path: 'chapter-05.json', size: 912_400, uploaded: true }]), upload_bytes: 960_610, live: JSON.stringify({ log_tail: log(['[whisperx] aligning 1,204 segments', '[whisperx] wrote /out/chapter-05.srt', 'done in 47:10']) }), exit_code: 0 }, 5.2 * 3600e3),
+        add(kinds.tts, 'failed', { go: 'hours', go_by: c.who, started_at: now - 3 * 3600e3, ended_at: now - 2.9 * 3600e3, run_s: 312, gpu_busy_s: 290, exit_code: 137, error: 'Out of GPU memory (exit 137)', live: JSON.stringify({ log_tail: log(['loading xtts v2…', 'torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB', 'Killed']) }) }, 3.1 * 3600e3),
+        add(kinds.tts, 'needs-go', {}, 40 * 60e3, 'now', 'The narrator wants chapter 8 by tomorrow morning'),
+        add(kinds.whisperx, 'queued', { go: 'standing', go_by: c.who }, 25 * 60e3),
+        add(kinds.tts, 'paused', { go: 'now', go_by: c.who, paused_by: 'owner', started_at: now - 70 * 60e3, run_s: 1460, gpu_busy_s: 1300, live: JSON.stringify({ held_vram_mb: 14_200, log_tail: log(['rendering sentence 412/1,880']) }), live_at: now - 9 * 60e3 }, 75 * 60e3),
+        add(kinds.whisperx, 'paused', { go: 'standing', go_by: c.who, paused_by: 'hours', started_at: now - 9 * 3600e3, run_s: 1700, gpu_busy_s: 1500, live: JSON.stringify({ log_tail: log(['[whisperx] transcribing 61%']) }), live_at: now - 7 * 3600e3 }, 10 * 3600e3),
+        add(kinds.whisperx, 'running', { go: 'now', go_by: c.who, started_at: now - 34 * 60e3, run_s: 2010, gpu_busy_s: 1880, live: JSON.stringify({ gpu_pct: 87, vram_mb: 9_830, log_tail: log(['[whisperx] loading large-v3', '[whisperx] transcribing chapter-07.wav', '[whisperx] 42% (1:12:04 of 2:51:30)']) }), live_at: now - 20e3 }, 36 * 60e3, 'now', 'Cara asked for chapter 7 tonight'),
+      ];
+      const waits = (j: typeof jobs[number]) => (j.state === 'queued' ? 'outside job hours (opens 11:00 PM PST)' : null);
+      const viewOf = (j: typeof jobs[number]) => jobView(j, { machine: machine.name, waits: waits(j), decider: owner?.id ?? null, ticketNumber: t.number });
+      w.asked('Transcribe chapters 5 to 8 on my desktop, and render chapter 8 with the narrator voice.');
+      w.init();
+      w.said('Queuing them on the desktop as GPU jobs; each shows below as it goes.');
+      let first = 0;
+      for (const j of jobs) {
+        if (j.state === 'needs-go') {
+          const k = JSON.parse(j.kind) as JobKind;
+          w.put('question', { id: hex(), job: j.id, to: c.who, questions: [{ header: 'GPU job go', question: `#${t.number} wants to run job #${j.id} "${k.name}" on ${machine.name} NOW.`, options: [
+            { label: 'Run in job hours', description: 'Queue it; it starts once job hours open.' },
+            { label: 'Run now', description: "Start it as soon as the machine is free, outside job hours too; job hours ending won't pause it.", recommended: true },
+            { label: 'Always allow this kind', description: 'Run this one in job hours, and let this exact recipe run in job hours from now on without asking.' },
+            { label: 'No', description: 'Refuse it; the minion that asked is told.' },
+          ] }], recipe: { machine: machine.name, asked_by: j.asked_by, when: j.run_when, reason: j.reason, limit_s: j.limit_s, kind: k, inputs: [{ name: 'chapter-08.wav', size: 398_000_000 }] } });
+        }
+        // A paused or ended job's card moved down once already: its first place keeps the note.
+        if (j.state !== 'needs-go' && j.state !== 'queued') w.put('job', { job: j.id, stage: 'waiting', view: { ...viewOf(j), state: 'queued' } });
+        const e = w.put('job', { job: j.id, stage: jobStage(j.state), view: viewOf(j) });
+        first ||= e;
+      }
+      w.done('Seven jobs on the desktop: one waits on your go.');
+      return route(c, t, first);
     },
   },
   'inbox-full': {

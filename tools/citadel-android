@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The shared headless Android emulator (#381), one AVD (`citadel`) for every scheme:
 #   citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down
+#                   | tone <hz> <seconds> <out.wav> [rate] | mic <file.wav> [seconds] | mic-check [hz]
 # Since #533 the emulator runs on Cara's desktop, in the WSL distro citadel-android (deploy/desktop/android/),
 # and turns still run here on perigee. perigee can't open a connection to the desktop, so the desktop dials
 # in: its SSH tunnel puts the starter (127.0.0.1:$STARTER) and the emulator's console and adb ports
@@ -19,6 +20,8 @@
 # Console steps (sms, #442) need the console's token in the host's ~/.emulator_console_auth_token, which
 # turns can't read. The step drops a request file in the lock folder (private to this account) and `serve`,
 # which runs on the host, checks it again, sends it to the console and leaves the answer beside it.
+# The synthetic mic (#843): `mic` feeds a WAV into the emulator's microphone through its gRPC port ($GRPC, tunnelled
+# like the console), where only injectAudio is open (allow list below); citadel-android-mic.ts beside this does it.
 set -uo pipefail
 
 say() { echo "citadel-android: $*" >&2; }
@@ -28,6 +31,7 @@ AVD=citadel
 CONSOLE=${CITADEL_ANDROID_PORT:-5554} # rehearsals only: a second emulator beside the shared one
 SERIAL="emulator-$CONSOLE"
 STARTER=${CITADEL_ANDROID_STARTER:-18590}
+GRPC=${CITADEL_ANDROID_GRPC:-18591}
 IDLE=${CITADEL_ANDROID_IDLE:-900}
 LEASE=120
 BOOT_WAIT=360
@@ -181,9 +185,10 @@ up() {
   done
   # Once per boot, cheap: keep the screen on and unlocked, and skip Chrome's first-run pages so `open` lands on the URL.
   adb shell 'svc power stayon true; settings put system screen_off_timeout 2147483647; wm dismiss-keyguard' >/dev/null 2>&1
-  adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line' >/dev/null 2>&1
+  # --use-fake-ui-for-media-stream: pages get the mic and camera without a prompt (mic-check, #843).
+  adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run --use-fake-ui-for-media-stream" > /data/local/tmp/chrome-command-line' >/dev/null 2>&1
   adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1
-  adb shell pm grant com.android.chrome android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
+  adb shell 'pm grant com.android.chrome android.permission.POST_NOTIFICATIONS; pm grant com.android.chrome android.permission.RECORD_AUDIO' >/dev/null 2>&1
   say "up after $((SECONDS - t0))s ($SERIAL)"
 }
 
@@ -209,7 +214,11 @@ serve() {
   [ -n "$far" ] || "$ADB" start-server
   # Saving the quick-boot snapshot writes ~2.6 GB and took 17s here; the emulator's default 20s cut one short.
   export ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL=90
-  "$emu" -avd "$AVD" -port "$CONSOLE" -no-window -no-audio -no-boot-anim -no-metrics \
+  # The gRPC port for `mic`: a JWT is needed for every method but injectAudio, and nobody here holds one.
+  printf '{"unprotected":["/android.emulation.control.EmulatorController/injectAudio"],"allowlist":[]}\n' >"$dir/android-grpc.json"
+  # -audio none: no host sound card or server; the mic is fed through gRPC only (hw.audioInput=yes in the AVD).
+  "$emu" -avd "$AVD" -port "$CONSOLE" -no-window -audio none -no-boot-anim -no-metrics \
+    -grpc "$GRPC" -grpc-use-jwt -grpc-allowlist "$dir/android-grpc.json" \
     -gpu swiftshader_indirect -feature -Vulkan -memory "${CITADEL_ANDROID_MEMORY:-2048}" -cores "${CITADEL_ANDROID_CORES:-2}" &
   pid=$!
   # `adb emu kill` shuts it down cleanly, which saves the quick-boot snapshot; plain signals are the fallback.
@@ -258,6 +267,7 @@ down() {
   fi
 }
 
+mic="$(dirname "$(readlink -f "$0")")/citadel-android-mic.ts"
 cmd=${1:-}
 [ $# -gt 0 ] && shift
 case "$cmd" in
@@ -293,7 +303,14 @@ case "$cmd" in
     [ $s = 0 ] && say "sent a text from $1 to the emulator"
     exit $s ;;
   down) take_screen; down ;;
+  tone) exec node "$mic" tone "$@" ;;
+  mic)
+    [ $# -ge 1 ] && [ $# -le 2 ] && [ -f "$1" ] || { say "usage: citadel-android mic <file.wav> [seconds]   (plays once an app records; loops to fill seconds)"; exit 2; }
+    # The screen stays ours for the lease, but not locked: the same turn's open, install and shot run while it plays.
+    take_screen; up; keep_screen; exec 9>&-
+    node "$mic" play "$@"; s=$?; touch "$used"; exit $s ;;
+  mic-check) exec node "$mic" check "$@" ;;
   *)
-    say "usage: citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down"
+    say "usage: citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down | tone <hz> <seconds> <out.wav> [rate] | mic <file.wav> [seconds] | mic-check [hz]"
     exit 2 ;;
 esac

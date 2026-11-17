@@ -1,6 +1,6 @@
 ---
 name: android-app
-description: Build, sign and ship an Android app (a Capacitor shell or plain Gradle) on perigee's shared Android toolchain. Use when a turn runs gradlew, changes compileSdk, the Android Gradle Plugin or build-tools, makes a release APK, wires an app's update banner, or tries an APK or a page on the shared emulator (citadel-android).
+description: Build, sign and ship an Android app (a Capacitor shell or plain Gradle) on perigee's shared Android toolchain. Use when a turn runs gradlew, changes compileSdk, the Android Gradle Plugin or build-tools, makes a release APK, wires an app's update banner, or tries an APK or a page on the shared emulator (citadel-android), its microphone included.
 ---
 
 # Android app
@@ -121,6 +121,9 @@ citadel-android open https://citadel.zip/c/                                   # 
 citadel-android shot "$TMPDIR/shot.png"                                    # then Read the PNG
 citadel-android offline on         # airplane mode; `offline off` to undo
 citadel-android sms +15551234567 'Your code is 1234'                      # an incoming text
+citadel-android tone 1000 3 "$TMPDIR/tone.wav"                             # a test tone (hz, seconds, file, [rate])
+citadel-android mic "$TMPDIR/tone.wav" 10 &                                 # the phone's microphone hears it once an app records
+citadel-android mic-check                                                  # smoke check: Chrome records the mic and finds a tone
 citadel-android down               # when you're done
 ```
 
@@ -167,6 +170,24 @@ citadel-android down               # when you're done
   permission flow without reinstalling: `adb -s emulator-5554 shell pm revoke <appId>
   android.permission.<NAME>`, then `pm grant` to undo it. When phones behave differently, note the
   WebView version: `adb -s emulator-5554 shell dumpsys webviewupdate`.
+- **Synthetic microphone** (`mic`, #843). It feeds a WAV into the phone's microphone, so a recording
+  flow (getUserMedia, an AudioWorklet, an upload) runs end to end with audio whose answer you know.
+  - **Synthetic audio only**: tones, sweeps or noise made with code (`tone`, or your own generator),
+    never a recording of a real voice. The WAV must be 16-bit PCM, mono or stereo, 8 to 48 kHz.
+  - **`mic` waits up to 2 minutes for an app to open the mic**, then plays the file, looped to fill
+    `[seconds]`, at most 600; it never plays into a phone where nothing records, because that crashes
+    this emulator. So start it in the background, then make the app record.
+  - **Chrome grants the mic and camera without a prompt.** A Capacitor shell needs the permission
+    first: `adb -s emulator-5554 shell pm grant <appId> android.permission.RECORD_AUDIO`.
+  - **The phone records at 48 kHz.** That is the trap the mic exists to catch: code that assumes
+    44.1 kHz. Read the rate from the AudioContext or the track's settings, and turn off
+    `echoCancellation`, `noiseSuppression` and `autoGainControl` for analysis. `mic-check` prints
+    both, and a pure tone with them left on can come back quieter or reshaped. The emulator has no
+    processing of its own, so it can't show what a real phone's does: test that on a real phone.
+  - **"only silence came through"**: the emulator's computer was too busy to keep its sound card fed,
+    and Android filled in silence. Try again later.
+  - **"no emulator microphone"**: the desktop hasn't been set up again since the mic arrived
+    (Citadel's `deploy/desktop/android/README.md`, "Adding the mic port"). Ask your Taskmaster.
 - It renders in software (SwiftShader, no GPU) with guest Vulkan off: fine for screenshots and
   flows, not for frame rates or graphics bugs. Test those on a real phone.
 

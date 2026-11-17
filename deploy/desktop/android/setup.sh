@@ -16,7 +16,7 @@
 #      perigee's adb key (so its adb server is let in) and its console token (so `sms` and `down` work
 #      from there). Until Cara has added the SSH key on perigee it prints the line to add and stops;
 #   7. installs three services: the emulator (started on demand, stops itself when idle), its starter on
-#      127.0.0.1:18590, and the tunnel, which dials perigee and puts the starter and the emulator's two
+#      127.0.0.1:18590, and the tunnel, which dials perigee and puts the starter and the emulator's three
 #      ports on perigee's loopback. perigee can't reach this PC, so everything goes through that tunnel.
 #      The tunnel also gives the emulator perigee's adb server on 127.0.0.1:15037 here: the emulator runs
 #      adb commands of its own, and a second adb server here would take the phone away from perigee's.
@@ -30,9 +30,10 @@ dir=/opt/citadel-android
 user=android
 home=/home/$user
 key=$home/.ssh/citadel_android
-# perigee's side of the key: it may hold these three ports open on perigee's loopback, and reach perigee's adb server.
+# perigee's side of the key: it may hold these four ports open on perigee's loopback, and reach perigee's adb server.
 helper='/home/cara/claude-coordinator/deploy/desktop/android/perigee-key.sh'
-ports=(18590 5554 5555)
+# 18591: the emulator's gRPC port, where `citadel-android mic` feeds its microphone (#843).
+ports=(18590 5554 5555 18591)
 adb_here=15037 # not 5037: with WSL's mirrored networking that is Windows' own adb server, when Cara runs one
 
 die() { echo "setup: $*" >&2; exit 1; }
@@ -112,7 +113,7 @@ if ! facts=$(as_android ssh "${ssh_opts[@]}" "$target" facts 2>/dev/null) || ! g
   listen=$(printf 'permitlisten="127.0.0.1:%s",' "${ports[@]}")
   echo
   echo "perigee doesn't know this distro's key yet (or $target can't be reached from here)."
-  echo 'SSH into perigee as usual and run this one line there. It lets the key hold those three ports open on'
+  echo 'SSH into perigee as usual and run this one line there. It lets the key hold those four ports open on'
   echo "perigee's own loopback, reach perigee's adb server and ask one script two questions, nothing else (no shell):"
   echo
   echo "echo 'restrict,port-forwarding,${listen}permitopen=\"127.0.0.1:5037\",command=\"$helper\" $(cat "$key.pub")' >> ~/.ssh/authorized_keys"
@@ -190,7 +191,7 @@ Wants=network-online.target
 [Service]
 User=$user
 ExecStartPre=-$ssh_run $target takeover
-ExecStart=$ssh_run -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -L 127.0.0.1:$adb_here:127.0.0.1:5037$(printf ' -R 127.0.0.1:%s:127.0.0.1:%s' "${ports[0]}" "${ports[0]}" "${ports[1]}" "${ports[1]}" "${ports[2]}" "${ports[2]}") $target
+ExecStart=$ssh_run -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -L 127.0.0.1:$adb_here:127.0.0.1:5037$(for p in "${ports[@]}"; do printf ' -R 127.0.0.1:%s:127.0.0.1:%s' "$p" "$p"; done) $target
 Restart=always
 RestartSec=10
 
@@ -219,4 +220,6 @@ else
   echo "The tunnel isn't holding yet. If the lines above say a port forwarding failed, perigee's own emulator"
   echo 'starter still has port 18590: run the perigee line from the README ("Switch perigee over"), and the'
   echo 'tunnel connects by itself within 10 seconds. Check with: systemctl status citadel-android-tunnel'
+  echo "If it names port ${ports[3]}, perigee's line for this key predates the mic (#843): run the line from the"
+  echo 'README ("Adding the mic port") on perigee.'
 fi

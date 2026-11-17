@@ -65,7 +65,7 @@ fi
 # avdmanager 23 writes disk.dataPartition.path=<temp>, a throwaway data disk that would lose installs and quick boot.
 sed -i '/^disk\.dataPartition\.path *= *<temp>/d' "$avd_dir/config.ini"
 # The service passes -memory and -cores too; these keep a hand-started emulator as small.
-for kv in hw.ramSize=2048 hw.cpu.ncore=2 hw.keyboard=yes disk.dataPartition.size=4G hw.audioInput=no hw.audioOutput=no; do
+for kv in hw.ramSize=2048 hw.cpu.ncore=2 hw.keyboard=yes disk.dataPartition.size=4G hw.audioInput=yes hw.audioOutput=no; do
   k=${kv%%=*}
   if grep -q "^$k *=" "$avd_dir/config.ini"; then sed -i "s|^$k *=.*|$kv|" "$avd_dir/config.ini"; else echo "$kv" >>"$avd_dir/config.ini"; fi
 done

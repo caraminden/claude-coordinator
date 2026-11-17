@@ -8,13 +8,14 @@ Cara picked the move on 2026-11-11 ("Move it to the desktop"); nothing changes i
 ## How it fits together
 
 perigee can't open a connection to the desktop, so the desktop dials perigee: one SSH tunnel, held by a
-service in the distro, puts three of the distro's ports on perigee's loopback.
+service in the distro, puts four of the distro's ports on perigee's loopback.
 
 | On perigee's loopback | Is | Used by |
 |---|---|---|
 | `127.0.0.1:18590` | the starter in the distro: a connection starts the emulator and marks it used | `citadel-android up` and every other step |
 | `127.0.0.1:5555` | the emulator's adb port | perigee's adb server |
 | `127.0.0.1:5554` | the emulator's console | `citadel-android sms` and `down` |
+| `127.0.0.1:18591` | the emulator's gRPC port, open only for feeding its microphone | `citadel-android mic` and `mic-check` (#843) |
 
 - **The adb server stays on perigee** (`deploy/citadel-android-adb.service`, on `127.0.0.1:5037`). So the phone
   is still `emulator-5554`, and `adb reverse` and `adb forward` still end on perigee, where the dev servers are.
@@ -25,7 +26,7 @@ service in the distro, puts three of the distro's ports on perigee's loopback.
 - **While the desktop is away** (asleep, restarting, Cara not logged on) there is no emulator: `citadel-android`
   says so within about 10 seconds and exits 1. Nothing falls back to perigee. When the PC is back, the tunnel
   reconnects by itself within about a minute.
-- **The key** the tunnel logs in with can do three things on perigee and nothing else: hold those three ports,
+- **The key** the tunnel logs in with can do three things on perigee and nothing else: hold those four ports,
   reach perigee's adb server, and run [`perigee-key.sh`](perigee-key.sh) (hand the distro perigee's adb key and
   console token; end a tunnel left over from before a restart). It gets no shell. Reaching the adb server
   does mean the distro could ask the phone for an `adb reverse` or `forward` to any port on perigee's
@@ -101,6 +102,22 @@ Paste the setup line again in the distro (`wsl -d citadel-android -u root`). It 
 `citadel-android` and rewrites the services. A change to `tools/citadel-android` that only touches perigee's
 side (most of them) needs nothing here.
 
+## Adding the mic port
+
+The synthetic microphone (`citadel-android mic`, #843) added a fourth port, 18591, to the tunnel. A key line added
+before then allows only three, and the tunnel refuses to start until perigee's line allows the fourth. Once, in
+this order:
+
+1. **On perigee**, add the port to the key's line (it ends in `citadel-android`):
+
+   ```bash
+   sed -i '/citadel-android$/{/18591/!s/permitlisten="127.0.0.1:5555",/&permitlisten="127.0.0.1:18591",/}' ~/.ssh/authorized_keys
+   ```
+
+2. **In the distro** (`wsl -d citadel-android -u root`), paste the setup line again. It rewrites the emulator's
+   service with the gRPC port and the tunnel with the fourth port. The phone's next boot is a cold one (about a
+   minute longer), because its microphone setting changed.
+
 ## When it doesn't work
 
 All of these run in the distro's root shell (`wsl -d citadel-android -u root`) unless they say perigee.
@@ -108,7 +125,7 @@ All of these run in the distro's root shell (`wsl -d citadel-android -u root`) u
 | What you see | Look at | Usually |
 |---|---|---|
 | `citadel-android`: "the emulator's desktop isn't connected" | `systemctl status citadel-android-tunnel` | The PC slept or the distro stopped: `wsl -l -v` in PowerShell shows whether `citadel-android` is Running; the logon task from step 6 starts it. |
-| The tunnel restarts every 10 seconds with "remote port forwarding failed" | `journalctl -u citadel-android-tunnel -n 20` | Something on perigee holds 18590, 5554 or 5555: perigee's old starter is still enabled (step 4), or an emulator runs there. |
+| The tunnel restarts every 10 seconds with "remote port forwarding failed" | `journalctl -u citadel-android-tunnel -n 20` | Something on perigee holds 18590, 5554, 5555 or 18591: perigee's old starter is still enabled (step 4), or an emulator runs there. Naming 18591 alone after an update: perigee's key line lacks the mic port ("Adding the mic port"). |
 | The tunnel says "Permission denied" | the same | The key's line isn't in perigee's `~/.ssh/authorized_keys` (step 4). Paste the setup line again to see it. |
 | The tunnel can't resolve or reach perigee | `ssh -i /home/android/.ssh/citadel_android cara@perigee.tail59477f.ts.net facts` | WSL isn't reaching the tailnet: add `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`, then `wsl --shutdown` ([`.wslconfig` settings](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#wslconfig)). That stops the CI distro too; its logon task restarts it. |
 | `up` gives up after 6 minutes | `journalctl -u citadel-android -n 50` | The emulator's own log. "/dev/kvm" errors: `ls -l /dev/kvm` must show group `kvm`. |

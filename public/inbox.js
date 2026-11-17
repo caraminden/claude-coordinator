@@ -91,8 +91,8 @@ export function schemeCount(p) {
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
   const { need, busy, working, fresh, label } = schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p);
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, title: label || null, 'aria-label': label || null },
-    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working, h('span', { class: 'w' }, ' working')) : h('span', { class: 'w' }, 'working')) : null,
-    need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need, h('span', { class: 'w' }, ' need you')) : null);
+    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
+    need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
 }
 
 // The items each scheme last told the server you saw (sorted keys, joined), so a redraw with nothing new writes nothing.

@@ -55,10 +55,6 @@ a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overfl
 .scheme-count > .busy::before { content: '\2007'; width: 0; overflow: hidden; } /* a digit's height, as the count has */
 .scheme-count > .busy i { width: 1.05em; height: 1.05em; box-sizing: border-box; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--running) 30%, transparent); border-top-color: var(--running); animation: scheme-spin 0.9s linear infinite; }
 .scheme-count > .busy b { margin-left: 0.3em; color: var(--running); font-weight: 600; font-variant-numeric: tabular-nums; } /* how many minions are working (#278) */
-/* The words beside the counts (#881) are for the wide overview, which reserves their room; phones keep the bare counts. */
-.scheme-count .w { display: none; }
-@media (min-width: 1151px) { .scheme-count .w { display: inline; } }
-@media (min-width: 1151px) { .scheme-count > .busy > .w { margin-left: 0.3em; color: var(--running); } }
 @keyframes scheme-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .scheme-count > .busy i { animation: none; border-color: transparent; background: var(--running) content-box; } }
 button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }
@@ -134,12 +130,12 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 @media (min-width: 1151px) {
   .split { grid-template-columns: auto minmax(15rem, 3fr) minmax(0, 7fr); }
   .split:has(> .panels > .shelf[open] + .sidebar:not([open])) { grid-template-columns: auto auto minmax(0, 1fr); }
-  .shelf[open] { width: max-content; min-width: 220px; max-width: calc(max(22rem, 18vw) + 9em); }
+  .shelf[open] { width: max-content; min-width: 220px; max-width: max(22rem, 18vw); }
   /* The header too, so who is signed in fits beside the scheme name (up to the cap) rather than breaking mid-word. */
   .shelf[open] > :not(#schemes-shelf, summary) { contain: inline-size; }
   /* What changes live leaves the width alone (#861): each scheme row keeps room for its pill whether it shows or not,
      and the release rows' ticking ETAs fit the width the names set. */
-  .shelf[open] .scheme-count { min-width: 16em; white-space: nowrap; justify-content: flex-end; }
+  .shelf[open] .scheme-count { min-width: 7em; justify-content: flex-end; }
   .shelf[open] .scheme-count[hidden] { display: inline-flex; visibility: hidden; }
   .shelf[open] .rel-rows { contain: inline-size; }
   .sidebar[open] { width: auto; }

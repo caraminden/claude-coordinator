@@ -42,9 +42,24 @@ export function isOpenPath(openPaths: string[], rest: string): boolean {
 }
 
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const page = (title: string, text: string) =>
+/**
+ * What a person sees when an app can't open: a panel in Citadel's look (its tokens and light/dark), the words, an optional
+ * link on (`more`, such as Settings → Contraptions) and a "Back to Citadel" button. Inside Citadel's frame the button asks
+ * the frame to leave (public/frames.js, type "leave"), which returns to Citadel's last own view; on its own it opens /c/.
+ */
+const page = (title: string, text: string, more?: { href: string; label: string }) =>
   `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(title)}</title>` +
-  `<body style="font:16px system-ui;padding:2rem;text-align:center"><p>${escape(text)}</p><p><a href="/c/">Open ${APP_NAME}</a></p></body>`;
+  `<style>:root{--bg:#f6f5f2;--panel:#fff;--ink:#1d1c1a;--muted:#6b6862;--line:#e2dfd8;--accent:#c2410c}` +
+  `@media(prefers-color-scheme:dark){:root{--bg:#161514;--panel:#201f1d;--ink:#ecebe7;--muted:#9b978f;--line:#34322e;--accent:#fb923c}}` +
+  `body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:1rem;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}` +
+  `main{max-width:26rem;width:100%;box-sizing:border-box;padding:1.5rem;background:var(--panel);border:1px solid var(--line);border-radius:12px}` +
+  `h1{margin:0 0 .5rem;font-size:1.2rem}p{margin:0 0 1rem;color:var(--muted)}a{color:var(--accent)}` +
+  `.row{display:flex;flex-wrap:wrap;align-items:center;gap:1rem}` +
+  `button{font:inherit;min-height:2.5rem;padding:.5rem 1rem;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}` +
+  `@media(prefers-color-scheme:dark){button{color:#1d1c1a}}</style>` +
+  `<body><main><h1>${escape(title)}</h1><p>${escape(text)}</p><div class="row"><button type="button" id="back">Back to ${APP_NAME}</button>` +
+  (more ? `<a href="${escape(more.href)}" target="_top">${escape(more.label)}</a>` : '') +
+  `</div></main><script>document.getElementById('back').onclick=function(){if(parent!==window)parent.postMessage({protocol:'citadel-frame-1',type:'leave'},'*');else location.href='/c/'}</script></body>`;
 
 type Refusal = { status: number; reason: string; headers: OutgoingHttpHeaders; body: string };
 /** renewed: a fresh session cookie for the person (Auth.renewal), added to the contraption's answer. */
@@ -265,7 +280,12 @@ export class AppProxy {
     const user = this.contraptions.enabled(row.name, session.uid!) ? this.store.getUser(session.uid!) : undefined;
     if (!user) return { status: 403, reason: 'Forbidden', headers: html, body: page(row.title, `You don't have access to ${row.title}.`) };
     const identity = this.contraptions.signIdentity(row.name, user);
-    if (!identity) return { status: 503, reason: 'Service Unavailable', headers: text, body: `${row.title}'s keys don't open; an admin can rotate them in Settings → Contraptions` };
+    if (!identity) {
+      if (!isPage(req)) return { status: 503, reason: 'Service Unavailable', headers: text, body: `${row.title}'s keys don't open; an admin can rotate them in Settings → Contraptions` };
+      const scheme = row.home_scheme ?? this.store.listProjects()[0]?.id;
+      const more = scheme === undefined ? undefined : { href: `/c/#/p/${scheme}/contraptions`, label: 'Settings → Contraptions' };
+      return { status: 503, reason: 'Service Unavailable', headers: html, body: page(`${row.title} can't open`, `Citadel can't prove who you are to ${row.title} because its keys don't open. An admin can rotate them in Settings → Contraptions.`, more) };
+    }
     headers['x-citadel-identity'] = identity;
     const renewed = host !== null ? this.auth.appRenewal(row.name, session, isSecure(req)) : this.auth.renewal(session, isSecure(req));
     return { row, path, headers, uid: user.id, renewed };

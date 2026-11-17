@@ -86,6 +86,7 @@ if (typeof window !== 'undefined') {
       if (!frame.hidden) fit();
     } else if (d.type === 'key' && d.event && typeof d.event === 'object') frameKey(d.event);
     else if (d.type === 'blur') frameKey(null);
+    else if (d.type === 'leave') leave();
   });
 }
 

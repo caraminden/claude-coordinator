@@ -133,7 +133,7 @@ export interface WhereItWent {
   schemes: (Slice & { id: number })[];
   kinds: Slice[];
   /** The 10 minions that cost the most this week. */
-  top: { id: number; project_id: number; scheme: string; number: number | null; title: string; usd: number }[];
+  top: { id: number; project_id: number; kind: string; scheme: string; number: number | null; title: string; usd: number }[];
 }
 
 /** The kind of work a turn was: keepalive pings, Taskmasters, scheduled runs, else the minion's `type`. */
@@ -170,7 +170,7 @@ export function whereItWent(store: Store, payer: number | null, weekUsd: number 
   };
   const minions = new Map<number, WhereItWent['top'][number]>();
   for (const [r, usd] of cur) {
-    const m = minions.get(r.ticket_id) ?? minions.set(r.ticket_id, { id: r.ticket_id, project_id: r.project_id, scheme: projects.get(r.project_id) ?? `Scheme ${r.project_id}`, number: r.number, title: r.title, usd: 0 }).get(r.ticket_id)!;
+    const m = minions.get(r.ticket_id) ?? minions.set(r.ticket_id, { id: r.ticket_id, project_id: r.project_id, kind: r.kind, scheme: projects.get(r.project_id) ?? `Scheme ${r.project_id}`, number: r.number, title: r.title, usd: 0 }).get(r.ticket_id)!;
     m.usd += usd;
   }
   const sum = (rs: [SpendRowRaw, number, boolean][]) => rs.reduce((a, [, usd]) => a + usd, 0);

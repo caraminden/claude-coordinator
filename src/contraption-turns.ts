@@ -13,7 +13,7 @@
 // and the session names are stored. The transcript is the person's own Claude session, in their folder.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
@@ -23,7 +23,7 @@ import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexM
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
 import { clockTime, parseResetTime } from './runner.ts';
 import { MEDIA_SERVER, type CodexAt, type MediaTurn } from './contraption-media.ts';
-import { claudeConfigDir, transcriptPath, validSessionId } from './sessions.ts';
+import { claudeConfigDir, projectSlug, transcriptPath, validSessionId } from './sessions.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
 const AGENT_CAP = readFileSync(join(import.meta.dirname, 'contraption-agent-cap.ts'), 'utf8');
@@ -102,6 +102,8 @@ export interface TurnRequest {
   machines: boolean;
   /** generate_image, edit_image, generate_audio and generate_speech from Citadel's `citadel` server, on the person's own OpenRouter key (#732). */
   media: boolean;
+  /** A turn whose context names no person or app (VoiceAnalyzer #26): a neutral empty folder, `system` as the whole system prompt, no machines, always fresh, never Codex. */
+  blind: boolean;
   timeoutSec: number;
 }
 
@@ -123,6 +125,9 @@ export const DEFAULT_TIMEOUT_SEC = 180;
 export const DRAIN_MS = 3 * 60_000;
 /** How long a stopped turn's claude has between SIGTERM and SIGKILL: on the host it exits in under a second (#319). */
 const KILL_AFTER_MS = 2_000;
+/** Where a blind turn's random folder goes: a path with no login, home or app in it. */
+const BLIND_ROOT = '/tmp';
+interface Blind { root: string | null; cwd: string }
 const SESSION_NAME = /^[\w.:@-]{1,100}$/;
 const MODEL = /^[\w.\[\]-]{1,60}$/;
 const SERVER_NAME = /^[A-Za-z0-9_-]{1,40}$/;
@@ -172,11 +177,13 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   if (body.webSearch !== undefined && typeof body.webSearch !== 'boolean') bad('webSearch must be true or false');
   if (body.machines !== undefined && typeof body.machines !== 'boolean') bad('machines must be true or false');
   if (body.media !== undefined && typeof body.media !== 'boolean') bad('media must be true or false');
+  if (body.blind !== undefined && typeof body.blind !== 'boolean') bad('blind must be true or false');
+  if (body.blind === true && isCodexModel(model)) bad('A blind turn runs on Claude only: pick a Claude model');
   if (body.media === true && mcp.some((s) => s.name === MEDIA_SERVER)) bad(`With media: true, ${MEDIA_SERVER} is Citadel's server: call yours something else`);
   return {
-    person: body.person, session: body.session, fresh: body.fresh === true, prompt: body.prompt, system: body.system ?? '', model,
+    person: body.person, session: body.session, fresh: body.fresh === true || body.blind === true, prompt: body.prompt, system: body.system ?? '', model,
     compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), mcp, agents,
-    webSearch: body.webSearch === true, machines: body.machines !== false, media: body.media === true, timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
+    webSearch: body.webSearch === true, machines: body.machines !== false && body.blind !== true, media: body.media === true, blind: body.blind === true, timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
 
@@ -202,7 +209,8 @@ export function args(req: TurnRequest, dir: string, claudeSession: string, resum
     // A resumed session gets this turn's system text, not its first one's (#618).
     '--system-prompt-snapshot', 'off',
   ];
-  if (req.system) a.push('--append-system-prompt-file', join(dir, 'system.md'));
+  // Blind: the app's text is the whole prompt, not an addition to Claude Code's own.
+  if (req.system) a.push(req.blind ? '--system-prompt-file' : '--append-system-prompt-file', join(dir, 'system.md'));
   if (req.model) a.push('--model', req.model);
   a.push(resume ? '--resume' : '--session-id', claudeSession);
   return a;
@@ -403,7 +411,8 @@ export class ContraptionTurns {
    * A turn's private folder (its prompt, the contraption's system prompt and MCP tokens), as this server
    * sees it and as claude does. Never under run/turns, whose person folders the containers mount.
    */
-  private turnDir(id: number, place: TurnPlace) {
+  private turnDir(id: number, place: TurnPlace, blind: Blind | null) {
+    if (blind?.root) return { onHost: join(blind.root, 'p'), inside: join(blind.root, 'p') };
     if (place.host) {
       const dir = join(this.dataDir, 'run', 'contraption-turns', String(id));
       return { onHost: dir, inside: dir };
@@ -416,6 +425,12 @@ export class ContraptionTurns {
   private dropCodex(key: string, logFile: string | null) {
     this.store.deleteSetting(key);
     if (logFile) rmSync(logFile, { force: true });
+  }
+
+  /** A blind turn's folder and every transcript it left (its cwd is never used again, so nothing could resume them). */
+  private dropBlind(person: number, blind: Blind) {
+    if (blind.root) rmSync(blind.root, { recursive: true, force: true });
+    for (const dir of this.claude.configDirs(person)) rmSync(join(dir, 'projects', projectSlug(blind.cwd)), { recursive: true, force: true });
   }
 
   /** Delete a Claude session's transcript and its subagents' from the person's Claude folder. */
@@ -446,12 +461,17 @@ export class ContraptionTurns {
     if (!place) return fail('no_plan', 'This person hasn\'t linked their Claude in Citadel (Settings → Claude), or it needs linking again');
 
     // The server login's Codex turns run in its Codex-only container (#341); its Claude turns, and the session's bookkeeping, stay on the host.
-    const wantCodex = isCodexModel(req.model) || !!this.store.getSetting<boolean>(codexSwitchKey(req.person));
+    // A blind turn is Claude's only (Codex's own prompt and folder aren't proven clean), whatever the switch says.
+    const wantCodex = isCodexModel(req.model) || (!req.blind && !!this.store.getSetting<boolean>(codexSwitchKey(req.person)));
     const at = (wantCodex && place.host && !this.codexWhy(req.person) && this.claude.codexPlace(req.person)) || place;
 
     // Busy only once the turn is recorded, so a throw here can't leave the name busy until a restart (#468 S04-8).
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
-    const dir = this.turnDir(id, at);
+    // A neutral folder for everything of the turn's (host: its private files and cwd; a container: only the cwd, made inside it).
+    const blind: Blind | null = !req.blind ? null : at.host
+      ? { root: mkdtempSync(join(BLIND_ROOT, 't-')), cwd: '' } : { root: null, cwd: join(BLIND_ROOT, `t-${randomBytes(6).toString('hex')}`) };
+    if (blind?.root) blind.cwd = join(blind.root, 'w');
+    const dir = this.turnDir(id, at, blind);
     const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set(),
       media: req.media ? { person: req.person, name: c.name, home: c.home_scheme, emit, codex: this.codexAt(req.person, place) } : null };
     this.names.add(key);
@@ -468,7 +488,7 @@ export class ContraptionTurns {
       emit(event, data);
     };
     try {
-      let r = await this.turn(c, req, place, at, wantCodex, live, dir, out, () => !sent);
+      let r = await this.turn(c, req, place, at, wantCodex, live, dir, blind, out, () => !sent);
       if (r.retry) {
         // The limit moved this person's turns to their next account; turn() carries the session's transcript over to it.
         retrying = true;
@@ -477,7 +497,7 @@ export class ContraptionTurns {
         live.replied = false;
         live.steers.clear();
         // Only a Claude turn retries, and its `at` is its place.
-        if (next) r = await this.turn(c, req, next, next, wantCodex, live, dir, out, () => false);
+        if (next) r = await this.turn(c, req, next, next, wantCodex, live, dir, blind, out, () => false);
         else out('error', { code: 'limit', message: 'This person has no Claude account to carry on with' });
       }
       ({ outcome, usage } = r);
@@ -487,14 +507,16 @@ export class ContraptionTurns {
       this.live.delete(id);
       this.names.delete(key);
       rmSync(dir.onHost, { recursive: true, force: true });
+      if (blind) this.dropBlind(req.person, blind);
       this.store.endContraptionTurn(id, outcome, usage);
     }
   }
 
   /** `place` is where the person's Claude turns and the session's files are; `at` is where this one runs (they differ only for the server login on Codex). */
-  private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, at: TurnPlace, wantCodex: boolean, live: Live, dir: { onHost: string; inside: string }, emit: Emit, canRetry: () => boolean): Promise<{ outcome: string; usage: Usage | null; retry?: true }> {
-    const where = this.scratch(c, req.person, place);
-    mkdirSync(where.onHost, { recursive: true });
+  private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, at: TurnPlace, wantCodex: boolean, live: Live, dir: { onHost: string; inside: string }, blind: Blind | null, emit: Emit, canRetry: () => boolean): Promise<{ outcome: string; usage: Usage | null; retry?: true }> {
+    const base = this.scratch(c, req.person, place);
+    const where = blind ? { ...base, cwd: blind.cwd, onHost: blind.cwd } : base;
+    if (!blind || blind.root) mkdirSync(where.onHost, { recursive: true });
     // Its working folder, inside the container it runs in: Codex's app turns run only their MCP tools, so it holds nothing they need.
     const runIn = at === place ? where : this.scratch(c, req.person, at);
     if (runIn !== where) mkdirSync(runIn.onHost, { recursive: true });
@@ -515,7 +537,7 @@ export class ContraptionTurns {
       // No Codex turn logged anything yet.
     }
     // Resume the name's session unless asked for a fresh one, or its transcript is gone (a relinked Claude).
-    const known = this.store.contraptionSession(c.id, req.person, req.session);
+    const known = blind ? null : this.store.contraptionSession(c.id, req.person, req.session);
     const transcript = known ? transcriptPath(where.configDir, where.cwd, known.claude_session) : null;
     // A limit (#785) or a cold move (#793) took this session to another account, where it may have carried on: the newest
     // copy of its transcript (and its subagents') comes in, or a move back would resume the conversation as it was before.
@@ -539,7 +561,7 @@ export class ContraptionTurns {
     const claudeSession = resume ? known!.claude_session : randomUUID();
     // The name can never get back to the session it leaves, so that session's transcript goes.
     if (known && !resume) this.dropTranscript(where, known.claude_session);
-    this.store.putContraptionSession(c.id, req.person, req.session, claudeSession);
+    if (!blind) this.store.putContraptionSession(c.id, req.person, req.session, claudeSession);
 
     // Private: it holds the prompt, the contraption's system prompt and its MCP tokens until the turn ends.
     mkdirSync(dir.onHost, { recursive: true, mode: 0o700 });
@@ -591,6 +613,9 @@ export class ContraptionTurns {
       CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', DISABLE_AUTOUPDATER: '1',
     };
     delete env.SSH_AUTH_SOCK;
+    // Nothing of the login in the process (the model sees no env without a shell, but a tool it's given might); the config dir stays, it holds the sign-in.
+    if (blind) for (const v of ['USER', 'LOGNAME', 'SHELL', 'USERNAME']) delete env[v];
+    if (blind?.root) env.HOME = blind.root;
     if (req.agents && (req.agents.model ?? req.model)) env.CLAUDE_CODE_SUBAGENT_MODEL = (req.agents.model ?? req.model)!;
     let argv = args({ ...req, system }, dir.inside, claudeSession, resume);
     if (codex) {
@@ -615,8 +640,11 @@ export class ContraptionTurns {
       await at.ensure();
       // `exec` keeps the pid, written first, so a cancel can signal claude inside the container.
       cmd = this.podman;
-      cmdArgs = ['exec', '-i', '-w', runIn.cwd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container,
-        'sh', '-c', 'echo $$ > "$0"; exec "$@"', join(dir.inside, 'pid'), codex ? process.execPath : resolveClaude(this.claudeBin), ...argv];
+      const exe = codex ? process.execPath : resolveClaude(this.claudeBin);
+      // A blind turn makes its random folder inside the container, and runs there.
+      const [wd, script, more] = blind ? [BLIND_ROOT, 'echo $$ > "$0"; mkdir -p "$1" && cd "$1" && shift && exec "$@"', [blind.cwd]] : [runIn.cwd, 'echo $$ > "$0"; exec "$@"', []];
+      cmdArgs = ['exec', '-i', '-w', wd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container,
+        'sh', '-c', script, join(dir.inside, 'pid'), ...more, exe, ...argv];
     }
     if (live.stopped) return { outcome: live.stopped, usage: null };
 
@@ -651,7 +679,7 @@ export class ContraptionTurns {
       } else if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
         const t = this.store.getSetting<CodexSession>(ckey);
         if (t) this.store.setSetting(ckey, { ...t, thread: ev.codex_thread });
-      } else if (ev.type === 'system' && ev.subtype === 'init' && validSessionId(ev.session_id) && ev.session_id !== claudeSession) {
+      } else if (!blind && ev.type === 'system' && ev.subtype === 'init' && validSessionId(ev.session_id) && ev.session_id !== claudeSession) {
         this.store.putContraptionSession(c.id, req.person, req.session, ev.session_id);
       } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
         emit('compacted', {});

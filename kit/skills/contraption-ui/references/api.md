@@ -148,7 +148,7 @@ X-Citadel-Identity: v1.<base64url(JSON claims)>.<base64url(Ed25519 signature ove
 | Claim | Meaning |
 |---|---|
 | `app` | Your name. Refuse a header naming another app |
-| `sub` | The person's Citadel user id: stable, the key for their data |
+| `sub` | The person's Citadel user id, a JSON number (an integer): stable, the key for their data. Apps that key folders or maps on it use `String(sub)` |
 | `login`, `name` | Their login and display name, which can change |
 | `iat`, `exp` | Seconds; `exp` is `iat + 60` |
 | `from`, `fromTitle` | Only on a relayed call (the calling contraption's name and title) or a session read (`scheme-<id>` and the scheme's name) |
@@ -240,6 +240,7 @@ Body up to 4,000,000 bytes:
 | `agents` | | `false` (default) or `{ max, model }`: lets the agent start Grunts (the Agent tool), at most `max` (1 to 10, default 1) at once, nested ones included; `model` defaults to the turn's |
 | `webSearch` | | `true` adds WebSearch and WebFetch for the agent and its Grunts; default `false`. WebFetch puts a web page in front of the model, so keep your write tools behind the person's explicit asks on such turns |
 | `machines` | | `false` leaves out the person's online machines and the system prompt's note on them; default `true`. For a turn that must see only its prompt, such as a blind grader |
+| `blind` | | `true` makes a turn whose context names no person or app: it runs in a random empty folder under `/tmp`, `system` is the whole system prompt (not an addition), and it is always fresh (no resume), without the person's machines, and on Claude only (a Codex model is refused, and "Enable Codex override" is ignored). Claude Code still adds its own platform, OS and model lines. Your `mcp` server names and tool descriptions are yours: keep them neutral too. Default `false` |
 | `media` | | `true` gives the agent Citadel's image and sound tools, spending the person's own OpenRouter money, or their Codex plan for PNGs ("Media" below); default `false`. Your own `mcp` servers can't be called `citadel` then |
 | `timeoutSec` | | 1 to 900, default 180 |
 

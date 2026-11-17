@@ -60,7 +60,7 @@ take().then((m) => {
   const session = opt('--resume') ?? opt('--session-id');
   fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({
     argv, cwd: process.cwd(), env: process.env, prompt, pid: process.pid, cwdFiles: fs.readdirSync(process.cwd()),
-    settings: read(opt('--settings')), mcp: read(opt('--mcp-config')), system: read(opt('--append-system-prompt-file')),
+    settings: read(opt('--settings')), mcp: read(opt('--mcp-config')), system: read(opt('--append-system-prompt-file') ?? opt('--system-prompt-file')),
   }) + '\\n');
   const dir = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
   fs.mkdirSync(dir, { recursive: true });
@@ -584,6 +584,52 @@ test('a container turn runs in the person\'s own container, on their own sign-in
   // A refused sign-in: they link again, and no one else's plan steps in.
   assert.equal(errorOf(await turn(mandate, { person: josh.id, session: 'in-container', prompt: 'expired' })), 'no_plan');
   assert.deepEqual(expired, [josh.id]);
+});
+
+// A blind turn (VoiceAnalyzer #26): nothing in what the model is started with names the person, the login, the home or the app.
+// The test's own temp folder (root) may sit under any home, so it's masked: the server's real config dir is the one thing a blind turn keeps, for its sign-in.
+const leaks = (what: object, names: string[]) => names.filter((n) => JSON.stringify(what).replaceAll(root, '<root>').includes(n));
+test('a blind turn runs in a neutral folder with the app\'s text as the whole system prompt, and nothing names who or which app', async () => {
+  store.setSetting(codexSwitchKey(cara.id), true); // the Codex override doesn't move a blind turn
+  const evs = await turn(mandate, { blind: true, session: 'blind-h', system: 'Word feedback neutrally.', mcp: [{ name: 'tools', path: '/mcp' }] });
+  store.deleteSetting(codexSwitchKey(cara.id));
+  assert.equal(evs.at(-1)!.event, 'end');
+  assert.equal(evs[0].data.provider, 'claude');
+  const run = lastRun();
+  const { PATH: _path, ...env } = run.env; // PATH is the server's; the model sees no environment without a shell
+  const named = ['cara', 'Cara', 'Mandate', 'mandate', homedir(), data];
+  assert.deepEqual(leaks({ argv: run.argv, cwd: run.cwd, env, system: run.system, settings: run.settings, mcp: run.mcp, prompt: run.prompt }, named), []);
+  assert.match(run.cwd, /^\/tmp\/t-[A-Za-z0-9]{6}\/w$/);
+  assert.deepEqual(run.cwdFiles, []);
+  assert.equal(argAfter(run.argv, '--system-prompt-file') && !run.argv.includes('--append-system-prompt-file'), true, 'the whole prompt, not an addition');
+  assert.match(run.system, /^Word feedback neutrally\./);
+  assert.equal(argAfter(run.argv, '--tools'), '');
+  assert.equal(env.HOME, join(run.cwd, '..'));
+  for (const k of ['USER', 'LOGNAME', 'SHELL']) assert.equal(env[k], undefined, k);
+  assert.ok(!existsSync(join(run.cwd, '..')), 'its folder is gone once the turn ends');
+  assert.deepEqual(existsSync(join(claudeDir, 'projects', run.cwd.replace(/[^a-zA-Z0-9]/g, '-'))), false, 'and its transcript');
+  assert.equal(store.contraptionSession(mandate.id, cara.id, 'blind-h'), undefined, 'no session kept');
+});
+
+test('a blind turn is always fresh, never carries the person\'s machines, and refuses a Codex model', async () => {
+  assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', blind: true, model: 'gpt-6-astra' }, mandate), /Claude only/);
+  assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', blind: 'yes' }, mandate), /blind must be true or false/);
+  const r = parseTurn({ person: 1, session: 's', prompt: 'x', blind: true, machines: true, fresh: false }, mandate);
+  assert.deepEqual([r.fresh, r.machines, r.blind], [true, false, true]);
+  assert.equal(parseTurn({ person: 1, session: 's', prompt: 'x' }, mandate).blind, false);
+});
+
+test('a blind turn in a container makes its random folder inside it', async () => {
+  rmSync(podmanLog, { force: true });
+  await turn(mandate, { person: josh.id, session: 'blind-c', blind: true, system: 'Neutral.' });
+  const call = jsonLines(podmanLog)[0];
+  assert.deepEqual(call.slice(0, 4), ['exec', '-i', '-w', '/tmp']);
+  const folder = call.find((a: string) => /^\/tmp\/t-[0-9a-f]{12}$/.test(a));
+  assert.ok(folder, 'the folder it makes and runs in');
+  rmSync(folder, { recursive: true, force: true }); // the fake podman ran the wrapper for real
+  assert.ok(call.some((a: string) => a.includes('mkdir -p')));
+  assert.ok(!call.includes(join(homedir(), '.citadel', 'contraption-scratch', 'mandate')));
+  assert.ok(argAfter(call, '--system-prompt-file'));
 });
 
 test("a stream's session id that isn't one is never stored, and one stored before never reaches a path (C1)", async () => {

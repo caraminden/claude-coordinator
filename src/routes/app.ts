@@ -136,11 +136,14 @@ export const appRoutes: Route[] = [
   { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner, outsideSpend } }) => json(res, 200, { outside: outsideSpend.bill(), days: costDays(store), dayBudget: dayBudget(store, runner.usageOf(store.serverLoginOwner())?.weekly), split: spendSplit(store) }) },
   // Where your own spend went this week (#905): yours only, so any person (Cara, 2026-11-17: "Per person only"); a Taskmaster
   // reads its asker's (usage_split).
-  { method: 'GET', path: '/api/costs/mine', who: ['person', 'taskmaster'], handler: ({ res, app: { store, runner }, session, caller }) => {
+  { method: 'GET', path: '/api/costs/mine', who: ['person', 'taskmaster'], handler: ({ res, app: { store, runner, claude }, session, caller }) => {
     const uid = session.uid ?? (caller ? store.turnAsker(caller.id) : null);
     if (!uid) throw new HttpError(409, 'No person asked for this turn, so there is no one whose spend to show');
     const payer = runner.payerOf(uid);
-    return json(res, 200, whereItWent(store, payer, weekLimit(store, payer, runner.usageOf(uid))));
+    // 100% is all the person's accounts together (Cara, 2026-11-17: "All accounts combined"), each priced like the one in use.
+    const accounts = Math.max(1, claude.accounts(uid)?.accounts.filter((a) => !a.expired).length ?? 1);
+    const week = weekLimit(store, payer, runner.usageOf(uid));
+    return json(res, 200, { ...whereItWent(store, payer, week && week * accounts), accounts });
   } },
   // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).
   { method: 'GET', path: '/api/prs', who: ['person'], handler: async ({ res, app: { store }, session }) => {

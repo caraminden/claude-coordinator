@@ -3,7 +3,7 @@
 import { api, costText, h, icon, threadHref, view } from './base.js';
 import { settingsTabs } from './settings.js';
 
-/** A share of one account's weekly limit, "4.2%", or null while no meter can price it. */
+/** A share of the weekly limit (all your accounts together), "4.2%", or null while no meter can price it. */
 function share(usd, weekUsd) {
   if (!weekUsd) return null;
   const p = (usd / weekUsd) * 100;
@@ -59,7 +59,7 @@ export function whereView(w) {
       sliceTable('Minion', top, w.weekUsd, (m) => h('a', { href: threadHref(m) }, m.name, h('span', { class: 'scheme' }, ` · ${m.scheme}`))),
     ] : h('p', { class: 'key' }, 'No turns on your plan in the last two weeks.'),
     h('p', { class: 'foot' },
-      w.weekUsd ? `100% is one Claude account's weekly limit, ≈ $${Math.round(w.weekUsd)} at API prices, priced from your weekly meter. ` : 'Dollars at API prices until your weekly meter reaches 3%; then shares of the week. ',
+      w.weekUsd ? `100% is the weekly limit of ${w.accounts > 1 ? `all ${w.accounts} of your Claude accounts together` : 'your Claude account'}, ≈ $${Math.round(w.weekUsd)} at API prices, priced from your weekly meter. ` : 'Dollars at API prices until your weekly meter reaches 3%; then shares of the week. ',
       "Your plan's turns only, Grunts counted under their own model. ",
       est > 0.005 ? `${costText(est).slice(2)} of this week is from turns before 2026-11-17, counted under each minion's own model (marked est.).` : ''));
 }

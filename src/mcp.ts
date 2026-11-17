@@ -394,7 +394,7 @@ const TOOLS = [
   LIST_TICKETS,
   {
     name: 'usage_split',
-    description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings) and the 10 costliest minions, each as a share of one Claude account's weekly limit with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
+    description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings) and the 10 costliest minions, each as a share of the person's weekly limit, all their Claude accounts together, with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -1019,7 +1019,7 @@ async function openTwins(title: string, message: string): Promise<{ number: numb
   return (hits ?? []).filter((h) => h.twin);
 }
 
-/** usage_split's answer (#905): each slice as a share of one account's week with its dollars, against last week. */
+/** usage_split's answer (#905): each slice as a share of the week (all accounts together) with its dollars, against last week. */
 export function usageSplitText(w: any): string {
   const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
   const pct = (n: number) => { const p = (n / w.weekUsd) * 100; return p && p < 0.1 ? '<0.1' : p < 10 ? p.toFixed(1) : String(Math.round(p)); };
@@ -1031,7 +1031,7 @@ export function usageSplitText(w: any): string {
   };
   const estimated = w.models.reduce((a: number, m: any) => a + m.estimated, 0);
   return [
-    `Last 7 days: ${amount(w.total)}; the 7 before: ${amount(w.lastWeek)}. ${w.weekUsd ? `100% is one Claude account's weekly limit, about ${usd(w.weekUsd)} at API prices.` : 'No weekly meter can price a share yet, so dollars at API prices only.'}`,
+    `Last 7 days: ${amount(w.total)}; the 7 before: ${amount(w.lastWeek)}. ${w.weekUsd ? `100% is the weekly limit of ${w.accounts > 1 ? `all ${w.accounts} Claude accounts together` : 'the Claude account'}, about ${usd(w.weekUsd)} at API prices.` : 'No weekly meter can price a share yet, so dollars at API prices only.'}`,
     `Fable's share of spend: ${fable('usd', w.total)} this week, ${fable('lastWeek', w.lastWeek)} last week.`,
     'By model:', ...w.models.map(line),
     'By scheme:', ...w.schemes.map(line),

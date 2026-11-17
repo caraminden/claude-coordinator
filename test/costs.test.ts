@@ -199,15 +199,15 @@ test('model names read like the model picker', () => {
   assert.equal(modelName('gpt-5.1-codex'), 'gpt-5.1-codex');
 });
 
-test("usage_split's text gives shares of one account's week with dollars, and Fable's share each week (#905)", () => {
+test("usage_split's text gives shares of the week, all accounts together, with dollars, and Fable's share each week (#905)", () => {
   const s = (name: string, usd: number, lastWeek: number, estimated = 0) => ({ name, usd, lastWeek, estimated });
   const text = usageSplitText({
-    total: 50, lastWeek: 80, weekUsd: 500,
+    total: 50, lastWeek: 80, weekUsd: 500, accounts: 2,
     models: [s('Opus 5.5', 30, 40, 10), s('Fable 5.2', 10, 40), s('Sonnet 5.5', 10, 0)],
     schemes: [s('Citadel', 50, 80)], kinds: [s('Feature', 50, 80)],
     top: [{ id: 3, number: 12, title: 'Big one', scheme: 'Citadel', usd: 20 }],
   });
-  assert.match(text, /^Last 7 days: 10% \(\$50\); the 7 before: 16% \(\$80\)\. 100% is one Claude account's weekly limit, about \$500/);
+  assert.match(text, /^Last 7 days: 10% \(\$50\); the 7 before: 16% \(\$80\)\. 100% is the weekly limit of all 2 Claude accounts together, about \$500/);
   assert.match(text, /Fable's share of spend: 20% this week, 50% last week\./);
   assert.match(text, /- Opus 5\.5: 6\.0% \(\$30\), last week 8\.0% \(\$40\), \$10 estimated/);
   assert.match(text, /- #12 Big one \(Citadel\): 4\.0% \(\$20\)/);

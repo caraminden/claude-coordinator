@@ -127,7 +127,7 @@ export interface WhereItWent {
   until: number;
   total: number;
   lastWeek: number;
-  /** One account's weekly limit at API prices, for shares; null until a meter can price it. */
+  /** The weekly limit at API prices that 100% stands for, for shares; null until a meter can price it. */
   weekUsd: number | null;
   models: Slice[];
   schemes: (Slice & { id: number })[];

@@ -387,8 +387,8 @@ export const projectRoutes: Route[] = [
           running: !hidden.has(p.id) && tickets.some(busy),
           working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
           icon: await iconVersion(p.repo_dir, { store, projectId: p.id }),
-          // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538).
-          coordinator_id: tickets.find((t) => t.kind === 'coordinator')?.id ?? null,
+          // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538): the person's own once split (#919).
+          coordinator_id: store.coordinatorFor(p.id, session.uid ?? null)?.id ?? null,
         };
       })));
     },

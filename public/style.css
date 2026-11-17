@@ -102,6 +102,9 @@ html { background: var(--bg); }
 /* The page never pans sideways (a phone's edge swipe opens a drawer instead): anything too wide
    scrolls in its own box or is cut off. clip, unlike hidden, keeps position: sticky working. */
 html, body { overflow-x: clip; }
+/* The page's scrollbar keeps its room when it isn't there, so a chat growing past the window doesn't narrow
+   everything by its width (#861). */
+html { scrollbar-gutter: stable; }
 body {
   margin: 0;
   background: var(--bg);

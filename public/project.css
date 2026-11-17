@@ -133,9 +133,15 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   .shelf[open] { width: max-content; min-width: 220px; max-width: max(22rem, 18vw); }
   /* The header too, so who is signed in fits beside the scheme name (up to the cap) rather than breaking mid-word. */
   .shelf[open] > :not(#schemes-shelf, summary) { contain: inline-size; }
+  /* What changes live leaves the width alone (#861): each scheme row keeps room for its pill whether it shows or not,
+     and the release rows' ticking ETAs fit the width the names set. */
+  .shelf[open] .scheme-count { min-width: 6.25em; justify-content: flex-end; }
+  .shelf[open] .scheme-count[hidden] { display: inline-flex; visibility: hidden; }
+  .shelf[open] .rel-rows { contain: inline-size; }
   .sidebar[open] { width: auto; }
   /* Open, a column runs to the window's bottom even when short, so its edge and scrollbar do (#648). */
-  :is(.sidebar, .shelf)[open] { height: calc(100dvh - var(--banner-h, 0px) - var(--split-top, 1rem)); }
+  /* Their scrollbars keep their room too, so a list growing past the window doesn't reflow it (#861). */
+  :is(.sidebar, .shelf)[open] { height: calc(100dvh - var(--banner-h, 0px) - var(--split-top, 1rem)); scrollbar-gutter: stable; }
   /* Both headers are one height, so they line up. The minions list's header and new-minion box stay put while the
      list scrolls under them (Josh, 2026-11-13: "a locked title frame that stays when you scroll"). */
   :is(.sidebar, .shelf)[open] > summary { box-sizing: border-box; min-height: 1.9rem; }

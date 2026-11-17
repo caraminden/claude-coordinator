@@ -265,7 +265,7 @@ function installButton() {
       } catch {}
       syncInstall();
     } else if (mode === 'intent') location.href = chromeIntent(url);
-    else if (mode === 'tab') open(url, '_blank', 'noopener');
+    else if (mode === 'tab') open(shortUrls.get(name) ?? url, '_blank', 'noopener'); // a person sees the app's own host when there is one (#827)
     else if (mode === 'ios') showHint(`To add ${b.dataset.title} to your Home Screen: in Safari, tap Share, then Add to Home Screen.`);
   });
   return b;
@@ -367,6 +367,9 @@ const atCitadel = () => root.origin === location.origin;
  * The rail's entries, or null when Citadel didn't answer (no answer, or a 5xx from it or its proxy while it restarts).
  * A contraption's page asks its own host (src/apps.ts kit), which also says who is signed in and where Citadel is.
  */
+/** Each app's own address, https://<name>.<domain>/, from `mine` when Citadel serves apps on their own hosts (APPS_DOMAIN, #827). */
+const shortUrls = new Map();
+
 const fetchItems = async () => {
   try {
     const res = await fetch(inContraption ? '/apps/_citadel/api/mine' : new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
@@ -379,6 +382,8 @@ const fetchItems = async () => {
       if (mine?.citadel) root = new URL(mine.citadel);
       mine = mine?.apps ?? [];
     }
+    shortUrls.clear();
+    for (const c of mine ?? []) if (c?.url) shortUrls.set(c.name, c.url);
     // A drop still saving: the rail keeps it, though this answer may predate it.
     return railItems(dragged ? inOrder(mine, (c) => c.name, dragged) : mine, showing(), atCitadel() ? root.pathname : root.href, !inContraption);
   } catch {

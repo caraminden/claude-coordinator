@@ -92,7 +92,7 @@ perigee are the same as when it ran here:
 ```
 citadel-android up                 # boot it (quick boot ~6s, cold ~40s) and wait until it's ready
 citadel-android install app/build/outputs/apk/debug/app-debug.apk
-citadel-android open https://citadel.zip/c/                                   # in Chrome
+citadel-android open https://citadel.zip/c/                                   # in Chrome (an app: https://<name>.citadel.zip/, the short link people get)
 citadel-android shot "$TMPDIR/shot.png"                                    # then Read the PNG
 citadel-android offline on         # airplane mode; `offline off` to undo
 citadel-android sms +15551234567 'Your code is 1234'                      # an incoming text

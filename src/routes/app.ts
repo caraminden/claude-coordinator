@@ -140,9 +140,14 @@ export const appRoutes: Route[] = [
   } },
   // The release monitor (#625, src/releases.ts): the schemes this person may see; ?scope=member keeps those they own or
   // are a member of, for the All view (Josh, 2026-11-13: "all should only show schemes you are a member of").
-  { method: 'GET', path: '/api/releases', who: ['person'], handler: ({ res, url, app: { store, releases }, session }) => {
+  { method: 'GET', path: '/api/releases', who: ['person'], handler: ({ res, url, app: { store, releases, contraptions }, session }) => {
     const member = url.searchParams.get('scope') === 'member' ? store.memberSchemes(session.uid) : null;
-    return json(res, 200, { schemes: releases.view((id) => store.canSee(session, id) && (!member || member.has(id))) });
+    // An app's link is shown as its own host when APPS_DOMAIN is set (#827); an APK's or any deeper path stays as it is.
+    const short = (link: string | null | undefined) => (link && contraptions.appUrl(/^\/apps\/([a-z0-9-]+)\/$/.exec(link)?.[1] ?? '')) || link;
+    const schemes = releases.view((id) => store.canSee(session, id) && (!member || member.has(id)));
+    if (!contraptions.appsDomain) return json(res, 200, { schemes });
+    const fix = <T extends { link?: string | null }>(r: T | null | undefined): T | null | undefined => (r && r.link ? { ...r, link: short(r.link) } : r);
+    return json(res, 200, { schemes: schemes.map((s) => ({ ...s, targets: s.targets.map((t) => ({ ...t, target: fix(t.target), current: fix(t.current), next: fix(t.next), recent: t.recent.map((r) => fix(r)) })) })) });
   } },
   // A release card's Deploy button (#629; Cara, 2026-11-12: "Yes, on any target that can deploy"): any member of the
   // target's scheme deploys it at once. Starts it and answers; the releases event follows it.

@@ -99,6 +99,10 @@ your own `Origin` (403 otherwise). Open paths' non-page requests (websockets, fe
 Citadel's host too. Without `APPS_DOMAIN` (dev copies, previews) you're served on Citadel's host as
 before (tested: `test/app-hosts.test.ts`).
 
+**Links to an app** (#827): link people to `https://<name>.citadel.zip/`; the app itself still serves
+under `$BASE_PATH` (`/apps/<name>/`), and manifests, `id` and `scope` keep that path. Citadel's rail and
+Releases page print the short link when `APPS_DOMAIN` is set, from `url` in `/api/contraptions/mine`.
+
 On every request, open path or not:
 
 - **Any `X-Citadel-*` header the client sent is removed first**, so a client can never claim an

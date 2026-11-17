@@ -205,7 +205,7 @@ Configuration comes from the environment:
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |
 | `CLAUDE_BIN` | `claude` | Claude Code executable |
-| `APPS_DOMAIN` | (unset: contraptions at `/apps/<name>/` on Citadel's host) | Each contraption on its own host, `<name>.<APPS_DOMAIN>` (live: `citadel.zip`), so its page can't reach Citadel's API or login; needs `*.<APPS_DOMAIN>` to reach the app with `Host` intact ([ADR 0005](docs/adr/0005-contraptions-on-subdomains.md)) |
+| `APPS_DOMAIN` | (unset: contraptions at `/apps/<name>/` on Citadel's host) | Each contraption on its own host, `<name>.<APPS_DOMAIN>` (live: `citadel.zip`), so its page can't reach Citadel's API or login; people are shown `https://<name>.<APPS_DOMAIN>/` as its link while the app keeps serving under `/apps/<name>/`; needs `*.<APPS_DOMAIN>` to reach the app with `Host` intact ([ADR 0005](docs/adr/0005-contraptions-on-subdomains.md)) |
 | `MACHINES_URL` | (unset: agents use the app's address) | Private address machines' agents connect to, e.g. `http://perigee.tail59477f.ts.net:8574`; the app listens there for agents only |
 | `PUSH_SUBJECT` | the app's address, from the first subscribe | VAPID contact (`https://…` or `mailto:…`) push services see |
 

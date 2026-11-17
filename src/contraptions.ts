@@ -156,10 +156,18 @@ export class Contraptions {
     return c;
   }
 
+  /** APPS_DOMAIN (server.ts), set at boot: the address people are shown for an app is https://<name>.<domain>/ (#827); null: /apps/<name>/ here. */
+  appsDomain: string | null = null;
+
+  /** The address to show a person for an app: its own host when APPS_DOMAIN is set (the path stays /apps/<name>/ behind it), else null. */
+  appUrl(name: string): string | null {
+    return this.appsDomain ? `https://${name}.${this.appsDomain}/` : null;
+  }
+
   /** The contraptions enabled for a person in their rail order, each with whether it is up: the rail's list (GET /api/contraptions/mine). */
   mine(uid: number) {
     return Promise.all(inOrder(this.store.contraptionsFor(uid), (c) => c.name, this.store.listOrder(uid, 'apps'))
-      .map(async (c) => ({ name: c.name, title: c.title, icon: c.icon, up: await this.up(c) })));
+      .map(async (c) => ({ name: c.name, title: c.title, icon: c.icon, up: await this.up(c), ...(this.appsDomain ? { url: this.appUrl(c.name) } : {}) })));
   }
 
   /**

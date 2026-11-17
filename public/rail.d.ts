@@ -17,6 +17,8 @@ export interface MyContraption {
   icon?: string | null;
   /** false: its service is down or its keys don't open, so the rail greys it and fetches nothing from it. */
   up?: boolean;
+  /** Its own address, https://<name>.<domain>/, when Citadel serves apps on their own hosts (APPS_DOMAIN); absent otherwise. */
+  url?: string;
 }
 
 /** One rail entry: Citadel first (`name` null), then each contraption. */

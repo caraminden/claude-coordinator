@@ -1010,6 +1010,7 @@ const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticke
 const BACKUP_SCHEME = 2;
 
 // Contraptions' own services under /apps/<name>/, on their own hosts with APPS_DOMAIN (src/apps.ts).
+contraptions.appsDomain = APPS_DOMAIN;
 const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN);
 if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.

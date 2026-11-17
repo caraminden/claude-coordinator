@@ -143,7 +143,7 @@ export const appRoutes: Route[] = [
   { method: 'GET', path: '/api/releases', who: ['person'], handler: ({ res, url, app: { store, releases, contraptions }, session }) => {
     const member = url.searchParams.get('scope') === 'member' ? store.memberSchemes(session.uid) : null;
     // An app's link is shown as its own host when APPS_DOMAIN is set (#827); an APK's or any deeper path stays as it is.
-    const short = (link: string | null | undefined) => (link && contraptions.appUrl(/^\/apps\/([a-z0-9-]+)\/$/.exec(link)?.[1] ?? '')) || link;
+    const short = (link: string | null | undefined) => { const n = link && /^\/apps\/([a-z0-9-]+)\/$/.exec(link)?.[1]; return (n && contraptions.appUrl(n)) || link; };
     const schemes = releases.view((id) => store.canSee(session, id) && (!member || member.has(id)));
     if (!contraptions.appsDomain) return json(res, 200, { schemes });
     const fix = <T extends { link?: string | null }>(r: T | null | undefined): T | null | undefined => (r && r.link ? { ...r, link: short(r.link) } : r);

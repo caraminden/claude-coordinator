@@ -1731,7 +1731,7 @@ export class Runner {
   relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true, unparked = false): boolean | 'cold' | 'mail' | 'parked' {
     const { held, cold, parked } = this.guard(minionPairKey(from, to), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, false, from, !wake, urgent);
     if (!held) {
-      this.copyToTaskmaster(to, author, text, unparked);
+      this.copyToTaskmaster(to, author, text, unparked, from);
       return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
     }
     const [a, b] = [from, to].map((id) => `#${this.store.getTicket(id)!.number}`);
@@ -1743,12 +1743,16 @@ export class Runner {
     return true;
   }
 
-  /** The scheme's Taskmaster sees each message between its minions as held mail that wakes nothing (#783). */
-  private copyToTaskmaster(to: number, author: string, text: string, unparked = false) {
+  /**
+   * The scheme's Taskmaster sees each message between its minions in its chat (#783), as a row of its own kind
+   * that the chat groups (#924). It is never queued as held mail: the Taskmaster reads a minion with read_ticket.
+   */
+  private copyToTaskmaster(to: number, author: string, text: string, unparked = false, from?: number) {
     const target = this.store.getTicket(to)!;
     const coordinator = this.store.getCoordinator(target.project_id);
     const line = text.replace(/\s+/g, ' ');
-    if (coordinator) this.leaveMail(coordinator.id, author, `(${unparked ? `${author.split(' ')[0]} unparked #${target.number}` : `to #${target.number}`}, for your tracking; nothing to do) ${line.length > 200 ? line.slice(0, 200) + '…' : line}`);
+    const sender = from ? this.store.getTicket(from)?.number : Number(/^#(\d+)/.exec(author)?.[1]) || undefined;
+    if (coordinator) this.emit(coordinator.id, 'minion_copy', { author, from: sender ?? null, to: target.number, text: line.length > 200 ? line.slice(0, 200) + '…' : line, ...(unparked ? { unparked: true } : {}) });
   }
 
   /**

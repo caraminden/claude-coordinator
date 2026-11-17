@@ -77,10 +77,13 @@ test('a message shows in both chats, labelled with the sender, and the Taskmaste
   // The chat's bubble reads "Not sent yet" while the ticket lists the message as held (#910).
   const heldRow = store.listEvents(M2.id).filter((e) => e.kind === 'user_message').at(-1)!;
   assert.ok((await srv.call(`/api/tickets/${M2.id}`)).data.ticket.held_ids.includes(heldRow.id));
-  const copy = events(TM.id, 'user_message').at(-1);
-  assert.equal(copy.mail, true, 'held mail: no Taskmaster turn');
+  const copy = events(TM.id, 'minion_copy').at(-1);
   assert.equal(copy.author, '#1 Sender');
-  assert.match(copy.text, /^\(to #2, for your tracking; nothing to do\) I changed/);
+  assert.deepEqual([copy.from, copy.to], [1, 2]);
+  assert.match(copy.text, /^I changed/);
+  // A chat-only row (#924): nothing queued for its next turn, and no message of its own.
+  assert.equal((store.getSetting<unknown[]>(`mail:${TM.id}`) ?? []).length, 0, "the Taskmaster's next turn gets no copy");
+  assert.equal(events(TM.id, 'user_message').length, 0);
   const { data: tm } = await srv.call(`/api/tickets/${TM.id}`);
   assert.notEqual(tm.ticket.status, 'running');
 });
@@ -113,9 +116,10 @@ test('unpark: true wakes a minion parked on the sender, and the Taskmaster gets 
   assert.equal(store.getTicket(P.id)!.state, null);
   assert.ok(events(P.id, 'note').some((n) => n.text === '#1 unparked this minion.'));
   assert.ok(events(P.id, 'user_message').some((m) => m.author === '#1 Sender' && m.text === 'my work is on main, go ahead'));
-  const copy = events(TM.id, 'user_message').at(-1);
-  assert.equal(copy.mail, true);
-  assert.match(copy.text, /^\(#1 unparked #\d+, for your tracking; nothing to do\) my work is on main/);
+  const copy = events(TM.id, 'minion_copy').at(-1);
+  assert.equal(copy.unparked, true);
+  assert.match(copy.text, /^my work is on main/);
+  assert.equal((store.getSetting<unknown[]>(`mail:${TM.id}`) ?? []).length, 0);
 });
 
 test('unpark: a chain a person put on hold is refused and stays parked', async () => {
@@ -147,7 +151,7 @@ test('a pair of minions is held after 6 either way in 10 minutes; their Taskmast
   const held = await tool(M4.id, 'message_minion', { ticket_id: M1.number, text: 'ping 6', wake: false });
   assert.match(held.text, /Held, not delivered: you and #1/);
   assert.equal(events(M1.id, 'user_message').filter((m) => m.text === 'ping 6').length, 0);
-  const copies = () => events(TM.id, 'user_message').filter((m) => m.text.endsWith(') ping 6')).length;
+  const copies = () => events(TM.id, 'minion_copy').filter((m) => m.text === 'ping 6').length;
   assert.equal(copies(), 0, 'no Taskmaster copy while it is held');
   for (const id of [M1.id, M4.id]) assert.match(events(id, 'loop_paused').at(-1).text, /#4 and #1 have exchanged 6 messages/);
   // Another pair isn't held, and the Taskmaster's own loop with #1 counted none of these.

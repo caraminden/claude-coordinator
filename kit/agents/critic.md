@@ -19,8 +19,8 @@ was made. In `mode: informed` you may also read the source files the brief names
 
 - **The rubric's path,** and `<kit>`, the Citadel kit's path, when it `extends:` a starter
   (`citadel:critique/rubrics/<name>` is `<kit>/skills/critique/rubrics/<name>.md`).
-- **Per item, a brief:** what it is, what it should read as or do, its size or place, and any pick or
-  note of a person's it keeps. It holds no source and no argument for the work.
+- **Per item, a brief:** what it is, what it should read as or do, its size or place. It holds no source, no argument
+  for the work, and no pick or note of a person's unless the rubric names one as a criterion.
 - **The artifacts per item:** images, text, rows, a diff, with the output of the rubric's `checks:`.
 - **For something built from parts made earlier:** each reused part's known flaws and who owns it.
 - **Round 2 and later:** your last round's findings per item. Check each, and raise anything new only

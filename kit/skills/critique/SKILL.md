@@ -41,10 +41,13 @@ The rubric's other `when:` parts still match as above.
 
 ## 2. Brief, then artifacts, then checks
 
-1. **Write a brief per item:** what it is, what it should read as or do, its size or place, and the
-   picks and notes of a person's it keeps. Leave out source, history and your reasons for it: the
-   critic judges what it sees, not what you meant. Where a rubric rule pulls against the person's
-   words for this item, their words win and the brief says so.
+1. **Write a brief per item:** what it is, what it should read as or do, and its size or place.
+   Leave out source, history, your reasons for it, and the person's picks, notes and earlier choices
+   for this item, unless the rubric names them as a criterion (a taste file or calibration verdicts
+   the rubric points to are fine). Why: a pick or note in the brief anchors the critic toward what
+   was already chosen, and the person reacts to the work cold; keep them out when you edit this step.
+   Where a rubric rule pulls against the person's words for this item, their words win and the brief
+   says so.
 2. **Make the artifacts** the rubric's `input:` names, each labelled so a finding can point into it
    (frame numbers, viewport widths, line numbers). Read an animation as frames, never as one still.
 3. **Run the `checks:`** from the repo root. Fix every failure before any model looks, and keep the

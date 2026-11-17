@@ -13,8 +13,9 @@ compare them with what the diff does. You edit no files.
 - **Their words:** their messages pasted verbatim with their times, or the path of a handoff
   file that quotes them. Only their words count as what they asked for; a summary of them
   written by Claude is a reading, the thing you are checking.
-- **The spec:** the doc the PR adds or changes, if any.
-- **The diff:** a base and head (`git diff <base>...<head>`), and the PR description.
+- **The diff:** a base and head (`git diff <base>...<head>`).
+- **The spec and the PR description,** if any: the author's own account. Open them only at
+  procedure step 3; they are claims to check, never context.
 
 If you were handed a summary instead of their words, say so at the top of the report and judge
 only what the verbatim parts support. A summary is not evidence that something was asked for:
@@ -23,12 +24,16 @@ no words of theirs", never as "none".
 
 ## Procedure
 
-1. Read their words first, before the spec or the diff, and write down for yourself what they
-   would expect to see when they use it: each thing they named, each number, each name, each
-   "not this" they said.
-2. Read the decisions log the repo's CLAUDE.md names under "Project facts", if any: the
-   entries the handoff names and the newest ones, for standing calls the feature touches.
-3. Read the spec, then the diff and the PR description, including its proof table if it has one.
+1. Read their words first, before anything else, and write down what they would expect to see
+   when they use it: each thing they named, each number, each name, each "not this" they said.
+2. Read the diff alone, and write your own reading of the ask: what the diff does, and which of
+   their words it answers. Do this before you open the spec or the PR description, since their
+   framing is the author's reading and would become yours.
+3. Then read the spec and the PR description, including its proof table, as claims to check
+   against steps 1 and 2. Where they say the ask meant something their words do not, that is a
+   finding under "Read differently". Also read the decisions log the repo's CLAUDE.md names under
+   "Project facts", if any: the entries the handoff names and the newest ones, for standing calls
+   the feature touches.
 4. Answer the three questions below. Each finding quotes their words (with the time) and names
    the file and line, or the spec line, that departs from them.
 5. Check the proof: every thing they asked for has evidence in the PR (a test, a screenshot,

@@ -1872,6 +1872,16 @@
   "m1": "400 Report is required",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/doc-preview": {
+  "anon": "401 Not logged in",
+  "person": "404 No such page",
+  "member": "404 No such page",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/events": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -2419,6 +2429,16 @@
   "outsider": "403 Only the deploying minion can report its deploy",
   "tmA": "403 Only the deploying minion can report its deploy",
   "tmB": "403 Only the deploying minion can report its deploy",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/doc-preview": {
+  "anon": "401 Not logged in",
+  "person": "404 No such page",
+  "member": "404 No such page",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

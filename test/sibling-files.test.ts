@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
+import { findChrome } from '../kit/skills/critique/scripts/ui-measure.mjs';
 import { projectSharedDir } from '../src/workspace.ts';
 import { agentToken, bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
 
@@ -217,4 +218,20 @@ test('a linked script, stylesheet or data file opens as text in the viewer; othe
   assert.equal((await get(`/api/tickets/${M.id}/file?path=escdir/x.js`, headers)).status, 404);
   // Still not listed as artifacts: only documents, pages and downloads are.
   assert.ok(!(await (await get(`/api/projects/${P.id}/shared`, headers)).json()).some((f: any) => /\.(js|json)$/.test(f.path)));
+});
+
+test("a choices card's preview (#821): a page's top as a JPEG, kept per version; 404 for what isn't a page", async () => {
+  const c = { Cookie: srv.cookie };
+  assert.equal((await get(`/api/tickets/${M.id}/doc-preview?path=notes.md`, c)).status, 404);
+  assert.equal((await get(`/api/tickets/${M.id}/doc-preview?path=nope.html`, c)).status, 404);
+  assert.equal((await get(`/api/tickets/${M.id}/doc-preview?path=.scratch/demo.html`, c)).status, 404);
+  assert.equal((await get(`/api/tickets/${M.id}/doc-preview?path=page.html`)).status, 401);
+  if (!findChrome()) return; // shortcut: the shot itself needs Playwright's headless shell, which perigee has and CI may not
+  const res = await get(`/api/tickets/${M.id}/doc-preview?path=page.html`, c);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/jpeg');
+  const img = Buffer.from(await res.arrayBuffer());
+  assert.deepEqual([...img.subarray(0, 3)], [0xff, 0xd8, 0xff]);
+  const etag = res.headers.get('etag')!;
+  assert.equal((await get(`/api/tickets/${M.id}/doc-preview?path=page.html`, { ...c, 'If-None-Match': etag })).status, 304);
 });

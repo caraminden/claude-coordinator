@@ -7,6 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { cleanEntries, entriesView, injectBridge, LIMITS, storeId, writeStore } from '../artifact-data.ts';
+import { DocPreviews } from '../doc-preview.ts';
 import { commentMessage, fileTitle, fileType, isArtifact, resolveFile, resolveLink, sharedListable, siblingType } from '../artifacts.ts';
 import type { Session } from '../auth.ts';
 import type { Artifact, Project, Ticket } from '../db.ts';
@@ -196,20 +197,24 @@ function scopeRoot(app: App, scope: string): string | null {
 async function serveFound(ctx: { req: IncomingMessage; res: ServerResponse; url: URL; app: App; session: Session }, found: Awaited<ReturnType<typeof resolveFile>>, path: string, roots: [string, string][]) {
   const { req, res, url, app, session } = ctx;
   const download = url.searchParams.has('download');
-  if (found?.type.kind === 'html' && !download && session.agent === undefined) {
-    for (const [scope, root] of roots) {
-      const real = await realpath(root).catch(() => null);
-      if (!real || !found.file.startsWith(real + sep)) continue;
-      const rel = found.file.slice(real.length + 1).split(sep).map(encodeURIComponent).join('/');
-      // A page under a hidden folder still opens, just without its siblings.
-      if (tokenPath(rel) === null) break;
-      // Relative, so it stays inside a preview's /preview/N/.
-      const location = `${'../'.repeat(url.pathname.split('/').length - 3)}files/${app.auth.fileToken(scope)}/${rel}`;
-      return void res.writeHead(302, { Location: location, 'Cache-Control': 'no-store' }).end();
-    }
-  }
+  const tokened = found?.type.kind === 'html' && !download && session.agent === undefined ? await tokenedPath(app, found.file, roots) : null;
+  // Relative, so it stays inside a preview's /preview/N/.
+  if (tokened) return void res.writeHead(302, { Location: `${'../'.repeat(url.pathname.split('/').length - 3)}files/${tokened}`, 'Cache-Control': 'no-store' }).end();
   return serveArtifact(req, res, found, path, download);
 }
+
+/** `<file token>/<path>` of a file under one of `roots`, as /api/files/ serves it; null under a hidden folder (it opens without its siblings). */
+async function tokenedPath(app: App, file: string, roots: [string, string][]): Promise<string | null> {
+  for (const [scope, root] of roots) {
+    const real = await realpath(root).catch(() => null);
+    if (!real || !file.startsWith(real + sep)) continue;
+    const rel = file.slice(real.length + 1).split(sep).map(encodeURIComponent).join('/');
+    return tokenPath(rel) === null ? null : `${app.auth.fileToken(scope)}/${rel}`;
+  }
+  return null;
+}
+
+const docPreviews = new Map<string, DocPreviews>();
 
 /** The scheme a file token's scope belongs to. */
 function scopeProject(app: App, scope: string): number | null {
@@ -575,6 +580,28 @@ export const fileRoutes: Route[] = [
     },
   },
 
+  {
+    method: 'GET', path: '/api/tickets/:ticket/doc-preview', who: ['person'],
+    async handler(ctx) {
+      // A choices card's picture of its page's top (#821, src/doc-preview.ts); 404 when there is none,
+      // and the card shows just its Open button.
+      const { req, res, url, app, ticket } = ctx;
+      const found = await resolveTicketFile(app, ticket, url.searchParams.get('path') ?? '');
+      if (found?.type.kind !== 'html') throw new HttpError(404, 'No such page');
+      const tokened = await tokenedPath(app, found.file, ticketScopes(app, ticket));
+      if (!tokened) throw new HttpError(404, 'That page has no preview');
+      const key = DocPreviews.key(found.file, found.size, found.mtime);
+      if (req.headers['if-none-match'] === `"${key}"`) return void res.writeHead(304).end();
+      let previews = docPreviews.get(app.dataDir);
+      if (!previews) docPreviews.set(app.dataDir, (previews = new DocPreviews(join(app.dataDir, 'doc-previews'))));
+      // The server opens the page on itself, at the address this request came in on.
+      const { localAddress = '127.0.0.1', localPort } = req.socket;
+      const img = await previews.get(key, () => `http://${localAddress.includes(':') ? `[${localAddress}]` : localAddress}:${localPort}/api/files/${tokened}`);
+      if (!img) throw new HttpError(404, 'That page could not be shot');
+      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'image/jpeg', 'Content-Length': img.length, 'Cache-Control': 'private, no-cache', ETag: `"${key}"` });
+      res.end(img);
+    },
+  },
   {
     method: ['GET', 'HEAD'], path: '/api/tickets/:ticket/file', who: ['person', 'taskmaster'],
     async handler(ctx) {

@@ -235,6 +235,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'A proposal always ends in an action: when your turn suggests work, post it as a card (ask_question or propose_plan). For handoffs, send their paths to the Taskmaster (message_coordinator) and post one multi-select `ask_question` card, one option per handoff. Never leave a proposal as prose alone.',
     'When you are proven wrong in a disagreement with the Taskmaster (by a test, git, the live state, a person), strike your own wrong words with `strike_text` (mcp__thread), quoting them exactly; in your reply, also write the wrong words as `~~…~~` with the fix right after.',
     `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
+    `A note for another scheme's Taskmaster or a minion once you are live: queue it with \`relay_when_live\` (mcp__thread) before hand_off_land, not by asking the Taskmaster; your Taskmaster sees it now.`,
     'Wherever the instructions say to run tools/land.sh (but not a build minion\'s --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, posts the shipped line and dismisses or parks you on a clean land, and wakes you with its output if it fails.',
     ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),

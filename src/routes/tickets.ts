@@ -38,8 +38,9 @@ import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketVi
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { machineNotes, patchMachine } from './machines.ts';
-import { LINE_FIELDS } from './projects.ts';
-import { pacificTime, parseWakeTime } from '../wake.ts';
+import { ensureCoordinator, LINE_FIELDS, schemeTarget } from './projects.ts';
+import { pacificTime, parseWakeTime, type Relay } from '../wake.ts';
+import { gitOut } from '../git.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -1146,6 +1147,48 @@ export const ticketRoutes: Route[] = [
       const waiting = await waiters.add(id, commit, reason);
       app.runner.broadcastTicket(id); // a parked row moves to Waiting (#718)
       return json(res, 201, { waiting, commit, head: waiters.head, merged: !!elsewhere });
+    },
+  },
+  {
+    // relay_when_live: a note for another scheme's Taskmaster or a minion of this scheme, sent as held mail once a commit is live.
+    // The minion's own Taskmaster sees the full text now (held mail, no wake), so it can notice if something is off.
+    method: 'POST', path: '/api/tickets/:ticket/relay-when-live', who: ['minion'], refuse: 'Only a minion queues a relay',
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      const { store, runner, waiters } = app;
+      const body = await readJson(req);
+      const mine = () => waiters.relays(ticket.id).map((r) => ({ id: r.id, to: 'scheme' in r.to ? r.to.scheme : `#${r.to.number}`, commit: r.commit, text: r.text }));
+      if (body.cancel != null) {
+        const r = waiters.cancelRelay(ticket.id, Number(body.cancel));
+        if (!r) throw new HttpError(404, `No pending relay ${Number(body.cancel)} of yours`);
+        const taskmaster = store.getCoordinator(ticket.project_id);
+        if (taskmaster) runner.leaveMail(taskmaster.id, `#${ticket.number} ${ticket.title}`, `(for your tracking; nothing to do) #${ticket.number} cancelled its relay to ${'scheme' in r.to ? r.to.scheme : `#${r.to.number}`}.`);
+        return json(res, 200, { cancelled: r.id, relays: mine() });
+      }
+      if (body.to == null) return json(res, 200, { relays: mine() });
+      const text = str(body.text, 'Text', 10_000);
+      const target = String(body.to).trim();
+      let to: Relay['to'];
+      if (/^#?\d+$/.test(target)) {
+        const n = Number(target.replace('#', ''));
+        const m = store.getTicketByNumber(ticket.project_id, n);
+        if (!m || m.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
+        if (m.id === ticket.id) throw new HttpError(400, 'That is you');
+        to = { minion: m.id, number: m.number };
+      } else {
+        const { project } = schemeTarget(app, ticket, target);
+        to = { scheme: project.name, taskmaster: (await ensureCoordinator(app, project)).id };
+      }
+      const commit = body.commit == null || body.commit === ''
+        ? (ticket.cwd ? await gitOut(['rev-parse', 'HEAD'], ticket.cwd) : null)
+        : await waiters.resolve(String(body.commit), store.getProject(ticket.project_id)?.repo_dir ?? null, !!(await waiters.elsewhere(ticket.id)));
+      if (!commit) throw new HttpError(400, body.commit ? `No commit ${String(body.commit).slice(0, 40)} in the live checkout or the scheme's repo` : 'No commit to wait for: commit the work first, or give a commit');
+      const dest = 'scheme' in to ? to.scheme : `#${to.number}`;
+      const { queued, relay } = await waiters.addRelay({ ticket: ticket.id, to, text, commit });
+      const taskmaster = store.getCoordinator(ticket.project_id);
+      if (queued && taskmaster) runner.leaveMail(taskmaster.id, `#${ticket.number} ${ticket.title}`, `(for your tracking; nothing to do) #${ticket.number} will send this to ${dest} once ${commit.slice(0, 7)} is live: ${text}`);
+      runner.emit(ticket.id, 'note', { text: `${queued ? `Relay to ${dest} queued until ${commit.slice(0, 7)} is live` : `Relay to ${dest} sent: ${commit.slice(0, 7)} was live already`}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
+      return json(res, 201, { queued, id: relay.id, commit, to: dest, relays: mine() });
     },
   },
   {

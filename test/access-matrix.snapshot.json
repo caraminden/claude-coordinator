@@ -2252,6 +2252,16 @@
   "m1": "400 questions must be a list of 1 to 4 questions",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/relay-when-live": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion queues a relay",
+  "member": "403 Only a minion queues a relay",
+  "outsider": "403 Only a minion queues a relay",
+  "tmA": "403 Only a minion queues a relay",
+  "tmB": "403 Only a minion queues a relay",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/secret": {
   "anon": "401 Not logged in",
   "person": "404 No such secret card",
@@ -2829,6 +2839,16 @@
   "outsider": "403 Only the minion itself can ask in its chat",
   "tmA": "400 questions must be a list of 1 to 4 questions",
   "tmB": "403 Only the minion itself can ask in its chat",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/relay-when-live": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion queues a relay",
+  "member": "403 Only a minion queues a relay",
+  "outsider": "403 Only a minion queues a relay",
+  "tmA": "403 Only a minion queues a relay",
+  "tmB": "403 Only a minion queues a relay",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

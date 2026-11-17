@@ -1337,6 +1337,19 @@ const THREAD_TOOLS = [
     },
   },
   {
+    name: 'relay_when_live',
+    description: `Queue a note for another scheme's Taskmaster (\`to\` is the scheme's name) or a minion of this scheme (\`to\` is #N), sent as held mail (it wakes nothing) once \`commit\` is live (in a scheme this server doesn't run: merged). Use it instead of asking the Taskmaster to relay something once you are live. Call it before hand_off_land; \`commit\` defaults to your branch's head. Your Taskmaster gets the full text now as held mail, and a one-line note when it goes out. A dismissed minion's relays still go out, and a failed land leaves them queued: call it with no arguments to list yours (a \`#id\` each), or with \`cancel\` to drop one. Several allowed.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: "Another scheme's name, or #N for a minion of this scheme" },
+        text: { type: 'string', maxLength: 10000, description: 'The note, self-contained (at most 10,000 characters)' },
+        commit: { type: 'string', description: "Optional: the commit to wait for (a hash); your branch's head if left out" },
+        cancel: { type: 'number', description: 'Drop your pending relay with this id instead' },
+      },
+    },
+  },
+  {
     name: 'wake_when_live',
     description: `${WAKE_DESCRIPTION.replace('the minion', 'this minion')} Use it instead of asking the Taskmaster to remember, then set state parked and end your turn.`,
     inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
@@ -1884,6 +1897,13 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!r.waiting && r.merged) return `${what} is on the scheme's main already, so there is nothing to wait for.`;
       if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
       return `Waiting for ${what}: ${APP_NAME} sends ${ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
+    }
+    case 'relay_when_live': {
+      const r = await call('POST', `/api/tickets/${TICKET}/relay-when-live`, { to: args.to ?? null, text: args.text, commit: args.commit ?? null, cancel: args.cancel ?? null });
+      const lines = r.relays.map((o: any) => `#${o.id} to ${o.to}, once \`${String(o.commit).slice(0, 7)}\` is live: ${o.text.length > 120 ? o.text.slice(0, 120) + '…' : o.text}`);
+      if (r.cancelled) return `Cancelled relay #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
+      if (r.id) return r.queued ? `Queued as #${r.id}: ${APP_NAME} leaves it as held mail for ${r.to} once \`${r.commit.slice(0, 7)}\` is live, and your Taskmaster has the full text. If the land fails it stays queued: fix it, or cancel it. Do not ask the Taskmaster to relay it.` : `\`${r.commit.slice(0, 7)}\` was live already, so the note went to ${r.to} now.`;
+      return lines.length ? `Pending relays:\n${lines.join('\n')}` : 'No relays pending.';
     }
     case 'wake_at': {
       const r = await call('POST', `/api/tickets/${TICKET}/wake-at`, { at: args.at ?? null, note: args.note, cancel: args.cancel ?? null });

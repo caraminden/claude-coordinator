@@ -70,6 +70,32 @@ async function putOnGithub(app: App, projectId: number, dir: string, slug: strin
   return saved;
 }
 
+/**
+ * The scheme another scheme's Taskmaster (`from`) may message: only schemes the turn's person is in, and Citadel (src/access.ts).
+ * A scheme they aren't in gets the same answer as one that doesn't exist, so its name doesn't leak.
+ */
+export function schemeTarget(app: App, from: Ticket, scheme: unknown) {
+  const { store } = app;
+  const want = String(scheme ?? '').trim().toLowerCase();
+  const own = store.getProject(from.project_id)!;
+  // Only schemes the turn's person is in, and Citadel (src/access.ts): a scheme they aren't in gets
+  // the same answer as one that doesn't exist, so its name doesn't leak.
+  // Who asked for the turn (#255), not whom it runs as: a non-member's ask reaches no further than they could.
+  const personId = store.turnAsker(from.id) ?? own.owner_id;
+  const person = personId === null ? undefined : store.getUser(personId);
+  const who = { uid: person?.id, admin: !!person?.admin };
+  const others = taskmasterTargets(store, own.id, personId, Date.now());
+  const project = others.find((p) => p.name.toLowerCase() === want) ?? others.find((p) => String(p.id) === want);
+  if (!project) {
+    if (want === own.name.toLowerCase() || want === String(own.id)) throw new HttpError(400, `${own.name} is your own scheme: use message_ticket for its minions`);
+    // Schemes Citadel may only answer stay unlisted: the person may not be in them.
+    const listed = others.filter((p) => p.id === GLOBAL_OWNER || store.canSee(who, p.id));
+    const answers = own.id === GLOBAL_OWNER ? ` The ${own.name} ${AGENT_NAME} may also answer a scheme whose ${AGENT_NAME} wrote to it in the last ${CITADEL_REPLY_MS / 86_400_000} days.` : '';
+    throw new HttpError(404, `No scheme called "${String(scheme ?? '')}" that ${person?.name ?? 'this turn\'s person'} is in. You can reach: ${listed.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}.${answers}`);
+  }
+  return { own, person, who, project };
+}
+
 /** The project's coordinator ticket, created the first time someone opens the project. */
 export async function ensureCoordinator(app: App, project: Project): Promise<Ticket> {
   const { store } = app;
@@ -991,23 +1017,7 @@ export const projectRoutes: Route[] = [
       const text = str(body.text, 'Message', 10_000);
       // Held mail (#405): wake: false waits for the other Taskmaster's next turn instead of starting one.
       const wake = body.wake !== false;
-      const want = String(body.scheme ?? '').trim().toLowerCase();
-      const own = store.getProject(from.project_id)!;
-      // Only schemes the turn's person is in, and Citadel (src/access.ts): a scheme they aren't in gets
-      // the same answer as one that doesn't exist, so its name doesn't leak.
-      // Who asked for the turn (#255), not whom it runs as: a non-member's ask reaches no further than they could.
-      const personId = store.turnAsker(from.id) ?? own.owner_id;
-      const person = personId === null ? undefined : store.getUser(personId);
-      const who = { uid: person?.id, admin: !!person?.admin };
-      const others = taskmasterTargets(store, own.id, personId, Date.now());
-      const project = others.find((p) => p.name.toLowerCase() === want) ?? others.find((p) => String(p.id) === want);
-      if (!project) {
-        if (want === own.name.toLowerCase() || want === String(own.id)) throw new HttpError(400, `${own.name} is your own scheme: use message_ticket for its minions`);
-        // Schemes Citadel may only answer stay unlisted: the person may not be in them.
-        const listed = others.filter((p) => p.id === GLOBAL_OWNER || store.canSee(who, p.id));
-        const answers = own.id === GLOBAL_OWNER ? ` The ${own.name} ${AGENT_NAME} may also answer a scheme whose ${AGENT_NAME} wrote to it in the last ${CITADEL_REPLY_MS / 86_400_000} days.` : '';
-        throw new HttpError(404, `No scheme called "${String(body.scheme ?? '')}" that ${person?.name ?? 'this turn\'s person'} is in. You can reach: ${listed.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}.${answers}`);
-      }
+      const { own, person, who, project } = schemeTarget(app, from, body.scheme);
       const to = await ensureCoordinator(app, project);
       const toCitadel = project.id === GLOBAL_OWNER;
       // Citadel's Taskmaster weighs a non-member's ask differently (its prompt). Names that could fake

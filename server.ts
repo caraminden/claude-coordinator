@@ -17,6 +17,7 @@ import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
+import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
 import { ciFinished } from './src/ci-armed.ts';
@@ -418,6 +419,19 @@ runner.onSpendAlert = (ticketId, text, eventId, person) => notify(ticketId, { ki
 // Chained minions (create_ticket's start_after): one starts with its held brief once its leader's work is in (src/wake.ts startChained).
 const startChain = (c: Chain, why: string) => startChained(c, why, { store, runner, waiters });
 waiters.start = (c, why) => void startChain(c, why).catch((err) => console.error(`Starting chained #${c.ticket} failed:`, err));
+// relay_when_live: a note goes out as held mail once its commit is live; the sender's Taskmaster gets a one-line "went out".
+waiters.deliver = (r) => {
+  const from = store.getTicket(r.ticket);
+  if (!from) return;
+  const who = `#${from.number} ${from.title}`;
+  if ('scheme' in r.to) {
+    const own = store.getProject(from.project_id)!;
+    const author = `${own.name} #${from.number} (relayed once live)`;
+    runner.leaveMail(r.to.taskmaster, author, asData(author, r.text));
+  } else runner.leaveMail(r.to.minion, `${who} (relayed once live)`, r.text);
+  const taskmaster = store.getCoordinator(from.project_id);
+  if (taskmaster) runner.leaveMail(taskmaster.id, who, `(for your tracking; nothing to do) #${from.number}'s relay to ${'scheme' in r.to ? r.to.scheme : `#${r.to.number}`} went out`);
+};
 runner.heldFor = (id) => waiters.heldFor(id);
 runner.heldBrief = (id) => waiters.heldBrief(id);
 runner.wakesOn = (id) => {

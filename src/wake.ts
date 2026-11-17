@@ -25,6 +25,17 @@ const run = promisify(execFile);
 /** A PR lookup's answer: tests' stand-ins answer at once. */
 type Maybe<T> = T | Promise<T>;
 
+/** A note a minion queued for another scheme's Taskmaster or a minion of its own scheme (relay_when_live), sent once `commit` is live. */
+export interface Relay {
+  id: number;
+  /** The id of the minion that queued it. */
+  ticket: number;
+  /** Where it goes: held mail for a scheme's Taskmaster (`scheme` is its name), or for a minion (#number). */
+  to: { scheme: string; taskmaster: number } | { minion: number; number: number };
+  text: string;
+  commit: string;
+}
+
 /** A minion waiting for a commit to be live, or (commit null) for the next deploy after `since`. */
 export interface Waiter {
   ticket: number;
@@ -123,6 +134,7 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): Pr
 /** All waiters, in the settings table so they outlive the restart they wait for. */
 const KEY = 'wake-when-live';
 const CHAINS = 'chained-minions';
+const RELAYS = 'relay-when-live';
 
 // Never execFileSync here (#526): a check runs dozens of these, and the server answered nobody until they ended.
 async function git(dir: string, args: string[]): Promise<string | null> {
@@ -181,6 +193,8 @@ export class LiveWaiters {
   private starting = new Set<number>();
   /** A chained minion's leader was dismissed without shipping: tell people, once. */
   hold: (c: Chain, why: string) => void = () => {};
+  /** A relay is live: leave its text as held mail (set by the server, which owns the runner). */
+  deliver: (r: Relay) => void = () => {};
   /** The commit the server runs now: what it booted from, then what its front end last reloaded to. */
   head: string | null;
   /** The check waiting for its turn, if any, and the end of the newest one: checks run one at a time. */
@@ -372,6 +386,49 @@ export class LiveWaiters {
     return go.length;
   }
 
+  relays(ticket?: number): Relay[] {
+    return (this.store.getSetting<Relay[]>(RELAYS) ?? []).filter((r) => ticket === undefined || r.ticket === ticket);
+  }
+
+  /** Queue a relay; false (it was delivered at once) when its commit is live already. */
+  async addRelay(r: Omit<Relay, 'id'>): Promise<{ queued: boolean; relay: Relay }> {
+    const all = this.relays();
+    const relay = { ...r, id: Math.max(0, ...all.map((o) => o.id)) + 1 };
+    if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.head })) {
+      this.deliver(relay);
+      return { queued: false, relay };
+    }
+    // Read again: another relay may have been queued while git ran.
+    const now = this.relays();
+    relay.id = Math.max(relay.id, ...now.map((o) => o.id + 1));
+    this.store.setSetting(RELAYS, [...now, relay]);
+    return { queued: true, relay };
+  }
+
+  /** Drop `ticket`'s pending relay `id`; the relay, or null when it has none. */
+  cancelRelay(ticket: number, id: number): Relay | null {
+    const all = this.relays();
+    const r = all.find((o) => o.id === id && o.ticket === ticket) ?? null;
+    if (r) this.store.setSetting(RELAYS, all.filter((o) => o !== r));
+    return r;
+  }
+
+  /** Deliver each relay whose commit is live, once; a dismissed minion's relays go out too. */
+  private async checkRelays(): Promise<void> {
+    const ready: Relay[] = [];
+    for (const r of this.relays()) if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.head })) ready.push(r);
+    if (!ready.length) return;
+    // Dropped before sending, so a send that throws can't deliver one twice; read again for any queued meanwhile.
+    this.store.setSetting(RELAYS, this.relays().filter((r) => !ready.some((o) => o.id === r.id)));
+    for (const r of ready) {
+      try {
+        this.deliver(r);
+      } catch (err) {
+        console.error(`Relaying #${r.ticket}'s note failed:`, err);
+      }
+    }
+  }
+
   list(): Waiter[] {
     return this.store.getSetting<Waiter[]>(KEY) ?? [];
   }
@@ -467,6 +524,7 @@ export class LiveWaiters {
         console.error(`Waking #${w.ticket} failed:`, err); // the others still get theirs
       }
     }
+    await this.checkRelays();
     return woken.length + (await this.checkChains());
   }
 

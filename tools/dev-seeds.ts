@@ -395,6 +395,33 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}`;
     },
   },
+  'taskmaster-split': {
+    about: 'a scheme split into per-person Taskmasters (#919, #920): yours, Josh\'s and the Overlord, each with a chat, an Overlord alert and a card for everyone; sign in as josh with the same password to see his side',
+    seed(c) {
+      const tm = taskmaster(c);
+      const josh = c.store.findUser('name', 'Josh') ?? c.store.createUser({ name: 'Josh', login: 'josh' });
+      c.store.addMember(c.project.id, josh.id);
+      const mine = chat(c, tm, 8);
+      mine.asked('Where does the export minion stand?');
+      mine.init();
+      mine.said('#12 is **ready**: tested, risk low. It lands after #14.');
+      mine.done('Answered.');
+      const own = c.store.splitScheme(c.project.id, josh.id);
+      const ovl = c.store.getOverlord(c.project.id)!;
+      for (const t of [own, ovl]) c.store.updateTicket(t.id, { status: 'idle' });
+      const j = chat(c, own, 6);
+      j.put('user_message', { author: 'Josh', text: 'Start a minion for the runner box\'s third slot.' });
+      j.init();
+      j.said('Started #15 for the third runner slot.');
+      j.done('Started.');
+      const o = chat(c, ovl, 6);
+      o.said('Checking CI on main after the last land.');
+      o.put('note', { text: 'CI on main fell back to perigee: the desktop runner is offline.', everyone: true });
+      const opts = [{ label: 'Wait for the desktop', recommended: true }, { label: 'Run on perigee' }];
+      o.put('question', { id: hex(), everyone: true, questions: [{ question: 'Hold lands until the desktop runner is back?', header: 'CI', multiSelect: false, options: opts }] });
+      return `#/p/${c.project.id}`;
+    },
+  },
   'agent-relays': {
     about: 'a minion and the Taskmaster messaging each other: a brief, relays both ways, held mail from another scheme\'s Taskmaster, collapsed and shortened replies, and a person\'s messages (#693)',
     seed(c) {

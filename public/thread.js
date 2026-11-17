@@ -45,6 +45,16 @@ function tmViewSwitch() {
     pick('everyone', 'Everyone', 'Every Taskmaster in this scheme and the Overlord, in time order'));
 }
 
+/** Mine's line under the title (board C): whose chats it leaves out, and a way there. */
+function tmBanner() {
+  const rest = (view.taskmasters ?? []).filter((t) => t.id !== view.id);
+  const names = rest.filter((t) => t.person_id != null).map((t) => `${t.person_name ?? 'Someone'}'s`);
+  const whose = names.length ? `${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} Taskmasters` : `${names[0]} Taskmaster`}` : '';
+  const said = [whose, rest.some((t) => t.person_id == null) ? 'the Overlord' : ''].filter(Boolean).join(' and ');
+  return said && h('div', { class: 'tm-banner' }, `${said} ${rest.length > 1 ? 'are' : 'is'} in `,
+    h('button', { type: 'button', class: 'link', onclick: () => setTmView('everyone') }, 'Everyone'), '.');
+}
+
 async function setTmView(mode) {
   const v = view;
   const before = v.merged.mode;
@@ -542,6 +552,7 @@ export function renderTicketHead() {
       phone ? more : '',
       phone ? close : ''),
     coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
+    coord && view.merged?.mode === 'mine' ? tmBanner() : '',
     phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
     sub,
     phone ? '' : view.progressEl);
@@ -1214,6 +1225,7 @@ function drawEvent(event, scroll) {
   if (view.part) for (const n of nodes) {
     n.classList.toggle('ovl', !!view.part.overlord);
     n.dataset.session = view.part.label;
+    if (n.matches('.msg.user')) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `to ${view.part.label}`));
   }
   // A for-everyone card a person's Taskmaster asked through the Overlord (#921) says whose it was.
   const asker = data.asker && view.taskmasters?.find((t) => t.id === data.asker);

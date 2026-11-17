@@ -432,6 +432,8 @@ body:has(dialog.viewer[open]) { overflow: hidden; }
 .viewer-stage > .edge-steps > .next { right: 0.75rem; }
 .viewer-stage .artifact-media { width: 100%; height: 100%; max-height: none; object-fit: contain; border: 0; border-radius: 0; background: none; }
 .viewer-stage .artifact-frame { width: 100%; height: 100%; }
+/* Pictures and clips: the kit's lightbox (ui/media.js) fills the stage edge to edge, with its own ‹ › and filmstrip. */
+.viewer-stage.k-media { padding: 0; align-items: stretch; overflow: hidden; }
 /* Full screen for HTML pages: sized like the Open link beside it. Where a frame can't go full screen
    (iPhone), it fills the window with a close button over it. */
 button.full-screen { padding: 0.2rem 0.65rem; font-size: 0.85em; }
@@ -452,7 +454,7 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
   dialog.viewer { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
   dialog.viewer > .chat { border-left: 0; border-top: 1px solid var(--line); }
   .viewer-bar .meta, .viewer-bar a.wide-only { display: none; }
-  .viewer-stage { padding: 0.4rem; }
+  .viewer-stage:not(.k-media) { padding: 0.4rem; }
   /* The chat gets little height here: the title takes one line, the state, where the change is, Stop and ↻ the next, and the readout waits for the full chat. */
   dialog.viewer .ticket-head > .row > h2 { -webkit-line-clamp: 1; line-clamp: 1; }
   dialog.viewer .ticket-head .head-sub::after, dialog.viewer .ticket-head .head-sub > .spacer { display: none; }

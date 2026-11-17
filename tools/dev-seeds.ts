@@ -292,6 +292,24 @@ mock.boards('#takes', { boards: [
       return route(c, t);
     },
   },
+  'media-chat': {
+    about: 'a minion whose reply links a clip, a panorama and two screenshots, for the viewer\'s lightbox, scrubber and panner (#833)',
+    seed(c) {
+      const t = minion(c, 'Record the onboarding flow', { state: 'complete', note: 'clips and screens in the chat' });
+      // Code-made media from the design-system demo (docs/design-system/media), never a real app's.
+      const media = join(import.meta.dirname, '..', 'docs', 'design-system', 'media');
+      for (const f of ['clip.webm', 'panorama.svg', 'screen-1.svg', 'screen-2.svg']) copyFileSync(join(media, f), join(t.cwd, f));
+      const w = chat(c, t, 1);
+      w.asked('Can you record the onboarding flow and grab the screens?');
+      w.said([
+        'Recorded it, and the two screens it passes through:', '',
+        `![The flow, 8 s](${t.cwd}/clip.webm)`, '', `![The view from the top](${t.cwd}/panorama.svg)`, '',
+        `![Settings](${t.cwd}/screen-1.svg)`, `![Minions](${t.cwd}/screen-2.svg)`,
+      ].join('\n'));
+      w.done('Recorded.');
+      return route(c, t);
+    },
+  },
   board: {
     about: 'the minions list with a minion in each state, types, notes and a build',
     seed(c) {

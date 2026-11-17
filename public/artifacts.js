@@ -8,6 +8,7 @@ import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
 import { linkify } from './ui/markdown.js';
+import { lightbox } from './ui/media.js';
 import { optimistic } from './ui/optimistic.js';
 import { renderFiles } from './files.js';
 
@@ -239,6 +240,14 @@ function openViewer(ticket, file, inPlace) {
   }
   Object.assign(viewer, { ticket, file });
   viewer.dialog.setAttribute('aria-label', file.name);
+  // Stepping in the lightbox changed the address: it already shows this file, so only the bar changes.
+  const shown = viewer.media?.paths.indexOf(file.path) ?? -1;
+  if (shown >= 0 && viewer.media.ticketId === ticket.id && viewer.media.lb.el.isConnected) {
+    if (viewer.media.lb.at !== shown) viewer.media.lb.go(shown);
+    return renderViewerBar();
+  }
+  viewer.media?.lb.destroy();
+  viewer.media = null;
   viewer.stage.className = `viewer-stage k-${file.kind}`;
   viewer.stage.replaceChildren();
   viewer.stage.textLoad = null; // a text file still loading for the last file is dropped
@@ -246,9 +255,34 @@ function openViewer(ticket, file, inPlace) {
   else {
     // A page's Send goes to the chat beside it.
     const bridge = viewerBridge(ticket, file);
-    renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name }, bridge });
+    if (!showMedia(ticket, file)) renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name }, bridge });
   }
   renderViewerBar();
+}
+
+/**
+ * A picture or clip opens in the kit's lightbox (#833): clips get the scrubber, wide pictures the panner, and
+ * the other pictures and clips of the message it was linked from come along, stepped with ‹ ›, ←/→ or the
+ * filmstrip. A card's picture options keep their own stepping (galleryControls), so they don't come here.
+ */
+function showMedia(ticket, file) {
+  if (file.kind !== 'image' && file.kind !== 'video') return false;
+  if (gallery?.ticketId === ticket.id && gallery.options.some((o) => o.path === file.path)) return false;
+  const prefix = `#/f/${ticket.id}/`;
+  const pathOf = (a) => a.dataset.file ?? decodeURIComponent(a.getAttribute('href').slice(prefix.length));
+  const link = [...viewer.chat.querySelectorAll(`#log a[href^="${prefix}"]`)].find((a) => pathOf(a) === file.path);
+  const paths = [...new Set([...(link?.closest('.msg')?.querySelectorAll(`a[href^="${prefix}"]`) ?? [])].map(pathOf))]
+    .filter((p) => ['image', 'video'].includes(fileKind(p)));
+  if (!paths.includes(file.path)) paths.splice(0, paths.length, file.path);
+  const items = paths.map((p) => ({
+    src: p === file.path ? `${fileUrl(ticket.id, p)}&v=${file.mtime}` : fileUrl(ticket.id, p),
+    kind: fileKind(p), alt: baseName(p),
+  }));
+  viewer.stage.className = 'viewer-stage k-media';
+  const lb = lightbox(items, { at: paths.indexOf(file.path), into: viewer.stage, autoplay: true, label: 'Pictures and clips in this message',
+    onChange: (at) => replaceHash(fileHref(ticket.id, paths[at])) });
+  viewer.media = { ticketId: ticket.id, paths, lb };
+  return true;
 }
 
 /** Put the chat back where it was and drop the viewer. The chat's address it was over, or null. */
@@ -256,6 +290,7 @@ export function closeViewer() {
   if (!viewer) return null;
   const { dialog, chat, placeholder, ticket, scrollY } = viewer;
   const follow = followChat;
+  viewer.media?.lb.destroy();
   viewer = gallery = null;
   placeholder.replaceWith(chat);
   // Gone once its close event has been out on the page, which puts the caret back in the chat's box (ui/composer.js).

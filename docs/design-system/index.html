@@ -432,6 +432,7 @@ window.COLOURS = [
         <tr><td><code>ui/tip.js</code></td><td>Tooltips: <code>data-tip</code> on anything, one <code>mountTips()</code> call. Hover, keyboard focus, a tap or a long press opens it; it sits below or above the thing, never over it; a slow body shows skeleton lines. Ported from Theory of Crafting (#296).</td><td>ES module; its look is <code>.cui-tip</code> in base.css</td></tr>
         <tr><td><code>ui/status.js</code></td><td>A steady status line (<code>statusSlot</code>: always drawn, 22px, one line cut off with an ellipsis and whole in a tooltip, a working spinner, a tone), steady labels (<code>steadyLabel</code>: a button as wide as its widest label), a <code>toast</code> in the top layer, and the same markup as HTML strings (<code>statusSlotHtml</code> and the like). A status change moves nothing (#298).</td><td>ES module; its look is <code>.cui-status</code> and <code>.cui-steady</code> in base.css</td></tr>
         <tr><td><code>ui/optimistic.js</code></td><td><code>optimistic({ key, sets, apply, send, undo, label })</code>: a click shows its result at once and sends behind it; one key sends in click order, other keys side by side; a failure rolls back that item alone (with <code>sets</code>, clicks that set one thing end on what the server last took, #399) with a "Couldn't &lt;label&gt;: &lt;error&gt;" toast and Retry; its promise settles once, Retries included (rule 23, #388).</td><td>ES module; its toast is status.js's</td></tr>
+        <tr><td><code>ui/media.js</code></td><td>The media viewer: <code>lightbox</code> (pictures and clips one at a time, ←/→, a filmstrip), <code>scrubber</code> (a clip's frame strip, seek bar and Start/End pins, passed in and out through callbacks) and <code>panner</code> (a panorama that pans with a mini-map). Ported from TripPresenter's Show (#833); Citadel's file viewer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/dialog.js</code></td><td>The dialog: <code>cui-dialog</code> on a native <code>&lt;dialog&gt;</code>, <code>cui-dialog-head</code> on its header. The head and its ✕ stay at the top while the body scrolls; one <code>mountDialogs()</code> call closes it on a backdrop click (a drag out of it doesn't count); Escape as ever; the page behind doesn't scroll (#383).</td><td>ES module; its look is <code>.cui-dialog</code> in base.css</td></tr>
         <tr><td><code>ui/upload.js</code></td><td>Big uploads (#832): <code>mountUpload()</code> draws a drop zone with file and folder pickers, a row per file with its progress, Pause or Resume and ✕, a total with Pause all, and a line naming what it left out; <code>startUpload()</code> sends one file in 8 MiB chunks that resume after a dropped connection or a reload. Into an app's <code>DATA_DIR/uploads/&lt;login&gt;/</code>, or the shared folder from Files.</td><td>ES module; its look is <code>.cui-upload</code> in base.css</td></tr>
         <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
@@ -857,6 +858,20 @@ background: var(--citadel-warn-tint);</code></pre></div>
   </section>
 
   <section>
+    <h2>Media viewer</h2>
+    <div class="mk-specimen">
+      <div class="mk-show doc-block">
+        <div class="doc-media" id="media-demo"><p class="cui-notice" data-tone="info" id="media-fallback">The live parts load from <code>public/ui/media.js</code> beside this page; open the page from the repo to try them.</p></div>
+        <p class="doc-sent" id="media-said" aria-live="polite"></p>
+      </div>
+      <div class="mk-about">
+        <p>The lightbox shows pictures and clips one at a time: ‹ › on the edges (a phone swipes instead), a filmstrip and count under them, ←/→ and a swipe to step, wrapping round. A clip gets the scrubber: play, a strip of frames to hover and drag along, a seek bar (←/→ a second, Shift five, <kbd>,</kbd> and <kbd>.</kbd> a frame), mute, and Start/End pins when the app passes <code>onStart</code>/<code>onEnd</code>. A picture at least twice as wide as tall gets the panner: it pans end to end and back, eased, with a mini-map to click or drag and a slider to look around; reduced motion starts it paused. The parts store nothing: pins and pan directions come in as options and go out through callbacks (the line under the demo shows them), and <code>update()</code> rolls back a save that failed. Citadel's file viewer opens a message's pictures and clips in it. Live: these are the real parts, on code-made media.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/media.js</code> (<code>lightbox</code>, <code>scrubber</code>, <code>panner</code>, <code>clock</code>) · <code>.cui-lb</code>, <code>.cui-scrubber</code>, <code>.cui-panner</code></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <h2>Rules</h2>
     <p class="doc-why">What every screen of every app is held to. Each shows the right way (green) beside the wrong way (red).</p>
 
@@ -1129,6 +1144,9 @@ row.innerHTML =
 .cui-scope .doc-spin-always { animation: cui-spin 0.8s linear infinite; }
 .doc-covered { position: relative; }
 .doc-cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--citadel-space-2); background: color-mix(in srgb, var(--citadel-bg) 92%, transparent); color: var(--citadel-muted); font-size: var(--citadel-size-small); }
+.doc-media { display: flex; flex-direction: column; height: 460px; max-width: 760px; margin: 0 auto; border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); overflow: hidden; }
+.doc-media > .cui-notice { margin: auto var(--citadel-space-3); }
+@media (max-width: 800px) { .doc-media { height: 420px; } }
 </style>
 <script>
 (function () {
@@ -1345,6 +1363,32 @@ row.innerHTML =
   applyTheme('auto');
   measures();
 })();
+</script>
+<script type="module">
+// The media viewer specimen runs the real parts; a page opened without the repo beside it keeps the notice.
+try {
+  const { lightbox, clock } = await import('../../public/ui/media.js');
+  const said = document.getElementById('media-said');
+  const pin = (name) => (ms) => { said.textContent = ms == null ? `${name} pin cleared: the app saves null` : `${name} pin at ${clock(ms / 1000)}: the app saves ${ms}`; };
+  const box = document.getElementById('media-demo');
+  box.replaceChildren();
+  const lb = lightbox([
+    { src: 'media/clip.webm', kind: 'video', caption: 'A clip with pins', start: 1500, onStart: pin('Start'), onEnd: pin('End') },
+    { src: 'media/panorama.svg', alt: 'Code-drawn hills marked A to F', caption: 'A panorama', onPan: (p) => { said.textContent = `Pan: ${p}`; } },
+    { src: 'media/screen-1.svg', alt: 'A mock Settings screen', caption: 'Settings' },
+    { src: 'media/screen-2.svg', alt: 'A mock Minions screen', caption: 'Minions' },
+  ], { into: box, keys: false, label: 'Demo pictures and clips', onChange: (at, item) => { said.textContent = `Showing ${at + 1}: ${item.caption}`; } });
+  // On a long page ←/→ step the demo only while focus is in it (keys: false leaves the document's arrows alone);
+  // go() is the app's own move and stays quiet, so the line is written here.
+  box.addEventListener('keydown', (e) => {
+    if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.target.closest('input, select, textarea')) return;
+    e.preventDefault();
+    e.key === 'ArrowLeft' ? lb.prev() : lb.next();
+    said.textContent = `Showing ${lb.at + 1}: ${box.querySelectorAll('.cui-lb-thumb')[lb.at].getAttribute('aria-label').split(': ')[1]}`;
+  });
+} catch (e) {
+  console.warn('media viewer specimen:', e);
+}
 </script>
 </body>
 </html>

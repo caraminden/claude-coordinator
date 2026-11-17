@@ -109,8 +109,10 @@ body {
   font: var(--size-body)/1.5 var(--font);
 }
 a { color: inherit; }
-button, input, textarea, select { font: inherit; color: inherit; }
-button {
+/* These three not inside Citadel UI's media parts (ui/media.js, #833), which draw their own controls as they do in
+   apps: :not(:where(…)) adds no weight, so every rule that outranked them still does. */
+:is(button, input, select):not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *)), textarea { font: inherit; color: inherit; }
+button:not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *)) {
   background: var(--accent);
   color: var(--on-accent);
   border: 0;
@@ -121,7 +123,7 @@ button {
 button.secondary, a.button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--control-line); }
 a.button { display: inline-block; text-decoration: none; border-radius: 6px; padding: 0.2rem 0.65rem; font-size: 0.85em; }
 button:disabled { opacity: 0.5; cursor: default; }
-input, textarea, select {
+input:not(:where(.cui-scrubber *, .cui-panner *)), textarea, select:not(:where(.cui-panner *)) {
   background: var(--panel);
   border: 1px solid var(--control-line);
   border-radius: 6px;

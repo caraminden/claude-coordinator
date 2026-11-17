@@ -112,6 +112,13 @@ test('the Taskmaster claims the lane for a minion; minions only read; dismissing
   const freed = await call(`${url}/release-train`, { method: 'DELETE' });
   assert.equal(freed.status, 200);
   assert.equal(freed.data.released.name, 'release-train');
+
+  // Each take and release is a line in the other Taskmasters' digest (#919's noteDigest).
+  const digest = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  const lines = (digest.prepare('SELECT text FROM taskmaster_digest WHERE project_id = ? ORDER BY id').all(p.id) as { text: string }[]).map((r) => r.text);
+  digest.close();
+  assert.ok(lines.some((t) => new RegExp(`claimed pipeline-lane for #${a.number} `).test(t)), lines.join('\n'));
+  assert.ok(lines.some((t) => /released release-train \(held by the Taskmaster\)/.test(t)), lines.join('\n'));
 });
 
 test('the Taskmaster\'s claim, release and list_claims tools, and list_tickets showing claims', async () => {

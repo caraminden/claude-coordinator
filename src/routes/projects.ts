@@ -1147,15 +1147,21 @@ export const projectRoutes: Route[] = [
         throw new HttpError(409, `${name} is held by ${v.holder_name}, taken by ${v.taken_by} ${v.since_text}${held.note ? ` (${held.note})` : ''}. Release it first if it should move.`);
       }
       app.broadcast({ type: 'claims', projectId: project.id });
-      return json(res, 201, { claim: claimView(app, claim) });
+      const view = claimView(app, claim);
+      app.store.noteDigest(project.id, caller?.id ?? holder.id, `${session.name} claimed ${name} for ${view.holder_name}${note ? ` (${note})` : ''}`);
+      return json(res, 201, { claim: view });
     },
   },
   {
     method: 'DELETE', path: '/api/projects/:project/claims/:name', who: PEOPLE_AND_TASKMASTER,
-    handler({ res, app, project, params }) {
+    handler({ res, app, session, caller, project, params }) {
       const released = app.store.claims.release(project.id, claimName(decodeURIComponent(params.name)));
-      if (released) app.broadcast({ type: 'claims', projectId: project.id });
-      return json(res, 200, { released: released ? claimView(app, released) : null });
+      const view = released && claimView(app, released);
+      if (view) {
+        app.broadcast({ type: 'claims', projectId: project.id });
+        app.store.noteDigest(project.id, caller?.id ?? view.holder, `${session.name} released ${view.name} (held by ${view.holder_name})`);
+      }
+      return json(res, 200, { released: view || null });
     },
   },
   // Edit, pause or resume, or delete a schedule; runs it already started stay.

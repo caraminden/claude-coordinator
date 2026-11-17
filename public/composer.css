@@ -98,7 +98,14 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 .composer button.add-image, .composer button.to-latest, .composer button.to-card, .composer select.picker, .composer .unpark-slot > button, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
 
 /* A parked minion's Unpark, just left of Send (#726). */
+.composer .unpark-slot { display: inline-flex; align-items: center; gap: 0.5rem; }
 .composer .unpark-slot[hidden] { display: none; }
+.composer .unpark-slot > button { white-space: nowrap; }
+/* Phones: five buttons don't fit one line, so a parked minion's two take a line of their own above, with full padding and labels. */
+@media (max-width: 800px) {
+  .composer .row:has(.unpark-slot:not([hidden])) { flex-wrap: wrap; row-gap: 0.5rem; }
+  .composer .row > .unpark-slot:not([hidden]) { order: -1; flex: 1 0 100%; }
+}
 
 /* Send, and while a turn runs a ▾ beside it for "Send after this turn" (Send itself steers the turn). */
 .composer .send-group { position: relative; display: inline-flex; }

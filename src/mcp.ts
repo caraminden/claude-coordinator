@@ -806,6 +806,19 @@ const PUBLISH_RELEASE = {
   },
 };
 
+/** A home contraption's Android release key, made on the server once a member approves (#837). */
+const MAKE_RELEASE_KEY = {
+  name: 'make_release_key',
+  description: `Ask for a contraption's Android release key: posts a card in this chat that any member of this scheme approves, which makes the key on the ${APP_NAME} server (a keystore and a random password in ~/.config/citadel-android, readable only by ${APP_NAME}) and starts its first APK build. Call it when you're told a Capacitor app has no release key yet. Neither the key nor its password ever comes back to you or goes in a chat or a repo. A key is never replaced, so it is refused for an app that has one. Members can also press Make release key on the app's card on the Releases page. Link every mention of the card, as with propose_plan.${HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      contraption: { type: 'string', ...(HOME_CONTRAPTIONS.length ? { enum: HOME_CONTRAPTIONS } : {}) },
+    },
+    required: ['contraption'],
+  },
+};
+
 /** Deploying a contraption from its repo: for Citadel's Taskmaster on an admin's turn, and a contraption's home scheme. */
 const DEPLOY_CONTRAPTION = {
   name: 'deploy_contraption',
@@ -1726,6 +1739,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
       return readText(args.app, args.command, r);
     }
+    case 'make_release_key': {
+      const { href } = await call('POST', `/api/tickets/${TICKET}/release-key`, { contraption: args.contraption });
+      return `The release key card is in the chat; its link is ${href}. Link every mention of it, e.g. [the key card below](${href}). Any member of this scheme can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
+    }
     case 'publish_release':
       return (await call('POST', `/api/projects/${PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {
@@ -2056,11 +2073,11 @@ function toolList() {
 
 function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
-  const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE] : [])];
+  const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

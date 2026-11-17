@@ -5,10 +5,11 @@ import { costDays, dayBudget, spendSplit, weekLimit, whereItWent } from '../cost
 import { fallbacks } from '../fallbacks.ts';
 import { prOwners } from '../prlinks.ts';
 import { ServiceError } from '../app-services.ts';
-import type { Store } from '../db.ts';
+import type { ContraptionRow, Store } from '../db.ts';
+import { hasKey } from '../release-key.ts';
 import { mayReceive } from '../access.ts';
 import { randomUUID } from 'node:crypto';
-import { clientIp, HttpError, isSecure, json, readJson, str, type Ctx, type Route } from '../http.ts';
+import { clientIp, HttpError, isSecure, json, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { optOutKey } from '../replay-keep.ts';
 
 const MAX_CLIENTS = 100;
@@ -195,6 +196,16 @@ export const appRoutes: Route[] = [
     releases.poll();
     return json(res, 200, { said: said ?? `Started ${t.name}'s release.` });
   } },
+  // A keyless Capacitor app's Make release key button (#837; Cara, 2026-11-17, "Both"): any member of its home scheme
+  // makes the key on the server, as approving make_release_key's card does. Neither the key nor its password is sent back.
+  { method: 'POST', path: '/api/releases/release-key', who: ['person'], handler: async ({ req, res, app, session }) => {
+    const body = await readJson(req);
+    const projectId = Number(body?.projectId);
+    if (!Number.isInteger(projectId) || !app.store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
+    const c = homeApp(app, projectId, str(body?.contraption, 'contraption', 100));
+    await makeKey(app, session, c.name);
+    return json(res, 201, { ok: true });
+  } },
   // A target's auto-deploy on or off (#629: "A scheme can turn it off"), from its card, by any member of its scheme.
   { method: 'PUT', path: '/api/releases/auto-deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {
     const body = await readJson(req);
@@ -205,6 +216,27 @@ export const appRoutes: Route[] = [
     return json(res, 200, { on: body.on });
   } },
 ];
+
+/** `name`, a contraption of scheme `projectId` with no release key yet (#837), or an HttpError saying why not. */
+export function homeApp(app: App, projectId: number, name: string): ContraptionRow {
+  const c = app.store.getContraption(name);
+  if (!c || c.home_scheme !== projectId) throw new HttpError(403, `${name} isn't one of this scheme's contraptions`);
+  if (hasKey(app.apkBuilds.keyDir, c.name)) throw new HttpError(409, `${c.title} already has a release key; it's never replaced, as phones would have to uninstall the app`);
+  return c;
+}
+
+/** Make `name`'s release key and start its APK build (#837), for a member of its home scheme: the card's Approve and the Releases button. */
+export async function makeKey(app: App, session: Session, name: string) {
+  const c = app.store.getContraption(name);
+  if (!c || c.home_scheme == null) throw new HttpError(409, `${name} was removed`);
+  if (!app.store.canSee(session, c.home_scheme)) throw new HttpError(403, `Only a member of ${app.store.getProject(c.home_scheme)?.name ?? 'its'} scheme can make ${c.title}'s release key`);
+  try {
+    await app.apkBuilds.makeKey(c, session.name);
+  } catch (err: any) {
+    throw new HttpError(409, err?.message ?? String(err));
+  }
+  app.releases.poll();
+}
 
 /** The scheme and target a release action names, if the person may see that scheme. */
 function releaseTarget(store: Store, session: Session, body: any): { projectId: number; target: string } {

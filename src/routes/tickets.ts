@@ -13,6 +13,7 @@ import { APP_NAME } from '../appname.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../artifacts.ts';
 import { cardHref } from '../card-links.ts';
+import { keyFiles } from '../release-key.ts';
 import { checkNeed } from '../needs.ts';
 import { armForCi, postCard, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
@@ -38,6 +39,7 @@ import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
+import { homeApp, makeKey } from './app.ts';
 import { machineNotes, patchMachine } from './machines.ts';
 import { ensureCoordinator, LINE_FIELDS, schemeTarget } from './projects.ts';
 import { pacificTime, parseWakeTime, type Relay } from '../wake.ts';
@@ -297,14 +299,16 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
 
 /**
  * Post a plan card that waits, across restarts, for a person. A new one replaces any earlier one of its kind still open
- * (waiting, or sent back for changes): a plan replaces plans, and a machine's notes card (#617) that machine's earlier ones.
+ * (waiting, or sent back for changes): a plan replaces plans, a machine's notes card (#617) that machine's earlier ones,
+ * and a release key card (#837) that app's.
  */
-function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number } }) {
+function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string } }) {
   const { store, runner } = app;
+  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : 'plan');
   for (const e of store.eventsOfKinds(id, ['plan'])) {
     const old = JSON.parse(e.data);
     if (old?.status !== 'pending' && old?.status !== 'revising') continue;
-    if (old.machine?.id !== card.machine?.id) continue;
+    if (kind(old) !== kind(card)) continue;
     store.setEventData(e.id, { ...old, status: 'superseded' });
     runner.emit(id, 'plan_result', { id: old.id, status: 'superseded' });
   }
@@ -688,6 +692,22 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    method: 'POST', path: '/api/tickets/:ticket/release-key', who: ['self'], refuse: 'Only the minion or Taskmaster itself can ask for a release key in its chat',
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      // make_release_key (#837; Cara, 2026-11-17, "Both"): a card a member approves, which makes the key on the server.
+      // Neither the key nor its password goes through the chat; the card only names where they are.
+      const c = homeApp(app, ticket.project_id, str((await readJson(req))?.contraption, 'contraption', 100));
+      const { jks, pass } = keyFiles(app.apkBuilds.keyDir, c.name);
+      const event = postPlan(app, ticket.id, {
+        summary: `Make ${c.title}'s release key`,
+        plan: `Approve makes ${c.title}'s Android signing key on the server: \`${jks}\`, with a random password in \`${pass}\` beside it, both readable only by ${APP_NAME}. Neither goes in a repo or a chat. It signs every APK from now on, so it is never replaced, and it goes off-box with the nightly backup. Its first APK builds once it's made.`,
+        releaseKey: { app: c.name, title: c.title },
+      });
+      return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id) });
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/verdict', who: ['person'], refuse: 'Only people approve plans',
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
@@ -699,10 +719,11 @@ export const ticketRoutes: Route[] = [
       const event = store.eventsOfKinds(id, ['plan']).find((e) => JSON.parse(e.data).id === body.planId);
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
-      // A machine's notes card (#617): a reason to reject is optional, and only its owner or an admin approves.
-      const notes = body.verdict === 'approve' ? null : card.machine && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
-      if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : 'A newer plan replaced this one');
-      if (card.status !== 'pending') throw new HttpError(409, card.machine ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} these notes` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
+      // A machine's notes card (#617) or a release key card (#837): a reason to reject is optional, and a reject is final.
+      const fixed = card.machine || card.releaseKey;
+      const notes = body.verdict === 'approve' ? null : fixed && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
+      if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : 'A newer plan replaced this one');
+      if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
       if (card.machine && notes === null) {
         const machine = store.getMachine(card.machine.id);
         if (!machine) throw new HttpError(409, `${card.machine.name} was removed`);
@@ -711,10 +732,16 @@ export const ticketRoutes: Route[] = [
         if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
         await patchMachine(app, session, machine, { notes: card.plan });
       }
-      const result = { status: body.verdict === 'approve' ? 'approved' : card.machine ? 'rejected' : 'revising', by: session.name, at: Date.now() };
+      // A release key card (#837): any member of the app's home scheme makes the key, as the Releases page's button does.
+      if (card.releaseKey && notes === null) await makeKey(app, session, card.releaseKey.app);
+      const result = { status: body.verdict === 'approve' ? 'approved' : fixed ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });
       runner.emit(id, 'plan_result', { id: card.id, ...result });
-      deliverAnswer(app, id, session.name, card.machine
+      deliverAnswer(app, id, session.name, card.releaseKey
+        ? notes === null
+          ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
+          : `Rejected the release key card for ${card.releaseKey.title}; no key was made.${notes ? `\n\n${notes}` : ''}`
+        : card.machine
         ? notes === null
           ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`
           : `Rejected your proposed notes for ${card.machine.name}; they are unchanged.${notes ? `\n\n${notes}` : ''}`

@@ -1832,6 +1832,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/releases/release-key": {
+  "anon": "401 Not logged in",
+  "person": "404 No such scheme",
+  "member": "404 No such scheme",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "DELETE /api/schedules/:s": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -2280,6 +2290,16 @@
   "tmA": "403 Only a minion queues a relay",
   "tmB": "403 Only a minion queues a relay",
   "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/release-key": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "member": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "outsider": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "tmA": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "tmB": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "m1": "400 contraption is required",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/secret": {
@@ -2869,6 +2889,16 @@
   "outsider": "403 Only a minion queues a relay",
   "tmA": "403 Only a minion queues a relay",
   "tmB": "403 Only a minion queues a relay",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/release-key": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "member": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "outsider": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "tmA": "400 contraption is required",
+  "tmB": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

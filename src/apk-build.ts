@@ -116,6 +116,10 @@ export class ApkBuilds {
     })();
   }
 
+  get keyDir() {
+    return this.d.keyDir;
+  }
+
   /** Whether `name` is a Capacitor app whose last check found no release key: the Releases page offers to make it. */
   keyless(name: string): boolean {
     return existsSync(join(this.d.cacheDir, name, 'key-missing-told')) && !hasKey(this.d.keyDir, name);

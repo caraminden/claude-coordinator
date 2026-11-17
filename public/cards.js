@@ -208,24 +208,27 @@ function revisionBody(card, prev, ticketId) {
 export function planCard(ticketId, card, opts = {}) {
   // A machine's notes card (#617): only its owner or an admin approves; anyone may reject, with an optional reason.
   const m = card.machine;
+  // A release key card (#837): approved or rejected like a machine's notes, by any member of the app's scheme.
+  const k = card.releaseKey;
+  const fixed = m || k;
   const mayApprove = !m || !!account?.admin || (m.owner != null && m.owner === me);
   // Said beside the greyed-out Approve, not only in its tooltip, so a phone or keyboard shows why.
   const hint = mayApprove ? '' : `Only ${m.owner ? `${m.owner} (its owner)` : 'an admin'}${m.owner ? ' or an admin' : ''} can approve`;
   const status = h('span', { class: 'muted', role: 'status' });
   const why = h('div', { class: 'muted small', hidden: !hint }, hint);
   const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, 'Approve');
-  const revise = h('button', { type: 'button', class: 'small secondary' }, m ? 'Reject' : 'Revise');
-  const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: m ? 'Why? (optional)' : 'What should change?', hidden: true });
+  const revise = h('button', { type: 'button', class: 'small secondary' }, fixed ? 'Reject' : 'Revise');
+  const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: fixed ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
-  const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !m }, m ? 'Reject' : 'Send notes');
+  const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !fixed }, fixed ? 'Reject' : 'Send notes');
   // Diffed against the plan before it unless that one was approved: a later plan after a go is new work, not a revision.
-  const prev = m || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
+  const prev = fixed || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
   const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
-  if (!m) view.lastPlan = mine;
-  const head = whoLine(m ? 'proposes machine notes' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
+  if (!fixed) view.lastPlan = mine;
+  const head = whoLine(m ? 'proposes machine notes' : k ? 'asks for a release key' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
   const el = h('div', { class: 'qcard pcard' },
     head.el,
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : 'Plan'), card.summary),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : 'Plan'), card.summary),
     h('div', { class: 'pbody' }, m ? notesBody(card) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
     notes, why,
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), revise, approve, cancel, sendNotes));
@@ -251,7 +254,7 @@ export function planCard(ticketId, card, opts = {}) {
         approve.hidden = revise.hidden = true;
         el.classList.add('answered');
         why.hidden = true;
-        status.textContent = verdict === 'approve' ? 'Approved' : m ? 'Rejected' : 'Revision sent';
+        status.textContent = verdict === 'approve' ? (k ? 'Making the key…' : 'Approved') : fixed ? 'Rejected' : 'Revision sent';
       },
       send: () => api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: text } }),
       undo: () => {
@@ -263,16 +266,16 @@ export function planCard(ticketId, card, opts = {}) {
         status.textContent = '';
         if (verdict === 'revise') editing(true);
       },
-      label: m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
+      label: m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
   };
   approve.addEventListener('click', () => decide('approve'));
   revise.addEventListener('click', () => editing(true));
   cancel.addEventListener('click', () => editing(false));
   sendNotes.addEventListener('click', () => decide('revise'));
-  notes.addEventListener('input', () => { sendNotes.disabled = !m && !notes.value.trim(); });
+  notes.addEventListener('input', () => { sendNotes.disabled = !fixed && !notes.value.trim(); });
   notes.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (m || notes.value.trim())) { e.preventDefault(); decide('revise'); }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (fixed || notes.value.trim())) { e.preventDefault(); decide('revise'); }
   });
   const handle = {
     el,
@@ -286,7 +289,7 @@ export function planCard(ticketId, card, opts = {}) {
       el.classList.add('answered', `p-${r.status}`);
       why.hidden = true;
       approve.hidden = revise.hidden = true;
-      status.textContent = planOutcome(r, m);
+      status.textContent = planOutcome(r, fixed);
       if (r.by) head.done(`${r.status === 'approved' ? 'approved' : 'sent back'} by ${r.by}`);
     },
   };

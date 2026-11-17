@@ -276,3 +276,18 @@ test('tap targets: the panner\'s Look around and the scrubber\'s seek bar are at
     assert.ok(h.every((x) => x >= min), `${width}px wide: ${h} ≥ ${min}`);
   }
 });
+
+test('scrubber: a stream with no known length (duration Infinity) fills no frame strip and throws nothing', { skip }, async () => {
+  const page = await browser.page(app.base, { width: 700, height: 600 });
+  await page.eval(`(() => {
+    window.errs = []; addEventListener('error', (e) => errs.push(e.message));
+    const real = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'duration');
+    // Only the scrubber's hidden frame-capture clip (muted, preload auto, never in the page) reports a live stream.
+    Object.defineProperty(HTMLMediaElement.prototype, 'duration', { get() { return this.preload === 'auto' && this.muted && !this.isConnected ? Infinity : real.get.call(this); } });
+    const v = document.createElement('video'); v.src = clip; v.muted = true; box.append(v);
+    window.s = scrubber(v); box.append(s.el);
+  })()`);
+  await waitFor(page, 'the clip to load', `document.querySelector('.cui-scrub-time').textContent.endsWith('/ 0:08')`);
+  await new Promise((r) => setTimeout(r, 800)); // the capture clip's loadeddata comes after the page's own
+  assert.deepEqual(await page.eval(`errs`), []);
+});

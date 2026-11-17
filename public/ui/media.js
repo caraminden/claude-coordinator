@@ -345,6 +345,7 @@ export function scrubber(video, opts = {}) {
     let i = 0;
     const next = () => {
       if (i >= n || !root.isConnected && i > 0) return void capture.removeAttribute('src');
+      if (!Number.isFinite(capture.duration)) return; // a live stream has no length to cut frames from
       capture.currentTime = Math.min(capture.duration - 0.05, ((i + 0.5) * capture.duration) / n);
     };
     capture.addEventListener('loadeddata', next, { once: true });

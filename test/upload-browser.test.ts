@@ -41,3 +41,38 @@ for (const [name, width] of [['desktop', 1000], ['phone', 390]] as const) {
     for (const h of heights.buttons) assert.ok(h >= heights.control, `button ${h}px is at least control-h ${heights.control}px`);
   });
 }
+
+// #902: a page whose uploads never finish (fetch never answers), so a row stays "sending" until the test moves it.
+const HANG = PAGE.replace("mountUpload(document.getElementById('root'), { endpoint: '/none' });",
+  "window.fetch = () => new Promise(() => {}); window.up = mountUpload(document.getElementById('root'), { endpoint: '/none' });");
+const states = `[...document.querySelectorAll('.cui-upload-file')].map((li) => li.dataset.state)`;
+const files = (...names: string[]) => `up.add([${names.map((n) => `{ file: new File(['x'], '${n}'), path: '${n}' }`).join(',')}])`;
+
+test('a file cancelled before its turn is cleared with the finished rows when the next batch comes', { skip }, async () => {
+  const hang = await serveUi(HANG);
+  try {
+    const page = await browser.page(hang.base, { width: 1000, height: 700 });
+    await page.eval(files('a.bin', 'b.bin'));
+    assert.deepEqual(await page.eval(states), ['sending', 'waiting']);
+    await page.eval(`document.querySelectorAll('.cui-upload-file')[1].querySelector('[aria-label^="Cancel"]').click()`);
+    assert.deepEqual(await page.eval(states), ['sending', 'cancelled']);
+    await page.eval(files('c.bin'));
+    assert.deepEqual(await page.eval(states), ['sending', 'waiting']);
+  } finally { await hang.close(); }
+});
+
+test('Resume on a paused file while another is sending waits its turn: one file at a time', { skip }, async () => {
+  const hang = await serveUi(HANG);
+  try {
+    const page = await browser.page(hang.base, { width: 1000, height: 700 });
+    await page.eval(files('a.bin', 'b.bin'));
+    await page.eval(`document.querySelectorAll('.cui-upload-file')[0].querySelector('.cui-btn').click()`); // pause a: b starts
+    assert.deepEqual(await page.eval(states), ['paused', 'sending']);
+    await page.eval(`document.querySelectorAll('.cui-upload-file')[0].querySelector('.cui-btn').click()`); // resume a
+    assert.deepEqual(await page.eval(states), ['waiting', 'sending']);
+    await page.eval(`up.pause(); up.resume()`); // Resume all keeps it too
+    assert.deepEqual((await page.eval<string[]>(states)).filter((s) => s === 'sending').length, 1);
+    await page.eval(`document.querySelectorAll('.cui-upload-file')[1].querySelector('.cui-btn').click()`); // pause b: a gets its turn
+    assert.deepEqual(await page.eval(states), ['sending', 'paused']);
+  } finally { await hang.close(); }
+});

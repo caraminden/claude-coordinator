@@ -1,6 +1,6 @@
 // Project checkouts and per-ticket working directories.
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -250,6 +250,36 @@ export async function createTicketDir(
   await mkdir(join(projectDir(dataDir, projectId), 'tickets'), { recursive: true });
   await git(['worktree', 'add', '--quiet', '-b', branch, cwd, base], repoDir);
   return { cwd, branch };
+}
+
+/**
+ * A minion whose creation was cut off between createTicket and setTicketDir (a restart during server.ts newMinion) has
+ * no folder recorded, though createTicketDir may have made it. Its turns ran in the server's own folder, where Claude
+ * filed its session under that folder's name, so no later turn found it (#899). This takes the folder where
+ * createTicketDir puts it, on whatever branch it holds, or makes it: on its branch if that exists, else a new one from
+ * the scheme checkout's HEAD. Synchronous: it runs just before a turn starts.
+ */
+export function recoverTicketDir(dataDir: string, projectId: number, repoDir: string | null, ticketId: number, ticketNumber: number | null, title: string): { cwd: string; branch: string | null } {
+  const cwd = join(projectDir(dataDir, projectId), 'tickets', String(ticketId));
+  const gitSync = (args: string[], dir: string) => execFileSync('git', args, { cwd: dir, timeout: GIT_TIMEOUT_MS, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  if (!repoDir) {
+    mkdirSync(cwd, { recursive: true });
+    return { cwd, branch: null };
+  }
+  if (!existsSync(cwd)) {
+    const branch = `ticket/${ticketNumber}-${slugify(title)}`;
+    let have = true;
+    try {
+      gitSync(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir);
+    } catch {
+      have = false;
+    }
+    gitSync(['worktree', 'prune'], repoDir);
+    gitSync(['worktree', 'add', '--quiet', ...(have ? [cwd, branch] : ['-b', branch, cwd, 'HEAD'])], repoDir);
+  }
+  // A folder git never finished making is no worktree: refuse it rather than run the turn somewhere else.
+  if (!existsSync(join(cwd, '.git'))) throw new Error(`${cwd} is not a git worktree`);
+  return { cwd, branch: gitSync(['symbolic-ref', '--short', 'HEAD'], cwd) };
 }
 
 /**

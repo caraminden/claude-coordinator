@@ -16,7 +16,7 @@ import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
-import { buildBranch, landsBuilds, projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
+import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
 import { isAuthFailure, type TurnPlace } from './claude-link.ts';
@@ -879,6 +879,18 @@ export class Runner {
 
   /** Recreate a minion's worktree from its branch if the sweep removed it, with the work it saved (#660). */
   private restoreDir(ticket: Ticket, project: Project) {
+    if (ticket.kind === 'ticket' && !ticket.cwd) {
+      try {
+        const { cwd, branch } = recoverTicketDir(this.dataDir, project.id, project.repo_dir, ticket.id, ticket.number, ticket.title);
+        this.store.setTicketDir(ticket.id, cwd, branch);
+        // The caller's copy too: the turn about to start runs in it.
+        Object.assign(ticket, { cwd, branch });
+        this.emit(ticket.id, 'note', { text: `This minion had no worktree on record (its creation was cut off, #899), so it now uses ${cwd}${branch ? ` on branch ${branch}` : ''}.` });
+      } catch (err: any) {
+        this.emit(ticket.id, 'note', { text: `This minion has no worktree on record and Citadel could not make one: ${err.message}` });
+      }
+      return;
+    }
     try {
       const note = restoreTicketDir(ticket.cwd, project.repo_dir, ticket.branch, savedRef(String(ticket.id)));
       if (note) this.emit(ticket.id, 'note', { text: note });
@@ -2268,6 +2280,8 @@ export class Runner {
     }
     // The worktree sweep removes dismissed minions' worktrees; a reopened one gets its back.
     this.restoreDir(ticket, project);
+    // With no folder it would run in the server's own (#899): the note above says why it can't.
+    if (ticket.kind === 'ticket' && !ticket.cwd) return this.broadcastTicket(ticket.id);
     let filesDir = this.filesDir(ticket);
     try {
       if (filesDir) mkdirSync(filesDir, { recursive: true });

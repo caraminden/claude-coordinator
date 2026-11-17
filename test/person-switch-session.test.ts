@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { ticketWorktree } from '../src/build-output.ts';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { projectSlug, restoreAhead, restoreSession, saveSession, transcriptPath } from '../src/sessions.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
@@ -50,8 +51,8 @@ const args = process.argv.slice(2);
 const at = args.indexOf('--resume');
 const resume = at >= 0 ? args[at + 1] : null;
 const dir = join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
-require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
-  appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ config: process.env.CLAUDE_CONFIG_DIR, resume }) + '\\n');
+require('node:readline').createInterface({ input: process.stdin }).once('line', (prompt) => {
+  appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ config: process.env.CLAUDE_CONFIG_DIR, resume, cwd: process.cwd(), prompt }) + '\\n');
   if (resume && !existsSync(join(dir, resume + '.jsonl'))) {
     console.log(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'No conversation found with session ID: ' + resume }));
     process.exit(1);
@@ -125,6 +126,25 @@ test('a session nobody has a copy of starts fresh with a note, instead of failin
   assert.equal(store.getTicket(t.id)!.status, 'idle');
   assert.notEqual(store.getTicket(t.id)!.session_id, 'lost-session');
   assert.ok(notes(t.id).some((n) => /fresh session/.test(n) && n.includes('lost-session')), notes(t.id).join('\n'));
+});
+
+test("a minion whose creation was cut off before its worktree was recorded runs in its worktree and keeps its session (#899)", async () => {
+  rmSync(seen, { force: true });
+  // A restart between createTicket and setTicketDir (server.ts newMinion) left the row's cwd empty, its folder made.
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const dir = ticketWorktree(root, project.id, t.id);
+  mkdirSync(dir, { recursive: true });
+  store.updateTicket(t.id, { person_id: cara.id });
+  const r = runner();
+  r.send(t.id, 'Cara', 'one');
+  await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
+  r.send(t.id, 'Cara', 'two');
+  await until(() => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
+  const [first, second] = turns();
+  assert.equal(realpathSync(first.cwd), realpathSync(dir), 'the turn runs in its own folder, not the home folder');
+  assert.equal(store.getTicket(t.id)!.cwd, dir, 'the folder is recorded');
+  assert.equal(second.resume, store.getTicket(t.id)!.session_id, 'the second turn resumes the first');
+  assert.ok(!notes(t.id).some((n) => /fresh session/.test(n)), notes(t.id).join('\n'));
 });
 
 test("a restore that fails doesn't cost the database its copy: the turn resumes, fails, and the next one recovers", async () => {

@@ -884,26 +884,26 @@ export class AppServices {
         // it until its stdin closes. The time limit starts once it holds it, so the wait in line doesn't count against it.
         // shortcut: a Citadel restart mid-build ends the holder while the build unit runs on unslotted, a few minutes at most.
         let holder: ChildProcess | null = null;
-        if (m.build.length) {
-          // Citadel's own CITADEL_HEAVY_* settings (a dev copy's lock folder, a test's pressure gate) carry over.
-          const heavyEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('CITADEL_HEAVY_') && k !== 'CITADEL_HEAVY_HELD'));
-          const fd = openSync(view.log, 'a');
-          holder = spawn(this.opts.heavy, ['sh', '-c', 'echo; exec cat >/dev/null'], {
-            cwd: next, env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` }, stdio: ['pipe', 'pipe', fd],
-          });
-          closeSync(fd);
-          holder.stdin!.on('error', () => {}); // it may be gone already when the build ends
-          const asked = Date.now();
-          const ended = await new Promise<number | null>((ok) => {
-            holder!.stdout!.once('data', () => ok(null));
-            holder!.once('close', (code) => ok(code ?? 1));
-            holder!.once('error', () => ok(127));
-          });
-          if (ended !== null) throw new Error(`Waiting for a heavy slot ended (${exitWhy(ended)}): see the log.`);
-          const waited = Math.round((Date.now() - asked) / 1000);
-          if (waited >= 2) await say(`Got a heavy slot after ${waited} s in line.`);
-        }
         try {
+          if (m.build.length) {
+            // Citadel's own CITADEL_HEAVY_* settings (a dev copy's lock folder, a test's pressure gate) carry over.
+            const heavyEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('CITADEL_HEAVY_') && k !== 'CITADEL_HEAVY_HELD'));
+            const fd = openSync(view.log, 'a');
+            holder = spawn(this.opts.heavy, ['sh', '-c', 'echo; exec cat >/dev/null'], {
+              cwd: next, env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` }, stdio: ['pipe', 'pipe', fd],
+            });
+            closeSync(fd);
+            holder.stdin!.on('error', () => {}); // it may be gone already when the build ends
+            const asked = Date.now();
+            const ended = await new Promise<number | null>((ok) => {
+              holder!.stdout!.once('data', () => ok(null));
+              holder!.once('close', (code) => ok(code ?? 1));
+              holder!.once('error', () => ok(127));
+            });
+            if (ended !== null) throw new Error(`Waiting for a heavy slot ended (${exitWhy(ended)}): see the log.`);
+            const waited = Math.round((Date.now() - asked) / 1000);
+            if (waited >= 2) await say(`Got a heavy slot after ${waited} s in line.`);
+          }
           const deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
           for (const step of m.build) {
             await say(`Build: ${step}`);

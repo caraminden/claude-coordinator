@@ -565,7 +565,7 @@ export const projectRoutes: Route[] = [
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet and ci_watch; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'repo_url'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
       const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch'>> = {};
@@ -601,6 +601,16 @@ export const projectRoutes: Route[] = [
       if (instructions.length > MAX_INSTRUCTIONS) {
         throw new HttpError(400, `Instructions are ${instructions.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
       }
+      // A repo URL only records where the repo lives: no clone, no re-pointing of a checkout. Refused before anything saves.
+      let repoUrl: string | null = null;
+      if (body.repo_url !== undefined) {
+        repoUrl = typeof body.repo_url === 'string' ? body.repo_url.trim() : '';
+        if (!/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
+        if (repoUrl === project.repo_url) repoUrl = null;
+        else if (project.repo_url && body.replace_repo !== true) {
+          throw new HttpError(409, `This scheme's repo is already ${project.repo_url}; send replace_repo: true to point it at ${repoUrl} instead`);
+        }
+      }
       // Renamed first: it is the only change that can still be refused (a taken name).
       if (name !== project.name) {
         try {
@@ -610,6 +620,13 @@ export const projectRoutes: Route[] = [
         }
         const coordinator = store.getCoordinator(project.id);
         if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} renamed the scheme from "${project.name}" to "${name}".` });
+      }
+      if (repoUrl) {
+        store.setProjectUpstream(project.id, repoUrl, null);
+        const coordinator = store.getCoordinator(project.id);
+        if (coordinator) {
+          runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists, still on the old repo)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
+        }
       }
       for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
       if (Object.keys(settings).length) {

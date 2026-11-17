@@ -87,6 +87,28 @@ test('set_project_settings refuses nothing-to-set and a null list', async () => 
   assert.equal(store.getProject(Citadel.id)!.approval_rules, rules);
 });
 
+test('set_project_settings takes name and repo_url for its own scheme, and refuses a taken name', async () => {
+  const r = await tool(TM, 'coordinator', 'set_project_settings', { name: 'Delve' });
+  refused(r, /already a scheme called "Delve"/);
+  assert.equal(store.getProject(Citadel.id)!.name, 'Citadel');
+  const ok = await tool(TM, 'coordinator', 'set_project_settings', { repo_url: 'https://github.com/me/cit' });
+  assert.ok(!ok.isError, ok.text);
+  assert.match(ok.text, /clon/);
+  refused(await tool(TM, 'coordinator', 'set_project_settings', { repo_url: 'https://github.com/me/other' }), /replace_repo/);
+  assert.equal(store.getProject(Citadel.id)!.repo_url, 'https://github.com/me/cit');
+  const renamed = await tool(TM, 'coordinator', 'set_project_settings', { name: 'Citadel 2' });
+  assert.ok(!renamed.isError, renamed.text);
+  assert.equal(store.getProject(Citadel.id)!.name, 'Citadel 2');
+  assert.equal((await tool(TM, 'coordinator', 'set_project_settings', { name: 'Citadel' })).isError, undefined);
+});
+
+test('a Taskmaster of another scheme cannot rename or re-point this one', async () => {
+  const other = store.createTicket({ project_id: store.listProjects().find((p) => p.name === 'Delve')!.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+  const r = await tool(other, 'coordinator', 'set_project_settings', { name: 'Hijacked' }, { COORDINATOR_PROJECT: String(Citadel.id) });
+  assert.equal(r.isError, true, r.text);
+  assert.equal(store.getProject(Citadel.id)!.name, 'Citadel');
+});
+
 test('set_properties refuses a missing or empty properties', async () => {
   for (const args of [{ ticket_id: Minion.number }, { ticket_id: Minion.number, properties: {} }, { ticket_id: Minion.number, properties: null }]) {
     refused(await tool(TM, 'coordinator', 'set_properties', args), /properties is required/);

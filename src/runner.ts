@@ -42,7 +42,6 @@ import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, pl
 import { packPlan, unpackPlan } from './history.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
-import { overlordOrLead } from './overlord.ts';
 import { clockTime, parseResetTime } from './pacific.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -817,7 +816,7 @@ export class Runner {
   private freeClaims(ticketId: number) {
     const freed = this.store.claims.releaseHeldBy(ticketId);
     const minion = this.store.getTicket(ticketId);
-    const keeper = minion && freed.length ? overlordOrLead(this.store, minion.project_id) : undefined;
+    const keeper = minion && freed.length ? this.store.getOverlord(minion.project_id) : undefined;
     if (!keeper) return;
     for (const c of freed) this.leaveMail(keeper.id, `#${minion!.number} ${minion!.title}`, `(nothing to do unless something waits on it) ${c.name} is free: #${minion!.number}, its holder, was dismissed.`);
     this.broadcast({ type: 'claims', projectId: minion!.project_id });

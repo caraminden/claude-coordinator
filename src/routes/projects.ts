@@ -18,6 +18,7 @@ import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
 import { claimName, type Claim } from '../claims.ts';
+import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
@@ -191,13 +192,39 @@ function minionHits(app: App, hits: MemoryHit[]): (MemoryHit & { owner: string |
   return hits.map((h) => ({ ...h, owner: String(app.store.props.forTarget('minion', h.ticket_id).assigned ?? '') || null, twin: h.score >= TWIN_SCORE }));
 }
 
-/** After a person starts a minion: a note in its chat naming open minions that read like the same work. Never blocks the start; a failed search says nothing. */
-async function twinNote(app: App, projectId: number, id: number, text: string) {
+/**
+ * After a start: a person's gets a quiet note in its chat naming open minions that read like the same work (#689);
+ * in a split scheme the Overlord hears of every start but its own as held mail, and gets a card when one reads like
+ * another person's open minion (#921). Never blocks the start; a failed search says nothing.
+ */
+async function startChecks(app: App, projectId: number, id: number, startedBy: string, caller: Ticket | undefined, text: string) {
+  const { store } = app;
+  const minion = store.getTicket(id);
+  const overlord = store.isSplit(projectId) ? store.getOverlord(projectId) : undefined;
+  const watching = overlord && overlord.id !== caller?.id ? overlord : undefined;
+  if (!minion) return;
+  if (watching) app.runner.leaveMail(watching.id, 'Citadel', `${startedBy} started #${minion.number} ${minion.title}`);
+  if ((caller && !watching) || !app.memory.indexed(projectId)) return;
   try {
     const hits = await app.store.memory.search(projectId, text.slice(0, 1000), app.memory.embed, app.memory.model, { limit: 3, openMinions: true });
     const twins = minionHits(app, hits).filter((h) => h.twin && h.ticket_id !== id);
-    if (!twins.length || !app.store.getTicket(id)) return;
-    app.runner.emit(id, 'note', { text: `Similar and open: ${twins.map((h) => `#${h.number} '${h.title}'${h.owner ? `, ${h.owner}'s` : ''}`).join('; ')}` });
+    if (!twins.length || !store.getTicket(id)) return;
+    if (!caller) app.runner.emit(id, 'note', { text: `Similar and open: ${twins.map((h) => `#${h.number} '${h.title}'${h.owner ? `, ${h.owner}'s` : ''}`).join('; ')}` });
+    // The Overlord only flags another person's: a person's own look-alikes are theirs and their Taskmaster's to see.
+    const mine = store.minionOwner(minion) ?? (caller ? caller.coordinator_of : null);
+    const theirs = twins.map((h) => ({ ...h, by: store.minionOwner({ id: h.ticket_id }) })).find((h) => h.by != null && h.by !== mine);
+    if (!watching || !theirs) return;
+    const who = store.getUser(theirs.by!)?.name ?? 'someone';
+    postCard(app, watching, { questions: [{
+      header: 'Duplicate start?',
+      question: `${startedBy} started #${minion.number} '${minion.title}', which reads like ${who}'s #${theirs.number} '${theirs.title}' (match ${theirs.score.toFixed(2)}). Same work?`,
+      multiSelect: false,
+      options: [
+        { label: 'Both stay', description: 'Different work after all; nothing to do.', recommended: true },
+        { label: `Dismiss #${minion.number}`, description: `#${theirs.number} carries on; #${minion.number} is dismissed and its starter told why.` },
+        { label: 'Merge into one', description: `Both owners' Taskmasters are told to agree which minion carries on with both briefs.` },
+      ],
+    }] });
   } catch {}
 }
 
@@ -950,8 +977,8 @@ export const projectRoutes: Route[] = [
       } else {
         runner.send(id, session.name, message, [], { brief: true });
       }
-      // A person's start gets a quiet note on look-alike open minions (#689); the Taskmaster's create_ticket checks before it creates (#488).
-      if (!caller && app.memory.indexed(project.id)) void twinNote(app, project.id, id, `${title}\n${message}`);
+      // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
+      void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);
       return json(res, 201, { ...ticketView(app, id), notes });
     },
   },

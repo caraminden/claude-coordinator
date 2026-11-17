@@ -197,3 +197,21 @@ test("the Overlord's alert notes are for everyone; a person's own Taskmaster's a
   assert.equal(note(s.coordinatorFor(p.id, josh.id)!.id).everyone, undefined);
   s.db.close();
 });
+
+test("a dismissed minion is a line in a split scheme's Taskmaster digest (#919: \"claims and closes are yours to add\")", async () => {
+  const s = new Store(join(root, 'closes.db'));
+  const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = s.createUser({ name: 'Josh', login: 'josh' });
+  const p = s.createProject('Shared', null, cara.id);
+  s.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  const before = s.createTicket({ project_id: p.id, title: 'Before the split', permission_mode: 'default', created_by: 'Cara' });
+  const runner = new Runner(s, () => {}, () => ({}), '/bin/false');
+  await runner.close(before.id, 'Dismissed.');
+  s.splitScheme(p.id, josh.id);
+  const m = s.createTicket({ project_id: p.id, title: 'Lairs', permission_mode: 'default', created_by: 'Josh' });
+  await runner.close(m.id, 'Dismissed.');
+  const lines = s.digestFor(s.coordinatorFor(p.id, cara.id)!.id).join('\n');
+  assert.match(lines, new RegExp(`#${m.number} Lairs was dismissed`));
+  assert.doesNotMatch(lines, /Before the split/, 'an unsplit scheme has no one to tell');
+  s.db.close();
+});

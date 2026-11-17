@@ -836,6 +836,9 @@ export class Runner {
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
     this.freeClaims(ticketId);
+    // A split scheme's Taskmasters read it in their next turn's digest (#919's noteDigest).
+    const gone = this.store.getTicket(ticketId);
+    if (gone && gone.kind !== 'coordinator' && this.store.isSplit(gone.project_id)) this.store.noteDigest(gone.project_id, 0, `#${gone.number} ${gone.title} was dismissed`);
     return this.lanes.run(ticketId, 'dismissal cleanup', async () => {
       const ticket = this.store.getTicket(ticketId);
       // Reopened while this waited (the status route): its temp folder is in use again.

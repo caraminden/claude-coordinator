@@ -102,8 +102,8 @@ test('only minions of its own scheme: a number that exists only in another schem
 test('unpark: true wakes a minion parked on the sender, and the Taskmaster gets a held-mail line', async () => {
   const P = minion(A.id, 'Waiting on #1');
   store.updateTicket(P.id, { state: 'parked' });
-  const plain = await tool(M1.id, 'message_minion', { ticket_id: P.number, text: 'held only', wake: false });
-  assert.match(plain.text, /resend with unpark: true|Left as held mail|Held for/);
+  const plain = await tool(M1.id, 'message_minion', { ticket_id: P.number, text: 'held only' });
+  assert.match(plain.text, /resend with unpark: true/);
   assert.equal(store.getTicket(P.id)!.state, 'parked', 'without unpark it stays parked');
   const r = await tool(M1.id, 'message_minion', { ticket_id: P.number, text: 'my work is on main, go ahead', unpark: true });
   assert.equal(r.error, false, r.text);

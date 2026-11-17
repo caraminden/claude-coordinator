@@ -941,7 +941,7 @@ export const ticketRoutes: Route[] = [
         if (app.waiters.chains().some((c) => c.ticket === target.id && c.held)) throw new HttpError(409, `#${to} is on hold: only a person's Unpark or the Taskmaster starts it. Ask the Taskmaster (message_coordinator).`);
         await unparkTicket(app, target, `#${ticket.number}`, author, true);
       }
-      const held = runner.relayMinion(ticket.id, target.id, author, text, body.urgent === true || unparks, body.wake !== false, unparks);
+      const held = runner.relayMinion(ticket.id, target.id, author, text, body.urgent === true || unparks, body.wake !== false || unparks, unparks);
       if (unparks && held === true && target.state === 'parked' && !runner.isRunning(target.id)) {
         store.updateTicket(target.id, { state: 'parked' });
         runner.emit(target.id, 'note', { text: 'The loop guard held the message that unparked it, so it stays parked.' });

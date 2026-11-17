@@ -91,6 +91,51 @@ export interface Project {
   created_at: number;
 }
 
+/** A job on a person's own machine (#857, src/machine-jobs.ts). JSON columns are text. */
+export interface MachineJob {
+  id: number;
+  machine_id: number;
+  project_id: number;
+  /** The minion that queued it, or null for a contraption's. */
+  ticket_id: number | null;
+  contraption_id: number | null;
+  /** Who asked, as people read it: "#857 GPU jobs" or a contraption's name. */
+  asked_by: string;
+  kind_name: string;
+  /** The recipe as sent (src/machine-jobs.ts JobKind), JSON. */
+  kind: string;
+  kind_hash: string;
+  /** [{ name, size, sha256, path }] as JSON; path is where on this server the agent's fetch reads it. */
+  inputs: string;
+  limit_s: number;
+  run_when: 'hours' | 'now';
+  reason: string;
+  state: string;
+  go: 'hours' | 'now' | 'always' | 'standing' | null;
+  go_by: string | null;
+  /** Why it is paused: 'owner' (a person's click), 'hours' (job hours ended) or 'machine' (the whole-machine Pause). */
+  paused_by: string | null;
+  /** Its go card as JSON { ticket, question }, while one is out. */
+  card: string | null;
+  input_token_hash: string | null;
+  created_at: number;
+  started_at: number | null;
+  ended_at: number | null;
+  run_s: number;
+  /** Running time the server counted from the agent's reports, for the limit in case the agent's own count is off. */
+  server_run_s: number;
+  gpu_busy_s: number;
+  /** The agent's last report's live fields (gpu_pct, vram_mb, held_vram_mb, log_tail) as JSON. */
+  live: string | null;
+  live_at: number | null;
+  exit_code: number | null;
+  error: string | null;
+  /** [{ path, size, uploaded }] as JSON. */
+  outputs: string;
+  upload_bytes: number;
+  swept_at: number | null;
+}
+
 /** A file in the CI store (#658, src/ci-store.ts). */
 export interface CiFile {
   id: number;
@@ -292,6 +337,10 @@ export interface Machine {
   last_check: string | null;
   /** What a person ticked for it to lend, as JSON (src/machines.ts Lend) (#439); null until its agent first reports what it found. */
   lend: string | null;
+  /** What its agent says jobs may use there (#857, src/machine-jobs.ts JobsOffer) as JSON; null when its agent has no jobs block. */
+  jobs: string | null;
+  /** Its owner's job hours, one-off window and Pause (#857, src/machine-jobs.ts JobSettings) as JSON; null for the defaults. */
+  job_settings: string | null;
 }
 
 /** One browser of one signed-in person that wants Web Push notifications (src/push.ts). */
@@ -608,6 +657,56 @@ CREATE TABLE IF NOT EXISTS runner_load (
   data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runner_load_at ON runner_load(at);
+-- Jobs on a person's own machine (#857, shared/project/specs/desktop-gpu-jobs.md): one row per job a minion or a contraption
+-- queued, the server's queue of record. kind is the recipe as sent (JSON) and kind_hash its hash (src/machine-jobs.ts kindHash);
+-- go is how it got its go: hours, now, always (a standing go asked on its card) or standing (an earlier standing go covered it).
+CREATE TABLE IF NOT EXISTS machine_jobs (
+  id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  ticket_id INTEGER REFERENCES tickets(id) ON DELETE SET NULL,
+  contraption_id INTEGER REFERENCES contraptions(id) ON DELETE SET NULL,
+  asked_by TEXT NOT NULL,
+  kind_name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  kind_hash TEXT NOT NULL,
+  inputs TEXT NOT NULL DEFAULT '[]',
+  limit_s INTEGER NOT NULL,
+  run_when TEXT NOT NULL DEFAULT 'hours',
+  reason TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL,
+  go TEXT,
+  go_by TEXT,
+  paused_by TEXT,
+  card TEXT,
+  input_token_hash TEXT,
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  ended_at INTEGER,
+  run_s INTEGER NOT NULL DEFAULT 0,
+  server_run_s INTEGER NOT NULL DEFAULT 0,
+  gpu_busy_s INTEGER NOT NULL DEFAULT 0,
+  live TEXT,
+  live_at INTEGER,
+  exit_code INTEGER,
+  error TEXT,
+  outputs TEXT NOT NULL DEFAULT '[]',
+  upload_bytes INTEGER NOT NULL DEFAULT 0,
+  swept_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS machine_jobs_machine ON machine_jobs(machine_id, state);
+CREATE INDEX IF NOT EXISTS machine_jobs_ticket ON machine_jobs(ticket_id);
+-- A standing go (#857): its owner's "Always allow this kind" for one machine, keyed on the recipe's hash, so any change to
+-- the image digest, command, folders, GPU, network or top limit is a new kind that asks again. It covers job hours only.
+CREATE TABLE IF NOT EXISTS machine_job_kinds (
+  machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  hash TEXT NOT NULL,
+  name TEXT NOT NULL,
+  recipe TEXT NOT NULL,
+  allowed_by TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (machine_id, hash)
+);
 -- What each finished step of a minion's plan took (#571): its guess and its working time (the part of start to
 -- finish inside running turns), written as the step is marked completed, for the readout's ratio (Store.stepRatio).
 CREATE TABLE IF NOT EXISTS step_times (
@@ -1049,6 +1148,10 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'last_effort', 'ALTER TABLE tickets ADD COLUMN last_effort TEXT'],
   ['tickets', 'workflow', 'ALTER TABLE tickets ADD COLUMN workflow INTEGER NOT NULL DEFAULT 0'],
   ['tickets', 'plugin_dirs', "ALTER TABLE tickets ADD COLUMN plugin_dirs TEXT NOT NULL DEFAULT ''"],
+  // What a machine's agent says its owner allows jobs to use (#857, src/machine-jobs.ts JobsOffer), kept while it is offline; null: no jobs block.
+  ['machines', 'jobs', 'ALTER TABLE machines ADD COLUMN jobs TEXT'],
+  // Its owner's job hours, one-off window and Pause (#857, src/machine-jobs.ts JobSettings); null: the defaults.
+  ['machines', 'job_settings', 'ALTER TABLE machines ADD COLUMN job_settings TEXT'],
   ['projects', 'instructions', "ALTER TABLE projects ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"],
   ['projects', 'instructions_updated_by', 'ALTER TABLE projects ADD COLUMN instructions_updated_by TEXT'],
   ['projects', 'instructions_updated_at', 'ALTER TABLE projects ADD COLUMN instructions_updated_at INTEGER'],
@@ -1150,6 +1253,7 @@ export const SCHEMA_HISTORY = [
   [58, 'outside_spend (#839)'],
   [59, 'contraption_turn_audit (#844)'],
   [60, 'stored_secrets (#838)'],
+  [61, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings, cara-desktop-* owners (#857)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1230,6 +1334,7 @@ export class Store {
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.lendingLists();
+    this.ownDesktops();
     this.noteSchemaVersion();
   }
 
@@ -1301,6 +1406,17 @@ export class Store {
    * a person's own machine added there starts lent to no scheme, and a scheme whose switch was turned off there
    * keeps its place on the lists. Says what it did, for the deploy's notes.
    */
+  /**
+   * Cara's desktop agents (cara-desktop-ci-runners, cara-desktop-linux) were added before machines had owners (#306), so
+   * their owner_id is null and a job's go card (#857) had no one to go to. Give each the person who added it, by name;
+   * once set, never again. Neither lends a turn anything today (a runner host, and one with nothing ticked), so who gets
+   * them is unchanged.
+   */
+  private ownDesktops() {
+    this.db.prepare(`UPDATE machines SET owner_id = (SELECT id FROM users WHERE users.name = machines.created_by)
+      WHERE owner_id IS NULL AND name LIKE 'cara-desktop-%' AND EXISTS (SELECT 1 FROM users WHERE users.name = machines.created_by)`).run();
+  }
+
   private lendingLists() {
     const first = (this.getSetting<number>('schema_version') ?? 0) < 34;
     const machines = (this.db.prepare('SELECT * FROM machines ORDER BY id').all() as unknown as Machine[]).filter((m) => first || (!m.scoped && m.owner_id === null));
@@ -3047,10 +3163,58 @@ export class Store {
     return this.getMachine(Number(lastInsertRowid))!;
   }
 
-  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend'>>) {
+  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend' | 'jobs' | 'job_settings'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
+  }
+
+  /** A new job (#857); returns it. */
+  addMachineJob(j: Omit<MachineJob, 'id' | 'go' | 'go_by' | 'paused_by' | 'card' | 'input_token_hash' | 'started_at' | 'ended_at' | 'run_s' | 'server_run_s' | 'gpu_busy_s' | 'live' | 'live_at' | 'exit_code' | 'error' | 'outputs' | 'upload_bytes' | 'swept_at'> & Partial<Pick<MachineJob, 'go' | 'go_by'>>): MachineJob {
+    const keys = Object.keys(j) as (keyof typeof j)[];
+    const { lastInsertRowid } = this.db.prepare(`INSERT INTO machine_jobs (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => (j[k] ?? null) as any));
+    return this.getMachineJob(Number(lastInsertRowid))!;
+  }
+
+  getMachineJob(id: number): MachineJob | undefined {
+    return this.db.prepare('SELECT * FROM machine_jobs WHERE id = ?').get(id) as unknown as MachineJob | undefined;
+  }
+
+  updateMachineJob(id: number, fields: Partial<Omit<MachineJob, 'id' | 'machine_id' | 'project_id' | 'kind' | 'kind_hash' | 'created_at'>>) {
+    const keys = Object.keys(fields) as (keyof typeof fields)[];
+    if (!keys.length) return;
+    this.db.prepare(`UPDATE machine_jobs SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => (fields[k] ?? null) as any), id);
+  }
+
+  /** Jobs matching one of these: a machine's, a minion's, a contraption's, or in some states; newest first, at most `limit`. */
+  machineJobs(where: { machine?: number; ticket?: number; contraption?: number; states?: readonly string[]; endedBefore?: number }, limit = 100): MachineJob[] {
+    const conds: string[] = [];
+    const args: (number | string)[] = [];
+    if (where.machine !== undefined) { conds.push('machine_id = ?'); args.push(where.machine); }
+    if (where.ticket !== undefined) { conds.push('ticket_id = ?'); args.push(where.ticket); }
+    if (where.contraption !== undefined) { conds.push('contraption_id = ?'); args.push(where.contraption); }
+    if (where.states) { conds.push(`state IN (${where.states.map(() => '?').join(', ')})`); args.push(...where.states); }
+    if (where.endedBefore !== undefined) { conds.push('ended_at < ? AND swept_at IS NULL'); args.push(where.endedBefore); }
+    return this.db.prepare(`SELECT * FROM machine_jobs ${conds.length ? `WHERE ${conds.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`).all(...args, limit) as unknown as MachineJob[];
+  }
+
+  /** The bytes of job results a scheme holds on this server now (#857): what the 20 GB cap counts. */
+  jobResultBytes(projectId: number): number {
+    return (this.db.prepare('SELECT COALESCE(SUM(upload_bytes), 0) AS n FROM machine_jobs WHERE project_id = ? AND swept_at IS NULL').get(projectId) as { n: number }).n;
+  }
+
+  /** The standing go for a kind on a machine (#857), or undefined. */
+  jobKind(machineId: number, hash: string): { machine_id: number; hash: string; name: string; recipe: string; allowed_by: string; at: number } | undefined {
+    return this.db.prepare('SELECT * FROM machine_job_kinds WHERE machine_id = ? AND hash = ?').get(machineId, hash) as any;
+  }
+
+  allowJobKind(machineId: number, hash: string, name: string, recipe: string, by: string) {
+    this.db.prepare('INSERT OR REPLACE INTO machine_job_kinds (machine_id, hash, name, recipe, allowed_by, at) VALUES (?, ?, ?, ?, ?, ?)').run(machineId, hash, name, recipe, by, Date.now());
+  }
+
+  /** A machine's standing goes, newest first. */
+  jobKinds(machineId: number): { hash: string; name: string; recipe: string; allowed_by: string; at: number }[] {
+    return this.db.prepare('SELECT hash, name, recipe, allowed_by, at FROM machine_job_kinds WHERE machine_id = ? ORDER BY at DESC').all(machineId) as any;
   }
 
   /** The schemes a machine is lent to. */

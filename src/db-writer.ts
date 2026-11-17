@@ -20,7 +20,7 @@ export const WRITES = [
   'updateTicketQuietly', 'updateTicket', 'setLastActivity', 'setEventData', 'setArtifactPinned', 'deleteCiFile',
   'publishCiFile', 'recordApkPublish', 'setSharedPin', 'writeArtifactData', 'deleteClaudeState', 'setTicketPinned',
   'settleBrief', 'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting',
-  'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'updateMachine', 'setMachineProjects', 'deleteMachine', 'saveView',
+  'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'updateMachine', 'updateMachineJob', 'allowJobKind', 'setMachineProjects', 'deleteMachine', 'saveView',
   'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'insertEvent', 'putFates',
   'props.backfillOther', 'props.setBuild', 'schedules.ran', 'memory.deleteTicket',
 ];
@@ -29,7 +29,7 @@ export const WRITES = [
 export const VALUE_WRITES = [
   'createProject', 'renameProject', 'createUser', 'addOpenrouterCall', 'createContraption', 'deleteContraptionSession',
   'startContraptionTurn', 'createTicket', 'putCiFile', 'syncArtifacts', 'markSeen', 'setPersonNote', 'claimBrief', 'recap',
-  'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'deleteView',
+  'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'addMachineJob', 'deleteView',
   'savePushSubscription', 'pruneArtifacts', 'props.set', 'props.registerKey', 'props.registerValues', 'props.review',
   'schedules.create', 'schedules.update', 'schedules.remove', 'memory.index',
 ];

@@ -326,7 +326,6 @@
 
 /* Upload (ui/upload.js): a dashed drop zone, then a row per file: name, numbers and buttons on one line, its bar under. */
 :where(.cui-upload) { display: flex; flex-direction: column; gap: var(--citadel-space-2); font: var(--citadel-size-body)/1.45 var(--citadel-font); color: var(--citadel-text); }
-:where(.cui-upload [hidden]) { display: none; }
 :where(.cui-upload-drop) {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--citadel-space-2) var(--citadel-space-3);
   padding: var(--citadel-space-4) var(--citadel-space-3); border: 1.5px dashed var(--citadel-control-border); border-radius: var(--citadel-radius);
@@ -357,6 +356,9 @@
 :where(.cui-upload-file[data-state="paused"] .cui-upload-bar)::-moz-progress-bar { background: var(--citadel-warn); }
 :where(.cui-upload-file[data-state="done"] .cui-upload-bar)::-webkit-progress-value { background: var(--citadel-ok); }
 :where(.cui-upload-file[data-state="done"] .cui-upload-bar)::-moz-progress-bar { background: var(--citadel-ok); }
+/* Last in the block: every rule above that sets a display (the total's grid, a row's grid) would otherwise beat [hidden]
+   at equal (zero) specificity, source order deciding. */
+:where(.cui-upload [hidden]) { display: none; }
 
 /* A long press on a tipped link or button shows its tip, not the phone's own menu or a selection. */
 @media (pointer: coarse) { :where([data-tip]:is(a, button, [role="button"])) { -webkit-touch-callout: none; user-select: none; } }

@@ -248,8 +248,8 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
   const zone = el('div', { class: 'cui-upload-drop' },
     el('span', {}, label),
     el('span', { class: 'cui-upload-pick' },
-      el('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => pickFiles.click() }, 'Choose files'),
-      folders ? el('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => pickFolder.click() }, 'Choose a folder') : ''));
+      el('button', { type: 'button', class: 'cui-btn', onclick: () => pickFiles.click() }, 'Choose files'),
+      folders ? el('button', { type: 'button', class: 'cui-btn', onclick: () => pickFolder.click() }, 'Choose a folder') : ''));
   const box = el('div', { class: 'cui-upload' }, zone, pickFiles, pickFolder, left, total, list);
   root.append(box);
 

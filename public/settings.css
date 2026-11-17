@@ -185,6 +185,12 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .account-card .kv dt { color: var(--muted); }
 .account-card .kv dd { margin: 0; overflow-wrap: anywhere; }
 .account-card a.button { padding: 0.45rem 0.9rem; font-size: 1em; }
+.secrets-card .secret-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.secrets-card .secret-item { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem 0; border-top: 1px solid var(--line); }
+.secrets-card .secret-item .row { gap: 0.5rem; flex-wrap: wrap; }
+.secrets-card .secret-form input { flex: 1; min-width: 8rem; }
+.secrets-card .secret-add { display: flex; flex-direction: column; gap: 0.4rem; }
+.secrets-card .secret-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9em; }
 .account-card a.button:not(.secondary) { background: var(--accent); color: var(--on-accent); }
 .openrouter-form, .openrouter-cap { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: flex-end; margin-bottom: 0.75rem; }
 .openrouter-form label, .openrouter-cap label { display: flex; flex-direction: column; gap: 0.2rem; margin: 0; font-size: 0.9em; }

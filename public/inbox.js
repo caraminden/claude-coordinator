@@ -72,7 +72,7 @@ export function inboxOtherTicket(ticket) {
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
-const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', plan: '📋 Plan', ready: '✅ Ready', complete: '🏁 Complete', try: '🧪 Try it', replies: '💬 Reply' };
+const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', ready: '✅ Ready', complete: '🏁 Complete', try: '🧪 Try it', replies: '💬 Reply' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
@@ -184,7 +184,7 @@ function inboxRow(items) {
   const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
   const asks = new Map();
   for (const i of items) {
-    const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.kind === 'state' ? t.state : i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.kind] ?? i.kind;
+    const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.kind === 'state' ? t.state : i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind;
     asks.set(ask, (asks.get(ask) ?? 0) + 1);
   }
   const seen = items.every(faded);

@@ -923,14 +923,15 @@ export function appendEvent(event, scroll = true) {
     // An answer to a question card or a plan's go shows in the card itself; the chat only gets a
     // line pointing back up when messages below have pushed the card out of the way.
     const card = view.cards.get(data.answer?.questionId ?? (data.plan?.verdict === 'approve' ? data.plan.planId : null));
-    if (data.answer) card?.markAnswered(data.answer.answers, data.author);
+    // A secret card's answer (#838) carries only the name it was saved as; its question_result shuts the card.
+    if (data.answer?.answers) card?.markAnswered(data.answer.answers, data.author);
     if (card) {
       if (messagesBelow(card.el)) nodes.push(stamped(answerRef(card.el, data), event));
       // Someone else's answer counts as new, so the unread divider can still land on the card.
       else if (data.author !== me) card.el.dataset.at = event.created_at;
     } else if (data.answer) {
       // The card is in history not loaded yet.
-      nodes.push(stamped(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)), event));
+      nodes.push(stamped(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), data.answer.secret ? h('div', { class: 'answer-lines' }, `→ saved the secret as ${data.answer.secret}`) : answerSummary(data.answer.answers)), event));
     } else {
       const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),

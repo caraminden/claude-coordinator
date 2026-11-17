@@ -58,6 +58,7 @@ export function cardLabel(kind: string, data: any): string {
   if (kind === 'plan') return clip(data?.summary);
   if (kind === 'question' && data?.notice) return clip(data.notice);
   if (kind === 'question' && data?.doc) return clip(`picks on “${data.doc.title}”`);
+  if (kind === 'question' && data?.secret) return clip(`a secret to save as ${data.secret.name}`);
   if (kind === 'question') return clip((data?.questions ?? []).map((q: any) => q?.header || q?.question).filter(Boolean).join(', '));
   return clip(typeof data?.input?.description === 'string' ? `${data.tool}: ${data.input.description}` : data?.tool);
 }

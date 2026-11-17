@@ -354,8 +354,12 @@ export function messagesBelow(el) {
 
 /** "Cara picked Tabs ↑" at the bottom of the chat, jumping back up to the card it answered. */
 export function answerRef(cardEl, data) {
+  if (data.answer?.secret) return answerRefButton(cardEl, `${data.author} saved the secret as ${data.answer.secret}`);
   const picks = data.answer?.answers.map((a) => [...a.selected, ...(a.other ? [a.other] : [])].join(', ')).join(' · ');
-  const text = picks == null ? `${data.author} approved the plan` : `${data.author} picked ${picks}`;
+  return answerRefButton(cardEl, picks == null ? `${data.author} approved the plan` : `${data.author} picked ${picks}`);
+}
+
+function answerRefButton(cardEl, text) {
   return h('div', { class: 'answer-ref' }, h('button', {
     type: 'button', title: 'Show the card',
     onclick: () => cardEl.scrollIntoView({ block: 'center', behavior: 'smooth' }),
@@ -375,6 +379,7 @@ const cardPicks = new Map();
 export function questionCard(ticketId, card, opts = {}) {
   if (card.notice) return noticeCard(ticketId, card, opts);
   if (card.doc) return docCard(ticketId, card, opts);
+  if (card.secret) return secretCard(ticketId, card, opts);
   if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
   const picks = cardPicks.get(card.id);
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
@@ -552,6 +557,57 @@ function noticeCard(ticketId, card, opts) {
       label: 'mark the notice seen',
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {});
   });
+  view.cards.set(card.id, handle);
+  if (card.settled) handle.markSettled(card.settled);
+  return el;
+}
+
+/**
+ * A secret card (#838: ask_question with secret): a masked field whose value goes to the secret store
+ * (POST /secret), never the chat; the minion hears only the name it was saved under. Not optimistic: the value
+ * isn't kept anywhere to retry with, so the card waits for the server and keeps the field on a refusal.
+ */
+function secretCard(ticketId, card, opts) {
+  const { name, scope, why } = card.secret;
+  const head = whoLine('asks', card, opts);
+  const input = h('input', { type: 'password', class: 'secret-value', autocomplete: 'off', spellcheck: 'false', 'aria-label': `The secret to save as ${name}`, placeholder: 'Paste or type it here' });
+  const save = h('button', { type: 'button', class: 'small', disabled: true }, 'Save');
+  const status = h('span', { class: 'muted' }, scope === 'scheme' ? 'Every turn in this scheme gets it' : 'Saved as yours: turns that run as you get it');
+  const field = h('div', { class: 'row secret-row' }, input, save);
+  const el = h('div', { class: 'qcard secret' }, head.el,
+    h('div', { class: 'qtitle' }, 'A secret, saved as ', h('code', {}, name), why ? h('div', { class: 'desc' }, why) : ''),
+    field, h('div', { class: 'row' }, status));
+  let done = false;
+  input.addEventListener('input', () => { save.disabled = done || !input.value; });
+  const submit = () => {
+    if (done || !input.value) return;
+    done = true;
+    save.disabled = input.disabled = true;
+    status.textContent = 'Saving…';
+    api(`api/tickets/${ticketId}/secret`, { method: 'POST', body: { questionId: card.id, value: input.value } }).then((ticket) => {
+      input.value = '';
+      adoptTicket(ticketId, ticket);
+    }, (err) => {
+      done = false;
+      input.disabled = false;
+      save.disabled = !input.value;
+      status.textContent = `Not saved: ${err.message}`;
+    });
+  };
+  save.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submit(); } });
+  const handle = {
+    el,
+    markAnswered() {},
+    markSettled(settled) {
+      done = true;
+      input.value = '';
+      field.hidden = true;
+      el.classList.add('answered');
+      status.textContent = settled?.saved ? `Saved by ${settled.by}` : 'Settled in the chat';
+      head.done(settled?.saved ? `saved by ${settled.by}` : 'settled in the chat');
+    },
+  };
   view.cards.set(card.id, handle);
   if (card.settled) handle.markSettled(card.settled);
   return el;

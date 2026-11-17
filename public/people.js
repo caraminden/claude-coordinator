@@ -1,5 +1,5 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
-import { account, api, h, icon, view } from './base.js';
+import { account, ago, api, h, icon, view } from './base.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
 import { settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
@@ -229,7 +229,7 @@ export function accountPage() {
   return page(
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
       account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you link your Claude below.']),
-    form, claudeCard(), codexCard(), githubCard(), openrouterCard());
+    form, claudeCard(), codexCard(), githubCard(), openrouterCard(), secretsCard());
 }
 
 /** A plan's week as of its last turn: "41%, resets Mon 9:00 AM", or null before its first turn. */
@@ -404,6 +404,78 @@ function codexCard() {
       h('div', { class: 'row' }, act('Link Codex', 'POST')), override, note);
   };
   api('api/me/codex').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
+  return card;
+}
+
+/**
+ * Saved secrets (#838): your own, and those of the schemes you're in, by name. A value goes in (Add, Replace) and
+ * never comes back out, not even to you; turns get them as $CITADEL_SECRET_<NAME>, contraptions by name.
+ */
+function secretsCard() {
+  const card = h('div', { class: 'account-card secrets-card' }, h('p', { class: 'muted' }, 'Loading secrets…'));
+  let schemes = [];
+  const where = (s) => s.scope === 'scheme' ? { scope: 'scheme', project: s.project } : { scope: 'person' };
+  const valueInput = () => h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'The value', required: true, 'aria-label': 'The value' });
+  const row = (s, st) => {
+    const status = h('span', { class: 'muted small', role: 'status' });
+    const replace = h('button', { type: 'button', class: 'secondary small' }, 'Replace');
+    const del = h('button', { type: 'button', class: 'secondary small' }, 'Delete');
+    const el = h('div', { class: 'secret-item' },
+      h('div', { class: 'row' }, h('code', {}, s.name), h('span', { class: 'muted small' }, `${s.scope === 'scheme' ? s.project_name : 'yours'} · ${s.updated_by ? `${s.updated_by}, ` : ''}${ago(s.updated_at)}`),
+        h('span', { class: 'spacer' }), replace, del), status);
+    replace.onclick = () => {
+      const value = valueInput();
+      const form = h('form', { class: 'row secret-form' }, value, h('button', { type: 'submit', class: 'small' }, 'Save'), h('button', { type: 'button', class: 'secondary small', onclick: () => form.remove() }, 'Cancel'));
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        status.textContent = 'Saving…';
+        try {
+          await api('api/secrets', { method: 'PUT', body: { ...where(s), name: s.name, value: value.value } });
+          load();
+        } catch (err) { status.textContent = err.message; }
+      };
+      el.querySelector('.secret-form')?.remove();
+      el.insertBefore(form, status);
+      value.focus();
+    };
+    del.onclick = () => {
+      if (!confirm(`Delete the secret ${s.name}? Turns and apps that use it stop getting it.`)) return;
+      const without = { person: st.person.filter((x) => x !== s), schemes: st.schemes.filter((x) => x !== s) };
+      optimistic({ apply: () => render(without), send: () => api('api/secrets', { method: 'DELETE', body: { ...where(s), name: s.name } }), undo: () => render(st), label: `delete ${s.name}` }).then(load, () => {});
+    };
+    return el;
+  };
+  const addForm = () => {
+    const name = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'AZURE_SPEECH_KEY', required: true, pattern: '[A-Za-z][A-Za-z0-9_]{0,63}', 'aria-label': 'Name' });
+    const value = valueInput();
+    const whose = h('select', { 'aria-label': 'Whose' }, h('option', { value: '' }, 'Mine'), ...schemes.map((p) => h('option', { value: p.id }, `${p.name} (scheme)`)));
+    const status = h('span', { class: 'muted small', role: 'status' });
+    const form = h('form', { class: 'secret-add' },
+      h('label', {}, 'Name', name), h('label', {}, 'Value', value), h('label', {}, 'Whose', whose),
+      h('div', { class: 'row' }, h('button', { type: 'submit', class: 'small' }, 'Add'), status));
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      status.textContent = 'Saving…';
+      try {
+        await api('api/secrets', { method: 'PUT', body: { ...(whose.value ? { scope: 'scheme', project: Number(whose.value) } : { scope: 'person' }), name: name.value, value: value.value } });
+        load();
+      } catch (err) { status.textContent = err.message; }
+    };
+    return form;
+  };
+  const render = (st) => {
+    const all = [...st.person, ...st.schemes];
+    card.replaceChildren(h('h3', {}, 'Secrets'),
+      h('p', { class: 'small' }, 'Passwords and keys for minions and apps, saved here instead of typed into a chat. A minion gets them as ', h('code', {}, '$CITADEL_SECRET_<NAME>'),
+        ': yours in turns that run as you, a scheme\'s in every turn in it. Values are kept encrypted and never shown again.'),
+      all.length ? h('div', { class: 'secret-list' }, all.map((s) => row(s, st))) : h('p', { class: 'muted small' }, 'None saved yet.'),
+      addForm());
+  };
+  const load = () => Promise.all([api('api/secrets'), api('api/projects')]).then(([st, projects]) => {
+    schemes = projects.filter((p) => p.member);
+    render(st);
+  }).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
+  load();
   return card;
 }
 

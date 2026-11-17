@@ -28,6 +28,10 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 /* A choices card (#804): its one button opens the page the picks are made on. */
 .qcard.doc a.button:not(.secondary) { background: var(--accent); color: var(--on-accent); }
 .qcard.doc .qtitle { margin-bottom: 0; }
+.qcard.secret .qtitle { margin-bottom: 0; }
+.qcard.secret .qtitle .desc { font-weight: 400; color: var(--muted); font-size: 0.9em; margin-top: 0.2rem; }
+.qcard.secret .secret-row { gap: 0.5rem; }
+.qcard.secret .secret-value { flex: 1; min-width: 0; }
 .qcard.doc .doc-preview { display: block; height: 10rem; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .qcard.doc .doc-preview img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .qcard.doc a.button.doc-open { align-self: center; width: min(16rem, 100%); padding: 0.6rem 1rem; font-size: 1em; font-weight: 650; }

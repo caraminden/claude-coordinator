@@ -229,7 +229,7 @@ test("the rail's answers on a contraption's host: who you are, where Citadel is,
   const jar = await enter();
   const mine = await ask(APP, '/apps/_citadel/api/mine', { Cookie: jar });
   assert.equal(mine.status, 200);
-  assert.deepEqual(JSON.parse(mine.body), { name: 'Cara', citadel: `http://${DOMAIN}/c/`, apps: [{ name: 'stub', title: 'Stub', icon: '/icon.svg', up: true }] });
+  assert.deepEqual(JSON.parse(mine.body), { name: 'Cara', citadel: `http://${DOMAIN}/c/`, apps: [{ name: 'stub', title: 'Stub', icon: '/icon.svg', up: true, url: `https://stub.${DOMAIN}/` }] });
   assert.equal((await ask(APP, '/apps/_citadel/api/mine', { Cookie: cara })).status, 401, "Citadel's cookie is no use here");
   const icon = await ask(APP, '/apps/_citadel/icon/stub', { Cookie: jar });
   assert.equal(icon.status, 200);

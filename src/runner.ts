@@ -2329,6 +2329,11 @@ export class Runner {
    * from someone outside this scheme (a non-member's ask to Citadel) runs as the scheme's owner (#211).
    */
   private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[]): number | null {
+    // A person's own Taskmaster (#919) runs for them; a card answered there by someone else wakes it on theirs (R5).
+    if (ticket.kind === 'coordinator' && ticket.coordinator_of != null) {
+      const answer = batch.find((m) => m.own && !m.typed && !m.from);
+      return (answer && this.personOf?.(answer.author)) || ticket.coordinator_of;
+    }
     for (const m of batch) {
       const p = this.personOf?.(m.author, m.from);
       if (!p) continue;

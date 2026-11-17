@@ -41,7 +41,7 @@ import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '..
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { homeApp, makeKey } from './app.ts';
 import { machineNotes, patchMachine } from './machines.ts';
-import { ensureCoordinator, LINE_FIELDS, schemeTarget } from './projects.ts';
+import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } from './projects.ts';
 import { pacificTime, parseWakeTime, type Relay } from '../wake.ts';
 import { gitOut } from '../git.ts';
 
@@ -264,6 +264,8 @@ function personWrote({ app: { store, runner, presence }, caller, session, ticket
   if (caller) return;
   runner.personWrote(ticket.id);
   presence.wroteIn(ticket.id, session.name);
+  // Writing in a minion's chat (or answering its card) touches it: its updates reach their Taskmaster too (#919).
+  if (ticket.kind !== 'coordinator' && session.uid != null) store.touch(ticket.id, session.uid);
   const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id) : [ticket];
   for (const t of minions) runner.continueLoop(t.id, session.name);
 }
@@ -437,9 +439,16 @@ export const ticketRoutes: Route[] = [
   {
     method: 'POST', path: '/api/tickets/:ticket/messages', who: ['person', 'taskmaster'],
     async handler(ctx) {
-      const { req, res, app, session, caller, ticket } = ctx;
-      const { id } = ticket;
+      const { req, res, app, session, caller } = ctx;
       const { runner } = app;
+      // A person writes to their own Taskmaster (#919): one in another person's chat goes to theirs (R5, "Answer
+      // cards only"), the first from a second member splits the scheme. The Overlord takes anyone's.
+      if (!caller && ctx.ticket.kind === 'coordinator' && !(ctx.ticket.coordinator_of == null && app.store.isSplit(ctx.ticket.project_id))) {
+        const own = await ensureCoordinatorFor(app, app.store.getProject(ctx.ticket.project_id)!, session.uid);
+        if (own.id !== ctx.ticket.id) ctx = { ...ctx, ticket: ticketView(app, own.id) };
+      }
+      const { ticket } = ctx;
+      const { id } = ticket;
       // Room for MAX_IMAGES images at 5 MB each, base64-encoded.
       const body = await readJson(req, 45_000_000);
       const attached = (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0);
@@ -841,8 +850,17 @@ export const ticketRoutes: Route[] = [
         const text = !agent && after.toLowerCase() === by.toLowerCase() ? `${by} took over #${ticket.number}`
           : after ? `${by} handed #${ticket.number} to ${after}` : `${by} unassigned #${ticket.number}`;
         runner.emit(id, 'note', { text });
-        const coordinator = store.getCoordinator(ticket.project_id);
-        if (coordinator) runner.emit(coordinator.id, 'note', { text });
+        // The old owner stays touched, so its updates still reach their Taskmaster (#919).
+        const was = store.findUser('name', store.props.personName(before) || '')?.id;
+        if (was != null) store.touch(id, was);
+        if (!store.isSplit(ticket.project_id)) {
+          const coordinator = store.getCoordinator(ticket.project_id);
+          if (coordinator) runner.emit(coordinator.id, 'note', { text });
+        } else {
+          // Split: both owners' Taskmasters hear it as held mail.
+          const tms = new Set([was ?? null, store.minionOwner(ticket)].map((uid) => store.coordinatorFor(ticket.project_id, uid)?.id));
+          for (const tm of tms) if (tm != null) runner.leaveMail(tm, by, text);
+        }
       }
       runner.broadcastTicket(id);
       return json(res, 200, r);

@@ -119,6 +119,55 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
   return store.getCoordinator(project.id)!;
 }
 
+/**
+ * The Taskmaster a person's message goes to (#919): their own, made the first time a member who isn't the owner
+ * writes (that splits the scheme, R3: "From the second person"). The owner before a split, a non-member and
+ * nobody get the scheme's only one or, after the split, the Overlord.
+ */
+export async function ensureCoordinatorFor(app: App, project: Project, personId: number | null | undefined): Promise<Ticket> {
+  const { store, runner } = app;
+  const only = await ensureCoordinator(app, project);
+  if (personId == null) return store.getOverlord(project.id) ?? only;
+  const own = store.coordinatorFor(project.id, personId) ?? only;
+  if (own.coordinator_of === personId) return own;
+  const split = store.isSplit(project.id);
+  if (!split && (project.owner_id == null || project.owner_id === personId)) return own;
+  if (!store.listMembers(project.id).some((m) => m.id === personId)) return own;
+  const before = new Set(store.listCoordinators(project.id).map((t) => t.id));
+  const mine = store.splitScheme(project.id, personId);
+  if (!split) runner.emit(only.id, 'note', { text: `${store.getUser(personId)?.name ?? 'Someone'} wrote to the ${AGENT_NAME}, so each person in this scheme now has their own; this one is ${store.getUser(project.owner_id!)?.name ?? "the owner"}'s, and a new Overlord does the scheme-wide jobs.` });
+  for (const t of store.listCoordinators(project.id)) if (!before.has(t.id) || t.id === only.id) runner.broadcastTicket(t.id);
+  return mine;
+}
+
+/** Which Taskmaster of `project` last wrote to scheme `to`: where `to`'s reply goes (#919). */
+const replyKey = (to: number, project: number) => `taskmaster_reply:${to}:${project}`;
+
+/**
+ * The Taskmaster of `project` a message_taskmaster from `from` reaches (#919): with `person`, that member's own,
+ * else the Overlord; without, the one that last wrote from `project` to `from`'s scheme (a reply), else the sender's
+ * person's own, else the Overlord. An unsplit scheme has just the one.
+ */
+async function taskmasterTo(app: App, from: Ticket, own: Project, project: Project, person: unknown): Promise<Ticket> {
+  const { store } = app;
+  const only = await ensureCoordinator(app, project);
+  if (person != null && person !== '') {
+    const raw = str(person, 'person', 200);
+    const user = store.findUser('name', store.props.personName(raw) || raw);
+    if (!user) throw new HttpError(400, `No person called "${raw}"; leave person out for the scheme's Overlord`);
+    return store.coordinatorFor(project.id, user.id) ?? only;
+  }
+  const back = store.getTicket(store.getSetting<number>(replyKey(own.id, project.id)) ?? 0);
+  if (back?.kind === 'coordinator' && back.project_id === project.id) return back;
+  return store.coordinatorFor(project.id, from.coordinator_of) ?? only;
+}
+
+/** ", Josh's" or ", the Overlord" after a split scheme's Taskmaster's name, so the receiver knows who wrote. */
+function senderLabel(app: App, from: Ticket): string {
+  if (!app.store.isSplit(from.project_id)) return '';
+  return from.coordinator_of == null ? ' (the Overlord)' : ` (${app.store.getUser(from.coordinator_of)?.name ?? 'someone'}'s)`;
+}
+
 /** Where a new scheme's code came from, for the kickoff message. */
 function codeLine(p: Project, source: Source, folder: string | null): string {
   if (source === 'none') return 'no code';
@@ -1040,18 +1089,20 @@ export const projectRoutes: Route[] = [
       const { need } = checked;
       const wake = body.wake !== false && need !== 'fyi';
       const { own, person, who, project } = schemeTarget(app, from, body.scheme);
-      const to = await ensureCoordinator(app, project);
+      const to = await taskmasterTo(app, from, own, project, body.person);
       const toCitadel = project.id === GLOBAL_OWNER;
       // Citadel's Taskmaster weighs a non-member's ask differently (its prompt). Names that could fake
       // the membership clause (a scheme called "X, for Cara, a Citadel member") come quoted.
       const name = (s: string) => (/[,"[\]\n]/.test(s) ? JSON.stringify(s) : s);
       const author = toCitadel
         ? `${AGENT_NAME} of ${name(own.name)}, for ${person ? name(person.name) : 'no one'}, ${store.canSee(who, project.id) ? 'a' : 'not a'} ${project.name} member`
-        : `${AGENT_NAME} of ${own.name}`;
+        : `${AGENT_NAME} of ${own.name}${senderLabel(app, from)}`;
       // A file (#405) is copied into the receiver's shared inbox/ before anything is sent, so a bad path sends nothing.
       const file = body.file == null || body.file === '' ? null : relayFile(projectSharedDir(app.dataDir, own.id), projectSharedDir(app.dataDir, project.id), own.name, str(body.file, 'File', 1000));
       const attached = file ? `\n${APP_NAME} copied a file it attached into your scheme's shared folder, where your minions can read it too: ${file.path} (${byteSize(file.size)})` : '';
       const { held, left, cold } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true, need);
+      // A reply from that scheme comes back to this Taskmaster, not to whichever of its scheme's is default (#919).
+      if (!held) store.setSetting(replyKey(project.id, own.id), from.id);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
       if (!held) runner.emit(from.id, 'note', { need, text: `${wake && !cold ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });

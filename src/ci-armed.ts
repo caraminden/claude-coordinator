@@ -34,8 +34,16 @@ export function postCard(app: App, ticket: Ticket, card: Card): { id: string; hr
 /** Send the minion's Taskmaster a message, as message_coordinator does; returns runner.relay's answer. */
 export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urgent: boolean, wake = true, need?: string) {
   const { store, runner } = app;
-  const coordinator = await ensureCoordinator(app, store.getProject(ticket.project_id)!);
-  const held = runner.relay(ticket.id, coordinator.id, `#${ticket.number} ${ticket.title}`, text, urgent, wake, need);
+  await ensureCoordinator(app, store.getProject(ticket.project_id)!);
+  // Its owner's Taskmaster gets it as sent (#919); every other touched person's own gets held mail.
+  const coordinator = store.ownerCoordinator(ticket)!;
+  const author = `#${ticket.number} ${ticket.title}`;
+  const held = runner.relay(ticket.id, coordinator.id, author, text, urgent, wake, need);
+  if (held !== true) {
+    for (const tm of new Set(store.touchedBy(ticket).map((uid) => store.coordinatorFor(ticket.project_id, uid)))) {
+      if (tm && tm.coordinator_of != null && tm.id !== coordinator.id) runner.leaveMail(tm.id, author, text);
+    }
+  }
   if (held !== true) runner.emit(ticket.id, 'note', { ...(need ? { need } : {}), text: `${held ? 'Left held mail for' : 'Sent'} the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
   return held;
 }

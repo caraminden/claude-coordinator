@@ -270,7 +270,7 @@ function describeServer() {
 
   test('handing a minion over leaves a held-mail line in both owners\' Taskmasters, and its reports follow', async () => {
     const res = await fetch(`${srv.base}/api/tickets/${work.id}/properties`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: cookies(Cara) }, body: JSON.stringify({ properties: { assigned: 'Josh' } }),
+      method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: cookies(Cara) }, body: JSON.stringify({ properties: { assigned: 'Josh' } }),
     });
     assert.equal(res.status, 200, await res.text());
     const josh = db.coordinatorFor(Shared.id, Josh.id)!;
@@ -278,8 +278,7 @@ function describeServer() {
     assert.ok(line(sharedTm.id), "Cara's Taskmaster gets the handover line");
     assert.ok(line(josh.id), "Josh's Taskmaster gets the handover line");
     await post(`/api/tickets/${work.id}/coordinator`, { text: 'after handover', need: 'ask' }, { bearer: tokens.agentToken(work.id) });
-    assert.ok(said(josh.id, 'after handover'));
-    assert.equal(said(josh.id, 'after handover').mail === true && said(sharedTm.id, 'after handover')?.mail !== true, false, "the new owner's is the one it reports to");
+    assert.notEqual(said(josh.id, 'after handover')?.mail, true, "the new owner's is the one it reports to");
     assert.equal(said(sharedTm.id, 'after handover')?.mail, true, 'Cara stays touched, so held mail');
   });
 

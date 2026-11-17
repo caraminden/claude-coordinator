@@ -182,18 +182,22 @@ export function schemeRefsHooks(refs: string, sent: string, script = turnPins().
  * COORDINATOR_* values it posts with are the runner's per-turn ones (src/runner.ts).
  */
 const ENV_NAMES = new Set([
-  'HOME', 'PATH', 'LANG', 'TERM', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TZ', 'SSH_AUTH_SOCK', 'XDG_RUNTIME_DIR',
+  'HOME', 'PATH', 'LANG', 'TERM', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'SSH_AUTH_SOCK', 'XDG_RUNTIME_DIR',
   'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS',
   'DOTNET_ROOT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'GODOT',
 ]);
 // LC_* is the locale; CLAUDE_* and ANTHROPIC_* configure Claude Code itself (its config dir, its login).
 const ENV_PREFIXES = ['LC_', 'CLAUDE_', 'ANTHROPIC_'];
+export const TURN_TZ = 'America/Los_Angeles';
 export function turnEnv(from: NodeJS.ProcessEnv): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(from)) {
     if (v !== undefined && (ENV_NAMES.has(k) || ENV_PREFIXES.some((p) => k.startsWith(p)))) env[k] = v;
   }
+  // Claude Code's date line is in the turn's own zone. On the server's UTC it flips at 4 PM PST, in the middle of keepalive
+  // hours, and the flip changes the cached prefix. Pacific flips at midnight (#862, Cara 2026-11-17). The server's clock stays UTC.
+  env.TZ = TURN_TZ;
   return env;
 }
 /** Cara's pick on #760 (2026-11-15), no real calls in a week: ListAgents lists other local sessions; ReportFindings is the built-in code-review's (citadel:self-review reviews instead). */

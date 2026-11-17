@@ -44,12 +44,15 @@ function artifactCsp(kind: string): string {
 }
 
 /** A path as people should see it: relative to the working directory, or under "shared files". */
-function displayPath(app: App, ticket: Ticket, path: string): string {
+export function displayPath(app: App, ticket: Ticket, path: string): string {
   const projectShared = projectSharedDir(app.dataDir, ticket.project_id) + sep;
   if (path.startsWith(projectShared)) return `scheme shared/${path.slice(projectShared.length)}`;
   const shared = app.sharedDir(ticket) + sep;
   if (path.startsWith(shared)) return `shared files/${path.slice(shared.length)}`;
   if (ticket.cwd && path.startsWith(ticket.cwd + sep)) return path.slice(ticket.cwd.length + 1);
+  // Another minion's shared folder (a file it made, shown under this one): still never the server's absolute path.
+  const other = /\/shared\/(\d+)\/(.+)$/.exec(path);
+  if (other) return `shared files/${other[2]}`;
   return path;
 }
 

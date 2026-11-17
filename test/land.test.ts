@@ -396,6 +396,7 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
     ['the run never finishes', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }, /CI didn't finish within 1s/],
     ['the run was cancelled', { FAKE_CI: 'cancelled' }, /ended as cancelled/],
     ['the run failed before the tests', { FAKE_CI: 'red', FAKE_STEP: "the runner user's systemd" }, /failed in its setup step "the runner user's systemd", before any test ran/],
+    ['the runner\'s clock stayed skewed', { FAKE_CI: 'red', FAKE_STEP: "the runner's clock" }, /CI FALLBACK: runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran/],
     ['LAND_CI=0', { LAND_CI: '0' }, /LAND_CI=0 was set/],
   ];
   for (const [name, extra, why] of cases) {
@@ -487,6 +488,24 @@ test('after CI gave no answer in time, the landings of the next minutes skip the
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /CI passed/);
   assert.ok(!existsSync(down), 'a green run takes the note away');
+  assert.equal(c.localRuns(), 2);
+});
+
+// #900: a skewed runner clock lasts hours, and each landing spent a CI run on learning it again.
+test("a red in the runner's clock step leaves the note, so the next landing doesn't spend a CI run on it", () => {
+  const r = setup();
+  const c = ci(r);
+  const down = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'ci-down');
+  r.commit(r.wt, 'b.txt', 'one\n');
+  let res = c.run({ FAKE_CI: 'red', FAKE_STEP: "the runner's clock" });
+  assert.equal(res.status, 0, res.stderr);
+  assert.ok(existsSync(down), 'the landing leaves a note');
+  const asked = c.calls();
+  r.commit(r.wt, 'b.txt', 'two\n');
+  res = c.run({ FAKE_CI: 'red', FAKE_STEP: "the runner's clock" });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI FALLBACK: CI gave no answer to a landing \d+ s ago \(runner clock: /);
+  assert.equal(c.calls(), asked, 'GitHub is not asked');
   assert.equal(c.localRuns(), 2);
 });
 

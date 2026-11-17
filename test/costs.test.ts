@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { costDays, dayBudget, localDay, spendSplit } from '../src/costs.ts';
+import { costDays, dayBudget, localDay, modelName, spendSplit, weekLimit, whereItWent } from '../src/costs.ts';
 import { Store } from '../src/db.ts';
+import { usageSplitText } from '../src/mcp.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'costs-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -134,4 +135,98 @@ test('the spend split counts every payer by person and by scheme, for 7 and 30 d
   assert.equal(cara.server_login, 1);
   assert.deepEqual(people.map((r) => [r.name, r.week, r.month]), [['Cara (server login)', 5, 8], ['Josh', 2, 2]]);
   assert.deepEqual(schemes.map((r) => [r.name, r.week, r.month]), [[p.name, 5, 8], ['Delve', 2, 2]]);
+});
+
+const usage = (m: Record<string, number>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, { costUSD: v, outputTokens: 1 }]));
+
+test("a turn's split by model is each model's rise in the session's running total, Grunts' models included (#905)", () => {
+  const { store, p, t } = setup('models');
+  const now = Date.now();
+  // Before the split was kept: no per-model numbers, so it counts under the minion's own model, marked estimated.
+  store.updateTicket(t.id, { last_model: 'claude-fable-5-2' });
+  store.recordTurn(t.id, { session_id: 's1', ended_at: now - 3000, session_cost_usd: 1 });
+  // The session's next turn: its earlier per-model totals are unknown, so its own $2 splits pro rata (1:3).
+  store.recordTurn(t.id, { session_id: 's1', ended_at: now - 2000, session_cost_usd: 3, modelUsage: usage({ 'claude-fable-5-2': 0.75, 'claude-sonnet-5-5': 2.25 }) });
+  // Then each model's own rise: Fable +0.25, Sonnet +1.75, and a Haiku Grunt new this turn.
+  store.recordTurn(t.id, { session_id: 's1', ended_at: now - 1000, session_cost_usd: 5.5, account: 2, modelUsage: usage({ 'claude-fable-5-2': 1, 'claude-sonnet-5-5': 4, 'claude-haiku-5-5': 0.5 }) });
+  // A fresh session counts from zero.
+  store.recordTurn(t.id, { session_id: 's2', ended_at: now, session_cost_usd: 0.4, modelUsage: usage({ 'claude-opus-5-5': 0.4 }) });
+  const w = whereItWent(store, null, null, now + 1);
+  close(w.total, 1 + 2 + 2.5 + 0.4);
+  const by = Object.fromEntries(w.models.map((s) => [s.name, s]));
+  close(by['Fable 5.2'].usd, 1 + 0.5 + 0.25);
+  close(by['Fable 5.2'].estimated, 1);
+  close(by['Sonnet 5.5'].usd, 1.5 + 1.75);
+  close(by['Haiku 5.5'].usd, 0.5);
+  close(by['Opus 5.5'].usd, 0.4);
+  assert.equal(by['Sonnet 5.5'].estimated, 0);
+  assert.equal(w.models[0].name, 'Sonnet 5.5', 'biggest first');
+  assert.equal(store.listTurns(t.id)[2].account, 2);
+  assert.deepEqual(w.schemes.map((s) => [s.id, s.name]), [[p.id, p.name]]);
+  assert.deepEqual(w.top.map((m) => m.id), [t.id]);
+  // A ticket deleted takes its split with it.
+  store.deleteTicket(t.id);
+  assert.equal(whereItWent(store, null, null, now + 1).total, 0);
+});
+
+test('where it went: one payer only, this week against last, by kind of work (#905)', () => {
+  const { store, p, t } = setup('kinds');
+  const now = Date.now(), day = 86400_000;
+  const tm = store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+  const sched = store.createTicket({ project_id: p.id, title: 'audit', permission_mode: 'default', created_by: 'Citadel' });
+  store.props.set('minion', t.id, p.id, { type: 'bug' }, 'Cara');
+  const turn = (id: number, at: number, usd: number, extra = {}) => store.recordTurn(id, { session_id: `s${Math.random()}`, ended_at: at, session_cost_usd: usd, modelUsage: usage({ 'claude-opus-5-5': usd }), ...extra });
+  turn(t.id, now - day, 4);
+  turn(t.id, now - 2 * day, 1, { keepalive: true });
+  turn(tm.id, now - day, 2);
+  turn(sched.id, now - day, 3);
+  turn(t.id, now - 8 * day, 6); // last week
+  turn(t.id, now - day, 50, { payer: 7 }); // someone else's plan
+  const w = whereItWent(store, null, 100, now);
+  close(w.total, 10);
+  close(w.lastWeek, 6);
+  assert.equal(w.weekUsd, 100);
+  assert.deepEqual(w.kinds.map((k) => [k.name, k.usd, k.lastWeek]), [['Bug', 4, 6], ['Scheduled runs', 3, 0], ['Taskmasters', 2, 0], ['Keepalive pings', 1, 0]]);
+  assert.deepEqual(w.top.map((m) => m.id), [t.id, sched.id, tm.id]);
+  close(whereItWent(store, 7, null, now).total, 50);
+});
+
+test('model names read like the model picker', () => {
+  assert.equal(modelName('claude-opus-5-5'), 'Opus 5.5');
+  assert.equal(modelName('claude-haiku-4-5-20251001'), 'Haiku 4.5');
+  assert.equal(modelName('claude-sonnet-5-5+opus-advisor'), 'Sonnet 5.5');
+  assert.equal(modelName('opus'), 'Opus');
+  assert.equal(modelName('gpt-5.1-codex'), 'gpt-5.1-codex');
+});
+
+test("usage_split's text gives shares of the week, all accounts together, with dollars, and Fable's share each week (#905)", () => {
+  const s = (name: string, usd: number, lastWeek: number, estimated = 0) => ({ name, usd, lastWeek, estimated });
+  const text = usageSplitText({
+    total: 50, lastWeek: 80, weekUsd: 500, accounts: 2,
+    models: [s('Opus 5.5', 30, 40, 10), s('Fable 5.2', 10, 40), s('Sonnet 5.5', 10, 0)],
+    schemes: [s('Citadel', 50, 80)], kinds: [s('Feature', 50, 80)],
+    top: [{ id: 3, number: 12, title: 'Big one', scheme: 'Citadel', usd: 20 }],
+  });
+  assert.match(text, /^Last 7 days: 10% \(\$50\); the 7 before: 16% \(\$80\)\. 100% is the weekly limit of all 2 Claude accounts together, about \$500/);
+  assert.match(text, /Fable's share of spend: 20% this week, 50% last week\./);
+  assert.match(text, /- Opus 5\.5: 6\.0% \(\$30\), last week 8\.0% \(\$40\), \$10 estimated/);
+  assert.match(text, /- #12 Big one \(Citadel\): 4\.0% \(\$20\)/);
+  assert.match(usageSplitText({ total: 1, lastWeek: 0, weekUsd: null, models: [], schemes: [], kinds: [], top: [] }), /^Last 7 days: \$1\.00; .* dollars at API prices only/);
+});
+
+test("one account's week is priced from that account's turns since its reset, once turns keep their account (#905)", () => {
+  const { store, t } = setup('weeklimit');
+  const now = Date.now();
+  const meter = (utilization: number, account: number) => ({ weekly: { utilization, resetsAt: now + 4 * 86400_000 }, account });
+  // Before #905 turns kept no account: a window reaching back to them can't be split, so nothing is priced yet.
+  store.recordTurn(t.id, { session_id: 'old', ended_at: now - 2 * 86400_000, session_cost_usd: 500, payer: 7 });
+  store.recordTurn(t.id, { session_id: 'a2', ended_at: now - 3600_000, session_cost_usd: 10, payer: 7, account: 2 });
+  assert.equal(weekLimit(store, 7, meter(0.5, 2), now), null);
+  // A meter that reset after the first turn with an account: account 2's turns since then over its utilization.
+  const fresh = { weekly: { utilization: 0.5, resetsAt: now + 7 * 86400_000 - 2 * 3600_000 }, account: 2 };
+  store.recordTurn(t.id, { session_id: 'a1', ended_at: now - 1800_000, session_cost_usd: 30, payer: 7, account: 1 });
+  close(weekLimit(store, 7, fresh, now)!, 10 / 0.5);
+  // Too little of the meter used to price it, or another payer: the last estimate stands, or none.
+  close(weekLimit(store, 7, meter(0.01, 2), now)!, 20);
+  assert.equal(weekLimit(store, 8, fresh, now), null);
 });

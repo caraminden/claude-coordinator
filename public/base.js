@@ -113,7 +113,7 @@ export function icon(name) {
 }
 
 /**
- * In the desktop app (#637) the window controls sit on the page's theme colour (app.js's metas), so a
+ * In the desktop app (#637) the window controls sit on the page's theme colour (index.html's metas), so a
  * contraption's top bar colours them (frames.js, with its computed background colour); null puts the plain colour back.
  * A canvas pixel turns any CSS colour into the hex a theme colour surely takes; a see-through one keeps the plain colour (#694).
  * `over`, a modal's backdrop (#772), is laid over the colour, so the controls dim with the page under it.

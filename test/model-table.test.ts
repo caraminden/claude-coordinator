@@ -4,7 +4,7 @@ import { BY_TYPE, CLAUDE_MODELS, EFFORT_LEVELS, FALLBACK, guessType, pickFor, ta
 import { EFFORTS, MODELS } from '../src/db.ts';
 import { systemPrompt } from '../src/prompts.ts';
 
-// The model table (#698): one copy that the prompt, the server's starts and the new-minion box read.
+// The model table (#698): one copy that the prompt and the server's starts read.
 
 test('every pick in the table is a model and effort the server takes', () => {
   for (const p of [...TIERS, ...Object.values(BY_TYPE), FALLBACK]) {

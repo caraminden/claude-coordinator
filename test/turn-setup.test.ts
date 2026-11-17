@@ -53,7 +53,7 @@ test('the Citadel kit is pinned beside them, a copy of the repo\'s kit/ plugin',
 
 test('a turn inherits only the allowlisted environment', () => {
   const env = turnEnv({ HOME: '/h', PATH: '/bin', LC_ALL: 'C', CLAUDE_CONFIG_DIR: '/c', XDG_RUNTIME_DIR: '/r', GODOT: '/g', MACHINES_URL: 'x', COORDINATOR_PASSWORD: 'p', SESSION_SECRET: 's', PORT: '8573', HOST: 'h', DBUS_SESSION_BUS_ADDRESS: 'd' });
-  assert.deepEqual(env, { HOME: '/h', PATH: '/bin', LC_ALL: 'C', CLAUDE_CONFIG_DIR: '/c', XDG_RUNTIME_DIR: '/r', GODOT: '/g' });
+  assert.deepEqual(env, { HOME: '/h', PATH: '/bin', LC_ALL: 'C', CLAUDE_CONFIG_DIR: '/c', XDG_RUNTIME_DIR: '/r', GODOT: '/g', TZ: 'America/Los_Angeles' });
 });
 
 // A stand-in for `claude -p` that records its arguments and environment, prints an init event

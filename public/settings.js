@@ -280,7 +280,7 @@ const settingText = (p, key) => (key === 'list_groups' ? listGroupsOf(p).join('\
 export function settingsTabs() {
   const nav = h('nav', { class: 'settings-tabs' },
     [['instructions', 'Instructions'], account?.admin && ['app-instructions', 'Citadel-wide'], ['my-instructions', 'My instructions'], ['approvals', 'Needs approval'], ['properties', 'Properties'],
-      ['members', 'Members'], account?.admin && ['people', 'People'], account?.admin && ['contraptions', 'Contraptions'], ['machines', 'Machines'], ['account', 'Your account']].filter(Boolean).map(([kind, label]) =>
+      ['members', 'Members'], account?.admin && ['people', 'People'], account?.admin && ['contraptions', 'Contraptions'], ['machines', 'Machines'], ['usage', 'Usage'], ['account', 'Your account']].filter(Boolean).map(([kind, label]) =>
       h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label,
         // The same waiting-review count as the Settings button (renderSettingsCount fills both).
         kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '')));

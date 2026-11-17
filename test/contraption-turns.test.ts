@@ -729,7 +729,7 @@ test('a person who opts out while a kept turn runs has nothing of it kept', asyn
   const seen = () => readFileSync(log, 'utf8').split('\n').filter((l) => l.includes('linger then opt out')).length;
   const before = seen();
   const running = turn(app, { session: 'r1', keep: true, prompt: 'linger then opt out' });
-  while (seen() === before) await new Promise((r) => setTimeout(r, 20));
+  await until('the kept turn to start', () => seen() !== before);
   store.setSetting(`replay_optout:${cara.id}`, true); // its reply is out; claude is still exiting
   await running;
   store.setSetting(`replay_optout:${cara.id}`, false);

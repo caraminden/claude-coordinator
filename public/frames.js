@@ -86,6 +86,7 @@ if (typeof window !== 'undefined') {
       if (!frame.hidden) fit();
     } else if (d.type === 'key' && d.event && typeof d.event === 'object') frameKey(d.event);
     else if (d.type === 'blur') frameKey(null);
+    else if (d.type === 'leave') leave();
   });
 }
 
@@ -125,6 +126,14 @@ if (typeof window !== 'undefined') {
   });
 }
 
+/**
+ * What a framed contraption may ask the browser for (#892). With APPS_DOMAIN, /apps/<name>/ on Citadel's host redirects to
+ * https://<name>.<domain>/ (#709), so the frame ends on another origin than its src attribute; Chrome gives a bare
+ * `allow="microphone"` to the src's origin only, and getUserMedia in the page was refused. `*` delegates to whatever origin
+ * the frame is on: it only ever reaches Citadel's own contraption hosts, and the browser still asks the person.
+ */
+export const FRAME_ALLOW = ['microphone', 'camera', 'clipboard-read', 'clipboard-write', 'fullscreen'].map((f) => `${f} *`).join('; ');
+
 /** Show contraption `name` (its frame made on first visit), at address `src` if given: an open frame reloads there. */
 export function showFrame(name, src) {
   if (!box) {
@@ -145,6 +154,7 @@ export function showFrame(name, src) {
   if (!frame) {
     frame = document.createElement('iframe');
     frame.src = src ?? `/apps/${name}/`;
+    frame.allow = FRAME_ALLOW;
     frame.title = name;
     frame.dataset.app = name;
     frame.addEventListener('load', fit);

@@ -418,6 +418,30 @@ test('a turn runs for its sender: their token, a line in its prompt, a note on e
   await finish(r, t);
 });
 
+test("a land the server runs for a minion (hand_off_land, the land tool) pushes as the person the minion's turn runs for (#911)", async () => {
+  const t = newTicket();
+  const r = runner();
+  r.send(t.id, 'Josh', 'build it');
+  await until(() => seen(t.dir).length === 1);
+  const mid = r.hostEnv(store.getTicket(t.id)!, 'tok');
+  assert.equal(mid.GH_TOKEN, 'gho_new', "the turn's person's token, not the box's gh login");
+  assert.equal(mid.GIT_AUTHOR_NAME, 'Josh D');
+  assert.equal(mid.GIT_TERMINAL_PROMPT, '0');
+  // The land outlives the turn, whose folder goes when it ends: its gh config folder can't be in there.
+  assert.ok(mid.GH_CONFIG_DIR && !mid.GH_CONFIG_DIR.startsWith(r.turnsDir), mid.GH_CONFIG_DIR);
+  assert.ok(existsSync(mid.GH_CONFIG_DIR));
+  await finish(r, t);
+  // A land started after the turn ended (a queued hand-off) still runs as that person.
+  assert.equal(r.hostEnv(store.getTicket(t.id)!, 'tok').GH_TOKEN, 'gho_new');
+  // Cara hasn't linked: no token at all, never the box's own.
+  r.send(t.id, 'Cara', 'build it');
+  await until(() => seen(t.dir).length === 2);
+  const unlinked = r.hostEnv(store.getTicket(t.id)!, 'tok');
+  assert.equal(unlinked.GH_TOKEN, undefined);
+  assert.equal(unlinked.GIT_AUTHOR_NAME, 'Cara');
+  await finish(r, t);
+});
+
 test('a message from someone else waits for its own turn instead of steering; a relay carries its sender\'s person', async () => {
   const t = newTicket();
   const r = runner();

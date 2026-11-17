@@ -44,9 +44,13 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
 
 ## Release signing
 
-- Cara makes each app's keystore once: `~/.config/citadel-android/<app>-release.jks`, with its
-  password in `<app>-release.pass` beside it. Both are mode 600.
-- Never copy either into a repo, the shared folder, a chat or a log. Container homes don't have
+- Each app has one keystore: `~/.config/citadel-android/<app>-release.jks`, with its password in
+  `<app>-release.pass` beside it. Both are mode 600. Citadel makes it on the server (#837): a
+  Capacitor contraption with none gets a **Make release key** button on its Releases card, and the
+  `make_release_key` tool posts a card any member of its scheme approves. Neither ever replaces a key
+  that exists. Never run keytool for one yourself.
+- Every key and its password go off-box nightly (`deploy/offbox.sh`, `keys/` on Cara's desktop).
+- Never copy either into a repo, the shared folder, a chat or a log, and never read the .pass file. Container homes don't have
   `~/.config/citadel-android`, so release builds run in a host turn.
 - A Capacitor app's releases build themselves (Delivery below). Its release build type has no
   `signingConfig`, so Gradle writes `app-release-unsigned.apk` and Citadel signs it with the key.
@@ -63,7 +67,10 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   (each one can call the app's native plugins). Checklist after Cap-go/capgo-skills @e82217b (MIT),
   in our words.
 - A lost keystore means every friend uninstalls (losing local data) and reinstalls, so never
-  delete or regenerate one. If it's missing, stop and ask Cara.
+  delete or regenerate one. Citadel can't tell a lost key from one never made: use
+  `make_release_key` only for an app that never had one. If an app that had a key is told it has
+  none, or half of one, stop: it's restored from the desktop's `keys\` backup
+  (`deploy/desktop/README.md`, "Restoring"), so ask Cara.
 
 ## Delivery
 
@@ -79,8 +86,8 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
     `build.gradle` alone; `versionName` is read from it.
   - Needs: the app's release key (above), `npm ci` in its `citadel-app.json` build steps (the
     build uses the live slot's `node_modules`), and a release build type with no `signingConfig`.
-  - A failed build, or one with no key yet, tells the scheme's Taskmaster once per commit and
-    publishes nothing. A risky release manifest flag (above) is told but still publishes.
+  - A failed build tells the scheme's Taskmaster once per commit, and a missing key once until
+    it's made; neither publishes anything. A risky release manifest flag (above) is told but still publishes.
   - Each build shows on the Releases page. An app whose `apk:` release target has a CI workflow
     (Mandate) keeps that path instead.
 - The feed is in the contraption's `DATA_DIR/android/`: `latest.json` and the newest three
@@ -177,8 +184,10 @@ citadel-android down               # when you're done
   - **`mic` waits up to 2 minutes for an app to open the mic**, then plays the file, looped to fill
     `[seconds]`, at most 600; it never plays into a phone where nothing records, because that crashes
     this emulator. So start it in the background, then make the app record.
-  - **Chrome grants the mic and camera without a prompt.** A Capacitor shell needs the permission
-    first: `adb -s emulator-5554 shell pm grant <appId> android.permission.RECORD_AUDIO`.
+  - **Chrome grants the mic and camera without a prompt,** and runs an AudioContext without a tap. A
+    Capacitor shell needs the permission first (`adb -s emulator-5554 shell pm grant <appId>
+    android.permission.RECORD_AUDIO`), and its WebView may hold an AudioContext until a tap: start
+    recording with a real tap (`adb -s emulator-5554 shell input tap <x> <y>`).
   - **The phone records at 48 kHz.** That is the trap the mic exists to catch: code that assumes
     44.1 kHz. Read the rate from the AudioContext or the track's settings, and turn off
     `echoCancellation`, `noiseSuppression` and `autoGainControl` for analysis. `mic-check` prints

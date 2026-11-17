@@ -9,7 +9,7 @@ import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, LandsInFlight, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { ApkReader, buildWait, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, LandsInFlight, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { CITADEL_TARGET, named, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
@@ -947,6 +947,8 @@ test('handed-off lands list in line order, not minion-number order (#766)', asyn
   const got = (vs[0].next as { changes: { title: string; brief?: string }[] } | null)?.changes ?? [];
   assert.deepEqual(got.map((c) => c.brief ?? 'landing'), ['landing', '2nd', '3rd', '4th', '5th']);
   assert.deepEqual(got.map((c) => c.title), ['Change 0', 'Change 1', 'Change 4', 'Change 3', 'Change 2']);
+  // Only the change landing now is in the release under way; the rest of the line goes out after it, so none carries its number.
+  assert.deepEqual((got as { later?: boolean }[]).map((c) => !!c.later), [false, true, true, true, true]);
 });
 
 test('a handed-off land is on its targets from the hand-off: in line, then landing, ahead of what is on main (#764)', async () => {
@@ -1011,4 +1013,13 @@ test('named: a template names each numbered release; a next with no number is "N
   const plain = { ...tv, target: { ...tv.target, numbering: undefined }, current: r(5), next: null, recent: [] };
   named(plain);
   assert.equal((plain.current as { name?: string }).name, undefined, 'no template: the page says "Release 5"');
+});
+
+test('a deploy build in the heavy queue says what it waits on, not "running long" (Cara, 2026-11-17)', () => {
+  const job = (who: string, reason?: string) => ({ who, what: 'npm ci', since: 1, ...(reason && { reason }) });
+  const heavy = { holders: [], waiters: [job('Citadel #5 (cara)'), job('voice deploy'), job('mandate deploy', 'load')] };
+  assert.equal(buildWait(heavy, 'voice deploy'), 'in line for a build slot · 1 ahead');
+  assert.equal(buildWait(heavy, 'mandate deploy'), 'perigee is busy · waiting for load to ease');
+  assert.equal(buildWait({ holders: [], waiters: [job('voice deploy')] }, 'voice deploy'), 'in line for a build slot · next');
+  assert.equal(buildWait(heavy, 'peek deploy'), null, 'not queued: it is running, so "running long" stays honest');
 });

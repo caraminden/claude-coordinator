@@ -10,7 +10,8 @@ its text is here; credited in `THIRD_PARTY.md`). The criteria are WCAG 2.2 and t
 
 Use the kit dialog ([base-parts.md](base-parts.md#dialog)): a native `<dialog class="cui-dialog">`
 opened with `showModal()`, which brings the top layer, the rest of the page inert, Escape, a pinned
-✕, a backdrop click that closes it, and a page that stays still behind it. The rest of this list is
+✕, a backdrop click that closes it, and a page that stays still behind it. Built from script,
+`openDialog({ title, body })` also names it and removes it on close. The rest of this list is
 yours.
 
 - It has a name: `aria-labelledby` its heading, which says what it's for (4.1.2, 2.4.6).

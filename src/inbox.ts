@@ -4,7 +4,7 @@ import type { Store } from './db.ts';
 import { openSpend, type SpendState } from './spend-alert.ts';
 
 export interface InboxItem {
-  /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'spend' for a running turn's unanswered spend alert (#723), 'state' for a minion in state ready, complete or try, or 'replies' for one offering one-tap replies in another state. */
+  /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'spend' for a running turn's unanswered spend alert (#723), 'state' for a minion in state ready, complete or try, 'quiet' for a running turn gone quiet (#906), or 'replies' for one offering one-tap replies in another state. */
   kind: string;
   ticketId: number;
   /** When it started waiting. */
@@ -34,7 +34,13 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     const a = String(store.props.forTarget('minion', id).assigned ?? '');
     return (a && store.props.personName(a) || a).toLowerCase();
   };
-  const tickets = store.listTickets(projectId).filter((t) => t.status !== 'closed' && ['', person.toLowerCase()].includes(assignee(t.id)));
+  const all = store.listTickets(projectId).filter((t) => t.status !== 'closed');
+  const tickets = all.filter((t) => ['', person.toLowerCase()].includes(assignee(t.id)));
+  // Who asked for a minion (#906): its requestedBy, else who created it.
+  const requester = (t: { id: number; created_by: string | null }) => {
+    const r = String(store.props.forTarget('minion', t.id).requestedBy ?? '') || t.created_by || '';
+    return (r && store.props.personName(r) || r).toLowerCase();
+  };
   const ids = new Set(tickets.map((t) => t.id));
   const awake = new Set(tickets.filter((t) => t.state !== 'parked').map((t) => t.id));
   const items: InboxItem[] = [
@@ -49,6 +55,11 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     ...tickets.filter((t) => t.status === 'running').flatMap((t) => {
       const spend = openSpend(store.getSetting<{ spend?: SpendState }>(`turn:${t.id}`)?.spend);
       return spend ? [{ kind: 'spend', ticketId: t.id, at: spend.at, card: spend, eventId: spend.event, key: `spend:${spend.event}` }] : [];
+    }),
+    // A running turn gone quiet (#906; Cara, 2026-11-17, "Yes, for the requester"): in its requester's Needs you only, until it talks again.
+    ...all.filter((t) => t.status === 'running' && requester(t) === person.toLowerCase()).flatMap((t) => {
+      const since = store.getSetting<{ quiet?: number }>(`turn:${t.id}`)?.quiet;
+      return since ? [{ kind: 'quiet', ticketId: t.id, at: since, key: `quiet:${t.id}:${since}` }] : [];
     }),
     ...tickets.filter((t) => ['ready', 'complete', 'try'].includes(t.state ?? '')).map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at, key: `state:${t.id}` })),
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.

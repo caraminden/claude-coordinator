@@ -3,6 +3,7 @@
 // Options… opens a sheet for changing those or chaining the minion after another.
 import { api, h } from './base.js';
 import { briefMessage, findBriefs, matchType } from './briefs.js';
+import { openDialog } from './ui/dialog.js';
 import { steadyLabel } from './ui/status.js';
 
 /**
@@ -119,12 +120,9 @@ async function openSheet(slot, brief, file) {
     err,
     h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }),
       h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn));
-  const dialog = h('dialog', { class: 'cui-dialog new-scheme start-brief', 'aria-label': 'Start a minion' },
-    h('div', { class: 'cui-dialog-head' }, h('h2', {}, 'Start a minion'),
-      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
+  const dialog = openDialog({ title: 'Start a minion', className: 'new-scheme start-brief', body: [
     h('p', { class: 'muted small from' }, `From ${brief.heading || 'the handoff'} in ${file.name}`),
-    form);
-  dialog.addEventListener('close', () => dialog.remove());
+    form] });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     btn.disabled = true;
@@ -141,7 +139,5 @@ async function openSheet(slot, brief, file) {
       btn.textContent = 'Start minion';
     }
   });
-  document.body.append(dialog);
-  dialog.showModal();
   title.focus();
 }

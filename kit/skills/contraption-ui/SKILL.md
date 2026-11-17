@@ -20,6 +20,10 @@ needed and why; don't grow a second library in your app.
 
 ## What there is
 
+**Don't hand-build what's in this table:** a toast, tooltip, dialog, drawer, disclosure, optimistic
+click or changing number each has a part below (or in the "Not a file" rows). Import it; a
+hand-built one is checked after the fact ([references/component-checks.md](references/component-checks.md)).
+
 Every file is under `/apps/_citadel/`, on your app's own host as on Citadel's. No login,
 `Cache-Control: no-cache` with an ETag: a page load costs a 304 until Citadel deploys, and a fix
 reaches you on Citadel's next deploy. Dev copies fetch them from the live Citadel on
@@ -36,10 +40,11 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/tip.js` (+ `.d.ts`) | Tooltips: `data-tip` on anything, opened on hover, focus, a tap or a long press | ES module import, needs base.css; [references/tooltip.md](references/tooltip.md) |
 | `ui/dialog.js` (+ `.d.ts`) | The dialog: every modal. Its head and ✕ stay at the top while the body scrolls; a backdrop click and Escape close it | `cui-dialog` in base.css, `mountDialogs()` once; [references/base-parts.md](references/base-parts.md#dialog) |
 | `ui/status.js` (+ `.d.ts`) | A status line that's always there, a button label that keeps its width, a toast (with a Retry, or an Undo that Ctrl-Z presses too), and the headless check that nothing moved | ES module import, needs base.css; [references/status.md](references/status.md) |
-| `ui/media.js` (+ `.d.ts`) | Pictures and clips: `lightbox()` (one at a time, ‹ › and ←/→, a filmstrip; a dialog or inside your own box), `scrubber()` (a clip's frame strip, seek bar and Start/End pins) and `panner()` (a panorama that pans, with a mini-map). They store nothing: pins and pan directions come in as options and go out through callbacks, and `update()` rolls a failed save back. Use these, never a second viewer | ES module import, needs base.css; types and options in `media.d.ts`; live demo in the design-system home |
+| `ui/media.js` (+ `.d.ts`) | Pictures and clips: `lightbox()` (one at a time, ‹ › and ←/→, a filmstrip; a dialog or inside your own box), `scrubber()` (a clip's frame strip, seek bar and Start/End pins) and `panner()` (a panorama that pans, with a mini-map). They store nothing: pins and pan directions come in as options and go out through callbacks, and `update()` rolls a failed save back. `scrubber` options: `order: 'refuse'` + `onRefuse` (a crossing pin is turned down, not dropping the other), `stopAtEnd: false`, `pinKeys` (move or drop S/E, the tooltip follows), `onUser(play\|pause\|seek)` (a person's, not the app's own calls). `panner` options: `once` + `onLeg`/`onProgress`, `onPause(paused)` (a person's), `onFit(fits)` and `.fits`, and `.overlay` (`.cui-pan-over`, over the picture above the bar, presses pass through). Use these, never a second viewer | ES module import, needs base.css; types and options in `media.d.ts`; live demo in the design-system home |
 | `ui/optimistic.js` (+ `.d.ts`) | `optimistic()`: a click shows its result at once and sends behind it; a failure rolls back that item with a Retry toast (rule 23) | ES module import, needs base.css; [references/status.md](references/status.md#optimistic-actions) |
 | `ui/upload.js` (+ `.d.ts`) | `mountUpload()`: big files and folders into your `DATA_DIR`, any size, in resumable chunks, with progress, pause and resume; `startUpload()` for one file | ES module import, needs base.css; [references/upload.md](references/upload.md) |
 | `ui/update.js` (+ `.d.ts`) | `mountUpdate()`: a Capacitor app's "Update the app" banner when Citadel has published a newer APK | ES module import, needs base.css; the `citadel:android-app` skill, Delivery |
+| Not a file: a section that opens and shuts, a number that changes | `<details>`/`<summary>`; `font-variant-numeric: tabular-nums` and a `min-width` in `ch` | [references/component-checks.md](references/component-checks.md#disclosure-a-section-that-opens-and-shuts); [references/status.md](references/status.md) |
 | Your `manifest.webmanifest` | Installing your app on its own, beside Citadel's | [references/installing.md](references/installing.md) |
 
 [starter/](starter/index.html) (`index.html`, `app.css`, `app.js`) wires theme.css, base.css, the
@@ -82,6 +87,11 @@ Citadel's do, so use the variables and never copy a hex value.
   0s under reduced motion.
 - **Notice:** `notice-bg` and `notice-bar`, the warning notice's fill and bar.
 
+An app may set its own **radii** (`--citadel-radius-sm`, `-radius`, `-radius-lg`: a tighter or rounder
+set, still in that order) and its own **heading face** (the face on `size-h1` to `h3`), on `:root`
+like its accent and named with its reason in the first reply ([First look](#first-look), 10). Body
+type, the size scale and the spacing stay Citadel's.
+
 All are `--citadel-<name>` (`var(--citadel-space-3)`). One computes from another at `:root`, so to
 tint a part, set the base colour (`--citadel-accent`) on its container rather than a derived one.
 
@@ -92,7 +102,7 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
 
 Cara, 2026-11-09: "a big wall of white/black text is never going to be what we want out of our
 UIs"; 2026-11-14, picking the "Moderate" take of #683 for every minion's UI: "a lot of the UI that is
-made by our minions by default is pretty bland and colorless". A new page or view meets all nine
+made by our minions by default is pretty bland and colorless". A new page or view meets all ten
 before its first screenshot; a view that is only a chat needs 1, 8 and 9, as the chat's parts carry
 their own look. A scheme with its own style guide (a design-system home, a theme) follows that
 instead. The code for each, and the picked take:
@@ -130,8 +140,12 @@ instead. The code for each, and the picked take:
 9. **Contrast holds:** body `text`, secondary `muted` and never fainter, `on-accent` on the accent;
    your own accent passes 4.5:1 with `on-accent` and 3:1 with `surface`, and your own accent-2 4.5:1
    with `surface`.
+10. **One standout per view.** Pick one thing to be memorable (a stat tile, the empty-state mark, a
+    gradient, one animated or glowing moment) and keep everything around it quiet. Rules 1 to 9 are
+    the floor, not decoration to stack. Optional, and always one: your own radius set or heading face,
+    named with its reason in your first reply, like the accent.
 
-The check: squint at the phone and desktop shots in both modes. Before you can read a word you
+The check: squint at the phone and desktop shots in both modes. Name the view's one standout; if you name two, take one off. Before you can read a word you
 should see the accent, the cards and where each status sits, and count at least three hues besides
 the status tones (the accent, accent-2, a category hue) on any view with a list or two cards. Fewer
 is the bland default this section exists to stop: add the tints, icon tiles, tags and stat tiles

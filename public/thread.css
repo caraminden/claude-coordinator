@@ -155,6 +155,11 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
 .msg.ask > summary .who::before { content: '▸ '; }
 .msg.ask[open] > summary .who::before { content: '▾ '; }
 .msg.ask > .msg { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; padding: 0.6rem 0.85rem; }
+/* Copies of minion-to-minion messages in the Taskmaster's chat, one collapsed row per run (thread.js addMinionCopy). */
+.mcopies > .mc-list { padding: 0 0.85rem 0.6rem; display: grid; gap: 0.3rem; font-size: 0.9em; }
+.mcopies .mc-row { display: flex; gap: 0.5rem; align-items: baseline; }
+.mcopies .mc-who { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mcopies .mc-text { min-width: 0; overflow-wrap: anywhere; }
 /* Grunt reports collapse to a line each (thread.js addGruntText); a fan-out's lines share one block. */
 .msg.grunt > summary .dur { flex: none; font-variant-numeric: tabular-nums; }
 .grunts > .grunt-list { padding: 0 0.6rem 0.5rem; }
@@ -453,3 +458,13 @@ details.recap-group:not([open]) > summary { margin: 0; }
 
 /* A chained minion's held brief (#728): read-only, in its sender's colour like the sent brief (.from-tm, .from-minion: Cara, 2026-11-14, "The brief should be purple since it came from a taskmaster right?"); a person's stays plain but dashed. */
 .msg.user.held-brief { border-style: dashed; }
+
+/* A message held for a minion (heldmsg.js): dashed and dimmed while it waits, normal once a turn took it. The line is one fixed row,
+   as tall as its button, so the flip changes only text, icon and the border's style. */
+.msg.user.held-msg > .held-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; min-height: 2rem; margin-top: 0.4rem; padding: 0.25rem 0; color: var(--muted); font-size: 0.9em; }
+.msg.user.held-msg > .held-line .held-text { flex: 1 1 14rem; min-width: 0; }
+.msg.user.held-msg > .held-line button { flex: none; }
+.msg.user.held-waiting { border-style: dashed; }
+.msg.user.held-waiting > :not(.who, .held-line) { opacity: 0.6; }
+.msg.user.held-waiting > .held-line { color: var(--ink); font-weight: 600; }
+.mcopies > summary .who { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }

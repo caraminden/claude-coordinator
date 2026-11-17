@@ -1,4 +1,4 @@
-// Citadel mock kit (v2): boards of takes, pick bars, a Send dock and contents for documents and mocks.
+// Citadel mock kit (v3): boards of takes, pick bars, a Send dock and contents for documents and mocks.
 // Copy it beside the page with mockkit.css. No dependencies. In Citadel's viewer (or a tab its Open button
 // opened), picks save through the artifact bridge (`window.claude.use('db')`, keys `db/<collection>/<id>`,
 // read by agents with artifact_data) and Send posts them straight to the minion's chat as the person. Only
@@ -8,6 +8,7 @@
 //   mock.picks({ collection, options, one })                          pick bars on every [data-pick] element
 //   mock.toc()                                                        contents from the page's h2s
 //   mock.esc(text)                                                    escape text for render's HTML
+// By itself, once the page has loaded, it gives each section with an h2 a hue and a drawn shape (#874).
 (function () {
   'use strict';
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -190,7 +191,7 @@
         btn = el('button', { type: 'button', class: 'mk-btn primary' }, '');
         text = el('span', { class: 'mk-dock-text' });
         sent = el('span', { class: 'mk-sent', 'aria-live': 'polite' });
-        node = el('div', { class: 'mk-dock' }, text, sent, btn);
+        node = el('div', { class: 'mk-dock' }, el('div', { class: 'mk-dock-msg' }, text, sent), btn);
         btn.addEventListener('click', async () => {
           const body = summary();
           if (!body) return void (sent.textContent = 'Nothing picked yet');
@@ -317,7 +318,7 @@
     };
   }
 
-  /** Contents: a link per h2 in the page, into `.mk-toc` (or `target`). */
+  /** Contents: a link per h2 in the page, into `.mk-toc` (or `target`), each in its section's hue. */
   function toc(target = '.mk-toc') {
     const nav = $(target);
     if (!nav) return;
@@ -325,7 +326,31 @@
       h.id ||= h.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       nav.append(el('a', { href: `#${h.id}` }, h.textContent.trim()));
     }
+    hueLinks();
   }
+
+  // Each section with an h2 gets a hue (the six category hues in turn, unless the page set --mk-hue on it) and a
+  // shape beside its heading, so a page is colour-coded with no markup of its own.
+  const SHAPES = ['circle', 'diamond', 'square', 'triangle', 'hex', 'star'];
+  function hueLinks() {
+    for (const a of document.querySelectorAll('.mk-toc a[href^="#"]')) {
+      const sec = document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)))?.closest('.mk-sec');
+      if (sec) a.style.setProperty('--mk-hue', sec.style.getPropertyValue('--mk-hue') || getComputedStyle(sec).getPropertyValue('--mk-hue'));
+    }
+  }
+  function sections() {
+    const secs = [...document.querySelectorAll('.mk-page section')].filter((s) => s.querySelector(':scope > h2'));
+    secs.forEach((s, i) => {
+      if (!s.style.getPropertyValue('--mk-hue')) s.style.setProperty('--mk-hue', `var(--mk-cat-${(i % 6) + 1})`);
+      s.classList.add('mk-sec');
+      const h = s.querySelector(':scope > h2');
+      if (!h.querySelector(':scope > .mk-glyph')) h.prepend(el('span', { class: 'mk-glyph', 'aria-hidden': 'true' }));
+      h.dataset.shape ||= SHAPES[i % SHAPES.length];
+    });
+    hueLinks();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sections);
+  else sections();
 
   window.mock = { boards, picks, toc, esc, ready };
 })();

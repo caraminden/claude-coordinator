@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { accountUsageKey } from '../src/account-pick.ts';
 import { Store } from '../src/db.ts';
-import { clockTime, MAX_LIMIT_RESUMES, parseResetTime, Runner } from '../src/runner.ts';
+import { MAX_LIMIT_RESUMES, nextLimitResume, Runner } from '../src/runner.ts';
+import { clockTime, parseResetTime } from '../src/pacific.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
@@ -49,6 +50,7 @@ function makeRunner() {
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
   r.limitDelayMs = 0;
   r.limitGapMs = 0;
+  r.limitProvenGapMs = 0;
   return r;
 }
 let runner = makeRunner();
@@ -514,4 +516,29 @@ test('weekly on one account and 5-hour on another: the note says which account i
   } finally {
     noAccounts();
   }
+});
+
+test('the limit note says the time in Pacific, whatever zone Claude named', async () => {
+  const resetsAt = Date.now() + 2 * 60 * 60 * 1000;
+  store.setSetting('usage', { session: { utilization: 1, resetsAt, status: 'rejected' }, weekly: null, updatedAt: Date.now() });
+  const id = minion();
+  const t = await turn(id, "You've hit your 5-hour limit · resets 9:00am (Asia/Tokyo)");
+  const LA = 'America/Los_Angeles';
+  assert.equal(t.note, `Usage limit, resumes ${clockTime(resetsAt, LA)}`);
+  assert.ok(events(id, 'note').at(-1)!.includes(`resumes by itself at ${clockTime(resetsAt, LA)}`));
+  runner.stop(id);
+  store.deleteSetting('usage');
+});
+
+test('the resume gap: 30 s for unproven waits, 5 s for ones a turn getting through released, and neither holds back the other', () => {
+  const now = 1_000_000;
+  const gaps = { gap: 30_000, provenGap: 5_000 };
+  const unproven = [{ ticket: 1, at: now, tries: 1 }];
+  const proven = [{ ticket: 2, at: now, tries: 1, proven: true as const }];
+  assert.equal(nextLimitResume(unproven, now - 1_000, gaps.gap, gaps.provenGap)!.due, now + 29_000);
+  assert.equal(nextLimitResume(proven, now - 1_000, gaps.gap, gaps.provenGap)!.due, now + 4_000);
+  // Both due together: the proven one goes at its own 5 s, not behind the other's 30 s.
+  const both = nextLimitResume([...unproven, ...proven], now - 1_000, gaps.gap, gaps.provenGap)!;
+  assert.deepEqual([both.wait.ticket, both.due], [2, now + 4_000]);
+  assert.equal(nextLimitResume([], 0, 30_000, 5_000), null);
 });

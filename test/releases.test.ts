@@ -82,6 +82,7 @@ test('the next release: the furthest-along change leads, with its stage, usual, 
   // One list on the card (Josh, 2026-11-13): its order says the line, so a waiting change's short words are its place alone.
   assert.equal(n.changes[1].brief, '2nd');
   assert.deepEqual(t.line.map((e) => e.place), ['next', '2nd']);
+  assert.deepEqual(n.changes.map((c) => !!c.later), [false, true], 'the one waiting for the lock goes out in the release after, so it has no number');
 });
 
 test('a change offers a preview while its minion is open with a worktree, not once dismissed (#638)', () => {
@@ -298,6 +299,14 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   w.store.setSetting(`preview:${theirs.id}`, { at: now });
   releases.poll();
   assert.equal(sent.at(-1).releases.testCopies.length, 1, 'a scheme that gets something after the first poll is sent too');
+});
+
+test('Releases: a target the releaseKey dep names carries releaseKey for its Make release key button (#837); others carry none', () => {
+  const w = world();
+  const keyless = new Releases({ store: w.store, readers: [w.server], broadcast: () => {}, testCopies: () => [], releaseKey: (tv) => (tv.target.id === CITADEL_TARGET ? 'twi' : null) });
+  assert.equal(keyless.read().find((s) => s.projectId === w.citadel.id)!.targets[0].releaseKey, 'twi');
+  const keyed = new Releases({ store: w.store, readers: [w.server], broadcast: () => {}, testCopies: () => [], releaseKey: () => null });
+  assert.ok(!('releaseKey' in keyed.read().find((s) => s.projectId === w.citadel.id)!.targets[0]));
 });
 
 test('memberSchemes: the schemes a person owns or is in, admin or not', () => {

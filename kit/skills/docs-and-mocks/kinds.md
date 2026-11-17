@@ -36,7 +36,8 @@ People pick between takes, or give each item a verdict.
 
 A proposal, or the design of a system, before anyone builds.
 
-1. **The problem**, with the real numbers (`.stat` tiles or a sentence) and where they came from.
+1. **The problem**, with the real numbers (a `.mk-stats` strip for the three to five headline
+   figures, or a sentence) and where they came from.
 2. **What it touches**: screens, systems, files; a table when there are more than three.
 3. **The options**, as `.mk-options` cards, each with a picture (a live mini screen, a screenshot,
    art), its idea in a line, and what it costs. Two or three, never one.

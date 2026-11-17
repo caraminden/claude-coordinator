@@ -234,6 +234,21 @@ test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ti
     assert.ok(!last.parked, 'this one woke it');
     await settled(b);
 
+    // A person's message is held and listed in held_ids (the bubble's "Not sent yet"); with unpark: true it wakes the minion (#910).
+    const pe = await parkedMinion('E');
+    const personHeld = await call(`/api/tickets/${pe}/messages`, { text: 'later please' });
+    assert.equal(personHeld.data.held, 'parked');
+    const heldRow = (await said(pe)).at(-1);
+    assert.equal(heldRow.parked, true);
+    const rows = (await call(`/api/tickets/${pe}/events?after=0`)).data.filter((r: any) => r.kind === 'user_message');
+    assert.deepEqual((await view(pe)).held_ids, [rows.at(-1).id]);
+    const personWake = await call(`/api/tickets/${pe}/messages`, { text: 'now please', unpark: true });
+    assert.equal(personWake.status, 202);
+    assert.notEqual((await view(pe)).state, 'parked');
+    assert.ok(!(await said(pe)).at(-1).parked, 'this one woke it');
+    await settled(pe);
+    assert.deepEqual((await view(pe)).held_ids, [], 'the turn took the held message');
+
     // The loop guard holding the message meant to unpark it leaves it parked, Unpark still there.
     const d = (await call(`/api/projects/${p.id}/tickets`, { title: 'D', message: 'brief for D' })).data.id as number;
     await settled(d);

@@ -1,17 +1,18 @@
 // tools/lane.sh (#753): the land lane of a change, from tools/lanes as a given commit has it.
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { git as gitIn } from './git.ts';
 import { scriptEnv } from './script-env.ts';
 
 const laneSh = join(import.meta.dirname, '..', 'tools', 'lane.sh');
 const root = mkdtempSync(join(tmpdir(), 'lane-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const env = { ...scriptEnv(), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
-const git = (...args: string[]) => execFileSync('git', args, { cwd: root, env, encoding: 'utf8' }).trim();
+const git = (...args: string[]) => gitIn(root, ...args);
 git('init', '-q', '-b', 'main');
 // Citadel's own map, so these cases are the lanes Citadel's lands get.
 mkdirSync(join(root, 'tools'));

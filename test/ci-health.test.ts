@@ -11,6 +11,7 @@ import {
   clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, type LandState,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
+import type { AlertPart } from '../src/alert-wakes.ts';
 import { Store } from '../src/db.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ci-health-'));
@@ -205,20 +206,22 @@ function world({ delve = false } = {}) {
     return etag === tag ? { status: 304, etag: tag, body: null } : { status: 200, etag: tag, body };
   };
   const puts: [string, string, string | null][] = [];
+  const parts: (AlertPart[] | undefined)[] = [];
   const from: string[] = [];
   const quiet: string[] = [];
   const mandateUp = { ok: true };
   const deps = {
     as: () => undefined,
     get,
-    mandate: async (p: { name: string }, u: { name: string }, key: string, title: string | null, q?: boolean) => {
+    mandate: async (p: { name: string }, u: { name: string }, key: string, title: string | null, q?: boolean, _link?: string, about?: AlertPart[]) => {
       puts.push([u.name, key, title]);
+      parts.push(about);
       from.push(p.name);
       if (q) quiet.push(key);
       return mandateUp.ok;
     },
   };
-  return { store, peek, gh, puts, from, quiet, mandateUp, deps, health: new CiHealth(store, deps) };
+  return { store, peek, gh, puts, parts, from, quiet, mandateUp, deps, health: new CiHealth(store, deps) };
 }
 
 test('a problem is one Mandate alert per admin with Mandate, cleared when fixed, and kept across a restart', async () => {
@@ -620,6 +623,23 @@ test("the land alarm joins CI health's one alert under the live scheme, rings wi
   for (const [phase, ci, ms] of capHit) { await again.land(w.peek.id, [land(5, '#558', phase, ci)], t); t += ms; }
   await again.land(w.peek.id, [], t);
   assert.match(w.puts.at(-1)![2]!, /2 lands in a row: #557 .*#558/);
+});
+
+test("the one alert names its problems for the Taskmaster's wake, the land alarm with each run's link, failed step and runner (#869)", async () => {
+  const w = world();
+  let t = NOW;
+  const failed: [string, string | null, number][] = [['rebase', null, 5_000], ['ci', 'failed', 20_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]];
+  for (const [seq, name, run] of [[1, '#866', 7001], [2, '#867', 7002]] as const) {
+    w.gh.jobs.set(run, [job({ run_id: run, name: 'tests', conclusion: 'failure', runner_name: 'DESKTOP-G248IJ8-desktop', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: "the runner's clock", conclusion: 'failure' }] })]);
+    for (const [phase, ci, ms] of failed) { await w.health.land(w.peek.id, [land(seq, name, phase, ci, ci ? run : null)], t); t += ms; }
+    await w.health.land(w.peek.id, [], t);
+  }
+  assert.equal(w.puts.length, 1);
+  const [part] = w.parts[0]!;
+  assert.equal(part.id, `${w.peek.id}:land:fallback`);
+  assert.match(part.title, /^Peek Auras: the land gate fell back to perigee on 2 lands in a row/);
+  assert.match(part.facts!, /https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/7001: tests › the runner's clock failed on DESKTOP-G248IJ8-desktop/);
+  assert.match(part.facts!, /runs\/7002: tests › the runner's clock/);
 });
 
 test('a failed scheduled run on main tells its scheme\'s Taskmaster once, failed step and link included; green, push and old runs say nothing (#588)', async () => {

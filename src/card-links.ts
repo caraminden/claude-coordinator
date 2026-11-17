@@ -44,12 +44,13 @@ const clip = (s: unknown, n = 80) => {
 };
 
 /** What a card asks for: a merge or land go (a question card asked with kind merge, or an approval for a merge), a tripwire approval, or its plain kind. */
-export type CardWhat = 'question' | 'plan' | 'merge' | 'approval' | 'tripwire';
+export type CardWhat = 'question' | 'plan' | 'merge' | 'approval' | 'tripwire' | 'secret';
 
 /** What card `kind` posted with chat event data `data` asks for (CardWhat). */
 export function cardWhat(kind: CardLink['kind'], data: any): CardWhat {
   if (data?.kind === 'merge' || (kind === 'approval' && data?.merge)) return 'merge';
   if (kind === 'approval' && data?.tripwire) return 'tripwire';
+  if (kind === 'question' && data?.secret) return 'secret';
   return kind;
 }
 
@@ -83,7 +84,7 @@ export function settledHow(kind: string, data: any, reply: any, result: any, dis
 }
 
 /** How a card reads in a tool's text: `question card "Layout": [open it](#/p/2/t/394?e=123)`. */
-export const cardText = (c: CardLink) => `${c.kind} card${c.to ? ` for ${c.to}` : ''}${c.label ? ` "${c.label}"` : ''}: [open it](${c.href})`;
+export const cardText = (c: CardLink) => `${c.what === 'secret' ? 'secret' : c.kind} card${c.to ? ` for ${c.to}` : ''}${c.label ? ` "${c.label}"` : ''}: [open it](${c.href})`;
 
 /** "card", "cards", "card's", as a word. */
 const CARD = /(?<![\p{L}\p{N}_-])cards?(?![\p{L}\p{N}_-])/iu;

@@ -1,6 +1,6 @@
 /* The composer under a chat: the message box, its button row and pickers, one-tap replies, attachments. */
 .composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
-/* It grows with its text (composer.js fitHeight), like the new-minion box, up to a cap that leaves the chat in view. */
+/* It grows with its text (composer.js fitHeight), up to a cap that leaves the chat in view. */
 .composer textarea { min-height: 4.5rem; max-height: 40vh; resize: none; overflow-y: auto; }
 /* 16px on phones, so iOS Safari doesn't zoom in on focus (as ui/composer.js does for apps; Citadel's textarea font rule outweighs its :where()). */
 @media (max-width: 800px) { .composer textarea { font-size: 16px; } }
@@ -30,10 +30,6 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 .attachments { align-items: center; }
 /* Clicking a thumbnail shows it full size (#654). */
 .attachments .thumb button.zoom { display: block; padding: 0; border: 0; border-radius: 6px; background: none; cursor: zoom-in; }
-dialog.image-zoom[open] { box-sizing: border-box; display: flex; align-items: center; justify-content: center; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 3rem 1rem 1rem; border: 0; background: transparent; cursor: zoom-out; }
-dialog.image-zoom::backdrop { background: rgb(0 0 0 / 0.8); }
-dialog.image-zoom img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; cursor: default; }
-dialog.image-zoom .close { position: absolute; top: 0.5rem; right: 0.5rem; width: 2.5rem; height: 2.5rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--panel); color: var(--ink); }
 .attachments .file-chip { max-width: min(100%, 22rem); }
 .attachments .file-chip button { flex: none; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
 
@@ -142,3 +138,6 @@ dialog.secret-ask .secret-warning { display: flex; flex-direction: column; gap: 
 dialog.secret-ask .secret-warning p { margin: 0; }
 dialog.secret-ask label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9em; }
 dialog.secret-ask .row { gap: 0.5rem; flex-wrap: wrap; }
+/* Over the box while the minion is parked: your message waits until it's unparked (heldmsg.js composerHint). */
+.composer .parked-hint { padding: 0.35rem 0.6rem; margin-bottom: 0.4rem; border: 1px dashed var(--control-line); border-radius: 6px; color: var(--ink); font-size: 0.9em; }
+.composer .parked-hint[hidden] { display: none; }

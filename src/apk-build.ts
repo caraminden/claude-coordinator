@@ -6,13 +6,14 @@
 // ~/.config/citadel-android (the citadel:android-app skill), and publishes it and latest.json into the app's DATA_DIR/android/,
 // where its open route serves them to the update banner. An app whose APKs a release workflow signs on CI (Mandate) keeps that
 // path (src/apk-release.ts): this skips it. Nothing here touches the live slot, so a failed build changes nothing that runs.
-import { spawn, execFile } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { execResult, runLogged } from './exec.ts';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { androidEnv } from './claude-link.ts';
 import { apksigner, install, OldApk, OtherKey, signers } from './apk-release.ts';
 import type { ContraptionRow } from './db.ts';
+import { hasKey, keyFiles, makeReleaseKey, type Keytool } from './release-key.ts';
 import { gradleVersion } from './release-readers.ts';
 
 /** The whole build, the wait for a heavy slot included: past it the build is stopped and told. */
@@ -54,22 +55,6 @@ export function manifestWarnings(xml: string): string[] {
 /** Runs a command, its output into `log`: its exit code, 124 when it ran out of time. */
 export type Runner = (argv: string[], cwd: string, env: NodeJS.ProcessEnv, log: string, ms: number) => Promise<number>;
 
-const spawnRun: Runner = (argv, cwd, env, log, ms) => new Promise<number>((ok) => {
-  const fd = openSync(log, 'a');
-  const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: ['ignore', fd, fd] });
-  closeSync(fd);
-  let late = false;
-  const timer = setTimeout(() => {
-    late = true;
-    try {
-      process.kill(-child.pid!, 'SIGTERM');
-      setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }, 10_000).unref();
-    } catch {}
-  }, Math.max(1, ms));
-  child.once('error', () => { clearTimeout(timer); ok(127); });
-  child.once('close', (code) => { clearTimeout(timer); ok(late ? 124 : code ?? 1); });
-});
-
 export interface ApkBuildDeps {
   home: string;
   /** The app's folder, a link to its live slot (src/app-services.ts). */
@@ -90,6 +75,7 @@ export interface ApkBuildDeps {
   tell: (row: ContraptionRow, text: string) => void;
   run?: Runner;
   certs?: (apk: string) => Promise<string[]>;
+  keytool?: Keytool;
 }
 
 /** What one check came to, for the log and the tests. */
@@ -130,6 +116,26 @@ export class ApkBuilds {
     })();
   }
 
+  get keyDir() {
+    return this.d.keyDir;
+  }
+
+  /** Whether `name` is a Capacitor app whose last check found no release key: the Releases page offers to make it. */
+  keyless(name: string): boolean {
+    return existsSync(join(this.d.cacheDir, name, 'key-missing-told')) && !hasKey(this.d.keyDir, name);
+  }
+
+  /**
+   * Make `row`'s release key (src/release-key.ts; throws when it has one) and build its APK at once: the commit the
+   * missing key failed at is forgotten. The make_release_key card's Approve and the Releases page's button both come here.
+   * Resolves once the key is made, to the build it started.
+   */
+  async makeKey(row: ContraptionRow, by: string): Promise<{ building: Promise<void> }> {
+    await makeReleaseKey(this.d.keyDir, row.name, { home: this.d.home, keytool: this.d.keytool });
+    for (const f of ['key-missing-told', 'failed-at']) rmSync(join(this.d.cacheDir, row.name, f), { force: true });
+    return { building: this.schedule(row, by) };
+  }
+
   /** Whether `row`'s APK is behind its live commit, and if so build and publish it. */
   async check(row: ContraptionRow, by: string): Promise<Outcome> {
     if (this.d.ciRelease(row)) return { skipped: 'a release workflow signs its APKs' };
@@ -137,8 +143,7 @@ export class ApkBuilds {
     if (!live) return { skipped: 'not deployed' };
     const cap = await capacitorApp(live);
     if (!cap) return { skipped: 'not a Capacitor app' };
-    const git = (cwd: string, ...args: string[]) => new Promise<{ code: number; out: string }>((ok) =>
-      execFile('git', args, { cwd, timeout: 120_000 }, (err: any, out) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out).trim() })));
+    const git = (cwd: string, ...args: string[]) => execResult('git', args, { cwd, timeout: 120_000 }).then((r) => ({ code: r.code, out: r.out.trim() }));
     const commit = (await git(live, 'rev-parse', 'HEAD')).out;
     if (!/^[0-9a-f]{40}$/.test(commit)) return { failed: `couldn't read ${live}'s commit` };
     const feedFile = join(this.d.dataDir(row), 'android', 'latest.json');
@@ -162,10 +167,19 @@ export class ApkBuilds {
       this.d.tell(row, `${row.title}'s Android build at ${commit.slice(0, 9)} wasn't published: ${why}${end ? `\n\nThe end of its build log (${join(this.d.cacheDir, row.name, 'build.log')}):\n${end}` : ''}\n\nIt's tried again once a deploy carries a newer commit.`);
       return { failed: why };
     };
-    const key = join(this.d.keyDir, `${row.name}-release.jks`);
-    const pass = join(this.d.keyDir, `${row.name}-release.pass`);
-    if (!existsSync(key) || !existsSync(pass)) {
-      return fail(`it has no release key yet (${key} and its .pass). A person makes it once, as the citadel:android-app skill says; until then no APK is built after its deploys.`);
+    const { jks: key, pass } = keyFiles(this.d.keyDir, row.name);
+    // A missing key is told once, not per commit (a night of deploys woke the Taskmaster ten times): the marker stays until a check finds the key.
+    const keyTold = join(dir, 'key-missing-told');
+    const there = [key, pass].filter((f) => existsSync(f));
+    if (there.length === 2) rmSync(keyTold, { force: true });
+    else {
+      if (existsSync(keyTold)) return { skipped: 'no release key yet, already told' };
+      // Half a pair is a key that was lost, not one never made: restore it, never make a new one (phones would have to uninstall).
+      const out = fail(there.length
+        ? `half of its release key is missing: ${there[0]} is there but ${there[0] === key ? pass : key} isn't. Restore it from the desktop's CitadelBackups\\keys (deploy/desktop/README.md, "Restoring"); a new key is never made over half of one. Until then no APK is built after its deploys.`
+        : `it has no release key yet (${key} and its .pass). A member makes it with Make release key on its Releases card, or approves the card make_release_key posts; until then no APK is built after its deploys.`);
+      writeFileSync(keyTold, commit);
+      return out;
     }
     const code = Number((await git(live, 'rev-list', '--count', commit)).out);
     if (!Number.isInteger(code) || code < 1) return fail(`couldn't count ${commit.slice(0, 9)}'s commits`);
@@ -203,7 +217,7 @@ export class ApkBuilds {
     const path = `${join(this.d.home, '.local/share/mise/shims')}:${join(this.d.home, '.local/bin')}:/usr/local/bin:/usr/bin:/bin`;
     const env: NodeJS.ProcessEnv = { ...base, PATH: path, ...androidEnv(this.d.home, path), GIT_TERMINAL_PROMPT: '0', MISE_TRUSTED_CONFIG_PATHS: src, CITADEL_HEAVY_WHO: `${row.title} APK build`, CI: '1' };
     if (!env.ANDROID_HOME) return fail(`the Android toolchain isn't installed on perigee (tools/android/install-sdk.sh)`);
-    const run = this.d.run ?? spawnRun;
+    const run = this.d.run ?? runLogged;
     const deadline = Date.now() + BUILD_MS;
     const step = async (what: string, argv: string[], cwd: string) => {
       await writeFile(log, `== ${argv.join(' ')}\n`, { flag: 'a' });

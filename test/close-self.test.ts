@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { closeSelfResult } from '../src/mcp.ts';
 import { Runner } from '../src/runner.ts';
+import { until } from './wait.ts';
 import { stopTurns, testPins } from './helpers.ts';
 testPins();
 
@@ -65,12 +66,12 @@ function release(outcome: 'ok' | 'error') {
 // The first turn's close note is out: wait for the queued second turn. It starts only after the first one's
 // session is saved, and until then nothing runs, so an endTurn there would return at once and leave it running.
 async function secondTurn(id: number) {
-  while (!notes(id).length || !runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  await until('the second turn to start', () => notes(id).length && runner.isRunning(id));
 }
 
 async function endTurn(id: number, outcome: 'ok' | 'error') {
   release(outcome);
-  while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to end', () => !runner.isRunning(id));
 }
 
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text);
@@ -106,7 +107,7 @@ test('a stopped turn stays open', async () => {
   runner.send(id, 'Cara', 'ship it');
   runner.closeAfterTurn(id, null);
   runner.stop(id);
-  while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to end', () => !runner.isRunning(id));
   assert.equal(store.getTicket(id)!.status, 'idle');
 });
 

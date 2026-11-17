@@ -236,3 +236,29 @@ test('Grunt worktrees: kept while a turn of the scheme that began before them ru
   await runner.sweepWorktrees(later);
   assert.ok(existsSync(theirs));
 });
+
+test('a minion whose worktree was never recorded (creation cut off by a restart) gets its folder back on its branch, or a new one (#899)', async () => {
+  const s = scheme('Unrecorded');
+  // Its worktree was made, then the restart came before setTicketDir.
+  const made = store.createTicket({ project_id: s.id, title: 'Keep clips', permission_mode: 'default', created_by: 'T' });
+  const dir = ticketWorktree(data, s.id, made.id);
+  git(s.repo, 'worktree', 'add', '-q', '-b', `ticket/${made.number}-keep-clips`, dir);
+  await runner.reopened(made.id);
+  assert.deepEqual({ cwd: store.getTicket(made.id)!.cwd, branch: store.getTicket(made.id)!.branch }, { cwd: dir, branch: `ticket/${made.number}-keep-clips` });
+  assert.match(notes(made.id).at(-1)!, /no worktree on record .* on branch ticket\/\d+-keep-clips/);
+
+  // The restart came before the worktree: it is made now, on a branch named as createTicketDir names it.
+  const none = store.createTicket({ project_id: s.id, title: 'Show the bill', permission_mode: 'default', created_by: 'T' });
+  await runner.reopened(none.id);
+  const t = store.getTicket(none.id)!;
+  assert.equal(t.cwd, ticketWorktree(data, s.id, none.id));
+  assert.equal(git(t.cwd, 'branch', '--show-current'), `ticket/${none.number}-show-the-bill`);
+  assert.equal(t.branch, `ticket/${none.number}-show-the-bill`);
+
+  // A folder git never finished: nothing is recorded, and the note says why.
+  const half = store.createTicket({ project_id: s.id, title: 'Half', permission_mode: 'default', created_by: 'T' });
+  mkdirSync(ticketWorktree(data, s.id, half.id), { recursive: true });
+  await runner.reopened(half.id);
+  assert.equal(store.getTicket(half.id)!.cwd, '');
+  assert.match(notes(half.id).at(-1)!, /could not make one/);
+});

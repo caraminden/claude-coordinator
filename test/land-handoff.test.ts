@@ -85,6 +85,52 @@ test('a clean land waiting for the restart sets pending-deploy, and a restart al
   assert.ok(early.did.includes('deployLive'), 'its restart went live before land.sh ended: no report will come, so it is dismissed now');
 });
 
+test('stay_open: a clean land still posts the shipped line but never dismisses, live now or after the restart (#909)', async () => {
+  const live = setup('stay-live');
+  await live.land(LIVE, 0, { stayOpen: true });
+  await live.handoffs.poll();
+  assert.match(live.notes[0], /^Shipped abc1234 .* Live now\./);
+  assert.ok(!live.did.some((d) => d.startsWith('close')), live.did.join('\n'));
+  assert.equal(live.ticket.state, 'ready');
+  assert.deepEqual(live.landings.handoffs(), [], 'reported once');
+  assert.equal(live.sent.length, 0, 'no model call');
+
+  const waiting = setup('stay-parked');
+  await waiting.land(LIVE, 0, { stayOpen: true, waitingOn: 'the migration piece' });
+  await waiting.handoffs.poll();
+  assert.equal(waiting.ticket.state, 'parked');
+  assert.match(String(waiting.ticket.note), /the migration piece/);
+  assert.ok(!waiting.did.some((d) => d.startsWith('close')));
+
+  const restart = setup('stay-restart', { liveAlready: true });
+  await restart.land(RESTART, 0, { stayOpen: true });
+  await restart.handoffs.poll();
+  assert.match(restart.notes[0], /Waiting for the restart\./);
+  assert.ok(!restart.did.includes('deployPending'), 'pending-deploy would dismiss it once live');
+  assert.ok(!restart.did.includes('deployLive'));
+  assert.notEqual(restart.ticket.state, 'pending-deploy');
+  assert.ok(!restart.did.some((d) => d.startsWith('close')));
+});
+
+test('stay_open with a restart and a person who wrote in line: the message never says pending-deploy', async () => {
+  const s = setup('stay-talked');
+  await s.land(RESTART, 0, { stayOpen: true });
+  s.landings.talked(1);
+  assert.ok(s.landings.wasTalked(1));
+  await s.handoffs.poll();
+  assert.ok(!s.sent.some((m) => /pending-deploy/.test(m)), s.sent.join('\n'));
+});
+
+test('stay_open does not change a failed land: it wakes the minion with the output', async () => {
+  const s = setup('stay-failed');
+  await s.land('land: conflict\n', 1, { stayOpen: true });
+  await s.handoffs.poll();
+  assert.equal(s.sent.length, 1);
+  assert.match(s.sent[0], /didn't go through/);
+  assert.equal(s.ticket.state, null);
+  assert.ok(!s.did.some((d) => d.startsWith('close')));
+});
+
 test('a high-risk land carries its go in the shipped line', async () => {
   const s = setup('high');
   await s.land(LIVE, 0, { risk: 'high', reason: 'touches the land pipeline', go: 'Cara, 3:05 PM PST' });
@@ -115,6 +161,23 @@ test('each kind of failed land wakes the minion with the end of its output, and 
     assert.ok(!s.did.some((d) => d.startsWith('close')), `${kind}: not dismissed`);
     assert.deepEqual(s.landings.handoffs(), [], `${kind}: reported`);
   }
+});
+
+test('a land whose branch moved but whose push to origin failed says it landed locally and what to do, never that it did not go through (#911)', async () => {
+  const s = setup('unpushed');
+  const out = 'land: CI passed on d1a5c2f6\nland: master is now at d1a5c2f "#15: seed the tree"\nland: master moved, but the push to origin failed: remote: Repository not found.\nfatal: repository \'https://github.com/o/r.git/\' not found\nland: the next landing retries it; if origin\'s master moved on its own (rejected as non-fast-forward), a person merges it into /repo first\n';
+  await s.land(out, 1);
+  await s.handoffs.poll();
+  assert.equal(s.sent.length, 1, 'woken once');
+  assert.doesNotMatch(s.sent[0], /didn't go through|hand it off again with hand_off_land/);
+  assert.match(s.sent[0], /master moved locally to d1a5c2f "#15: seed the tree"/);
+  assert.match(s.sent[0], /push to origin failed: remote: Repository not found\.\nfatal: repository 'https:\/\/github\.com\/o\/r\.git\/' not found/);
+  assert.match(s.sent[0], /git push origin master/, 'says how to push it now');
+  assert.ok(s.notes.some((n) => n.startsWith('Shipped d1a5c2f "#15: seed the tree"') && /not pushed to origin/i.test(n)), 'the shipped line says it landed but is not pushed');
+  assert.equal(s.ticket.state, null, 'left open for the minion to push');
+  assert.ok(!s.did.some((d) => d.startsWith('close')), 'not dismissed');
+  assert.equal(landResult('land: master moved, but the push to origin failed: error: one\n\nhint: two\n', 1).error, 'error: one\n\nhint: two', "a blank line in git's output doesn't cut it short");
+  assert.deepEqual(landResult(out, 1), { kind: 'unpushed', commit: 'd1a5c2f', subject: '#15: seed the tree', branch: 'master', error: "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found" });
 });
 
 test('exit 75 (no CI verdict) parks the minion until the runners are back, or wakes it when there are none to watch', async () => {
@@ -378,6 +441,8 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.match((await full.json()).error, /--full yourself/);
 
     assert.equal((await handOff({ ...body, deploy: 'no' })).status, 400, 'deploy is true or false');
+    assert.equal((await handOff({ ...body, stay_open: 'yes' })).status, 400, 'stay_open is true or false');
+    assert.equal((await handOff({ ...body, waiting_on: 'x' })).status, 400, 'waiting_on goes with stay_open');
     writeFileSync(join(cwd, 'conflict'), '');
     const clash = await handOff(body);
     assert.equal(clash.status, 409, 'a branch that would conflict is sent back in the turn');

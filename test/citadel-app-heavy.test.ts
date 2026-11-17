@@ -11,13 +11,10 @@ const root = mkdtempSync(join(tmpdir(), 'app-heavy-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const pressure = join(root, 'pressure');
 writeFileSync(pressure, 'some avg10=1.00 avg60=1.00 avg300=1.00 total=1\n');
+import { until } from './wait.ts';
 let n = 0;
 function env(app: string, more: Record<string, string> = {}) {
   return { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_WHO: undefined, CITADEL_HEAVY_DIR: join(root, `locks-${n}`), CITADEL_HEAVY_SLOTS: '2', CITADEL_HEAVY_PRESSURE: pressure, CITADEL_HEAVY_POLL: '0.1', BASE_PATH: `/apps/${app}`, ...more };
-}
-async function until(what: string, check: () => boolean) {
-  for (let i = 0; i < 400 && !check(); i++) await new Promise((r) => setTimeout(r, 25));
-  assert.ok(check(), `timed out waiting for ${what}`);
 }
 
 test("it runs the step with its status and puts the app's name in the history", () => {

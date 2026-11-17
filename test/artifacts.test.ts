@@ -117,3 +117,11 @@ test('a git worktree lists its committed and staged files as well as untracked o
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a file in another minion\'s shared folder shows a short path, never the server\'s absolute one', async () => {
+  const { displayPath } = await import('../src/routes/files.ts');
+  const app = { dataDir: '/data', sharedDir: (t: { id: number }) => `/data/projects/2/shared/${t.id}` } as never;
+  const ticket = { id: 882, project_id: 2, cwd: '/work/t882' } as never;
+  assert.equal(displayPath(app, ticket, '/data/projects/2/shared/1974/critic.md'), 'shared files/critic.md');
+  assert.equal(displayPath(app, ticket, '/data/projects/2/shared/882/a.md'), 'shared files/a.md');
+});

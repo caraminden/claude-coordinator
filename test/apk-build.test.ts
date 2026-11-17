@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { apkPaths, ApkBuilds, capacitorApp, manifestWarnings, type Runner } from '../src/apk-build.ts';
 import type { ContraptionRow } from '../src/db.ts';
+import { git } from './git.ts';
 
 // src/apk-build.ts (#837): once a Capacitor app's deploy is live, an APK whose inputs changed is built, numbered by the
 // commit count, signed and published. A real git repo stands in for the live slot; a fake runner for npx, Gradle and apksigner.
@@ -18,7 +18,6 @@ mkdirSync(join(home, '.local/share/mise/installs/java/temurin-21'), { recursive:
 const keyDir = join(root, 'keys');
 mkdirSync(keyDir);
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
 function commit(dir: string, files: Record<string, string>) {
   for (const [f, text] of Object.entries(files)) {
     mkdirSync(join(dir, f, '..'), { recursive: true });
@@ -69,6 +68,7 @@ function builder(o: { ciRelease?: boolean; fail?: string } = {}) {
     published: (row, code, c) => published.push([row.name, code, c]),
     tell: (_row, text) => told.push(text),
     run, certs: async () => ['k1'],
+    keytool: async (args) => writeFileSync(args[args.indexOf('-keystore') + 1], 'jks'),
   });
   return { b, calls, told, published };
 }
@@ -135,6 +135,41 @@ test('no release key: nothing builds, the home Taskmaster is told once for that 
   key('keyless');
   commit(live, { 'android/app/y.txt': '1' });
   assert.deepEqual(await b.check(row, '#2'), { built: 2 });
+});
+
+test('a missing release key is told once, not once per commit; it tells again only after the key existed and went missing', async () => {
+  const { live, row } = app('nokey');
+  const { b, told } = builder();
+  assert.ok('failed' in (await b.check(row, '#1')));
+  commit(live, { 'android/app/a.txt': '1' });
+  assert.deepEqual(await b.check(row, '#2'), { skipped: 'no release key yet, already told' });
+  commit(live, { 'android/app/a.txt': '2' });
+  await b.check(row, '#3');
+  assert.equal(told.length, 1, 'two more commits without the key are not told again');
+  key('nokey');
+  commit(live, { 'android/app/a.txt': '3' });
+  assert.ok('built' in (await b.check(row, '#4')));
+  rmSync(join(keyDir, 'nokey-release.jks'));
+  commit(live, { 'android/app/a.txt': '4' });
+  await b.check(row, '#5');
+  assert.equal(told.length, 2, 'the key went missing again: told again');
+  assert.match(told[1], /half of its release key is missing: .*nokey-release\.pass is there but .*nokey-release\.jks isn't\. Restore it/, 'half a key is a lost one: restore, never make');
+  assert.doesNotMatch(told[1], /Make release key/);
+  assert.equal(b.keyless('nokey'), false, 'and no button offers a new one');
+});
+
+test("makeKey makes a keyless app's key, forgets the told notice and builds at once; keyless names it until then", async () => {
+  const { row, data } = app('newkey');
+  const { b, told } = builder();
+  assert.equal(b.keyless('newkey'), false, 'not known as a Capacitor app until a check reads it');
+  assert.ok('failed' in (await b.check(row, '#1')));
+  assert.equal(told.length, 1);
+  assert.match(told[0], /Make release key|make_release_key/);
+  assert.equal(b.keyless('newkey'), true);
+  await (await b.makeKey(row, 'Cara')).building;
+  assert.equal(b.keyless('newkey'), false);
+  assert.equal(feed(data).versionCode, 1, 'the commit the notice failed at builds now');
+  await assert.rejects(b.makeKey(row, 'Cara'), /already has a release key/);
 });
 
 test('a failed Gradle build publishes nothing and tells the end of its log; an app a release workflow signs is left alone', async () => {

@@ -5,6 +5,8 @@ import { account, api, formatSize, h, isCoordinator, me, uploadUrl, view } from 
 import { codex, reloadWhenIdle, scrollToBottom, sending, setSending } from './core.js';
 import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
+import { openDialog } from './ui/dialog.js';
+import { lightbox } from './ui/media.js';
 import { optimistic } from './ui/optimistic.js';
 import { pastedFiles } from './paste.js';
 import { looksSecret } from './secret-check.js';
@@ -26,7 +28,7 @@ export function saveDraft(key, value) {
   } catch {}
 }
 
-// Shared with every app (public/ui/composer.js); the new-minion box uses it too.
+// Shared with every app (public/ui/composer.js).
 export { fitHeight } from './ui/composer.js';
 
 let draftDb = null;
@@ -114,6 +116,7 @@ export function composer(chatId, ticket) {
   let after = false;
   // Set by the secret warning's Send anyway, for the one submit it makes (#838).
   let sendAnyway = false;
+  let unparkWith = false;
   const box = mountComposer(document.createDocumentFragment(), {
     placeholder: composerPlaceholder(ticket),
     draftKey: `cc-draft:${chatId}`,
@@ -135,11 +138,19 @@ export function composer(chatId, ticket) {
     send: (text) => {
       const sent = attachments.items.slice();
       attachments.remove(sent);
-      send(text, sent, after);
+      send(text, sent, after, unparkWith);
     },
     onError: (ex) => alertNote(ex.message),
   });
   const { form, textarea, row, sendButton: sendBtn } = box;
+  form.sendAndUnpark = () => {
+    unparkWith = true;
+    try {
+      form.requestSubmit();
+    } finally {
+      unparkWith = false;
+    }
+  };
   // Citadel keeps its own look (style.css .composer); the cui-* look is the apps'. Two rows tall when empty, as before.
   form.className = 'composer';
   row.className = 'row';
@@ -229,7 +240,7 @@ export function composer(chatId, ticket) {
    * retried (src/send-ids.ts). One that fails stays in the chat marked not sent, with Retry and Edit, and
    * the ones after it still go. The promise settles as optimistic()'s does.
    */
-  const send = (text, sent = [], queue = false) => {
+  const send = (text, sent = [], queue = false, unpark = false) => {
     const images = sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
     const uploads = sent.filter((i) => i.upload).map((i) => i.upload);
     const files = uploads.map(({ name, type }) => ({ name, type }));
@@ -239,7 +250,7 @@ export function composer(chatId, ticket) {
     const el = userBubble(me, text, urls, null, null,
       uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })));
     const entry = { el, urls, text, sendId: crypto.randomUUID(), saved: [...images, ...uploads.map((upload) => ({ upload }))], state: 'new' };
-    const body = { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}), sendId: entry.sendId };
+    const body = { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}), ...(unpark ? { unpark: true } : {}), sendId: entry.sendId };
     setSending(sending + 1); // until it's in or taken back: a reload now would lose it
     entry.retry = () => optimistic({
       key: `send:${chatId}`,
@@ -443,15 +454,9 @@ function createAttachments(chatId, onChange) {
   return state;
 }
 
-/** An image waiting to send, full size (#654), until Esc, its ✕ or a click off the picture. */
+/** An image waiting to send, full size (#654), in the kit's lightbox (#872): Esc, its ✕ or a backdrop click closes it. */
 function zoomImage(src) {
-  const dialog = h('dialog', { class: 'image-zoom', 'aria-label': 'Image to send' },
-    h('img', { src, alt: 'Image to send, full size' }),
-    h('button', { type: 'button', class: 'close', title: 'Close', 'aria-label': 'Close' }, '✕'));
-  dialog.addEventListener('click', (e) => e.target.tagName !== 'IMG' && dialog.close());
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  lightbox([{ src, caption: 'Image to send', alt: 'Image to send, full size' }]);
 }
 
 /** PUT a file into the thread's uploads folder, streamed, with progress (fetch can't report upload progress). */
@@ -500,10 +505,7 @@ function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
     h('div', { class: 'row' }, save,
       h('button', { type: 'button', class: 'secondary', onclick: () => { dialog.close(); sendAnyway(); } }, 'Send anyway'),
       h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel')));
-  const dialog = h('dialog', { class: 'cui-dialog secret-ask', 'aria-label': 'This looks like a secret' },
-    h('div', { class: 'cui-dialog-head' }, h('h2', {}, 'This looks like a secret. Save it as one instead?'),
-      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
-    form);
+  const dialog = openDialog({ title: 'This looks like a secret. Save it as one instead?', className: 'secret-ask', body: form });
   form.onsubmit = async (e) => {
     e.preventDefault();
     save.disabled = true;
@@ -519,9 +521,6 @@ function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
       save.disabled = false;
     }
   };
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
   name.focus();
 }
 

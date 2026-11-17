@@ -9,6 +9,10 @@
   the person who runs it: at their logon, and every 5 minutes in case it ended (IgnoreNew skips a run while one is
   going), it runs `wsl.exe -d <distro> -u root --exec /bin/sleep infinity` in a hidden console, which holds the distro
   up. Then it starts the task now.
+  It also registers "Citadel WSL clock" (#900): every 5 minutes, in every distro that is running (it starts none), it
+  masks systemd-timesyncd where WSL keeps the clock itself, since one distro's timesyncd skews the clock every distro
+  shares, CI's included (tools/ci-runner/README.md, #542). Each distro it masks goes in
+  %LOCALAPPDATA%\citadel-wsl-clock.log.
   WSL distros are each person's own, so the task runs as whoever runs this, while they're logged on, like the session
   runners. It changes nothing inside the distro, touches no runner, and never restarts or reboots the PC. No
   elevation needed.
@@ -49,6 +53,21 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Register-ScheduledTask -Force -TaskName $task -Action $action -Trigger $triggers -Principal $principal -Settings $settings | Out-Null
 Start-ScheduledTask -TaskName $task
 
+# The clock guard (#900): a new Ubuntu distro turns timesyncd on, and that alone skews CI's clock. No double quotes in
+# the sh line: Windows PowerShell 5.1 passes them to wsl.exe unescaped.
+$sh = 'grep -qa refclock.PHC /init 2>/dev/null || exit 0; test -e /usr/lib/systemd/system/systemd-timesyncd.service || exit 0; systemctl is-enabled systemd-timesyncd 2>/dev/null | grep -qx masked && exit 0; systemctl mask --now systemd-timesyncd >/dev/null 2>&1 && echo masked'
+$guard = @"
+`$w = '$wsl'; `$log = Join-Path `$env:LOCALAPPDATA 'citadel-wsl-clock.log'
+foreach (`$d in @(& `$w -l --running -q | ForEach-Object { (`$_ -replace "``0", '').Trim() } | Where-Object { `$_ })) {
+  if ((& `$w -d `$d -u root --exec /bin/sh -c '$sh') -eq 'masked') { Add-Content `$log "`$(Get-Date -Format s) masked systemd-timesyncd in `$d" }
+}
+"@
+$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($guard))
+$clockAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument "--headless `"$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -NonInteractive -EncodedCommand $encoded"
+$clockSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -StartWhenAvailable -MultipleInstances IgnoreNew
+Register-ScheduledTask -Force -TaskName 'Citadel WSL clock' -Action $clockAction -Trigger $triggers -Principal $principal -Settings $clockSettings | Out-Null
+Start-ScheduledTask -TaskName 'Citadel WSL clock'
+
 Start-Sleep -Seconds 5
 $running = @(& $wsl -l -v | ForEach-Object { $_ -replace "`0", '' } | Where-Object { $_ -match "\b$([regex]::Escape($Distro))\s+Running\b" })
 if ($running) {
@@ -58,3 +77,4 @@ if ($running) {
 }
 Write-Host "Stop it:   Disable-ScheduledTask -TaskName '$task'; Stop-ScheduledTask -TaskName '$task'"
 Write-Host "Remove it: Unregister-ScheduledTask -TaskName '$task' -Confirm:`$false"
+Write-Host "Task 'Citadel WSL clock' masks systemd-timesyncd in any running distro every 5 minutes; what it masked: $env:LOCALAPPDATA\citadel-wsl-clock.log"

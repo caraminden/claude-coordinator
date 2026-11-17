@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { answerCheck, answerHook, processLine, proposalLine, readTurn } from '../kit/hooks/answer-check.ts';
+import { answerCheck, answerHook, placeholderInCommand, processLine, proposalLine, readTurn } from '../kit/hooks/answer-check.ts';
 
 // Fixture transcripts in Claude Code's JSONL shape: the prompt carries promptId, assistant entries don't.
 const prompt = (text: string, promptId = 'p1') => ({ type: 'user', promptId, message: { role: 'user', content: [{ type: 'text', text }] } });
@@ -150,4 +150,16 @@ test('process line: a Process: line at the start of a line is logged as a proces
   assert.equal(logged().length, 1, 'mid-line logs nothing');
   assert.equal(processLine('Process: none'), null);
   assert.equal(processLine('Process:  the Z doc  '), 'the Z doc');
+});
+
+test('placeholder in a command: a <name> in a shell-tagged block is a hit; redirects, heredocs and other blocks are not', () => {
+  const block = (tag: string, body: string) => 'Run this:\n\n```' + tag + '\n' + body + '\n```\n';
+  assert.equal(placeholderInCommand(block('powershell', "$u = '<the address the Machines page shows>'; iwr $u")), "$u = '<the address the Machines page shows>'; iwr $u");
+  assert.ok(placeholderInCommand(block('bash', 'ssh <host> ls')));
+  assert.ok(placeholderInCommand(block('powershell-admin', 'wsl --unregister <distro>')));
+  assert.equal(placeholderInCommand(block('bash', 'cat <<EOF\nhi\nEOF\nmake 2>&1 | tee log\nsort <in >out\nfoo <in 2>err')), null);
+  assert.equal(placeholderInCommand(block('json', '{"a": "<name>"}')), null);
+  assert.equal(placeholderInCommand('Say <name> in prose, `<x>` inline.'), null);
+  const hits = answerCheck({ toolCalls: [], finalText: block('fish', 'ssh <host>'), steered: false });
+  assert.match(hits[0], /^placeholder in a command · "ssh <host>"/);
 });

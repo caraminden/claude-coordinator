@@ -207,6 +207,11 @@ test('every kind of turn is launched with exactly what the snapshot says', async
   for (const name of Object.keys(want)) assert.deepEqual(got[name], want[name], name);
 });
 
+// Claude Code's date line is in the turn's zone: UTC flips it at 4 PM PST, mid keepalive hours (#862). The server stays UTC.
+test('every turn runs on Pacific time, whatever the server\'s TZ is', () => {
+  for (const tz of [undefined, 'UTC', 'Asia/Tokyo']) assert.equal(turnEnv({ ...process.env, TZ: tz }).TZ, 'America/Los_Angeles', String(tz));
+});
+
 // Claude Code records a conversation's first system prompt and replays it on every resume unless told not
 // to (--system-prompt-snapshot, on by default since 2.1.319 at the latest), so saved scheme and Citadel-wide
 // instructions never reached a running session (#618). Turns where the text didn't change still read it from cache.

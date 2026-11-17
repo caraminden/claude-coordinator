@@ -18,6 +18,17 @@
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const unescapeHtml = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
 
+/** Info string → [tone, header label] for a fence that names where its commands run (#898); other tags draw plain. */
+const SHELL_KINDS = {
+  admin: ['PowerShell · Admin · Windows · Run as administrator', ['powershell-admin', 'pwsh-admin', 'ps1-admin', 'admin-powershell']],
+  powershell: ['PowerShell · Windows', ['powershell', 'pwsh', 'ps1']],
+  wsl: ['WSL · bash (Linux on your desktop)', ['wsl']],
+  fish: ['perigee · fish', ['fish']],
+  bash: ['bash', ['bash', 'sh', 'zsh', 'shell', 'console']],
+  cmd: ['cmd · Windows', ['cmd', 'bat']],
+};
+const SHELLS = Object.fromEntries(Object.entries(SHELL_KINDS).flatMap(([tone, [label, tags]]) =>
+  tags.map((t) => [t, [tone, tone === 'bash' && t !== 'bash' ? t : label]])));
 /** A fence's opening line; a backtick one with a backtick later on its line is inline code, not a fence (CommonMark). */
 const FENCE = /^ {0,3}(`{3,}(?!.*`)|~{3,})\s*([^`\s]*)/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*$/;
@@ -340,7 +351,8 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
         for (i++; i < lines.length && !close.test(lines[i]); i++) code.push(lines[i]);
         i++;
         // shortcut: mermaid and other languages show as plain code; render them if people start writing diagrams.
-        out.push(`<pre><code${m[2] ? ` class="language-${escapeHtml(m[2])}"` : ''}>${escapeHtml(code.join('\n'))}</code></pre>`);
+        const shell = SHELLS[m[2].toLowerCase()];
+        out.push(`<pre${shell ? ` class="cui-shell" data-tone="${shell[0]}" data-label="${escapeHtml(shell[1])}"` : ''}><code${m[2] ? ` class="language-${escapeHtml(m[2])}"` : ''}>${escapeHtml(code.join('\n'))}</code></pre>`);
       } else if ((m = HEADING.exec(line))) {
         const html = inline(m[2]);
         let id = slug(html);
@@ -441,11 +453,25 @@ const CSS = `
 :where(.cui-md .cui-front-matter) { color: var(--citadel-muted); font-size: 0.85em; }
 :where(.cui-md .cui-link) { text-decoration: underline dotted; }
 :where(.cui-md .cui-alt) { color: var(--citadel-muted); }
+:where(.cui-md pre.cui-shell) { position: relative; padding-top: 0; border-left: 4px solid var(--cui-shell); }
+:where(.cui-md pre.cui-shell)::before {
+  content: attr(data-label); display: block; margin: 0 -0.6rem 0.5rem -0.6rem; padding: 0.3rem 3.6rem 0.3rem 0.6rem;
+  font: 600 var(--citadel-size-small) var(--citadel-font); line-height: 1.3; color: var(--cui-shell);
+  background: color-mix(in srgb, var(--cui-shell) 14%, var(--citadel-code-bg)); border-radius: 0 var(--citadel-radius-sm) 0 0;
+}
+:where(.cui-md pre.cui-shell[data-tone="admin"]) { --cui-shell: var(--citadel-warn-tint); }
+:where(.cui-md pre.cui-shell[data-tone="admin"])::before { background: var(--citadel-warn-tint); color: #1d1c1a; }
+:where(.cui-md pre.cui-shell[data-tone="powershell"]) { --cui-shell: var(--citadel-cat-2); }
+:where(.cui-md pre.cui-shell[data-tone="wsl"]) { --cui-shell: var(--citadel-cat-5); }
+:where(.cui-md pre.cui-shell[data-tone="fish"]) { --cui-shell: var(--citadel-cat-6); }
+:where(.cui-md pre.cui-shell[data-tone="bash"]) { --cui-shell: var(--citadel-cat-4); }
+:where(.cui-md pre.cui-shell[data-tone="cmd"]) { --cui-shell: var(--citadel-cat-3); }
 :where(.cui-md .cui-copy) {
   float: right; margin: -0.25rem -0.25rem 0.2rem 0.6rem; padding: 0.15rem 0.5rem; line-height: 1.3;
   border: 1px solid var(--citadel-control-border); border-radius: var(--citadel-radius-sm); background: transparent; color: var(--citadel-text);
   font: 500 var(--citadel-size-small) var(--citadel-font); cursor: pointer; user-select: none;
 }
+:where(.cui-md pre.cui-shell > .cui-copy) { position: absolute; top: 0.2rem; right: 0.3rem; float: none; margin: 0; z-index: 1; }
 :where(.cui-md .cui-copy)::before { content: 'Copy'; }
 :where(.cui-md .cui-copy[data-copied="yes"])::before { content: 'Copied'; }
 :where(.cui-md .cui-copy[data-copied="no"])::before { content: "Couldn't copy"; }

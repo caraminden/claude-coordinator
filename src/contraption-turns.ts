@@ -25,7 +25,7 @@ import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
 import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
-import { clockTime, parseResetTime } from './runner.ts';
+import { clockTime, parseResetTime, ZONE } from './pacific.ts';
 import type { ImageBlock } from './turn-images.ts';
 import { type CodexAt, type MediaTurn } from './contraption-media.ts';
 import { args, mcpConfig, settings, toolNamesPrompt, userLine, MEDIA_SERVER } from './contraption-args.ts';
@@ -785,7 +785,7 @@ export class ContraptionTurns {
       const until = parseResetTime(why) ?? Date.now() + 60 * 60 * 1000;
       const r = codex ? null : this.claude.limitedView(req.person, place.account ?? 1, until);
       if (r?.next && canRetry() && !live.stopped) return { outcome: 'retry', usage, retry: true };
-      if (r && !r.next && r.resetAt < until) line += ` Another of this person's Claude accounts resets first, at ${clockTime(r.resetAt, 'America/Los_Angeles')}.`;
+      if (r && !r.next && r.resetAt < until) line += ` Another of this person's Claude accounts resets first, at ${clockTime(r.resetAt, ZONE)}.`;
       return error('limit', line);
     }
     // A Codex turn's 401 is OpenAI's: it says nothing about the Claude sign-in.

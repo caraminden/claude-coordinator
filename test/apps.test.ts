@@ -358,3 +358,25 @@ test('isOpenPath matches the path or under it, never an encoded way round it', (
   assert.equal(isOpenPath(['/link'], '/link\\..\\admin'), false);
   assert.equal(isOpenPath([], '/link'), false);
 });
+
+test('keys that don\'t open: a page gets Citadel\'s styled panel with a Settings link and a way back, anything else the plain line', async () => {
+  const made = await srv.call('/api/contraptions', { name: 'locked', title: 'Locked', port: stubPort });
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  assert.equal((await srv.call(`/api/contraptions/locked/people/${cara}`, { enabled: true }, 'PUT')).status, 200);
+  const scheme = (await srv.call('/api/projects', { name: 'Scheme' })).data.id;
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'));
+  try {
+    db.prepare("UPDATE contraptions SET identity_private = 'garbage' WHERE name = 'locked'").run();
+  } finally {
+    db.close();
+  }
+  const res = await get('/apps/locked/', { Cookie: srv.cookie, Accept: 'text/html' });
+  assert.equal(res.status, 503);
+  const body = await res.text();
+  assert.match(body, /Locked can&#39;t open/);
+  assert.match(body, /id="back"[^>]*>Back to /);
+  assert.ok(body.includes(`href="/c/#/p/${scheme}/contraptions"`));
+  const api = await get('/apps/locked/x', asCara());
+  assert.equal(api.status, 503);
+  assert.match(await api.text(), /keys don't open/);
+});

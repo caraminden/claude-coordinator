@@ -25,6 +25,7 @@
 // woken once for that red streak, sharing the red mark above, so later red runs say nothing until it's back to green.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { AlertPart } from './alert-wakes.ts';
 import { lines } from './approvals.ts';
 import { APP_NAME } from './appname.ts';
 import { schemeLabels } from './ci-runner.ts';
@@ -442,8 +443,8 @@ const LAND_WATCH = 'ci-health:land';
 export interface CiHealthDeps {
   /** The GitHub login to read a scheme's repo as: its owner's linked one, or undefined for the box's. */
   as: (project: Project) => GithubEnv;
-  /** Put (with `title`) or clear (null) a person's Mandate item from a scheme or CI_SENDER, an alert unless `quiet`; true once Mandate has it settled. */
-  mandate: (from: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, quiet?: boolean, link?: string) => Promise<boolean>;
+  /** Put (with `title`) or clear (null) a person's Mandate item from a scheme or CI_SENDER, an alert unless `quiet`; true once Mandate has it settled. `parts`: the one alert's problems, for the Taskmaster's wake (#869). */
+  mandate: (from: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, quiet?: boolean, link?: string, parts?: AlertPart[]) => Promise<boolean>;
   get?: GhGet;
   /** A REST POST (the sweep's cancel); the gh CLI by default. */
   post?: (path: string, as: GithubEnv) => Promise<{ status: number }>;
@@ -561,8 +562,9 @@ export class CiHealth {
     const sent = this.store.getSetting<Record<string, string>>('ci-health:alert') ?? {};
     const title = open.length ? bundleTitle(open) : null;
     const admins = title ? this.admins() : [];
+    const parts = admins.some((u) => sent[u.id] !== title) ? await this.parts(open, land) : [];
     for (const u of admins) {
-      if (sent[u.id] !== title && (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, title, false, `/c/#/p/${open[0].id}`))) sent[u.id] = title!;
+      if (sent[u.id] !== title && (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, title, false, `/c/#/p/${open[0].id}`, parts))) sent[u.id] = title!;
     }
     for (const uid of Object.keys(sent)) {
       if (admins.some((u) => String(u.id) === uid)) continue;
@@ -570,6 +572,24 @@ export class CiHealth {
       if (!u || (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, null))) delete sent[uid];
     }
     this.store.setSetting('ci-health:alert', sent);
+  }
+
+  /** The one alert's problems as the Taskmaster's wake tells them (#869): the land alarm with each fallen-back run's link, failed step and runner. */
+  private async parts(open: { scheme: string; problem: Problem; id: number }[], land: LandWatch | undefined): Promise<AlertPart[]> {
+    return Promise.all(open.map(async ({ scheme, problem, id }) => {
+      const part: AlertPart = { id: `${id}:${problem.key}`, title: `${scheme}: ${problem.title.replace(/^CI: /, '')}` };
+      const p = this.store.getProject(id);
+      const slug = p && repoSlug(p.repo_url);
+      if (problem.key !== 'land:fallback' || !p || !slug || !land) return part;
+      const runs = land.state.fellBack.slice(-3).map((f) => f.run).filter((r): r is number => !!r);
+      const said = await Promise.all(runs.map(async (run) => {
+        const jobs = await this.guarded(Date.now(), () => this.jobs(slug, { id: run } as Run, this.deps.as(p)));
+        const j = jobs?.find((x) => x.conclusion === 'failure');
+        const step = (j?.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
+        return `https://github.com/${slug}/actions/runs/${run}: ${j ? `${j.name}${step ? ` › ${step}` : ''} failed${j.runner_name ? ` on ${j.runner_name}` : ''}` : 'no failed job'}`;
+      }));
+      return said.length ? { ...part, facts: said.join('; ') } : part;
+    }));
   }
 
   async problems(p: Project, slug: string, saved: Saved, now: number): Promise<Problem[]> {

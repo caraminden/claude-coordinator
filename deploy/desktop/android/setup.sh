@@ -39,7 +39,7 @@ adb_here=15037 # not 5037: with WSL's mirrored networking that is Windows' own a
 die() { echo "setup: $*" >&2; exit 1; }
 as_android() { runuser -u "$user" -- env HOME="$home" "$@"; }
 
-[[ -n $url ]] || die 'usage: setup.sh <the address the Machines page shows> [<ssh login on perigee>]'
+[[ -n $url ]] || die 'usage: setup.sh http://perigee.tail59477f.ts.net:8574 [<ssh login on perigee>]'
 [[ $(id -u) == 0 ]] || die 'Run this as root: in PowerShell, wsl -d citadel-android -u root'
 cd / # root's home isn't readable by the user the steps below run as
 

@@ -2,7 +2,7 @@
 // kind of minion gets, the usage-limit countdowns, and the list's order.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { byUrgency, cardChip, rowBar, rowState, rowUnread, serverLabel, SHIP, workingBy } from '../public/threadstate.js';
+import { askWhy, byUrgency, cardChip, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -314,4 +314,82 @@ test('rowState: a minion on its way in a release shows that release where landin
   assert.deepEqual(pill({ status: 'closed', state: 'ready', release: { ...release, name: 'Next build' } }), [2, 'wait', 'Next build']);
   assert.equal(rowState(t({ status: 'closed', release }), null, NOW).label, 'On its way: Peek for Windows Build 997: CI, on main: it goes out with the next build CI ships');
   assert.match(rowState(t({ server_work: { kind: 'land' }, release }), null, NOW).label, / · Peek for Windows Build 997: CI/);
+});
+
+// #906: every state the list, the inbox and Releases can show says why, with since when in Pacific.
+const QUIET = { status: 'running', activity: { at: NOW - 14 * MIN, quiet_since: NOW - 9 * MIN, tool: { name: 'Bash', label: 'Bash: citadel-test test/media.test.ts', started: NOW - 14 * MIN, limit: 5 * MIN } } };
+
+test('rowState: a quiet turn stays running blue with a stopped dot and says how long (#906)', () => {
+  assert.deepEqual(pill(QUIET), [1, 'work', 'quiet 14m']);
+  const st = rowState(t(QUIET), null, NOW);
+  assert.equal(st.quiet, true);
+  assert.equal(st.pulse, undefined, 'no pulse: the dot stops');
+  // A wait doesn't recolour or re-pulse it, and a turn not yet quiet is plain working.
+  assert.deepEqual(pill({ ...QUIET, wait: { kind: 'heavy', stage: 'run', chip: 'x', text: 'x', since: NOW, usual: 60 } }), [1, 'work', 'quiet 14m']);
+  assert.deepEqual(pill({ status: 'running', activity: { at: NOW - MIN, quiet_since: null, tool: null } }), [1, 'work', 'working', 'pulse']);
+});
+
+test('rowWhy: a quiet turn names its last tool, its timeout and how far past it, in Pacific (#906)', () => {
+  const why = rowWhy(t(QUIET), rowState(t(QUIET), null, NOW), NOW);
+  assert.equal(why.quiet, true);
+  assert.equal(why.title, 'Quiet 14m');
+  assert.match(why.lines[0], /^No output for 14m, since 3:46 AM PST\.$/);
+  assert.equal(why.lines[1], 'Last: Bash: citadel-test test/media.test.ts, started 3:46 AM PST with a 5m timeout, now 9m past it.');
+});
+
+test('rowWhy: every state rowState gives has a title and a reason; cards and releases link to what they wait on (#906)', () => {
+  const wait = { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line, behind #513 (testing)', since: NOW - 4 * MIN, usual: 540 };
+  const card = { kind: 'question', what: 'question', href: '#/p/2/t/9?e=5' };
+  const release = { name: 'Release 14', target: 'Citadel', stage: 'restart', text: 'waits for 3 turns' };
+  const states = [
+    {}, { state: 'ready' }, { state: 'complete', note: 'nothing left' }, { state: 'try' }, { approvals: 1, status: 'running', open_cards: [card] },
+    { state: 'ready', pending_card_at: NOW - HOUR, open_cards: [card] }, { status: 'error' }, { status: 'running' },
+    { status: 'running', turnStartedAt: NOW - 12 * MIN, last_activity: 'Editing thread.css', steps: { done: 2, total: 5, since: NOW - 3 * MIN, usual: 300 } },
+    { status: 'new' }, { status: 'new', parked_for: 'x', wakes_on: 'x', state: 'parked' }, { state: 'parked' }, { state: 'parked', wakes_on: 'the fix in #9 goes live' },
+    { state: 'outside', wait }, { state: 'pending-deploy' }, { state: 'pending-deploy', release }, { state: 'blocked', note: 'needs Cody' },
+    { status: 'closed' }, { status: 'closed', release }, { server_work: { kind: 'land' }, wait }, { server_work: { kind: 'land' }, release },
+    { status: 'error', state: 'limited', limit_resume_at: NOW + 40 * MIN }, { status: 'error', state: 'limited' }, QUIET,
+  ];
+  for (const over of states) {
+    const m = t({ project_id: 2, ...over });
+    const why = rowWhy(m, rowState(m, null, NOW), NOW);
+    assert.ok(why.title, `a title for ${JSON.stringify(over)}`);
+    assert.ok(why.lines.length && why.lines.every((l) => l.trim()), `a reason for ${JSON.stringify(over)}`);
+  }
+  const of = (over) => { const m = t({ project_id: 2, ...over }); return rowWhy(m, rowState(m, null, NOW), NOW); };
+  assert.deepEqual(of({ pending_card_at: NOW - HOUR, open_cards: [card] }).link, { href: card.href, text: 'Open the question card →' });
+  assert.equal(of({ status: 'closed', release }).link.href, '#/p/2/releases/all');
+  // A wait says what and against its usual; a ready minion says since when.
+  const landing = of({ state: 'outside', wait });
+  assert.equal(landing.lines[0], 'Waiting to land: 2nd in line, behind #513 (testing).');
+  assert.equal(landing.more, '4m so far; usually ~9m. Started 3:56 AM PST.');
+  assert.equal(of({ state: 'ready' }).lines[0], 'Since 3:55 AM PST, 5m ago.');
+  assert.equal(of({ state: 'blocked', note: 'needs Cody' }).lines.at(-1), 'Note: needs Cody');
+});
+
+test('askWhy: every kind of Needs-you item says why it is there and since when (#906)', () => {
+  const at = NOW - 10 * MIN;
+  const kinds = [
+    { kind: 'approval', card: {} }, { kind: 'question', card: {} }, { kind: 'question', card: { doc: 'x.html' } }, { kind: 'question', card: { notice: 'x' } },
+    { kind: 'question', card: { secret: { name: 'X' } } }, { kind: 'plan', card: {} }, { kind: 'spend', card: { stage: 5 } }, { kind: 'quiet' },
+    { kind: 'state' }, { kind: 'replies' },
+  ];
+  for (const item of kinds) {
+    const why = askWhy({ at, ...item }, { state: 'ready' }, NOW);
+    assert.match(why, /3:50 AM PST/, item.kind);
+    assert.doesNotMatch(why, /^Waiting on you since/, `${item.kind} has its own words`);
+  }
+  assert.match(askWhy({ kind: 'question', at, card: { doc: 'x.html' } }, null, NOW), /^A choices page card/);
+  assert.match(askWhy({ kind: 'state', at }, { state: 'ready' }, NOW), /^Ready/);
+});
+
+test('progressWhy: a release says its stage, what it waits on, since when and its usual (#906)', () => {
+  assert.equal(progressWhy({ stage: 'deploy', since: NOW - 3 * MIN, usual: 240, waitingOn: null, text: 'deploying' }, 'Deploy', NOW), 'Deploy: deploying.\nSince 3:57 AM PST, 3m so far; usually ~4m.');
+  assert.equal(progressWhy({ stage: 'line', since: NOW - 9 * MIN, usual: null, waitingOn: '2nd in line, behind #620', text: '' }, 'Line', NOW), 'Line: Waiting on 2nd in line, behind #620.\nSince 3:51 AM PST, 9m so far; no estimate while it waits.');
+});
+
+test('pacific and span: clock times are Pacific with the day once old; spans read short (#906)', () => {
+  assert.equal(pacific(NOW, NOW), '4:00 AM PST');
+  assert.equal(pacific(NOW - 30 * HOUR, NOW), 'Sun, 10:00 PM PST');
+  assert.deepEqual([span(20_000), span(14 * MIN), span(65 * MIN), span(2 * HOUR), span(51 * HOUR)], ['under a minute', '14m', '1h 5m', '2h', '2d 3h']);
 });

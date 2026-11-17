@@ -1,7 +1,7 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
 import { isCoordinator, STATES } from './base.js';
-import { waitFam, waitShows } from './wait.js';
+import { waitFam, waitShows, waitWords } from './wait.js';
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. */
 export function byUrgency(a, b, usage, now = Date.now()) {
@@ -30,7 +30,7 @@ export function rowState(t, usage, now = Date.now()) {
   // row's subtitle says the wait in words (#551, Josh 2026-11-11: "What does "line 2nd" mean? that isnt a useful
   // progress indicator"), as its bar shows tests or jobs done.
   // The server's own work stays blue and pulsing all through, its line included: the track's hatched piece shows that (#727).
-  if (!t.wait || t.status === 'closed' || (st.rank !== 1 && st.rank !== 2) || st.fam === 'broken' || st.server) return st;
+  if (!t.wait || t.status === 'closed' || (st.rank !== 1 && st.rank !== 2) || st.fam === 'broken' || st.server || st.quiet) return st;
   const fam = waitFam(t.wait);
   return { ...st, fam, pulse: fam === 'work' };
 }
@@ -67,6 +67,9 @@ function baseState(t, usage, now) {
   if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Waiting for your approval' };
   // A minion parked on start_after is new (it hasn't run) but not working (#261).
   const by = workingBy(t);
+  // Gone quiet (#906; Cara picked "Running blue, dot stopped", 2026-11-17): no output well past its usual gap (src/quiet.ts).
+  const quiet = by === 'turn' && t.activity?.quiet_since;
+  if (quiet) return { rank: 1, fam: 'work', cell: `quiet ${shortAgo(t.activity.at, now)}`, quiet: true, label: 'Quiet: no output for a while' };
   if (by === 'turn') return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, label: workingLabel(t) };
   // On its way in a release (#764, releases.js pendingRelease): the release's name where "landing" or "deploying" would be.
   const rel = t.release;
@@ -103,6 +106,87 @@ function limitState(t, waited, usage, now) {
   if (hit) return { rank: 2, fam: 'wait', cell: `resets ${shortIn(hit.resetsAt, now)}`, label: STATES.limited.label };
   if (usage?.updatedAt > t.updated_at) return { rank: 0, fam: 'you', cell: waited('resume'), label: 'The usage limit has reset: send a message to carry on' };
   return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
+}
+
+/** "11:24 AM PST", with the day once it's over 20 hours ago: every clock time people read is Pacific. */
+export function pacific(ms, now = Date.now()) {
+  return new Date(ms).toLocaleTimeString('en-US', { ...(now - ms > 20 * 3_600_000 && { weekday: 'short' }), hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles', timeZoneName: 'short' });
+}
+
+/** "under a minute", "14m", "1h 5m", "2d 3h": a span in the popover's words. */
+export function span(ms) {
+  const m = Math.floor(Math.max(0, ms) / 60_000);
+  if (m < 1) return 'under a minute';
+  if (m < 60) return `${m}m`;
+  if (m < 1440) return `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`;
+  return `${Math.floor(m / 1440)}d${Math.floor(m / 60) % 24 ? ` ${Math.floor(m / 60) % 24}h` : ''}`;
+}
+
+/**
+ * Why a row's chip says what it says (#906), for its popover: a title (what), lines (since when, Pacific, and how long;
+ * the usual time where the server knows one), a muted aside and a link to what it waits on. Built from the minion as the
+ * stream sent it, so opening it fetches nothing. `st` is its rowState; every state rowState gives has lines (the test).
+ */
+export function rowWhy(t, st, now = Date.now()) {
+  const at = (ms) => `${pacific(ms, now)}, ${span(now - ms)} ago`;
+  const lines = [];
+  let more = null, link = null;
+  const card = t.open_cards?.[0], w = t.status !== 'closed' && !st.quiet ? t.wait : null;
+  if (st.quiet) {
+    const a = t.activity, tool = a.tool;
+    lines.push(`No output for ${span(now - a.at)}, since ${pacific(a.at, now)}.`);
+    if (tool) {
+      const over = tool.limit && now > tool.started + tool.limit ? `, now ${span(now - tool.started - tool.limit)} past it` : '';
+      lines.push(`Last: ${tool.label}, started ${pacific(tool.started, now)}${tool.limit ? ` with a ${span(tool.limit)} timeout${over}` : ''}.`);
+    }
+    more = 'Turns go this quiet less than 0.1% of the time (5,620 turns, Nov 2026).';
+  } else if (workingBy(t) === 'turn') {
+    lines.push(t.turnStartedAt ? `Since ${at(t.turnStartedAt)}.` : t.status === 'new' ? 'Setting up its first turn.' : 'Its turn is running.');
+    if (t.last_activity) lines.push(`Now: ${t.last_activity}`);
+    if (t.steps) lines.push(`${t.steps.done} of ${t.steps.total} steps done${t.steps.since && t.steps.usual ? `; this one ${span(now - t.steps.since)} of ~${span(t.steps.usual * 1000)} guessed` : ''}.`);
+  } else if (t.limit_resume_at && t.state === 'limited') {
+    lines.push(`Hit the usage limit at ${pacific(t.updated_at, now)}; resumes by itself at ${pacific(t.limit_resume_at, now)}.`);
+  } else if (!w) {
+    lines.push(`Since ${at(st.since ?? t.updated_at)}.`);
+  }
+  if (w) {
+    lines.push(`${waitWords(w)}.`);
+    more = `${span((w.ended ?? now) - w.since)} so far${w.usual ? `; usually ~${span(w.usual * 1000)}` : ''}. Started ${pacific(w.since, now)}.`;
+  }
+  // The note says what's left or what it's stuck on; complete's label already has it.
+  if (t.note && st.rank !== 1 && !st.label.includes(t.note)) lines.push(`Note: ${t.note}`);
+  if (card && (st.rank === 0 || t.pending_card_at)) link = { href: card.href, text: `Open the ${card.what ?? card.kind} card →` };
+  else if (t.release) link = { href: `#/p/${t.project_id}/releases/all`, text: 'Releases →' };
+  return { title: st.quiet ? `Quiet ${shortAgo(t.activity.at, now)}` : st.label, lines, more, link, quiet: !!st.quiet };
+}
+
+/**
+ * Why an item is in your Needs you (#906), for its inbox chip's popover: what it is, since when (Pacific) and when it
+ * leaves. `item` is src/inbox.ts's; `t` its minion, when this page has it. Every kind the server sends has one (the test).
+ */
+export function askWhy(item, t, now = Date.now()) {
+  const since = pacific(item.at, now);
+  const card = item.card ?? {};
+  const what = card.notice ? 'notice' : card.doc ? 'choices page' : card.secret ? 'secret' : item.kind;
+  switch (item.kind) {
+    case 'approval': return `An approval card since ${since}: its turn waits on it. Approvals count even while the minion is parked.`;
+    case 'question': case 'plan': return `A ${what} card for you since ${since}. It leaves once someone answers it.`;
+    case 'spend': return `This turn passed $${card.stage} at ${since}. It leaves once someone answers the alert.`;
+    case 'quiet': return `No output from its turn since ${since}, well past its usual gap. You asked for it, so it shows here until the turn talks again or ends.`;
+    case 'state': return `${STATES[t?.state]?.label ?? 'Waiting on you'} since ${since}, assigned to you or no one. It stops counting once you open it.`;
+    case 'replies': return `It offered one-tap replies at ${since} and waits for a go. It stops counting once you open it.`;
+    default: return `Waiting on you since ${since}.`;
+  }
+}
+
+/**
+ * Why a release stands where it does (#906), for a Releases row's popover: its stage, what it waits on, since when
+ * (Pacific) and its usual length. `p` is src/releases.ts's Progress; `stage` the stage's name in words.
+ */
+export function progressWhy(p, stage, now = Date.now()) {
+  const what = p.waitingOn ? `Waiting on ${p.waitingOn}` : p.text;
+  const usual = p.usual ? `; usually ~${span(p.usual * 1000)}` : p.waitingOn ? '; no estimate while it waits' : '';
+  return `${stage}${what ? `: ${what}` : ''}.\nSince ${pacific(p.since, now)}, ${span(now - p.since)} so far${usual}.`;
 }
 
 /** A track with one piece, not started: the bar's line while a working minion has no plan yet (#696). */

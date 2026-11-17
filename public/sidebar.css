@@ -104,6 +104,20 @@
   color: color-mix(in srgb, var(--done) 75%, var(--ink)); background: color-mix(in srgb, var(--done) 14%, transparent); }
 .thread-row .state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .thread-row .state .pulse { animation: none; } }
+/* A quiet turn (#906): the working dot, stopped and hollow; the chip opens why. */
+.thread-row .state .still { display: inline-block; width: 6px; height: 6px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid currentColor; margin-right: 4px; vertical-align: 1px; }
+.thread-row .state[data-tip-id] { cursor: help; }
+/* The chip's popover (public/ui/tip.js): what, since when, the usual, and a link to what it waits on. */
+.why-tip { max-width: min(20rem, calc(100vw - 16px)); }
+.why { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.88rem; line-height: 1.4; }
+.why p { margin: 0; overflow-wrap: anywhere; }
+.why-title { color: var(--c, var(--ink)); }
+.why-more { color: var(--muted); font-size: 0.82rem; }
+.why-check { font-weight: 600; }
+.why-check.busy { color: var(--muted); font-weight: 400; }
+.why-acts { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
+.why a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.why a:hover { text-decoration: underline; }
 .thread-row .note { text-align: left; color: var(--ink); grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; }
 .thread-row .note.t { color: var(--muted); }
 .thread-row .pnote { grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; color: color-mix(in srgb, var(--waiting) 80%, var(--ink)); }

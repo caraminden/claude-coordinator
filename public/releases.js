@@ -11,6 +11,8 @@ import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
 import { segTrack, TRACK } from './wait.js';
+import { progressWhy } from './threadstate.js';
+import { mountTips } from './ui/tip.js';
 
 /** projectId → { projectId, targets: TargetView[], testCopies } for every scheme this person can see (src/releases.ts). */
 let schemes = new Map();
@@ -116,9 +118,15 @@ function versionLink(r, cls = 'rel-ver', short = false) {
 // ---------- the Schemes list ----------
 
 /** The whole release's estimate: "~3m", "waiting" while a stage waits, else the stage it's at. */
+let relTips = null;
+/** A row's estimate, whose tap or hover says why (#906): what it waits on, since when, against usual. */
 function estimate(next) {
-  if (next.waitingOn) return h('span', { class: 'rel-est waits' }, 'waiting');
-  return h('span', { class: 'rel-est' }, next.eta ? etaText(next.eta, { since: next.since, full: false }) : stageName(next.stage));
+  relTips ??= mountTips(document.body, { selector: '.rel-row .rel-est[data-tip]', tapOpens: true });
+  const tip = { tabindex: 0, 'data-tip': progressWhy(next, stageName(next.stage)) };
+  if (next.waitingOn) return h('span', { class: 'rel-est waits', ...tip }, 'waiting');
+  const el = h('span', { class: 'rel-est', ...tip }, next.eta ? etaText(next.eta, { since: next.since, full: false }) : stageName(next.stage));
+  el.querySelector('.rel-eta')?.removeAttribute('title'); // the popover says it, on a phone too
+  return el;
 }
 
 /** Remember where the page was opened from, for its ×. */
@@ -138,7 +146,7 @@ export function releaseRows(projectId) {
     return h('div', {
       class: 'rel-row',
       // The whole row opens the scheme's page (Josh: "clicking any of the releases would take you to that schemes detail page"); its release link opens the release.
-      onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = href; } },
+      onclick: (e) => { if (!e.target.closest('a') && !e.defaultPrevented) { opening(); location.hash = href; } }, // a tap on the estimate opens its why
     },
     h('a', { class: 'rel-name', href, onclick: opening }, tv.target.name),
     estimate(tv.next),

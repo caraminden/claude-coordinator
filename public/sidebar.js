@@ -8,12 +8,14 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { presenceChip } from './presence.js';
-import { byUrgency, cardChip, rowBar, rowState, rowUnread, SHIP, workingBy } from './threadstate.js';
+import { byUrgency, cardChip, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
 import { pendingRelease } from './releases.js';
 import { replaceHash } from './navstack.js';
 import { openDialog } from './ui/dialog.js';
+import { mountTips } from './ui/tip.js';
+import { toast } from './ui/status.js';
 
 // ---------- projects ----------
 
@@ -183,6 +185,8 @@ export function renderSidebar() {
     pinnedGroup, ...sections, closedGroup,
     !all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one.')
       : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : '');
+  // An open chip popover follows its chip into the new rows (tip.js); its words follow the minion's news.
+  if (whyTips?.open) whyTips.refresh();
 }
 
 /** Scroll the minion list (not the page) so the open minion's row is in view, after you navigate to one. */
@@ -320,7 +324,7 @@ export function threadRow(t, href = threadHref(t)) {
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     card,
-    st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
+    st.cell ? stateChip(t, st) : '',
     presenceChip(t),
     ownerChip(t, coord),
     wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
@@ -328,6 +332,55 @@ export function threadRow(t, href = threadHref(t)) {
     t.cost && !(share && share.startsWith('<')) ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
     bar);
+}
+
+/** The rows drawn last, by id, for their chips' popovers; a check's answer per minion while its popover shows it. */
+const drawn = new Map(), checks = new Map();
+let whyTips = null;
+
+/**
+ * The state chip (#906; Cara picked "Popover on the chip only", 2026-11-17): a tap or hover opens why it says what it
+ * says (threadstate.js rowWhy). Its empty title keeps the row's own tooltip off it. A quiet turn's dot stops.
+ */
+function stateChip(t, st) {
+  drawn.set(t.id, { t, st });
+  whyTips ??= mountTips(document.body, { selector: '.thread-row .state[data-tip-id]', body: (el) => whyBody(Number(el.dataset.tipId)), role: 'dialog', label: 'Why', tapOpens: true, className: 'why-tip' });
+  return h('span', { class: `state${st.quiet ? ' quiet' : ''}`, 'data-tip-id': t.id, tabindex: 0, title: '', 'aria-label': `${st.cell}: ${st.label}` },
+    st.pulse ? h('i', { class: 'pulse' }) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
+}
+
+function whyBody(id) {
+  const row = drawn.get(id);
+  if (!row) return null;
+  const { t, st } = row, why = rowWhy(t, st);
+  const check = checks.get(id);
+  return h('div', { class: `why f-${st.fam || 'none'}` },
+    h('b', { class: 'why-title' }, why.title),
+    why.lines.map((l) => h('p', {}, l)),
+    why.more ? h('p', { class: 'why-more' }, why.more) : '',
+    check ? h('p', { class: `why-check${check.busy ? ' busy' : ''}` }, check.busy ? 'Checking the turn\'s process…' : check.text) : '',
+    why.quiet ? h('div', { class: 'why-acts' },
+      h('button', { type: 'button', class: 'secondary act-stop', onclick: () => stopTurn(t) }, 'Stop'),
+      h('button', { type: 'button', class: 'secondary', disabled: !!check?.busy, onclick: () => checkTurn(t) }, 'Is this still going?')) : '',
+    why.link ? h('a', { href: why.link.href, onclick: () => whyTips?.close() }, why.link.text) : '');
+}
+
+function stopTurn(t) {
+  whyTips?.close();
+  api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => toast(`Couldn't stop #${t.number}: ${e.message}`, { tone: 'warn', ms: 8000 }));
+}
+
+/** The server looks at the turn's process (src/quiet.ts checkProcess): no model call, no message to the minion. */
+async function checkTurn(t) {
+  checks.set(t.id, { busy: true });
+  whyTips?.refresh();
+  try {
+    const r = await api(`api/tickets/${t.id}/check`, { method: 'POST', body: {} });
+    checks.set(t.id, { text: r.text });
+  } catch (e) {
+    checks.set(t.id, { text: `Couldn't check: ${e.message}` });
+  }
+  if (whyTips?.open?.dataset.tipId === String(t.id)) whyTips.refresh();
 }
 
 /** Whose minion it is (#690): the owner's initial at the row's end, ringed when it's yours; nothing for nobody's or the Taskmaster. */

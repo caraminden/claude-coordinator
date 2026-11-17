@@ -123,6 +123,14 @@ test("the frame is another origin: Citadel can't read the contraption's page", {
   assert.equal(await page.eval(`document.querySelector('#frames iframe').contentDocument`), null);
 });
 
+test("the frame carries the allow list, so the mic works on the contraption's own host (#892)", { skip }, async () => {
+  const page = await framer({ width: 1000, height: 600 });
+  await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
+  const allow = await page.eval(`document.querySelector('#frames iframe').allow`) as string;
+  for (const f of ['microphone', 'camera', 'clipboard-read', 'clipboard-write', 'fullscreen']) assert.match(allow, new RegExp(`(^|; )${f} \\*(;|$)`));
+  assert.equal(await page.eval(`document.querySelector('#frames iframe').contentWindow.document`).catch(() => 'cross'), 'cross');
+});
+
 test("a contraption's top bar runs up into Citadel's title bar strip, with a drag box over it and a hole over its button", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 });
   await waitFor(page, 'the frame-topbar class', `document.documentElement.classList.contains('frame-topbar')`);

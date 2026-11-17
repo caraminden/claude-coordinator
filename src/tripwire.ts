@@ -877,7 +877,7 @@ function namesOnly(ws: string[]): boolean {
 
 /**
  * Why a sqlite3 call on the live data is blocked, or null: state.db (every minion's session) opened
- * writable, or SQL that reads the credentials table (people's linked accounts), a whole-file `.dump` included.
+ * writable, or SQL that reads the credentials or stored_secrets table (linked accounts, saved secrets), a whole-file `.dump` included.
  */
 function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | null {
   const a = args.map((w) => w.text);
@@ -893,7 +893,7 @@ function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | nu
   if (/^state\b/.test(basename(p)) && !readonly) return `${basename(p)} holds every minion's Claude session. Open it with \`sqlite3 -readonly\`.`;
   if (!sqlShown(args)) return "SQL piped in or read from a file can't be checked for the credentials table. Put it in the command: `sqlite3 -readonly <db> 'select …'`.";
   const shown = [...sql, ...args.filter((_, k) => /^--?cmd$/.test(a[k - 1] ?? ''))].map((w) => w.text);
-  if (shown.some((t) => /\bcredentials\b/i.test(t) || /^\s*\.dump\s*$/m.test(t))) return "The credentials table holds people's linked accounts; nothing here needs to read it. Name the tables you need (`.dump tickets`).";
+  if (shown.some((t) => /\b(credentials|stored_secrets)\b/i.test(t) || /^\s*\.dump\s*$/m.test(t))) return "The credentials and stored_secrets tables hold people's linked accounts and saved secrets; nothing here needs to read them. Name the tables you need (`.dump tickets`).";
   return null;
 }
 

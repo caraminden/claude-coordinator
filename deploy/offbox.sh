@@ -3,7 +3,8 @@
 #
 # backup.sh runs this after each nightly backup. It mirrors $DATA_DIR/backups into $DATA_DIR/offbox:
 # - every coordinator daily and weekly, as a copy with people's linked-account secrets stripped
-#   (credentials rows other than claude_runner, whose row holds only a container name and an email),
+#   (credentials rows other than claude_runner, whose row holds only a container name and an email)
+#   and every saved secret (stored_secrets, #838),
 #   then VACUUMed so the deleted rows leave no bytes behind. A weekly links to its stripped daily.
 # - only the newest state-<day>.db, as a hard link (claude_state holds transcripts, memory and task
 #   lists, no logins).
@@ -28,13 +29,18 @@ strip() {
   rm -f "$tmp"
   cp --reflink=auto -- "$1" "$tmp"
   local has
-  has=$(sqlite3 "$tmp" "PRAGMA journal_mode=DELETE;" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'credentials';" | tail -n 1)
-  if [[ $has == 1 ]]; then
-    sqlite3 "$tmp" "DELETE FROM credentials WHERE kind <> 'claude_runner';" "VACUUM;"
-    local left
-    left=$(sqlite3 "$tmp" "SELECT count(*) FROM credentials WHERE kind <> 'claude_runner';")
-    [[ $left == 0 ]] || { echo "Off-box copy of $(basename "$1") still holds $left credentials" >&2; exit 1; }
-  fi
+  sqlite3 "$tmp" "PRAGMA journal_mode=DELETE;" >/dev/null
+  # Each secret-holding table, and which of its rows must not go off-box. A backup from before a table existed lacks it.
+  local table drop has left
+  for table in credentials stored_secrets; do
+    drop=$([[ $table == credentials ]] && echo "kind <> 'claude_runner'" || echo 1)
+    has=$(sqlite3 "$tmp" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '$table';")
+    [[ $has == 1 ]] || continue
+    sqlite3 "$tmp" "DELETE FROM $table WHERE $drop;"
+    left=$(sqlite3 "$tmp" "SELECT count(*) FROM $table WHERE $drop;")
+    [[ $left == 0 ]] || { echo "Off-box copy of $(basename "$1") still holds $left $table rows" >&2; exit 1; }
+  done
+  sqlite3 "$tmp" "VACUUM;"
   [[ $(sqlite3 "$tmp" "PRAGMA quick_check;") == ok ]] || { echo "Off-box copy of $(basename "$1") failed its check" >&2; exit 1; }
   chmod 600 "$tmp"
   mv -f "$tmp" "$2"

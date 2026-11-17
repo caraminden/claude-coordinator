@@ -3,12 +3,13 @@
 // Run as a child (src/host-check.ts), so a slow query never stalls the server: `node db-view.ts <db file>`, the SQL on stdin.
 import { constants, DatabaseSync } from 'node:sqlite';
 
-/** Columns no turn reads: password and invite hashes, machine and contraption keys, linked logins, push keys. */
+/** Columns no turn reads: password and invite hashes, machine and contraption keys, linked logins, saved secrets, push keys. */
 export const SECRET: Record<string, string[]> = {
   users: ['password_hash', 'invite_hash'],
   machines: ['token_hash'],
   contraptions: ['key_hash', 'identity_private'],
   credentials: ['secret', 'meta'],
+  stored_secrets: ['value'],
   push_subscriptions: ['endpoint', 'p256dh', 'auth'],
 };
 /** Settings rows whose value is a secret: turn-token nonces. */

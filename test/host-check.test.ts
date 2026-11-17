@@ -16,6 +16,7 @@ const store = new Store(db);
 const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
 store.db.prepare("UPDATE users SET password_hash = 'scrypt$SALT$HASH', invite_hash = 'INVITE' WHERE id = ?").run(cara.id);
 store.db.prepare("INSERT INTO credentials (user_id, kind, secret, meta, created_at, updated_at) VALUES (?, 'github', 'GHTOKEN', '{\"login\":\"x\"}', 1, 1)").run(cara.id);
+store.putSecret('person', cara.id, 'SITE_PW', 'SEALED', cara.id);
 store.setSetting('agent-nonce:7', { current: 'NONCE', previous: null });
 store.setSetting('wake-when-live', [1]);
 store.createMachine('box', 'MACHINEHASH', 'Cara', null);
@@ -36,6 +37,7 @@ test('the database reads as sqlite3 prints it, with every secret [hidden]', asyn
   assert.equal(await sql('SELECT id, name, password_hash, invite_hash, admin FROM users'), 'id|name|password_hash|invite_hash|admin\n1|Cara|[hidden]|[hidden]|1');
   assert.equal(await sql('SELECT kind, secret, meta FROM credentials'), 'kind|secret|meta\ngithub|[hidden]|[hidden]');
   assert.equal(await sql("SELECT key, value FROM settings WHERE key IN ('agent-nonce:7', 'wake-when-live') ORDER BY key"), 'key|value\nagent-nonce:7|[hidden]\nwake-when-live|[1]');
+  assert.equal(await sql('SELECT name, value FROM stored_secrets'), 'name|value\nSITE_PW|[hidden]');
   assert.equal(await sql('SELECT name, token_hash FROM machines'), 'name|token_hash\nbox|[hidden]');
   assert.equal(await sql('SELECT name, identity_public, identity_private, key_hash FROM contraptions'), 'name|identity_public|identity_private|key_hash\nmandate|PUB|[hidden]|[hidden]');
   assert.match(await sql('PRAGMA table_info(users)'), /password_hash/);

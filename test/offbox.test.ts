@@ -22,6 +22,7 @@ const backups = join(root, 'backups');
 const offbox = join(root, 'offbox');
 const day = execFileSync('date', ['+%F'], { encoding: 'utf8' }).trim();
 const GITHUB_SECRET = 'v1:github-token-that-must-not-leave-perigee';
+const SAVED_SECRET = 'v1:a-saved-secret-that-must-not-leave-perigee';
 
 const store = new Store(join(root, 'coordinator.db'));
 const project = store.createProject('Demo', null);
@@ -29,6 +30,9 @@ store.createTicket({ project_id: project.id, title: 't', permission_mode: 'defau
 const user = store.createUser({ name: 'Josh', login: 'josh' });
 store.putCredential(user.id, 'github', GITHUB_SECRET, { login: 'josh-gh' });
 store.putCredential(user.id, 'claude_runner', 'citadel-claude-2', { container: 'citadel-claude-2' });
+// Saved secrets (#838), a person's and a scheme's: none leave perigee.
+store.putSecret('person', user.id, 'SITE_PW', SAVED_SECRET, user.id);
+store.putSecret('scheme', project.id, 'AZURE_KEY', SAVED_SECRET, user.id);
 store.putClaudeState({ path: 'projects/x/1.jsonl', project_id: project.id, ticket_id: null, size: 3, mtime: 1, data: new Uint8Array(10) });
 store.db.close();
 
@@ -36,6 +40,14 @@ const kinds = (file: string) => {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     return (db.prepare('SELECT kind FROM credentials ORDER BY kind').all() as { kind: string }[]).map((r) => r.kind);
+  } finally {
+    db.close();
+  }
+};
+const count = (file: string, table: string) => {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    return (db.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
   } finally {
     db.close();
   }
@@ -48,6 +60,9 @@ test('the nightly backup also writes the off-box set, with linked-account secret
   const daily = join(offbox, `coordinator-${day}.db`);
   assert.deepEqual(kinds(daily), ['claude_runner'], 'only the claude_runner row, which holds no secret, stays');
   assert.ok(!readFileSync(daily).includes(GITHUB_SECRET), 'VACUUM leaves no trace of the stripped rows');
+  assert.equal(count(daily, 'stored_secrets'), 0, 'no saved secret goes off-box');
+  assert.ok(!readFileSync(daily).includes(SAVED_SECRET), 'nor any trace of one');
+  assert.equal(count(join(backups, `coordinator-${day}.db`), 'stored_secrets'), 2);
   assert.deepEqual(kinds(join(backups, `coordinator-${day}.db`)), ['claude_runner', 'github'], 'the backup on perigee keeps everything');
   const weekly = readdirSync(offbox).find((f) => f.startsWith('coordinator-weekly-'))!;
   assert.equal(statSync(join(offbox, weekly)).ino, statSync(daily).ino, 'the weekly links to its stripped daily');

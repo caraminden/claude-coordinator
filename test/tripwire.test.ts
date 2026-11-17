@@ -117,6 +117,7 @@ const BLOCKED: [string, string?][] = [
   ['sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "select user_id, secret from credentials"'],
   ['sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db .dump > /tmp/all.sql'],
   ['sqlite3 -readonly -cmd "select * from Credentials" ~/.local/share/claude-coordinator/coordinator.db .quit'],
+  ['sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "select name, value from stored_secrets"'],
   ["echo 'select * from credentials' | sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db"],
   ['sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db < q.sql'],
   ['sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db ".read q.sql"'],

@@ -938,7 +938,10 @@ const MEDIA_TOOL_LIST = [
     inputSchema: {
       type: 'object',
       properties: {
-        model: { type: 'string', description: 'An OpenRouter speech model id, like fish-audio/drama-3, elevenlabs/eleven-v3 or google/gemini-3.8-flash-tts' },
+        provider: { type: 'string', enum: ['openrouter', 'azure'], description: "Optional, default openrouter. azure: Azure Speech on this scheme's own key (scheme secrets AZURE_SPEECH_KEY and AZURE_SPEECH_REGION); input is raw SSML (<phoneme> IPA, <prosody>, <break>, several <voice> elements, HD voices like en-US-Ava:DragonHDLatestNeural), model and response_format aren't used, and the cost (about $15 per million characters of text, $30 for HD voices) is booked to the scheme's outside spend" },
+        output_format: { type: 'string', description: 'azure only, optional: the Azure output format, default audio-24khz-48kbitrate-mono-mp3; out must end in the extension it makes (.mp3, .wav for riff-*, .ogg, .webm, .pcm for raw-*)' },
+        lang: { type: 'string', description: 'azure only, optional: xml:lang when input is not a whole <speak> document, default en-US' },
+        model: { type: 'string', description: 'An OpenRouter speech model id, like fish-audio/drama-3, elevenlabs/eleven-v3 or google/gemini-3.8-flash-tts. Required unless provider is azure' },
         input: { type: 'string', description: "The text to read. Sent byte for byte: inline pronunciation markup the model takes (Fish's <|phoneme_start|>klˈɛbkɪtʃ<|phoneme_end|>, SSML, IPA) goes through untouched. Over the model's limit is refused, never cut: split long text" },
         voice: { type: 'string', description: "Optional: the model's voice id (some models need one)" },
         response_format: { type: 'string', enum: ['mp3', 'wav', 'pcm'], description: "Optional: taken from out's extension. OpenRouter lists mp3 and pcm; some models give only one (Gemini and HeyGen only pcm), and the rest are refused for free" },
@@ -947,7 +950,7 @@ const MEDIA_TOOL_LIST = [
         out: { type: 'string', description: `${MEDIA_OUT.replace(/\. With n.*/, '')}. .mp3, .wav or .pcm, matching response_format` },
         overwrite: MEDIA_OVERWRITE,
       },
-      required: ['model', 'input', 'out'],
+      required: ['input', 'out'],
     },
   },
 ];
@@ -1636,6 +1639,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'generate_audio':
     case 'generate_speech': {
       const r = await call('POST', `/api/tickets/${TICKET}/openrouter`, { tool: name, args });
+      if (r.model === 'azure-speech') return `Wrote ${r.paths.join(', ')} with Azure Speech for about $${Number(r.cost_usd).toFixed(4)} (booked to the scheme: $${Number(r.month_usd).toFixed(2)} outside spend this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? ', over it' : ''}`}).`;
       return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.${r.warnings ? `\n${r.warnings.join('\n')}` : ''}`;
     }
     case 'generate_image_codex':

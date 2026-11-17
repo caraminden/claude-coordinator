@@ -1,5 +1,6 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
+import { azureSpeech } from '../azure-speech.ts';
 import { parseSpend } from '../outside-spend.ts';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -1034,6 +1035,14 @@ export const ticketRoutes: Route[] = [
       const tool = oneOf(body.tool, MEDIA_TOOLS, 'tool') as MediaTool | null;
       if (!tool) throw new HttpError(400, `tool must be one of: ${MEDIA_TOOLS.join(', ')}`);
       const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
+      // provider "azure" (#842): raw SSML to Azure Speech on the scheme's own key, booked to the scheme as outside spend (#839), not OpenRouter.
+      if (tool === 'generate_speech' && args.provider === 'azure') {
+        return json(res, 200, await azureSpeech(args, { roots: ticketRoots(app, ticket) }, {
+          secret: (name) => app.secrets.get('scheme', ticket.project_id, name),
+          book: (s) => app.outsideSpend.record(ticket.project_id, s, `minion:#${ticket.number}`),
+        }));
+      }
+      if (args.provider !== undefined && args.provider !== 'openrouter') throw new HttpError(400, "provider is 'openrouter' (the default) or 'azure'");
       return json(res, 200, await app.openrouter.tool(tool, args, { userId: ticket.person_id, ticketId: ticket.id, projectId: ticket.project_id, roots: ticketRoots(app, ticket) }));
     },
   },

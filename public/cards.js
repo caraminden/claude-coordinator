@@ -13,6 +13,8 @@ import { refreshViewerBar, setViewerGallery } from './artifacts.js';
  */
 export function speaker(doing = '') {
   if (!view.ticket || !isCoordinator(view.ticket)) return doing ? `Your Minion ${doing}` : 'Your Minion';
+  // Another person's Taskmaster or the Overlord, drawn in your Mine or Everyone (#920, thread.js appendEvent).
+  if (view.part) return doing ? [view.part.label, ` ${doing}`] : view.part.label;
   return doing ? ['The ', taskmasterLabel(view.ticket.project_id), ` ${doing}`] : taskmasterLabel(view.ticket.project_id);
 }
 

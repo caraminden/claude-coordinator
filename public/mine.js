@@ -7,3 +7,30 @@ export function inMine(event) {
   const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
   return data?.everyone === true || (event.kind === 'user_message' && (data.answer != null || data.plan != null));
 }
+
+/**
+ * Your Taskmaster's chat merged with the scheme's other sessions (thread.js appendEvent), or null when the
+ * scheme has one Taskmaster. `taskmasters` is the project payload's list; `mode` is 'mine' or 'everyone'.
+ * Mine adds the Overlord's for-everyone items; Everyone adds every session whole (src/routes/projects.ts).
+ */
+export function mergedView(projectId, ownId, taskmasters, mode) {
+  if (!(taskmasters?.length > 1) || !taskmasters.some((t) => t.id === ownId)) return null;
+  const everyone = mode === 'everyone';
+  const others = taskmasters.filter((t) => t.id !== ownId && (everyone || t.person_id == null));
+  return {
+    mode: everyone ? 'everyone' : 'mine',
+    src: `api/projects/${projectId}/taskmaster-events?view=${everyone ? 'everyone' : 'mine'}`,
+    parts: [{ id: ownId }, ...others.map((t) => ({
+      id: t.id, mine: !everyone, overlord: t.person_id == null,
+      label: t.person_id == null ? 'Overlord' : `${t.person_name ?? 'Someone'}'s Taskmaster`,
+    }))],
+    states: new Map(), // thread.js: each other session's drawing state
+    last: ownId, // the session the newest drawn event was in
+  };
+}
+
+/** Whether a live event belongs in the merged view (core.js onEvent). */
+export function inMerged(merged, event) {
+  const part = merged?.parts.find((p) => p.id === event.ticket_id);
+  return !!part && (!part.mine || inMine(event));
+}

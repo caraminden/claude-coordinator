@@ -24,6 +24,7 @@ import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
+import { mergedAfter, mergedPage } from '../history.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
@@ -587,7 +588,31 @@ export const projectRoutes: Route[] = [
       const builds = app.builds?.get(project.id) ?? [];
       // Builds' previews are of this server's own code, so only its own scheme's headers link one (src/previews.ts).
       const build_previews = !!app.previews && app.previews.buildScheme()?.id === project.id;
-      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, dismissed, seen, person_notes, pins, builds, build_previews });
+      // Per-person Taskmasters (#919): a person's page opens their own, and `taskmasters` lists every session for
+      // Mine and Everyone (#920): person_id null is the Overlord. Empty until the scheme splits.
+      const all_tms = app.store.listCoordinators(project.id);
+      const own = !caller && all_tms.length > 1 ? app.store.coordinatorFor(project.id, session.uid) ?? coordinator : coordinator;
+      const taskmasters = all_tms.length > 1
+        ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : app.store.getUser(t.coordinator_of)?.name ?? null }))
+        : [];
+      return json(res, 200, { project, coordinator: ticketView(app, own.id), taskmasters, tickets, dismissed, seen, person_notes, pins, builds, build_previews });
+    },
+  },
+  {
+    method: 'GET', path: '/api/projects/:project/taskmaster-events', who: ['person'], everyScheme: true,
+    // Mine and Everyone (#920): your Taskmaster's chat with the others', paged as one by event id (history.ts).
+    // Mine adds only the Overlord's for-everyone items and card answers; Everyone adds every session whole.
+    async handler({ res, url, app, session, project }) {
+      const { store } = app;
+      const list = store.listCoordinators(project.id);
+      const own = store.coordinatorFor(project.id, session.uid) ?? list[0];
+      const everyone = url.searchParams.get('view') === 'everyone';
+      const parts = !own ? [] : [{ id: own.id }, ...list
+        .filter((t) => t.id !== own.id && (everyone || t.coordinator_of == null))
+        .map((t) => ({ id: t.id, mine: !everyone }))];
+      const num = (k: string) => Number(url.searchParams.get(k)) || undefined;
+      if (url.searchParams.has('after')) return json(res, 200, mergedAfter(store, parts, num('after') ?? 0));
+      return json(res, 200, mergedPage(store, parts, { before: num('before'), limit: num('limit'), from: num('from') }));
     },
   },
   {

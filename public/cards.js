@@ -218,8 +218,10 @@ export function planCard(ticketId, card, opts = {}) {
   const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: m ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
   const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !m }, m ? 'Reject' : 'Send notes');
-  const prev = m ? null : view.lastPlan;
-  if (!m) view.lastPlan = { plan: card.plan ?? '', summary: card.summary ?? '' };
+  // Diffed against the plan before it unless that one was approved: a later plan after a go is new work, not a revision.
+  const prev = m || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
+  const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
+  if (!m) view.lastPlan = mine;
   const head = whoLine(m ? 'proposes machine notes' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
   const el = h('div', { class: 'qcard pcard' },
     head.el,
@@ -274,10 +276,12 @@ export function planCard(ticketId, card, opts = {}) {
   });
   const handle = {
     el,
+    status: card.status,
     settle(r) {
       // The stored card already has its latest outcome, so replayed older results are ignored.
       if ((PLAN_RANK[r.status] ?? 0) <= rank) return;
       rank = PLAN_RANK[r.status];
+      handle.status = r.status;
       editing(false);
       el.classList.add('answered', `p-${r.status}`);
       why.hidden = true;
@@ -286,6 +290,7 @@ export function planCard(ticketId, card, opts = {}) {
       if (r.by) head.done(`${r.status === 'approved' ? 'approved' : 'sent back'} by ${r.by}`);
     },
   };
+  mine.handle = handle;
   view.cards.set(card.id, handle);
   if (card.status !== 'pending') handle.settle(card);
   return el;

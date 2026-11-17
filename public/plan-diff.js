@@ -35,7 +35,7 @@ export function planChanges(oldPlan, newPlan, oldSummary = '', newSummary = '') 
   return { ops, changed, added, removed, summaryChanged: oldSummary !== newSummary };
 }
 
-/** "3 lines changed, 1 added, 2 removed, title changed", or "No changes to the text". */
+/** "3 lines changed, 1 added, 2 removed, summary changed", or "No changes to the text". */
 export function changesLine(c) {
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   const parts = [];

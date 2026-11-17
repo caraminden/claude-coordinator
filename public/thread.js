@@ -1025,7 +1025,10 @@ export function appendEvent(event, scroll = true) {
     else nodes.push(ultraResult(data));
   } else if (event.kind === 'minion_copy') {
     // A run of copies of minion-to-minion messages is one collapsed row (#924); any other event ends it.
-    const prev = log.lastElementChild;
+    // Messages still on their way sit last in the log, so the run's row is the last child before them.
+    const pending = new Set(view.pendingMessages.map((m) => m.el));
+    let prev = log.lastElementChild;
+    while (prev && pending.has(prev)) prev = prev.previousElementSibling;
     if (prev?.matches('.mcopies')) addMinionCopy(prev, data, event);
     else nodes.push(addMinionCopy(newMinionCopies(), data, event));
   } else if (event.kind === 'loop_paused') {

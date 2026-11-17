@@ -1533,6 +1533,46 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/shared/uploads": {
+  "anon": "401 Not logged in",
+  "person": "400 size must be the file's size in bytes",
+  "member": "400 size must be the file's size in bytes",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only people upload to the shared folder",
+  "tmB": "403 Only people upload to the shared folder",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/projects/:p/shared/uploads/0123456789abcdef0123456789abcdef": {
+  "anon": "401 Not logged in",
+  "person": "404 No such upload: it finished, was cancelled, or sat untouched for 3 days",
+  "member": "404 No such upload: it finished, was cancelled, or sat untouched for 3 days",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only people upload to the shared folder",
+  "tmB": "403 Only people upload to the shared folder",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/shared/uploads/0123456789abcdef0123456789abcdef": {
+  "anon": "401 Not logged in",
+  "person": "404 No such upload: it finished, was cancelled, or sat untouched for 3 days",
+  "member": "404 No such upload: it finished, was cancelled, or sat untouched for 3 days",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only people upload to the shared folder",
+  "tmB": "403 Only people upload to the shared folder",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/projects/:p/shared/uploads/0123456789abcdef0123456789abcdef": {
+  "anon": "401 Not logged in",
+  "person": "400 offset must be the byte the chunk starts at",
+  "member": "400 offset must be the byte the chunk starts at",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only people upload to the shared folder",
+  "tmB": "403 Only people upload to the shared folder",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/tickets": {
   "anon": "401 Not logged in",
   "person": "200",

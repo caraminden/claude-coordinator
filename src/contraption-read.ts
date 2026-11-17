@@ -47,7 +47,7 @@ export async function contraptionRead({ req, res, app, params, caller }: Ctx) {
 }
 
 /** A response's body as text, read no further than READ_MAX bytes. */
-async function capped(r: Response): Promise<{ text: string; cut: boolean }> {
+export async function capped(r: Response): Promise<{ text: string; cut: boolean }> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of r.body ?? []) {

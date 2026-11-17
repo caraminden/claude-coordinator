@@ -14,17 +14,23 @@
 // any other path needs a person signed in and enabled for the contraption, and carries X-Citadel-Identity
 // signed with the contraption's key (src/contraptions.ts), which the contraption checks. The proxy never
 // hands the contraption's server either login cookie, nor lets it set one, nor a cookie for another host.
+import { join } from 'node:path';
 import { request, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { APP_NAME } from './appname.ts';
 import { APP_COOKIE, COOKIE, type Auth, type Session } from './auth.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
-import { isSecure, requestUrl } from './http.ts';
+import { HttpError, isSecure, readJson, requestUrl } from './http.ts';
 import { answerRaw, forward, forwardUpgrade, type ForwardOptions } from './proxy.ts';
+import { place, type ChunkedUploads, type Meta } from './chunked-uploads.ts';
+import { capped } from './contraption-read.ts';
+import { safeFileName } from './uploads.ts';
 
 export const APPS_PATH = /^\/apps\/([^/]*)(\/.*)?$/;
 export const MAX_BODY = 20 * 1024 * 1024;
+/** A contraption page's big uploads (#832): /apps/_citadel/uploads/<app>[/<id>], the protocol in src/chunked-uploads.ts. */
+const UPLOADS = /^\/apps\/_citadel\/uploads\/([a-z0-9-]+)(?:\/([^/]+))?$/;
 /** How often open streams and websockets are checked against who the contraption is enabled for. */
 const SWEEP_MS = 2000;
 
@@ -90,12 +96,15 @@ export class AppProxy {
   private open = new Map<{ destroy(): void }, { name: string; uid: number }>();
   /** A 5xx answer from a contraption, for the daily error digest (src/contraption-errors.ts, #835): set by server.ts. */
   onServerError: (row: ContraptionRow, status: number, method: string, path: string, note?: string) => void = () => {};
+  /** Big uploads, and the home folder apps' DATA_DIRs are under (~/.local/share/<name>); null: no uploads. */
+  private uploads: { chunked: ChunkedUploads; home: string } | null;
 
-  constructor(store: Store, contraptions: Contraptions, auth: Auth, domain: string | null = null) {
+  constructor(store: Store, contraptions: Contraptions, auth: Auth, domain: string | null = null, uploads: { chunked: ChunkedUploads; home: string } | null = null) {
     this.store = store;
     this.contraptions = contraptions;
     this.auth = auth;
     this.domain = domain;
+    this.uploads = uploads;
     setInterval(() => this.sweep(), SWEEP_MS).unref();
   }
 
@@ -269,6 +278,8 @@ export class AppProxy {
    */
   private async kit(req: IncomingMessage, res: ServerResponse, url: URL, host: string | null) {
     if (host !== null && !this.store.getContraption(host)) return void res.writeHead(404, text).end('Not found');
+    const upload = UPLOADS.exec(url.pathname);
+    if (upload) return this.upload(req, res, url, host, upload[1], upload[2]);
     if (req.method !== 'GET' && req.method !== 'HEAD') return void res.writeHead(405, text).end('Method not allowed');
     const session = this.who(req, host);
     if (!session) return void res.writeHead(401, text).end('Not logged in');
@@ -296,5 +307,63 @@ export class AppProxy {
     up.setTimeout(10_000, () => up.destroy());
     up.on('error', () => (res.headersSent ? res.destroy() : res.writeHead(502, text).end(`${row.title} is not answering`)));
     up.end();
+  }
+  /**
+   * A big upload from a contraption's page, into its DATA_DIR/uploads/<login>/ (the folder the page names under it).
+   * The same gate as the app's own requests: signed in, enabled for it, same origin. On the last chunk Citadel tells
+   * the app, POST $BASE_PATH/app-api/uploaded as the uploader, and the page gets the app's answer with the file's.
+   */
+  private async upload(req: IncomingMessage, res: ServerResponse, url: URL, host: string | null, name: string, id: string | undefined) {
+    const answer = (status: number, body?: unknown) =>
+      void (body === undefined ? res.writeHead(status, { 'Cache-Control': 'no-store' }).end() : res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body)));
+    const row = this.store.getContraption(name);
+    // On a contraption's host only its own; with APPS_DOMAIN set its pages are there, so Citadel's host takes none.
+    if (!this.uploads || !row || (host !== null ? host !== name : this.domain !== null)) return answer(404, { error: 'Not found' });
+    if (id === undefined ? req.method !== 'POST' : !['GET', 'PUT', 'DELETE'].includes(req.method!)) return answer(405, { error: 'Method not allowed' });
+    const session = this.who(req, host);
+    if (!session) return answer(401, { error: 'Not logged in' });
+    if (host !== null && crossOrigin(req)) return answer(403, { error: 'Cross-origin request' });
+    const user = this.contraptions.enabled(row.name, session.uid!) ? this.store.getUser(session.uid!) : undefined;
+    if (!user) return answer(403, { error: `You don't have access to ${row.title}` });
+    const { chunked, home } = this.uploads;
+    const who = { uid: user.id, login: user.login };
+    const target = { kind: 'app', app: row.name } as const;
+    try {
+      if (id === undefined) return answer(201, await chunked.start(who, target, (await readJson(req, 16 * 1024)) ?? {}));
+      if (req.method === 'GET') return answer(200, await chunked.status(who, target, id));
+      if (req.method === 'DELETE') return answer(204, await chunked.cancel(who, target, id));
+      const offset = Number(url.searchParams.get('offset') ?? NaN);
+      if (!Number.isSafeInteger(offset) || offset < 0) throw new HttpError(400, 'offset must be the byte the chunk starts at');
+      answer(200, await chunked.put(who, target, id, offset, req, async (meta, part) => {
+        const rel = ['uploads', safeFileName(user.login), ...meta.folder];
+        const saved = await place(part, join(home, '.local/share', row.name, ...rel), meta.name);
+        const file = { path: [...rel, saved.slice(saved.lastIndexOf('/') + 1)].join('/'), name: saved.slice(saved.lastIndexOf('/') + 1), size: meta.size };
+        return { ...file, app: await this.tellUploaded(row, user, file, meta) };
+      }));
+    } catch (err) {
+      if (res.headersSent) return void res.destroy();
+      answer(err instanceof HttpError ? err.status : 500, { error: err instanceof HttpError ? err.message : 'Internal error' });
+    }
+  }
+
+  /** Tell the app a file arrived; what it answers (64 KB at most) goes back to the page. Never fails the upload. */
+  private async tellUploaded(row: ContraptionRow, user: Parameters<Contraptions['signIdentity']>[1], file: { path: string; name: string; size: number }, meta: Meta) {
+    const identity = this.contraptions.signIdentity(row.name, user);
+    if (!identity) return { status: 503, answer: null };
+    try {
+      const r = await fetch(`http://127.0.0.1:${row.port}/apps/${row.name}/app-api/uploaded`, {
+        method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15_000),
+        headers: { 'X-Citadel-Identity': identity, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ ...file, folder: meta.folder.join('/') }),
+      });
+      const body = await capped(r);
+      let answer: unknown = body.cut ? null : body.text;
+      try {
+        answer = body.cut ? null : JSON.parse(body.text);
+      } catch {}
+      return { status: r.status, answer };
+    } catch {
+      return { status: 502, answer: null };
+    }
   }
 }

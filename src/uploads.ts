@@ -19,6 +19,17 @@ export function safeFileName(raw: string): string {
   return chars.length <= 150 ? base : chars.slice(0, 150 - Array.from(ext).length).join('').trimEnd() + ext;
 }
 
+/**
+ * A folder path a person typed (or a picked folder's relative path), as the folders it names: each cleaned as a
+ * file name is, none hidden, "." or "..", at most 8 deep. The top level is allowed (an empty path).
+ */
+export function uploadFolder(raw: string): string[] {
+  const parts = raw.replace(/\\/g, '/').split('/').map((p) => p.trim()).filter(Boolean);
+  if (parts.some((p) => p.startsWith('.'))) throw new HttpError(400, 'Folder names can\'t start with a dot');
+  if (parts.length > 8) throw new HttpError(400, 'At most 8 folders deep');
+  return parts.map(safeFileName);
+}
+
 /** Whether a name could have come from safeFileName (or its " (2)" de-duplicates): one plain name inside the folder. */
 export const isUploadName = (name: string) => /^[\p{L}\p{N}\p{M}_()+,=@][\p{L}\p{N}\p{M} ._()+,=@-]{0,199}$/u.test(name);
 
@@ -38,20 +49,7 @@ export class UploadTooLarge extends HttpError {
  * partial file is removed.
  */
 export async function saveUpload(dir: string, rawName: string, body: AsyncIterable<Buffer>, max = MAX_UPLOAD_BYTES) {
-  await mkdir(dir, { recursive: true });
-  const name = safeFileName(rawName);
-  const ext = extname(name);
-  const stem = name.slice(0, name.length - ext.length);
-  let path = '';
-  let file;
-  for (let n = 1; !file; n++) {
-    path = join(dir, n === 1 ? name : `${stem} (${n})${ext}`);
-    try {
-      file = await open(path, 'wx');
-    } catch (err: any) {
-      if (err.code !== 'EEXIST' || n > 999) throw err;
-    }
-  }
+  const { path, file } = await claimName(dir, rawName);
   let size = 0;
   try {
     for await (const chunk of body) {
@@ -66,4 +64,20 @@ export async function saveUpload(dir: string, rawName: string, body: AsyncIterab
   }
   await file.close();
   return { name: basename(path), path, size };
+}
+
+/** Make `dir` and create an empty file there under the safe form of `rawName`, " (2)" and on if it's taken. */
+export async function claimName(dir: string, rawName: string) {
+  await mkdir(dir, { recursive: true });
+  const name = safeFileName(rawName);
+  const ext = extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let n = 1; ; n++) {
+    const path = join(dir, n === 1 ? name : `${stem} (${n})${ext}`);
+    try {
+      return { path, file: await open(path, 'wx') };
+    } catch (err: any) {
+      if (err.code !== 'EEXIST' || n > 999) throw err;
+    }
+  }
 }

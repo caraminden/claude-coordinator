@@ -12,7 +12,8 @@ import { commentMessage, fileTitle, fileType, isArtifact, resolveFile, resolveLi
 import type { Session } from '../auth.ts';
 import type { Artifact, Project, Ticket } from '../db.ts';
 import type { MessageFile } from '../runner.ts';
-import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, safeFileName, saveUpload } from '../uploads.ts';
+import { place } from '../chunked-uploads.ts';
+import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload, uploadFolder } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
 import { HttpError, json, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 
@@ -107,15 +108,19 @@ async function pinShared(app: App, projectId: number, rel: string, by: string | 
   return { file, already };
 }
 
-/**
- * A folder path a person typed, as the folders under the shared folder it names: each cleaned as a file name
- * is, none hidden, "." or "..", at most 8 deep. The top level is allowed (an empty path).
- */
-export function sharedFolder(raw: string): string[] {
-  const parts = raw.replace(/\\/g, '/').split('/').map((p) => p.trim()).filter(Boolean);
-  if (parts.some((p) => p.startsWith('.'))) throw new HttpError(400, 'Folder names can\'t start with a dot');
-  if (parts.length > 8) throw new HttpError(400, 'At most 8 folders deep');
-  return parts.map(safeFileName);
+/** Each folder on the way must be a real folder (or not there yet), not a link that leads out of the shared folder. */
+async function realFolders(root: string, folder: string[]) {
+  for (let i = 1; i <= folder.length; i++) {
+    const st = await lstat(join(root, ...folder.slice(0, i))).catch(() => null);
+    if (!st) break;
+    if (!st.isDirectory()) throw new HttpError(400, `${folder.slice(0, i).join('/')} is not a folder`);
+  }
+}
+
+/** Who a chunked upload belongs to: a person with a user id (sessions from the shared-password days have none). */
+export function uploader(session: Session) {
+  if (session.uid === undefined) throw new HttpError(403, 'Sign in again to upload');
+  return { uid: session.uid, login: session.name };
 }
 
 /** A shared-folder file for an agent: marked as Shared, with its absolute path. */
@@ -428,17 +433,46 @@ export const fileRoutes: Route[] = [
     async handler({ req, res, url, app, project }) {
       if (Number(req.headers['content-length'] ?? 0) > MAX_UPLOAD_BYTES) throw new HttpError(413, 'Files must be under 200 MB');
       const root = projectSharedDir(app.dataDir, project.id);
-      const folder = sharedFolder(url.searchParams.get('folder') ?? 'inbox');
-      // Each folder on the way must be a real folder, not a link that leads out of the shared folder.
-      for (let i = 1; i <= folder.length; i++) {
-        const st = await lstat(join(root, ...folder.slice(0, i))).catch(() => null);
-        if (!st) break;
-        if (!st.isDirectory()) throw new HttpError(400, `${folder.slice(0, i).join('/')} is not a folder`);
-      }
+      const folder = uploadFolder(url.searchParams.get('folder') ?? 'inbox');
+      await realFolders(root, folder);
       const saved = await saveUpload(join(root, ...folder), url.searchParams.get('name') ?? '', req);
       app.broadcast({ type: 'artifacts', projectId: project.id });
       const path = [...folder, saved.name].join('/');
       return json(res, 201, { path, name: saved.name, size: saved.size, mtime: Math.round((await stat(saved.path)).mtimeMs) });
+    },
+  },
+  {
+    // A big file into the shared folder in chunks, resumable (#832, src/chunked-uploads.ts): { name, size, folder }
+    // starts one, folder as the PUT above (default inbox). public/ui/upload.js is the client.
+    method: 'POST', path: '/api/projects/:project/shared/uploads', who: ['person'], refuse: 'Only people upload to the shared folder',
+    async handler({ req, res, app, project, session }) {
+      const body = (await readJson(req, 16 * 1024)) ?? {};
+      const folder = typeof body.folder === 'string' ? body.folder : 'inbox';
+      await realFolders(projectSharedDir(app.dataDir, project.id), uploadFolder(folder));
+      return json(res, 201, await app.chunked.start(uploader(session), { kind: 'shared', project: project.id }, { ...body, folder }));
+    },
+  },
+  {
+    // Where an upload got to (GET), its next chunk at ?offset= (PUT; the last one answers with the file, as the PUT
+    // above does), or give it up (DELETE).
+    method: ['GET', 'PUT', 'DELETE'], path: '/api/projects/:project/shared/uploads/:upload', who: ['person'], refuse: 'Only people upload to the shared folder',
+    async handler({ req, res, url, app, project, session, params }) {
+      const who = uploader(session);
+      const target = { kind: 'shared', project: project.id } as const;
+      if (req.method === 'GET') return json(res, 200, await app.chunked.status(who, target, params.upload));
+      if (req.method === 'DELETE') {
+        await app.chunked.cancel(who, target, params.upload);
+        return void res.writeHead(204).end();
+      }
+      const offset = Number(url.searchParams.get('offset') ?? NaN);
+      if (!Number.isSafeInteger(offset) || offset < 0) throw new HttpError(400, 'offset must be the byte the chunk starts at');
+      const root = projectSharedDir(app.dataDir, project.id);
+      return json(res, 200, await app.chunked.put(who, target, params.upload, offset, req, async (meta, part) => {
+        await realFolders(root, meta.folder);
+        const saved = await place(part, join(root, ...meta.folder), meta.name);
+        app.broadcast({ type: 'artifacts', projectId: project.id });
+        return { path: [...meta.folder, basename(saved)].join('/'), name: basename(saved), mtime: Math.round((await stat(saved)).mtimeMs) };
+      }));
     },
   },
   {

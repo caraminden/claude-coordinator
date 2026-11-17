@@ -28,6 +28,7 @@ import { Runner, slimEvent } from './src/runner.ts';
 import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
 import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
+import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, githubPrs, LiveWaiters, pacificTime, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
@@ -553,6 +554,8 @@ const tellHome = (projectId: number, text: string) => {
 // The workflow readers go through CI health's etag-cached reads (defined below; first called after startup's scan).
 const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r), runArtifacts: (p: Project, r: Run) => ciHealth.runArtifacts(p, r) };
 // A shipped run's GitHub artifact, copied into the CI store so its release links a file on perigee (#673).
+// Big uploads (#832); UPLOAD_FLOOR_GB moves the free-disk floor (tests, a dev copy on a small disk).
+const chunked = new ChunkedUploads(DATA_DIR, process.env.UPLOAD_FLOOR_GB ? Number(process.env.UPLOAD_FLOOR_GB) * 1024 ** 3 : DISK_FLOOR);
 const ciMirror = new CiMirror(ciStore, ghDownload((p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined)));
 const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror });
 const apkReader = new ApkReader({
@@ -992,7 +995,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {
@@ -1020,7 +1023,7 @@ const BACKUP_SCHEME = 2;
 
 // Contraptions' own services under /apps/<name>/, on their own hosts with APPS_DOMAIN (src/apps.ts).
 contraptions.appsDomain = APPS_DOMAIN;
-const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN);
+const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN, { chunked, home: services.opts.home });
 apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
 if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.

@@ -443,3 +443,26 @@ test('a running turn gone quiet (#906) is in its requester\'s Needs you only, wh
   store.updateTicket(made, { status: 'idle', state: 'parked' });
   assert.deepEqual(quiet('Cara'), [], 'a turn that ended is not quiet');
 });
+
+test('a split scheme: each person\'s own Taskmaster\'s cards are in their Needs you only; the Overlord\'s and a card\'s `to` reach others (#919, #920)', () => {
+  const store = new Store(join(root, 'split.sqlite'));
+  store.typedHandlesUpTo = 0;
+  const approvals = new Approvals(() => {});
+  const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const Josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const p = store.createProject('Shared', null, Cara.id).id;
+  store.addMember(p, Josh.id);
+  const caraTm = store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' }).id;
+  const joshTm = store.splitScheme(p, Josh.id).id;
+  const ovl = store.getOverlord(p)!.id;
+  store.addEvent(caraTm, 'question', { id: 'q-cara', questions: [] });
+  store.addEvent(joshTm, 'question', { id: 'q-josh', questions: [] });
+  store.addEvent(joshTm, 'question', { id: 'q-josh-to-cara', to: 'Cara', questions: [] });
+  store.addEvent(ovl, 'question', { id: 'q-ovl', questions: [] });
+  approvals.request(joshTm, 'Bash', { command: 'ls' });
+
+  const cards = (person: string) => inboxItems(store, approvals, p, person).map((i) => (i.card as { id: string }).id).filter((id) => id.startsWith('q-')).sort();
+  assert.deepEqual(cards('Cara'), ['q-cara', 'q-josh-to-cara', 'q-ovl']);
+  assert.deepEqual(cards('Josh'), ['q-josh', 'q-ovl']);
+  assert.ok(!inboxItems(store, approvals, p, 'Cara').some((i) => i.kind === 'approval'), 'Josh\'s Taskmaster\'s approval holds up his turn, not Cara\'s');
+});

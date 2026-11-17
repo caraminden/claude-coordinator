@@ -290,7 +290,7 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
     held: held ? [`You are parked: your brief is held until ${held}. Handle what woke you (a card's answer, a notice) without starting the work; Unpark on your page (or the Taskmaster's message_ticket with unpark) starts you with your brief. End the turn with the state and note you have now.`] : [],
     // The details only while the branch has an open PR (#760): the line changes once when one opens, costing one cache rewrite.
     pr: [openPr
-      ? 'Your branch has an open PR: the app messages you as "[GitHub]: ..." on CI, reviews, comments, merge or close, so don\'t wait on CI in a turn or a loop; set state outside and end the turn. `ci-failures [<run id> | <sha> | <branch>]` prints a red run\'s failing tests.'
+      ? 'Your branch has an open PR: the app messages you as "[GitHub]: ..." on CI, reviews, comments, merge or close, so don\'t wait on CI in a turn or a loop; set state outside and end the turn. `ci-failures [<run id> | <sha> | <branch>]` prints a red run\'s failing tests (`--list`: recent runs).'
       : 'When you open a GitHub pull request or dispatch a workflow on your branch, the app messages you as "[GitHub]: ..." on its CI, reviews and merge: don\'t wait on CI in a turn or a background loop; set state outside and end the turn.'],
       files: filesDir ? [filesLine(filesDir)] : [],
       machines: machineTools(machines),

@@ -34,7 +34,10 @@
              ui/dialog.js's mountDialogs() closes it on a backdrop click; --cui-dialog-width sets its width (480px).
    Top bar:  <header class="cui-topbar"><img src="icon.svg" alt=""><h1>My app</h1>…buttons, status…</header> at the
              very top of the page: in Citadel's installed app it takes the title bar strip, clear of the window
-             controls and of Citadel's ‹ › × (which Citadel draws over its end), and drags the window; one row. */
+             controls and of Citadel's ‹ › × (which Citadel draws over its end), and drags the window; one row.
+   Upload:   ui/upload.js's mountUpload() draws div.cui-upload: a dashed cui-upload-drop (cui-dropping while files are
+             dragged over it) with its pickers, a cui-upload-left line, a cui-upload-total and a cui-upload-list of
+             li.cui-upload-file rows (data-state="waiting|sending|paused|done|cancelled") with a progress.cui-upload-bar. */
 
 /* Buttons: every variant the same height, content centred, so the room above and below is equal. */
 :where(.cui-btn) {
@@ -320,6 +323,40 @@
 :where(.cui-topbar > img) { flex: none; width: 20px; height: 20px; }
 :where(.cui-topbar > :is(h1, h2)) { min-width: 0; margin: 0; font: 600 var(--citadel-size-h2)/1.3 var(--citadel-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 800px) { :where(.cui-topbar) { --cui-topbar-row: var(--citadel-strip-row, 2.5rem); } }
+
+/* Upload (ui/upload.js): a dashed drop zone, then a row per file: name, numbers and buttons on one line, its bar under. */
+:where(.cui-upload) { display: flex; flex-direction: column; gap: var(--citadel-space-2); font: var(--citadel-size-body)/1.45 var(--citadel-font); color: var(--citadel-text); }
+:where(.cui-upload [hidden]) { display: none; }
+:where(.cui-upload-drop) {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--citadel-space-2) var(--citadel-space-3);
+  padding: var(--citadel-space-4) var(--citadel-space-3); border: 1.5px dashed var(--citadel-control-border); border-radius: var(--citadel-radius);
+  color: var(--citadel-muted); text-align: center; transition: border-color var(--citadel-motion), background var(--citadel-motion);
+}
+:where(.cui-upload-drop.cui-dropping) { border-color: var(--citadel-accent); color: var(--citadel-text); background: color-mix(in srgb, var(--citadel-accent) 8%, transparent); }
+:where(.cui-upload-pick) { display: inline-flex; flex-wrap: wrap; gap: var(--citadel-space-2); }
+:where(.cui-upload-left) { margin: 0; color: var(--citadel-muted); font-size: var(--citadel-size-small); overflow-wrap: anywhere; }
+:where(.cui-upload-total) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--citadel-space-1) var(--citadel-space-3); font-size: var(--citadel-size-small); }
+:where(.cui-upload-total > .cui-upload-bar) { grid-column: 1; grid-row: 2; }
+:where(.cui-upload-total > .cui-btn) { grid-column: 2; grid-row: 1 / span 2; }
+:where(.cui-upload-list) { display: flex; flex-direction: column; gap: var(--citadel-space-2); margin: 0; padding: 0; list-style: none; }
+:where(.cui-upload-file) {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: var(--citadel-space-1) var(--citadel-space-2);
+  padding: var(--citadel-space-2) var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm); background: var(--citadel-surface);
+}
+:where(.cui-upload-file > .cui-upload-bar, .cui-upload-file > .cui-upload-error) { grid-column: 1 / -1; }
+:where(.cui-upload-name) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where(.cui-upload-meta) { color: var(--citadel-muted); font-size: var(--citadel-size-small); font-variant-numeric: tabular-nums; white-space: nowrap; }
+:where(.cui-upload-error) { color: var(--citadel-danger); font-size: var(--citadel-size-small); overflow-wrap: anywhere; }
+:where(.cui-upload-file[data-state="done"] .cui-upload-meta) { color: var(--citadel-ok); }
+:where(.cui-upload-file[data-state="cancelled"]) { opacity: 0.6; }
+:where(.cui-upload-bar) { appearance: none; display: block; width: 100%; height: 6px; border: 0; border-radius: var(--citadel-radius-pill); background: color-mix(in srgb, var(--citadel-text) 10%, transparent); overflow: hidden; }
+:where(.cui-upload-bar)::-webkit-progress-bar { background: transparent; }
+:where(.cui-upload-bar)::-webkit-progress-value { background: var(--citadel-accent); border-radius: var(--citadel-radius-pill); transition: width var(--citadel-motion); }
+:where(.cui-upload-bar)::-moz-progress-bar { background: var(--citadel-accent); border-radius: var(--citadel-radius-pill); }
+:where(.cui-upload-file[data-state="paused"] .cui-upload-bar)::-webkit-progress-value { background: var(--citadel-warn); }
+:where(.cui-upload-file[data-state="paused"] .cui-upload-bar)::-moz-progress-bar { background: var(--citadel-warn); }
+:where(.cui-upload-file[data-state="done"] .cui-upload-bar)::-webkit-progress-value { background: var(--citadel-ok); }
+:where(.cui-upload-file[data-state="done"] .cui-upload-bar)::-moz-progress-bar { background: var(--citadel-ok); }
 
 /* A long press on a tipped link or button shows its tip, not the phone's own menu or a selection. */
 @media (pointer: coarse) { :where([data-tip]:is(a, button, [role="button"])) { -webkit-touch-callout: none; user-select: none; } }

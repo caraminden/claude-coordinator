@@ -6,6 +6,7 @@ import { ago, fileExt, fileKind, formatSize, h, sharedHref, sharedUrl, threadLab
 import { pinButton, previewBody } from './artifacts.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
+import { startUpload } from './ui/upload.js';
 
 /** Folders the README names, in its order; the rest follow by name, then the top level. */
 const ORDER = ['inbox', 'handoffs', 'reports', 'specs', 'mockups'];
@@ -17,7 +18,6 @@ const listed = (path) => (path.startsWith('inbox/') ? !!fileKind(path) : !!fileK
 const MINIONS = '@minions';
 const SECTION = 5; // files each folder shows on All
 const PAGE = 200; // rows a folder or search draws before "Show more"
-export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024; // the server's cap (src/uploads.ts)
 const KINDS = [
   ['all', 'All kinds', () => true],
   ['docs', 'Docs', (k) => k === 'markdown' || k === 'pdf' || k === 'canvas' || k === 'text'],
@@ -270,7 +270,6 @@ function renderStage() {
   const s = state();
   if (!s.staged) return el.replaceChildren();
   const { files } = s.staged;
-  const big = files.filter((f) => f.size > MAX_UPLOAD_BYTES);
   const known = folders(items()).shared.filter((k) => k !== TOP);
   const input = h('input', { type: 'text', list: 'files-folders', value: s.staged.folder, 'aria-label': 'Folder', spellcheck: 'false', autocomplete: 'off' });
   input.addEventListener('input', () => (s.staged.folder = input.value));
@@ -282,17 +281,17 @@ function renderStage() {
     const search = document.getElementById('files-search');
     if (search) search.value = '';
     renderStage();
-    for (const file of files) if (file.size <= MAX_UPLOAD_BYTES) upload(file, folder);
+    for (const file of files) upload(file, folder);
   };
   input.addEventListener('keydown', (e) => e.key === 'Enter' && go());
   el.replaceChildren(h('div', { class: 'files-stage' },
     h('b', {}, `Upload ${files.length} file${files.length === 1 ? '' : 's'}`),
-    h('ul', {}, ...files.map((f) => h('li', { class: f.size > MAX_UPLOAD_BYTES ? 'error' : '' }, h('span', { class: 'name' }, f.name), h('span', { class: 'muted' }, f.size > MAX_UPLOAD_BYTES ? `${formatSize(f.size)}: over 200 MB, left out` : formatSize(f.size))))),
+    h('ul', {}, ...files.map((f) => h('li', {}, h('span', { class: 'name' }, f.name), h('span', { class: 'muted' }, formatSize(f.size))))),
     h('label', {}, 'To the shared folder\'s', input, '/'),
     h('datalist', { id: 'files-folders' }, ...known.map((k) => h('option', { value: k }))),
-    h('p', { class: 'muted small' }, 'Kept byte for byte, never recompressed. Up to 200 MB a file. A name already there gets a number, so nothing is overwritten.'),
+    h('p', { class: 'muted small' }, 'Kept byte for byte, never recompressed, any size: a big file goes in pieces and picks up where it left off if the connection drops. A name already there gets a number, so nothing is overwritten.'),
     h('div', { class: 'row' },
-      h('button', { type: 'button', onclick: go, disabled: big.length === files.length }, 'Upload'),
+      h('button', { type: 'button', onclick: go }, 'Upload'),
       h('button', { type: 'button', class: 'secondary', onclick: () => {
         s.staged = null;
         renderStage();
@@ -334,20 +333,13 @@ function upload(file, folder) {
   }
 }
 
+/** Send it in chunks (ui/upload.js); a stop after its own retries fails the action, and Retry carries on from the server's offset. */
 function put(projectId, folder, file, onProgress) {
   return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('PUT', `api/projects/${projectId}/shared/upload?folder=${encodeURIComponent(folder)}&name=${encodeURIComponent(file.name || 'file')}`);
-    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
-    xhr.onload = () => {
-      let data = {};
-      try {
-        data = JSON.parse(xhr.responseText);
-      } catch {}
-      if (xhr.status === 201) resolve(data);
-      else reject(new Error(data.error || `HTTP ${xhr.status}`));
-    };
-    xhr.onerror = () => reject(new Error('the upload broke off'));
-    xhr.send(file);
+    const up = startUpload(`api/projects/${projectId}/shared/uploads`, file, { folder, onChange: (u) => {
+      if (u.size) onProgress(u.sent / u.size);
+      if (u.state === 'paused') reject(new Error(u.error || 'the upload stopped'));
+    } });
+    up.done.then(resolve);
   });
 }

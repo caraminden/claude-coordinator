@@ -471,7 +471,7 @@ export const fileRoutes: Route[] = [
         await realFolders(root, meta.folder);
         const saved = await place(part, join(root, ...meta.folder), meta.name);
         app.broadcast({ type: 'artifacts', projectId: project.id });
-        return { path: [...meta.folder, basename(saved)].join('/'), name: basename(saved), mtime: Math.round((await stat(saved)).mtimeMs) };
+        return { path: [...meta.folder, basename(saved)].join('/'), name: basename(saved), size: meta.size, mtime: Math.round((await stat(saved)).mtimeMs) };
       }));
     },
   },

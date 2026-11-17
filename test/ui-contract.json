@@ -41,6 +41,15 @@
       "mountTips",
       "placeTip"
     ],
+    "upload.js": [
+      "droppedFiles",
+      "formatBytes",
+      "mountUpload",
+      "startUpload"
+    ],
+    "optimistic.js": [
+      "optimistic"
+    ],
     "rail.js": [
       "FRAME",
       "chromeIntent",
@@ -54,9 +63,6 @@
       "opensApart",
       "railItems",
       "showRail"
-    ],
-    "optimistic.js": [
-      "optimistic"
     ],
     "drawers.js": [
       "EDGE",
@@ -78,6 +84,7 @@
       "cui-danger",
       "cui-dialog",
       "cui-dialog-head",
+      "cui-dropping",
       "cui-ghost",
       "cui-icon",
       "cui-input",
@@ -103,6 +110,17 @@
       "cui-toast-say",
       "cui-toast-text",
       "cui-topbar",
+      "cui-upload",
+      "cui-upload-bar",
+      "cui-upload-drop",
+      "cui-upload-error",
+      "cui-upload-file",
+      "cui-upload-left",
+      "cui-upload-list",
+      "cui-upload-meta",
+      "cui-upload-name",
+      "cui-upload-pick",
+      "cui-upload-total",
       "cui-working"
     ],
     "chat.js": [

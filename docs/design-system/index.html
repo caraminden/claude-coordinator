@@ -433,6 +433,7 @@ window.COLOURS = [
         <tr><td><code>ui/status.js</code></td><td>A steady status line (<code>statusSlot</code>: always drawn, 22px, one line cut off with an ellipsis and whole in a tooltip, a working spinner, a tone), steady labels (<code>steadyLabel</code>: a button as wide as its widest label), a <code>toast</code> in the top layer, and the same markup as HTML strings (<code>statusSlotHtml</code> and the like). A status change moves nothing (#298).</td><td>ES module; its look is <code>.cui-status</code> and <code>.cui-steady</code> in base.css</td></tr>
         <tr><td><code>ui/optimistic.js</code></td><td><code>optimistic({ key, sets, apply, send, undo, label })</code>: a click shows its result at once and sends behind it; one key sends in click order, other keys side by side; a failure rolls back that item alone (with <code>sets</code>, clicks that set one thing end on what the server last took, #399) with a "Couldn't &lt;label&gt;: &lt;error&gt;" toast and Retry; its promise settles once, Retries included (rule 23, #388).</td><td>ES module; its toast is status.js's</td></tr>
         <tr><td><code>ui/dialog.js</code></td><td>The dialog: <code>cui-dialog</code> on a native <code>&lt;dialog&gt;</code>, <code>cui-dialog-head</code> on its header. The head and its ✕ stay at the top while the body scrolls; one <code>mountDialogs()</code> call closes it on a backdrop click (a drag out of it doesn't count); Escape as ever; the page behind doesn't scroll (#383).</td><td>ES module; its look is <code>.cui-dialog</code> in base.css</td></tr>
+        <tr><td><code>ui/upload.js</code></td><td>Big uploads (#832): <code>mountUpload()</code> draws a drop zone with file and folder pickers, a row per file with its progress, Pause or Resume and ✕, a total with Pause all, and a line naming what it left out; <code>startUpload()</code> sends one file in 8 MiB chunks that resume after a dropped connection or a reload. Into an app's <code>DATA_DIR/uploads/&lt;login&gt;/</code>, or the shared folder from Files.</td><td>ES module; its look is <code>.cui-upload</code> in base.css</td></tr>
         <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
       </tbody>
     </table></div>
@@ -717,6 +718,25 @@ background: var(--citadel-warn-tint);</code></pre></div>
       <div class="mk-about">
         <p>Every modal is this dialog (Cara, 2026-11-08: "the X to close should stay at the top and clicking off the modal should close it"). A native <code>&lt;dialog&gt;</code> opened with <code>showModal()</code>: the head is sticky on the surface colour, spans the box and keeps equal room above and below its title and ✕; the body scrolls under it; the box fits the window (8px in on a phone) and the page behind stays still. Width 480px, or <code>--cui-dialog-width</code>. In the installed app it opens below the title bar strip, <code>--cui-dialog-top</code>, so the window controls never cover it and its ✕ takes clicks (#772): set no <code>top</code> of your own, and size a full-height one <code>calc(100dvh - var(--cui-dialog-top))</code>.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/dialog.js</code> (<code>mountDialogs</code>) · <code>.cui-dialog</code>, <code>.cui-dialog-head</code> in <code>ui/base.css</code></p>
+      </div>
+    </div>
+    <h3>Big upload</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <div class="cui-upload">
+          <div class="cui-upload-drop"><span>Drop files or folders here</span><span class="cui-upload-pick"><button type="button" class="cui-btn cui-small">Choose files</button><button type="button" class="cui-btn cui-small">Choose a folder</button></span></div>
+          <p class="cui-upload-left">Left out 2: Japan 2026/.DS_Store (hidden), Japan 2026/itinerary.docx (not a kind this takes)</p>
+          <div class="cui-upload-total" role="status"><span>1 of 3 files · 1.9 GB of 4.6 GB</span><progress class="cui-upload-bar" max="1" value="0.41"></progress><button type="button" class="cui-btn cui-small">Pause all</button></div>
+          <ul class="cui-upload-list">
+            <li class="cui-upload-file" data-state="done"><span class="cui-upload-name">Japan 2026/day 1/IMG_0412.HEIC</span><span class="cui-upload-meta">Done · 3.1 MB</span><progress class="cui-upload-bar" max="1" value="1"></progress></li>
+            <li class="cui-upload-file" data-state="sending"><span class="cui-upload-name">Japan 2026/day 2/Fushimi Inari walk.mov</span><span class="cui-upload-meta">62% · 1.9 GB of 3.0 GB</span><button type="button" class="cui-btn cui-small">Pause</button><button type="button" class="cui-btn cui-small cui-ghost" aria-label="Cancel">✕</button><progress class="cui-upload-bar" max="1" value="0.62"></progress></li>
+            <li class="cui-upload-file" data-state="paused"><span class="cui-upload-name">Japan 2026/day 3/Kyoto drone.mp4</span><span class="cui-upload-meta">Paused · 1.6 GB</span><button type="button" class="cui-btn cui-small">Resume</button><button type="button" class="cui-btn cui-small cui-ghost" aria-label="Cancel">✕</button><progress class="cui-upload-bar" max="1" value="0.12"></progress><span class="cui-upload-error">Not enough room on the server: 51 GB free, and uploads always leave 50 GB. This file is 1.6 GB.</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="mk-about">
+        <p>For files past the app proxy's 20 MiB, or a whole folder (#832). Each file goes in 8 MiB chunks; a dropped connection or a server error retries from the server's offset, and after 8 failures or a refusal the row pauses with the reason under it. Files go one at a time; the bar is accent while sending, warn while paused, ok when done. Hidden files and kinds <code>accept</code> doesn't take are named on the one "Left out" line, never dropped silently.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/upload.js</code> (<code>mountUpload</code>, <code>startUpload</code>, <code>droppedFiles</code>, <code>formatBytes</code>) · <code>.cui-upload</code> and its parts in <code>ui/base.css</code></p>
       </div>
     </div>
   </section>
@@ -1045,6 +1065,39 @@ row.innerHTML =
 .cui-scope .cui-tip-skel > .cui-skeleton { height: 0.8em; padding: 0; }
 .cui-scope .doc-tip-demo { margin: 0; }
 .cui-scope .doc-tip-thing { border-bottom: 1px dotted var(--citadel-muted); }
+/* Big upload (ui/upload.js, base.css's cui-upload). */
+.cui-scope .cui-upload { display: flex; flex-direction: column; gap: var(--citadel-space-2); font: var(--citadel-size-body)/1.45 var(--citadel-font); color: var(--citadel-text); }
+.cui-scope .cui-upload [hidden] { display: none; }
+.cui-scope .cui-upload-drop {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--citadel-space-2) var(--citadel-space-3);
+  padding: var(--citadel-space-4) var(--citadel-space-3); border: 1.5px dashed var(--citadel-control-border); border-radius: var(--citadel-radius);
+  color: var(--citadel-muted); text-align: center; transition: border-color var(--citadel-motion), background var(--citadel-motion);
+}
+.cui-scope .cui-upload-drop.cui-dropping { border-color: var(--citadel-accent); color: var(--citadel-text); background: color-mix(in srgb, var(--citadel-accent) 8%, transparent); }
+.cui-scope .cui-upload-pick { display: inline-flex; flex-wrap: wrap; gap: var(--citadel-space-2); }
+.cui-scope .cui-upload-left { margin: 0; color: var(--citadel-muted); font-size: var(--citadel-size-small); overflow-wrap: anywhere; }
+.cui-scope .cui-upload-total { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--citadel-space-1) var(--citadel-space-3); font-size: var(--citadel-size-small); }
+.cui-scope .cui-upload-total > .cui-upload-bar { grid-column: 1; grid-row: 2; }
+.cui-scope .cui-upload-total > .cui-btn { grid-column: 2; grid-row: 1 / span 2; }
+.cui-scope .cui-upload-list { display: flex; flex-direction: column; gap: var(--citadel-space-2); margin: 0; padding: 0; list-style: none; }
+.cui-scope .cui-upload-file {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: var(--citadel-space-1) var(--citadel-space-2);
+  padding: var(--citadel-space-2) var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm); background: var(--citadel-surface);
+}
+.cui-scope .cui-upload-file > .cui-upload-bar, .cui-scope .cui-upload-file > .cui-upload-error { grid-column: 1 / -1; }
+.cui-scope .cui-upload-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cui-scope .cui-upload-meta { color: var(--citadel-muted); font-size: var(--citadel-size-small); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cui-scope .cui-upload-error { color: var(--citadel-danger); font-size: var(--citadel-size-small); overflow-wrap: anywhere; }
+.cui-scope .cui-upload-file[data-state="done"] .cui-upload-meta { color: var(--citadel-ok); }
+.cui-scope .cui-upload-file[data-state="cancelled"] { opacity: 0.6; }
+.cui-scope .cui-upload-bar { appearance: none; display: block; width: 100%; height: 6px; border: 0; border-radius: var(--citadel-radius-pill); background: color-mix(in srgb, var(--citadel-text) 10%, transparent); overflow: hidden; }
+.cui-scope .cui-upload-bar::-webkit-progress-bar { background: transparent; }
+.cui-scope .cui-upload-bar::-webkit-progress-value { background: var(--citadel-accent); border-radius: var(--citadel-radius-pill); transition: width var(--citadel-motion); }
+.cui-scope .cui-upload-bar::-moz-progress-bar { background: var(--citadel-accent); border-radius: var(--citadel-radius-pill); }
+.cui-scope .cui-upload-file[data-state="paused"] .cui-upload-bar::-webkit-progress-value { background: var(--citadel-warn); }
+.cui-scope .cui-upload-file[data-state="paused"] .cui-upload-bar::-moz-progress-bar { background: var(--citadel-warn); }
+.cui-scope .cui-upload-file[data-state="done"] .cui-upload-bar::-webkit-progress-value { background: var(--citadel-ok); }
+.cui-scope .cui-upload-file[data-state="done"] .cui-upload-bar::-moz-progress-bar { background: var(--citadel-ok); }
 /* Dialog (ui/dialog.js, base.css's cui-dialog). */
 .cui-scope .cui-dialog { --cui-dialog-pad: var(--citadel-space-4); box-sizing: border-box; width: min(480px, calc(100vw - 2 * var(--citadel-space-3))); max-width: none; max-height: min(420px, calc(100dvh - 2 * var(--citadel-space-3))); margin: auto; padding: 0 var(--cui-dialog-pad) var(--cui-dialog-pad); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg); background: var(--citadel-surface); color: var(--citadel-text); font: var(--citadel-size-body)/1.45 var(--citadel-font); box-shadow: 0 12px 32px rgb(0 0 0 / 0.22); }
 .cui-scope .cui-dialog::backdrop { background: rgb(0 0 0 / 0.4); }

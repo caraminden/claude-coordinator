@@ -21,6 +21,7 @@ the test on purpose.
 - [The relay: calling another contraption](#the-relay-calling-another-contraption)
 - [Embeddings: `POST /api/contraptions/embed`](#embeddings-post-apicontraptionsembed)
 - [Sessions reading a person's data: `/app-api/read`](#sessions-reading-a-persons-data-app-apiread)
+- [Big uploads: `/apps/_citadel/uploads/<name>`](#big-uploads-apps_citadeluploadsname)
 - [What Citadel serves your pages](#what-citadel-serves-your-pages)
 - [Running and deploying: `citadel-app.json`](#running-and-deploying-citadel-appjson)
 - [Limits at a glance](#limits-at-a-glance)
@@ -69,7 +70,7 @@ Citadel sets these on your service and its timers; `citadel-app.json` can't over
 |---|---|
 | `PORT` | The registry's port |
 | `BASE_PATH` | `/apps/<name>` |
-| `DATA_DIR` | `~/.local/share/<name>`, created empty (0700) on install or deploy if missing; never touched otherwise (tested) |
+| `DATA_DIR` | `~/.local/share/<name>`, created empty (0700) on install or deploy if missing; never touched otherwise, except that big uploads land in its `uploads/<login>/` ("Big uploads") (tested) |
 | `CITADEL_KEYS` | Your key folder |
 | `CITADEL_URL` | Where your server calls Citadel: `http://127.0.0.1:8573` on the live box. Read it; don't hard-code it |
 | `PATH` | mise's shims, `~/.local/bin`, then the system's |
@@ -112,7 +113,7 @@ On every request, open path or not:
   reach the browser, host-only (tested). On gated requests Citadel may add its own `Set-Cookie` renewing a session older than 7
   days (tested).
 - `Authorization` passes through untouched: it's yours.
-- Request bodies up to 20 MiB; bigger gets 413 (tested). Answers stream as they come: server-sent
+- Request bodies up to 20 MiB; bigger gets 413 (tested). For files past that, use big uploads (below). Answers stream as they come: server-sent
   events arrive event by event (tested), and a stream you drop ends the browser's too, so its
   `EventSource` reconnects (tested). Websocket upgrades are tunnelled on open and gated paths
   (tested).
@@ -609,6 +610,38 @@ Nothing under `/app-api/read` may change data. Citadel waits 15 s and passes bac
 marked cut, so give commands args that narrow the answer. No `/app-api/read` (404) tells the session
 your app offers no reads.
 
+## Big uploads: `/apps/_citadel/uploads/<name>`
+
+For files past the proxy's 20 MiB (a trip's videos, a folder of photos): the page sends them to Citadel in
+chunks, Citadel puts each finished file in your `DATA_DIR`, then tells your server. Your server never
+handles the bytes. In the page, `ui/upload.js`'s `mountUpload()` does all of it (a drop zone with file
+and folder pickers, progress, pause and resume; [upload.md](upload.md)); these are its calls, on your own
+host only, under the same gate as your pages (signed in, your app enabled for them, same origin):
+
+- `POST /apps/_citadel/uploads/<name>` `{ "name", "size", "folder"? }` → 201 `{ id, offset: 0, size, chunk }`.
+  `folder` is a path under the person's uploads (`"Japan 2026/day 1"`, at most 8 deep, no part starting
+  with a dot). 507 when the file would take the server's disk below its floor (50 GB free, counting
+  the uploads already under way).
+- `GET …/<id>` → `{ id, offset, size }`: how many bytes Citadel has.
+- `PUT …/<id>?offset=<n>` with the next bytes (at most 16 MiB; the kit sends 8) → `{ id, offset, size }`.
+  A wrong offset, or a chunk still landing, is a 409: GET and go on from its offset. A connection that
+  breaks off keeps what arrived. The last chunk's answer is the finished file:
+  `{ done: true, path, name, size, app: { status, answer } }`.
+- `DELETE …/<id>` → 204, what arrived deleted. An upload untouched for 3 days goes the same way.
+
+The finished file lands at `DATA_DIR/uploads/<login>/<folder>/<name>`: the name cleaned (no slashes,
+leading dots or brackets), and never over a file already there (`IMG_1 (2).jpg`). Then Citadel calls
+your server, signed as the person who sent it:
+
+- `POST $BASE_PATH/app-api/uploaded` `{ "path", "name", "size", "folder" }`, `path` relative to
+  `DATA_DIR` (`"uploads/cara/Japan 2026/IMG_1.jpg"`). Move it, import it or leave it there; it's yours.
+  Your answer (JSON or text, 64 KB at most, within 15 s) goes back to the page as
+  `app: { status, answer }`, so the page can show what you made of it. No such route, or a failure, still
+  leaves the file in place (`status` 404, or 502 when you didn't answer).
+
+Someone else's upload id is a 404, as is one for another app. Citadel never logs a file's name or
+contents.
+
 ## What Citadel serves your pages
 
 Under `/apps/_citadel/`, no login, `Cache-Control: no-cache` with an ETag, live on every Citadel
@@ -629,6 +662,7 @@ deploy:
 | `ui/status.js` | `statusSlot`, `steadyLabel`, `toast`, `statusSlotHtml`, `statusTextHtml`, `statusWorkingHtml`, `steadyLabelHtml` |
 | `ui/dialog.js` | `mountDialogs` |
 | `ui/optimistic.js` | `optimistic` |
+| `ui/upload.js` | `mountUpload`, `startUpload`, `droppedFiles`, `formatBytes` |
 
 Each `ui/*.js` has a `.d.ts` beside it. Exports, classes and token names only ever get added: a
 contract test holds them. How to use each one is in this skill's SKILL.md table and the references
@@ -711,6 +745,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 | What | Limit |
 |---|---|
 | Proxied request body | 20 MiB |
+| Big upload | any size, in chunks of at most 16 MiB; refused below 50 GB free on the server; kept 3 days untouched |
+| `/app-api/uploaded` timeout, answer | 15 s, 64 KB |
 | Identity header lifetime | 60 s |
 | Turn request body | 4,000,000 bytes |
 | Turn `timeoutSec` | 1 to 900, default 180 |
@@ -735,6 +771,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-16:** Big uploads: files of any size from the page into your `DATA_DIR/uploads/<login>/`,
+  in resumable chunks, then `POST /app-api/uploaded` ("Big uploads"); `ui/upload.js` is the drop zone.
 - **2026-11-14:** `media: true` on a turn gives the agent image and sound tools on the person's own
   OpenRouter key and cap, with a media folder you read through `/api/contraptions/media`, a `media`
   event per call and `GET /api/contraptions/openrouter` to check before a turn ("Media"). A person with

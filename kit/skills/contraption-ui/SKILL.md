@@ -37,6 +37,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/dialog.js` (+ `.d.ts`) | The dialog: every modal. Its head and ✕ stay at the top while the body scrolls; a backdrop click and Escape close it | `cui-dialog` in base.css, `mountDialogs()` once; [references/base-parts.md](references/base-parts.md#dialog) |
 | `ui/status.js` (+ `.d.ts`) | A status line that's always there, a button label that keeps its width, a toast (with a Retry, or an Undo that Ctrl-Z presses too), and the headless check that nothing moved | ES module import, needs base.css; [references/status.md](references/status.md) |
 | `ui/optimistic.js` (+ `.d.ts`) | `optimistic()`: a click shows its result at once and sends behind it; a failure rolls back that item with a Retry toast (rule 23) | ES module import, needs base.css; [references/status.md](references/status.md#optimistic-actions) |
+| `ui/upload.js` (+ `.d.ts`) | `mountUpload()`: big files and folders into your `DATA_DIR`, any size, in resumable chunks, with progress, pause and resume; `startUpload()` for one file | ES module import, needs base.css; [references/upload.md](references/upload.md) |
 | Your `manifest.webmanifest` | Installing your app on its own, beside Citadel's | [references/installing.md](references/installing.md) |
 
 [starter/](starter/index.html) (`index.html`, `app.css`, `app.js`) wires theme.css, base.css, the

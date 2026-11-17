@@ -27,7 +27,9 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <script type="module">
   window.fetch = () => new Promise(() => {}); // every request stays on its way
   const { renderUsage, setCodex } = await import('/core.js');
-  const { setView } = await import('/base.js');
+  const base = await import('/base.js');
+  const { setView } = base;
+  window.tmv = () => base.view;
   Object.assign(window, { renderUsage, setCodex });
   const { appendEvent, chatView, renderCardJump } = await import('/thread.js');
   setView({ ...chatView(1, { id: 1, title: 'T' }), kind: 'ticket' });
@@ -118,8 +120,8 @@ test('Everyone draws each Taskmaster session with its own state: the Overlord on
     const alex = [...document.querySelectorAll('#log .msg.user')].find((m) => m.textContent.includes('export'));
     return {
       order: log.map((n) => n.classList.contains('ovl') ? 'ovl' : n.dataset.session ? 'alex' : 'mine'),
-      ovlWho: ovl?.querySelector('.who')?.textContent, ovlSession: ovl?.dataset.session, alexSession: alex?.dataset.session,
-      own: [view.ticket.id, view.part === undefined, view.heldCards.length],
+      ovlWho: ovl?.querySelector('.who')?.firstChild?.textContent, ovlSession: ovl?.dataset.session, alexSession: alex?.dataset.session,
+      own: [tmv().ticket.id, tmv().part === undefined, tmv().heldCards.length],
     };
   })()`);
   assert.deepEqual(got.order, ['mine', 'ovl', 'alex'], 'in time order: the Overlord\'s words go below your card, not above it');
@@ -209,7 +211,9 @@ async function inboxPage(status: 'ok' | 'fail' | 'hold', closed = false): Promis
   await page.eval(`(async () => {
     document.body.insertAdjacentHTML('afterbegin', '<span data-scheme-inbox="2"></span><div id="ticket-head"></div><div id="threads"></div>');
     localStorage.setItem('cc-inbox-open', '1');
-    const { setView } = await import('/base.js');
+    const base = await import('/base.js');
+  const { setView } = base;
+  window.tmv = () => base.view;
     const { inboxStrip, refreshInbox } = await import('/inbox.js');
     const { onTicketUpdate } = await import('/core.js');
     const { renderTicketHead } = await import('/thread.js');

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { mergedPage, mergedAfter } from '../src/history.ts';
-import { inMine } from '../public/mine.js';
+import { inMerged, inMine, mergedView } from '../public/mine.js';
 
 const root = mkdtempSync(join(tmpdir(), 'tm-views-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -93,4 +93,22 @@ test('the newest page reaches back to a card still waiting in any session', () =
   const parts = [{ id: cara.id }, { id: ovl.id, mine: true }];
   assert.ok(ids(mergedPage(store, parts, { limit: 20 })).includes(card));
   assert.ok(!ids(mergedPage(store, parts, { limit: 20, before: card + 40 })).includes(card), 'only the newest page reaches back');
+});
+
+test('the front end merges only when the scheme has split: Mine takes your chat and the Overlord, Everyone takes all, each named', () => {
+  const tms = [{ id: 1, person_id: 7, person_name: 'Cara' }, { id: 2, person_id: 8, person_name: 'Alex' }, { id: 3, person_id: null, person_name: null }];
+  assert.equal(mergedView(9, 5, [{ id: 5, person_id: null, person_name: null }], 'mine'), null, 'one Taskmaster: a plain chat');
+  assert.equal(mergedView(9, 4, tms, 'mine'), null, 'a chat that isn\'t a Taskmaster of this scheme: plain');
+  const mine = mergedView(9, 1, tms, 'mine');
+  assert.deepEqual(mine.parts.map((p) => [p.id, p.label, p.mine]), [[1, undefined, undefined], [3, 'Overlord', true]]);
+  assert.equal(mine.src, 'api/projects/9/taskmaster-events?view=mine');
+  const all = mergedView(9, 1, tms, 'everyone');
+  assert.deepEqual(all.parts.map((p) => [p.id, p.label, p.mine]), [[1, undefined, undefined], [2, "Alex's Taskmaster", false], [3, 'Overlord', false]]);
+  const ev = (ticket_id: number, data: object, kind = 'claude') => ({ ticket_id, kind, data: JSON.stringify(data) });
+  assert.ok(inMerged(mine, ev(1, { type: 'assistant' })), 'your own session: everything');
+  assert.ok(!inMerged(mine, ev(3, { type: 'assistant' })), 'the Overlord\'s own work stays out of Mine');
+  assert.ok(inMerged(mine, ev(3, { text: 'CI fell back', everyone: true }, 'note')));
+  assert.ok(!inMerged(mine, ev(2, { type: 'assistant' })), 'another person\'s Taskmaster: only in Everyone');
+  assert.ok(inMerged(all, ev(2, { type: 'assistant' })) && inMerged(all, ev(3, { type: 'assistant' })));
+  assert.ok(!inMerged(all, ev(4, { type: 'assistant' })) && !inMerged(null, ev(1, {})), 'a minion\'s event never lands in the Taskmaster chat');
 });

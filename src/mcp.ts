@@ -911,7 +911,7 @@ const IMAGE_PROPS = {
 export const NOT_DEFAULT = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise draw with code.';
 const NOT_DEFAULT_AUDIO = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise make sound with code.';
 /** Which generative tool makes what (Cara, 2026-11-14, "Codex for raster images"). */
-const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan, when it is offered; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex isn\'t offered or refused because a Codex limit is near.';
+const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex refuses (no Codex login, or a Codex limit is near).';
 const MEDIA_TOOL_LIST = [
   { name: 'generate_image', description: `${NOT_DEFAULT} Then: make an image from a prompt through OpenRouter. ${IMAGE_ROUTING} ${MEDIA_COMMON}${IMAGE_MODELS}`, inputSchema: { type: 'object', properties: IMAGE_PROPS, required: ['prompt', 'out'] } },
   {
@@ -998,7 +998,7 @@ async function codexImage(args: any): Promise<string> {
   const usage = /^Codex usage: .*$/m.exec(r.err)?.[0];
   const why = r.err.replace(/^Codex usage: .*$/m, '').replace(/^citadel-codex-review: /gm, '').trim();
   if (r.code === 0) return `${r.out.trim()} with Codex on this person's ChatGPT plan.${usage ? ` ${usage}.` : ''}`;
-  if (r.code === 4) throw new Error(`${why} Use generate_image (OpenRouter) for this one if it is offered.`);
+  if (r.code === 4) throw new Error(`${why} Use generate_image (OpenRouter) for this one; it refuses too when the person has no OpenRouter key.`);
   throw new Error(`Codex couldn't make the image${r.code === null ? '' : ` (exit ${r.code})`}: ${why || 'no reason given'}`);
 }
 

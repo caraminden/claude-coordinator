@@ -79,7 +79,7 @@ test('generate_image_codex runs citadel-codex-review --image-gen with the prompt
 
   const over = await call({ prompt: 'a cat', out: 'cat.png', overwrite: true }, { FAKE_REVIEW: 'over' });
   assert.ok(over.isError);
-  assert.equal(over.content[0].text, 'Error: Skipped to save your Codex plan: the 5-hour window is 85% used. Use generate_image (OpenRouter) for this one if it is offered.');
+  assert.equal(over.content[0].text, 'Error: Skipped to save your Codex plan: the 5-hour window is 85% used. Use generate_image (OpenRouter) for this one; it refuses too when the person has no OpenRouter key.');
   assert.ok(JSON.parse(readFileSync(fakeLog, 'utf8')).argv.includes('--overwrite'));
 
   const failed = await call({ prompt: 'a cat', out: 'cat.png' }, { FAKE_REVIEW: 'fail' });

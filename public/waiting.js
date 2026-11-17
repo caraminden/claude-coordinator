@@ -27,5 +27,5 @@ export function waitingStrip(t) {
   // A choices card's page holds its picks; this opens it as the card's button does (public/cards.js docCard).
   c.doc ? h('a', { class: 'button small waiting-open', href: fileHref(t.id, c.doc) }, 'Open the page') : ''];
   // A strip of only choices cards (always so in a minion's chat): on a phone its head gives way to them (public/composer.css).
-  return h('div', { class: cards.every((c) => c.doc) ? 'waiting-strip choices' : 'waiting-strip' }, h('span', { class: 'waiting-head' }, cards.length === 1 ? '1 card waits on you' : `${cards.length} cards wait on you`), ...cards.flatMap(link));
+  return h('div', { class: cards.every((c) => c.doc || c.what === 'secret') ? 'waiting-strip choices' : 'waiting-strip' }, h('span', { class: 'waiting-head' }, cards.length === 1 ? '1 card waits on you' : `${cards.length} cards wait on you`), ...cards.flatMap(link));
 }

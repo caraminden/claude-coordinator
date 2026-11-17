@@ -132,6 +132,8 @@ export interface TargetView {
   recent: Release[];
   /** Its deploy button and auto-deploy (src/auto-deploy.ts, #629); absent when its kind has no release step Citadel starts. */
   deploy?: DeployInfo;
+  /** A Capacitor app with no release key yet (#837): its contraption's name, for the card's Make release key button. */
+  releaseKey?: string;
 }
 
 export interface SchemeReleases {
@@ -170,6 +172,8 @@ export interface ReleasesDeps {
   scan?: () => Promise<void>;
   /** A target's deploy button and auto-deploy (src/auto-deploy.ts), or null when it has no release step. */
   deploy?: (tv: Omit<TargetView, 'testCopies'>) => DeployInfo | null;
+  /** The app a target's card offers to make a release key for (#837), or null. */
+  releaseKey?: (tv: Omit<TargetView, 'testCopies'>) => string | null;
   /** Put each scheme's changes still on their way to main (open PRs) on its targets (PrsInFlight.attach, #655). */
   inFlight?: (views: Omit<TargetView, 'testCopies'>[]) => void;
 }
@@ -202,7 +206,8 @@ export class Releases {
     for (const t of views) named(t);
     for (const t of views) {
       const deploy = this.d.deploy?.(t);
-      scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}) });
+      const releaseKey = this.d.releaseKey?.(t);
+      scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}), ...(releaseKey ? { releaseKey } : {}) });
     }
     for (const [id, list] of copies) {
       for (const c of list) {

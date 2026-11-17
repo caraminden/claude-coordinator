@@ -652,7 +652,9 @@ const testCopyReader = new TestCopyReader({
   }),
 });
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv), inFlight: (views) => {
+  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
+  // A keyless Capacitor app's card offers Make release key (#837): the app's own card, as it has no Android one until its first APK.
+  releaseKey: (tv) => { const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null; return name && apkBuilds.keyless(name) ? name : null; }, inFlight: (views) => {
     landsInFlight.attach(views);
     prsInFlight.attach(views);
   },

@@ -275,6 +275,7 @@ function targetCard(projectId, tv, alone) {
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
       cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
     deployBar(projectId, tv),
+    keyBar(projectId, tv),
     h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : n?.name ?? 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
@@ -360,6 +361,31 @@ function deployBar(projectId, tv) {
     h('label', { class: 'rel-auto', title: 'Deploys by itself about 5 minutes after main last moved' },
       h('input', { type: 'checkbox', checked: d.auto, onchange: (e) => flip(e.target.checked) }), 'Auto-deploy'),
     d.due && !busy ? h('span', { class: 'muted' }, 'deploys by itself ', etaText(d.due)) : '');
+}
+
+/** Apps whose Make release key was pressed here, until the server's view stops offering it: "projectId/app". */
+const makingKeys = new Set();
+
+/**
+ * A keyless Capacitor app's Make release key button (#837; Cara, 2026-11-17, "Both"): any member of its scheme makes the
+ * key on the server, which never sends it or its password back. "Making the key…" shows at once; a refusal puts the
+ * button back with a toast and Retry.
+ */
+function keyBar(projectId, tv) {
+  const app = tv.releaseKey;
+  if (!app) return '';
+  const key = `${projectId}/${app}`;
+  const press = () => optimistic({
+    key: `release-key:${key}`,
+    apply: () => { makingKeys.add(key); redraw(); },
+    send: () => api('api/releases/release-key', { method: 'POST', body: { projectId, contraption: app } }),
+    undo: () => { makingKeys.delete(key); redraw(); },
+    label: `make ${schemeName(projectId)} ${tv.target.name}'s release key`,
+  }).then(() => makingKeys.delete(key), () => {});
+  return h('div', { class: 'rel-deploy rel-key' },
+    makingKeys.has(key) ? h('span', { class: 'rel-deploying', role: 'status' }, 'Making the key…')
+      : h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Make its Android signing key on the server. It is never replaced, and it goes off-box nightly.' }, 'Make release key'),
+    h('span', { class: 'muted' }, 'No release key yet, so its Android app isn\'t built.'));
 }
 
 /**

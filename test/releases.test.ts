@@ -301,6 +301,14 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   assert.equal(sent.at(-1).releases.testCopies.length, 1, 'a scheme that gets something after the first poll is sent too');
 });
 
+test('Releases: a target the releaseKey dep names carries releaseKey for its Make release key button (#837); others carry none', () => {
+  const w = world();
+  const keyless = new Releases({ store: w.store, readers: [w.server], broadcast: () => {}, testCopies: () => [], releaseKey: (tv) => (tv.target.id === CITADEL_TARGET ? 'twi' : null) });
+  assert.equal(keyless.read().find((s) => s.projectId === w.citadel.id)!.targets[0].releaseKey, 'twi');
+  const keyed = new Releases({ store: w.store, readers: [w.server], broadcast: () => {}, testCopies: () => [], releaseKey: () => null });
+  assert.ok(!('releaseKey' in keyed.read().find((s) => s.projectId === w.citadel.id)!.targets[0]));
+});
+
 test('memberSchemes: the schemes a person owns or is in, admin or not', () => {
   const w = world();
   const josh = w.store.createUser({ name: 'Josh', login: 'josh', admin: true });

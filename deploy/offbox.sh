@@ -4,7 +4,8 @@
 # backup.sh runs this after each nightly backup. It mirrors $DATA_DIR/backups into $DATA_DIR/offbox:
 # - every coordinator daily and weekly, as a copy with people's linked-account secrets stripped
 #   (credentials rows other than claude_runner, whose row holds only a container name and an email)
-#   and every saved secret (stored_secrets, #838),
+#   and every saved secret (stored_secrets, #838), and the contraption turn audit (players' words, #844; backup.sh
+#   already drops it, this covers copies from before #850),
 #   then VACUUMed so the deleted rows leave no bytes behind. A weekly links to its stripped daily.
 # - only the newest state-<day>.db, as a hard link (claude_state holds transcripts, memory and task
 #   lists, no logins).
@@ -30,9 +31,9 @@ strip() {
   cp --reflink=auto -- "$1" "$tmp"
   local has
   sqlite3 "$tmp" "PRAGMA journal_mode=DELETE;" >/dev/null
-  # Each secret-holding table, and which of its rows must not go off-box. A backup from before a table existed lacks it.
+  # Each table holding secrets or players' words, and which of its rows must not go off-box. A backup from before a table existed lacks it.
   local table drop has left
-  for table in credentials stored_secrets; do
+  for table in credentials stored_secrets contraption_turn_audit; do
     drop=$([[ $table == credentials ]] && echo "kind <> 'claude_runner'" || echo 1)
     has=$(sqlite3 "$tmp" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '$table';")
     [[ $has == 1 ]] || continue

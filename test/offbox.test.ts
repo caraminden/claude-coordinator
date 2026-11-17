@@ -33,6 +33,10 @@ store.putCredential(user.id, 'claude_runner', 'citadel-claude-2', { container: '
 // Saved secrets (#838), a person's and a scheme's: none leave perigee.
 store.putSecret('person', user.id, 'SITE_PW', SAVED_SECRET, user.id);
 store.putSecret('scheme', project.id, 'AZURE_KEY', SAVED_SECRET, user.id);
+// A contraption turn's audit (#844): players' words, kept 14 days, so no backup copy holds them (#850). Long, so it spills into overflow pages.
+const PLAYER_WORDS = `a-player-said-this-in-a-turn-${'x'.repeat(20_000)}`;
+const app = store.createContraption({ name: 'voice', title: 'Voice', icon: null, port: 9, home_scheme: project.id, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
+store.putTurnAudit(store.startContraptionTurn(app.id, user.id, 's1'), { model: null, blind: false, images: 0, system: 'sys', prompt: PLAYER_WORDS, output: 'reply' });
 store.putClaudeState({ path: 'projects/x/1.jsonl', project_id: project.id, ticket_id: null, size: 3, mtime: 1, data: new Uint8Array(10) });
 store.db.close();
 
@@ -63,7 +67,14 @@ test('the nightly backup also writes the off-box set, with linked-account secret
   assert.equal(count(daily, 'stored_secrets'), 0, 'no saved secret goes off-box');
   assert.ok(!readFileSync(daily).includes(SAVED_SECRET), 'nor any trace of one');
   assert.equal(count(join(backups, `coordinator-${day}.db`), 'stored_secrets'), 2);
-  assert.deepEqual(kinds(join(backups, `coordinator-${day}.db`)), ['claude_runner', 'github'], 'the backup on perigee keeps everything');
+  assert.deepEqual(kinds(join(backups, `coordinator-${day}.db`)), ['claude_runner', 'github'], 'the backup on perigee keeps its secrets');
+  const marker = PLAYER_WORDS.slice(0, 40);
+  assert.ok(readFileSync(join(root, 'coordinator.db')).includes(marker), 'the fixture holds the words to strip');
+  for (const copy of [join(backups, `coordinator-${day}.db`), daily]) {
+    assert.equal(count(copy, 'contraption_turn_audit'), 0, `no turn audit in ${copy}`);
+    assert.ok(!readFileSync(copy).includes(marker), `nor any trace of one in ${copy}`);
+  }
+  assert.equal(count(join(backups, `coordinator-${day}.db`), 'contraption_turns'), 1, 'the turn itself stays');
   const weekly = readdirSync(offbox).find((f) => f.startsWith('coordinator-weekly-'))!;
   assert.equal(statSync(join(offbox, weekly)).ino, statSync(daily).ino, 'the weekly links to its stripped daily');
   assert.equal(statSync(join(offbox, `state-${day}.db`)).ino, statSync(join(backups, `state-${day}.db`)).ino);
@@ -149,7 +160,7 @@ test("every registered app's newest nightly backups join the set as hard links, 
   const out = run('offbox.sh');
   assert.match(out, /App backups: late \(1 files, 1 days\), mandate \(14 files, 7 days\)/);
   assert.match(out, new RegExp(`not from today.*late \\(newest ${nine[1]}\\)`));
-  assert.match(out, /Apps with no nightly backups, skipped: nobackups, transdata$/m);
+  assert.match(out, /Apps with no nightly backups, skipped: nobackups, transdata, voice$/m); // voice: the audit fixture's app, at the top
   assert.deepEqual(readdirSync(join(offbox, 'apps')).sort(), ['late', 'mandate']);
   assert.deepEqual(readdirSync(join(offbox, 'apps', 'mandate')).sort(), nine.slice(0, 7).sort(), 'the newest 7 days');
   assert.deepEqual(readdirSync(join(offbox, 'apps', 'mandate', nine[0])).sort(), ['1.db', '2.db']);

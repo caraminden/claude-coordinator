@@ -238,6 +238,13 @@ turn_units() {
   echo "citadel-turn-$tag-*.service"
 }
 
+# Drop the contraption turn audit (#844) from database copy $1: it holds players' words for 14 days only, so
+# no copy keeps it (#850). secure_delete zeroes the freed pages, so no trace is left without a second VACUUM.
+strip_audit() {
+  [ "$(sqlite3 "$1" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'contraption_turn_audit'")" = 1 ] || return 0
+  sqlite3 "$1" "PRAGMA journal_mode = MEMORY" "PRAGMA secure_delete = ON" "DELETE FROM contraption_turn_audit" >/dev/null
+}
+
 # Copy the database to backups/pre-deploy-<commit $1>.db before the new code migrates it. Prints the
 # copy's path; no database (a dev copy) prints nothing. A copy already there stays: a retry after a
 # rollback would otherwise replace the clean copy with what the failed code left. VACUUM INTO copies in
@@ -252,7 +259,7 @@ backup_db() {
   echo "$out" # first, so a copy that fails still names its file
   if [ ! -e "$out" ]; then
     tmp=$dir/.pre-deploy.db.tmp
-    (umask 077 && mkdir -p "$dir" && rm -f "$tmp" && sqlite3 "$DB" ".timeout 30000" "VACUUM INTO '$tmp'" && sqlite3 "$tmp" "PRAGMA journal_mode = WAL" >/dev/null && mv -f "$tmp" "$out") || { rm -f "$tmp"; return 1; }
+    (umask 077 && mkdir -p "$dir" && rm -f "$tmp" && sqlite3 "$DB" ".timeout 30000" "VACUUM INTO '$tmp'" && strip_audit "$tmp" && sqlite3 "$tmp" "PRAGMA journal_mode = WAL" >/dev/null && mv -f "$tmp" "$out") || { rm -f "$tmp"; return 1; }
   fi
 }
 

@@ -376,7 +376,13 @@ test('deploy.sh copies the database before a restart, keeps a copy already there
   execFileSync('git', ['init', '-q', '-b', 'main', live]);
   const file = join(dir, 'coordinator.db');
   const db = new Store(file);
-  db.createProject('Saved', null);
+  const scheme = db.createProject('Saved', null);
+  // The contraption turn audit (#844) never reaches a copy (#850); long, so it spills into overflow pages.
+  const words = `a-player-said-this-before-a-deploy-${'x'.repeat(20_000)}`;
+  const user = db.createUser({ name: 'Josh', login: 'josh' });
+  const app = db.createContraption({ name: 'voice', title: 'Voice', icon: null, port: 9, home_scheme: scheme.id, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
+  const turn = db.startContraptionTurn(app.id, user.id, 's1');
+  db.putTurnAudit(turn, { model: null, blind: false, images: 0, system: 'sys', prompt: words, output: 'reply' });
   const commits = [1, 2, 3, 4].map((n) => {
     execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', String(n)]);
     return execFileSync('git', ['-C', live, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -394,6 +400,9 @@ test('deploy.sh copies the database before a restart, keeps a copy already there
   deploySh(['backup-db', commits[0]]);
   const kept = new Store(first);
   assert.deepEqual(kept.listProjects().map((p) => p.name), ['Saved'], 'a retry keeps the clean copy');
+  assert.equal(kept.db.prepare('SELECT count(*) AS n FROM contraption_turn_audit').get()!.n, 0, 'the copy holds no turn audit');
+  assert.ok(db.turnAudit(turn), 'the live database keeps its audit');
+  assert.ok(!readFileSync(first).includes(words.slice(0, 40)), 'nor any trace of it');
   kept.db.close();
 
   deploySh(['rotate-backups']);

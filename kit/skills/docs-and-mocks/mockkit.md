@@ -70,7 +70,11 @@ mock.picks({ collection: 'questions', options: ['yes', 'no'], root: document.get
   row (one `data-pick` item) per person in the same collection.
 - One collection per question set; two sets on a page need two collections or separate roots.
 - The item gets `.picked` and `data-mk-v` when chosen, for styling.
-- Put everything a take shows (heading, blurb, screenshots, captions) inside its `data-pick` element, never loose between elements. The kit boxes that element as one unit with its pick bar at the bottom and turns the whole box green when picked; anything outside it reads as belonging to no take.
+- The buttons are one segmented control, and each choice wears its tone: `go`, `yes`, `keep` and
+  `pick` are good with a drawn tick, `later`, `maybe` and `rework` warn with a ring, `skip`, `no`
+  and `cut` bad with a cross. Use those values where they fit; any other value gets the accent and
+  no mark.
+- Put everything a take shows (heading, blurb, screenshots, captions) inside its `data-pick` element, never loose between elements. The kit boxes that element as one unit with its pick bar at the bottom and turns the whole box the picked choice's tone (green for go, amber for later, red for skip); anything outside it reads as belonging to no take.
 
 ## The dock
 
@@ -90,16 +94,24 @@ a page you link has any of them. A question the pick bars can't ask is still a `
 
 Fills `<nav class="mk-toc">` with a link per `h2` in `.mk-page`, giving each an id.
 
+## Section hues
+
+Once the page loads, the kit gives every `<section>` with its own `h2` the class `mk-sec`, a hue
+(`--mk-hue`: `--mk-cat-1` to `-6` in turn) and a drawn shape beside the heading. The section's
+takes, option cards, table heads and contents link wear that hue. Set `style="--mk-hue: …"` on a
+section to choose its hue yourself; a page with no `<section>`s gets none.
+
 ## CSS parts
 
 | Class | What |
 |---|---|
-| `mk-head`, `mk-kicker`, `mk-meta`, `mk-lede` | The header |
+| `mk-head`, `mk-kicker`, `mk-meta`, `mk-lede` | The header, on the `--mk-band` colour with a ribbon of the six hues |
 | `mk-status` + `data-status` | draft, review, decided, living, superseded |
 | `mk-chip`, `mk-tag` (`.rec`) | Plain chip; small uppercase tag |
 | `mk-banner` (`.info`) | A line across the top: superseded, or a warning |
 | `mk-toc` | Contents |
-| `mk-callout` + `.rec` `.decision` `.question` `.risk`, `data-label` | Callouts |
+| `mk-callout` + `.rec` `.decision` `.question` `.risk`, `data-label` | Callouts, tinted in their tone with a drawn icon |
+| `mk-stats` > `mk-stat` > `b` (the number) + `span` (what it is); `data-tone="good"` | The numbers strip, a tile per figure in turn's hue |
 | `mk-options` > `mk-option` (`.rec`) | Option cards side by side |
 | `mk-figure` > `mk-frame` or `img`, `figcaption` | A picture or a live mini screen |
 | `mk-table-wrap` > `mk-table`; `mk-yes` `mk-no` `mk-meh`; `.num` | Tables that scroll on a phone |

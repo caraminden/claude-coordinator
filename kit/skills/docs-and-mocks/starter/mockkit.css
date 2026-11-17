@@ -1,4 +1,4 @@
-/* Citadel mock kit, styles (v3). Copy beside the page with mockkit.js; a scheme's theme.css, linked after
+/* Citadel mock kit, styles (v4). Copy beside the page with mockkit.js; a scheme's theme.css, linked after
    this file, overrides the --mk-* tokens. Classes are mk-*; everything else on the page is the page's own. */
 
 :root {
@@ -17,6 +17,9 @@
   /* v3 (#683): colour roles for a mocked screen, Citadel's --citadel-accent-2 and --citadel-cat-1..6. */
   --mk-accent-2: #a21caf;
   --mk-cat-1: #4f46e5; --mk-cat-2: #0369a1; --mk-cat-3: #be123c; --mk-cat-4: #4d7c0f; --mk-cat-5: #0f766e; --mk-cat-6: #9333ea;
+  /* v4 (#874): the header band and the dock, a deep colour with light text on it in both modes. */
+  --mk-band: #2e2a6b;
+  --mk-band-ink: #f4f2ff;
   --mk-font: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mk-display: var(--mk-font);
   --mk-mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -41,6 +44,8 @@
     --mk-info: #60a5fa;
     --mk-accent-2: #e879f9;
     --mk-cat-1: #a5b4fc; --mk-cat-2: #7dd3fc; --mk-cat-3: #fda4af; --mk-cat-4: #bef264; --mk-cat-5: #5eead4; --mk-cat-6: #d8b4fe;
+    --mk-band: #25224f;
+    --mk-band-ink: #ecebff;
     color-scheme: dark;
   }
 }
@@ -78,11 +83,27 @@ body.mk {
 .mk p, .mk li { max-width: 72ch; }
 .mk .mk-muted { color: var(--mk-muted); }
 
-/* Header: kicker, title, meta line (status, who, when), lede. */
-.mk-head { border-bottom: 1px solid var(--mk-line); padding-bottom: 1.25rem; }
+/* Header: kicker, title, meta line (status, who, when), lede, contents, on a deep band with a ribbon of the
+   six category hues along its bottom (#874, Cara 2026-11-17: "make them a little prettier and more colorful"). */
+.mk-page:has(> .mk-head:first-child) { padding-top: 0; }
+.mk-head {
+  position: relative; color: var(--mk-band-ink); background: var(--mk-band);
+  margin: 0 calc(-1 * max(1rem, env(safe-area-inset-left))); padding: 1.75rem max(1rem, env(safe-area-inset-left)) 2rem;
+  border-radius: 0 0 var(--mk-radius) var(--mk-radius);
+}
+@media (min-width: 1012px) { .mk-head { margin-inline: -1.5rem; padding-inline: 1.5rem; } }
+.mk-head::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 6px; border-radius: 0 0 var(--mk-radius) var(--mk-radius);
+  background: linear-gradient(90deg, var(--mk-cat-1) 0 16.66%, var(--mk-cat-2) 0 33.33%, var(--mk-cat-3) 0 50%, var(--mk-cat-4) 0 66.66%, var(--mk-cat-5) 0 83.33%, var(--mk-cat-6) 0);
+}
+.mk-head h1 { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.01em; }
+.mk-head a { color: inherit; }
 .mk-kicker { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mk-muted); }
 .mk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.9rem; color: var(--mk-muted); font-size: 0.88rem; }
 .mk-lede { font-size: 1.08rem; color: var(--mk-ink); margin: 0.9rem 0 0; }
+.mk-head .mk-kicker, .mk-head .mk-meta { color: color-mix(in srgb, var(--mk-band-ink) 72%, transparent); }
+.mk-head .mk-lede { color: var(--mk-band-ink); }
+.mk-head .mk-lede b { color: #ffd166; }
 
 /* Chips: status and plain. Even room above and below. */
 .mk-chip, .mk-status {
@@ -97,6 +118,12 @@ body.mk {
 .mk-status[data-status="decided"] { color: var(--mk-good); border-color: color-mix(in srgb, var(--mk-good) 45%, var(--mk-line)); }
 .mk-status[data-status="living"] { color: var(--mk-info); border-color: color-mix(in srgb, var(--mk-info) 45%, var(--mk-line)); }
 .mk-status[data-status="superseded"] { color: var(--mk-bad); border-color: color-mix(in srgb, var(--mk-bad) 45%, var(--mk-line)); }
+/* On the band the tones are fixed light ones: the band is dark in both modes. */
+.mk-head .mk-status { background: rgb(255 255 255 / 0.1); border-color: rgb(255 255 255 / 0.25); color: #d4d2ee; }
+.mk-head .mk-status[data-status="review"] { color: #ffd166; }
+.mk-head .mk-status[data-status="decided"] { color: #86efac; }
+.mk-head .mk-status[data-status="living"] { color: #93c5fd; }
+.mk-head .mk-status[data-status="superseded"] { color: #fca5a5; }
 
 /* A banner across the top: superseded, or not saved outside Citadel. */
 .mk-banner {
@@ -109,33 +136,63 @@ body.mk {
 .mk-toc { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 1.1rem; }
 .mk-toc a { text-decoration: none; color: var(--mk-ink); font-size: 0.85rem; padding: 0.2rem 0.6rem; border: 1px solid var(--mk-line); border-radius: 999px; background: var(--mk-panel); line-height: 1.3; }
 .mk-toc a:hover { border-color: var(--mk-accent); }
+.mk-toc a::before { content: ''; display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--mk-hue, var(--mk-muted)); margin-right: 0.4rem; vertical-align: 0.05em; }
+.mk-head .mk-toc a { background: rgb(255 255 255 / 0.08); border-color: color-mix(in srgb, var(--mk-hue, #fff) 70%, transparent); color: var(--mk-band-ink); }
+.mk-head .mk-toc a:hover { background: rgb(255 255 255 / 0.18); }
 
-/* Callouts: the recommendation, a decision, an open question, a risk, a plain note. */
+/* Sections: mockkit.js gives each section with an h2 a hue (--mk-hue, the six category hues in turn) and a
+   drawn shape beside its heading; takes, table heads and contents chips in it wear the same hue. */
+.mk-sec > h2 { display: flex; align-items: center; padding-bottom: 0.45rem; border-bottom: 3px solid color-mix(in srgb, var(--mk-hue) 35%, transparent); }
+.mk-sec h3 { color: color-mix(in srgb, var(--mk-hue) 70%, var(--mk-ink)); }
+.mk-glyph { display: inline-block; width: 0.95em; height: 0.95em; background: var(--mk-hue, var(--mk-accent)); margin-right: 0.5em; flex: none; }
+h2[data-shape="circle"] .mk-glyph { border-radius: 50%; }
+h2[data-shape="diamond"] .mk-glyph { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+h2[data-shape="square"] .mk-glyph { border-radius: 2px; }
+h2[data-shape="triangle"] .mk-glyph { clip-path: polygon(50% 4%, 100% 96%, 0 96%); }
+h2[data-shape="hex"] .mk-glyph { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); }
+h2[data-shape="star"] .mk-glyph { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+
+/* The numbers strip: the headline figures as tiles, each in a hue (data-tone="good" for a saving). */
+.mk-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: 0.75rem; margin: 1.25rem 0; }
+.mk-stat { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; padding: 0.8rem 0.9rem; border-radius: var(--mk-radius-sm);
+  background: color-mix(in srgb, var(--mk-hue) 11%, var(--mk-panel)); border: 1px solid color-mix(in srgb, var(--mk-hue) 30%, var(--mk-line)); }
+.mk-stat b { font: 700 1.5rem/1.15 var(--mk-display); font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--mk-hue) 85%, var(--mk-ink)); }
+.mk-stat span { font-size: 0.82rem; color: var(--mk-muted); line-height: 1.35; }
+.mk-stat:nth-child(6n+1) { --mk-hue: var(--mk-cat-1); }
+.mk-stat:nth-child(6n+2) { --mk-hue: var(--mk-cat-2); }
+.mk-stat:nth-child(6n+3) { --mk-hue: var(--mk-cat-3); }
+.mk-stat:nth-child(6n+4) { --mk-hue: var(--mk-cat-4); }
+.mk-stat:nth-child(6n+5) { --mk-hue: var(--mk-cat-5); }
+.mk-stat:nth-child(6n+6) { --mk-hue: var(--mk-cat-6); }
+.mk-stat[data-tone="good"] { --mk-hue: var(--mk-good); }
+
+/* Callouts: the recommendation, a decision, an open question, a risk, a plain note. Tinted in their tone, with
+   an icon drawn by code (an SVG mask, so it takes the tone's colour). */
 .mk-callout {
-  margin: 1rem 0; padding: 0.85rem 1rem; border-radius: var(--mk-radius-sm);
-  border: 1px solid var(--mk-line); border-left: 4px solid var(--mk-muted); background: var(--mk-panel);
+  --mk-ctone: var(--mk-info);
+  --mk-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='none' stroke='black' stroke-width='2.4'/%3E%3Crect x='10.8' y='10' width='2.4' height='7' rx='1.2'/%3E%3Ccircle cx='12' cy='7' r='1.5'/%3E%3C/svg%3E");
+  position: relative; margin: 1rem 0; padding: 1rem 1.1rem 1rem 3.4rem; border-radius: var(--mk-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--mk-ctone) 35%, var(--mk-line)); background: color-mix(in srgb, var(--mk-ctone) 9%, var(--mk-panel));
 }
+.mk-callout::after { content: ''; position: absolute; left: 0.9rem; top: 0.95rem; width: 1.6rem; height: 1.6rem; background: var(--mk-ctone);
+  -webkit-mask: var(--mk-icon) center / contain no-repeat; mask: var(--mk-icon) center / contain no-repeat; }
 .mk-callout > :first-child { margin-top: 0; }
 .mk-callout > :last-child { margin-bottom: 0; }
-.mk-callout[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 0.3rem; color: var(--mk-muted); }
-.mk-callout.rec { border-left-color: var(--mk-accent); }
-.mk-callout.rec::before { color: var(--mk-accent); }
-.mk-callout.decision { border-left-color: var(--mk-good); }
-.mk-callout.decision::before { color: var(--mk-good); }
-.mk-callout.question { border-left-color: var(--mk-warn); }
-.mk-callout.question::before { color: var(--mk-warn); }
-.mk-callout.risk { border-left-color: var(--mk-bad); }
-.mk-callout.risk::before { color: var(--mk-bad); }
+.mk-callout[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 0.3rem; color: var(--mk-ctone); }
+.mk-callout.rec { --mk-ctone: var(--mk-accent); --mk-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z'/%3E%3C/svg%3E"); }
+.mk-callout.decision { --mk-ctone: var(--mk-good); --mk-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='none' stroke='black' stroke-width='2.4'/%3E%3Cpath d='m7.5 12.3 3 3 6-6.3' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.mk-callout.question { --mk-ctone: var(--mk-warn); --mk-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='none' stroke='black' stroke-width='2.4'/%3E%3Cpath d='M9.2 9.3a2.9 2.9 0 1 1 4.4 2.5c-1 .6-1.6 1.2-1.6 2.4' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='17.6' r='1.5'/%3E%3C/svg%3E"); }
+.mk-callout.risk { --mk-ctone: var(--mk-bad); --mk-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3 2 21h20z' fill='none' stroke='black' stroke-width='2.4' stroke-linejoin='round'/%3E%3Crect x='10.8' y='9' width='2.4' height='6.5' rx='1.2'/%3E%3Ccircle cx='12' cy='18' r='1.4'/%3E%3C/svg%3E"); }
 
 /* Options side by side: each with its picture, one-line idea, what it costs; the recommended one ringed. */
 .mk-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 1rem; margin: 1rem 0; }
-.mk-option { background: var(--mk-panel); border: 1px solid var(--mk-line); border-radius: var(--mk-radius); padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
-.mk-option.rec { border-color: var(--mk-accent); box-shadow: 0 0 0 1px var(--mk-accent); }
+.mk-option { background: var(--mk-panel); border: 1px solid var(--mk-line); border-top: 5px solid var(--mk-hue, var(--mk-accent)); border-radius: var(--mk-radius); padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.mk-option.rec { border-color: var(--mk-accent); box-shadow: 0 0 0 2px var(--mk-accent); }
 .mk-option h3 { margin: 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .mk-option ul { margin: 0; padding-left: 1.1rem; font-size: 0.92rem; }
 .mk-option .mk-figure { margin: 0; }
 .mk-tag { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mk-muted); }
-.mk-tag.rec { color: var(--mk-accent); }
+.mk-tag.rec { background: var(--mk-accent); color: var(--mk-on-accent); padding: 0.15rem 0.55rem; border-radius: 999px; letter-spacing: 0.04em; }
 
 /* Figures: a picture or a live mini screen, with a caption. */
 .mk-figure { margin: 1rem 0; }
@@ -147,7 +204,8 @@ body.mk {
 .mk-table-wrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); background: var(--mk-panel); }
 .mk-table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
 .mk-table th, .mk-table td { text-align: left; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--mk-line); vertical-align: top; }
-.mk-table thead th { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mk-muted); background: var(--mk-sunk); }
+.mk-table thead th { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--mk-hue, var(--mk-muted)) 75%, var(--mk-ink)); background: color-mix(in srgb, var(--mk-hue, var(--mk-muted)) 14%, var(--mk-panel)); }
 .mk-table tr:last-child > * { border-bottom: 0; }
 .mk-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .mk-yes { color: var(--mk-good); font-weight: 600; }
@@ -157,7 +215,10 @@ body.mk {
 /* The decisions log: newest first, each with the person's own words and the date. */
 .mk-log { list-style: none; padding: 0; margin: 1rem 0; border-left: 2px solid var(--mk-line); }
 .mk-log li { position: relative; padding: 0 0 1rem 1.1rem; max-width: none; }
-.mk-log li::before { content: ''; position: absolute; left: -6px; top: 0.45rem; width: 10px; height: 10px; border-radius: 50%; background: var(--mk-good); }
+.mk-log li::before { content: ''; position: absolute; left: -6px; top: 0.45rem; width: 10px; height: 10px; border-radius: 50%; background: var(--mk-cat-1); }
+.mk-log li:nth-child(4n+2)::before { background: var(--mk-cat-2); }
+.mk-log li:nth-child(4n+3)::before { background: var(--mk-cat-3); }
+.mk-log li:nth-child(4n+4)::before { background: var(--mk-cat-4); }
 .mk-log time { font-size: 0.8rem; color: var(--mk-muted); font-variant-numeric: tabular-nums; }
 .mk-log q { font-style: italic; }
 
@@ -165,7 +226,6 @@ body.mk {
 .mk-boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--mk-board-w, 420px)), 1fr)); gap: 1.25rem; margin: 1.25rem 0; align-items: start; }
 .mk-board { background: var(--mk-panel); border: 1px solid var(--mk-line); border-radius: var(--mk-radius); display: flex; flex-direction: column; min-width: 0; box-shadow: var(--mk-shadow); }
 .mk-board.rec { border-color: color-mix(in srgb, var(--mk-accent) 60%, var(--mk-line)); }
-.mk-board.picked { border-color: var(--mk-good); }
 .mk-board > header { padding: 0.8rem 0.95rem 0.6rem; display: grid; gap: 0.2rem; }
 .mk-board > header .mk-board-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 650; font-family: var(--mk-display); }
 .mk-board > header p { margin: 0; font-size: 0.88rem; color: var(--mk-muted); }
@@ -177,7 +237,9 @@ body.mk {
 
 /* The pick bar under a board or an item: the choice buttons, a note, who chose and when. */
 .mk-pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.75rem 0.95rem 0.85rem; }
-.mk-pickbar .mk-opts { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; }
+/* The choices are one segmented control. Each wears its meaning before and after it's picked: go, yes, keep and
+   pick are good with a drawn tick, later, maybe and rework warn with a ring, skip, no and cut bad with a cross. */
+.mk-pickbar .mk-opts { display: inline-flex; flex-wrap: wrap; border: 1.5px solid var(--mk-line); border-radius: 999px; overflow: hidden; }
 .mk-btn, .mk-pickbar button {
   display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;
   padding: 0.35rem 0.75rem; line-height: 1.3; border-radius: var(--mk-radius-sm);
@@ -185,41 +247,53 @@ body.mk {
 }
 .mk-btn:hover, .mk-pickbar button:hover:not(:disabled) { border-color: var(--mk-accent); }
 .mk-btn.primary { background: var(--mk-accent); border-color: var(--mk-accent); color: var(--mk-on-accent); font-weight: 600; }
-.mk-pickbar button[aria-pressed="true"] { background: var(--mk-good); border-color: var(--mk-good); color: var(--mk-panel); font-weight: 600; }
-.mk-pickbar button[aria-pressed="true"][data-v="cut"], .mk-pickbar button[aria-pressed="true"][data-v="no"] { background: var(--mk-bad); border-color: var(--mk-bad); }
-.mk-pickbar button[aria-pressed="true"][data-v="rework"], .mk-pickbar button[aria-pressed="true"][data-v="maybe"] { background: var(--mk-warn); border-color: var(--mk-warn); }
+.mk-pickbar button { --mk-tone: var(--mk-accent); }
+.mk-pickbar button:is([data-v="go"], [data-v="yes"], [data-v="keep"], [data-v="pick"]) { --mk-tone: var(--mk-good); }
+.mk-pickbar button:is([data-v="later"], [data-v="maybe"], [data-v="rework"]) { --mk-tone: var(--mk-warn); }
+.mk-pickbar button:is([data-v="skip"], [data-v="no"], [data-v="cut"]) { --mk-tone: var(--mk-bad); }
+.mk .mk-pickbar .mk-opts button { border: 0; border-radius: 0; padding: 0.45rem 1.05rem; background: var(--mk-panel); font-weight: 600; color: color-mix(in srgb, var(--mk-tone) 80%, var(--mk-ink)); }
+.mk .mk-pickbar .mk-opts button + button { border-left: 1.5px solid var(--mk-line); }
+.mk .mk-pickbar .mk-opts button:hover:not(:disabled):not([aria-pressed="true"]) { background: color-mix(in srgb, var(--mk-tone) 12%, var(--mk-panel)); }
+.mk .mk-pickbar .mk-opts button[aria-pressed="true"] { background: var(--mk-tone); color: var(--mk-bg); }
+.mk-pickbar button:is([data-v="go"], [data-v="yes"], [data-v="keep"], [data-v="pick"], [data-v="later"], [data-v="maybe"], [data-v="rework"], [data-v="skip"], [data-v="no"], [data-v="cut"])::before { content: ''; width: 0.85em; height: 0.85em; background: currentColor; flex: none; }
+.mk-pickbar button:is([data-v="go"], [data-v="yes"], [data-v="keep"], [data-v="pick"])::before { clip-path: polygon(12% 52%, 38% 78%, 88% 22%, 100% 34%, 38% 100%, 0 64%); }
+.mk-pickbar button:is([data-v="later"], [data-v="maybe"], [data-v="rework"])::before { border-radius: 50%; -webkit-mask: radial-gradient(circle, transparent 45%, #000 48%); mask: radial-gradient(circle, transparent 45%, #000 48%); }
+.mk-pickbar button:is([data-v="skip"], [data-v="no"], [data-v="cut"])::before { clip-path: polygon(20% 0, 50% 30%, 80% 0, 100% 20%, 70% 50%, 100% 80%, 80% 100%, 50% 70%, 20% 100%, 0 80%, 30% 50%, 0 20%); }
 .mk-pickbar button:disabled, .mk-btn:disabled { opacity: 0.55; cursor: default; }
 .mk-pickbar input {
   flex: 1 1 12rem; min-width: 0; padding: 0.35rem 0.6rem; line-height: 1.3; font-size: 0.88rem;
-  border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); background: var(--mk-bg);
+  border: 1px solid var(--mk-line); border-radius: 999px; padding-inline: 0.9rem; background: var(--mk-bg);
 }
 .mk-pickbar .mk-who { flex-basis: 100%; font-size: 0.78rem; color: var(--mk-muted); min-height: 1em; }
 .mk-item { position: relative; }
 .mk-item > .mk-pickbar { padding-inline: 0; }
 
 /* A take: every [data-pick] element is one boxed unit (heading, blurb, screenshots, pick bar) on a panel,
-   with the page background showing between units. Picked: the whole box turns green, not just the bar. */
-.mk-take { background: var(--mk-panel); border: 1px solid var(--mk-line); border-radius: var(--mk-radius); padding: 1rem 1.1rem 0; margin: 1.5rem 0; box-shadow: var(--mk-shadow); position: relative; }
+   with the page background showing between units, a stripe of its section's hue across the top. Picked: the
+   whole box takes the choice's tone (green for go, amber for later, red for skip), not just the bar. */
+.mk-take { background: color-mix(in srgb, var(--mk-hue, var(--mk-accent)) 4%, var(--mk-panel)); border: 1px solid var(--mk-line); border-top: 5px solid var(--mk-hue, var(--mk-accent)); border-radius: var(--mk-radius); padding: 1rem 1.1rem 0; margin: 1.5rem 0; box-shadow: var(--mk-shadow); position: relative; }
 .mk-take > :first-child { margin-top: 0; }
 .mk-take img, .mk-take .mk-frame { border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); background: var(--mk-sunk); padding: 0.4rem; box-sizing: border-box; }
 .mk-take figure { margin: 0.9rem 0; }
 .mk-take figcaption { font-size: 0.82rem; color: var(--mk-muted); margin-top: 0.35rem; }
 .mk-take > .mk-pickbar { padding-inline: 0; margin-top: 1rem; border-top: 1px solid var(--mk-line); }
-.mk-take.picked, .mk-board.picked, .mk-option.picked { border-color: var(--mk-good); box-shadow: 0 0 0 1px var(--mk-good); background: color-mix(in srgb, var(--mk-good) 9%, var(--mk-panel)); }
-.mk-take.picked > .mk-pickbar { border-top-color: color-mix(in srgb, var(--mk-good) 35%, var(--mk-line)); }
+:is(.mk-take, .mk-option, .mk-board)[data-mk-v] { --mk-picked: var(--mk-good); }
+:is(.mk-take, .mk-option, .mk-board):is([data-mk-v="later"], [data-mk-v="maybe"], [data-mk-v="rework"]) { --mk-picked: var(--mk-warn); }
+:is(.mk-take, .mk-option, .mk-board):is([data-mk-v="skip"], [data-mk-v="no"], [data-mk-v="cut"]) { --mk-picked: var(--mk-bad); }
+.mk :is(.mk-take, .mk-option, .mk-board)[data-mk-v] { border-color: var(--mk-picked); box-shadow: 0 0 0 1px var(--mk-picked); background: color-mix(in srgb, var(--mk-picked) 9%, var(--mk-panel)); }
+.mk-take[data-mk-v] > .mk-pickbar { border-top-color: color-mix(in srgb, var(--mk-picked) 35%, var(--mk-line)); }
 
 /* The dock: how many are picked, and Send. Sits at the end of the page; sticks to the bottom once anything is picked. */
 .mk-dock.stuck { position: sticky; bottom: 0; z-index: 5; }
 .mk-dock { margin: 2rem calc(-1 * max(1rem, env(safe-area-inset-left))) -5rem;
   padding: 0.7rem max(1rem, env(safe-area-inset-right)) calc(0.7rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
   display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem;
-  background: color-mix(in srgb, var(--mk-panel) 92%, transparent); backdrop-filter: blur(6px);
-  border-top: 1px solid var(--mk-line); font-size: 0.9rem;
+  background: color-mix(in srgb, var(--mk-band) 94%, transparent); backdrop-filter: blur(6px); color: var(--mk-band-ink);
+  border-top: 3px solid var(--mk-accent-2); font-size: 0.9rem;
 }
-.mk-dock .mk-dock-text { flex: 1 1 14rem; color: var(--mk-muted); }
-.mk-dock .mk-dock-text b { color: var(--mk-ink); }
-.mk-dock.mk-unsaved .mk-dock-text { color: var(--mk-warn); }
-.mk-dock .mk-sent { font-size: 0.85rem; color: var(--mk-good); }
+.mk-dock .mk-dock-text, .mk-dock .mk-dock-text b { color: var(--mk-band-ink); }
+.mk-dock.mk-unsaved .mk-dock-text { color: #ffd166; }
+.mk-dock .mk-sent { font-size: 0.85rem; color: #86efac; }
 /* A Send that failed: what went wrong, and Retry. */
 .mk-toast { position: fixed; z-index: 20; left: 50%; bottom: max(1rem, env(safe-area-inset-bottom)); transform: translateX(-50%);
   width: max-content; max-width: calc(100vw - 2rem); box-sizing: border-box; display: flex; align-items: center; gap: 0.75rem;
@@ -244,6 +318,7 @@ body.mk {
 @media (max-width: 640px) {
   body.mk { font-size: 14.5px; }
   .mk-page { padding-top: 1.25rem; }
-  .mk h1 { font-size: 1.5rem; }
+  .mk h1, .mk-head h1 { font-size: 1.6rem; }
+  .mk-head, .mk-head::after { border-radius: 0; }
   .mk-boards { gap: 1rem; }
 }

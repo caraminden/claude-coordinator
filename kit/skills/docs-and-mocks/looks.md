@@ -2,8 +2,8 @@
 
 For a page whose job is to propose a look: a new scheme's, or a screen no theme covers yet. A mock of
 a screen that already has a look wears it (`theming.md`), Citadel UI follows `citadel:contraption-ui`,
-and the kit's own frame (header, kicker, tags, dock) is Citadel's decided look: none of those is
-judged against this file.
+and the kit's own frame (the header band, section hues, coloured picks and callouts, the dock: #874,
+Cara 2026-11-17) is Citadel's decided look: none of those is judged against this file.
 
 ## Plan before you build
 

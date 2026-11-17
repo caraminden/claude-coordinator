@@ -57,7 +57,8 @@ after(async () => {
 });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const click = async (page: Page, sel: string) => { const c = await page.centre(sel); await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: c.x, y: c.y, button: 'left', clickCount: 1 }); await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: c.x, y: c.y, button: 'left', clickCount: 1 }); };
+// A person scrolls a button into view before pressing it; the sticky dock covers the bottom of the 400 px viewport.
+const click = async (page: Page, sel: string) => { await page.eval(`document.querySelector(${JSON.stringify(sel)}).scrollIntoView({ block: 'center' })`); const c = await page.centre(sel); await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: c.x, y: c.y, button: 'left', clickCount: 1 }); await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: c.x, y: c.y, button: 'left', clickCount: 1 }); };
 const posts = (page: Page) => page.eval<string[]>('window.posts');
 const send = (page: Page) => click(page, '.mk-dock > button');
 const label = (page: Page) => page.eval<string>('document.querySelector(".mk-dock > button").textContent');

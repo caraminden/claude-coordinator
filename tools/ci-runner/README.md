@@ -398,8 +398,7 @@ their units with `systemd-run --user` as they do on perigee. As root in the dist
 when it's missing).
 
 The workflow's step "the runner's clock" fails when the distro's kernel clock runs more than 1% off its raw clock
-for 2 minutes (it measures again every 10 s, #900), and then lists the WSL distros running on the PC: every one but
-`citadel-ci` is a suspect. `land.sh` reads that failure as `runner clock`, not a red: it falls back to the suite on
+for 2 minutes (it measures again every 10 s, #900). `land.sh` reads that failure as `runner clock`, not a red: it falls back to the suite on
 perigee and leaves its CI-down note, so the landings of the next 10 minutes don't each spend a run learning it.
 That happens when two programs keep the same clock (#542). Every WSL distro on the PC shares one kernel, so one
 clock. WSL's own init (3.x) runs a chrony outside the distros, where `ps` doesn't show it, that steers that clock

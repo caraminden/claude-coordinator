@@ -148,3 +148,18 @@ test("an Overlord turn runs for whoever started it, else the scheme's owner, nev
   assert.equal(turnPerson([{ author: 'Citadel', text: 'CI went red', images: [] }]), cara.id, 'an alert: the owner, not Josh from last time');
   s.db.close();
 });
+
+test("the Overlord's alert notes are for everyone; a person's own Taskmaster's aren't", () => {
+  const s = new Store(join(root, 'notes.db'));
+  const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = s.createUser({ name: 'Josh', login: 'josh' });
+  const p = s.createProject('Shared', null, cara.id);
+  const first = s.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  const runner = new Runner(s, () => {}, () => ({}), '/bin/false');
+  const note = (id: number) => JSON.parse(runner.emit(id, 'note', { text: 'CI store is full' }).data);
+  assert.equal(note(first.id).everyone, undefined, 'before a split its only Taskmaster is everyone\'s anyway');
+  s.splitScheme(p.id, josh.id);
+  assert.equal(note(s.getOverlord(p.id)!.id).everyone, true);
+  assert.equal(note(s.coordinatorFor(p.id, josh.id)!.id).everyone, undefined);
+  s.db.close();
+});

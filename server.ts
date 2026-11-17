@@ -614,7 +614,7 @@ services.onDeploy = (view) => {
 // Scheme-wide news (auto-deploys, alerts) is nobody's in particular: the Overlord's (#921), the only Taskmaster before a split.
 const tellHome = (projectId: number, text: string) => {
   const tm = store.getOverlord(projectId);
-  if (tm) runner.send(tm.id, APP_NAME, text);
+  if (tm) runner.send(tm.id, APP_NAME, text, [], runner.isOverlord(tm) ? { everyone: true } : {});
 };
 // The workflow readers go through CI health's etag-cached reads (defined below; first called after startup's scan).
 const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r), runArtifacts: (p: Project, r: Run) => ciHealth.runArtifacts(p, r) };
@@ -878,7 +878,7 @@ const ciHealth = new CiHealth(store, {
   tell: (project, text, wake) => {
     const coordinator = store.getOverlord(project.id);
     if (coordinator) {
-      if (wake) runner.send(coordinator.id, APP_NAME, text);
+      if (wake) runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
       else runner.leaveMail(coordinator.id, APP_NAME, text);
     }
     return !!coordinator;

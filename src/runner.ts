@@ -59,7 +59,7 @@ export function schemeRefs(project: Project, projects: Project[], tickets: Ticke
 
 /** The chat event kinds that post or settle a card waiting on people (a person's message answers one). */
 const CARD_KINDS = new Set(['question', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
-const OPEN_CARDS = new Set(['question', 'plan', 'approval']);
+const EVERYONES = new Set(['question', 'plan', 'approval', 'note']);
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -3556,8 +3556,8 @@ export class Runner {
   }
 
   emit(ticketId: number, kind: string, data: unknown): EventRow {
-    // A split scheme's Overlord asks for everyone (#921): its cards show in every member's chat (#920 reads the flag).
-    if (OPEN_CARDS.has(kind) && this.isOverlord(this.store.getTicket(ticketId))) data = { ...(data as object), everyone: true };
+    // A split scheme's Overlord asks and alerts for everyone (#921): its cards and notes show in every member's chat (#920 reads the flag).
+    if (EVERYONES.has(kind) && this.isOverlord(this.store.getTicket(ticketId))) data = { ...(data as object), everyone: true };
     const row = this.store.addEvent(ticketId, kind, data);
     this.broadcast({ type: 'event', event: row });
     if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId);

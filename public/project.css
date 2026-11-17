@@ -457,6 +457,11 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
   dialog.viewer .ticket-head > .row > h2 { -webkit-line-clamp: 1; line-clamp: 1; }
   dialog.viewer .ticket-head .head-sub::after, dialog.viewer .ticket-head .head-sub > .spacer { display: none; }
   dialog.viewer .ticket-head .progress { display: none; }
+  /* On a phone the readout sits in the head line as display: contents (thread.css), which outranks the rule above: out-rank it, and put the state label back (#831). */
+  dialog.viewer .ticket-head .head-line > .progress:not([hidden]) { display: none; }
+  dialog.viewer .ticket-head .head-line:has(> .progress:not([hidden])) > .head-state { display: block; }
+  /* The page is already open, so its card's reminder strip (Open the page, #821) has nothing to add: the page gets the room (#831). */
+  dialog.viewer #chat-waiting { display: none; }
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
 }
 /* After the rows' own rules, which set their padding: phones give them --control-h of tap room (#471). */

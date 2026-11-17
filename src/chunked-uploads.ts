@@ -69,8 +69,14 @@ export class ChunkedUploads {
       throw new HttpError(507, `Not enough room on the server: ${gb(Math.max(0, free - owed))} free${owed ? ' after the uploads already under way' : ''}, and uploads always leave ${gb(this.floor)}. This file is ${gb(size)}.`, true);
     }
     const meta: Meta = { id: randomBytes(16).toString('hex'), uid: who.uid, login: who.login, target, name: safeFileName(body.name), folder, size, created: Date.now() };
-    await writeFile(this.part(meta.id), '', { mode: 0o600 });
-    await writeFile(this.metaPath(meta.id), JSON.stringify(meta), { mode: 0o600 });
+    // Busy while half-written, so another start's sweep doesn't take it for a stray.
+    this.busy.add(meta.id);
+    try {
+      await writeFile(this.part(meta.id), '', { mode: 0o600 });
+      await writeFile(this.metaPath(meta.id), JSON.stringify(meta), { mode: 0o600 });
+    } finally {
+      this.busy.delete(meta.id);
+    }
     return { id: meta.id, offset: 0, size, chunk: CHUNK_SIZE };
   }
 

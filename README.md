@@ -369,9 +369,9 @@ commits but can't push, and says so. Without the OAuth App, turns use the box's
 own `gh` login as before. To set it up, once:
 
 1. On github.com: Settings → Developer settings → [OAuth Apps](https://github.com/settings/developers) → New OAuth App.
-   Homepage `https://cara.apps.webplatformisbestplatform.net`, and a redirect URI per hostname people
-   reach Citadel at (up to 10; #489): `https://cara.apps.webplatformisbestplatform.net/api/github/callback`
-   and `https://citadel.zip/api/github/callback`. Citadel sends GitHub the one for the hostname the person
+   Homepage `https://citadel.zip`, and a redirect URI per hostname people
+   reach Citadel at (up to 10; #489): `https://citadel.zip/api/github/callback`
+   and, for the old alias, `https://cara.apps.webplatformisbestplatform.net/api/github/callback`. Citadel sends GitHub the one for the hostname the person
    is on, so a hostname left out fails to link with "redirect_uri mismatch". Leave wildcard matching,
    "Enable Device Flow" and "Expire user access tokens" off.
 2. Generate a client secret, and add both to `~/.config/claude-coordinator/env`
@@ -387,10 +387,10 @@ so nothing else in their account. Settings → Your account then offers both way
 limited link reaches. To set it up, once:
 
 1. [Register a new GitHub App](https://github.com/settings/apps/new). Homepage
-   `https://cara.apps.webplatformisbestplatform.net`, callback URL
-   `https://cara.apps.webplatformisbestplatform.net/api/github/callback` (add one per hostname people
+   `https://citadel.zip`, callback URL
+   `https://citadel.zip/api/github/callback` (add one per hostname people
    reach Citadel at, up to 10, as for the OAuth App). Setup URL
-   `https://cara.apps.webplatformisbestplatform.net/api/github/installed`, with **Redirect on update**
+   `https://citadel.zip/api/github/installed` (an App registered earlier with the old host there keeps working), with **Redirect on update**
    ticked: installing the App links nothing, so this brings people back from GitHub and, if they have
    no link yet, straight on to Link GitHub (limited). It takes one URL, so someone who installs the App
    from another hostname comes back on this one and may have to sign in there once. Leave "Request user authorization (OAuth) during

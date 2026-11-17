@@ -18,7 +18,6 @@
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const unescapeHtml = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
 
-/** A fence's opening line; a backtick one with a backtick later on its line is inline code, not a fence (CommonMark). */
 /** Info string → [tone, header label] for a fence that names where its commands run (#898); other tags draw plain. */
 const SHELL_KINDS = {
   admin: ['PowerShell · Admin · Windows · Run as administrator', ['powershell-admin', 'pwsh-admin', 'ps1-admin', 'admin-powershell']],
@@ -30,6 +29,7 @@ const SHELL_KINDS = {
 };
 const SHELLS = Object.fromEntries(Object.entries(SHELL_KINDS).flatMap(([tone, [label, tags]]) =>
   tags.map((t) => [t, [tone, tone === 'bash' && t !== 'bash' ? t : label]])));
+/** A fence's opening line; a backtick one with a backtick later on its line is inline code, not a fence (CommonMark). */
 const FENCE = /^ {0,3}(`{3,}(?!.*`)|~{3,})\s*([^`\s]*)/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*$/;
 const HR = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
@@ -466,12 +466,12 @@ const CSS = `
 :where(.cui-md pre.cui-shell[data-tone="fish"]) { --cui-shell: var(--citadel-cat-6); }
 :where(.cui-md pre.cui-shell[data-tone="bash"]) { --cui-shell: var(--citadel-cat-4); }
 :where(.cui-md pre.cui-shell[data-tone="cmd"]) { --cui-shell: var(--citadel-cat-3); }
-:where(.cui-md pre.cui-shell > .cui-copy) { position: absolute; top: 0.2rem; right: 0.3rem; float: none; margin: 0; z-index: 1; }
 :where(.cui-md .cui-copy) {
   float: right; margin: -0.25rem -0.25rem 0.2rem 0.6rem; padding: 0.15rem 0.5rem; line-height: 1.3;
   border: 1px solid var(--citadel-control-border); border-radius: var(--citadel-radius-sm); background: transparent; color: var(--citadel-text);
   font: 500 var(--citadel-size-small) var(--citadel-font); cursor: pointer; user-select: none;
 }
+:where(.cui-md pre.cui-shell > .cui-copy) { position: absolute; top: 0.2rem; right: 0.3rem; float: none; margin: 0; z-index: 1; }
 :where(.cui-md .cui-copy)::before { content: 'Copy'; }
 :where(.cui-md .cui-copy[data-copied="yes"])::before { content: 'Copied'; }
 :where(.cui-md .cui-copy[data-copied="no"])::before { content: "Couldn't copy"; }

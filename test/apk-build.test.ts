@@ -137,6 +137,24 @@ test('no release key: nothing builds, the home Taskmaster is told once for that 
   assert.deepEqual(await b.check(row, '#2'), { built: 2 });
 });
 
+test('a missing release key is told once, not once per commit; it tells again only after the key existed and went missing', async () => {
+  const { live, row } = app('nokey');
+  const { b, told } = builder();
+  assert.ok('failed' in (await b.check(row, '#1')));
+  commit(live, { 'android/app/a.txt': '1' });
+  assert.deepEqual(await b.check(row, '#2'), { skipped: 'no release key yet, already told' });
+  commit(live, { 'android/app/a.txt': '2' });
+  await b.check(row, '#3');
+  assert.equal(told.length, 1, 'two more commits without the key are not told again');
+  key('nokey');
+  commit(live, { 'android/app/a.txt': '3' });
+  assert.ok('built' in (await b.check(row, '#4')));
+  rmSync(join(keyDir, 'nokey-release.jks'));
+  commit(live, { 'android/app/a.txt': '4' });
+  await b.check(row, '#5');
+  assert.equal(told.length, 2, 'the key went missing again: told again');
+});
+
 test('a failed Gradle build publishes nothing and tells the end of its log; an app a release workflow signs is left alone', async () => {
   const { row, data } = app('broken');
   key('broken');

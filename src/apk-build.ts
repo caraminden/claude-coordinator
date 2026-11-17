@@ -7,7 +7,7 @@
 // where its open route serves them to the update banner. An app whose APKs a release workflow signs on CI (Mandate) keeps that
 // path (src/apk-release.ts): this skips it. Nothing here touches the live slot, so a failed build changes nothing that runs.
 import { spawn, execFile } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { androidEnv } from './claude-link.ts';
@@ -164,8 +164,14 @@ export class ApkBuilds {
     };
     const key = join(this.d.keyDir, `${row.name}-release.jks`);
     const pass = join(this.d.keyDir, `${row.name}-release.pass`);
-    if (!existsSync(key) || !existsSync(pass)) {
-      return fail(`it has no release key yet (${key} and its .pass). A person makes it once, as the citadel:android-app skill says; until then no APK is built after its deploys.`);
+    // A missing key is told once, not per commit (a night of deploys woke the Taskmaster ten times): the marker stays until a check finds the key.
+    const keyTold = join(dir, 'key-missing-told');
+    if (existsSync(key) && existsSync(pass)) rmSync(keyTold, { force: true });
+    else {
+      if (existsSync(keyTold)) return { skipped: 'no release key yet, already told' };
+      const out = fail(`it has no release key yet (${key} and its .pass). A person makes it once, as the citadel:android-app skill says; until then no APK is built after its deploys.`);
+      writeFileSync(keyTold, commit);
+      return out;
     }
     const code = Number((await git(live, 'rev-list', '--count', commit)).out);
     if (!Number.isInteger(code) || code < 1) return fail(`couldn't count ${commit.slice(0, 9)}'s commits`);

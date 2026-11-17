@@ -787,6 +787,8 @@ export class Runner {
       // Its cards waiting on people with the links that open them, for read_ticket and list_tickets (#400).
       open_cards: this.cardLinks(ticket, false, cards),
       properties: this.store.props.forTarget('minion', ticket.id),
+      // Who touched it and hasn't left (#919): their Taskmasters hear its updates; the page offers them Leave.
+      touched: ticket.kind === 'ticket' && !closed ? this.store.touchedBy(ticket) : [],
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
       wait: closed ? null : this.wait(ticket.id),

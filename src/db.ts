@@ -2073,8 +2073,10 @@ export class Store {
     return null;
   }
 
-  /** The Taskmaster a minion reports to: its owner's own, else the Overlord. */
+  /** The Taskmaster a minion reports to: its owner's own, else the Overlord; a build's own minion, the Overlord (builds are shared, #921). */
   ownerCoordinator(ticket: Pick<Ticket, 'id' | 'project_id'>): Ticket | undefined {
+    const build = this.getTicket(ticket.id)?.build;
+    if (build != null && this.getSetting<number>(buildOwnerKey(ticket.project_id, build)) === ticket.id) return this.getOverlord(ticket.project_id);
     return this.coordinatorFor(ticket.project_id, this.minionOwner(ticket));
   }
 

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
-import { Store } from '../src/db.ts';
+import { buildOwnerKey, Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, jsonLines, PASSWORD, SECRET, type Booted, stopTurns, testPins, until } from './helpers.ts';
 testPins();
@@ -143,6 +143,16 @@ test("a minion's owner: assigned, else requestedBy, else nobody; its touched set
   assert.equal(store.ownerCoordinator(assignedJosh)!.id, josh.id);
   assert.equal(store.ownerCoordinator(requested)!.id, store.getOverlord(p.id)!.id, 'Rachel has no Taskmaster here yet');
   assert.equal(store.ownerCoordinator(nobody)!.id, store.getOverlord(p.id)!.id);
+  // A build's own minion reports to the Overlord (#921: builds are shared); a feeder in it, to its owner's.
+  const lead = minion(store, p.id, { assigned: 'Josh' });
+  const feeder = minion(store, p.id, { assigned: 'Josh' });
+  for (const t of [lead, feeder]) store.db.prepare('UPDATE tickets SET build = 3 WHERE id = ?').run(t.id);
+  store.setSetting(buildOwnerKey(p.id, 3), lead.id);
+  assert.equal(store.ownerCoordinator(lead)!.id, store.getOverlord(p.id)!.id);
+  assert.equal(store.ownerCoordinator(feeder)!.id, josh.id);
+  // The page's view carries the touched set, for its Leave item (#920).
+  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  assert.deepEqual(sorted(runner.view(store.getTicket(assigned.id)!).touched), sorted([Josh.id, Lee.id, Rachel.id]));
 });
 
 test('the digest: up to ten lines other Taskmasters logged since this one last read, never its own', () => {

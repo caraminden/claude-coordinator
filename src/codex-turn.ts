@@ -18,7 +18,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSyn
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { callLine, CODEX_NOTE, codexModelFor, saveGenerated, toCodexPreamble } from './codex.ts';
+import { callLine, CODEX_NOTE, isTurnNote, codexModelFor, saveGenerated, toCodexPreamble } from './codex.ts';
 import { codexLock, LOCK_ENV, startTime } from './codex-lock.ts';
 
 export const QUIET_MS = 30 * 60 * 1000;
@@ -251,7 +251,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   };
   const startTurn = async (q: { content: any; uuid?: string; line: any }) => {
     busy = true;
-    const text = typeof q.content === 'string' ? q.content : (q.content ?? []).filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('\n');
+    const text = typeof q.content === 'string' ? q.content : (q.content ?? []).filter((b: any) => b?.type === 'text' && !isTurnNote(String(b.text ?? ''))).map((b: any) => b.text).join('\n');
     log(`[Message] ${text}`);
     const input = [...(preamble ? [{ type: 'text', text: preamble, text_elements: [] }] : []), ...codexInput(q.content)];
     preamble = null;

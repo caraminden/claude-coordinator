@@ -9,7 +9,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { COLD_HOLD_MAX_MS, COLD_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { jsonLines, lines, stopTurns, until, testPins } from './helpers.ts';
+import { jsonLines, withoutTurnNote, lines, stopTurns, until, testPins } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'cold-mail-'));
@@ -55,8 +55,7 @@ function ticket(kind: 'coordinator' | 'ticket', idleMs: number | null, projectId
 
 const lastMessage = (id: number) => JSON.parse(store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!.data);
 const promptCount = () => lines(prompts).length;
-// Without a minion's opening turn note (#878): these tests are about the messages after it.
-const lastPrompt = () => jsonLines(prompts).at(-1).message.content.map((c: any) => c.text).filter((t: string) => !t.startsWith('[System]: You are a minion working on'));
+const lastPrompt = () => withoutTurnNote(jsonLines(prompts).at(-1).message.content).map((c: any) => c.text);
 async function idle(id: number) {
   await until('the turn to end', async () => !runner.isRunning(id));
 }

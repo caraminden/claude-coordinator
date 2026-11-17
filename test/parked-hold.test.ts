@@ -13,7 +13,7 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { COLD_HOLD_MAX_MS, LOOP_LIMIT, Runner } from '../src/runner.ts';
 import { LiveWaiters, startChained } from '../src/wake.ts';
-import { bootServer, jsonLines, lines, PASSWORD, SECRET, stopTurns, testPins, until } from './helpers.ts';
+import { bootServer, jsonLines, withoutTurnNote, lines, PASSWORD, SECRET, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'parked-hold-'));
@@ -54,7 +54,7 @@ function minion(state: string | null = 'parked') {
 const messages = (id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
 const held = (id: number) => store.getSetting<any[]>(`mail:${id}`) ?? [];
 const promptCount = () => lines(prompts).length;
-const lastPrompt = () => jsonLines(prompts).at(-1).message.content.map((c: any) => c.text);
+const lastPrompt = () => withoutTurnNote(jsonLines(prompts).at(-1).message.content).map((c: any) => c.text);
 async function turn(start: () => unknown): Promise<string[]> {
   const before = promptCount();
   start();

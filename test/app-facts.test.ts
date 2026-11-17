@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
 import { systemPrompt, turnContext } from '../src/prompts.ts';
+import { isTurnNote } from '../src/codex.ts';
 import { TRIPWIRE_BLOCKS } from '../src/tripwire-blocks.ts';
 
 // How the app behaves (the chat, links, the tripwire) is the same in every scheme, so the built-in
@@ -77,6 +78,7 @@ test('two minions of one scheme get a byte-identical system prompt and tool list
   assert.equal(systemPrompt(...a), systemPrompt(...b));
   for (const varies of ['#5', '#9', 'ticket/5-t', 'ticket/9-other', '/shared/5', '/shared/9', 'josh-box', 'The GPU box.', 'build/2', 'ci-failures']) assert.ok(!systemPrompt(...a).includes(varies), varies);
   const [ca, cb] = [turnContext(...a), turnContext(...b)];
+  assert.ok(isTurnNote(`[System]: ${ca}`) && isTurnNote(`[System]: ${cb}`), 'a Codex hand-over knows them for turn notes');
   for (const has of ['#5', 'ticket/5-t', '/shared/5', 'josh-box', 'The GPU box.', 'feeder in Build 2', 'ci-failures']) assert.ok(ca.includes(has), has);
   for (const has of ['#9', 'ticket/9-other', '/shared/9', 'When you open a GitHub pull request']) assert.ok(cb.includes(has), has);
   assert.ok(!cb.includes('josh-box') && !cb.includes('Build 2'));

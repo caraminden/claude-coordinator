@@ -15,6 +15,7 @@ import { Credentials } from '../src/credentials.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { systemPrompt, turnContext } from '../src/prompts.ts';
 import { Runner } from '../src/runner.ts';
+import { isTurnNote } from '../src/codex.ts';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
 import { coordinatorAccess } from '../src/turn-launch.ts';
 import { bootServer, PASSWORD, SECRET, stopTurns } from './helpers.ts';
@@ -131,6 +132,7 @@ test('its turn message names every scheme and contraption folder on a member ask
   assert.ok(on.includes(`${join(data, 'projects')}/<number>/`) && on.includes('3 Peek') && on.includes(`peek-auras ${appDir}`));
   const off = turnContext(citadel, tmCitadel, null, null, join(data, 'projects/2/tickets'), null);
   assert.ok(!off.includes(`peek-auras ${appDir}`) && off.includes('message_taskmaster instead'));
+  for (const note of [on, off]) assert.ok(isTurnNote(`[System]: ${note}`), 'a Codex hand-over knows it for a turn note');
   assert.equal(systemPrompt(citadel, tmCitadel, null, null, join(data, 'projects/2/tickets'), null, [], false, '', null, [], null, false, view), systemPrompt(citadel, tmCitadel, null, null, join(data, 'projects/2/tickets'), null));
   assert.equal(turnContext(peek, tmPeek, null, null, join(data, 'projects/3/tickets'), null, [], false, '', null, [], null, false, view), '');
 });

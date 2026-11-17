@@ -9,6 +9,7 @@ import { after, beforeEach, test } from 'node:test';
 import { AppServices, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
 import { fakeSystemd } from './helpers.ts';
+import { until } from './wait.ts';
 
 // Citadel writes and runs contraptions' user services (#266). Everything here runs against a stand-in
 // systemctl and a temp unit folder: never the real ones.
@@ -388,10 +389,6 @@ test("a deploy build holds one heavy slot for all its steps and goes ahead of mi
     child.stderr!.on('data', (b) => (err += b));
     return { err: () => err, done: new Promise((ok) => child.on('close', ok)) };
   };
-  const until = async (what: string, check: () => boolean) => {
-    for (let i = 0; i < 400 && !check(); i++) await new Promise((ok) => setTimeout(ok, 25));
-    assert.ok(check(), `timed out waiting for ${what}`);
-  };
   const svc = await listening();
   const suite = heavyJob('suite', `touch '${order}-up'; i=0; while [ ! -e '${go}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done`);
   try {
@@ -401,7 +398,10 @@ test("a deploy build holds one heavy slot for all its steps and goes ahead of mi
     services.deploy({ ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow, 'Cara');
     const deployWaits = () => readdirSync(heavyDir).some((f) => f.startsWith('wait-') && readFileSync(join(heavyDir, f), 'utf8').startsWith(`${name} deploy\n`));
     await until('the deploy waiting for the slot', deployWaits);
-    await new Promise((ok) => setTimeout(ok, 300));
+    // A whole look at the slots with the deploy still in line: the waiting job touches its file at each one.
+    const waitFile = readdirSync(heavyDir).filter((f) => /^wait-[0-9-]+$/.test(f)).map((f) => join(heavyDir, f)).find((p) => readFileSync(p, 'utf8').startsWith(`${name} deploy\n`))!;
+    const seen = statSync(waitFile).mtimeMs;
+    await until('the deploy to look at the slots again', () => statSync(waitFile).mtimeMs > seen, 15_000);
     writeFileSync(go, '');
     const d = await done(name);
     assert.equal(d.state, 'deployed', d.said.join('\n'));
@@ -438,7 +438,7 @@ test('a deploy waits for a build an earlier deploy left running, so two never bu
   try {
     const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     services.deploy(c, 'Cara', [], undefined, { uid: 7 });
-    await new Promise((res) => setTimeout(res, 300));
+    await until('the deploy to say it waits', async () => (await services.lastDeploy(name))?.said.some((l) => /still running in citadel-build-/.test(l)));
     const mid = await services.lastDeploy(name);
     assert.equal(mid!.state, 'running');
     assert.ok(mid!.said.some((l) => /still running in citadel-build-.*waiting for it to end/.test(l)), mid!.said.join('\n'));

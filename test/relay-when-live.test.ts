@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { LiveWaiters, type Relay } from '../src/wake.ts';
+import { git as gitIn, makeRepo } from './git.ts';
 import { bootServer, PASSWORD, REPO, SECRET, stopProcs, type Booted } from './helpers.ts';
 
 // relay_when_live: a note queued for a Taskmaster or minion, sent as held mail once its commit is live. The
@@ -23,11 +24,8 @@ after(async () => {
 });
 
 const repo = join(root, 'scheme-repo');
-mkdirSync(repo);
-const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-git('init', '-q', '-b', 'main');
-git('config', 'user.email', 't@example.com');
-git('config', 'user.name', 'T');
+makeRepo(repo);
+const git = (...args: string[]) => gitIn(repo, ...args);
 let n = 0;
 const commit = () => {
   writeFileSync(join(repo, 'f.txt'), String(++n));

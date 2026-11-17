@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { apkPaths, ApkBuilds, capacitorApp, manifestWarnings, type Runner } from '../src/apk-build.ts';
 import type { ContraptionRow } from '../src/db.ts';
+import { git } from './git.ts';
 
 // src/apk-build.ts (#837): once a Capacitor app's deploy is live, an APK whose inputs changed is built, numbered by the
 // commit count, signed and published. A real git repo stands in for the live slot; a fake runner for npx, Gradle and apksigner.
@@ -18,7 +18,6 @@ mkdirSync(join(home, '.local/share/mise/installs/java/temurin-21'), { recursive:
 const keyDir = join(root, 'keys');
 mkdirSync(keyDir);
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
 function commit(dir: string, files: Record<string, string>) {
   for (const [f, text] of Object.entries(files)) {
     mkdirSync(join(dir, f, '..'), { recursive: true });

@@ -8,6 +8,7 @@ import { after, test } from 'node:test';
 import { READ_WAIT_MS, writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
 import { writes } from '../src/http.ts';
+import { until } from './wait.ts';
 
 // #795: with WAL and synchronous=NORMAL, the first write after a checkpoint fsyncs the WAL's new header on the
 // writer's thread, and on the event loop a stalled disk held the whole server (14.3 s, #791). The server's void
@@ -49,7 +50,7 @@ test('a write on a stalled disk never holds the event loop; reads go on, stale, 
   const r1 = performance.now();
   for (let i = 0; i < 20; i++) assert.equal(title(), 'a minion');
   assert.ok(performance.now() - r1 < 50, 'later reads skip the wait while the disk is stalled');
-  while (w.queued()) await new Promise((r) => setTimeout(r, 20));
+  await until('the queued writes to land', () => !w.queued(), 15_000);
   clearInterval(tick);
   assert.ok(performance.now() - t0 >= 1500, 'the writes really were slow');
   assert.ok(worst < 200, `the event loop was held ${Math.round(worst)} ms`);

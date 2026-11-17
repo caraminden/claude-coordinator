@@ -313,7 +313,9 @@ test('61k of context: an idle Taskmaster hands off, one whose turn just ended do
     await started(working);
     await endTurn(working, 'ok');
     await waitIdle(working);
-    await new Promise((r) => setTimeout(r, 100)); // its save, after which a fresh start would run
+    // Its save, after which a fresh start would run: a worker thread that takes most of a second on a loaded box.
+    await until('its save', () => store.getSetting(`saving:${working}`) == null);
+    await new Promise((r) => setTimeout(r, 100));
     assert.equal(runner.isRunning(working), false);
     assert.equal(runner.view(store.getTicket(working)!).fresh_pending, false);
     // The same 61k, once it has sat idle, does hand off.
@@ -338,7 +340,8 @@ test('a Taskmaster turn that ends past 150k hands off at once; one at 150k does 
     await started(small);
     await endTurn(small, 'ok');
     await waitIdle(small);
-    await new Promise((r) => setTimeout(r, 100)); // its save, after which a fresh start would run
+    await until('its save', () => store.getSetting(`saving:${small}`) == null); // after which a fresh start would run
+    await new Promise((r) => setTimeout(r, 100));
     assert.equal(runner.isRunning(small), false);
     assert.equal(runner.view(store.getTicket(small)!).fresh_pending, false);
 

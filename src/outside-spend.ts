@@ -58,11 +58,11 @@ export class OutsideSpend {
     return { project_id: projectId, month_usd: round(services.reduce((s, r) => s + r.usd, 0)), cap_usd: this.store.getSetting<number | null>(capKey(projectId)) ?? null, services };
   }
 
-  /** Every scheme with spend this month, biggest first. */
+  /** Every scheme with spend or a cap this month, biggest first. */
   bill(now = Date.now()): SchemeBill[] {
     return this.store.listProjects()
       .map((p) => ({ name: p.name, ...this.month(p.id, now) }))
-      .filter((b) => b.month_usd > 0)
+      .filter((b) => b.month_usd > 0 || b.cap_usd !== null)
       .sort((a, b) => b.month_usd - a.month_usd);
   }
 

@@ -75,6 +75,8 @@ test('a cap warns once a month when crossed, and refuses nothing', () => {
   // The next month warns again.
   spend.record(other.id, { service: 's', usd: 11, units: null, note: null }, 'x', Date.UTC(2027, 1, 2));
   assert.equal(warned.length, 6);
+  // A cap with no spend yet that month still shows, so the field can display it.
+  assert.deepEqual(spend.bill(Date.UTC(2027, 5, 1)).filter((b) => b.project_id === other.id).map((b) => [b.month_usd, b.cap_usd]), [[0, 10]]);
   spend.setCap(other.id, null);
   assert.equal(spend.bill(now).find((b) => b.project_id === other.id)!.cap_usd, null);
   assert.throws(() => spend.setCap(other.id, -3), /cap/);

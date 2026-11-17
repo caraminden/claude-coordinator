@@ -34,7 +34,8 @@ function files(dir: string): string[] {
 
 /** The parts each file hand-builds, ignoring comment lines. */
 function found(text: string): string[] {
-  const code = text.split('\n').filter((l) => !/^\s*(\/\/|\/?\*|<!--)/.test(l)).join('\n');
+  // A toggletip's `role: 'dialog'` passed to the kit's mountTips is the part in use (contraption-ui component-checks.md), not a twin.
+  const code = text.split('\n').filter((l) => !/^\s*(\/\/|\/?\*|<!--)/.test(l)).map((l) => l.replace(/\bmountTips\(.*$/, 'mountTips(')).join('\n');
   return Object.entries(PATTERNS).filter(([, re]) => code.split('\n').some((l) => re.test(l))).map(([part]) => part);
 }
 
@@ -42,6 +43,7 @@ test('the patterns catch a hand-built dialog, toast and tooltip, and pass the ki
   assert.deepEqual(found(`const d = document.createElement('dialog');\nd.showModal();`), ['dialog']);
   assert.deepEqual(found(`h('dialog', { class: 'x' })`), ['dialog']);
   assert.deepEqual(found(`el.setAttribute('role', 'dialog');`), ['dialog']);
+  assert.deepEqual(found(`tips = mountTips(document.body, { selector: '.x', role: 'dialog', tapOpens: true });`), [], 'a toggletip through the kit');
   assert.deepEqual(found(`h('div', { class: 'my-toast' })`), ['toast']);
   assert.deepEqual(found(`h('div', { class: 'toaster-row' })`), []);
   assert.deepEqual(found(`h('div', { class: 'toast warn' })`), ['toast']);

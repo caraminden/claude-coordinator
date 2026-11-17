@@ -566,7 +566,9 @@ export function pendingRelease(t) {
     // A change past the build under way (`later`) goes out in the one after, which has no number yet.
     const tpl = tv.target.numbering?.name;
     const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';
-    return { name: c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text };
+    // Still in the line past the one under way: many releases may stand between, so no release is named (the row's subtitle says the place).
+    const inLine = c.later && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn));
+    return { name: inLine ? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text };
   }
   return null;
 }

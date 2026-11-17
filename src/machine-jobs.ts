@@ -32,6 +32,8 @@ export const JOB_CAPS = {
   keepMs: 14 * 24 * 3600_000,
   /** A job's longest limit unless its owner's file allows more (the agent enforces the file's). */
   limitS: 12 * 3600,
+  /** A job's whole log (job-upload with log=1), kept beside its results outside the caps above. */
+  logBytes: 20 * 1024 ** 2,
   inputs: 50,
   outputs: 500,
 };
@@ -679,12 +681,15 @@ export class MachineJobs {
     const id = Number(url.searchParams.get('job'));
     const job = Number.isInteger(id) ? this.store.getMachineJob(id) : undefined;
     if (!job || job.machine_id !== m.id) throw new HttpError(404, 'No such job on this machine');
-    if (!(['running', 'uploading', 'paused'] as string[]).includes(job.state)) throw new HttpError(409, `Job #${id} is ${job.state}; results upload while it runs or uploads`);
-    const rel = safeRelPath(url.searchParams.get('path') ?? '');
+    // The job's whole log (log=1) may also come once it has ended, kept as .job.log (no /out path starts with a dot) under its own small cap.
+    const log = url.searchParams.get('log') === '1';
+    const ok = log ? !['needs-go', 'queued', 'refused'].includes(job.state) && !job.swept_at : (['running', 'uploading', 'paused'] as string[]).includes(job.state);
+    if (!ok) throw new HttpError(409, `Job #${id} is ${job.state}; results upload while it runs or uploads`);
+    const rel = log ? '.job.log' : safeRelPath(url.searchParams.get('path') ?? '');
     const dir = this.d.resultsDir(job);
     if (!dir) throw new HttpError(410, 'Nowhere to keep this job\'s results: whoever queued it is gone');
     const declared = Number(req.headers['content-length']);
-    const room = () => Math.min(JOB_CAPS.jobBytes - this.store.getMachineJob(id)!.upload_bytes, JOB_CAPS.schemeBytes - this.store.jobResultBytes(job.project_id));
+    const room = () => log ? JOB_CAPS.logBytes : Math.min(JOB_CAPS.jobBytes - this.store.getMachineJob(id)!.upload_bytes, JOB_CAPS.schemeBytes - this.store.jobResultBytes(job.project_id));
     if (Number.isFinite(declared) && declared > room()) throw new HttpError(413, `Over the cap: a job keeps ${JOB_CAPS.jobBytes / 1024 ** 3} GB here and a scheme ${JOB_CAPS.schemeBytes / 1024 ** 3} GB; the file stays on the machine`);
     const dest = join(dir, rel);
     await fs.mkdir(dirname(dest), { recursive: true });
@@ -702,7 +707,7 @@ export class MachineJobs {
       // A file sent again replaces its first copy, which no longer counts.
       const old = await fs.stat(dest).then((s) => s.size, () => 0);
       await fs.rename(tmp, dest);
-      this.store.updateMachineJob(id, { upload_bytes: this.store.getMachineJob(id)!.upload_bytes - old + size });
+      if (!log) this.store.updateMachineJob(id, { upload_bytes: this.store.getMachineJob(id)!.upload_bytes - old + size });
     } catch (err) {
       await fs.rm(tmp, { force: true });
       throw err;

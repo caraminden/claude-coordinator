@@ -283,7 +283,7 @@ test('results upload under the job\'s and the scheme\'s caps', async () => {
   await until('job.start', () => agent.jobs('job.start').some((s) => s.id === j.id));
   await state(j.id, 'running');
   const upload = (path: string, body: string | null, length?: number) => new Promise<number>((resolve, reject) => {
-    const req = request(`${base}/api/machines/job-upload?job=${j.id}&path=${encodeURIComponent(path)}`, { method: 'POST', headers: { Authorization: `Bearer ${boxToken}`, ...(length !== undefined ? { 'Content-Length': String(length) } : {}) } }, (res) => {
+    const req = request(`${base}/api/machines/job-upload?job=${j.id}&${path === 'LOG' ? 'log=1' : `path=${encodeURIComponent(path)}`}`, { method: 'POST', headers: { Authorization: `Bearer ${boxToken}`, ...(length !== undefined ? { 'Content-Length': String(length) } : {}) } }, (res) => {
       res.resume();
       resolve(res.statusCode!);
       req.destroy();
@@ -304,8 +304,14 @@ test('results upload under the job\'s and the scheme\'s caps', async () => {
   assert.equal(await upload('fits.txt', 'x'.repeat(5)), 201);
   assert.equal(await upload('over.txt', 'x'.repeat(100)), 413);
   assert.equal(existsSync(join(shared, 'jobs', String(j.id), 'over.txt')), false);
+  assert.equal(await upload('LOG', 'line 1\n'.repeat(20)), 201, 'the log sits outside the result caps');
+  assert.equal(await upload('LOG', null, 20 * 1024 ** 2 + 1), 413, 'under its own 20 MB cap');
   store.db.prepare('UPDATE machine_jobs SET upload_bytes = 0 WHERE id = ?').run(other.id);
   await finish(j.id);
+  assert.equal(await upload('LOG', 'the whole log\n'), 201, 'the log may come once the job has ended');
+  assert.equal(await upload('late.txt', 'x'), 409, 'results may not');
+  assert.equal(readFileSync(join(shared, 'jobs', String(j.id), '.job.log'), 'utf8'), 'the whole log\n');
+  assert.equal(store.getMachineJob(j.id)!.upload_bytes, 5 + 11, 'the log doesn\'t count against the job');
   assert.match(JSON.stringify(turns().at(-1).prompt), new RegExp(`Job #${j.id} .*jobs/${j.id}/ in the scheme's shared folder`));
 });
 

@@ -103,7 +103,8 @@ async function schemeHook({ req, res, app, params }: Ctx, from: ContraptionRow, 
   const m = typeof hook?.key === 'string' ? /^(\d{1,9})\.(.+)$/.exec(hook.key) : null;
   if (!m || !HOOK_EVENTS.has(hook.event)) throw new HttpError(400, 'A hook is { key: "<minion number>.<key>", event: ticked | unticked | deleted | restored }');
   const n = Number(m[1]);
-  const ticket = n ? app.store.getTicketByNumber(schemeId, n) : app.store.getCoordinator(schemeId);
+  // 0 is a Taskmaster's item, put for the person who typed to it: their own Taskmaster's, else the Overlord's (#921).
+  const ticket = n ? app.store.getTicketByNumber(schemeId, n) : app.store.coordinatorFor(schemeId, person);
   if (!ticket || ticket.status === 'closed') {
     console.log(`Mandate hook for ${project.name} ${n ? `#${n}` : 'Taskmaster'} dropped: ${ticket ? 'closed' : 'no such minion'} (${hook.event} ${hook.key})`);
     return json(res, 200, { delivered: false });

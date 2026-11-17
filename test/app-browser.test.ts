@@ -266,6 +266,7 @@ test('the installed app shows the title bar hint once: gone for good on close or
   assert.equal(await run('(wco.visible = true, wco.dispatchEvent(new Event("geometrychange")), hint())'), false, 'hiding the title bar takes it away');
   assert.equal(await run('(wco.visible = false, start(), hint())'), false, 'and for good, even with the title bar back');
   assert.equal(await run('(localStorage.clear(), wco.visible = true, start(), hint())'), false, 'an app that opens with it hidden needs no hint');
+  assert.equal(await run('(wco.visible = false, installed.dispatchEvent(new Event("change")), hint())'), false, 'nor when they show the title bar after');
 });
 
 // #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through

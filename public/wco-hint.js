@@ -23,7 +23,9 @@ export function wcoHint(wco = navigator.windowControlsOverlay, installed = match
       h('button', { type: 'button', class: 'cui-btn cui-ghost', 'aria-label': 'Close', title: 'Close', onclick: done }, '✕'));
     document.body.append(note);
   };
-  wco.addEventListener('geometrychange', () => { if (wco.visible && note) done(); });
+  // Seen hidden, now or later, means they've found the ⌃: no note then, or when they show the title bar again.
+  if (wco.visible) return done();
+  wco.addEventListener('geometrychange', () => { if (wco.visible) done(); });
   installed.addEventListener('change', show);
   show();
 }

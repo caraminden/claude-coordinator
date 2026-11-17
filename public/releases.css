@@ -6,7 +6,7 @@
 .rel-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; column-gap: 0.5rem; margin-left: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.85em; cursor: pointer; }
 .rel-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .rel-row .rel-name { color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rel-row .rel-ver { grid-column: 3; }
+.rel-row .rel-ver { grid-column: 3; min-width: 4ch; text-align: right; } /* room for #999 whatever it reads, so a new number moves nothing */
 /* The row's text trimmed to its capitals and baseline, so the padding above and below the letters is equal whatever the font
    (Cara, 2026-11-12: "it should be equal padding on the top and bottom"): a line box keeps room for descenders under them. */
 .rel-row > :is(.rel-name, .rel-ver, .rel-est) { text-box: trim-both cap alphabetic; padding-block: 0.35em; }

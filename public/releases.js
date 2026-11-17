@@ -150,7 +150,8 @@ export function releaseRows(projectId) {
     },
     h('a', { class: 'rel-name', href, onclick: opening }, tv.target.name),
     estimate(tv.next),
-    tv.current ? versionLink(tv.current, 'rel-ver', true) : '',
+    // The release being made (Cara, 2026-11-17): its number, linked to its preview or download when it has one, plain when not; never the current release.
+    versionLink(tv.next.number != null ? tv.next : { ...tv.next, link: null }, 'rel-ver', true),
     stageTrack(tv.next.stages, tv.next));
   }));
 }

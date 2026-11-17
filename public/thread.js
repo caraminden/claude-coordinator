@@ -420,8 +420,8 @@ export function renderTicketHead() {
       const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while parked';
       unparkSlot.hidden = !parked;
       unparkSlot.replaceChildren(...(parked ? [
-        h('button', { type: 'button', class: 'secondary small act-unpark', title, onclick: () => unpark(t) }, 'Unpark'),
-        h('button', { type: 'button', class: 'secondary small act-send-unpark', title: 'Send your message and unpark it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unpark'),
+        h('button', { type: 'button', class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unpark'),
+        h('button', { type: 'button', class: 'secondary act-send-unpark', title: 'Send your message and unpark it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unpark'),
       ] : []));
     }
     const hint = form.querySelector('.parked-hint');

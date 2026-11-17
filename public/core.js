@@ -414,8 +414,18 @@ export let usage = null;
 export let codex = null;
 let codexHint = '';
 
+// The usage bars link to Settings → Usage (Cara, 2026-11-17). Settings pages take any scheme's id, so the link uses the one last open.
+let usageProject = null;
+const usageHref = () => `#/p/${usageProject ?? view?.projectId ?? ''}/usage`.replace('/p//', '/');
+function syncUsageLinks() {
+  const id = location.hash.match(/^#\/p\/(\d+)/)?.[1];
+  if (id) usageProject = Number(id);
+  for (const a of document.querySelectorAll('a.usage')) a.setAttribute('href', usageHref());
+}
+addEventListener('hashchange', syncUsageLinks);
+
 /** A weekly-limit bar; one lives in the top bar and one in a project's side panel. */
-export const usageMeter = () => h('div', { class: 'usage', hidden: true },
+export const usageMeter = () => h('a', { class: 'usage', href: usageHref(), hidden: true },
   h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), costChip());
 
 /**
@@ -447,6 +457,7 @@ export function pickLine(u, accounts) {
 /** Fill in every usage bar from the latest usage report from Claude turns. */
 export function renderUsage(next = usage) {
   usage = next;
+  syncUsageLinks();
   const accounts = usage?.accounts?.length > 1 ? usage.accounts : null;
   const week = accounts ? combineWindows(accounts, 'weekly') : usage?.weekly;
   const session = accounts ? combineWindows(accounts, 'session') : usage?.session;
@@ -455,6 +466,7 @@ export function renderUsage(next = usage) {
     if (!week) continue;
     const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
     el.querySelector('.label').textContent = `Week ${pct}%`;
+    el.setAttribute('aria-label', `Usage details: week ${pct}%`);
     el.style.setProperty('--pct', `${pct}%`);
     // Several accounts: out only once every one is (turns move to the next by themselves).
     const out = accounts ? accounts.every((a) => high(a.usage)) : week.status && week.status !== 'allowed';
@@ -477,7 +489,7 @@ export function renderUsage(next = usage) {
 }
 
 /** A bar in the Claude bar's look (#342); `.codex` keeps it out of the Claude bars' loops. */
-const codexBar = () => h('div', { class: 'usage codex', hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), h('span', { class: 'which' }));
+const codexBar = () => h('a', { class: 'usage codex', href: usageHref(), 'aria-label': 'Usage details', hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), h('span', { class: 'which' }));
 const setBar = (bar, pct, label) => {
   bar.querySelector('.label').textContent = label;
   bar.style.setProperty('--pct', `${pct}%`);

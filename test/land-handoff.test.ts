@@ -19,21 +19,24 @@ const LIVE = 'land: main is now at abc1234 "#9: usage bar"\ndeploy: live now: th
 const RESTART = 'land: main is now at def5678 "#9: server bit"\ndeploy: restart queued as citadel-restart: running turns carry on through it, and it reports here\ndeploy: not live yet after 75 s; the restart reports here when it is\n';
 
 /** A Landings in a data dir of its own, a minion worktree whose land.sh prints `out` and exits `code`, and fake deps that record what the server did. */
-function setup(name: string, opts: { running?: boolean; kept?: string | null; runners?: boolean; liveAlready?: boolean; apps?: string[]; deployOps?: DeployOps } = {}) {
+function setup(name: string, opts: { owner?: number | null; ownerState?: string | null; running?: boolean; kept?: string | null; runners?: boolean; liveAlready?: boolean; apps?: string[]; deployOps?: DeployOps } = {}) {
   const data = join(root, name, 'data');
   const cwd = join(root, name, 'wt');
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   const landings = new Landings(data);
-  const ticket = { status: 'idle', state: 'outside' as string | null, note: 'landing: handed to the server' as string | null };
+  const ticket = { number: 7, title: 'Wake the owner', status: 'idle', state: 'outside' as string | null, note: 'landing: handed to the server' as string | null };
   const did: string[] = [];
   const sent: string[] = [];
   const notes: string[] = [];
+  const owned: any[] = [];
   const deps: HandoffDeps = {
     landings,
-    store: { getTicket: () => ticket, updateTicket: (_id, f) => { Object.assign(ticket, f); did.push(`state ${f.state}`); } },
+    store: { getTicket: (id: number) => (id === 1 ? ticket : { number: 9, title: 'The build', status: 'idle', state: opts.ownerState ?? null }), updateTicket: (_id, f) => { Object.assign(ticket, f); did.push(`state ${f.state}`); } },
     runner: {
       emit: (_id, _kind, data: any) => { notes.push(data.text); },
       send: (_id, _from, text) => { sent.push(text); },
+      unpark: (id, by) => { did.push(`unpark ${id} by ${by}`); return true; },
+      relayMinion: (from, to, author, text, urgent, wake, unparked) => { owned.push({ from, to, author, text, urgent, wake, unparked }); return false; },
       close: async (_id, text) => { ticket.status = 'closed'; did.push(`close: ${text}`); },
       closeAfterTurn: () => { did.push('closeAfterTurn'); return true; },
       keptOpen: () => opts.kept ?? null,
@@ -44,6 +47,7 @@ function setup(name: string, opts: { running?: boolean; kept?: string | null; ru
       broadcastTicket: () => {},
     },
     from: 'Citadel',
+    buildOwner: () => (opts.owner === undefined ? 2 : opts.owner),
     runnersBack: (_id, reason) => { did.push(`runnersBack: ${reason}`); return opts.runners ?? true; },
     liveAlready: async () => !!opts.liveAlready,
     ...(opts.deployOps ? { apps: () => opts.apps ?? [], deployOps: opts.deployOps } : {}),
@@ -53,7 +57,7 @@ function setup(name: string, opts: { running?: boolean; kept?: string | null; ru
     assert.ok(landings.handOff(1, cwd, { PATH: process.env.PATH! }, args, { ...H, ...h }));
     await until('land.sh ends', () => landings.get(1)?.code !== null);
   };
-  return { landings, ticket, did, sent, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
+  return { owned, landings, ticket, did, sent, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
 }
 
 test('a clean land that is live now posts the shipped line and dismisses the minion, with no message to it', async () => {
@@ -457,4 +461,31 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
   } finally {
     await srv.stop();
   }
+});
+
+test("a feeder's merge into a build wakes the build's parked owner with one message, unparking it; no owner, the feeder itself, or a land on main sends nothing", async () => {
+  const into = ['--into', 'build/3', 'test/a.test.ts'];
+  const s = setup('owner', { ownerState: 'parked' });
+  mkdirSync(join(s.cwd, 'test'), { recursive: true });
+  writeFileSync(join(s.cwd, 'test', 'a.test.ts'), '');
+  await s.land('land: merged into build/3\n', 0, H, into);
+  await s.handoffs.poll();
+  assert.equal(s.owned.length, 1);
+  const m = s.owned[0];
+  assert.deepEqual([m.from, m.to, m.urgent, m.wake, m.unparked], [1, 2, true, true, true], 'urgent and waking, so a cold owner still wakes');
+  assert.equal(m.text, '#7 Wake the owner merged into build/3: Usage bar in the top bar. Risk low: front end only.');
+  assert.ok(s.did.some((d) => d.startsWith('unpark 2 by #7')), 'unparked first');
+
+  const none = setup('owner-none', { owner: null });
+  mkdirSync(join(none.cwd, 'test'), { recursive: true });
+  writeFileSync(join(none.cwd, 'test', 'a.test.ts'), '');
+  await none.land('land: merged into build/3\n', 0, H, into);
+  await none.handoffs.poll();
+  const self = setup('owner-self', { owner: 1 });
+  await self.land('land: merged into build/3\n', 0, H, into);
+  await self.handoffs.poll();
+  const main = setup('owner-main');
+  await main.land(LIVE);
+  await main.handoffs.poll();
+  assert.deepEqual([none.owned.length, self.owned.length, main.owned.length], [0, 0, 0]);
 });

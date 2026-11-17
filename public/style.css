@@ -230,7 +230,10 @@ h2 { font-size: 1.15rem; margin: 0; }
 .update-banner button { padding: 0.15rem 0.6rem; font-size: 0.85em; margin-left: 0.25rem; }
 
 /* Weekly usage of the Claude account, in the top bar */
-.usage { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8em; color: var(--muted); white-space: nowrap; cursor: default; }
+.usage { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8em; color: var(--muted); white-space: nowrap; cursor: pointer; text-decoration: none; border-radius: 0.4rem; }
+.usage:hover { color: var(--ink); }
+.usage:hover .track { outline: 1px solid var(--muted); }
+.usage:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .usage .track { width: 5rem; height: 0.4rem; border-radius: 999px; background: var(--line); overflow: hidden; }
 .usage .fill { display: block; width: var(--pct, 0%); height: 100%; background: var(--running); }
 .usage[data-level="warn"] .fill { background: var(--waiting); }

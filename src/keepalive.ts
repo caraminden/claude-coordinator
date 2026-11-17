@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { ZONE } from './pacific.ts';
 
 /** A keepalive goes this long after the minion's last turn (or keepalive) ended: inside the cache's hour. */
 export const KEEPALIVE_AFTER_MS = 55 * 60_000;
@@ -43,7 +44,7 @@ export interface KeepaliveSeries {
   stopped?: 'dirty' | 'missed' | 'failed';
 }
 
-const hour = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' });
+const hour = new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: 'numeric', hourCycle: 'h23' });
 
 /** Inside working hours, 11:00 to midnight Pacific. */
 export function inWindow(now: number): boolean {

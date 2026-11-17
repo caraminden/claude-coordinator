@@ -6,8 +6,8 @@
 // ~/.config/citadel-android (the citadel:android-app skill), and publishes it and latest.json into the app's DATA_DIR/android/,
 // where its open route serves them to the update banner. An app whose APKs a release workflow signs on CI (Mandate) keeps that
 // path (src/apk-release.ts): this skips it. Nothing here touches the live slot, so a failed build changes nothing that runs.
-import { spawn, execFile } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execResult, runLogged } from './exec.ts';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { androidEnv } from './claude-link.ts';
@@ -53,22 +53,6 @@ export function manifestWarnings(xml: string): string[] {
 
 /** Runs a command, its output into `log`: its exit code, 124 when it ran out of time. */
 export type Runner = (argv: string[], cwd: string, env: NodeJS.ProcessEnv, log: string, ms: number) => Promise<number>;
-
-const spawnRun: Runner = (argv, cwd, env, log, ms) => new Promise<number>((ok) => {
-  const fd = openSync(log, 'a');
-  const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: ['ignore', fd, fd] });
-  closeSync(fd);
-  let late = false;
-  const timer = setTimeout(() => {
-    late = true;
-    try {
-      process.kill(-child.pid!, 'SIGTERM');
-      setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }, 10_000).unref();
-    } catch {}
-  }, Math.max(1, ms));
-  child.once('error', () => { clearTimeout(timer); ok(127); });
-  child.once('close', (code) => { clearTimeout(timer); ok(late ? 124 : code ?? 1); });
-});
 
 export interface ApkBuildDeps {
   home: string;
@@ -137,8 +121,7 @@ export class ApkBuilds {
     if (!live) return { skipped: 'not deployed' };
     const cap = await capacitorApp(live);
     if (!cap) return { skipped: 'not a Capacitor app' };
-    const git = (cwd: string, ...args: string[]) => new Promise<{ code: number; out: string }>((ok) =>
-      execFile('git', args, { cwd, timeout: 120_000 }, (err: any, out) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out).trim() })));
+    const git = (cwd: string, ...args: string[]) => execResult('git', args, { cwd, timeout: 120_000 }).then((r) => ({ code: r.code, out: r.out.trim() }));
     const commit = (await git(live, 'rev-parse', 'HEAD')).out;
     if (!/^[0-9a-f]{40}$/.test(commit)) return { failed: `couldn't read ${live}'s commit` };
     const feedFile = join(this.d.dataDir(row), 'android', 'latest.json');
@@ -209,7 +192,7 @@ export class ApkBuilds {
     const path = `${join(this.d.home, '.local/share/mise/shims')}:${join(this.d.home, '.local/bin')}:/usr/local/bin:/usr/bin:/bin`;
     const env: NodeJS.ProcessEnv = { ...base, PATH: path, ...androidEnv(this.d.home, path), GIT_TERMINAL_PROMPT: '0', MISE_TRUSTED_CONFIG_PATHS: src, CITADEL_HEAVY_WHO: `${row.title} APK build`, CI: '1' };
     if (!env.ANDROID_HOME) return fail(`the Android toolchain isn't installed on perigee (tools/android/install-sdk.sh)`);
-    const run = this.d.run ?? spawnRun;
+    const run = this.d.run ?? runLogged;
     const deadline = Date.now() + BUILD_MS;
     const step = async (what: string, argv: string[], cwd: string) => {
       await writeFile(log, `== ${argv.join(' ')}\n`, { flag: 'a' });

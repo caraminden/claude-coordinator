@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { accountUsageKey } from '../src/account-pick.ts';
 import { Store } from '../src/db.ts';
-import { clockTime, MAX_LIMIT_RESUMES, nextLimitResume, parseResetTime, Runner } from '../src/runner.ts';
+import { MAX_LIMIT_RESUMES, nextLimitResume, Runner } from '../src/runner.ts';
+import { clockTime, parseResetTime } from '../src/pacific.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
 testPins();
 

@@ -8,7 +8,8 @@
 // files that do. Units an app's people installed by hand before (same port, or run from its folder) are
 // reported, and stopped and disabled only when an admin asks with replace: their files stay.
 // A boot check, a preview or a dev copy without a stand-in systemctl gets `off`: it never touches systemd.
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { execResult, runLogged } from './exec.ts';
 import { closeSync, existsSync, openSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat, statfs, symlink, writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
@@ -351,9 +352,7 @@ export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCh
   };
 }
 
-const run = (bin: string, args: string[], timeout = 60_000) => new Promise<Ran>((ok) => {
-  execFile(bin, args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (err: any, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText || (err && !out ? err.message : '')) }));
-});
+const run = (bin: string, args: string[], timeout = 60_000) => execResult(bin, args, { timeout, maxBuffer: 4 * 1024 * 1024 });
 
 export class AppServices {
   readonly opts: ServiceOptions;
@@ -767,23 +766,9 @@ export class AppServices {
     if (hooks.resumed) await say('Started again: a Citadel restart cut the last deploy short.');
     await this.awaitOlderBuild(row.name, say);
     /** Run a command, its output into the log; its exit code (124 when it ran out of time). */
-    const sh = (argv: string[], cwd: string, ms: number, withEnv = env) => new Promise<number>((ok) => {
-      const fd = openSync(view.log, 'a');
-      const child = spawn(argv[0], argv.slice(1), { cwd, env: withEnv, detached: true, stdio: ['ignore', fd, fd] });
-      closeSync(fd);
-      let late = false;
-      const timer = setTimeout(() => {
-        late = true;
-        try {
-          process.kill(-child.pid!, 'SIGTERM');
-          setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }, 10_000).unref();
-        } catch {}
-      }, Math.max(1, ms));
-      child.once('error', () => { clearTimeout(timer); ok(127); });
-      child.once('close', (code) => { clearTimeout(timer); ok(late ? 124 : code ?? 1); });
-    });
+    const sh = (argv: string[], cwd: string, ms: number, withEnv = env) => runLogged(argv, cwd, withEnv, view.log, ms);
     const git = async (cwd: string, ...args: string[]) => {
-      const r = await new Promise<Ran>((ok) => execFile('git', args, { cwd, env, timeout: 120_000 }, (err: any, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText) })));
+      const r = await execResult('git', args, { cwd, env, timeout: 120_000 });
       if (r.code) throw new Error(`git ${args.join(' ')} failed: ${r.err.trim().slice(0, 500) || `exit ${r.code}`}`);
       return r.out.trim();
     };

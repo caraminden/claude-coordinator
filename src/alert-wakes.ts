@@ -6,6 +6,7 @@
 // is one wake per scheme. Scheme 0 is Citadel-wide (CI health, timers with no home scheme): the server sends it to the
 // scheme whose repo the live checkout is.
 import type { Store } from './db.ts';
+import { ZONE } from './pacific.ts';
 
 /** How long a scheme's batch waits for more alerts after its newest one. */
 export const BATCH_MS = 60_000;
@@ -42,7 +43,7 @@ export interface AlertWakeDeps {
 
 /** When the overnight hold that `t` falls in ends (9:00 AM Pacific), or null outside 2-9 AM Pacific. */
 export function quietUntil(t: number): number | null {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hourCycle: 'h23', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(t).map((x) => [x.type, x.value]));
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hourCycle: 'h23', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(t).map((x) => [x.type, x.value]));
   const h = Number(p.hour);
   if (h < 2 || h >= 9) return null;
   return t - (((h * 60 + Number(p.minute)) * 60 + Number(p.second)) * 1000 + (t % 1000)) + 9 * 3600_000;

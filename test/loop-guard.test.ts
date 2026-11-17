@@ -167,7 +167,7 @@ test('the routes: agents are held, people never are, and a person writing contin
   const tm = `agent:${coordinator.id}`;
   const minion = `agent:${t.id}`;
   const toMinion = (text: string) => call(tm, `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text } });
-  const toTaskmaster = (text: string) => call(minion, `/api/tickets/${t.id}/coordinator`, { method: 'POST', body: { text } });
+  const toTaskmaster = (text: string) => call(minion, `/api/tickets/${t.id}/coordinator`, { method: 'POST', body: { text, need: 'ask' } });
   const events = async (id: number, kind: string) => (await call('Cara', `/api/tickets/${id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
   const texts = async (id: number) => (await events(id, 'user_message')).map((d: any) => d.text);
 
@@ -209,7 +209,7 @@ test('message_taskmaster: a Taskmaster reaches another scheme\'s Taskmaster, and
   const theirMinion = await call('Cara', `/api/projects/${theirs.id}/tickets`, { method: 'POST', body: { message: 'go', title: 'Their minion' } });
   const tm = `agent:${tmMine.id}`;
   const send = (who: string, scheme: unknown, text = 'please start a minion for the API change') =>
-    call(who, '/api/taskmaster', { method: 'POST', body: { scheme, text } });
+    call(who, '/api/taskmaster', { method: 'POST', body: { scheme, text, need: 'ask' } });
 
   // By name, any case, before the other scheme's Taskmaster has ever been opened.
   assert.deepEqual(await send(tm, 'theirs'), { scheme: 'Theirs', held: false, left: 5 });

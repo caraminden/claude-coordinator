@@ -13,6 +13,7 @@ import { APP_NAME } from '../appname.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../artifacts.ts';
 import { cardHref } from '../card-links.ts';
+import { checkNeed } from '../needs.ts';
 import { armForCi, postCard, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
@@ -910,9 +911,14 @@ export const ticketRoutes: Route[] = [
       // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
       const body = await readJson(req);
       const text = str(body.text, 'Message', 10_000);
-      const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { coordinator: { text, urgent: body.urgent === true, ...(body.wake === false ? { wake: false } : {}) } }) : null;
+      const checked = checkNeed(body);
+      if ('error' in checked) throw new HttpError(400, checked.error);
+      const { need } = checked;
+      // A fyi is always held mail (#851), whatever wake says.
+      const wake = body.wake !== false && need !== 'fyi';
+      const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { coordinator: { text, urgent: body.urgent === true, need, ...(wake ? {} : { wake: false }) } }) : null;
       if (armed) return json(res, 202, { sent: false, armed });
-      const held = await tellTaskmaster(app, ticket, text, body.urgent === true, body.wake !== false);
+      const held = await tellTaskmaster(app, ticket, text, body.urgent === true, wake, need);
       if (held === true) return json(res, 202, { sent: false, held: true });
       return json(res, 202, { sent: true, ...(held === 'cold' ? { cold: true } : held === 'mail' ? { mail: true } : {}) });
     },

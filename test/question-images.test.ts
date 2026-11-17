@@ -122,7 +122,7 @@ test('comments only on files the thread may show, and only from people', async (
 
 test('a thread can message its coordinator, which wakes with the thread named', async () => {
   const before = turns().length;
-  await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'Send #2 the handoff' } });
+  await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'Send #2 the handoff', need: 'ask' } });
   const next = (await until('the coordinator\'s turn', () => turns().length > before && turns())).at(-1);
   assert.match(next.prompt.message.content[0].text, /^\[#1 .+\]: Send #2 the handoff$/);
   assert.notEqual(next.token, turn.token);
@@ -130,6 +130,17 @@ test('a thread can message its coordinator, which wakes with the thread named', 
   await idle(Number(next.token.split('.')[0]));
   await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', body: { text: 'x' } }), /403/);
   await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: next.token, body: { text: 'x' } }), /403/);
+});
+
+test('need (#851): a fyi to the coordinator is held mail that starts no turn; a missing need is refused', async () => {
+  const before = turns().length;
+  const r = await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'landed, nothing needed', need: 'fyi', wake: true } });
+  assert.equal(r.mail, true);
+  await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'x' } }), /400 need is required/);
+  await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'x', need: 'fyi', urgent: true } }), /400 urgent wakes/);
+  assert.equal(turns().length, before);
+  const evs = (await call(`/api/tickets/${ticket.id}/events?after=0`)).map((e: any) => ({ kind: e.kind, data: JSON.parse(e.data) }));
+  assert.ok(evs.some((e: any) => e.kind === 'note' && e.data.need === 'fyi'));
 });
 
 test('a zip in the thread\'s folders is served as a download, never shown', async () => {

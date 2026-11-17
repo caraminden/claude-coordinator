@@ -13,7 +13,7 @@ import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
 export interface Card { questions: unknown[]; kind?: 'merge'; to?: string; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string } }
-export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean } }
+export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string } }
 
 export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
 const short = (sha: string) => sha.slice(0, 7);
@@ -32,11 +32,11 @@ export function postCard(app: App, ticket: Ticket, card: Card): { id: string; hr
 }
 
 /** Send the minion's Taskmaster a message, as message_coordinator does; returns runner.relay's answer. */
-export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urgent: boolean, wake = true) {
+export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urgent: boolean, wake = true, need?: string) {
   const { store, runner } = app;
   const coordinator = await ensureCoordinator(app, store.getProject(ticket.project_id)!);
-  const held = runner.relay(ticket.id, coordinator.id, `#${ticket.number} ${ticket.title}`, text, urgent, wake);
-  if (held !== true) runner.emit(ticket.id, 'note', { text: `${held ? 'Left held mail for' : 'Sent'} the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
+  const held = runner.relay(ticket.id, coordinator.id, `#${ticket.number} ${ticket.title}`, text, urgent, wake, need);
+  if (held !== true) runner.emit(ticket.id, 'note', { ...(need ? { need } : {}), text: `${held ? 'Left held mail for' : 'Sent'} the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
   return held;
 }
 
@@ -96,9 +96,9 @@ export async function ciFinished(app: App, ticket: Ticket, pr: PrSnapshot, resul
     }
   }
   if (armed.coordinator) {
-    const { text, urgent, wake } = armed.coordinator;
+    const { text, urgent, wake, need } = armed.coordinator;
     try {
-      if ((await tellTaskmaster(app, ticket, text, urgent, wake !== false)) === true) failed.push('the Taskmaster message (held by the 6-in-10-minutes guard)');
+      if ((await tellTaskmaster(app, ticket, text, urgent, wake !== false, need)) === true) failed.push('the Taskmaster message (held by the 6-in-10-minutes guard)');
       else sent.push('Your armed message went to the Taskmaster.');
     } catch (err: any) {
       failed.push(`the Taskmaster message (${err.message})`);

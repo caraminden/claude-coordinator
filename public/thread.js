@@ -944,6 +944,7 @@ export function appendEvent(event, scroll = true) {
       stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
       if (data.mail) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: data.parked ? 'Held because this minion is parked: it reads it on its next turn, when someone unparks it or what it waits for comes in' : data.cold ? 'Held because this chat was idle over 55 minutes, so waking it would re-read its whole context: it is read on the next turn, with a person\'s message or within 3 hours' : "Sent without waking: it is read on this Taskmaster's next turn, whoever starts it" }, data.parked ? 'held: parked' : 'held mail'));
+      if (data.need) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'What the sender said this message needs' }, `need: ${data.need}`));
       markQueued(bubble, view.ticket);
       nodes.push(bubble);
     }

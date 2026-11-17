@@ -130,11 +130,11 @@ test('"Message is required": message is accepted for text on the message tools',
   const sent = await tool(TM, 'coordinator', 'message_ticket', { ticket_id: Minion.number, message: 'Alias from the Taskmaster.' });
   assert.ok(!sent.isError, sent.text);
   assert.ok(saw(Minion.id, 'Alias from the Taskmaster.'));
-  const up = await tool(Minion, 'thread', 'message_coordinator', { message: 'Alias from the minion.' });
+  const up = await tool(Minion, 'thread', 'message_coordinator', { need: 'ask', message: 'Alias from the minion.' });
   assert.ok(!up.isError, up.text);
   assert.ok(saw(TM.id, 'Alias from the minion.'));
   // message_taskmaster gets past the text check to the scheme lookup.
-  const across = await tool(TM, 'coordinator', 'message_taskmaster', { scheme: 'No such scheme', message: 'Hi.' });
+  const across = await tool(TM, 'coordinator', 'message_taskmaster', { scheme: 'No such scheme', need: 'ask', message: 'Hi.' });
   assert.doesNotMatch(across.text, /Message is required/);
   refused(await tool(Minion, 'thread', 'message_coordinator', {}), /Message is required/);
 });
@@ -148,7 +148,7 @@ test('state enum error: the string "null" is read as null', async () => {
   assert.equal(t.note, null);
   refused(await tool(Minion, 'thread', 'set_thread_status', { state: 'done' }), /State must be one of/);
   // Only where null is allowed: a message that says "null" is still that text.
-  assert.ok(!(await tool(Minion, 'thread', 'message_coordinator', { text: 'null' })).isError);
+  assert.ok(!(await tool(Minion, 'thread', 'message_coordinator', { text: 'null', need: 'ask' })).isError);
 });
 
 test('"is too long": the limit is in the schema, and the error names it', async () => {

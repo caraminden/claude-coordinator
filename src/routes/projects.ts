@@ -1,6 +1,7 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
 import { mkdir, rm } from 'node:fs/promises';
+import { checkNeed } from '../needs.ts';
 import { basename, join } from 'node:path';
 import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
@@ -1016,7 +1017,10 @@ export const projectRoutes: Route[] = [
       const body = await readJson(req);
       const text = str(body.text, 'Message', 10_000);
       // Held mail (#405): wake: false waits for the other Taskmaster's next turn instead of starting one.
-      const wake = body.wake !== false;
+      const checked = checkNeed(body);
+      if ('error' in checked) throw new HttpError(400, checked.error);
+      const { need } = checked;
+      const wake = body.wake !== false && need !== 'fyi';
       const { own, person, who, project } = schemeTarget(app, from, body.scheme);
       const to = await ensureCoordinator(app, project);
       const toCitadel = project.id === GLOBAL_OWNER;
@@ -1029,10 +1033,10 @@ export const projectRoutes: Route[] = [
       // A file (#405) is copied into the receiver's shared inbox/ before anything is sent, so a bad path sends nothing.
       const file = body.file == null || body.file === '' ? null : relayFile(projectSharedDir(app.dataDir, own.id), projectSharedDir(app.dataDir, project.id), own.name, str(body.file, 'File', 1000));
       const attached = file ? `\n${APP_NAME} copied a file it attached into your scheme's shared folder, where your minions can read it too: ${file.path} (${byteSize(file.size)})` : '';
-      const { held, left, cold } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true);
+      const { held, left, cold } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true, need);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
-      if (!held) runner.emit(from.id, 'note', { text: `${wake && !cold ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
+      if (!held) runner.emit(from.id, 'note', { need, text: `${wake && !cold ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
       return json(res, 202, { scheme: project.name, held, left, ...(cold ? { cold } : {}), ...(file ? { file: file.path } : {}) });
     },
   },

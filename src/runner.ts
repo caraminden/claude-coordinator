@@ -1679,10 +1679,10 @@ export class Runner {
    * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
    * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
    */
-  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true): boolean | 'cold' | 'mail' | 'parked' {
+  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string): boolean | 'cold' | 'mail' | 'parked' {
     const minion = this.store.getTicket(minionId)!;
     const from = to === minionId ? this.store.getCoordinator(minion.project_id)?.id : minionId;
-    const { held, cold, parked } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent);
+    const { held, cold, parked } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent, need);
     if (!held) return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
     const note = held === 1
@@ -1727,8 +1727,8 @@ export class Runner {
    * runaway exchange within a few turns but not work spread out over an hour. Past that each is held,
    * with a note in both chats, until a person continues in either. `left` is how many more may go now.
    */
-  relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = '', urgent = false): { held: boolean; left: number; cold?: true } {
-    const { held, left, cold } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, asData(author, text) + attached, false, from, !wake, urgent);
+  relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = '', urgent = false, need?: string): { held: boolean; left: number; cold?: true } {
+    const { held, left, cold } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, asData(author, text) + attached, false, from, !wake, urgent, need);
     if (held) {
       const [a, b] = [from, to].map((id) => this.store.getProject(this.store.getTicket(id)!.project_id)!.name);
       const what = `${a}'s message to ${b} ("${clip(text)}")`;
@@ -1751,8 +1751,8 @@ export class Runner {
     this.mail(to, author, text);
   }
 
-  private mail(to: number, author: string, text: string, from?: number, cold = false) {
-    const row = this.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
+  private mail(to: number, author: string, text: string, from?: number, cold = false, need?: string) {
+    const row = this.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(need ? { need } : {}), ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
     if (cold && !this.store.getSetting<number>(coldKey(to))) this.store.setSetting(coldKey(to), this.now());
     const sent = new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ');
     const list = this.store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];
@@ -1762,7 +1762,7 @@ export class Runner {
   }
 
   /** Count a message against the loop at `key`: send it (steering a running turn with `steer`; as held mail with `mail`), or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
-  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false, urgent = false): { held: number; left: number; cold: boolean; parked?: true } {
+  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false, urgent = false, need?: string): { held: number; left: number; cold: boolean; parked?: true } {
     const loop = this.store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
     const now = this.now();
     loop.sent = loop.sent.filter((t) => now - t < windowMs);
@@ -1770,7 +1770,7 @@ export class Runner {
     // isn't counted: notes left for a parked minion never pause the loop.
     const receiver = this.store.getTicket(to);
     if (!mail && !this.isRunning(to) && receiver && this.parked(receiver)) {
-      this.send(to, author, text, [], { from, hold: true }, steer);
+      this.send(to, author, text, [], { from, hold: true, ...(need ? { need } : {}) }, steer);
       return { held: 0, left: limit - loop.sent.length, cold: false, parked: true };
     }
     if (!loop.held.length && loop.sent.length < limit) {
@@ -1778,8 +1778,8 @@ export class Runner {
       this.store.setSetting(key, loop);
       // Every message through here is machine-made, so a cold receiver gets it as mail unless it's urgent (#413).
       const cold = !mail && !urgent && this.cold(to);
-      if (mail || cold) this.mail(to, author, text, from, cold);
-      else this.send(to, author, text, [], { from, hold: true }, steer);
+      if (mail || cold) this.mail(to, author, text, from, cold, need);
+      else this.send(to, author, text, [], { from, hold: true, ...(need ? { need } : {}) }, steer);
       return { held: 0, left: limit - loop.sent.length, cold };
     }
     loop.held.push({ to, author, text, from, asker: this.personOf?.(author, from) ?? null, ...(mail ? { mail: true as const } : {}) });

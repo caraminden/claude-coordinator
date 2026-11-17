@@ -122,7 +122,7 @@ test('a new minion rides its parent\'s build unless the create sets one', async 
   assert.equal(store.listTickets(Delve.id).length, before);
 
   // Left out, the parent is the minion whose relay the Taskmaster's turn answers; null opts out.
-  assert.equal((await as(withBuild.id, 'POST', `/api/tickets/${withBuild.id}/coordinator`, { text: 'start a follow-up' })).status, 202);
+  assert.equal((await as(withBuild.id, 'POST', `/api/tickets/${withBuild.id}/coordinator`, { text: 'start a follow-up', need: 'start' })).status, 202);
   for (let i = 0; i < 250 && !existsSync(tokenFile); i++) await new Promise((r) => setTimeout(r, 20));
   assert.ok(existsSync(tokenFile), 'the relay started a Taskmaster turn');
   t = await made({});

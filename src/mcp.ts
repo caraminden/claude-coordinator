@@ -30,6 +30,8 @@ const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Bool
 const MAX_TEXT = 4000;
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
 const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
+import { NEEDS, NEED_LINES } from './needs.ts';
+const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
 const URGENT = { type: 'boolean', description: 'true: wake it even when it is cold (idle over 55 minutes). Only when you are blocked waiting on its reply, or it is a person\'s go, pick or run-back to pass on. Anything else to a cold one stays held mail, read on its next turn (a person\'s message, or within 3 hours)' };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
@@ -452,17 +454,18 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with wake: false, which shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. For long text, write a file in your scheme's shared folder and send it with file and a one-line summary. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. For long text, write a file in your scheme's shared folder and send it with file and a one-line summary. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
         scheme: { type: 'string', description: 'The other scheme, by name or id; a wrong one lists them' },
         text: { type: 'string', maxLength: 10000, description: 'Self-contained: it cannot see your scheme, so say which scheme\'s minion #N is. Short: anything longer than a paragraph goes in file. At most 10,000 characters (`message` is accepted too)' },
-        wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent)' },
+        need: NEED,
+        wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent). A need of fyi is always held mail' },
         urgent: URGENT,
         file: { type: 'string', description: 'A file in your scheme\'s shared folder (absolute, or relative to that folder), at most 2 MB. Copied into the other scheme\'s shared folder under inbox/, where its Taskmaster and minions can read it; the message tells it the path' },
       },
-      required: ['scheme', 'text'],
+      required: ['scheme', 'text', 'need'],
     },
   },
   {
@@ -1305,8 +1308,8 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this scheme's Taskmaster, waking it by default: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Status reports, landed notes with no ask and for-your-tracking notes need nothing from it now: send them with wake: false, which shows in its chat at once and reaches it on its next turn, whoever wakes it. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
-    inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now (a status report, a landed note with no ask). Default true: it runs now, or after its current turn' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text'] },
+      "Send a message to this scheme's Taskmaster, waking it by default: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
+    inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
   },
   {
     name: 'message_minion',
@@ -1723,11 +1726,11 @@ async function runTool(name: string, args: any): Promise<string> {
       return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
-      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
+      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
       if (r.held) return `Held, not delivered: you and the Taskmaster of ${r.scheme} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it.${copied} ${ask}`;
-      const how = r.cold ? COLD(`the Taskmaster of ${r.scheme}`) : args.wake === false ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
+      const how = r.cold ? COLD(`the Taskmaster of ${r.scheme}`) : args.wake === false || args.need === 'fyi' ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
@@ -1819,7 +1822,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Updated. ${cancelled}${ticketLine(t)}`;
     }
     case 'message_coordinator': {
-      const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
+      const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
       if (r.armed) return `${r.armed} End your turn with state outside.`;
       if (r.held) return `Held, not delivered: ${HELD}`;
       if (r.mail) return 'Left as held mail: the Taskmaster reads it on its next turn, whoever wakes it. Do not resend it.';

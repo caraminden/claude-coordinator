@@ -116,7 +116,7 @@ test('the route: wake: false leaves held mail, and a file goes into the receiver
   const theirs = await call('Cara', '/api/projects', { name: 'Theirs' });
   const { coordinator: tmMine } = await call('Cara', `/api/projects/${mine.id}`);
   const tm = `agent:${tmMine.id}`;
-  const send = (body: object) => call(tm, '/api/taskmaster', { scheme: 'Theirs', text: 'see the write-up', ...body });
+  const send = (body: object) => call(tm, '/api/taskmaster', { scheme: 'Theirs', text: 'see the write-up', need: 'ask', ...body });
 
   const mineShared = projectSharedDir(data, mine.id);
   const theirShared = projectSharedDir(data, theirs.id);
@@ -171,4 +171,31 @@ test('an attachment over 2 MB is refused from its size alone, even one too big f
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('need (#851): a fyi is held mail even with wake: true, is stored on the event, and a missing need is refused', async () => {
+  const mine = await call('Cara', '/api/projects', { name: 'NeedMine' });
+  const theirs = await call('Cara', '/api/projects', { name: 'NeedTheirs' });
+  const { coordinator: tmMine } = await call('Cara', `/api/projects/${mine.id}`);
+  const { coordinator: tmTheirs } = await call('Cara', `/api/projects/${theirs.id}`);
+  const tm = `agent:${tmMine.id}`;
+  const send = (body: object) => call(tm, '/api/taskmaster', { scheme: 'NeedTheirs', text: 'it is live', ...body });
+  const events = async () => (await call('Cara', `/api/tickets/${tmTheirs.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+
+  await send({ need: 'fyi', wake: true });
+  let got = await events();
+  assert.equal(got.length, 1);
+  assert.equal(got[0].mail, true);
+  assert.equal(got[0].need, 'fyi');
+
+  await assert.rejects(send({ need: 'fyi', urgent: true }), /400 urgent wakes the receiver/);
+  await assert.rejects(send({}), /400 need is required: one of start .*fyi/);
+  await assert.rejects(send({ need: 'whatever' }), /400 need is required/);
+  assert.equal((await events()).length, 1);
+
+  // Another need keeps today's wake rules: it is delivered, with the need on the event.
+  await send({ need: 'decision', wake: false });
+  got = await events();
+  assert.equal(got.length, 2);
+  assert.equal(got[1].need, 'decision');
 });

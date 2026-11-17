@@ -396,10 +396,13 @@ test("a deploy build holds one heavy slot for all its steps and goes ahead of mi
     const minion = heavyJob('Peek #4', `echo minion >> '${order}'`);
     await until('a minion job at the head of the line', () => /are busy/.test(minion.err()));
     services.deploy({ ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow, 'Cara');
-    const deployWaits = () => readdirSync(heavyDir).some((f) => f.startsWith('wait-') && readFileSync(join(heavyDir, f), 'utf8').startsWith(`${name} deploy\n`));
-    await until('the deploy waiting for the slot', deployWaits);
+    // Only the finished wait-<pid>-<n>: citadel-heavy writes it as .tmp and moves it in place, and a .tmp seen
+    // before its mv left the second look with nothing (CI, 2026-11-17).
+    const deployWait = () => readdirSync(heavyDir).filter((f) => /^wait-[0-9-]+$/.test(f)).map((f) => join(heavyDir, f))
+      .find((p) => { try { return readFileSync(p, 'utf8').startsWith(`${name} deploy\n`); } catch { return false; } });
+    await until('the deploy waiting for the slot', () => !!deployWait());
     // A whole look at the slots with the deploy still in line: the waiting job touches its file at each one.
-    const waitFile = readdirSync(heavyDir).filter((f) => /^wait-[0-9-]+$/.test(f)).map((f) => join(heavyDir, f)).find((p) => readFileSync(p, 'utf8').startsWith(`${name} deploy\n`))!;
+    const waitFile = deployWait()!;
     const seen = statSync(waitFile).mtimeMs;
     await until('the deploy to look at the slots again', () => statSync(waitFile).mtimeMs > seen, 15_000);
     writeFileSync(go, '');

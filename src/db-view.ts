@@ -10,6 +10,8 @@ export const SECRET: Record<string, string[]> = {
   contraptions: ['key_hash', 'identity_private'],
   credentials: ['secret', 'meta'],
   stored_secrets: ['value'],
+  machine_jobs: ['input_token_hash', 'kind_hash'],
+  machine_job_kinds: ['hash'],
   push_subscriptions: ['endpoint', 'p256dh', 'auth'],
 };
 /** Settings rows whose value is a secret: turn-token nonces. */

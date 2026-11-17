@@ -894,6 +894,63 @@ test('a deploy refuses a folder with local changes, another origin, a missing br
   }
 });
 
+// #915: a member's private repo is out of the box's login's reach; only their own GitHub link gets in.
+test("a deploy clones and fetches with its home scheme owner's GitHub link, which never reaches the build, .git/config or the log", async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`alex/${name}`);
+  r.push({ '.gitignore': 'env.txt\n', 'citadel-app.json': appManifest(['env > env.txt']) });
+  const token = `ghu_${'T'.repeat(36)}`;
+  // The "GitHub" URL leads nowhere; only the owner's env (standing in for their token) is let through to the repo.
+  const hidden = `file://${join(root, 'private')}/`;
+  services = new AppServices({ ...opts(), gitUrl: (repo) => `${hidden}${repo}.git` });
+  const c = { ...row(name, 1), repo: `alex/${name}`, branch: null, folder: null, home_scheme: 9 } as ContraptionRow;
+  const asked: (number | null)[] = [];
+  const owner = { GH_TOKEN: token, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(root, 'remotes')}/.insteadOf`, GIT_CONFIG_VALUE_0: hidden };
+  services.githubAs = (x) => (asked.push(x.home_scheme), owner);
+  const svc = await listening();
+  try {
+    services.deploy({ ...c, port: svc.port }, 'Alex');
+    let d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    r.push({ 'later.txt': 'x' });
+    services.deploy({ ...c, port: svc.port }, 'Alex');
+    d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.equal(d.to, git(join(root, 'work', `alex/${name}`), 'rev-parse', 'HEAD'), 'the fetch went through too');
+    assert.deepEqual(asked, [9, 9], 'asked for the home scheme owner\'s link on each deploy');
+    const slots = join(home, 'apps', `.${name}`);
+    const env = readFileSync(join(liveSlot(name), 'env.txt'), 'utf8');
+    assert.doesNotMatch(env, /GH_TOKEN|GIT_CONFIG_/, 'the build never sees the owner\'s login');
+    for (const slot of ['a', 'b']) assert.ok(!git(join(slots, slot), 'config', '--list', '--show-origin').includes(token), `${slot}'s git config`);
+    assert.ok(!readFileSync(join(slots, 'a', '.git', 'config'), 'utf8').includes(token));
+    for (const f of readdirSync(join(home, 'deploy-logs', name))) assert.ok(!readFileSync(join(home, 'deploy-logs', name, f), 'utf8').includes(token), f);
+
+    // Without the owner's link it's the box's login, which can't see the repo: "Repository not found".
+    services.githubAs = () => undefined;
+    r.push({ 'more.txt': 'x' });
+    services.deploy({ ...c, port: svc.port }, 'Alex');
+    assert.match((await done(name)).said.join('\n'), /Fetching alex\/.* failed/);
+  } finally {
+    svc.close();
+  }
+});
+
+test("a deploy whose owner's link can't reach the repo tries again with the box's login, and says so (#915)", async () => {
+  const name = `app${++repoN}`;
+  remote(`cara/${name}`).push({ 'citadel-app.json': appManifest([]) });
+  // A limited link where the App isn't installed: GitHub answers "not found".
+  services.githubAs = () => ({ GH_TOKEN: `ghu_${'U'.repeat(36)}`, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(root, 'nowhere')}/.insteadOf`, GIT_CONFIG_VALUE_0: `file://${join(root, 'remotes')}/` });
+  const svc = await listening();
+  try {
+    services.deploy({ ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.match(d.said.join('\n'), /home scheme owner's GitHub link couldn't reach cara\/app\d+: trying Citadel's own login/);
+  } finally {
+    svc.close();
+  }
+});
+
 test('a deploy won\'t run over a hand-installed unit until an admin replaces it', async () => {
   const name = `app${++repoN}`;
   remote(`cara/${name}`).push({ 'citadel-app.json': appManifest([]) });

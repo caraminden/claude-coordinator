@@ -292,6 +292,11 @@ waiters.prs = githubPrs(githubOf);
 const timedWakes = new TimedWakes(store, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
 if (!BOOT_CHECK) timedWakes.arm();
 mainSync.as = githubOf;
+// A contraption's deploy clones and fetches its repo the same way, as its home scheme's owner (#915).
+services.githubAs = (c) => {
+  const p = c.home_scheme != null ? store.getProject(c.home_scheme) : undefined;
+  return p?.repo_dir ? githubOf(p.repo_dir) : undefined;
+};
 runner.liveHead = () => waiters.head;
 // After each deploy, compare health before and after it and wake the minions that shipped a regression (#724). No model.
 deployWatch = new DeployWatch({

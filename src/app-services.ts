@@ -16,6 +16,7 @@ import { connect } from 'node:net';
 import { constants as osConstants, homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { ContraptionRow } from './db.ts';
+import type { GithubEnv } from './scheme-repo.ts';
 import { installCheck } from './pwa-check.ts';
 
 /** The manifest's file name, in the app's folder. */
@@ -363,6 +364,11 @@ export class AppServices {
   drain: (row: ContraptionRow) => Promise<{ said: string | null; release: () => void }> = async () => ({ said: null, release: () => {} });
   /** A deploy reached a stage, or ended (finished_at set): the release monitor records and shows it (#627). */
   onDeploy: (view: DeployView) => void = () => {};
+  /**
+   * The GitHub login a deploy clones and fetches as (#915): its home scheme owner's link, as CI and releases read it
+   * (server.ts githubOf), since a member's private repo lets the box's login in nowhere. Undefined: the box's login.
+   */
+  githubAs: (row: ContraptionRow) => GithubEnv = () => undefined;
   /** Set on SIGTERM: a deploy ending now was cut short by the restart, so its marker stays for the next server (#847). */
   stopping = false;
 
@@ -767,6 +773,16 @@ export class AppServices {
     await this.awaitOlderBuild(row.name, say);
     /** Run a command, its output into the log; its exit code (124 when it ran out of time). */
     const sh = (argv: string[], cwd: string, ms: number, withEnv = env) => runLogged(argv, cwd, withEnv, view.log, ms);
+    // Only git's network calls get the owner's login (its token through gh's credential helper, never in a URL); builds run app code.
+    const as = this.githubAs(row);
+    /** Clone or fetch as the owner, then once more as the box's login when theirs can't reach it (a limited link, no App there). */
+    const network = async (argv: string[], cwd: string) => {
+      if (!as) return sh(argv, cwd, 600_000);
+      const code = await sh(argv, cwd, 600_000, { ...env, ...as });
+      if (code === 0 || code === 124) return code;
+      await say(`The home scheme owner's GitHub link couldn't reach ${repo}: trying Citadel's own login.`);
+      return sh(argv, cwd, 600_000);
+    };
     const git = async (cwd: string, ...args: string[]) => {
       const r = await execResult('git', args, { cwd, env, timeout: 120_000 });
       if (r.code) throw new Error(`git ${args.join(' ')} failed: ${r.err.trim().slice(0, 500) || `exit ${r.code}`}`);
@@ -809,7 +825,7 @@ export class AppServices {
       next = a;
       await mkdir(slots, { recursive: true });
       await say(`Cloning ${repo} (${view.branch}) into ${next}.`);
-      if (await sh(['git', 'clone', '--quiet', '--branch', view.branch, '--', this.opts.gitUrl(repo), next], slots, 600_000)) throw new Error(`Cloning ${repo} failed: see the log.`);
+      if (await network(['git', 'clone', '--quiet', '--branch', view.branch, '--', this.opts.gitUrl(repo), next], slots)) throw new Error(`Cloning ${repo} failed: see the log.`);
     } else {
       if (link === null) {
         // A plain folder from before the slots: move it, as it is, into the first slot. Its service runs on, its cwd moving with it.
@@ -840,7 +856,7 @@ export class AppServices {
         await checkout(next, 'built');
       }
       await say(`Fetching ${repo} ${view.branch}.`);
-      if (await sh(['git', 'fetch', '--quiet', 'origin', view.branch], next, 600_000)) throw new Error(`Fetching ${repo} failed: see the log.`);
+      if (await network(['git', 'fetch', '--quiet', 'origin', view.branch], next)) throw new Error(`Fetching ${repo} failed: see the log.`);
       const to = await git(next, 'rev-parse', 'FETCH_HEAD');
       if (!(await git(next, 'merge-base', '--is-ancestor', prev, to).then(() => true, () => false))) {
         throw new Error(`${old} has commits ${repo}'s ${view.branch} doesn't: a deploy only goes forward, so nothing changed.`);

@@ -42,5 +42,5 @@ Use them as a checklist when you check the page (step 5), and fix any that crept
 
 The colour roles above are the floor, the same as First look's for a real screen: a page whose
 only colour is its accent is the bland default (#683, Cara 2026-11-14: "pretty bland and
-colorless"). On top of them, pick one thing to be memorable (a type treatment, the art, a
-gradient) and keep everything around it quiet. Before you show the page, take one decoration off.
+colorless"). On top of them, First look's rule 10 (one standout per view) applies to a proposed
+look too: pick one thing to be memorable and take one decoration off before you show the page.

@@ -28,6 +28,10 @@ same URLs gives the numbers. A state the data lacks (a waiting card, a turn mid-
   Still under, by choice: inline text links and desktop checkboxes (the label is the target).
 - Errors and empty states as a bare red or grey sentence: Cara picked fixing them (#471, group 5).
   Use a `.cui-notice` with a tone, or the `.empty-state` box with a way out.
+- More than one standout in a view (a glow, an animation, a gradient and a big number all at once):
+  First look's rule 10 allows one. A finding when two or more compete, unless the brief asked.
+- An app's own radius set or heading face (First look, 10) is not a finding when the first reply names
+  its reason, the radii keep their order, and body type is still Citadel's.
 
 ## Notes
 

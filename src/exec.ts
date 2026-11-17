@@ -19,9 +19,10 @@ export const runLogged = (argv: string[], cwd: string, env: NodeJS.ProcessEnv, l
   child.once('close', (code) => { clearTimeout(timer); ok(late ? 124 : code ?? 1); });
 });
 
-export interface ExecResult { code: number; out: string; err: string }
+/** `err` is stderr as it came; `fail` is the spawn or exit error's message (empty when it ran clean). */
+export interface ExecResult { code: number; out: string; err: string; fail: string }
 
-/** Runs `bin` and resolves (never rejects) with its exit code (1 when it has none), stdout and stderr (the error's message when stderr is empty and nothing came out). */
+/** Runs `bin` and resolves (never rejects) with its exit code (1 when it has none), stdout, stderr and the failure's message. */
 export const execResult = (bin: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number } = {}): Promise<ExecResult> => new Promise((ok) => {
-  execFile(bin, args, opts, (err: any, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText || (err && !out ? err.message : '')) }));
+  execFile(bin, args, opts, (err: any, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText), fail: err ? String(err.message) : '' }));
 });

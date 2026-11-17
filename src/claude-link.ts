@@ -566,7 +566,7 @@ export class ClaudeLink {
   private claudeCmd(uid: number, n: number, args: string[]): Promise<CmdResult> {
     if (this.serverLogin(uid)) {
       const env = this.hostEnv(this.hostFolder(uid, n));
-      return execResult(resolveClaude(this.claudeBin), args, { env, timeout: 30_000 }).then((r) => ({ code: r.code, stdout: r.out, stderr: r.err }));
+      return execResult(resolveClaude(this.claudeBin), args, { env, timeout: 30_000 }).then((r) => ({ code: r.code, stdout: r.out, stderr: r.err || r.fail }));
     }
     return this.containers.exec(this.name(uid), [resolveClaude(this.claudeBin), ...args], { env: { CLAUDE_CONFIG_DIR: join(this.home, accountDir(n)) }, timeout: 30_000 });
   }

@@ -352,7 +352,7 @@ export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCh
   };
 }
 
-const run = (bin: string, args: string[], timeout = 60_000) => execResult(bin, args, { timeout, maxBuffer: 4 * 1024 * 1024 });
+const run = (bin: string, args: string[], timeout = 60_000) => execResult(bin, args, { timeout, maxBuffer: 4 * 1024 * 1024 }).then((r): Ran => ({ code: r.code, out: r.out, err: r.err || (r.fail && !r.out ? r.fail : '') }));
 
 export class AppServices {
   readonly opts: ServiceOptions;

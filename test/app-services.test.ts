@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
-import { AppServices, heavyWaited, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
+import { AppServices, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
 import { fakeSystemd } from './helpers.ts';
 
@@ -18,6 +18,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const heavyDir = join(root, 'heavy');
 process.env.CITADEL_HEAVY_DIR = heavyDir;
 process.env.CITADEL_HEAVY_MAX_PRESSURE = '101'; // the box's own load doesn't hold these up
+process.env.CITADEL_HEAVY_POLL = '0.1';
 const heavyHistory = () => (existsSync(join(heavyDir, 'history')) ? readFileSync(join(heavyDir, 'history'), 'utf8') : '');
 
 const MANIFEST = {
@@ -116,20 +117,6 @@ beforeEach(() => {
   mkdirSync(unitDir, { recursive: true });
   fake = fakeSystemd(join(root, `systemd${n}`));
   services = new AppServices(opts());
-});
-
-test("a step's wait in line for a heavy slot is read from citadel-heavy's history, so it doesn't count against build_timeout (#847)", async () => {
-  const began = Date.now();
-  const stamp = (ms: number) => spawnSync('date', [`-d@${Math.floor(ms / 1000)}`, '+%FT%T%z'], { encoding: 'utf8' }).stdout.trim();
-  mkdirSync(heavyDir, { recursive: true });
-  appendFileSync(join(heavyDir, 'history'), [
-    `${stamp(began - 60_000)}\twait-app deploy\tsh -c old\tslots\t99\t1\t0\t5\n`,
-    `${stamp(began)}\tother deploy\tsh -c x\tslots\t50\t1\t0\t5\n`,
-    `${stamp(began + 1000)}\twait-app deploy\tsh -c make\tslots\t42\t3\t0\t5\n`,
-  ].join(''));
-  assert.equal(await heavyWaited('wait-app deploy', began), 42, 'its own line from this step, in the +hhmm timestamps the script writes');
-  assert.equal(await heavyWaited('wait-app deploy', began + 10 * 60_000), 0, 'none since the step began');
-  assert.equal(await heavyWaited('nobody deploy', began), 0);
 });
 
 test("disk use (#847): measured in the background with each manifest's warning line, the free disk read on demand", async () => {
@@ -379,9 +366,51 @@ test('a first deploy clones, builds without Citadel\'s environment, installs and
     assert.ok(fake.calls().includes(`--user restart citadel-app-${name}.service`));
     // Each step in its own unit, out of Citadel's cgroup, and in a heavy slot named for the app (#847).
     assert.equal(fake.calls().filter((x) => x.startsWith(`run --user --wait --collect --unit=citadel-build-${name}.service `)).length, 3);
-    assert.equal(heavyHistory().split('\n').filter((l) => l.split('\t')[1] === `${name} deploy`).length, 3, heavyHistory());
+    assert.equal(heavyHistory().split('\n').filter((l) => l.split('\t')[1] === `${name} deploy`).length, 1, `one hold for all three steps (#885): ${heavyHistory()}`);
+    assert.match(env, /^CITADEL_HEAVY_HELD=1$/m, 'a step that calls citadel-heavy itself runs in the deploy\'s slot');
     assert.ok(!existsSync(join(home, 'deploy-logs', name, 'deploying.json')), 'its marker goes when it ends');
   } finally {
+    svc.close();
+  }
+});
+
+// #885: each step waited in line on its own, behind minions' suites, 15-20 min a step for seconds of work.
+test("a deploy build holds one heavy slot for all its steps and goes ahead of minions' jobs waiting in line", async () => {
+  const name = `app${++repoN}`;
+  const order = join(root, `${name}-order`);
+  const go = join(root, `${name}-go`);
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([`echo step1 >> '${order}'`, `sleep 0.3; echo step2 >> '${order}'`]) });
+  writeFileSync(join(heavyDir, 'slots'), '1\n');
+  const heavyJob = (who: string, script: string) => {
+    const child = spawn(opts().heavy, ['sh', '-c', script], { env: { ...process.env, CITADEL_HEAVY_WHO: who }, stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    child.stderr!.on('data', (b) => (err += b));
+    return { err: () => err, done: new Promise((ok) => child.on('close', ok)) };
+  };
+  const until = async (what: string, check: () => boolean) => {
+    for (let i = 0; i < 400 && !check(); i++) await new Promise((ok) => setTimeout(ok, 25));
+    assert.ok(check(), `timed out waiting for ${what}`);
+  };
+  const svc = await listening();
+  const suite = heavyJob('suite', `touch '${order}-up'; i=0; while [ ! -e '${go}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done`);
+  try {
+    await until('the slot held', () => existsSync(`${order}-up`));
+    const minion = heavyJob('Peek #4', `echo minion >> '${order}'`);
+    await until('a minion job at the head of the line', () => /are busy/.test(minion.err()));
+    services.deploy({ ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow, 'Cara');
+    const deployWaits = () => readdirSync(heavyDir).some((f) => f.startsWith('wait-') && readFileSync(join(heavyDir, f), 'utf8').startsWith(`${name} deploy\n`));
+    await until('the deploy waiting for the slot', deployWaits);
+    await new Promise((ok) => setTimeout(ok, 300));
+    writeFileSync(go, '');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    await minion.done;
+    assert.equal(readFileSync(order, 'utf8'), 'step1\nstep2\nminion\n', 'the deploy went first and kept the slot between its steps');
+  } finally {
+    writeFileSync(go, '');
+    await suite.done;
+    rmSync(join(heavyDir, 'slots'), { force: true });
     svc.close();
   }
 });

@@ -10,7 +10,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
+import { agentToken, bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'overlord-'));
 const data = join(root, 'data');
@@ -103,6 +103,33 @@ test("the Overlord hears of every start, and gets a card when one reads like ano
   const solo = await start(Solo.id, 'Retry loop in land.sh after a refused push');
   await new Promise((r) => setTimeout(r, 500));
   assert.ok(!mail(soloTm.id).some((t) => t.includes(`#${solo.number}`)));
+});
+
+test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't; an answer reaches every other Taskmaster as held mail", async () => {
+  const ownCara = db.coordinatorFor(Shared.id, Cara.id)!;
+  const ownJosh = db.coordinatorFor(Shared.id, Josh.id)!;
+  const ask = async (ticketId: number) => {
+    const res = await fetch(`${srv.base}/api/tickets/${ticketId}/questions`, {
+      method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, ticketId)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questions: [{ question: 'Who takes the pipeline lane next?', options: [{ label: 'Josh', recommended: true }, { label: 'Cara' }] }] }),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { id: string }).id;
+  };
+  const card = (ticketId: number, id: string) => cards(ticketId).find((c) => c.id === id);
+  const lordCard = await ask(overlord.id);
+  assert.equal(card(overlord.id, lordCard).everyone, true);
+  const ownCard = await ask(ownJosh.id);
+  assert.equal(card(ownJosh.id, ownCard).everyone, undefined);
+
+  const res = await fetch(`${srv.base}/api/tickets/${overlord.id}/answer`, {
+    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: lordCard, answers: [{ selected: ['Josh'] }] }),
+  });
+  assert.equal(res.status, 202);
+  for (const tm of [ownCara, ownJosh]) {
+    const got = await until(() => mail(tm.id), (m) => m.some((t) => t.includes('Who takes the pipeline lane next?')));
+    assert.ok(got.some((t) => /Cara answered the Overlord's card[\s\S]*→ Josh/.test(t)), got.join('\n'));
+  }
 });
 
 test("an Overlord turn runs for whoever started it, else the scheme's owner, never its last person (Cara's R4)", () => {

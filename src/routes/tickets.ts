@@ -633,6 +633,7 @@ export const ticketRoutes: Route[] = [
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
       deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, { answer: { questionId: body.questionId, answers } });
+      runner.echoOverlordAnswer(ticket, session.name, text);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },
@@ -751,6 +752,7 @@ export const ticketRoutes: Route[] = [
       const result = { status: body.verdict === 'approve' ? 'approved' : fixed ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });
       runner.emit(id, 'plan_result', { id: card.id, ...result });
+      runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? 'Approved' : `Sent back${notes ? `: ${notes}` : ''}`}`);
       deliverAnswer(app, id, session.name, card.releaseKey
         ? notes === null
           ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`

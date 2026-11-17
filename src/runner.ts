@@ -59,6 +59,7 @@ export function schemeRefs(project: Project, projects: Project[], tickets: Ticke
 
 /** The chat event kinds that post or settle a card waiting on people (a person's message answers one). */
 const CARD_KINDS = new Set(['question', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
+const OPEN_CARDS = new Set(['question', 'plan', 'approval']);
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -2357,8 +2358,21 @@ export class Runner {
       const user = m.from ? this.store.getUser(p) : null;
       return user && !this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? project.owner_id : p;
     }
-    const overlord = ticket.kind === 'coordinator' && ticket.coordinator_of == null && this.store.isSplit(project.id);
-    return (overlord ? null : ticket.person_id) ?? project.owner_id;
+    return (this.isOverlord(ticket) ? null : ticket.person_id) ?? project.owner_id;
+  }
+
+  /** Whether `ticket` is a split scheme's Overlord (#919, #921): the Taskmaster that is nobody's own, beside one per person. */
+  isOverlord(ticket: Ticket | undefined): boolean {
+    return !!ticket && ticket.kind === 'coordinator' && ticket.coordinator_of == null && this.store.isSplit(ticket.project_id);
+  }
+
+  /** An answer to an Overlord's card wakes only the Overlord; each person's own Taskmaster hears it as held mail (#921). */
+  echoOverlordAnswer(overlord: Ticket, by: string, text: string) {
+    if (!this.isOverlord(overlord)) return;
+    const line = text.length > 600 ? text.slice(0, 600) + '…' : text;
+    for (const tm of this.store.listCoordinators(overlord.project_id)) {
+      if (tm.id !== overlord.id) this.leaveMail(tm.id, by, `(for your tracking; nothing to do) ${by} answered the Overlord's card:\n${line}`);
+    }
   }
 
   private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0) {
@@ -3542,6 +3556,8 @@ export class Runner {
   }
 
   emit(ticketId: number, kind: string, data: unknown): EventRow {
+    // A split scheme's Overlord asks for everyone (#921): its cards show in every member's chat (#920 reads the flag).
+    if (OPEN_CARDS.has(kind) && this.isOverlord(this.store.getTicket(ticketId))) data = { ...(data as object), everyone: true };
     const row = this.store.addEvent(ticketId, kind, data);
     this.broadcast({ type: 'event', event: row });
     if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId);

@@ -249,6 +249,36 @@
   "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
+ "POST /api/contraptions/jobs": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "GET /api/contraptions/jobs/1": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "POST /api/contraptions/jobs/1/stop": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
  "GET /api/contraptions/media": {
   "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
@@ -629,6 +659,66 @@
   "m1": "404 This link has expired or was already used. Ask for a new one.",
   "m2": "404 This link has expired or was already used. Ask for a new one."
  },
+ "GET /api/jobs/1": {
+  "anon": "401 Not logged in",
+  "person": "404 No job #1",
+  "member": "404 No job #1",
+  "outsider": "404 No job #1",
+  "tmA": "403 Only people decide on a machine's jobs",
+  "tmB": "403 Only people decide on a machine's jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/jobs/1/go": {
+  "anon": "401 Not logged in",
+  "person": "400 choice must be hours, now, always or no",
+  "member": "400 choice must be hours, now, always or no",
+  "outsider": "400 choice must be hours, now, always or no",
+  "tmA": "403 Only people decide on a machine's jobs",
+  "tmB": "403 Only people decide on a machine's jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/jobs/1/pause": {
+  "anon": "401 Not logged in",
+  "person": "404 No job #1",
+  "member": "404 No job #1",
+  "outsider": "404 No job #1",
+  "tmA": "403 Only people decide on a machine's jobs",
+  "tmB": "403 Only people decide on a machine's jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/jobs/1/resume": {
+  "anon": "401 Not logged in",
+  "person": "404 No job #1",
+  "member": "404 No job #1",
+  "outsider": "404 No job #1",
+  "tmA": "403 Only people decide on a machine's jobs",
+  "tmB": "403 Only people decide on a machine's jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/jobs/1/run-now": {
+  "anon": "401 Not logged in",
+  "person": "404 No job #1",
+  "member": "404 No job #1",
+  "outsider": "404 No job #1",
+  "tmA": "403 Only people decide on a machine's jobs",
+  "tmB": "403 Only people decide on a machine's jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/jobs/1/stop": {
+  "anon": "401 Not logged in",
+  "person": "404 No job #1",
+  "member": "404 No job #1",
+  "outsider": "404 No job #1",
+  "tmA": "403 Only people decide on a machine's jobs",
+  "tmB": "403 Only people decide on a machine's jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/login": {
   "anon": "400 Login is required",
   "person": "400 Login is required",
@@ -729,6 +819,26 @@
   "m1": "401 Not a running contraption turn",
   "m2": "401 Not a running contraption turn"
  },
+ "PATCH /api/machines/:m/job-settings": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "403 Only mx's owner or an admin can change its job hours",
+  "outsider": "403 Only mx's owner or an admin can change its job hours",
+  "tmA": "403 Only people decide on a machine's jobs",
+  "tmB": "403 Only people decide on a machine's jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/machines/:m/jobs": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people decide on a machine's jobs",
+  "tmB": "403 Only people decide on a machine's jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/machines/:m/session": {
   "anon": "401 Not logged in",
   "person": "403 Only a minion's turn can use a machine",
@@ -770,6 +880,36 @@
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
  },
  "POST /api/machines/info": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "GET /api/machines/job-input": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/job-state": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/job-upload": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",
   "member": "401 Unknown machine token; make a new one in the Machines panel",
@@ -2102,6 +2242,36 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/jobs": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only the minion and its scheme's people read its jobs",
+  "tmB": "403 Only the minion and its scheme's people read its jobs",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/jobs": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion queues jobs here",
+  "member": "403 Only a minion queues jobs here",
+  "outsider": "403 Only a minion queues jobs here",
+  "tmA": "403 Only a minion queues jobs here",
+  "tmB": "403 Only a minion queues jobs here",
+  "m1": "400 machine is required: the machine's name",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/jobs/1/stop": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion queues jobs here",
+  "member": "403 Only a minion queues jobs here",
+  "outsider": "403 Only a minion queues jobs here",
+  "tmA": "403 Only a minion queues jobs here",
+  "tmB": "403 Only a minion queues jobs here",
+  "m1": "404 No job #1",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/land": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can land its branch",
@@ -2689,6 +2859,36 @@
   "outsider": "404 No such minion",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/jobs": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only the minion and its scheme's people read its jobs",
+  "tmB": "403 Only the minion and its scheme's people read its jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/jobs": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion queues jobs here",
+  "member": "403 Only a minion queues jobs here",
+  "outsider": "403 Only a minion queues jobs here",
+  "tmA": "403 Only a minion queues jobs here",
+  "tmB": "403 Only a minion queues jobs here",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/jobs/1/stop": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion queues jobs here",
+  "member": "403 Only a minion queues jobs here",
+  "outsider": "403 Only a minion queues jobs here",
+  "tmA": "403 Only a minion queues jobs here",
+  "tmB": "403 Only a minion queues jobs here",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

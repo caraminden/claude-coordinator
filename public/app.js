@@ -5,6 +5,7 @@ import { app, reloadNow, renderInvite, renderUsage, start, usage } from './core.
 import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
 import { mountDialogs } from './ui/dialog.js';
+import { wcoHint } from './wco-hint.js';
 
 // ---------- boot ----------
 
@@ -66,3 +67,5 @@ if (matchMedia('(display-mode: standalone), (display-mode: window-controls-overl
   const viewport = document.querySelector('meta[name=viewport]');
   viewport.content += ', interactive-widget=resizes-content';
 }
+// Once, in the installed app with its title bar showing: where the ⌃ that hides it is.
+wcoHint();

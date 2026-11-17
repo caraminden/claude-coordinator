@@ -246,6 +246,28 @@ test('the window controls take the page colour from the first load, and a browse
 
 // #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through
 // background (the Taskmaster chat's after #693) once came back from the canvas as #000000, a black strip.
+test('the installed app shows the title bar hint once: gone for good on close or when the title bar is hidden, never in a tab', { skip }, async () => {
+  const page = await open();
+  // Headless Chromium has no app window, so the overlay and the display-mode query are stand-ins that fire like the real ones.
+  const run = (expr: string) => page.eval(`(async () => {
+    const { wcoHint } = await import('/wco-hint.js');
+    const fake = (k, v) => Object.assign(new EventTarget(), { [k]: v });
+    window.wco ??= fake('visible', false);
+    window.installed ??= fake('matches', true);
+    window.start = () => wcoHint(wco, installed);
+    window.hint = () => !!document.querySelector('.wco-hint');
+    return ${expr};
+  })()`);
+  await run('(localStorage.clear(), installed.matches = false, start(), hint())').then((v) => assert.equal(v, false, 'a browser tab gets no hint'));
+  assert.equal(await run('(installed.matches = true, installed.dispatchEvent(new Event("change")), hint())'), true, 'installing from the tab shows it without a reload');
+  assert.equal(await run('(document.querySelector(".wco-hint button").click(), hint())'), false, 'its ✕ closes it');
+  assert.equal(await run('(start(), hint())'), false, 'and it stays closed on the next launch');
+  assert.equal(await run('(localStorage.clear(), start(), hint())'), true, 'a fresh profile shows it again');
+  assert.equal(await run('(wco.visible = true, wco.dispatchEvent(new Event("geometrychange")), hint())'), false, 'hiding the title bar takes it away');
+  assert.equal(await run('(wco.visible = false, start(), hint())'), false, 'and for good, even with the title bar back');
+  assert.equal(await run('(localStorage.clear(), wco.visible = true, start(), hint())'), false, 'an app that opens with it hidden needs no hint');
+});
+
 test('the window controls keep the base colour for a see-through background and take an opaque one', { skip }, async () => {
   for (const [dark, baseColour] of [[false, '#f6f5f2'], [true, '#161514']] as const) {
     const page = await browser.page(base, { dark });

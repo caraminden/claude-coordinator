@@ -286,15 +286,3 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .my-layers > .l-scheme { border-left-color: var(--cat-2); }
 .my-layers > .l-mine { border-left-color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 8%, var(--panel)); }
 .my-limits { margin: 0.3rem 0 0; padding-left: 1.2rem; max-width: 75ch; }
-/* Settings → App turns (#844): one card per model call, its texts in collapsed sections. */
-.turn-filter { margin: 0.75rem 0 0; }
-.turn-note { font-size: 0.85em; max-width: 75ch; }
-.turn-filter select { width: auto; }
-.turn-list { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.75rem 0 1rem; }
-.turn-row { padding: 0.5rem 0.6rem; border-radius: 6px; border: 1px solid var(--line); }
-.turn-head { display: flex; gap: 0.4rem 0.5rem; align-items: center; flex-wrap: wrap; }
-.turn-head .name { font-weight: 600; }
-.turn-head .meta { color: var(--muted); font-size: 0.8em; }
-.turn-reason { margin: 0.3rem 0 0; }
-.turn-text > summary { cursor: pointer; padding: max(0.2rem, var(--tap-pad)) 0; font-size: 0.9em; }
-.turn-text > pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; margin: 0.2rem 0 0.4rem; }

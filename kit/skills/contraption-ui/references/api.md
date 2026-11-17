@@ -208,9 +208,8 @@ else's plan. Citadel keeps a meter (contraption, person, session name, start, en
 counts), the session names, and for 14 days the turn's audit: the system text and prompt as sent
 (with any messages sent during the turn), the reply's text, the model that ran, whether it ran
 blind, how many images went with it (never the images) and your verdict. Each text over 100,000
-characters is cut there, with a note saying how much. Your home scheme's members read the audit in
-Settings → App turns and its Taskmaster with its `contraption_turns` tool; nobody else does (not its
-minions), and it is never logged anywhere else, though Citadel's own
+characters is cut there, with a note saying how much. Your home scheme's Taskmaster reads the audit with its `contraption_turns` tool (ask it); nobody
+else does (not its minions), and it is never logged anywhere else, though Citadel's own
 database backups hold it as long as they are kept. It holds no tool calls or tool results.
 Deleting a session deletes its audit rows (tested).
 
@@ -337,8 +336,8 @@ Body `{ "person": 3, "text": "…" }`, the turn's own person (tested).
 
 ### Verdict: `POST /api/contraptions/turns/<turn>/verdict`
 
-Optional. After you check a turn's reply, say whether you used it, so your scheme's members can see
-on Settings → App turns whether the model's words reached your people. Body `{ "verdict": "pass" }`
+Optional. After you check a turn's reply, say whether you used it, so your scheme's Taskmaster can see
+in the audit whether the model's words reached your people. Body `{ "verdict": "pass" }`
 when the reply passed your check and you used it, or `{ "verdict": "fallback", "reason": "named a
 person" }` when you used your own rule text in its place. `reason` is optional, up to 2000
 characters; say which check failed, not the player's words. A later call replaces the earlier one.
@@ -837,8 +836,8 @@ Newest first.
 
 - **2026-11-16:** `GET /api/contraptions/secrets/<name>?person=` reads a password or key a person saved
   in Citadel, theirs first, then your home scheme's ("Saved secrets").
-- **2026-11-16:** Citadel keeps each turn's text for 14 days for your home scheme's members
-  (Settings → App turns) and its Taskmaster (`contraption_turns`) to read, and `POST /api/contraptions/turns/<turn>/verdict` records whether your
+- **2026-11-16:** Citadel keeps each turn's text for 14 days for your home scheme's Taskmaster
+  to read (`contraption_turns`), and `POST /api/contraptions/turns/<turn>/verdict` records whether your
   check passed the reply or you fell back to your own text ("Verdict").
 - **2026-11-16:** `POST /api/contraptions/spend` books what an outside API cost to the home scheme's
   monthly bill, with an optional cap that warns without stopping ("Spend on outside APIs").

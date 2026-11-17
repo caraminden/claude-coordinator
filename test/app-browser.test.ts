@@ -47,11 +47,13 @@ before(async () => {
     if (path === '/') return res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
     const file = normalize(join(pub, path));
     if (!file.startsWith(pub) || !file.endsWith('.js')) return res.writeHead(404).end();
+    let body: Buffer;
     try {
-      res.writeHead(200, { 'content-type': 'text/javascript' }).end(readFileSync(file));
+      body = readFileSync(file);
     } catch {
-      res.writeHead(404).end();
+      return res.writeHead(404).end(); // read first: a 200 already sent can't become a 404, and the import would hang
     }
+    res.writeHead(200, { 'content-type': 'text/javascript' }).end(body);
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
@@ -244,8 +246,6 @@ test('the window controls take the page colour from the first load, and a browse
   assert.ok(metas.length && metas.every((m) => /\(display-mode: (standalone|window-controls-overlay)\)/.test(m.media)), 'each names an installed display mode, so tabs stay as they were');
 });
 
-// #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through
-// background (the Taskmaster chat's after #693) once came back from the canvas as #000000, a black strip.
 test('the installed app shows the title bar hint once: gone for good on close or when the title bar is hidden, never in a tab', { skip }, async () => {
   const page = await open();
   // Headless Chromium has no app window, so the overlay and the display-mode query are stand-ins that fire like the real ones.
@@ -268,6 +268,8 @@ test('the installed app shows the title bar hint once: gone for good on close or
   assert.equal(await run('(localStorage.clear(), wco.visible = true, start(), hint())'), false, 'an app that opens with it hidden needs no hint');
 });
 
+// #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through
+// background (the Taskmaster chat's after #693) once came back from the canvas as #000000, a black strip.
 test('the window controls keep the base colour for a see-through background and take an opaque one', { skip }, async () => {
   for (const [dark, baseColour] of [[false, '#f6f5f2'], [true, '#161514']] as const) {
     const page = await browser.page(base, { dark });

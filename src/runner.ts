@@ -1966,15 +1966,23 @@ export class Runner {
     return coordinator ? [minion.id, coordinator.id] : [minion.id];
   }
 
+  /** Waiting on a person (an approval or a card): its silence is theirs, not the turn's. */
+  private waitsOnPerson(ticketId: number) {
+    return this.approvals.waiting(ticketId) || this.store.openCardAt(ticketId) !== null;
+  }
+
   /** Since when the turn has been quiet (src/quiet.ts), or null. */
-  private quietSince(live: LiveTurn, now = Date.now()): number | null {
+  private quietSince(ticketId: number, live: LiveTurn, now = Date.now()): number | null {
+    if (this.waitsOnPerson(ticketId)) return null;
     const at = quietAt(live.activity);
     return now >= at ? at : null;
   }
 
   /** Save and show a turn going quiet or talking again: the list's chip and the requester's Needs you read it. */
-  private checkQuiet(ticketId: number, live: LiveTurn) {
-    const since = this.quietSince(live);
+  private checkQuiet(ticketId: number, live: LiveTurn, now = Date.now()) {
+    // The quiet clock restarts once the person answers: a tool held for approval starts then.
+    if (this.waitsOnPerson(ticketId)) live.activity = { at: now, tools: live.activity.tools.map((t) => ({ ...t, started: now })) };
+    const since = this.quietSince(ticketId, live, now);
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     if (!turn || (turn.quiet ?? null) === since) return;
     this.saveTurn(ticketId, { quiet: since ?? undefined });
@@ -1986,7 +1994,7 @@ export class Runner {
     const live = this.turns.get(ticketId);
     if (!live) return null;
     const tool = longestTool(live.activity);
-    return { at: live.activity.at, tool: tool && { name: tool.name, label: tool.label, started: tool.started, limit: tool.limit }, quiet_since: this.quietSince(live) };
+    return { at: live.activity.at, tool: tool && { name: tool.name, label: tool.label, started: tool.started, limit: tool.limit }, quiet_since: this.quietSince(ticketId, live) };
   }
 
   /** "Is this still going?" (#906): a look at the running turn's process, read from /proc; no message, no model call. */
@@ -3059,7 +3067,7 @@ export class Runner {
     const live = this.turns.get(ticketId);
     if (live) {
       live.activity = noteEvent(live.activity, ev, Date.now());
-      if (this.quietSince(live) === null && this.store.getSetting<TurnState>(turnKey(ticketId))?.quiet) this.checkQuiet(ticketId, live);
+      if (this.quietSince(ticketId, live) === null && this.store.getSetting<TurnState>(turnKey(ticketId))?.quiet) this.checkQuiet(ticketId, live);
     }
     // A keepalive (#862) shows nothing: only its session id and its cost are kept.
     if (this.keepalives.has(ticketId)) {

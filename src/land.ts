@@ -456,11 +456,11 @@ export class LandHandoffs {
     }
     // Someone wrote while it was in line (a person, a relay): the minion answers them before it goes.
     if (this.d.landings.wasTalked(id)) {
-      if (r.kind !== 'restart') {
+      if (r.kind !== 'restart' || h.stayOpen) {
         store.updateTicket(id, { state: null, note: null });
         runner.broadcastTicket(id);
       }
-      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`);
+      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`);
       return;
     }
     if (h.stayOpen) {

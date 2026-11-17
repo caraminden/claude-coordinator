@@ -1916,7 +1916,7 @@ async function runTool(name: string, args: any): Promise<string> {
       for (const k of ['summary', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       await call('POST', `/api/tickets/${TICKET}/land/handoff`, body);
-      return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state: the server posts the shipped line and dismisses this minion (or sets pending-deploy) on a clean land, or wakes you with the end of its output if it fails.';
+      return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state: the server posts the shipped line and ' + (args.stay_open === true ? 'leaves this minion open (stay_open)' : 'dismisses this minion (or sets pending-deploy)') + ' on a clean land, or wakes you with the end of its output if it fails.';
     }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).

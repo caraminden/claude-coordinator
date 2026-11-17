@@ -112,6 +112,15 @@ test('stay_open: a clean land still posts the shipped line but never dismisses, 
   assert.ok(!restart.did.some((d) => d.startsWith('close')));
 });
 
+test('stay_open with a restart and a person who wrote in line: the message never says pending-deploy', async () => {
+  const s = setup('stay-talked');
+  await s.land(RESTART, 0, { stayOpen: true });
+  s.landings.talked(1);
+  assert.ok(s.landings.wasTalked(1));
+  await s.handoffs.poll();
+  assert.ok(!s.sent.some((m) => /pending-deploy/.test(m)), s.sent.join('\n'));
+});
+
 test('stay_open does not change a failed land: it wakes the minion with the output', async () => {
   const s = setup('stay-failed');
   await s.land('land: conflict\n', 1, { stayOpen: true });

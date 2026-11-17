@@ -352,7 +352,14 @@ test('a minion with an owner pings its owner, whoever pinned it and devices set 
   // No owner, the Taskmaster, and an owner who left the scheme: everyone, as before.
   const all = ['Ada', 'Cara', 'Cody', 'Josh'];
   assert.deepEqual(await who(mk('Nobody\'s')), all);
-  assert.deepEqual(await who(mk('Taskmaster', 'Josh', 'coordinator')), all);
+  const tm = mk('Taskmaster', 'Josh', 'coordinator');
+  assert.deepEqual(await who(tm), all);
+  // A split scheme's own Taskmasters (#919) ping their person, as their cards are in that person's Needs you alone.
+  const joshTm = store.splitScheme(p.id, store.findUser('name', 'Josh')!.id);
+  assert.deepEqual(await who(joshTm), ['Cody', 'Josh'], "Josh's Taskmaster");
+  assert.deepEqual(await who(store.getTicket(tm.id)!), ['Cara', 'Cody'], "the old row is Cara's now");
+  assert.deepEqual(await who(store.getOverlord(p.id)!), all, 'the Overlord is everyone\'s');
+  assert.deepEqual(await who(joshTm, { kind: 'question', questions: [{ question: 'Ada?' }], to: 'Ada' }), ['Ada'], 'a card to Ada still goes to her');
   assert.deepEqual(await who(mk('Gone', 'Someone')), all, 'an owner who is nobody here');
   const leaving = mk('Leaving', 'Josh');
   store.removeMember(p.id, store.findUser('name', 'Josh')!.id);

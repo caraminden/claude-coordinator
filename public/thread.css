@@ -210,8 +210,8 @@ a.file-chip:hover { border-color: var(--muted); }
 /* When a message or card was posted, after its who-line */
 .who .stamp { margin-left: 0.4rem; color: var(--muted); font-weight: normal; font-variant-numeric: tabular-nums; }
 /* "into the running turn", "queued for the next turn" with its ✕, "taken back by …" */
-.msg .who .msg-tag { margin-left: 0.4rem; display: inline-flex; align-items: center; gap: 0.3rem; }
-.msg .who .msg-tag::before { content: '·'; margin-right: 0.1rem; }
+.who .msg-tag { margin-left: 0.4rem; display: inline-flex; align-items: center; gap: 0.3rem; }
+.who .msg-tag::before { content: '·'; margin-right: 0.1rem; }
 .msg .who .take-back { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); border: 1px solid var(--control-line); font-size: 0.75rem; line-height: 1; }
 .msg .who .take-back:hover, .msg .who .take-back:focus-visible { color: var(--ink); border-color: var(--accent); }
 .msg.user.withdrawn { opacity: 0.55; }

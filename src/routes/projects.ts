@@ -1150,7 +1150,7 @@ export const projectRoutes: Route[] = [
       }
       app.broadcast({ type: 'claims', projectId: project.id });
       const view = claimView(app, claim);
-      app.store.noteDigest(project.id, caller?.id ?? holder.id, `${session.name} claimed ${name} for ${view.holder_name}${note ? ` (${note})` : ''}`);
+      if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? holder.id, `${session.name} claimed ${name} for ${view.holder_name}${note ? ` (${note})` : ''}`);
       return json(res, 201, { claim: view });
     },
   },
@@ -1161,7 +1161,7 @@ export const projectRoutes: Route[] = [
       const view = released && claimView(app, released);
       if (view) {
         app.broadcast({ type: 'claims', projectId: project.id });
-        app.store.noteDigest(project.id, caller?.id ?? view.holder, `${session.name} released ${view.name} (held by ${view.holder_name})`);
+        if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? view.holder, `${session.name} released ${view.name} (held by ${view.holder_name})`);
       }
       return json(res, 200, { released: view || null });
     },

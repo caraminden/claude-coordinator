@@ -2351,10 +2351,12 @@ export class Runner {
    * A split scheme's Overlord has no last person (Cara's R4, "Starter, else owner", #921): it is nobody's own.
    */
   private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[]): number | null {
-    // A person's own Taskmaster (#919) runs for them; a card answered there by someone else wakes it on theirs (R5).
+    // A person's own Taskmaster (#919) runs for its person, but never on someone else's request: a turn another person
+    // starts there (a card answer, R5, a plan verdict, a file comment, /backup) runs on their login. Relays and held mail
+    // name no person, so they leave it on the owner's.
     if (ticket.kind === 'coordinator' && ticket.coordinator_of != null) {
-      const answer = batch.find((m) => m.own && !m.typed && !m.from);
-      const p = (answer && this.personOf?.(answer.author)) || ticket.coordinator_of;
+      const starter = batch.find((m) => !m.from && this.personOf?.(m.author));
+      const p = (starter && this.personOf?.(starter.author)) || ticket.coordinator_of;
       // #211: someone taken out of the scheme (or deleted) no longer pays for its turns; its owner does.
       const user = this.store.getUser(p);
       return user && this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? p : project.owner_id;

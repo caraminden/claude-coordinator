@@ -185,7 +185,10 @@ test("a personal Taskmaster's turns run for its person; a card answer from someo
   runner.personOf = (author) => store.findUser('name', author)?.id ?? null;
   const turnPerson = (t: any, batch: any[]) => (runner as any).turnPerson(t, store.getProject(p.id), batch);
   assert.equal(turnPerson(josh, []), Josh.id);
-  assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'hi', images: [], typed: true, own: true }]), Josh.id, "someone else's words are content");
+  // Never one person's request on another's login: Cara's typed words (/backup), plan verdict or file comment run on hers.
+  assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'hi', images: [], typed: true, own: true }]), Cara.id, "Cara's typing runs on her login");
+  assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'Plan approved', images: [] }]), Cara.id, 'a plan verdict or comment too');
+  assert.equal(turnPerson(josh, [{ author: 'Held mail from Cara, sent 2026-11-17 22:00 UTC', text: 'fyi', images: [] }]), Josh.id, 'held mail names no person');
   assert.equal(turnPerson(josh, [{ author: '#4 Work', text: 'done', images: [], from: 12 }]), Josh.id);
   assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'My answers', images: [], own: true }]), Cara.id);
   // #211: taken out of the scheme, Josh no longer pays for his old Taskmaster's turns; the owner does.
@@ -280,6 +283,12 @@ function describeServer() {
     const overlord = db.getOverlord(Shared.id)!;
     await post(`/api/tickets/${overlord.id}/messages`, { text: 'for the Overlord', after: true }, { cookie: cookies(Josh) });
     assert.ok(said(overlord.id, 'for the Overlord'));
+    // A member with no Taskmaster yet who writes to the Overlord gets their own made, and the words land there.
+    await post(`/api/tickets/${overlord.id}/messages`, { text: 'Rachel to the Overlord', after: true }, { cookie: cookies(Rachel) });
+    const rachel = db.coordinatorFor(Shared.id, Rachel.id)!;
+    assert.equal(rachel.coordinator_of, Rachel.id);
+    assert.ok(said(rachel.id, 'Rachel to the Overlord'));
+    assert.equal(said(overlord.id, 'Rachel to the Overlord'), undefined);
     // The scheme page opens each person's own Taskmaster, as the scheme list does.
     const page = async (u: { id: number; name: string }) => (await (await fetch(`${srv.base}/api/projects/${Shared.id}?tickets=open`, { headers: { Cookie: cookies(u) } })).json()).coordinator.id;
     assert.equal(await page(Josh), josh.id);

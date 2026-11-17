@@ -199,7 +199,9 @@ export class Pusher {
     const msg = notificationFor(ticket, trigger, project?.name);
     if (!msg) return;
     const to = 'to' in trigger && trigger.to ? trigger.to.toLowerCase() : null;
-    const owner = !to && ticket.kind === 'ticket' ? this.owner(ticket) : null;
+    // A person's own Taskmaster (#919) pings its person, as its cards are in their Needs you alone (src/inbox.ts).
+    const mine = ticket.kind === 'coordinator' && ticket.coordinator_of != null ? this.store.getUser(ticket.coordinator_of)?.name : undefined;
+    const owner = to ? null : ticket.kind === 'ticket' ? this.owner(ticket) : mine && this.inScheme(mine, ticket.project_id) ? mine.toLowerCase() : null;
     const also = trigger.kind === 'spend' && trigger.also ? trigger.also.toLowerCase() : null;
     const pinned = (name: string) => this.store.isTicketPinned(name, ticket.id);
     const forThem = (s: PushSubscriptionRow) => to ? s.name.toLowerCase() === to

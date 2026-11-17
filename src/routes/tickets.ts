@@ -442,8 +442,10 @@ export const ticketRoutes: Route[] = [
       const { req, res, app, session, caller } = ctx;
       const { runner } = app;
       // A person writes to their own Taskmaster (#919): one in another person's chat goes to theirs (R5, "Answer
-      // cards only"), the first from a second member splits the scheme. The Overlord takes anyone's.
-      if (!caller && ctx.ticket.kind === 'coordinator' && !(ctx.ticket.coordinator_of == null && app.store.isSplit(ctx.ticket.project_id))) {
+      // cards only"), the first from a second member splits the scheme. The Overlord takes the words of anyone who has a
+      // Taskmaster of their own (or no way to get one); a member without one gets theirs made first.
+      const overlord = ctx.ticket.coordinator_of == null && app.store.isSplit(ctx.ticket.project_id);
+      if (!caller && ctx.ticket.kind === 'coordinator' && !(overlord && app.store.coordinatorFor(ctx.ticket.project_id, session.uid)?.coordinator_of === session.uid)) {
         const own = await ensureCoordinatorFor(app, app.store.getProject(ctx.ticket.project_id)!, session.uid);
         if (own.id !== ctx.ticket.id) ctx = { ...ctx, ticket: ticketView(app, own.id) };
       }

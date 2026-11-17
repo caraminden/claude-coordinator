@@ -145,7 +145,7 @@ export function peak(samples: Float32Array, rate: number): { hz: number; dbfs: n
 
 // The page the check opens: it asks for the mic with the browser's voice processing off, records 1.5 s through an
 // AudioWorklet from a quarter second after the first sound (silence if none comes in 20 s), and posts what it got. localhost (through adb reverse) is a secure context.
-const PAGE = `<!doctype html><meta name=viewport content="width=device-width"><title>mic check</title><body style="font:20px sans-serif;padding:24px">
+const PAGE = `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><title>mic check</title><body style="font:20px sans-serif;padding:24px">
 <p id=s>asking for the microphone…</p><script type=module>
 const say = (t) => (document.getElementById('s').textContent = t);
 const post = (o) => fetch('/result', { method: 'POST', body: JSON.stringify(o) });
@@ -155,6 +155,9 @@ try {
   await ctx.audioWorklet.addModule('/worklet.js');
   const node = new AudioWorkletNode(ctx, 'grab', { processorOptions: { settle: ctx.sampleRate / 4, giveUp: ctx.sampleRate * 20, keep: ctx.sampleRate * 1.5 } });
   ctx.createMediaStreamSource(stream).connect(node);
+  // Chrome holds an AudioContext made without a tap; citadel-android up lifts that rule, an older Chrome flags file may not.
+  if (ctx.state !== 'running') await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 3000))]);
+  if (ctx.state !== 'running') throw new Error('the AudioContext stayed ' + ctx.state + ' (Chrome wants a tap first): run citadel-android down, then up');
   await fetch('/started', { method: 'POST' });
   say('recording…');
   const samples = await new Promise((r) => (node.port.onmessage = (e) => r(e.data)));
@@ -173,7 +176,7 @@ export const WORKLET = `registerProcessor('grab', class extends AudioWorkletProc
     if (!ch || this.at >= this.buf.length) return true;
     // The tone starts a moment after the page opens the mic (later on a busy box): wait for it, then let it settle.
     if (this.skip < 0) { this.giveUp -= ch.length; if (ch.some((x) => Math.abs(x) > 0.01)) this.skip = this.settle; else if (this.giveUp > 0) return true; else this.skip = 0; }
-    if (this.skip > 0) { this.skip -= ch.length; return true; }
+    if (this.skip > 0) { this.skip = Math.max(0, this.skip - ch.length); return true; }
     const n = Math.min(ch.length, this.buf.length - this.at);
     this.buf.set(ch.subarray(0, n), this.at); this.at += n;
     if (this.at >= this.buf.length) this.port.postMessage(this.buf);

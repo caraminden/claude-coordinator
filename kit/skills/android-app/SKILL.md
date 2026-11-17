@@ -177,8 +177,10 @@ citadel-android down               # when you're done
   - **`mic` waits up to 2 minutes for an app to open the mic**, then plays the file, looped to fill
     `[seconds]`, at most 600; it never plays into a phone where nothing records, because that crashes
     this emulator. So start it in the background, then make the app record.
-  - **Chrome grants the mic and camera without a prompt.** A Capacitor shell needs the permission
-    first: `adb -s emulator-5554 shell pm grant <appId> android.permission.RECORD_AUDIO`.
+  - **Chrome grants the mic and camera without a prompt,** and runs an AudioContext without a tap. A
+    Capacitor shell needs the permission first (`adb -s emulator-5554 shell pm grant <appId>
+    android.permission.RECORD_AUDIO`), and its WebView may hold an AudioContext until a tap: start
+    recording with a real tap (`adb -s emulator-5554 shell input tap <x> <y>`).
   - **The phone records at 48 kHz.** That is the trap the mic exists to catch: code that assumes
     44.1 kHz. Read the rate from the AudioContext or the track's settings, and turn off
     `echoCancellation`, `noiseSuppression` and `autoGainControl` for analysis. `mic-check` prints

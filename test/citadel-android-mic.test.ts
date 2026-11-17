@@ -165,6 +165,8 @@ test('the check page waits for the tone, lets it settle, then keeps its window; 
   assert.equal(got.length, 1024);
   assert.ok(got.every((x) => Math.abs(x) <= 0.5) && got.some((x) => Math.abs(x) > 0.4), 'the window is all tone, after the settle');
   assert.deepEqual(worklet([...silence(10)], { settle: 256, giveUp: 48000, keep: 1024 }), [], 'nothing posted while waiting');
+  // The page's own numbers: a settle of 48000 / 4 isn't a whole number of Chrome's 128-sample blocks.
+  assert.equal(worklet([...silence(5), ...tone(200)], { settle: 12000, giveUp: 960000, keep: 1024 }).length, 1, 'a settle that ends mid-block still records');
   const [quiet] = worklet(silence(20), { settle: 256, giveUp: 1024, keep: 512 });
   assert.ok(quiet && quiet.every((x) => x === 0), 'posts silence once it gives up');
 });

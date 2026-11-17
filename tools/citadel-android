@@ -185,8 +185,9 @@ up() {
   done
   # Once per boot, cheap: keep the screen on and unlocked, and skip Chrome's first-run pages so `open` lands on the URL.
   adb shell 'svc power stayon true; settings put system screen_off_timeout 2147483647; wm dismiss-keyguard' >/dev/null 2>&1
-  # --use-fake-ui-for-media-stream: pages get the mic and camera without a prompt (mic-check, #843).
-  adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run --use-fake-ui-for-media-stream" > /data/local/tmp/chrome-command-line' >/dev/null 2>&1
+  # --use-fake-ui-for-media-stream: pages get the mic and camera without a prompt; --autoplay-policy: an AudioContext
+  # runs without a tap, which no headless page gets (mic-check, #843).
+  adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run --use-fake-ui-for-media-stream --autoplay-policy=no-user-gesture-required" > /data/local/tmp/chrome-command-line' >/dev/null 2>&1
   adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1
   adb shell 'pm grant com.android.chrome android.permission.POST_NOTIFICATIONS; pm grant com.android.chrome android.permission.RECORD_AUDIO' >/dev/null 2>&1
   say "up after $((SECONDS - t0))s ($SERIAL)"

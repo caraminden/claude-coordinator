@@ -115,13 +115,18 @@ export function addAppTurnsCheck(store: Store, dataDir: string, projectId: numbe
   const key = `app_turns_check:${projectId}`;
   const p = store.getProject(projectId);
   if (!p || store.getSetting(key)) return null;
-  store.setSetting(key, now);
-  if (store.schedules.list(p.id).some((s) => s.template === 'app-turns')) return null;
   const t = templates.get('app-turns');
-  if (!t) throw new Error('kit/schedules/app-turns.md is missing');
+  // Not a throw: the caller has already saved the app. The flag stays unset, so the next boot tries again.
+  if (!t) {
+    console.error('kit/schedules/app-turns.md is missing: no app turns check added');
+    return null;
+  }
+  const has = store.schedules.list(p.id).some((s) => s.template === 'app-turns');
   const owner = p.owner_id == null ? undefined : store.getUser(p.owner_id);
   const fields = templateFields(t, p, '', templateVars(store, dataDir, p.id));
-  store.schedules.create({ project_id: p.id, ...fields, created_by: owner?.name ?? 'Citadel' }, now);
+  if (!has) store.schedules.create({ project_id: p.id, ...fields, created_by: owner?.name ?? 'Citadel' }, now);
+  store.setSetting(key, now);
+  if (has) return null;
   return `${p.name}: added "${t.name}" (${fields.cron})`;
 }
 

@@ -250,7 +250,7 @@ export function templateFields(t: ScheduleTemplate, project: Pick<Project, 'id' 
   };
 }
 
-/** Whether a minion is the run of its scheme's app turns check (kit/schedules/app-turns.md) that is working now: the one minion that reads the turn audit (#844). */
+/** Whether a minion is the latest run of its scheme's app turns check (kit/schedules/app-turns.md), until the next run replaces it: the one minion that reads the turn audit (#844). */
 export function isAppTurnsRun(store: Pick<Store, 'schedules'>, ticket: { id: number; project_id: number }): boolean {
   return store.schedules.list(ticket.project_id).some((s) => s.template === 'app-turns' && s.last_ticket_id === ticket.id);
 }

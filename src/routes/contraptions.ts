@@ -410,8 +410,8 @@ export const contraptionRoutes: Route[] = [
     return json(res, 200, { ok: true });
   }),
   // A scheme's turn audit (#844): its home apps' turns, newest first, for its own Taskmaster's contraption_turns (Cara,
-  // 2026-11-16: "Taskmaster can read it"; its page went the same day: "Remove the page"), and for the run of its weekly
-  // app turns check now working (kit/schedules/app-turns.md). Members and admins may read it too; no other minion, no app.
+  // 2026-11-16: "Taskmaster can read it"; its page went the same day: "Remove the page"), and for its weekly
+  // app turns check's latest run (kit/schedules/app-turns.md). Members and admins may read it too; no other minion, no app.
   // `?before=<turn id>` pages, `?app=` filters.
   {
     method: 'GET', path: '/api/projects/:project/contraption-turns', who: ['person', 'taskmaster', 'minion'],

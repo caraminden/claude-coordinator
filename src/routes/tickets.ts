@@ -1115,6 +1115,12 @@ export const ticketRoutes: Route[] = [
       }
       if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');
       if (body.deploy === false) h.deploy = false;
+      if (body.stay_open !== undefined && typeof body.stay_open !== 'boolean') throw new HttpError(400, 'stay_open must be true or false');
+      if (body.waiting_on !== undefined && body.stay_open !== true) throw new HttpError(400, 'waiting_on goes with stay_open: true');
+      if (body.stay_open === true) {
+        h.stayOpen = true;
+        if (body.waiting_on !== undefined) h.waitingOn = str(body.waiting_on, 'waiting_on', 120);
+      }
       let args: string[];
       try {
         args = landArgs(body, ticket.cwd);

@@ -85,6 +85,43 @@ test('a clean land waiting for the restart sets pending-deploy, and a restart al
   assert.ok(early.did.includes('deployLive'), 'its restart went live before land.sh ended: no report will come, so it is dismissed now');
 });
 
+test('stay_open: a clean land still posts the shipped line but never dismisses, live now or after the restart (#909)', async () => {
+  const live = setup('stay-live');
+  await live.land(LIVE, 0, { stayOpen: true });
+  await live.handoffs.poll();
+  assert.match(live.notes[0], /^Shipped abc1234 .* Live now\./);
+  assert.ok(!live.did.some((d) => d.startsWith('close')), live.did.join('\n'));
+  assert.equal(live.ticket.state, 'ready');
+  assert.deepEqual(live.landings.handoffs(), [], 'reported once');
+  assert.equal(live.sent.length, 0, 'no model call');
+
+  const waiting = setup('stay-parked');
+  await waiting.land(LIVE, 0, { stayOpen: true, waitingOn: 'the migration piece' });
+  await waiting.handoffs.poll();
+  assert.equal(waiting.ticket.state, 'parked');
+  assert.match(String(waiting.ticket.note), /the migration piece/);
+  assert.ok(!waiting.did.some((d) => d.startsWith('close')));
+
+  const restart = setup('stay-restart', { liveAlready: true });
+  await restart.land(RESTART, 0, { stayOpen: true });
+  await restart.handoffs.poll();
+  assert.match(restart.notes[0], /Waiting for the restart\./);
+  assert.ok(!restart.did.includes('deployPending'), 'pending-deploy would dismiss it once live');
+  assert.ok(!restart.did.includes('deployLive'));
+  assert.notEqual(restart.ticket.state, 'pending-deploy');
+  assert.ok(!restart.did.some((d) => d.startsWith('close')));
+});
+
+test('stay_open does not change a failed land: it wakes the minion with the output', async () => {
+  const s = setup('stay-failed');
+  await s.land('land: conflict\n', 1, { stayOpen: true });
+  await s.handoffs.poll();
+  assert.equal(s.sent.length, 1);
+  assert.match(s.sent[0], /didn't go through/);
+  assert.equal(s.ticket.state, null);
+  assert.ok(!s.did.some((d) => d.startsWith('close')));
+});
+
 test('a high-risk land carries its go in the shipped line', async () => {
   const s = setup('high');
   await s.land(LIVE, 0, { risk: 'high', reason: 'touches the land pipeline', go: 'Cara, 3:05 PM PST' });
@@ -395,6 +432,8 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.match((await full.json()).error, /--full yourself/);
 
     assert.equal((await handOff({ ...body, deploy: 'no' })).status, 400, 'deploy is true or false');
+    assert.equal((await handOff({ ...body, stay_open: 'yes' })).status, 400, 'stay_open is true or false');
+    assert.equal((await handOff({ ...body, waiting_on: 'x' })).status, 400, 'waiting_on goes with stay_open');
     writeFileSync(join(cwd, 'conflict'), '');
     const clash = await handOff(body);
     assert.equal(clash.status, 409, 'a branch that would conflict is sent back in the turn');

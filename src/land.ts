@@ -39,6 +39,10 @@ export interface Handoff {
   go?: string;
   /** False: the scheme's apps aren't deployed after the land (#712), for a change with nothing to serve. */
   deploy?: false;
+  /** True (#909): the brief has more pieces for this minion, so a clean land leaves it open (ready) instead of dismissing it. */
+  stayOpen?: true;
+  /** With stayOpen: what it waits on next; it is then parked, not ready. */
+  waitingOn?: string;
 }
 
 /** At most this many test files in one call: a feeder names the few its change touched. */
@@ -436,7 +440,7 @@ export class LandHandoffs {
     runner.emit(id, 'note', { text: `Shipped ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;
-    if (r.kind === 'restart') {
+    if (r.kind === 'restart' && !h.stayOpen) {
       store.updateTicket(id, { state: 'pending-deploy', note: 'deployed, live after the restart' });
       runner.deployPending(id);
       runner.broadcastTicket(id);
@@ -457,6 +461,14 @@ export class LandHandoffs {
         runner.broadcastTicket(id);
       }
       runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`);
+      return;
+    }
+    if (h.stayOpen) {
+      // More pieces to do in this minion (#909): the shipped line is out, and it stays open, ready for the next one.
+      store.updateTicket(id, h.waitingOn
+        ? { state: 'parked', note: `landed; waiting on: ${h.waitingOn}`.slice(0, 120) }
+        : { state: 'ready', note: r.kind === 'restart' ? 'landed, live after the restart; open for the next piece' : 'landed; open for the next piece' });
+      runner.broadcastTicket(id);
       return;
     }
     if (r.kind === 'restart') {

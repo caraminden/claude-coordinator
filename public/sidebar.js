@@ -330,7 +330,7 @@ export function threadRow(t, href = threadHref(t)) {
     ownerChip(t, coord),
     wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
       : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
-    t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
+    t.cost && !(share && share.startsWith('<')) ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
     bar);
 }
@@ -340,6 +340,7 @@ function ownerChip(t, coord) {
   const owner = !coord && String(t.properties?.assigned ?? '').trim();
   if (!owner) return '';
   const mine = owner.toLowerCase() === me?.toLowerCase();
+  if (mine) return ''; // your own initial on every row says nothing; only other people's mark a row (#881)
   return h('span', { class: `owner${mine ? ' mine' : ''}`, title: mine ? 'Yours' : `${owner}'s`, 'aria-label': `Owner: ${owner}` }, owner[0].toUpperCase());
 }
 

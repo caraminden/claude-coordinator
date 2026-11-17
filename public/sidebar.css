@@ -69,7 +69,8 @@
 .thread-row.yours.active, .thread-group .thread-row.yours.active { background: color-mix(in srgb, var(--t) 26%, var(--panel)); }
 .thread-row .name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 450; }
 /* Phones have no hover for the row's title: a long ask wraps to a second line before it's cut (#471). */
-@media (max-width: 800px) { .thread-row .name { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; } }
+/* The same on desktop (#881): a long ask wraps to a second line instead of cutting at 14 characters. */
+.thread-row .name { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .thread-row.unread .name { font-weight: 650; }
 .thread-row .unread-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
 .thread-row.unread .unread-dot { background: var(--c); }

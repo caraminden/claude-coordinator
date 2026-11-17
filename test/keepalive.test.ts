@@ -8,8 +8,8 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import {
-  changedParts, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEEPALIVE_TEXT, keepaliveKey, missed, prefixParts, SERIES_CAP_MS,
-  tooManyMisses, weekReport, type KeepaliveSeries, type KeepaliveRow,
+  changedParts, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, keepaliveKey, missed, prefixParts, SERIES_CAP_MS,
+  tooManyMisses, WEEK_MS, weekReport, type KeepaliveSeries, type KeepaliveRow,
 } from '../src/keepalive.ts';
 import { Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
@@ -290,4 +290,25 @@ test('a keepalive turn left by a restart is dropped, not resumed', () => {
   assert.equal(existsSync(join(root, 'gone-turn')), false);
   assert.equal(r.isRunning(id), false, 'no resume started');
   assert.equal(store.getSetting(`resume-owed:${id}`), null);
+});
+
+test('the weekly readout switches keepalives off when they cost more than they saved', async () => {
+  const id = minion();
+  const now = pst(12);
+  store.setSetting(KEEPALIVE_REPORT_KEY, now - WEEK_MS + 60_000);
+  runner.keepaliveSweep(now);
+  assert.equal(store.getSetting(KEEPALIVE_REPORT_KEY), now - WEEK_MS + 60_000, 'not before a week');
+  // One keepalive in the week and no wake it kept warm: all cost, nothing saved.
+  store.recordTurn(id, { session_id: 'sess', ended_at: now - 3_600_000, session_cost_usd: 0.05, duration_ms: 1000, usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 100_000, cache_creation_input_tokens: 0 }, keepalive: true });
+  try {
+    runner.keepaliveSweep(now + 60_000);
+    assert.equal(store.getSetting(KEEPALIVE_REPORT_KEY), now + 60_000);
+    assert.ok(store.getSetting(KEEPALIVE_OFF_KEY), 'net below zero turns them off');
+    const before = callCount();
+    runner.keepaliveSweep(now + 120_000);
+    await idle(id);
+    assert.equal(callCount(), before);
+  } finally {
+    store.deleteSetting(KEEPALIVE_OFF_KEY);
+  }
 });

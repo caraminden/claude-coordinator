@@ -422,6 +422,30 @@ be `.png` (`.webp` too on a model with its own). The note's `background` says wh
 2026-11-14). Music on Lyria takes a `seed`: the same seed with a tweaked prompt keeps more of the
 last clip. Effects iterate on the prompt alone; trim and fade on your side.
 
+## Spend on outside APIs: `POST /api/contraptions/spend`
+
+Your server pays for something Citadel can't see (Azure Speech, a paid data feed)? Report each
+cost and it shows in your home scheme's monthly bill, per service, beside Claude usage and
+OpenRouter. Citadel's own OpenRouter media and Claude turns are counted already: don't report those.
+
+```
+POST /api/contraptions/spend
+Authorization: Bearer <contraption.key>
+{ "service": "azure-speech", "usd": 0.42, "units": 31000, "note": "chapter 4" }
+→ 200 { "month_usd": 61.8, "cap_usd": 80, "over_cap": false }
+```
+
+- `service`: 1 to 64 characters, lowercase and stable (`azure-speech`); the bill groups by it.
+  `usd`: above 0, at most 10,000. `units` (any number of 0 or more) and `note` (500 characters) are
+  optional and only kept for the record.
+- Booked to the contraption's home scheme, to the calendar month in UTC. No home scheme: 409.
+  A body that isn't valid: 400. Report after the paid call, with the cost you worked out yourself.
+- A scheme can set a monthly cap (the usage popover, or `PUT /api/projects/<id>/spend {cap_usd}`).
+  The first report that takes the month to the cap warns the scheme's members once that month
+  (`over_cap: true` from then on). **Nothing stops**: the report is still booked, and you decide
+  whether to keep going.
+- Minions report theirs with the `report_spend` tool.
+
 ## Asks: bug reports, feature asks and data
 
 `POST /api/contraptions/asks` sends a person's report to your home scheme, as them (tested):
@@ -771,6 +795,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-16:** `POST /api/contraptions/spend` books what an outside API cost to the home scheme's
+  monthly bill, with an optional cap that warns without stopping ("Spend on outside APIs").
 - **2026-11-16:** Big uploads: files of any size from the page into your `DATA_DIR/uploads/<login>/`,
   in resumable chunks, then `POST /app-api/uploaded` ("Big uploads"); `ui/upload.js` is the drop zone.
 - **2026-11-14:** `media: true` on a turn gives the agent image and sound tools on the person's own

@@ -449,6 +449,16 @@
   "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
+ "POST /api/contraptions/spend": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
  "POST /api/contraptions/turns": {
   "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
@@ -1573,6 +1583,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/spend": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/projects/:p/spend": {
+  "anon": "401 Not logged in",
+  "person": "400 cap_usd is a number, or null for none",
+  "member": "400 cap_usd is a number, or null for none",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/tickets": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -2172,6 +2202,16 @@
   "m1": "200",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/spend": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can report its spend",
+  "member": "403 Only the minion itself can report its spend",
+  "outsider": "403 Only the minion itself can report its spend",
+  "tmA": "403 Only the minion itself can report its spend",
+  "tmB": "403 Only the minion itself can report its spend",
+  "m1": "400 service is 1 to 64 characters, like azure-speech",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/spend-mute": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -2729,6 +2769,16 @@
   "outsider": "403 Only the minion itself can settle its question cards",
   "tmA": "200",
   "tmB": "403 Only the minion itself can settle its question cards",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/spend": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can report its spend",
+  "member": "403 Only the minion itself can report its spend",
+  "outsider": "403 Only the minion itself can report its spend",
+  "tmA": "403 Only the minion itself can report its spend",
+  "tmB": "403 Only the minion itself can report its spend",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

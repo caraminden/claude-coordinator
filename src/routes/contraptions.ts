@@ -2,6 +2,7 @@
 // rotate their keys, as does Citadel's Taskmaster on an admin's turn (#246); anyone signed in lists
 // the ones enabled for them, for the app rail; a contraption's own server sends its people's bug
 // reports, feature asks and data to its home scheme (src/contraption-asks.ts) and runs turns for its people through the turn API (src/contraption-turns.ts).
+import { parseSpend } from '../outside-spend.ts';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { extname } from 'node:path';
@@ -346,6 +347,12 @@ export const contraptionRoutes: Route[] = [
     rmSync(file);
     if (!file.endsWith('.json')) rmSync(`${file}.json`, { force: true });
     return json(res, 200, { ok: true });
+  }),
+  // Spend on an outside API, booked to the contraption's home scheme (#839, src/outside-spend.ts).
+  fromContraption('POST', '/api/contraptions/spend', async ({ req, res, app }, c) => {
+    const body = parseSpend(await readJson(req));
+    if (c.home_scheme === null) throw new HttpError(409, `${c.title} has no home scheme: an admin sets one in Settings → Contraptions`);
+    return json(res, 200, app.outsideSpend.record(c.home_scheme, body, `contraption:${c.name}`));
   }),
   fromContraption('GET', '/api/contraptions/openrouter', ({ res, app, url }, c) => {
     const person = enabledPerson(app, c, url);

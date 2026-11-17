@@ -1,5 +1,6 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
+import { parseSpend } from '../outside-spend.ts';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -995,6 +996,13 @@ export const ticketRoutes: Route[] = [
       if (!tool) throw new HttpError(400, `tool must be one of: ${MEDIA_TOOLS.join(', ')}`);
       const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
       return json(res, 200, await app.openrouter.tool(tool, args, { userId: ticket.person_id, ticketId: ticket.id, projectId: ticket.project_id, roots: ticketRoots(app, ticket) }));
+    },
+  },
+  {
+    // report_spend (#839): a minion books what an outside API call cost to its scheme's month.
+    method: 'POST', path: '/api/tickets/:ticket/spend', who: ['minion'], refuse: 'Only the minion itself can report its spend',
+    async handler({ req, res, app, ticket }) {
+      return json(res, 200, app.outsideSpend.record(ticket.project_id, parseSpend(await readJson(req)), `minion:#${ticket.number}`));
     },
   },
   {

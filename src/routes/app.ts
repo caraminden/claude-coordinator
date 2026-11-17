@@ -132,7 +132,7 @@ export const appRoutes: Route[] = [
     return json(res, 200, {});
   } },
   // Every scheme's spend on the server's Claude login, so only for admins.
-  { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner } }) => json(res, 200, { days: costDays(store), dayBudget: dayBudget(store, runner.usageOf(store.serverLoginOwner())?.weekly), split: spendSplit(store) }) },
+  { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner, outsideSpend } }) => json(res, 200, { outside: outsideSpend.bill(), days: costDays(store), dayBudget: dayBudget(store, runner.usageOf(store.serverLoginOwner())?.weekly), split: spendSplit(store) }) },
   // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).
   { method: 'GET', path: '/api/prs', who: ['person'], handler: async ({ res, app: { store }, session }) => {
     const seen = store.visibleProjects(session);

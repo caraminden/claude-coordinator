@@ -47,6 +47,7 @@ import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
 import { Credentials } from './src/credentials.ts';
 import { OpenRouter } from './src/openrouter.ts';
+import { OutsideSpend } from './src/outside-spend.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
@@ -192,6 +193,8 @@ await safely('follow repo moves', () => followOrigins(store));
 const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
 // People's own OpenRouter keys (#717). OPENROUTER_BASE_URL points a dev copy or test at a fake.
 const openrouter = new OpenRouter(store, credentials);
+// Outside-API spend and its optional per-scheme cap (#839): crossing the cap tells the scheme's Taskmaster chat and pushes; nothing stops.
+const outsideSpend = new OutsideSpend(store);
 // Only the live data dir writes the real key folders: a dev copy registering "mandate" mustn't overwrite the live one's files.
 const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '',
   process.env.CITADEL_CONTRAPTIONS_DIR || (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
@@ -395,6 +398,14 @@ function notify(ticketId: number, trigger: PushTrigger, except: string | null = 
   if (ticket) pusher.notify(ticket, trigger, except).catch((err) => console.error(`Push for ticket ${ticketId} failed:`, err));
 }
 
+outsideSpend.onCap = (projectId, total, cap) => {
+  const coordinator = store.getCoordinator(projectId);
+  if (!coordinator) return;
+  const text = `Spend on outside APIs is $${total.toFixed(2)} this month, past the scheme's $${cap.toFixed(2)} cap. Nothing has stopped; raise the cap or cut back.`;
+  runner.emit(coordinator.id, 'note', { text });
+  runner.broadcastTicket(coordinator.id);
+  notify(coordinator.id, { kind: 'state', state: 'blocked', note: text });
+};
 runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'error', text, eventId });
 runner.onSpendAlert = (ticketId, text, eventId, person) => notify(ticketId, { kind: 'spend', text, eventId, also: person ? store.getUser(person)?.name : undefined });
 
@@ -995,7 +1006,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

@@ -1311,6 +1311,20 @@ const THREAD_TOOLS = [
     inputSchema: { type: 'object', properties: { reason: { type: 'string', maxLength: 1000, description: 'What to do once they are back (at most 1,000 characters); it comes back in the wake message, e.g. "run tools/land.sh again"' } }, required: ['reason'] },
   },
   {
+    name: 'report_spend',
+    description: "Book what you spent on an outside API (Azure Speech, ElevenLabs, a paid data feed: not OpenRouter media or Claude, which Citadel already counts) to this scheme's month (#839). Call it right after the paid call, with the cost you worked out from the service's price list. The scheme's monthly bill shows it per service beside Claude usage, and the scheme's cap, if it has one, warns its members when crossed; nothing stops.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        service: { type: 'string', maxLength: 64, description: 'The service, lowercase and stable, like azure-speech' },
+        usd: { type: 'number', exclusiveMinimum: 0, description: 'What it cost, in US dollars' },
+        units: { type: 'number', minimum: 0, description: 'Optional: how much you used (characters, requests), for the record' },
+        note: { type: 'string', maxLength: 500, description: 'Optional: what it was for' },
+      },
+      required: ['service', 'usd'],
+    },
+  },
+  {
     name: 'hand_off_land',
     description:
       `Hand your land to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed. Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${HOME_CONTRAPTIONS.length ? ` A land on main first deploys each of ${HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state. Same arguments as tools/land.sh's forms.`,
@@ -1594,6 +1608,10 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'generate_image_codex':
       return codexImage(args);
+    case 'report_spend': {
+      const r = await call('POST', `/api/tickets/${TICKET}/spend`, args);
+      return `Booked $${Number(args.usd).toFixed(4)} on ${args.service}: $${Number(r.month_usd).toFixed(2)} this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? " (over it; the scheme's members were told)" : ''}`}.`;
+    }
     case 'search_memory': {
       if (typeof args.query !== 'string' || !args.query.trim()) throw new Error('query is required');
       const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });

@@ -798,6 +798,19 @@ CREATE TABLE IF NOT EXISTS openrouter_calls (
   finished_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS openrouter_calls_user ON openrouter_calls(user_id, created_at);
+-- Spend on outside APIs a contraption or minion reported (src/outside-spend.ts, #839), by scheme. No foreign keys:
+-- the bill outlives the app or minion that reported it.
+CREATE TABLE IF NOT EXISTS outside_spend (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  service TEXT NOT NULL,
+  usd REAL NOT NULL,
+  units REAL,
+  note TEXT,
+  source TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS outside_spend_project ON outside_spend(project_id, created_at);
 -- What Citadel did on GitHub for a scheme member (src/repo-access.ts, #310): state added or invited is
 -- Citadel's own doing, undone when they leave; existing was there before, so leaving leaves it. No foreign
 -- keys: the row outlives a removed person or scheme so the collaborator it made can still be taken off.
@@ -1085,6 +1098,7 @@ export const SCHEMA_HISTORY = [
   [55, 'projects.ci_watch (#774)'],
   [56, 'schedules.template, notes; standard audits backfill (#799)'],
   [57, 'contraption_errors (#835)'],
+  [58, 'outside_spend (#839)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

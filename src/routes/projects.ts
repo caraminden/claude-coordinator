@@ -331,6 +331,18 @@ export const projectRoutes: Route[] = [
     },
   },
   {
+    // A scheme's month of outside-API spend by service, OpenRouter beside it, and its optional cap (#839). Any member reads; any member sets the cap.
+    method: ['GET', 'PUT'], path: '/api/projects/:project/spend', who: ['person'],
+    async handler({ req, res, app, project }) {
+      if (req.method === 'PUT') {
+        const body = await readJson(req);
+        if (!('cap_usd' in body)) throw new HttpError(400, 'cap_usd is a number, or null for none');
+        app.outsideSpend.setCap(project.id, body.cap_usd);
+      }
+      return json(res, 200, app.outsideSpend.month(project.id));
+    },
+  },
+  {
     // The Needs-you items this person saw waiting while in the scheme (#539: InboxItem.key): the scheme list marks the badge when one not among them waits.
     method: 'PUT', path: '/api/projects/:project/seen-items', who: ['person'],
     async handler({ req, res, app, session, project }) {

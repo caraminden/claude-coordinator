@@ -1,6 +1,7 @@
 // Today's use beside the weekly meter, as a share of an even day (a seventh of the week), opening to the last 7 days.
 import { account, api, costText, h, view } from './base.js';
 import { closeOnClickAway } from './properties.js';
+import { toast } from './ui/status.js';
 import { renderSidebar } from './sidebar.js';
 
 let days = null;
@@ -8,6 +9,8 @@ let days = null;
 let split = null;
 // What an even day's share of the weekly limit comes to at API prices (src/costs.ts dayBudget), or null.
 let budget = null;
+// This month's spend on outside APIs and OpenRouter by scheme and service, with each scheme's cap (src/outside-spend.ts, #839).
+let outside = [];
 
 /** "Day 38%" after the weekly bar: today against an even day's share of the week. It opens to the last 7 days. */
 export function costChip() {
@@ -35,7 +38,7 @@ export async function renderCost() {
   if (!account?.admin) return; // the server login's costs across Citadel, so only admins see them
   const before = budget;
   try {
-    ({ days, dayBudget: budget, split } = await api('api/costs'));
+    ({ days, dayBudget: budget, split, outside } = await api('api/costs'));
   } catch {
     return; // keep the last figures; the next turn tries again
   }
@@ -71,6 +74,34 @@ function splitTables() {
     table('Person', split.people), table('Scheme', split.schemes));
 }
 
+/** This month's bill for outside APIs, per scheme and service, with a cap field for the scheme you're in (#839). */
+function outsideBill() {
+  const pid = view?.projectId;
+  const mine = outside.find((b) => b.project_id === pid);
+  const cap = h('input', { type: 'number', min: '1', step: '1', class: 'cap-input', placeholder: 'none', 'aria-label': 'Monthly cap in dollars', value: mine?.cap_usd ?? '' });
+  cap.addEventListener('change', async () => {
+    const usd = cap.value === '' ? null : Number(cap.value);
+    try {
+      await api(`api/projects/${pid}/spend`, { method: 'PUT', body: { cap_usd: usd } });
+      renderCost();
+    } catch (err) {
+      toast(`Couldn't set the cap: ${err.message}`, { tone: 'warn' });
+    }
+  });
+  return h('div', { class: 'spend-split outside-bill' },
+    h('h4', {}, 'Outside APIs this month, by scheme'),
+    outside.length ? h('table', {},
+      h('tbody', {}, outside.flatMap((b) => {
+        const over = b.cap_usd !== null && b.month_usd >= b.cap_usd;
+        return [
+          h('tr', {}, h('th', { scope: 'row' }, b.name), h('td', { class: `num${over ? ' warn' : ''}` }, costText(b.month_usd), b.cap_usd === null ? '' : h('span', { class: 'usd' }, ` of ${costText(b.cap_usd)}`))),
+          ...b.services.map((s) => h('tr', { class: 'service' }, h('td', { class: 'indent' }, s.service), h('td', { class: 'num' }, costText(s.usd)))),
+        ];
+      }))) : h('p', { class: 'key' }, 'Nothing reported this month.'),
+    pid ? h('label', { class: 'cap-row' }, 'Cap for this scheme, $/month ', cap) : '',
+    h('p', { class: 'foot' }, 'Reported by contraptions (POST /api/contraptions/spend) and minions (report_spend), with OpenRouter calls. Crossing a cap warns the scheme once a month; nothing stops.'));
+}
+
 /** A cost as a share of an even day: "38%". */
 const pct = (usd) => `${Math.round((usd / budget) * 100)}%`;
 
@@ -91,6 +122,7 @@ function drawPop(chip) {
       h('tbody', {}, days.map((d, i) => h('tr', {}, h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total)))),
       h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, budget ? '7-day average' : '7 days'), cell(sum(here), budget ? days.length : 1), cell(sum((d) => d.total), budget ? days.length : 1)))),
     budget ? h('p', { class: 'key' }, h('span', { class: 'warn' }, 'Amber'), ': over that day\'s even share.') : '',
+    outsideBill(),
     split?.people.length ? splitTables() : '',
     h('p', { class: 'foot' }, budget
       ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns (last week's, early in a week). Over it, the week runs out early. The server login's turns only, Taskmasters included; not a bill.`

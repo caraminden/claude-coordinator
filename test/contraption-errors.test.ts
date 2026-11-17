@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -114,4 +114,32 @@ test('counts per app, day and group, written to the owning scheme\'s shared fold
   // The Taskmaster's morning count: yesterday's total for its scheme's apps, and the file.
   assert.deepEqual(digest.summary(peekScheme.id, NOV17), { day: '2026-11-16', total: 1, apps: [{ title: 'Peek Auras', count: 1 }], file: 'reports/contraption-errors/2026-11-16.md' });
   assert.equal(digest.summary(quiet.id, NOV17), null, 'nothing to say');
+});
+
+test("one scheme's folder that can't be written leaves the others' files, and is tried again", async () => {
+  const store = new Store(join(root, 'broken.db'));
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const a = store.createProject('A', null, josh.id);
+  const b = store.createProject('B', null, josh.id);
+  const c = new Contraptions(store, 's'.repeat(40), join(root, 'keys3'));
+  const appA = c.register({ name: 'a', title: 'A', port: 9501, icon: null, home_scheme: a.id, open_paths: '[]', default_model: null, turn_cap: null });
+  const appB = c.register({ name: 'b', title: 'B', port: 9502, icon: null, home_scheme: b.id, open_paths: '[]', default_model: null, turn_cap: null });
+  // A's shared folder is a file, so its digest folder can't be made.
+  const broken = join(root, 'broken-shared');
+  writeFileSync(broken, 'not a folder');
+  let fixed = false;
+  const digest = new ErrorDigest(store, { sharedDir: (id) => (id === a.id && !fixed ? broken : join(root, 'ok-shared', String(id))), now: () => NOV16_NOON });
+  digest.toolError(appA, 'Bash', 'exit 1');
+  digest.toolError(appB, 'Bash', 'exit 1');
+  const log = console.error;
+  console.error = () => {};
+  try {
+    await digest.tick();
+  } finally {
+    console.error = log;
+  }
+  assert.ok(existsSync(join(root, 'ok-shared', String(b.id), 'reports', 'contraption-errors', '2026-11-16.md')));
+  fixed = true;
+  await digest.tick();
+  assert.ok(existsSync(join(root, 'ok-shared', String(a.id), 'reports', 'contraption-errors', '2026-11-16.md')), 'the failed day is written next tick');
 });

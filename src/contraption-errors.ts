@@ -126,12 +126,14 @@ export class ErrorDigest {
       const written = new Set<string>();
       if (!last || last < yesterday) {
         const from = last && last >= addDays(today, -CATCH_UP_DAYS) ? addDays(last, 1) : yesterday;
-        for (let d = from; d <= yesterday; d = addDays(d, 1)) this.write(d, true), written.add(d);
-        this.store.setSetting(FINAL, yesterday);
+        let ok = true;
+        for (let d = from; d <= yesterday; d = addDays(d, 1)) (ok = this.write(d, true) && ok), written.add(d);
+        // A scheme's file that failed is tried again next tick; the others are rewritten with it, which is harmless.
+        if (ok) this.store.setSetting(FINAL, yesterday);
       }
       const days = [...this.dirty];
       this.dirty.clear();
-      for (const d of days) if (!written.has(d)) this.write(d, false);
+      for (const d of days) if (!written.has(d) && !this.write(d, false)) this.dirty.add(d);
     } finally {
       this.busy = false;
     }
@@ -162,21 +164,30 @@ export class ErrorDigest {
     return out;
   }
 
-  /** Write a day's file for each scheme with errors that day, or (`all`, an ended day) for every owning scheme. */
-  private write(day: string, all: boolean) {
+  /**
+   * Write a day's file for each scheme with errors that day, or (`all`, an ended day) for every owning scheme.
+   * False when a scheme's file couldn't be written (logged); the other schemes' still are.
+   */
+  private write(day: string, all: boolean): boolean {
     const rows = this.store.contraptionErrors(day);
+    let ok = true;
     for (const [scheme, apps] of this.owners()) {
       const mine = rows.filter((r) => r.home_scheme === scheme);
       if (!all && !mine.length) continue;
       const dir = this.deps.sharedDir(scheme);
       if (!dir) continue;
-      const project = this.store.getProject(scheme);
-      const folder = join(dir, DIGEST_DIR);
-      mkdirSync(folder, { recursive: true });
-      const file = join(folder, `${day}.md`);
-      writeFileSync(`${file}.tmp`, render(project?.name ?? 'This scheme', day, apps, mine, this.now(), all));
-      renameSync(`${file}.tmp`, file);
+      try {
+        const folder = join(dir, DIGEST_DIR);
+        mkdirSync(folder, { recursive: true });
+        const file = join(folder, `${day}.md`);
+        writeFileSync(`${file}.tmp`, render(this.store.getProject(scheme)?.name ?? 'This scheme', day, apps, mine, this.now(), all));
+        renameSync(`${file}.tmp`, file);
+      } catch (err: any) {
+        ok = false;
+        console.error(`Contraption errors: scheme ${scheme}'s ${day} file: ${err?.message ?? err}`);
+      }
     }
+    return ok;
   }
 
   /** Yesterday's count for a scheme's apps and its file, for the Taskmaster's list_tickets; null when there were none. */

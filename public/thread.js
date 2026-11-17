@@ -5,6 +5,7 @@ import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSee
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
+import { composerHint, heldLine } from './heldmsg.js';
 import { EMPTY_TRACK, rowState, SHIP, workingBy, workingLabel } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
 import { propertyChip } from './properties.js';
@@ -261,6 +262,8 @@ export function chatSection(chatId, ticket) {
   // One-tap replies sit at the top of the composer, so they stay in view with it (renderTicketHead fills them).
   // Whose plan your message runs on, only when that's news (public/payer.js); under the replies, right over the box.
   form.prepend(h('div', { id: 'chat-payer', hidden: true }));
+  // A parked minion reads nothing until it's unparked: said over the box before you send, not only after (renderTicketHead).
+  form.prepend(h('div', { class: 'parked-hint', hidden: true }));
   form.prepend(h('div', { class: 'replies-bar', id: 'chat-replies', hidden: true }));
   // The Taskmaster's cards still waiting on people, as links, on top (public/waiting.js).
   form.prepend(h('div', { id: 'chat-waiting', hidden: true }));
@@ -392,7 +395,10 @@ export function renderTicketHead() {
   // Whose chat it is, so you know at a glance who you're talking to (#360, style.css).
   chat?.classList.toggle('role-taskmaster', coord);
   chat?.classList.toggle('role-minion', !coord);
-  for (const bubble of chat?.querySelectorAll('.log [data-event]') ?? []) markQueued(bubble, t);
+  for (const bubble of chat?.querySelectorAll('.log [data-event]') ?? []) {
+    markQueued(bubble, t);
+    if (bubble.heldData) markHeld(bubble, t);
+  }
   const box = chat?.querySelector('.composer textarea');
   if (box) box.placeholder = composerPlaceholder(t);
   const form = chat?.querySelector('.composer');
@@ -413,7 +419,16 @@ export function renderTicketHead() {
       const parked = (t.parked_for || t.state === 'parked') && !coord && t.status !== 'closed' && t.status !== 'running';
       const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while parked';
       unparkSlot.hidden = !parked;
-      unparkSlot.replaceChildren(parked ? h('button', { type: 'button', class: 'secondary small act-unpark', title, onclick: () => unpark(t) }, 'Unpark') : '');
+      unparkSlot.replaceChildren(...(parked ? [
+        h('button', { type: 'button', class: 'secondary small act-unpark', title, onclick: () => unpark(t) }, 'Unpark'),
+        h('button', { type: 'button', class: 'secondary small act-send-unpark', title: 'Send your message and unpark it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unpark'),
+      ] : []));
+    }
+    const hint = form.querySelector('.parked-hint');
+    if (hint) {
+      const text = coord ? null : composerHint(t);
+      hint.hidden = !text;
+      hint.replaceChildren(text ? h('span', { 'aria-hidden': 'true' }, '⏸ ') : '', text ?? '');
     }
   }
   const actions = [];
@@ -622,6 +637,24 @@ function shipLine(t) {
   if (!stage) return '';
   return h('span', { class: `ship f-${stage.fam}`, title: `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}` },
     h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, stage.badge || 'on branch'));
+}
+
+/**
+ * A message held for a minion says so in its bubble, in place: "Not sent yet" with a dashed look (and, for a parked
+ * minion, Unpark and send) while the ticket still lists it as held, then a plain "Read" line once a turn took it.
+ * The line is one fixed row either way, so nothing moves when it flips.
+ */
+function markHeld(bubble, ticket) {
+  const line = heldLine(bubble.heldData, Number(bubble.dataset.event), ticket);
+  if (!line) return;
+  bubble.classList.add('held-msg');
+  bubble.classList.toggle('held-waiting', line.waiting);
+  let el = bubble.querySelector(':scope > .held-line');
+  if (!el) bubble.append(el = h('div', { class: 'held-line', role: 'status' }));
+  el.replaceChildren(
+    h('span', { class: 'held-icon', 'aria-hidden': 'true' }, line.waiting ? '⏸' : '✓'),
+    h('span', { class: 'held-text' }, line.text),
+    ...(line.unpark ? [h('button', { type: 'button', class: 'secondary small', onclick: () => unpark(ticket) }, 'Unpark and send')] : []));
 }
 
 /** Unpark (#718): the row and header drop parked at once; a refusal puts them back with a toast and a retry. */
@@ -943,7 +976,10 @@ export function appendEvent(event, scroll = true) {
       if (data.author === me && !data.comment) bubble.sent = { text: data.text ?? '', images: data.images ?? [], files: data.files ?? [] };
       stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
-      if (data.mail) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: data.parked ? 'Held because this minion is parked: it reads it on its next turn, when someone unparks it or what it waits for comes in' : data.cold ? 'Held because this chat was idle over 55 minutes, so waking it would re-read its whole context: it is read on the next turn, with a person\'s message or within 3 hours' : "Sent without waking: it is read on this Taskmaster's next turn, whoever starts it" }, data.parked ? 'held: parked' : 'held mail'));
+      if (data.mail) {
+        bubble.heldData = data;
+        markHeld(bubble, view.ticket);
+      }
       if (data.need) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'What the sender said this message needs' }, `need: ${data.need}`));
       markQueued(bubble, view.ticket);
       nodes.push(bubble);
@@ -1240,7 +1276,7 @@ function syncHeldBrief() {
     } }, 'Show more'));
   }
   // Above the messages left for it, which come after the brief.
-  const first = [...log.children].find((c) => c.classList.contains('user') && c.querySelector('.msg-tag')?.textContent === 'held: parked');
+  const first = [...log.children].find((c) => c.classList.contains('user') && c.heldData?.parked);
   const after = log.querySelector(':scope > #recap, :scope > .pending');
   if (first) first.before(el); else if (after) after.before(el); else log.append(el);
 }

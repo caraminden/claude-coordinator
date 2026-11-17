@@ -253,6 +253,10 @@ mock.boards('#takes', { boards: [
       w.asked('Pick this up once #700 is live.');
       w.init();
       w.said('Parked until #700 is live; Citadel wakes me then.');
+      // One message already read (no longer held) and one still waiting: the bubble says "Not sent yet" with Unpark and send (#910).
+      c.store.addEvent(t.id, 'user_message', { text: 'Also keep the old redirect.', author: c.who, mail: true, parked: true });
+      const row = c.store.addEvent(t.id, 'user_message', { text: 'Please start with the docs page first.', author: c.who, mail: true, parked: true });
+      c.store.setSetting(`mail:${t.id}`, [{ author: c.who, text: 'Please start with the docs page first.', images: [], id: row.id, parked: '2026-11-17 19:35' }]);
       return route(c, t);
     },
   },

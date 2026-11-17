@@ -138,3 +138,6 @@ dialog.secret-ask .secret-warning { display: flex; flex-direction: column; gap: 
 dialog.secret-ask .secret-warning p { margin: 0; }
 dialog.secret-ask label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9em; }
 dialog.secret-ask .row { gap: 0.5rem; flex-wrap: wrap; }
+/* Over the box while the minion is parked: your message waits until it's unparked (heldmsg.js composerHint). */
+.composer .parked-hint { padding: 0.35rem 0.6rem; margin-bottom: 0.4rem; border: 1px dashed var(--control-line); border-radius: 6px; color: var(--ink); font-size: 0.9em; }
+.composer .parked-hint[hidden] { display: none; }

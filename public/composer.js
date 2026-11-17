@@ -116,6 +116,7 @@ export function composer(chatId, ticket) {
   let after = false;
   // Set by the secret warning's Send anyway, for the one submit it makes (#838).
   let sendAnyway = false;
+  let unparkWith = false;
   const box = mountComposer(document.createDocumentFragment(), {
     placeholder: composerPlaceholder(ticket),
     draftKey: `cc-draft:${chatId}`,
@@ -137,11 +138,19 @@ export function composer(chatId, ticket) {
     send: (text) => {
       const sent = attachments.items.slice();
       attachments.remove(sent);
-      send(text, sent, after);
+      send(text, sent, after, unparkWith);
     },
     onError: (ex) => alertNote(ex.message),
   });
   const { form, textarea, row, sendButton: sendBtn } = box;
+  form.sendAndUnpark = () => {
+    unparkWith = true;
+    try {
+      form.requestSubmit();
+    } finally {
+      unparkWith = false;
+    }
+  };
   // Citadel keeps its own look (style.css .composer); the cui-* look is the apps'. Two rows tall when empty, as before.
   form.className = 'composer';
   row.className = 'row';
@@ -231,7 +240,7 @@ export function composer(chatId, ticket) {
    * retried (src/send-ids.ts). One that fails stays in the chat marked not sent, with Retry and Edit, and
    * the ones after it still go. The promise settles as optimistic()'s does.
    */
-  const send = (text, sent = [], queue = false) => {
+  const send = (text, sent = [], queue = false, unpark = false) => {
     const images = sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
     const uploads = sent.filter((i) => i.upload).map((i) => i.upload);
     const files = uploads.map(({ name, type }) => ({ name, type }));
@@ -241,7 +250,7 @@ export function composer(chatId, ticket) {
     const el = userBubble(me, text, urls, null, null,
       uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })));
     const entry = { el, urls, text, sendId: crypto.randomUUID(), saved: [...images, ...uploads.map((upload) => ({ upload }))], state: 'new' };
-    const body = { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}), sendId: entry.sendId };
+    const body = { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}), ...(unpark ? { unpark: true } : {}), sendId: entry.sendId };
     setSending(sending + 1); // until it's in or taken back: a reload now would lose it
     entry.retry = () => optimistic({
       key: `send:${chatId}`,

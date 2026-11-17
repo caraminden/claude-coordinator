@@ -753,7 +753,7 @@ export class Runner {
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     return {
       // A network wait's held messages are queued too: they go first into its resume (takeQueue).
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), held_ids: (this.store.getSetting<QueuedMessage[]>(mailKey(ticket.id)) ?? []).flatMap((m) => m.id ?? []), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.

@@ -23,6 +23,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   }) }) };
   window.citadel = {
     info: async () => ({ person: 'cara' }),
+    watchSaves: (cb) => { window.setSave = cb; },
     // labelAtSend: the button's label as the post leaves, read in the page so a loaded box can't let the 120 ms run out first.
     send: async (text) => { window.labelAtSend = document.querySelector('.mk-dock > button').textContent; await new Promise((r) => setTimeout(r, 120)); if (window.fail) { window.fail = false; throw new Error('boom'); } window.posts.push(text); return { sent: true, to: '#419' }; },
   };
@@ -127,3 +128,33 @@ test('a failed send rolls back to ready, with a toast whose Retry posts it', { s
   assert.equal((await posts(page)).length, 1);
   assert.equal(await disabled(page), true);
 });
+
+// #914: the button must not move while the status text, the Sent line and the label change.
+for (const width of [1200, 700, 390]) {
+  test(`the dock's button keeps its box through picks, notes, save states and Sent at ${width}px`, { skip }, async () => {
+    const page = await browser.page(base, { width, height: 700 });
+    await waitFor(page, 'the page', 'window.ready');
+    // The button's box inside the dock (x, y from the dock's top, size) plus the dock's own height.
+    const box = () => page.eval<string>(`(() => { const d = document.querySelector('.mk-dock'), b = d.querySelector('button'), r = b.getBoundingClientRect(), q = d.getBoundingClientRect(); return [r.left, r.top - q.top, r.width, r.height, q.height].map((n) => Math.round(n)).join(','); })()`);
+    const seen: Record<string, string> = {};
+    const snap = async (name: string) => { seen[name] = await box(); };
+    await snap('empty');
+    await click(page, '[data-pick="a"] [data-v="pick"]');
+    await snap('one picked');
+    await click(page, '[data-pick="b"] [data-v="pick"]');
+    await page.eval(`window.setSave('saving')`); await snap('saving');
+    await page.eval(`window.setSave('retrying')`); await snap('retrying');
+    await page.eval(`window.setSave('saved')`); await snap('saved');
+    await page.eval(`document.querySelector('.mk-dock .mk-sent').textContent = 'Sent to #419 ✓ and a long line that goes on and on to prove it cannot push anything around'`); await snap('sent line');
+    await page.eval(`document.querySelector('.mk-dock .mk-sent').textContent = ''`);
+    await send(page);
+    await waitFor(page, 'the post', 'window.posts.length > 0');
+    await snap('sent');
+    const first = seen.empty.split(',').map(Number);
+    for (const [name, v] of Object.entries(seen)) {
+      const n = v.split(',').map(Number);
+      // Same x, width, height and place in the dock, and the dock's own height, in every state (the page y of a sticky dock may change).
+      assert.deepEqual(n, first, `${name} at ${width}px moved the button or resized the dock: ${v} vs ${seen.empty}`);
+    }
+  });
+}

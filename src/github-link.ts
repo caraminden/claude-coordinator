@@ -53,6 +53,14 @@ export interface TurnGithub {
 
 type Fetch = typeof fetch;
 
+/** The App's URL name from what was configured: a bare slug, or a pasted URL or path like github.com/apps/<slug>. */
+export function appSlug(raw: string): string {
+  let v = (raw ?? '').trim();
+  try { v = decodeURIComponent(v); } catch { /* keep as typed */ }
+  const m = /(?:^|\/)apps\/([^/?#\s]+)/.exec(v);
+  return (m ? m[1] : v.replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop() ?? '').trim();
+}
+
 export class GithubLink {
   /** States already brought back, until they expire: each works once (per server; GitHub's code is single-use anyway). */
   private used = new Map<string, number>();
@@ -73,7 +81,8 @@ export class GithubLink {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.fetch = fetch;
-    this.app = app;
+    // GITHUB_APP_SLUG is the name in the App's URL, but people paste the whole URL (or a percent-encoded one): keep the last name in it.
+    this.app = { ...app, slug: appSlug(app.slug) };
   }
 
   /** Whether people link their own GitHub here at all, either way. */

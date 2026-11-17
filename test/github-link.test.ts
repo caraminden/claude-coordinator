@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
-import { GithubLink, personGithub } from '../src/github-link.ts';
+import { GithubLink, personGithub, appSlug } from '../src/github-link.ts';
 import { asEnv } from '../src/scheme-repo.ts';
 import { newToken } from '../src/machines.ts';
 import { hideTokens } from '../src/hide-tokens.ts';
@@ -521,4 +521,9 @@ test("a person's message shows with its key hidden, and the turn still gets it a
   assert.deepEqual(stored, ['the key is [AWS key hidden]']);
   assert.match(seen(t.dir)[0], /the key is AKIAIOSFODNN7EXAMPLE/);
   await finish(r, t);
+});
+
+test('appSlug takes a bare slug or a pasted App URL', () => {
+  for (const raw of ['citadelgitintegration', ' citadelgitintegration/', 'github.com/apps/citadelgitintegration', 'https://github.com/apps/citadelgitintegration/installations/new', 'github.com%2Fapps%2Fcitadelgitintegration']) assert.equal(appSlug(raw), 'citadelgitintegration', raw);
+  assert.equal(appSlug(''), '');
 });

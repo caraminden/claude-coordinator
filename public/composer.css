@@ -1,6 +1,6 @@
 /* The composer under a chat: the message box, its button row and pickers, one-tap replies, attachments. */
 .composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
-/* It grows with its text (composer.js fitHeight), like the new-minion box, up to a cap that leaves the chat in view. */
+/* It grows with its text (composer.js fitHeight), up to a cap that leaves the chat in view. */
 .composer textarea { min-height: 4.5rem; max-height: 40vh; resize: none; overflow-y: auto; }
 /* 16px on phones, so iOS Safari doesn't zoom in on focus (as ui/composer.js does for apps; Citadel's textarea font rule outweighs its :where()). */
 @media (max-width: 800px) { .composer textarea { font-size: 16px; } }

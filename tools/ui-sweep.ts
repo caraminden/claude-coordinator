@@ -96,7 +96,6 @@ export const SCREENS: Screen[] = [
   { name: 'flow-answer-card', flow: true, hash: `#/p/${S}/t/${T.cardsForJosh}`, before: `await scrollChatTo('.qcard, .question-card');`, click: '.qcard button.opt, .qcard .options button, .question-card button', about: 'Flow: answering a question card by tapping an option. Shot right after the click with a slow network.' },
   // Only one open plan in the live data, and approving settles it: one width.
   { name: 'flow-approve-plan', flow: true, widths: [390], hash: `#/p/${S}/t/${T.plan}`, before: `await scrollChatTo('.pcard'); [...[...document.querySelectorAll('.pcard')].at(-1).querySelectorAll('button')].find((b) => b.textContent.trim() === 'Approve').dataset.sweep = 'go';`, click: '[data-sweep=go]', about: 'Flow (phone): approving a plan card. Shot right after the click with a slow network.' },
-  { name: 'flow-new-minion', flow: true, hash: `#/p/${S}`, before: `if (phone) await drawer('right'); const b = await until('.new-thread textarea'); b.focus(); b.value = 'Check the sweep'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200); b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await sleep(150);`, about: 'Flow: starting a new minion by pressing Enter in the new-minion box; shot 150 ms later (in a preview this is refused, so the shot shows how a refusal reads).' },
 ];
 
 function args(argv: string[]) {

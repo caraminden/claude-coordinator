@@ -22,16 +22,8 @@
 .s-closed { border-left-color: var(--closed); opacity: 0.75; }
 .thread-row .ship-badge { display: inline-block; margin-right: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.85em; font-weight: 650; line-height: 1.3;
   color: var(--c); background: color-mix(in srgb, var(--c) 13%, var(--panel)); }
-.sidebar .new-thread { margin: 0 0 0.6rem; }
-.new-thread textarea { resize: none; overflow-y: auto; max-height: 12rem; padding: 0.3rem 0.55rem; font-size: 0.9em; line-height: 1.4; border-color: var(--accent); }
-.new-thread .error { margin: 0.3rem 0 0; }
-.new-thread-model { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.35rem; font-size: 0.82em; }
-.new-thread-model[hidden] { display: none; }
-.new-thread-model select.picker { width: auto; padding: 0.2rem 0.4rem; font-size: inherit; color: var(--ink); background: var(--panel); border-radius: 6px; cursor: pointer; }
-.new-thread-model .guess { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar .column { margin-top: 0.75rem; }
 .sidebar .column h3, .sidebar .column.closed > summary { font-size: 0.75rem; margin-bottom: 0.3rem; }
-.sidebar .new-thread + #threads { margin-top: -0.25rem; }
 
 /* Threads list, after Delve's Custom view: sections by kind of work, one compact row per thread
    (number + short ask, state, then a terse note), stripes restarting in each section. */

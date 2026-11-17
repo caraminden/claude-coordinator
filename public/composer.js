@@ -26,7 +26,7 @@ export function saveDraft(key, value) {
   } catch {}
 }
 
-// Shared with every app (public/ui/composer.js); the new-minion box uses it too.
+// Shared with every app (public/ui/composer.js).
 export { fitHeight } from './ui/composer.js';
 
 let draftDb = null;

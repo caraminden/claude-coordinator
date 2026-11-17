@@ -142,11 +142,10 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   /* Open, a column runs to the window's bottom even when short, so its edge and scrollbar do (#648). */
   /* Their scrollbars keep their room too, so a list growing past the window doesn't reflow it (#861). */
   :is(.sidebar, .shelf)[open] { height: calc(100dvh - var(--banner-h, 0px) - var(--split-top, 1rem)); scrollbar-gutter: stable; }
-  /* Both headers are one height, so they line up. The minions list's header and new-minion box stay put while the
+  /* Both headers are one height, so they line up. The minions list's header stays put while the
      list scrolls under them (Josh, 2026-11-13: "a locked title frame that stays when you scroll"). */
   :is(.sidebar, .shelf)[open] > summary { box-sizing: border-box; min-height: 1.9rem; }
   .sidebar[open] > summary { position: sticky; top: 0; z-index: 2; height: 2.4rem; margin-bottom: 0; padding-bottom: 0.5rem; background: var(--bg); }
-  .sidebar[open] > .new-thread { position: sticky; top: 2.4rem; z-index: 2; margin: 0; padding-bottom: 0.6rem; background: var(--bg); }
   #log .msg :is(p, li, blockquote, h1, h2, h3, h4, h5, h6) { max-width: 100ch; }
   #log > .note { max-width: 100ch; margin-inline: auto; }
 }

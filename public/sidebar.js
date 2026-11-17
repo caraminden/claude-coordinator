@@ -1,8 +1,7 @@
-// The scheme switcher and the minions list: new-minion box, search and rows.
+// The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
 import { account, ago, api, costText, h, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
-import { app, crumbs, openHash, sending, setSending, usage } from './core.js';
-import { fitHeight, loadDraft, saveDraft } from './composer.js';
+import { app, crumbs, openHash, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
@@ -14,8 +13,6 @@ import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.j
 import { renderInbox } from './inbox.js';
 import { pendingRelease } from './releases.js';
 import { replaceHash } from './navstack.js';
-import { continueList } from './ui/composer.js';
-import { CLAUDE_MODELS, EFFORT_LEVELS, guessType, pickFor } from './model-table.js';
 
 // ---------- projects ----------
 
@@ -134,84 +131,6 @@ export function openNewScheme() {
   dialog.showModal();
 }
 
-export function newTicketForm(projectId) {
-  // A one-line chat box: what you type becomes the new thread's first message. The thread names
-  // and types itself from it, and every thread gets full access.
-  const box = h('textarea', { name: 'message', required: true, rows: 1, placeholder: 'New minion: what should it work on?', 'aria-label': 'Start a new minion', 'data-draft': true });
-  const err = h('p', { class: 'error cui-notice', 'data-tone': 'danger', role: 'alert', hidden: true });
-  // The model and effort it starts on (#698; Cara, 2026-11-14: "we should ALWAYS make an intentional choice about model"):
-  // the model table's pick for the type its words suggest, until the person picks one themselves.
-  const model = h('select', { class: 'picker', name: 'model', 'aria-label': 'Model for the new minion' }, CLAUDE_MODELS.map(([id, name]) => h('option', { value: id }, name)));
-  const effort = h('select', { class: 'picker', name: 'effort', 'aria-label': 'Effort for the new minion' }, EFFORT_LEVELS.map((e) => h('option', { value: e }, e)));
-  const guess = h('span', { class: 'guess muted' });
-  const pickers = h('div', { class: 'new-thread-model', hidden: true }, model, effort, guess);
-  const form = h('form', { class: 'new-thread' }, box, pickers, err);
-  const fit = () => fitHeight(box);
-  const draftKey = `cc-new-thread:${projectId}`;
-  const draft = loadDraft(draftKey);
-  if (draft) box.value = draft.message ?? '';
-  let picked = draft?.model ? { model: draft.model, effort: draft.effort } : null;
-  const save = () => saveDraft(draftKey, box.value ? { message: box.value, ...(picked ?? {}) } : null);
-  const showModel = () => {
-    pickers.hidden = !box.value.trim();
-    const type = guessType(box.value);
-    const pick = picked ?? pickFor(type);
-    model.value = pick.model;
-    effort.value = pick.effort;
-    guess.textContent = picked ? '' : type ? `for a ${type}` : 'no type guessed';
-    guess.title = picked ? '' : `The model table's pick for ${type ? `a ${type}, guessed from your words` : 'work whose kind it can\'t tell'}; change it before you start.`;
-  };
-  const pick = () => {
-    picked = { model: model.value, effort: effort.value };
-    showModel();
-    save();
-  };
-  model.addEventListener('change', pick);
-  effort.addEventListener('change', pick);
-  showModel();
-  requestAnimationFrame(fit);
-  let busy = false;
-  box.addEventListener('input', () => {
-    fit();
-    if (!box.value) picked = null;
-    showModel();
-    save();
-  });
-  box.addEventListener('keydown', (e) => {
-    if (continueList(box, e)) return;
-    // Enter sends (on phones too, unlike the chat composer), Shift+Enter adds a line (or the next item in a numbered list), IME composition is left alone.
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      form.requestSubmit();
-    }
-  });
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (busy || !box.value.trim()) return;
-    busy = true;
-    box.readOnly = true;
-    err.hidden = true;
-    setSending(sending + 1);
-    try {
-      const t = await api(`api/projects/${projectId}/tickets`, { method: 'POST', body: { message: box.value, model: model.value, effort: effort.value } });
-      saveDraft(draftKey, null);
-      box.value = '';
-      picked = null;
-      showModel();
-      fit();
-      location.hash = threadHref(t);
-    } catch (ex) {
-      err.textContent = ex.message;
-      err.hidden = false;
-    } finally {
-      busy = false;
-      box.readOnly = false;
-      setSending(sending - 1);
-    }
-  });
-  return form;
-}
-
 /** A promoted group's heading: its value's label in the registry, or the value capitalised ("area: balance" → "Balance"). */
 function groupHeading(group) {
   const [key, value] = group.split(/:(.*)/).map((x) => x.trim());
@@ -267,7 +186,7 @@ export function renderSidebar() {
   }
   el.replaceChildren(
     pinnedGroup, ...sections, closedGroup,
-    !all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one, or type in the box above.')
+    !all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one.')
       : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : '');
 }
 

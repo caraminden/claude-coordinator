@@ -606,6 +606,7 @@ export const projectRoutes: Route[] = [
       if (body.repo_url !== undefined) {
         repoUrl = typeof body.repo_url === 'string' ? body.repo_url.trim() : '';
         if (!/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
+        if (/\s/.test(repoUrl) || /^https:\/\/[^/]*@/.test(repoUrl)) throw new HttpError(400, 'Repo URL cannot hold spaces or a login');
         if (repoUrl === project.repo_url) repoUrl = null;
         else if (project.repo_url && body.replace_repo !== true) {
           throw new HttpError(409, `This scheme's repo is already ${project.repo_url}; send replace_repo: true to point it at ${repoUrl} instead`);
@@ -625,7 +626,7 @@ export const projectRoutes: Route[] = [
         store.setProjectUpstream(project.id, repoUrl, null);
         const coordinator = store.getCoordinator(project.id);
         if (coordinator) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists, still on the old repo)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
+          runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
         }
       }
       for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];

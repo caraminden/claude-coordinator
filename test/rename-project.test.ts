@@ -78,6 +78,7 @@ test('PATCH sets a scheme\'s repo_url, refuses to replace one without replace_re
   await call(`/api/projects/${p.id}`);
   const bad = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'ftp://nope' } });
   assert.equal(bad.status, 400);
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'https://tok:x@github.com/me/one' } })).status, 400, 'no login in the URL');
   const ok = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: ' https://github.com/me/one ' } });
   assert.equal(ok.status, 200);
   assert.equal(ok.data.repo_url, 'https://github.com/me/one');

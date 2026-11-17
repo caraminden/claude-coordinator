@@ -1140,6 +1140,14 @@ function drawEvent(event, scroll) {
     const card = view.cards.get(data.id);
     if (card?.settle) card.settle(data);
     else nodes.push(ultraResult(data));
+  } else if (event.kind === 'minion_copy') {
+    // A run of copies of minion-to-minion messages is one collapsed row (#924); any other event ends it.
+    // Messages still on their way sit last in the log, so the run's row is the last child before them.
+    const pending = new Set(view.pendingMessages.map((m) => m.el));
+    let prev = log.lastElementChild;
+    while (prev && pending.has(prev)) prev = prev.previousElementSibling;
+    if (prev?.matches('.mcopies')) addMinionCopy(prev, data, event);
+    else nodes.push(addMinionCopy(newMinionCopies(), data, event));
   } else if (event.kind === 'loop_paused') {
     nodes.push(loopCard(data));
   } else if (event.kind === 'loop_continued') {
@@ -1331,6 +1339,27 @@ function addGruntText(log, id, text, data, event) {
   group.firstChild.replaceChildren(
     h('span', { class: 'who' }, groupTitle(all.length, Math.max(...all.map((l) => l.end)) - Math.min(...all.map((l) => l.start)), shortDuration)),
     h('span', { class: 'preview' }, all.map((l) => l.gruntLabel).join(', ')));
+}
+
+/** An empty group row for copies of minion-to-minion messages; addMinionCopy fills it. */
+function newMinionCopies() {
+  return h('details', { class: 'msg coord mcopies' }, h('summary', {}, h('span', { class: 'who' }), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
+}
+
+/** One copy into its group row: a line in the list, and the count and the numbers in the summary, updated in place. */
+function addMinionCopy(group, data, event) {
+  const list = group.querySelector('.mc-list');
+  const sender = data.author?.replace(/^#\d+\s*/, '') ?? '';
+  const who = `${data.unparked ? 'unparked' : '→'} #${data.to}`;
+  list.append(h('div', { class: 'mc-row', 'data-eid': event.id }, h('span', { class: 'mc-who' }, `${data.from ? '#' + data.from : data.author} ${who}`), h('span', { class: 'mc-text', title: sender }, data.text)));
+  const nums = new Set((group.dataset.nums ? group.dataset.nums.split(',').map(Number) : []));
+  for (const n of [data.from, data.to]) if (n) nums.add(n);
+  group.dataset.nums = [...nums].join(',');
+  const count = list.children.length;
+  const all = [...nums].sort((a, b) => a - b).map((n) => `#${n}`).join(', ');
+  group.querySelector('.who').textContent = `${count} message${count === 1 ? '' : 's'} between ${all}`;
+  group.dataset.at ??= event.created_at;
+  return group;
 }
 
 /** The time a message or card was posted, after its who-line; the full date shows on hover. */

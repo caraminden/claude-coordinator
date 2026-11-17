@@ -2,13 +2,13 @@
 // tastmasters chat with pending card links"), so a night's activity needn't be scrolled to find them. Only the
 // Taskmaster's own cards (Josh's pick, 2026-11-12); each is a link that opens the chat at the card. They're the
 // row's open_cards (Runner.cardLinks), the list read_ticket and list_tickets show. A minion's chat gets the strip
-// for its open choices cards only (#821), each with Open the page beside it.
+// for its open choices cards (#821, each with Open the page beside it) and secret cards.
 import { fileHref, h, me } from './base.js';
 import { openHash } from './core.js';
 import { stripCards } from './waiting-cards.js';
 
 /**
- * The strip for chat `t`, or null when nothing waits on you: a Taskmaster's cards, or a minion's open choices
+ * The strip for chat `t`, or null when nothing waits on you: a Taskmaster's cards, or a minion's open choices and secret
  * cards (#821), each with an Open the page button beside its link, as the card has.
  */
 export function waitingStrip(t) {
@@ -26,6 +26,6 @@ export function waitingStrip(t) {
   }, whatOf(c), c.label ? h('span', { class: 'label' }, c.doc ? c.label.replace(/^picks on “(.*)”$/, '$1') : c.label) : ''),
   // A choices card's page holds its picks; this opens it as the card's button does (public/cards.js docCard).
   c.doc ? h('a', { class: 'button small waiting-open', href: fileHref(t.id, c.doc) }, 'Open the page') : ''];
-  // A strip of only choices cards (always so in a minion's chat): on a phone its head gives way to them (public/composer.css).
-  return h('div', { class: cards.every((c) => c.doc) ? 'waiting-strip choices' : 'waiting-strip' }, h('span', { class: 'waiting-head' }, cards.length === 1 ? '1 card waits on you' : `${cards.length} cards wait on you`), ...cards.flatMap(link));
+  // A strip of only choices and secret cards (always so in a minion's chat): on a phone its head gives way to them (public/composer.css).
+  return h('div', { class: cards.every((c) => c.doc || c.what === 'secret') ? 'waiting-strip choices' : 'waiting-strip' }, h('span', { class: 'waiting-head' }, cards.length === 1 ? '1 card waits on you' : `${cards.length} cards wait on you`), ...cards.flatMap(link));
 }

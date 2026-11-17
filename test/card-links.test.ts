@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cardHref, cardLabel, cardWhat, misplacedCards, settledHow, staleCards, unlinkedCards, type CardLink, type SettledCard } from '../src/card-links.ts';
+import { cardHref, cardLabel, cardText, cardWhat, misplacedCards, settledHow, staleCards, unlinkedCards, type CardLink, type SettledCard } from '../src/card-links.ts';
 import { Store } from '../src/db.ts';
 import { check, SENT_BACK } from '../src/link-check.ts';
 import { Runner } from '../src/runner.ts';
@@ -345,4 +345,11 @@ test('an unrelated message does not settle a card; its own answer does, and is t
   const click = runner.emit(a.id, 'user_message', { author: 'Cara', text: 'My answers…', answer: { questionId: 'q1', answers: [{ selected: ['Yes'] }] } });
   assert.equal(snap().cards!.length, 0);
   assert.equal(snap().settled![0].how, `answered by Cara at ${clockTime(click.created_at)}: Yes`);
+});
+
+test('a secret card is a secret card in the minions list and the tools\' waiting lines, naming only the secret', () => {
+  const data = { id: 'x', questions: [], secret: { name: 'BRAVE_SEARCH_KEY', scope: 'scheme' } };
+  assert.equal(cardWhat('question', data), 'secret');
+  const c = { minion: 3, kind: 'question' as const, what: cardWhat('question', data), label: cardLabel('question', data), href: '#/p/2/t/3?e=9' };
+  assert.equal(cardText(c), 'secret card "a secret to save as BRAVE_SEARCH_KEY": [open it](#/p/2/t/3?e=9)');
 });

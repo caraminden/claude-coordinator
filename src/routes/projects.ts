@@ -474,8 +474,10 @@ export const projectRoutes: Route[] = [
   {
     // The scheme's favicon (src/scheme-icon.ts). Its URL carries the version, so it can be kept long.
     method: 'GET', path: '/api/projects/:project/icon', who: ['person'],
-    async handler({ res, project, app: { store } }) {
-      const icon = await readIcon(project.id, project.repo_dir, store);
+    async handler({ res, project, session, app: { store, contraptions } }) {
+      // The home app may gate its routes: it is asked as the person asking, when they may use it.
+      const user = typeof session.uid === 'number' ? store.getUser(session.uid) : undefined;
+      const icon = await readIcon(project.id, project.repo_dir, store, (c) => user && contraptions.enabled(c.name, user.id) ? contraptions.signIdentity(c.name, user) : null);
       if ('missing' in icon) throw new HttpError(404, icon.missing);
       send(res, 200, { ...iconHeaders(icon.type), 'Cache-Control': 'private, max-age=31536000, immutable' }, icon.body);
     },

@@ -17,3 +17,8 @@ test('a minion chat shows the strip for its open choices cards only; the Taskmas
   assert.deepEqual(stripCards({ kind: 'coordinator', open_cards }, 'Cara').map((c) => c.href), ['#q', '#d']);
   assert.deepEqual(stripCards({ kind: 'ticket', open_cards: [{ href: '#q', kind: 'question' }] }, 'Cara'), [], 'nothing once the choices card is settled');
 });
+
+test('a minion chat\'s strip also holds an open secret card, which is saved in its own field (Cara, 2026-11-17)', () => {
+  const open_cards = [{ href: '#q', kind: 'question', what: 'question' }, { href: '#s', kind: 'question', what: 'secret' }];
+  assert.deepEqual(stripCards({ kind: 'ticket', open_cards }, 'Cara').map((c) => c.href), ['#s']);
+});

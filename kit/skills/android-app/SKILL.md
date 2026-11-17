@@ -72,7 +72,8 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   Capacitor `webDir` changed since the published APK. If so, it builds a release APK in its own
   checkout (`~/.cache/citadel-apk/<app>/`, log in `build.log` there), signs it with the app's
   release key and publishes it. A change elsewhere (the server, a web layer loaded from
-  `server.url`) builds nothing.
+  `server.url`) builds nothing. A `webDir` the deploy builds (a gitignored `dist/`) is copied
+  from the live slot, and then every deploy with a new commit builds an APK.
   - **versionCode is the commit count on main** (`git rev-list --count HEAD`), set at build time
     by Citadel's Gradle init script (`-Pcitadel.versionCode=N`). Leave `versionCode` in
     `build.gradle` alone; `versionName` is read from it.

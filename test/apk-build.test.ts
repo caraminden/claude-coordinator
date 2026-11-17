@@ -172,3 +172,33 @@ test('schedule runs one build per app at a time and checks again for a deploy th
   assert.equal(published.at(-1)![1], 2, 'the newer commit is built once the first build ends');
   assert.ok(published.length <= 2);
 });
+
+test('a webDir the deploy builds (gitignored) is copied from the live slot, and any commit builds again', async () => {
+  const live = join(root, 'apps', 'bundled');
+  mkdirSync(join(live, 'node_modules'), { recursive: true });
+  git(join(root, 'apps'), 'init', '-q', '-b', 'main', 'bundled');
+  writeFileSync(join(live, '.gitignore'), 'node_modules\ndist\n');
+  commit(live, { 'capacitor.config.json': JSON.stringify({ webDir: 'dist' }), 'android/app/build.gradle': 'versionCode 1', 'src/main.ts': '1' });
+  const row = { name: 'bundled', title: 'Bundled', home_scheme: 10, repo: 'o/bundled' } as ContraptionRow;
+  key('bundled');
+  const { b, told } = builder();
+  assert.ok('failed' in (await b.check(row, '#1')), 'no built dist/ yet');
+  assert.match(told[0], /webDir dist isn't in git/);
+  mkdirSync(join(live, 'dist'));
+  writeFileSync(join(live, 'dist/index.html'), 'v2');
+  commit(live, { 'src/main.ts': '2' });
+  assert.deepEqual(await b.check(row, '#2'), { built: 2 });
+  assert.equal(readFileSync(join(root, 'cache/bundled/src/dist/index.html'), 'utf8'), 'v2', 'the live build output, copied');
+  commit(live, { 'src/main.ts': '3' });
+  assert.deepEqual(await b.check(row, '#3'), { built: 3 }, 'a source change may change dist/, so it builds');
+});
+
+test("the commit a build failed at outlasts a restart: a new builder doesn't tell it again", async () => {
+  const { row } = app('restarted');
+  const first = builder();
+  await first.b.check(row, '#1');
+  assert.equal(first.told.length, 1);
+  const second = builder();
+  assert.deepEqual(await second.b.check(row, 'auto-deploy'), { skipped: 'already failed at this commit' });
+  assert.deepEqual(second.told, []);
+});

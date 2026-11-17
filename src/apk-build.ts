@@ -7,9 +7,9 @@
 // where its open route serves them to the update banner. An app whose APKs a release workflow signs on CI (Mandate) keeps that
 // path (src/apk-release.ts): this skips it. Nothing here touches the live slot, so a failed build changes nothing that runs.
 import { spawn, execFile } from 'node:child_process';
-import { closeSync, existsSync, openSync } from 'node:fs';
-import { lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { androidEnv } from './claude-link.ts';
 import { apksigner, install, OldApk, OtherKey, signers } from './apk-release.ts';
 import type { ContraptionRow } from './db.ts';
@@ -99,8 +99,6 @@ export class ApkBuilds {
   private d: ApkBuildDeps;
   /** Apps building now, and what to check again once that ends (a deploy that went live meanwhile). */
   private busy = new Map<string, { again: ContraptionRow | null; by: string }>();
-  /** The commit each app's build last failed or was refused at: told once, and not tried again until it moves. */
-  private stuck = new Map<string, string>();
   constructor(d: ApkBuildDeps) {
     this.d = d;
   }
@@ -147,13 +145,20 @@ export class ApkBuilds {
     const feed = JSON.parse(await readFile(feedFile, 'utf8').catch(() => 'null')) as { versionCode?: unknown; commit?: unknown } | null;
     const current = Number.isInteger(feed?.versionCode) ? (feed!.versionCode as number) : 0;
     if (feed?.commit === commit) return { skipped: 'published at this commit' };
+    // A webDir the deploy builds (gitignored dist/) isn't in git: any commit may change it, and the build copies the live one.
+    const web: string | undefined = apkPaths(cap.webDir)[3]; // the webDir, when it's a path inside the repo
+    const built = web && !(await git(live, 'ls-files', '--', web)).out ? web : null;
     if (typeof feed?.commit === 'string' && /^[0-9a-f]{40}$/.test(feed.commit)) {
       // 0: nothing that goes into the APK changed; 1: something did; anything else (a commit it doesn't have): build.
-      if ((await git(live, 'diff', '--quiet', feed.commit, commit, '--', ...apkPaths(cap.webDir))).code === 0) return { skipped: 'nothing in its APK changed' };
+      if ((await git(live, 'diff', '--quiet', feed.commit, commit, '--', ...(built ? [] : apkPaths(cap.webDir)))).code === 0) return { skipped: 'nothing in its APK changed' };
     }
-    if (this.stuck.get(row.name) === commit) return { skipped: 'already failed at this commit' };
+    const dir = join(this.d.cacheDir, row.name);
+    // The commit its build last failed or was refused at, kept on disk so a restart doesn't tell it again.
+    const failedAt = join(dir, 'failed-at');
+    if ((() => { try { return readFileSync(failedAt, 'utf8').trim(); } catch { return ''; } })() === commit) return { skipped: 'already failed at this commit' };
     const fail = (why: string, end?: string): Outcome => {
-      this.stuck.set(row.name, commit);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(failedAt, commit);
       this.d.tell(row, `${row.title}'s Android build at ${commit.slice(0, 9)} wasn't published: ${why}${end ? `\n\nThe end of its build log (${join(this.d.cacheDir, row.name, 'build.log')}):\n${end}` : ''}\n\nIt's tried again once a deploy carries a newer commit.`);
       return { failed: why };
     };
@@ -166,7 +171,6 @@ export class ApkBuilds {
     if (!Number.isInteger(code) || code < 1) return fail(`couldn't count ${commit.slice(0, 9)}'s commits`);
     if (code <= current) return fail(`its versionCode is its commit count, ${code}, and the published APK is build ${current} already. Phones only update to a higher one: publish one from a release workflow instead, or bump past it.`);
 
-    const dir = join(this.d.cacheDir, row.name);
     const src = join(dir, 'src');
     const log = join(dir, 'build.log');
     await mkdir(dir, { recursive: true });
@@ -186,6 +190,13 @@ export class ApkBuilds {
     if ((await readlink(link).catch(() => null)) !== modules) {
       if (await lstat(link).catch(() => null)) await rm(link, { recursive: true, force: true });
       await symlink(modules, link);
+    }
+    if (built) {
+      // Copied, not linked: cap sync copies a link into the APK's assets as a link.
+      if (!existsSync(join(live, built))) return fail(`its Capacitor webDir ${built} isn't in git and ${live} has none: its citadel-app.json build steps must build it`);
+      await rm(join(src, built), { recursive: true, force: true });
+      await mkdir(dirname(join(src, built)), { recursive: true });
+      await cp(join(live, built), join(src, built), { recursive: true });
     }
 
     const base = Object.fromEntries(['HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'XDG_RUNTIME_DIR'].filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
@@ -227,7 +238,7 @@ export class ApkBuilds {
       await rm(signed, { force: true });
     }
     await this.prune(join(this.d.dataDir(row), 'android'), row.name, code);
-    this.stuck.delete(row.name);
+    await rm(failedAt, { force: true });
     this.d.published(row, code, commit, by);
     if (warnings.length) this.d.tell(row, `${row.title}'s Android build ${code} is published, but ${warnings.join(' and ')}. The citadel:android-app skill says none may be true in a release: fix it in the app's AndroidManifest.xml.`);
     return { built: code };

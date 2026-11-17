@@ -464,6 +464,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         scheme: { type: 'string', description: 'The other scheme, by name or id; a wrong one lists them' },
+        person: { type: 'string', description: "For a scheme with a Taskmaster per person: whose to reach (a member's name); one with none of their own, or none named, reaches its Overlord. Leave it out to answer: a reply goes back to the one that wrote to you" },
         text: { type: 'string', maxLength: 10000, description: 'Self-contained: it cannot see your scheme, so say which scheme\'s minion #N is. Short: anything longer than a paragraph goes in file. At most 10,000 characters (`message` is accepted too)' },
         need: NEED,
         wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent). A need of fyi is always held mail' },
@@ -1782,7 +1783,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
-      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
+      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
       if (r.held) return `Held, not delivered: you and the Taskmaster of ${r.scheme} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it.${copied} ${ask}`;

@@ -412,7 +412,7 @@ function notify(ticketId: number, trigger: PushTrigger, except: string | null = 
 }
 
 outsideSpend.onCap = (projectId, total, cap) => {
-  const coordinator = store.getCoordinator(projectId);
+  const coordinator = store.getOverlord(projectId);
   if (!coordinator) return;
   const text = `Spend on outside APIs is $${total.toFixed(2)} this month, past the scheme's $${cap.toFixed(2)} cap. Nothing has stopped; raise the cap or cut back.`;
   runner.emit(coordinator.id, 'note', { text });
@@ -435,7 +435,7 @@ waiters.deliver = (r) => {
     const author = `${own.name} #${from.number} (relayed once live)`;
     runner.leaveMail(r.to.taskmaster, author, asData(author, r.text));
   } else runner.leaveMail(r.to.minion, `${who} (relayed once live)`, r.text);
-  const taskmaster = store.getCoordinator(from.project_id);
+  const taskmaster = store.ownerCoordinator(from);
   if (taskmaster) runner.leaveMail(taskmaster.id, who, `(for your tracking; nothing to do) #${from.number}'s relay to ${'scheme' in r.to ? r.to.scheme : `#${r.to.number}`} went out`);
 };
 runner.heldFor = (id) => waiters.heldFor(id);
@@ -453,7 +453,7 @@ waiters.hold = (c, why) => {
   runner.emit(c.ticket, 'note', { text: `${why}, so this minion hasn't started. Start now starts it with its brief; or dismiss it.` });
   runner.broadcastTicket(c.ticket);
   notify(c.ticket, { kind: 'state', state: 'blocked', note: `${why}, so this one is held` });
-  const coordinator = store.getCoordinator(t.project_id);
+  const coordinator = store.ownerCoordinator(t);
   if (coordinator) runner.send(coordinator.id, APP_NAME, `${why}, so #${t.number} ${t.title}, chained on it, is held and hasn't started. Ask people whether to start it (message_ticket with start_now starts it with its brief) or dismiss it.`);
 };
 if (!BOOT_CHECK) {
@@ -612,7 +612,7 @@ services.onDeploy = (view) => {
 };
 /** A message from Citadel to a scheme's Taskmaster, if it has one. */
 const tellHome = (projectId: number, text: string) => {
-  const tm = store.getCoordinator(projectId);
+  const tm = store.getOverlord(projectId);
   if (tm) runner.send(tm.id, APP_NAME, text);
 };
 // The workflow readers go through CI health's etag-cached reads (defined below; first called after startup's scan).
@@ -839,7 +839,7 @@ const alertScheme = (from: number) => from || store.listProjects().find((p) => l
 const alertWakes = new AlertWakes(store, {
   wake: (from, text) => {
     const scheme = alertScheme(from);
-    if (!scheme || !store.getCoordinator(scheme)) return false;
+    if (!scheme || !store.getOverlord(scheme)) return false;
     tellHome(scheme, text);
     return true;
   },
@@ -875,7 +875,7 @@ const ciHealth = new CiHealth(store, {
   // A failed scheduled run (#588), or a dispatched one on main, is held mail for the scheme's Taskmaster (#678), to start a bug minion;
   // a watched workflow gone red on main wakes it (#774).
   tell: (project, text, wake) => {
-    const coordinator = store.getCoordinator(project.id);
+    const coordinator = store.getOverlord(project.id);
     if (coordinator) {
       if (wake) runner.send(coordinator.id, APP_NAME, text);
       else runner.leaveMail(coordinator.id, APP_NAME, text);
@@ -977,14 +977,14 @@ github.onMerged = (repoDir) => catchUp(repoDir);
 // One fetched by a runner agent job's scripts goes under that job's note instead (#339).
 runnerTokens.onFetched = (project, text, machine) => {
   if (runnerJobs.absorb(project, machine, text)) return;
-  const coordinator = store.getCoordinator(project.id);
+  const coordinator = store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text });
 };
 // So is each runner agent add or remove (#328), once, when it ends, its output collapsed under it (#339); a list isn't.
 // The CI store (#658): a refusal for room is told in the scheme Taskmaster's chat; the rules also run daily (and soon
 // after a start), for schemes that have stopped uploading and for what a restart cut off mid-upload.
 ciStore.onFull = (project, text) => {
-  const coordinator = store.getCoordinator(project.id);
+  const coordinator = store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text });
 };
 if (!BOOT_CHECK && !PREVIEW) {
@@ -993,7 +993,7 @@ if (!BOOT_CHECK && !PREVIEW) {
   setInterval(sweepCi, 24 * 60 * 60_000).unref();
 }
 runnerJobs.onNote = (project, text, detail) => {
-  const coordinator = store.getCoordinator(project.id);
+  const coordinator = store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text, detail });
 };
 
@@ -1002,7 +1002,7 @@ mainSync.stuck = (repoDir, why) => {
   if (!why) return;
   console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`);
   const project = store.listProjects().find((p) => p.repo_dir === repoDir);
-  const coordinator = project && store.getCoordinator(project.id);
+  const coordinator = project && store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text: `This scheme's main checkout (${repoDir}) isn't level with GitHub's main, and ${APP_NAME} didn't fast-forward it: ${why}. A person needs to look.` });
 };
 

@@ -1008,7 +1008,7 @@ export class Runner {
           ...log.kept.map((k) => `- ${k}`),
         ].filter(Boolean).join('\n');
         console.log(`${p.name}: ${text}`);
-        const coordinator = this.store.getCoordinator(p.id);
+        const coordinator = this.store.getOverlord(p.id);
         if (coordinator) this.emit(coordinator.id, 'note', { text });
       }
     } finally {
@@ -1709,9 +1709,9 @@ export class Runner {
    * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
    * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
    */
-  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string): boolean | 'cold' | 'mail' | 'parked' {
+  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string, sender?: number): boolean | 'cold' | 'mail' | 'parked' {
     const minion = this.store.getTicket(minionId)!;
-    const from = to === minionId ? this.store.getCoordinator(minion.project_id)?.id : minionId;
+    const from = to === minionId ? sender ?? this.store.ownerCoordinator(minion)?.id : minionId;
     const { held, cold, parked } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent, need);
     if (!held) return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
@@ -1746,7 +1746,7 @@ export class Runner {
   /** The scheme's Taskmaster sees each message between its minions as held mail that wakes nothing (#783). */
   private copyToTaskmaster(to: number, author: string, text: string, unparked = false) {
     const target = this.store.getTicket(to)!;
-    const coordinator = this.store.getCoordinator(target.project_id);
+    const coordinator = this.store.ownerCoordinator(target);
     const line = text.replace(/\s+/g, ' ');
     if (coordinator) this.leaveMail(coordinator.id, author, `(${unparked ? `${author.split(' ')[0]} unparked #${target.number}` : `to #${target.number}`}, for your tracking; nothing to do) ${line.length > 200 ? line.slice(0, 200) + '…' : line}`);
   }
@@ -1931,7 +1931,7 @@ export class Runner {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return 0;
     const loops: { key: string; chats: number[]; pair?: true }[] = ticket.kind === 'coordinator'
-      ? this.store.listProjects().map((p) => this.store.getCoordinator(p.id)).filter((c) => c && c.id !== ticketId)
+      ? this.store.listProjects().flatMap((p) => this.store.listCoordinators(p.id)).filter((c) => c && c.id !== ticketId)
         .map((c) => ({ key: pairKey(ticketId, c!.id), chats: [ticketId, c!.id] }))
       : [{ key: loopKey(ticketId), chats: this.loopChats(ticket) },
         // Its direct exchanges with the scheme's other minions (#783).
@@ -1962,7 +1962,7 @@ export class Runner {
 
   /** The chats a loop-guard note shows in: the minion's and its Taskmaster's. */
   private loopChats(minion: Ticket): number[] {
-    const coordinator = this.store.getCoordinator(minion.project_id);
+    const coordinator = this.store.ownerCoordinator(minion);
     return coordinator ? [minion.id, coordinator.id] : [minion.id];
   }
 

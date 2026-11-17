@@ -282,6 +282,24 @@ function describeServer() {
     assert.equal(said(sharedTm.id, 'after handover')?.mail, true, 'Cara stays touched, so held mail');
   });
 
+  test("a Taskmaster's message to a minion: the minion's next report answers it, once; leaving stops the held mail", async () => {
+    const rachel = db.coordinatorFor(Shared.id, Rachel.id)!;
+    const josh = db.coordinatorFor(Shared.id, Josh.id)!;
+    let r = await post(`/api/tickets/${work.id}/messages`, { text: 'Rachel asks: status?' }, { bearer: tokens.agentToken(rachel.id) });
+    assert.equal(r.status, 202, JSON.stringify(r.data));
+    assert.ok(db.touchedBy(db.getTicket(work.id)!).includes(Rachel.id), "the asking Taskmaster's person touches it");
+    await post(`/api/tickets/${work.id}/coordinator`, { text: 'answer for Rachel', need: 'ask' }, { bearer: tokens.agentToken(work.id) });
+    assert.notEqual(said(rachel.id, 'answer for Rachel')?.mail, true, 'it wakes the one that asked');
+    assert.equal(said(josh.id, 'answer for Rachel')?.mail, true, 'the owner hears it as held mail');
+    await post(`/api/tickets/${work.id}/coordinator`, { text: 'next report', need: 'ask' }, { bearer: tokens.agentToken(work.id) });
+    assert.notEqual(said(josh.id, 'next report')?.mail, true, 'back to the owner');
+    assert.equal(said(rachel.id, 'next report')?.mail, true);
+    r = await post(`/api/tickets/${work.id}/leave`, {}, { cookie: cookies(Rachel) });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    await post(`/api/tickets/${work.id}/coordinator`, { text: 'after Rachel left', need: 'ask' }, { bearer: tokens.agentToken(work.id) });
+    assert.equal(said(rachel.id, 'after Rachel left'), undefined);
+  });
+
   test('message_taskmaster "for" a member reaches theirs, else the Overlord; with no one, the sender\'s person', async () => {
     const josh = db.coordinatorFor(Shared.id, Josh.id)!;
     const overlord = db.getOverlord(Shared.id)!;

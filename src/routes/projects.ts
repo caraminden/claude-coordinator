@@ -668,12 +668,12 @@ export const projectRoutes: Route[] = [
         } catch (err: any) {
           throw new HttpError(409, err.message);
         }
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.getOverlord(project.id);
         if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} renamed the scheme from "${project.name}" to "${name}".` });
       }
       if (repoUrl) {
         store.setProjectUpstream(project.id, repoUrl, null);
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.getOverlord(project.id);
         if (coordinator) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
         }
@@ -682,7 +682,7 @@ export const projectRoutes: Route[] = [
       if (Object.keys(settings).length) {
         store.setProjectSettings(project.id, settings);
         // Who changed what gets a permanent line in the coordinator's chat, since rules decide what needs a person's OK.
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.getOverlord(project.id);
         const shown = (text: string) => (text ? lines(text).join(', ') : 'none');
         if (coordinator && settings.approval_rules !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each minion's next turn.` });
@@ -708,7 +708,7 @@ export const projectRoutes: Route[] = [
       }
       if (instructions !== project.instructions) {
         store.setProjectInstructions(project.id, instructions, session.name);
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.getOverlord(project.id);
         if (coordinator) {
           runner.emit(coordinator.id, 'note', {
             text: `${session.name} ${instructions ? 'updated' : 'cleared'} the scheme instructions; they apply from each minion's next turn.`,
@@ -802,7 +802,7 @@ export const projectRoutes: Route[] = [
         store.setAppInstructions(text, session.name);
         // Every Taskmaster gets the line, since the text reaches every scheme.
         for (const p of store.listProjects()) {
-          const coordinator = store.getCoordinator(p.id);
+          const coordinator = store.getOverlord(p.id);
           if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} ${text ? 'updated' : 'cleared'} the ${APP_NAME}-wide instructions; they apply from each minion's next turn in every scheme.` });
         }
         app.broadcast({ type: 'app-instructions', instructions: store.appInstructions() });
@@ -894,7 +894,7 @@ export const projectRoutes: Route[] = [
       if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);
       if (brief) {
         store.settleBrief(project.id, brief.path, brief.heading, id);
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.ownerCoordinator(store.getTicket(id)!);
         if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} started #${store.getTicket(id)!.number} from ${brief.heading || 'the handoff'} in ${basename(brief.path)}` });
       }
       if (follow) {
@@ -942,7 +942,7 @@ export const projectRoutes: Route[] = [
       const r = app.store.props.registerValues(project.id, body.key, body.values, actor, !!body.force);
       if (r.added.length || r.updated.length) app.registryChanged(project.id, app.store.props.isGlobal(project.id, body.key));
       if (r.unreviewed.length) {
-        const coordinator = app.store.getCoordinator(project.id);
+        const coordinator = app.store.getOverlord(project.id);
         if (coordinator) app.runner.emit(coordinator.id, 'note', { text: `${actor.name} added ${r.unreviewed.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
       }
       return json(ctx.res, 200, r);

@@ -31,17 +31,23 @@ export function postCard(app: App, ticket: Ticket, card: Card): { id: string; hr
   return { id, href: cardHref(ticket, event.id) };
 }
 
+/** The Taskmaster that last wrote to a minion (#919): its next message_coordinator goes there, once. */
+export const replyToKey = (ticketId: number) => `minion_reply_to:${ticketId}`;
+
 /** Send the minion's Taskmaster a message, as message_coordinator does; returns runner.relay's answer. */
 export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urgent: boolean, wake = true, need?: string) {
   const { store, runner } = app;
   await ensureCoordinator(app, store.getProject(ticket.project_id)!);
-  // Its owner's Taskmaster gets it as sent (#919); every other touched person's own gets held mail.
-  const coordinator = store.ownerCoordinator(ticket)!;
+  // A reply goes to the Taskmaster that asked, else its owner's gets it as sent (#919); every other touched person's own gets held mail.
+  const asked = store.getTicket(store.getSetting<number>(replyToKey(ticket.id)) ?? 0);
+  store.deleteSetting(replyToKey(ticket.id));
+  const owner = store.ownerCoordinator(ticket)!;
+  const coordinator = asked?.kind === 'coordinator' && asked.project_id === ticket.project_id ? asked : owner;
   const author = `#${ticket.number} ${ticket.title}`;
   const held = runner.relay(ticket.id, coordinator.id, author, text, urgent, wake, need);
   if (held !== true) {
-    for (const tm of new Set(store.touchedBy(ticket).map((uid) => store.coordinatorFor(ticket.project_id, uid)))) {
-      if (tm && tm.coordinator_of != null && tm.id !== coordinator.id) runner.leaveMail(tm.id, author, text);
+    for (const tm of new Map([owner, ...store.touchedBy(ticket).map((uid) => store.coordinatorFor(ticket.project_id, uid))].map((t) => [t?.id, t])).values()) {
+      if (tm && (tm.coordinator_of != null || tm.id === owner.id) && tm.id !== coordinator.id) runner.leaveMail(tm.id, author, text);
     }
   }
   if (held !== true) runner.emit(ticket.id, 'note', { ...(need ? { need } : {}), text: `${held ? 'Left held mail for' : 'Sent'} the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });

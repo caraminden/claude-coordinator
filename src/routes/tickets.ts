@@ -15,7 +15,7 @@ import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../a
 import { cardHref } from '../card-links.ts';
 import { keyFiles } from '../release-key.ts';
 import { checkNeed } from '../needs.ts';
-import { armForCi, postCard, tellTaskmaster } from '../ci-armed.ts';
+import { armForCi, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS } from '../../public/model-table.js';
@@ -465,7 +465,12 @@ export const ticketRoutes: Route[] = [
         if (unparks) await unparkTicket(app, ticket, session.name, APP_NAME, true);
         // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
         if (caller && ticket.kind !== 'coordinator') {
-          held = runner.relay(id, id, session.name, text, body.urgent === true || unparks);
+          held = runner.relay(id, id, session.name, text, body.urgent === true || unparks, true, undefined, caller.id);
+          // Its next message_coordinator answers this Taskmaster (#919), whose person now touches it.
+          if (held !== true) {
+            app.store.setSetting(replyToKey(id), caller.id);
+            if (caller.coordinator_of != null) app.store.touch(id, caller.coordinator_of);
+          }
           // The loop guard held the message meant to wake it: it stays parked, so Unpark still shows.
           if (unparks && held === true && ticket.state === 'parked' && !runner.isRunning(id)) {
             app.store.updateTicket(id, { state: 'parked' });
@@ -867,6 +872,15 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // Leave a minion (#919): its updates stop reaching your Taskmaster until you write in it again. The menu item is #920's.
+    method: 'POST', path: '/api/tickets/:ticket/leave', who: ['person'], refuse: 'Only a person can leave a minion',
+    async handler({ res, app, session, ticket }) {
+      if (ticket.kind === 'coordinator') throw new HttpError(400, `Only a minion can be left, not a ${AGENT_NAME}`);
+      app.store.leaveTouched(ticket.id, session.uid!);
+      return json(res, 200, { left: ticket.id });
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/stop', who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, app, ticket } = ctx;
@@ -1228,7 +1242,7 @@ export const ticketRoutes: Route[] = [
       if (body.cancel != null) {
         const r = waiters.cancelRelay(ticket.id, Number(body.cancel));
         if (!r) throw new HttpError(404, `No pending relay ${Number(body.cancel)} of yours`);
-        const taskmaster = store.getCoordinator(ticket.project_id);
+        const taskmaster = store.ownerCoordinator(ticket);
         if (taskmaster) runner.leaveMail(taskmaster.id, `#${ticket.number} ${ticket.title}`, `(for your tracking; nothing to do) #${ticket.number} cancelled its relay to ${'scheme' in r.to ? r.to.scheme : `#${r.to.number}`}.`);
         return json(res, 200, { cancelled: r.id, relays: mine() });
       }
@@ -1252,7 +1266,7 @@ export const ticketRoutes: Route[] = [
       if (!commit) throw new HttpError(400, body.commit ? `No commit ${String(body.commit).slice(0, 40)} in the live checkout or the scheme's repo` : 'No commit to wait for: commit the work first, or give a commit');
       const dest = 'scheme' in to ? to.scheme : `#${to.number}`;
       const { queued, relay } = await waiters.addRelay({ ticket: ticket.id, to, text, commit });
-      const taskmaster = store.getCoordinator(ticket.project_id);
+      const taskmaster = store.ownerCoordinator(ticket);
       if (queued && taskmaster) runner.leaveMail(taskmaster.id, `#${ticket.number} ${ticket.title}`, `(for your tracking; nothing to do) #${ticket.number} will send this to ${dest} once ${commit.slice(0, 7)} is live: ${text}`);
       runner.emit(ticket.id, 'note', { text: `${queued ? `Relay to ${dest} queued until ${commit.slice(0, 7)} is live` : `Relay to ${dest} sent: ${commit.slice(0, 7)} was live already`}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 201, { queued, id: relay.id, commit, to: dest, relays: mine() });

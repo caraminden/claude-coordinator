@@ -58,6 +58,8 @@ regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s
    `.topbar` and an artifact page. Every bar button clicks, the empty bar drags the window, and ‹ › × work.
    It exits 1 on any FAIL; the shots land in `$TMPDIR/wco-rig/shots/`. `rig.ts run modal` is #772's: a framed
    app's wide `.cui-dialog` opens below the strip, its ✕ clicks, the strip above it drags and the controls dim.
+   `rig.ts run corner` is #890's: at three window widths no control sits under the caption buttons, and they sit
+   on the page colour, not white.
    - A new check is a file in `checks/`, using `checks/lib.js`'s helpers (`openFixture`, `click`, `drag`,
      `expect`, `snap`).
    - A new fixture page is a file in `fixture/`, opened with `openFixture('<file>')`.

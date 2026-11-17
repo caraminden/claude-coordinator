@@ -60,16 +60,9 @@ function boot() {
 // The service worker makes the app installable (home screen, full screen) and shows push notifications; it caches nothing.
 // Absolute on purpose: a preview (/preview/N/) shares the live app's one worker instead of registering its own.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-// Only in the installed app, so browser tabs look and behave as before: colour the title/status bar
-// like the top bar, and on Android shrink the page when the keyboard opens so the composer stays in view.
-// With the title bar folded into the page (#637), the window controls take the page's colour; the first match wins.
+// Only in the installed app, so browser tabs behave as before: on Android shrink the page when the keyboard opens so
+// the composer stays in view. The title bar's colour is index.html's theme-color metas.
 if (matchMedia('(display-mode: standalone), (display-mode: window-controls-overlay)').matches) {
   const viewport = document.querySelector('meta[name=viewport]');
   viewport.content += ', interactive-widget=resizes-content';
-  for (const [scheme, color] of [['light', '#f6f5f2'], ['dark', '#161514']]) {
-    document.head.append(h('meta', { name: 'theme-color', content: color, media: `(display-mode: window-controls-overlay) and (prefers-color-scheme: ${scheme})` }));
-  }
-  for (const [scheme, color] of [['light', '#ffffff'], ['dark', '#201f1d']]) {
-    document.head.append(h('meta', { name: 'theme-color', content: color, media: `(prefers-color-scheme: ${scheme})` }));
-  }
 }

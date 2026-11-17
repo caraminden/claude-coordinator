@@ -12,6 +12,13 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="%APP_NAME%">
+  <!-- The installed app's title bar colour, here from the start: installing moves this tab into the app window without a
+       reload (#890). With the title bar hidden (#637) the window controls take the page's colour (base.js tintTitleBar);
+       the first match wins. A browser tab matches none. -->
+  <meta name="theme-color" content="#f6f5f2" media="(display-mode: window-controls-overlay) and (prefers-color-scheme: light)">
+  <meta name="theme-color" content="#161514" media="(display-mode: window-controls-overlay) and (prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(display-mode: standalone) and (prefers-color-scheme: light)">
+  <meta name="theme-color" content="#201f1d" media="(display-mode: standalone) and (prefers-color-scheme: dark)">
   <!-- Citadel's tokens as --citadel-*, built from style.css: what Citadel UI (ui/) reads, here as in apps. -->
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="ui/base.css">

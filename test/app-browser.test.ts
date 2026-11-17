@@ -233,6 +233,17 @@ test('reopening a dismissed minion that still waits on you puts it back in Needs
   assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true });
 });
 
+// #890: installing moves the open tab into the app window without a reload, so a colour app.js added only when the page
+// loaded installed never came, and the controls sat on a white box. The page has them from the start, for the app only.
+test('the window controls take the page colour from the first load, and a browser tab gets no theme colour', () => {
+  const metas = [...readFileSync(join(pub, 'index.html'), 'utf8').matchAll(/<meta name="theme-color" content="([^"]+)" media="([^"]+)">/g)].map((m) => ({ colour: m[1], media: m[2] }));
+  for (const [scheme, colour] of [['light', '#f6f5f2'], ['dark', '#161514']]) {
+    const first = metas.find((m) => m.media.includes('window-controls-overlay') && m.media.includes(scheme));
+    assert.equal(first?.colour, colour, `the ${scheme} page colour, for the title bar overlay`);
+  }
+  assert.ok(metas.length && metas.every((m) => /\(display-mode: (standalone|window-controls-overlay)\)/.test(m.media)), 'each names an installed display mode, so tabs stay as they were');
+});
+
 // #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through
 // background (the Taskmaster chat's after #693) once came back from the canvas as #000000, a black strip.
 test('the window controls keep the base colour for a see-through background and take an opaque one', { skip }, async () => {

@@ -254,7 +254,8 @@ test('the installed app shows the title bar hint once: gone for good on close or
     const fake = (k, v) => Object.assign(new EventTarget(), { [k]: v });
     window.wco ??= fake('visible', false);
     window.installed ??= fake('matches', true);
-    window.start = () => wcoHint(wco, installed);
+    window.desktop ??= { value: true };
+    window.start = () => wcoHint(wco, installed, () => desktop.value);
     window.hint = () => !!document.querySelector('.wco-hint');
     return ${expr};
   })()`);
@@ -267,6 +268,11 @@ test('the installed app shows the title bar hint once: gone for good on close or
   assert.equal(await run('(wco.visible = false, start(), hint())'), false, 'and for good, even with the title bar back');
   assert.equal(await run('(localStorage.clear(), wco.visible = true, start(), hint())'), false, 'an app that opens with it hidden needs no hint');
   assert.equal(await run('(wco.visible = false, installed.dispatchEvent(new Event("change")), hint())'), false, 'nor when they show the title bar after');
+  // Installed on a phone or tablet (standalone matches there too, and Chrome may expose the overlay): no title bar to hide.
+  assert.equal(await run('(localStorage.clear(), desktop.value = false, installed.matches = true, start(), hint())'), false, 'an installed phone app gets no hint');
+  assert.equal(await run('(installed.dispatchEvent(new Event("change")), hint())'), false, 'not on a later display-mode change either');
+  assert.equal(await run('(desktop.value = true, installed.dispatchEvent(new Event("change")), hint())'), true, 'an installed desktop app with the title bar showing still gets it');
+  assert.equal(await run('(document.querySelectorAll(".wco-hint").forEach((n) => n.remove()), localStorage.clear(), installed.matches = false, start(), hint())'), false, 'a desktop browser tab gets none');
 });
 
 // #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through

@@ -5,9 +5,14 @@ import { h } from './base.js';
 
 const KEY = 'cc-wco-hint';
 
+// A phone or tablet's installed app is standalone too and Chrome there may expose the overlay, but it has no title bar
+// to hide. userAgentData.mobile is the platform's own answer (Chromium, the only engine with the overlay, has it);
+// (pointer: fine) is the fallback, since a touch-first device's main pointer is coarse.
+const isDesktop = () => navigator.userAgentData ? navigator.userAgentData.mobile === false : matchMedia('(pointer: fine)').matches;
+
 // wco: navigator.windowControlsOverlay. installed: a query for the app window, which an install from the address bar
 // turns on without a reload, hence the change listener.
-export function wcoHint(wco = navigator.windowControlsOverlay, installed = matchMedia('(display-mode: standalone)')) {
+export function wcoHint(wco = navigator.windowControlsOverlay, installed = matchMedia('(display-mode: standalone)'), desktop = isDesktop) {
   if (!wco) return;
   let note = null;
   const done = () => {
@@ -17,7 +22,7 @@ export function wcoHint(wco = navigator.windowControlsOverlay, installed = match
   };
   const show = () => {
     try { if (localStorage.getItem(KEY)) return; } catch {}
-    if (note || wco.visible || !installed.matches) return;
+    if (note || wco.visible || !installed.matches || !desktop()) return;
     note = h('div', { class: 'cui-notice wco-hint', 'data-tone': 'info', role: 'status' },
       h('span', {}, 'Hide the title bar with the ', h('b', {}, '⌃'), ' up here'),
       h('button', { type: 'button', class: 'cui-btn cui-ghost', 'aria-label': 'Close', title: 'Close', onclick: done }, '✕'));

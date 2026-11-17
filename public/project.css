@@ -135,7 +135,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   .shelf[open] > :not(#schemes-shelf, summary) { contain: inline-size; }
   /* What changes live leaves the width alone (#861): each scheme row keeps room for its pill whether it shows or not,
      and the release rows' ticking ETAs fit the width the names set. */
-  .shelf[open] .scheme-count { min-width: 6.25em; justify-content: flex-end; }
+  .shelf[open] .scheme-count { min-width: 7em; justify-content: flex-end; }
   .shelf[open] .scheme-count[hidden] { display: inline-flex; visibility: hidden; }
   .shelf[open] .rel-rows { contain: inline-size; }
   .sidebar[open] { width: auto; }

@@ -50,15 +50,22 @@ test('the generative media tools are offered, in order', async () => {
 
 test('every generative media tool opens with the made-by-code rule (Cara, 2026-11-14)', async () => {
   const media = (await tools(both)).filter((t) => /image|audio|speech/.test(t.name));
-  for (const t of media) assert.match(t.description, /^Not the default: (images are drawn|sound is made) with code/, t.name);
-  assert.match(media.find((t) => t.name === 'generate_speech')!.description, /^Not the default: sound is made with code/);
+  for (const t of media) assert.match(t.description, /^Only on a person's explicit ask or a scheme system's call; otherwise (draw|make sound) with code\./, t.name);
+  assert.match(media.find((t) => t.name === 'generate_speech')!.description, /otherwise make sound with code/);
 });
 
-test('generate_image_codex is offered only with its flag, and never to a Taskmaster', async () => {
-  const names = async (env: Record<string, string>) => (await tools(env)).map((t) => t.name);
-  assert.ok(!(await names({ COORDINATOR_MEDIA: '1' })).includes('generate_image_codex'));
-  assert.ok((await names({ COORDINATOR_CODEX_IMAGES: '1' })).includes('generate_image_codex'));
-  assert.ok(!(await names({ ...both, COORDINATOR_ROLE: 'coordinator' })).includes('generate_image_codex'));
+test('the media tools are listed for every minion whatever its person has, refused at call time without, and never for a Taskmaster (#878)', async () => {
+  const list = async (env: Record<string, string>) => JSON.stringify(await tools(env));
+  // The tool list is the head of the cache prefix: it mustn't change with who sent the turn.
+  assert.equal(await list({}), await list(both));
+  assert.ok((await tools({})).some((t) => t.name === 'generate_image_codex'));
+  assert.ok(!(await tools({ ...both, COORDINATOR_ROLE: 'coordinator' })).some((t) => /image|audio|speech/.test(t.name)));
+  const codex = await mcp({ COORDINATOR_MEDIA: '1' }, 'tools/call', { name: 'generate_image_codex', arguments: { prompt: 'a cat', out: 'cat.png' } });
+  assert.ok(codex.isError);
+  assert.match(codex.content[0].text, /^Error: Not on this turn: the person it runs for has no Codex login/);
+  const media = await mcp({ COORDINATOR_CODEX_IMAGES: '1' }, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a cat', out: 'cat.png' } });
+  assert.ok(media.isError);
+  assert.match(media.content[0].text, /^Error: Not on this turn: the person it runs for hasn't connected OpenRouter/);
 });
 
 test('generate_image_codex runs citadel-codex-review --image-gen with the prompt on stdin and returns the path and usage', async () => {

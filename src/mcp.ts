@@ -25,7 +25,7 @@ const IN_CONTAINER = process.env.COORDINATOR_CONTAINER === '1';
 const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 // The contraptions whose home is this scheme (#266): it may deploy them.
 const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean);
-// The machines this minion's turn got (#617): it may propose new notes for them.
+// The machines this minion's turn got (#617): it may propose new notes for them (checked at call time, #878).
 const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
@@ -271,7 +271,8 @@ const PROPOSE_MACHINE_NOTES = {
   inputSchema: {
     type: 'object',
     properties: {
-      machine: { type: 'string', enum: MACHINES, description: 'The machine' },
+      // A free string, checked by the server (#878): an enum of this turn's machines would change the tool list with the sender.
+      machine: { type: 'string', description: 'The machine, one this turn got' },
       notes: { type: 'string', maxLength: 2000, description: 'The whole new notes, at most 2,000 characters' },
     },
     required: ['machine', 'notes'],
@@ -884,10 +885,10 @@ const SEARCH_MEMORY = {
   },
 };
 
-/** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): offered only when they've connected one on their account page. */
+/** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): listed for every minion, refused on a turn whose person hasn't connected one (#878). */
 const MEDIA = process.env.COORDINATOR_MEDIA === '1';
-const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. Spend like it is the person\'s own money, because it is: one take at the default first, more takes or a dearer model only when asked or when the first misses.';
-const IMAGE_MODELS = ' Models: leave model out for black-forest-labs/flux-3-image-klein (about $0.01 an image at 1K), or recraft/recraft-v4.1-vector when out ends in .svg (about $0.08). For readable text in the image or careful edits, google/gemini-nano-banana-2.1 or openai/gpt-image-2, which cost several times more.';
+const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. One take at the default first; more takes or a dearer model only when asked or when the first misses.';
+const IMAGE_MODELS = ' Models: leave model out for black-forest-labs/flux-3-image-klein, or recraft/recraft-v4.1-vector when out ends in .svg. For readable text in the image or careful edits, google/gemini-nano-banana-2.1 or openai/gpt-image-2, which cost several times more.';
 const MEDIA_OUT = 'Where to write it, inside your worktree or a shared folder (relative paths start in your worktree). With n over 1 the files are numbered: art-1.png, art-2.png';
 const MEDIA_MODEL = { type: 'string', description: 'Optional: an OpenRouter model id. Leave it out for the cheap default' };
 const MEDIA_OVERWRITE = { type: 'boolean', description: 'Replace a file that already exists (default false: refused)' };
@@ -907,8 +908,8 @@ const IMAGE_PROPS = {
  * unless using a system (like I described for making spell alerts) or explicitly asking for a generative model").
  * test/media-tools.test.ts pins it.
  */
-export const NOT_DEFAULT = 'Not the default: images are drawn with code (SVG, canvas, a script). Call this only when a person explicitly asks for a generative model, or a scheme system calls for one.';
-const NOT_DEFAULT_AUDIO = 'Not the default: sound is made with code (Web Audio, a synth script), as images are. Call this only when a person explicitly asks for a generative model, or a scheme system calls for one.';
+export const NOT_DEFAULT = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise draw with code.';
+const NOT_DEFAULT_AUDIO = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise make sound with code.';
 /** Which generative tool makes what (Cara, 2026-11-14, "Codex for raster images"). */
 const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan, when it is offered; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex isn\'t offered or refused because a Codex limit is near.';
 const MEDIA_TOOL_LIST = [
@@ -920,7 +921,7 @@ const MEDIA_TOOL_LIST = [
   },
   {
     name: 'generate_audio',
-    description: `${NOT_DEFAULT_AUDIO} Then: make a sound effect or a short music clip from a prompt through OpenRouter. ${MEDIA_COMMON} Models: effects default to bytedance-seed/seed-audio-1-0 (priced by the second), music to google/lyria-3-clip-preview (about $0.04 a clip).`,
+    description: `${NOT_DEFAULT_AUDIO} Then: make a sound effect or a short music clip from a prompt through OpenRouter. ${MEDIA_COMMON} Models: effects default to bytedance-seed/seed-audio-1-0 (priced by the second), music to google/lyria-3-clip-preview.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -958,7 +959,7 @@ const MEDIA_TOOL_LIST = [
   },
 ];
 
-/** A PNG through Codex's built-in image_gen on the person's own ChatGPT login (#733): offered only when they have a Codex login a turn can reach. */
+/** A PNG through Codex's built-in image_gen on the person's own ChatGPT login (#733): listed for every minion, refused on a turn whose person has no Codex login it can reach (#878). */
 const CODEX_IMAGES = process.env.COORDINATOR_CODEX_IMAGES === '1';
 const CODEX_IMAGE_TOOL = {
   name: 'generate_image_codex',
@@ -1655,11 +1656,14 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'edit_image':
     case 'generate_audio':
     case 'generate_speech': {
+      // Offered to every minion so the tool list doesn't follow the sender (#878); refused here when this turn's person has no key.
+      if (!MEDIA) throw new Error("Not on this turn: the person it runs for hasn't connected OpenRouter on their account page. Make it with code instead, or ask them to connect it.");
       const r = await call('POST', `/api/tickets/${TICKET}/openrouter`, { tool: name, args });
       if (r.model === 'azure-speech') return `Wrote ${r.paths.join(', ')} with Azure Speech for about $${Number(r.cost_usd).toFixed(4)} (booked to the scheme: $${Number(r.month_usd).toFixed(2)} outside spend this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? ', over it' : ''}`}).`;
       return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.${r.warnings ? `\n${r.warnings.join('\n')}` : ''}`;
     }
     case 'generate_image_codex':
+      if (!CODEX_IMAGES) throw new Error('Not on this turn: the person it runs for has no Codex login a turn can reach. Use generate_image (OpenRouter) for this one if it is on this turn.');
       return codexImage(args);
     case 'report_spend': {
       const r = await call('POST', `/api/tickets/${TICKET}/spend`, args);
@@ -1807,6 +1811,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return items.map((c: any) => `${c.kind} ${c.name} (${c.source})${c.in_kit && c.source !== 'kit' ? ' [kit has one]' : ''}: ${c.description || 'no description'}`).join('\n');
     }
     case 'propose_machine_notes': {
+      if (!MACHINES.includes(String(args.machine ?? '').toLowerCase())) throw new Error(MACHINES.length ? `No machine called ${args.machine} that this turn got: it has ${MACHINES.join(', ')}` : 'This turn got no connected machines, so there are no notes to propose');
       const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
@@ -2023,7 +2028,7 @@ function toolListAll() {
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE] : []), PROPOSE_MACHINE_NOTES, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

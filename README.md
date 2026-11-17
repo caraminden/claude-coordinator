@@ -37,8 +37,9 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   with a secret card (ask_question `secret`), people add, replace and delete theirs and their schemes'
   in Settings → Your account, and the message box asks before sending text that looks like one
   (`public/secret-check.js`). Values are sealed in `stored_secrets`, never shown again, dropped from
-  off-box copies, and reach turns only as `$CITADEL_SECRET_<NAME>` env vars (the scheme's, then the
-  person's own over them), with any value that shows up in a turn's output masked before it's stored.
+  off-box copies, and reach turns only as `$CITADEL_SECRET_<NAME>` env vars (the scheme's, plus the
+  person's own when they alone sent the turn's messages). A value a turn prints is masked in the chat
+  and failure notes, but Claude's own session transcript keeps it, so minions are told never to print one.
   Contraptions read them by name (`GET /api/contraptions/secrets/<name>`).
 - Every stream event is stored in SQLite and pushed to browsers over
   server-sent events.

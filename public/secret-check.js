@@ -20,7 +20,7 @@ export function looksSecret(text) {
   const said = plain.match(SAID);
   // At least 4 long, with a digit or a symbol, so "the password is wrong" or "the key is the name" stays a sentence.
   const value = said?.[1].replace(/[.,;!?)]+$/, '');
-  if (value && value.length >= 4 && !value.startsWith('$') && /[\d\W_]/.test(value)) return said[1];
+  if (value && value.length >= 4 && !value.startsWith('$') && /[\d\W_]/.test(value)) return value;
   for (const [run] of plain.matchAll(RANDOM)) {
     if (/[A-Z]/.test(run) && /[a-z]/.test(run) && /\d/.test(run) && !/[/.]/.test(run.slice(1, -1))) return run;
   }

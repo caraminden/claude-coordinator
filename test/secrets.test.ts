@@ -42,8 +42,13 @@ createInterface({ input: process.stdin }).once('line', (line) => {
   const secrets = {};
   for (const [k, v] of Object.entries(process.env)) if (k.startsWith('CITADEL_SECRET_')) secrets[k] = createHash('sha256').update(v).digest('hex');
   appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt, token: process.env.COORDINATOR_TOKEN, secrets, names: process.env.CITADEL_SECRET_NAMES ?? null }) + '\\n');
+  if (JSON.stringify(prompt).includes('fail loudly')) {
+    process.stderr.write('connecting with ' + process.env.CITADEL_SECRET_SITE_PW + '\\nboom\\n');
+    process.exit(3);
+  }
   if (JSON.stringify(prompt).includes('echo it')) {
     const text = 'The password is ' + process.env.CITADEL_SECRET_SITE_PW + ' and the key ' + process.env.CITADEL_SECRET_AZURE_KEY;
+    console.log('plain line: ' + process.env.CITADEL_SECRET_SITE_PW);
     console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }));
     console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: text }));
   } else console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
@@ -162,6 +167,40 @@ test('a secret said out loud in a turn is hidden in the chat', async () => {
   assert.ok(!events.includes(VALUE) && !events.includes(SCHEME_VALUE), 'a value said in a turn is in the events');
   assert.match(events, /\[secret SITE_PW hidden\]/);
   assert.match(events, /\[secret AZURE_KEY hidden\]/);
+  assert.match(events, /plain line: \[secret SITE_PW hidden\]/);
+  assert.deepEqual(filesHolding(root, VALUE), [], 'a file holds the value said in a turn');
+  assert.ok(!out.includes(VALUE), 'the server printed the value said in a turn');
+});
+
+test('a failed turn\'s stderr in the chat has its secrets hidden', async () => {
+  const before = turns().length;
+  await ok(`/api/tickets/${ticket.id}/messages`, { body: { text: 'fail loudly' } });
+  await until('the failing turn', () => turns().length > before);
+  await idle();
+  const events = JSON.stringify(await ok(`/api/tickets/${ticket.id}/events?after=0`));
+  assert.match(events, /connecting with \[secret SITE_PW hidden\]/);
+  assert.ok(!events.includes(VALUE), 'the stderr quoted in the chat holds the value');
+});
+
+test('a person\'s own secrets go only to turns they sent themselves; a minion\'s message gets the scheme\'s alone', async () => {
+  const other = await ok(`/api/projects/${P.id}/tickets`, { body: { message: 'another minion' } });
+  await until('the other minion\'s turn', () => turns().some((t) => t.token === agentToken(data, other.id)));
+  await until('it to end', async () => (await ok(`/api/tickets/${other.id}`)).ticket.status !== 'running');
+  const before = turns().length;
+  await ok(`/api/tickets/${other.id}/minion-message`, { token: agentToken(data, other.id), body: { to: ticket.number, text: 'a relay from another minion' } });
+  await until('the relayed turn', () => turns().length > before);
+  await idle();
+  const turn = turns().at(-1);
+  assert.match(JSON.stringify(turn.prompt), /a relay from another minion/);
+  assert.equal(turn.secrets.CITADEL_SECRET_SITE_PW, undefined, 'a minion\'s message carried Cara\'s own secret');
+  assert.equal(turn.secrets.CITADEL_SECRET_AZURE_KEY, sha(SCHEME_VALUE));
+  assert.equal(turn.names, 'AZURE_KEY');
+});
+
+test('a secret card can go to one person; NAMES is taken', async () => {
+  const asked = await call(`/api/tickets/${ticket.id}/questions`, { token: live(), body: { to: 'josh', secret: { name: 'JOSH_KEY', scope: 'scheme' } } });
+  assert.equal(asked.status, 201, JSON.stringify(asked.body));
+  assert.equal((await call('/api/secrets', { method: 'PUT', body: { scope: 'person', name: 'names', value: 'x' } })).status, 400);
 });
 
 test('people list, replace and delete their own secrets; a scheme\'s are its members\'', async () => {
@@ -208,6 +247,8 @@ test('a chat message that looks like a password or key is caught; ordinary words
   for (const s of ['my password is hunter2!', 'pw: Tr0ub4dor&3', 'the key is sk-proj-abcdefghijklmnopqrstuvwxyz012345', 'ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'use AKIAABCDEFGHIJKLMNOP', 'token=9fK2xQ7pL0mN3vB8zR5tW1yC6hJ4dG', 'api key: 3f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c']) {
     assert.ok(looksSecret(s), s);
   }
+  // The value offered to save, without the sentence's full stop.
+  assert.equal(looksSecret('The password is hunter2.'), 'hunter2');
   for (const s of ['merge it', 'see https://github.com/foo/bar/pull/12?x=abcdefghijklmnop1234', 'landed e59ee5ee5652109c1685ea6d68628e59dc3b6f9f', 'the password field should be masked', 'reset my password please', 'look at src/routes/contraptions.ts:512', '`CITADEL_SECRET_SITE_PW`']) {
     assert.ok(!looksSecret(s), s);
   }

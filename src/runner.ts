@@ -106,6 +106,7 @@ export interface QueuedMessage {
   id?: number; // its user_message event, for taking it back while queued
   from?: number; // the minion or Taskmaster that relayed it, whose turn's person it carries
   typed?: boolean; // a signed-in person sent it from the chat; only these can be a go to merge (#201)
+  own?: boolean; // a person sent it themselves: typed, or a card's answer; only these carry their own secrets (#838)
   asker?: number | null; // whose ask it is (Store.turnAsker), taken when it was sent; null for no person's
   fresh?: 'handoff' | 'compact'; // a Taskmaster's fresh-start step (#406), which runs alone
   fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
@@ -132,6 +133,8 @@ interface TurnState {
   unit?: string | null;
   /** Bytes of its stream.jsonl handled so far. */
   offset?: number;
+  /** Whose own secrets it was launched with (#838); absent for the scheme's alone. */
+  secretPerson?: number;
   startedAt?: number;
   configDir?: string;
   /** The ticket had an effort of its own when the turn started. */
@@ -1590,7 +1593,7 @@ export class Runner {
       author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}), ...(parked ? { mail: true, parked: true } : {}),
     });
-    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(fyi ? { fyi: true } : {}), asker };
+    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), asker };
     // A person's typed "merge it" stands for the whole scheme until its PR merges (#260), whenever a turn reads it.
     if (ticket) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg);
     // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
@@ -2286,7 +2289,11 @@ export class Runner {
     // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
     const github = this.githubFor?.(person, dir) ?? null;
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
-    const secrets = this.secretsFor?.(project.id, person) ?? new Map<string, string>();
+    // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a
+    // schedule, a wake, a relay or a batch mixing people, which fall back to someone who didn't ask.
+    const own = new Set(batch.filter((m) => m.own && !m.from).map((m) => this.personOf?.(m.author) ?? null));
+    const secretPerson = own.size === 1 && [...own][0] === person ? person : null;
+    const secrets = this.secretsFor?.(project.id, secretPerson) ?? new Map<string, string>();
     this.turnSecrets.set(ticket.id, secrets);
     // Back on Claude after Codex turns: they come first, verbatim, and their thread goes once this turn succeeds.
     const codexThread = this.store.getSetting<CodexThread>(codexThreadKey(ticket.id));
@@ -2413,7 +2420,7 @@ export class Runner {
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
@@ -2577,6 +2584,8 @@ export class Runner {
     clearTimeout(live.stopTimer);
     this.turns.delete(ticketId);
     this.spends.delete(ticketId);
+    // Kept for the failure note below, which quotes its stderr.
+    const secrets = this.secretsOfTurn(ticketId);
     this.turnSecrets.delete(ticketId);
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     this.store.deleteSetting(turnKey(ticketId));
@@ -2629,7 +2638,7 @@ export class Runner {
       const reason = killed || resultError?.trim() || startError;
       const switched = turn ? this.switchAccount(ticketId, turn, reason, usage, authFailed) : null;
       if (authFailed && switched !== true) this.emit(ticketId, 'note', { text: `${this.store.getUser(turn!.person!)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
-      if (switched !== true) this.turnFailed(ticketId, reason, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage, codexReset, turn?.netTries ?? 0, switched ?? undefined);
+      if (switched !== true) this.turnFailed(ticketId, reason, hideSecrets(stderr.slice(-10).join('\n'), secrets), code, turn?.limitTries ?? 0, usage, codexReset, turn?.netTries ?? 0, switched ?? undefined);
     } else if (turn?.handBack) {
       // Claude has the Codex turns now.
       this.store.deleteSetting(codexThreadKey(ticketId));
@@ -2819,7 +2828,7 @@ export class Runner {
     let secrets = this.turnSecrets.get(ticketId);
     if (!secrets) {
       const t = this.store.getTicket(ticketId);
-      const person = this.store.getSetting<TurnState>(turnKey(ticketId))?.person ?? null;
+      const person = this.store.getSetting<TurnState>(turnKey(ticketId))?.secretPerson ?? null;
       secrets = t && this.secretsFor ? this.secretsFor(t.project_id, person) : new Map<string, string>();
       this.turnSecrets.set(ticketId, secrets);
     }

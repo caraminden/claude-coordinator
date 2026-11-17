@@ -1,7 +1,8 @@
 // Secrets people save (#838): a password or key typed into a secret card's masked field, or saved in Settings, goes
 // here and nowhere else: never into a chat, an event, a turn's prompt or a log. A person's own are theirs; a
-// scheme's are its members'. A turn gets them as CITADEL_SECRET_<NAME> env vars (the scheme's, then the turn
-// person's own over them), its output has their values hidden, and a contraption reads one by name for one of its
+// scheme's are its members'. A turn gets them as CITADEL_SECRET_<NAME> env vars (the scheme's, plus the person's own
+// when they alone sent its messages: runner.startTurn), its chat events and failure notes have their values hidden
+// (Claude's own transcript doesn't: minions are told never to print one), and a contraption reads one by name for one of its
 // people. Sealed like credentials (src/credentials.ts): a copy of the database with another SESSION_SECRET can't
 // open them, and deploy/offbox.sh drops the rows from off-box copies.
 import { seal, sealKey, unseal } from './credentials.ts';
@@ -19,6 +20,8 @@ export const SECRET_MAX = 8192;
 export function secretName(raw: unknown): string {
   const name = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
   if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) throw new HttpError(400, 'A secret\'s name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY');
+  // $CITADEL_SECRET_NAMES lists the names a turn has.
+  if (name === 'NAMES') throw new HttpError(400, 'NAMES is taken: $CITADEL_SECRET_NAMES lists a turn\'s secrets');
   return name;
 }
 

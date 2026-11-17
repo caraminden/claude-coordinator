@@ -520,7 +520,7 @@ export const ticketRoutes: Route[] = [
       const to = addressee(app, ticket, body.to);
       // A choices page (#804): the card opens it, its pick bars ask, and its Send settles the card.
       const doc = body.doc != null && body.questions == null ? await choicesDoc(app, ticket, body.doc) : null;
-      const notice = to && body.questions == null && !doc ? str(body.notice, 'Notice', 500) : null;
+      const notice = to && body.questions == null && !doc && body.secret == null ? str(body.notice, 'Notice', 500) : null;
       // A secret card (#838): a masked field whose value goes to the secret store, never the chat.
       const secret = body.secret != null && body.questions == null && !doc && !notice ? secretAsk(body.secret) : null;
       const questions = notice || doc || secret ? [] : await cleanQuestions(app, ticket, body.questions);

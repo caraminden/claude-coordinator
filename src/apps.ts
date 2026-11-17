@@ -47,7 +47,7 @@ const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)}
  * link on (`more`, such as Settings → Contraptions) and a "Back to Citadel" button. Inside Citadel's frame the button asks
  * the frame to leave (public/frames.js, type "leave"), which returns to Citadel's last own view; on its own it opens /c/.
  */
-const page = (title: string, text: string, more?: { href: string; label: string }) =>
+const page = (title: string, text: string, more?: { href: string; label: string }, home = '') =>
   `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(title)}</title>` +
   `<style>:root{--bg:#f6f5f2;--panel:#fff;--ink:#1d1c1a;--muted:#6b6862;--line:#e2dfd8;--accent:#c2410c}` +
   `@media(prefers-color-scheme:dark){:root{--bg:#161514;--panel:#201f1d;--ink:#ecebe7;--muted:#9b978f;--line:#34322e;--accent:#fb923c}}` +
@@ -59,7 +59,7 @@ const page = (title: string, text: string, more?: { href: string; label: string 
   `@media(prefers-color-scheme:dark){button{color:#1d1c1a}}</style>` +
   `<body><main><h1>${escape(title)}</h1><p>${escape(text)}</p><div class="row"><button type="button" id="back">Back to ${APP_NAME}</button>` +
   (more ? `<a href="${escape(more.href)}" target="_top">${escape(more.label)}</a>` : '') +
-  `</div></main><script>document.getElementById('back').onclick=function(){if(parent!==window)parent.postMessage({protocol:'citadel-frame-1',type:'leave'},'*');else location.href='/c/'}</script></body>`;
+  `</div></main><script>document.getElementById('back').onclick=function(){if(parent!==window)parent.postMessage({protocol:'citadel-frame-1',type:'leave'},'*');else location.href='${home}/c/'}</script></body>`;
 
 type Refusal = { status: number; reason: string; headers: OutgoingHttpHeaders; body: string };
 /** renewed: a fresh session cookie for the person (Auth.renewal), added to the contraption's answer. */
@@ -283,8 +283,9 @@ export class AppProxy {
     if (!identity) {
       if (!isPage(req)) return { status: 503, reason: 'Service Unavailable', headers: text, body: `${row.title}'s keys don't open; an admin can rotate them in Settings → Contraptions` };
       const scheme = row.home_scheme ?? this.store.listProjects()[0]?.id;
-      const more = scheme === undefined ? undefined : { href: `/c/#/p/${scheme}/contraptions`, label: 'Settings → Contraptions' };
-      return { status: 503, reason: 'Service Unavailable', headers: html, body: page(`${row.title} can't open`, `Citadel can't prove who you are to ${row.title} because its keys don't open. An admin can rotate them in Settings → Contraptions.`, more) };
+      const home = host !== null ? this.origin(req, null) : '';
+      const more = scheme === undefined ? undefined : { href: `${home}/c/#/p/${scheme}/contraptions`, label: 'Settings → Contraptions' };
+      return { status: 503, reason: 'Service Unavailable', headers: html, body: page(`${row.title} can't open`, `Citadel can't prove who you are to ${row.title} because its keys don't open. An admin can rotate them in Settings → Contraptions.`, more, home) };
     }
     headers['x-citadel-identity'] = identity;
     const renewed = host !== null ? this.auth.appRenewal(row.name, session, isSecure(req)) : this.auth.renewal(session, isSecure(req));

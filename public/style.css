@@ -348,7 +348,7 @@ html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 
 @media (max-width: 800px) { .frame-nav { --head-btn: 2.5rem; } }
 /* A phone never traps a person in an app: one with no .cui-topbar gets this thin strip (its name, ‹ › ×) above it. */
 @media (max-width: 800px) {
-  html.framed:not(.frame-topbar) { --frame-strip: calc(var(--head-btn-phone, 2.5rem) + 0.5rem); }
+  html.framed:not(.frame-topbar) { --frame-strip: 3rem; }
   html.framed:not(.frame-topbar) #frames { top: calc(max(var(--banner-h, 0px), 0px) + env(safe-area-inset-top, 0px) + var(--frame-strip)); }
   html.framed:not(.frame-topbar) .frame-nav { display: inline-flex; --strip: var(--frame-strip); }
   html.framed:not(.frame-topbar) .frame-strip { display: flex; align-items: center; gap: 0.5rem; position: fixed; z-index: 1; top: var(--banner-h, 0px); left: 0; right: 0;

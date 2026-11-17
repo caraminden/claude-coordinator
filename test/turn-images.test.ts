@@ -72,3 +72,13 @@ test('parseTurn carries images, and takes them with blind', () => {
   assert.deepEqual(parseTurn({ person: 1, session: 's', prompt: 'p' }, c).images, []);
   assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'p', images: 'a.png' }, c), /images/);
 });
+
+test('an SVG renamed .png is refused, not rendered', async () => {
+  writeFileSync(join(data, 'x.png'), '<svg xmlns="http://www.w3.org/2000/svg" width="5" height="5"><rect width="5" height="5"/></svg>');
+  await refused(['x.png'], 400, /isn't a PNG/);
+});
+
+test('a name with brackets works', async () => {
+  png(join(data, 'a[1].png'), '20x20');
+  assert.equal((await loadImages(['a[1].png'], data)).length, 1);
+});

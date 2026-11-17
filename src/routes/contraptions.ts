@@ -310,7 +310,9 @@ export const contraptionRoutes: Route[] = [
   fromContraption('POST', '/api/contraptions/turns', async ({ req, res, app }, c) => {
     const body = await readJson(req, 4_000_000);
     // Before the stream opens, so a refused image is a plain HTTP 400 or 413 (#834).
-    const imageBlocks = body && typeof body === 'object' && body.images !== undefined ? await loadImages(body.images, app.services.dataDir(c)) : [];
+    // A body parseTurn refuses is reported on the stream below, without spending any magick runs.
+    const valid = (() => { try { parseTurn(body, c); return true; } catch { return false; } })();
+    const imageBlocks = valid && body.images !== undefined ? await loadImages(body.images, app.services.dataDir(c)) : [];
     const emit = eventStream(req, res);
     // The contraption hung up: stop its turn rather than run it for nobody.
     let turn: number | null = null;

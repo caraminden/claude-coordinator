@@ -1,12 +1,9 @@
 // Images on a contraption turn (#834): paths inside the app's own DATA_DIR, downscaled and sent as image
 // content in the turn's first user message. Citadel keeps nothing beyond what the turn already does.
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { isAbsolute, join, sep } from 'node:path';
-import { promisify } from 'node:util';
 import { HttpError } from './http.ts';
-
-const run = promisify(execFile);
 
 export const MAX_IMAGES = 8;
 /** The files' total size on disk, before downscaling. */
@@ -49,13 +46,47 @@ export async function loadImages(paths: unknown, dataDir: string, caps: { maxByt
   return out;
 }
 
-async function downscale(path: string): Promise<Buffer> {
-  // `>` shrinks only; `[0]` takes the first frame of a GIF or a multi-page file.
-  const args = [`${path}[0]`, '-auto-orient', '-resize', `${IMAGE_LONG_SIDE}x${IMAGE_LONG_SIDE}>`, '-background', 'white', '-flatten', '-quality', '85', 'jpeg:-'];
+/** The decoder to force, by the file's first bytes: magick otherwise picks one from the content (SVG and MVG can read other files). */
+function sniff(b: Buffer): string | null {
+  if (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
+  if (b[0] === 0xff && b[1] === 0xd8) return 'jpeg';
+  if (b.subarray(0, 3).toString('latin1') === 'GIF') return 'gif';
+  if (b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP') return 'webp';
+  if (b.subarray(0, 2).toString('latin1') === 'BM') return 'bmp';
+  if ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a && b[3] === 0) || (b[0] === 0x4d && b[1] === 0x4d && b[2] === 0 && b[3] === 0x2a)) return 'tiff';
+  return null;
+}
+
+// Two at a time: magick is heavy and the box is shared.
+let running = 0;
+const waiting: (() => void)[] = [];
+async function slot<T>(fn: () => Promise<T>): Promise<T> {
+  while (running >= 2) await new Promise<void>((r) => waiting.push(r));
+  running++;
   try {
-    const { stdout } = await run('magick', args, { encoding: 'buffer', maxBuffer: 32 * 1024 * 1024, timeout: 30_000 });
-    return stdout;
-  } catch {
-    throw new HttpError(400, `${path.split(sep).pop()} isn't an image Citadel can read`);
+    return await fn();
+  } finally {
+    running--;
+    waiting.shift()?.();
   }
+}
+
+async function downscale(path: string): Promise<Buffer> {
+  const name = path.split(sep).pop();
+  const bytes = await fs.readFile(path);
+  const fmt = sniff(bytes);
+  if (!fmt) throw new HttpError(400, `${name} isn't a PNG, JPEG, GIF, WebP, BMP or TIFF image`);
+  // The bytes go in on stdin with the decoder named, so a file name's brackets or wildcards mean nothing to magick.
+  // `>` shrinks only; `[0]` takes the first frame.
+  const args = ['-limit', 'area', '100MP', '-limit', 'memory', '512MiB', '-limit', 'disk', '1GiB', `${fmt}:-[0]`, '-auto-orient', '-resize', `${IMAGE_LONG_SIDE}x${IMAGE_LONG_SIDE}>`, '-background', 'white', '-flatten', '-quality', '85', 'jpeg:-'];
+  return slot(() => new Promise<Buffer>((resolve, reject) => {
+    const fail = () => reject(new HttpError(400, `${name} isn't an image Citadel can read`));
+    const child = spawn('magick', args, { stdio: ['pipe', 'pipe', 'ignore'], timeout: 30_000 });
+    const out: Buffer[] = [];
+    child.stdout.on('data', (d) => out.push(d));
+    child.on('error', fail);
+    child.stdin.on('error', () => {});
+    child.on('close', (code) => (code === 0 && out.length ? resolve(Buffer.concat(out)) : fail()));
+    child.stdin.end(bytes);
+  }));
 }

@@ -2933,7 +2933,7 @@
  "a session whose transcript is nowhere starts fresh": {
   "launched": true,
   "notes": [
-   "This minion's conversation (session sess-gone) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here, but Claude doesn't remember the earlier turns."
+   "This minion's conversation (session sess-gone) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here; Claude doesn't remember the earlier turns, so it starts from its status note."
   ],
   "spec": {
    "command": "<ROOT>/bin/claude",

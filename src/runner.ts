@@ -26,7 +26,7 @@ import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
-import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
@@ -875,6 +875,25 @@ export class Runner {
     }
     if (freed.worktrees) console.log(`Cleared ${size(freed.bytes)} of build output from ${freed.worktrees} dismissed minion${freed.worktrees === 1 ? "'s worktree" : "s' worktrees"}.`);
     return freed;
+  }
+
+  /**
+   * The chat's last few entries before this turn's messages, oldest first, for a fresh session that lost its old one
+   * (#899): people's messages and the minion's replies, each as `[author]: text`.
+   */
+  private chatDigest(ticketId: number, batch: QueuedMessage[]): string[] {
+    const asked = new Set(batch.map((m) => m.text));
+    const out: string[] = [];
+    for (const e of this.store.chatTextEvents(ticketId, 0, LOST_DIGEST_ENTRIES + batch.length + 20).reverse()) {
+      const d = JSON.parse(e.data);
+      if (e.kind === 'user_message' && typeof d.text === 'string' && !asked.has(d.text)) out.push(`[${d.author}]: ${d.text}`);
+      else if (e.kind === 'claude') {
+        const text = (d.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
+        if (text.trim()) out.push(`[You]: ${text}`);
+      }
+      if (out.length === LOST_DIGEST_ENTRIES) break;
+    }
+    return out.reverse();
   }
 
   /** Recreate a minion's worktree from its branch if the sweep removed it, with the work it saved (#660). */
@@ -2388,9 +2407,6 @@ export class Runner {
     const cancelled = !step && !keepalive && this.store.getSetting<string>(closeCancelledKey(ticket.id));
     if (cancelled) this.store.deleteSetting(closeCancelledKey(ticket.id));
     const cancelledLine = cancelled ? [{ author: 'System', text: `Your close_self in your last turn was cancelled: ${cancelled}, so this minion is still open. Once nothing is left for people, call close_self again.`, images: [] }] : [];
-    const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
-      : keepalive ? promptMessage(batch)
-      : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...handBack, ...cancelledLine, ...batch]);
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     const typer = typedBy ? this.store.getUser(typedBy) : undefined;
@@ -2483,6 +2499,8 @@ export class Runner {
     // config dir lacks (another account, a fresh machine) before resuming.
     let restoreFailed = false;
     let had: Set<string> | null = null;
+    // A session that is gone for good: the fresh one starts from a short digest of the chat (#899).
+    let lost: { text: string; entries: number } | null = null;
     try {
       const restored = restoreSession(this.store, ticket, project, configDir);
       // Everything stored is in the config dir now, so the end-of-turn save may prune what the turn deletes.
@@ -2504,7 +2522,8 @@ export class Runner {
       this.turnSecrets.delete(ticket.id);
       return;
     } else if (ticket.session_id) {
-      this.emit(ticket.id, 'note', { text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here, but Claude doesn't remember the earlier turns.` });
+      lost = lostSessionText(ticket.session_id, ticket.note, this.chatDigest(ticket.id, batch));
+      this.emit(ticket.id, 'note', { text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here; Claude doesn't remember the earlier turns, so it starts from ${lost.entries ? `its status note and its last ${lost.entries} chat entries` : 'its status note'}.` });
       this.store.updateTicket(ticket.id, { session_id: null });
     }
     // The Taskmaster's auto-memory moved to the repo memory (#98); bring its old notes along once.
@@ -2516,6 +2535,9 @@ export class Runner {
       }
     }
 
+    const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
+      : keepalive ? promptMessage(batch)
+      : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []), ...handBack, ...cancelledLine, ...batch]);
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);
     for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
     if (codex) {

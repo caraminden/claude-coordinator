@@ -118,14 +118,20 @@ test('a session nobody has a copy of starts fresh with a note, instead of failin
   const cwd = join(root, 'wt-2');
   mkdirSync(cwd);
   store.setTicketDir(t.id, cwd, null);
-  store.updateTicket(t.id, { session_id: 'lost-session', person_id: cara.id });
+  store.updateTicket(t.id, { session_id: 'lost-session', person_id: cara.id, note: 'waiting on the bill PR' });
+  store.addEvent(t.id, 'user_message', { author: 'Cara', text: 'keep the clips' });
+  store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'Kept them; the bill is PR #4.' }] } });
   const r = runner();
   r.send(t.id, 'Cara', 'hello?');
   await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[0].resume, null, 'no --resume of a transcript that is nowhere');
   assert.equal(store.getTicket(t.id)!.status, 'idle');
   assert.notEqual(store.getTicket(t.id)!.session_id, 'lost-session');
-  assert.ok(notes(t.id).some((n) => /fresh session/.test(n) && n.includes('lost-session')), notes(t.id).join('\n'));
+  assert.ok(notes(t.id).some((n) => /fresh session/.test(n) && n.includes('lost-session') && n.includes('last 2 chat entries')), notes(t.id).join('\n'));
+  // The fresh session starts from the note and the chat so far (#899), and this turn's own message only once.
+  const prompt = turns()[0].prompt;
+  for (const want of ['waiting on the bill PR', '[Cara]: keep the clips', '[You]: Kept them; the bill is PR #4.']) assert.ok(prompt.includes(want), prompt);
+  assert.equal(prompt.split('hello?').length, 2, prompt);
 });
 
 test("a minion whose creation was cut off before its worktree was recorded runs in its worktree and keeps its session (#899)", async () => {

@@ -43,6 +43,32 @@ Do nothing else this turn, and reply in one line.`;
 export const freshStartText = (handoff: string) =>
   `This is a fresh Claude session: ${APP_NAME} reset your context (people's chat history is unchanged). Your memory loads as usual. Your previous session's handoff:\n\n${handoff}`;
 
+/** How many chat entries a fresh session that lost its old one starts from, and how many characters of each and of all (#899). */
+export const LOST_DIGEST_ENTRIES = 8;
+const LOST_ENTRY_CHARS = 600;
+const LOST_DIGEST_CHARS = 4000;
+
+/**
+ * What a fresh session starts from when its old one is gone from every login and the database (#899): the minion's
+ * status note and its chat's last entries, each cut short, newest kept when they don't all fit. `entries` is how many made it.
+ */
+export function lostSessionText(sessionId: string, note: string | null, chat: string[]): { text: string; entries: number } {
+  const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}…` : t);
+  const kept: string[] = [];
+  let size = 0;
+  for (const line of [...chat].reverse().map((l) => cut(l, LOST_ENTRY_CHARS))) {
+    if (size + line.length > LOST_DIGEST_CHARS) break;
+    kept.unshift(line);
+    size += line.length;
+  }
+  const text = [
+    `Your earlier Claude session (${sessionId}) is gone: it isn't on this login or in ${APP_NAME}'s database, so this is a fresh session and you don't remember earlier turns. So you don't start blind, here is what ${APP_NAME} kept. Check your worktree, git log and the shared folder before you act on it.`,
+    `Your last status note: ${note ? `"${cut(note, LOST_ENTRY_CHARS)}"` : 'none'}.`,
+    ...(kept.length ? [`The chat's last ${kept.length} entries before this turn, oldest first (each cut at ${LOST_ENTRY_CHARS} characters):`, ...kept] : ['The chat has no earlier entries.']),
+  ].join('\n\n');
+  return { text, entries: kept.length };
+}
+
 /** The fallback when a handoff turn fails (#406): Claude Code's own compaction, kept to what a handoff holds. */
 export const COMPACT_COMMAND = '/compact Keep every open ask and who made it, relays still owed, cards waiting on people, who is parked on what, and promised next steps.';
 

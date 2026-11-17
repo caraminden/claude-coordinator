@@ -23,6 +23,9 @@ export const TYPED_HANDLES_UP_TO = 696493;
  * Not a relay from another chat (`from`: a minion, this or another scheme's Taskmaster), held mail, a
  * brief, Mandate's hook news, nor a name that isn't a person's (#610).
  */
+/** The Overlord's events every person's Mine shows (#920; public/mine.js inMine says the same): items marked for everyone, and its cards' answers and results so they settle there. */
+const MINE_EVENTS = `(json_extract(data, '$.everyone') = 1 OR kind IN ('question_result', 'plan_result', 'approval_result')
+  OR (kind = 'user_message' AND (json_extract(data, '$.answer') IS NOT NULL OR json_extract(data, '$.plan') IS NOT NULL)))`;
 const PERSON_WROTE = `json_extract(a.data, '$.from') IS NULL AND json_extract(a.data, '$.mail') IS NULL AND json_extract(a.data, '$.brief') IS NULL
   AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${[...NOT_PEOPLE, 'Mandate'].map((n) => `'${n.toLowerCase().replace(/'/g, "''")}'`).join(', ')})
   AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'`;
@@ -2584,6 +2587,18 @@ export class Store {
     return (this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id > ? AND (kind IN ('user_message', 'note', 'error')
       OR (kind = 'claude' AND json_extract(data, '$.type') = 'assistant' AND instr(data, '"type":"text"') > 0))
       ORDER BY id DESC LIMIT ?`).all(ticketId, afterId, limit) as unknown as EventRow[]).reverse();
+  }
+
+  /** A chat's events in [from, before), oldest first; `mine` keeps only what Mine shows from the Overlord (MINE_EVENTS). */
+  eventsBetween(ticketId: number, from: number, before: number, mine = false): EventRow[] {
+    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id`)
+      .all(ticketId, from, before) as unknown as EventRow[];
+  }
+
+  /** A chat's newest `limit` events before `before`, newest first; `mine` as in eventsBetween. */
+  eventsBefore(ticketId: number, before: number, limit: number, mine = false): EventRow[] {
+    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id DESC LIMIT ?`)
+      .all(ticketId, before, limit) as unknown as EventRow[];
   }
 
   listEvents(ticketId: number, afterId = 0): EventRow[] {

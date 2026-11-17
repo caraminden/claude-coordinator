@@ -2,6 +2,7 @@
 // marks a series dirty, the measured backstop, the week's readout, and the runner's keepalive turn (it fires
 // at 55 minutes, hides from the chat, leaves state alone, and is dropped when a real wake comes first).
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -281,11 +282,17 @@ test('a keepalive that missed the cache stops its series', async () => {
   }
 });
 
-test('a keepalive turn left by a restart is dropped, not resumed', () => {
+test('a keepalive turn left by a restart is killed and dropped, not resumed', async () => {
   const id = minion();
+  // Its process outlives the restart (a unit): recover kills it.
+  const orphan = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  mkdirSync(join(root, 'gone-turn'), { recursive: true });
+  writeFileSync(join(root, 'gone-turn', 'pid.json'), JSON.stringify({ claude: orphan.pid }));
+  const gone = new Promise((resolve) => orphan.once('exit', resolve));
   store.setSetting(`turn:${id}`, { resumes: 0, keepalive: true, dir: join(root, 'gone-turn'), startedAt: Date.now() });
   const r = new Runner(store, () => {}, () => ({}), fake);
   r.recover();
+  assert.equal(await Promise.race([gone.then(() => 'killed'), new Promise((res) => setTimeout(res, 3000, 'alive'))]), 'killed');
   assert.equal(store.getSetting(`turn:${id}`), null);
   assert.equal(existsSync(join(root, 'gone-turn')), false);
   assert.equal(r.isRunning(id), false, 'no resume started');

@@ -1183,6 +1183,8 @@ export class Runner {
         const kept = t.status !== 'running' ? this.store.getSetting<TurnState>(turnKey(t.id)) : null;
         if (kept?.keepalive) {
           this.store.deleteSetting(turnKey(t.id));
+          // Its unit outlives the server; killed first (pid.json is in its folder) so it can't race the next real turn on the session.
+          if (kept.dir) this.signal({ dir: kept.dir, unit: kept.unit ?? null, container: kept.container ?? null }, 'SIGKILL');
           if (kept.dir) rmSync(kept.dir, { recursive: true, force: true });
           if (kept.queued?.length) this.store.setSetting(waitingKey(t.id), [...(this.store.getSetting<QueuedMessage[]>(waitingKey(t.id)) ?? []), ...kept.queued]);
         }
@@ -1994,7 +1996,7 @@ export class Runner {
   }
 
   /** Signal a turn's claude and, as it runs in its own process group, its tool subprocesses too. */
-  private signal(live: LiveTurn, sig: NodeJS.Signals) {
+  private signal(live: Pick<LiveTurn, 'dir' | 'unit' | 'container'>, sig: NodeJS.Signals) {
     let pid = 0;
     try {
       pid = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8')).claude;

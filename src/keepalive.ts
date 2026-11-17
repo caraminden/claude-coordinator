@@ -50,7 +50,7 @@ export function inWindow(now: number): boolean {
   return Number(hour.format(now)) >= WINDOW_FROM_HOUR;
 }
 
-/** Claude Code's date line, in the turn's own time zone (the server's, unless the turn sets TZ). */
+/** Claude Code's date line, in the turn's own time zone (turnEnv sets it to Pacific). */
 export function turnDate(now: number, tz?: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz || undefined, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }

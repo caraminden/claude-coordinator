@@ -135,3 +135,10 @@ a.button.waiting-open { flex: none; background: var(--accent); color: var(--on-a
   /* A row that scrolls drops its end padding; this keeps the last card off the edge. */
   .waiting-strip::after { content: ''; flex: none; width: 0.2rem; }
 }
+
+/* The looks-like-a-secret warning before a message goes out (#838, composer.js askToSaveSecret). */
+dialog.secret-ask { --cui-dialog-width: 460px; }
+dialog.secret-ask .secret-warning { display: flex; flex-direction: column; gap: 0.6rem; }
+dialog.secret-ask .secret-warning p { margin: 0; }
+dialog.secret-ask label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9em; }
+dialog.secret-ask .row { gap: 0.5rem; flex-wrap: wrap; }

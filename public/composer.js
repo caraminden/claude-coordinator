@@ -7,6 +7,7 @@ import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
 import { optimistic } from './ui/optimistic.js';
 import { pastedFiles } from './paste.js';
+import { looksSecret } from './secret-check.js';
 import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 
 // ---------- drafts ----------
@@ -111,12 +112,23 @@ export function composer(chatId, ticket) {
   // Mid-turn, Send steers the running turn; the ▾ (shown only then, style.css) offers queueing instead.
   // The menu sets `after` around its submit, which calls send() at once (ui/composer.js), so it reads it there.
   let after = false;
+  // Set by the secret warning's Send anyway, for the one submit it makes (#838).
+  let sendAnyway = false;
   const box = mountComposer(document.createDocumentFragment(), {
     placeholder: composerPlaceholder(ticket),
     draftKey: `cc-draft:${chatId}`,
     canSend: (text) => {
       if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.'), false;
       if (attachments.uploading) return alertNote('Still uploading a file; send once it shows its size.'), false;
+      const found = !sendAnyway && looksSecret(text);
+      sendAnyway = false;
+      if (found) return askToSaveSecret(ticket, found, {
+        saved: (name) => {
+          box.value = box.value.split(found).join(`$${SECRET_ENV}${name}`);
+          textarea.focus();
+        },
+        sendAnyway: () => { sendAnyway = true; form.requestSubmit(); },
+      }), false;
       return !!text || attachments.items.length > 0;
     },
     // Returns at once, so Send never waits (#392): a failed message stays in the chat with Retry and Edit, not back in the box.
@@ -468,6 +480,51 @@ function uploadFile(chatId, file, item, onProgress) {
 }
 
 /** Shrink big images (and convert odd formats) so they fit the API's size limits; the file itself if it already does. */
+const SECRET_ENV = 'CITADEL_SECRET_';
+
+/**
+ * A message about to go out looks like it holds a password or key (#838): offer to save it as a secret instead.
+ * Saved, the message says $CITADEL_SECRET_<NAME> where the value was, for the person to look over and send.
+ */
+function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
+  const value = h('input', { type: 'password', value: found, autocomplete: 'off', spellcheck: 'false', required: true, 'aria-label': 'The value' });
+  const name = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', required: true, placeholder: 'SITE_PASSWORD', pattern: '[A-Za-z][A-Za-z0-9_]{0,63}', 'aria-label': 'Name' });
+  const whose = h('select', { 'aria-label': 'Whose' }, h('option', { value: 'person' }, 'Mine'),
+    ticket?.project_id != null ? h('option', { value: 'scheme' }, 'This scheme\'s') : null);
+  const err = h('p', { class: 'error', role: 'alert', hidden: true });
+  const save = h('button', { type: 'submit' }, 'Save as a secret');
+  const form = h('form', { class: 'secret-warning' },
+    h('p', {}, 'Chats are kept, so a password or key sent here stays in this chat. Save it as a secret instead: a minion gets it as ',
+      h('code', {}, `$${SECRET_ENV}<NAME>`), ' and the message names it in place of the value.'),
+    h('label', {}, 'The value', value), h('label', {}, 'Name', name), h('label', {}, 'Whose', whose), err,
+    h('div', { class: 'row' }, save,
+      h('button', { type: 'button', class: 'secondary', onclick: () => { dialog.close(); sendAnyway(); } }, 'Send anyway'),
+      h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel')));
+  const dialog = h('dialog', { class: 'cui-dialog secret-ask', 'aria-label': 'This looks like a secret' },
+    h('div', { class: 'cui-dialog-head' }, h('h2', {}, 'This looks like a secret. Save it as one instead?'),
+      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
+    form);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    save.disabled = true;
+    err.hidden = true;
+    try {
+      const scope = whose.value;
+      const r = await api('api/secrets', { method: 'PUT', body: { scope, ...(scope === 'scheme' ? { project: ticket.project_id } : {}), name: name.value, value: value.value } });
+      dialog.close();
+      saved(r.name);
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.hidden = false;
+      save.disabled = false;
+    }
+  };
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  name.focus();
+}
+
 async function prepareImage(file) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));

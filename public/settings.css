@@ -168,6 +168,7 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .people-add { margin-top: 0.5rem; }
 .contraption-list { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
 .contraption .row { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+.contraption .warn { color: var(--waiting); }
 .contraption-people { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: center; margin: 0.5rem 0; }
 .contraption-people .turns-toggle { display: inline-flex; gap: 0.3rem; align-items: center; margin: 0; }
 .contraption-people .turns-toggle input { width: auto; margin: 0; }

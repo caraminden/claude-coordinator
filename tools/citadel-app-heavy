@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Run one step of a contraption's service or timer in a citadel-heavy slot (#847):
+#   "$CITADEL_HEAVY" <command> [args...]
+# Citadel sets CITADEL_HEAVY to this script in every app unit, and the app's name (from BASE_PATH) goes in
+# citadel-heavy's queue and history as "<app> (app)". Apps share the slots minions build and test in, so two
+# rules keep their holds short (Cara, 2026-11-16: "I don't want to bog down perigee or stop the rest of citadel
+# from using heavy slots for a really long time"):
+# - A hold is capped at 10 min: past it the step is stopped (SIGTERM, then SIGKILL 30 s later) and this exits
+#   124. Split long work into shorter steps. CITADEL_HEAVY_APP_CAP (seconds) overrides it, for tests.
+# - All apps together hold at most one slot: an app first waits its turn among apps, outside citadel-heavy's
+#   line, so an app waiting on another app never keeps a minion's place.
+# Apps must call this, never flock the .heavy folder themselves. Exits with the step's status (75: no slot in an hour).
+set -uo pipefail
+
+say() { echo "citadel-app-heavy: $*" >&2; }
+[ $# -gt 0 ] || { say 'usage: "$CITADEL_HEAVY" <command> [args...]'; exit 2; }
+
+app=${BASE_PATH:-}; app=${app##*/}
+export CITADEL_HEAVY_WHO="${app:-an app} (app)"
+cap=${CITADEL_HEAVY_APP_CAP:-600}
+dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
+heavy=$(dirname "$(readlink -f "$0")")/citadel-heavy
+
+if command -v flock >/dev/null && mkdir -p "$dir" 2>/dev/null && exec 9>>"$dir/apps"; then
+  flock -n 9 || { say "another app holds the apps' heavy slot: waiting for it (at most 10 min a hold)"; flock 9; }
+  "$heavy" timeout -k 30 "$cap" "$@" 9>&-
+else
+  "$heavy" timeout -k 30 "$cap" "$@"
+fi
+rc=$?
+[ "$rc" -ne 124 ] || say "stopped: a heavy hold is capped at $((cap / 60)) min $((cap % 60)) s. Split the work into shorter steps."
+exit "$rc"

@@ -93,6 +93,21 @@ function servicePanel(c) {
   return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons, deployBtn), notes, status, log, deployLine, deployTodo, deployLog);
 }
 
+const size = (b) => (b < 1e9 ? `${Math.round(b / 1e6)} MB` : `${(b / 1e9).toFixed(b < 1e11 ? 1 : 0)} GB`);
+
+/** Its DATA_DIR size from the server's last background measure (#847), and its manifest's disk_warn_gb line. */
+function diskLine(c) {
+  const d = c.disk;
+  const dir = `~/.local/share/${c.name}`;
+  if (!d) return h('p', { class: 'small muted' }, `Data in ${dir}: not measured yet (every 30 min, from 2 min after a restart).`);
+  const over = d.warn_gb !== null && d.data_bytes !== null && d.data_bytes > d.warn_gb * 1e9;
+  return h('p', { class: 'small muted' },
+    d.data_bytes === null ? `No data in ${dir} yet` : `Data: ${size(d.data_bytes)} in ${dir}`,
+    `, measured ${when(d.measured_at)}`,
+    d.warn_gb !== null && !over ? `; warns past ${d.warn_gb} GB.` : '.',
+    over ? h('strong', { class: 'warn' }, ` Past its ${d.warn_gb} GB warning line.`) : '');
+}
+
 // Split so src/icons.ts doesn't take it for Citadel's own icon and append ?v=<hash>.
 const ICON_HINT = '/icon' + '.svg';
 
@@ -167,6 +182,7 @@ function card(c, people, replace) {
             }, () => {});
           },
         }), u.name))),
+    diskLine(c),
     servicePanel(c),
     h('details', {}, h('summary', { class: 'small' }, 'Settings'), form));
 }

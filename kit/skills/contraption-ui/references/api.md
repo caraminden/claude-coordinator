@@ -24,6 +24,7 @@ the test on purpose.
 - [Sessions reading a person's data: `/app-api/read`](#sessions-reading-a-persons-data-app-apiread)
 - [Big uploads: `/apps/_citadel/uploads/<name>`](#big-uploads-apps_citadeluploadsname)
 - [What Citadel serves your pages](#what-citadel-serves-your-pages)
+- [Heavy steps and disk use](#heavy-steps-and-disk-use)
 - [Running and deploying: `citadel-app.json`](#running-and-deploying-citadel-appjson)
 - [Limits at a glance](#limits-at-a-glance)
 - [What changed since 2026-11-02](#what-changed-since-2026-11-02)
@@ -75,6 +76,7 @@ Citadel sets these on your service and its timers; `citadel-app.json` can't over
 | `CITADEL_KEYS` | Your key folder |
 | `CITADEL_URL` | Where your server calls Citadel: `http://127.0.0.1:8573` on the live box. Read it; don't hard-code it |
 | `PATH` | mise's shims, `~/.local/bin`, then the system's |
+| `CITADEL_HEAVY` | The command that runs a heavy step in a shared slot: `"$CITADEL_HEAVY" <command> [args...]` ("Heavy steps and disk use"). Set from your next install or deploy |
 | `MISE_TRUSTED_CONFIG_PATHS` | Your app's folder, then any paths your manifest adds |
 
 The key folder (0700) holds two files (0600), rewritten whenever an admin rotates the keys:
@@ -735,6 +737,43 @@ your key): `{ name, citadel, apps: [{ name, title, icon, up }] }`, the person's 
 address (null when you're on Citadel's host), and the apps enabled for them, `up` false when its
 service doesn't answer. Their icons come from `/apps/_citadel/icon/<name>`, fetched by Citadel.
 
+## Heavy steps and disk use
+
+**Heavy steps.** A service or timer step that eats CPU or memory for a while (an encode, an index
+rebuild, a big import) runs through `$CITADEL_HEAVY`, so it takes one of the box's few heavy slots
+that minions' builds and test suites share, and waits in line when they are full:
+
+```sh
+"$CITADEL_HEAVY" ffmpeg -i in.wav out.opus     # from a timer's command or your own child process
+```
+
+- Your app shows in the line and in the slots' history as `<name> (app)`. The step's output, stdin
+  and exit status pass through.
+- **A hold is capped at 10 minutes.** Past it the step gets SIGTERM, then SIGKILL 30 s later, and
+  the command exits 124. Split long work into steps that each fit, and call `$CITADEL_HEAVY` once
+  per step.
+- **All apps together hold at most one slot.** A second app's step waits for the first to end
+  before it joins the line, so apps never keep minions waiting for more than one slot.
+- 75: no slot came free within an hour. Retry later.
+- Never `flock` Citadel's `.heavy` folder yourself: `$CITADEL_HEAVY` is the supported way in.
+
+**Disk use.** Citadel measures each app's `DATA_DIR` in the background (from 2 minutes after a
+restart, then every 30 minutes, at idle priority) and shows it in Settings → Contraptions. Set
+`disk_warn_gb` in `citadel-app.json` to mark the card when you pass it. Your server can read its
+own figure, which costs nothing on the request:
+
+```
+GET /api/contraptions/disk
+Authorization: Bearer <contraption.key>
+→ 200 { "data_bytes": 12884901888, "measured_at": "2026-11-17T01:30:00.000Z", "warn_gb": 100,
+        "free_bytes": 812345678848, "total_bytes": 2000398934016 }
+```
+
+- `data_bytes`, `measured_at` and `warn_gb` are from the last measure: all `null` before the first one,
+  and `data_bytes` is `null` while `DATA_DIR` doesn't exist. `free_bytes` and `total_bytes` are the
+  disk under `DATA_DIR`, read now.
+- Big uploads are refused below 50 GB free ("Big uploads"); check `free_bytes` before a big write of your own.
+
 ## Running and deploying: `citadel-app.json`
 
 Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.service` (and
@@ -748,7 +787,8 @@ Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.s
   "workdir": ".",
   "env": { "VAPID_KEYS": "~/.config/myapp/vapid.json" },
   "timers": { "backup": { "command": ["node", "tools/backup.ts", "${DATA_DIR}"], "on_calendar": "*-*-* 03:30:00" } },
-  "health": "/apps/myapp/health"
+  "health": "/apps/myapp/health",
+  "disk_warn_gb": 100
 }
 ```
 
@@ -756,11 +796,12 @@ Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.s
 |---|---|
 | `start` (required) | 1 to 50 words; the first is an absolute path or a program name, found on `PATH` above (so `node` is your `.mise.toml`'s). An argument starting `~/` is under the home folder; `${VAR}` expands from the environment |
 | `workdir` | A folder inside the repo, default the root |
-| `env` | `NAME: "one line"` (at most 1,000 characters); `~/` at the start of a value is the home folder. Can't set `PORT`, `DATA_DIR`, `CITADEL_KEYS`, `CITADEL_URL`, `BASE_PATH` or `PATH` |
+| `env` | `NAME: "one line"` (at most 1,000 characters); `~/` at the start of a value is the home folder. Can't set `PORT`, `DATA_DIR`, `CITADEL_KEYS`, `CITADEL_URL`, `BASE_PATH`, `PATH` or `CITADEL_HEAVY` |
 | `timers` | Up to 5 jobs named `^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$`, each `{ command, on_calendar, workdir? }`; systemd calendar syntax (`daily`, `*-*-* 03:30:00`); same environment; a run missed while the box was off happens at boot |
 | `health` | A path on your port as your server sees it (include your base path) that answers 2xx once up. Without it, an open port counts |
-| `build` | Up to 20 shell commands, run in the repo root in order at nice 10, with `PATH` as above and none of Citadel's variables (no `PORT`, `DATA_DIR`). Any failing fails the deploy |
-| `build_timeout` | Whole minutes for the whole build, 1 to 60, default 20 |
+| `build` | Up to 20 shell commands, run in the repo root in order at nice 10, with `PATH` as above and none of Citadel's variables (no `PORT`, `DATA_DIR`). Each runs in a heavy slot (shown as `<name> deploy`) in its own systemd unit, `citadel-build-<name>.service`, so a Citadel restart doesn't kill it. Any failing fails the deploy |
+| `build_timeout` | Whole minutes for the whole build, 1 to 60, default 20. Time waiting in line for a heavy slot doesn't count |
+| `disk_warn_gb` | A number of GB above 0: Settings marks the app once its `DATA_DIR` passes it ("Heavy steps and disk use") |
 
 The service restarts 5 s after any exit and starts with the box. Citadel never reads or writes
 your `DATA_DIR` beyond creating it when missing.
@@ -781,7 +822,11 @@ GitHub, so push first. A deploy (tested):
    rewrites the units and restarts the service;
 4. waits up to 60 s for the health path to answer, twice a few seconds apart.
 
-If 2 fails, nothing changed and nothing restarts (`failed`). If 3 or 4 fail, it points the folder
+If 2 fails, nothing changed and nothing restarts (`failed`); the log names how the step ended (its
+exit status, or the signal that killed it, like `killed by SIGKILL`) and quotes its last lines.
+Deploys of one app never overlap: a second waits for (or is refused while) the first runs. If Citadel
+itself restarts mid-deploy, the build keeps running in its unit; once Citadel is back, the deploy
+starts again (once), waiting for that build to end first. If 3 or 4 fail, it points the folder
 back at the old checkout and restarts that as it was built, with no rebuild (`rolled back`); a
 first deploy has nothing to roll back to (`failed`). Each checkout keeps its own build output, so
 an app takes about twice the disk. Anything the app writes belongs in its `DATA_DIR`, never the
@@ -827,13 +872,20 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 | `/app-api/read` timeout, answer | 15 s, 64 KB |
 | Open paths, relay paths | 20 each |
 | Timers | 5 |
-| Build | 1 to 60 minutes, default 20 |
+| Build | 1 to 60 minutes, default 20, not counting the wait for a heavy slot |
+| `$CITADEL_HEAVY` hold | 10 minutes; one slot for all apps together |
+| Disk measure | every 30 minutes |
 | Health wait | 60 s |
 
 ## What changed since 2026-11-02
 
 Newest first.
 
+- **2026-11-16:** `$CITADEL_HEAVY <command>` runs a heavy step of your service or timers in a shared
+  slot, capped at 10 minutes a hold; `disk_warn_gb` in `citadel-app.json`, and
+  `GET /api/contraptions/disk` for your `DATA_DIR` size and the free disk ("Heavy steps and disk
+  use"). Deploy builds run in a heavy slot in their own unit, survive a Citadel restart, and a
+  failed step's log names the signal and its last lines ("Running and deploying").
 - **2026-11-16:** `GET /api/contraptions/secrets/<name>?person=` reads a password or key a person saved
   in Citadel, theirs first, then your home scheme's ("Saved secrets").
 - **2026-11-16:** Citadel keeps each turn's text for 14 days for your home scheme's Taskmaster

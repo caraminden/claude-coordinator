@@ -233,7 +233,8 @@ finding (`citadel:self-review`, "UI findings").
 ## Read on demand
 
 - Anything between your app and Citadel (the proxy, `X-Citadel-Identity`, the turn API and its
-  events, asks, the relay, `/app-api/read`, `citadel-app.json` and deploys, env vars, limits):
+  events, asks, the relay, `/app-api/read`, `citadel-app.json` and deploys, env vars, a heavy step
+  through `$CITADEL_HEAVY`, your `DATA_DIR`'s disk use, limits):
   [references/api.md](references/api.md), the current spec. Prefer it over any pasted copy.
 - Using a part from the table above: its file in the table's last column, before writing the code.
 - Adding or reviewing an animation or transition: [references/motion.md](references/motion.md).

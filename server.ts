@@ -929,6 +929,8 @@ const timerAlerts = new TimerAlerts(store, {
   mandate: (from, person, key, title, link) => mandateAlert('Timer alerts', from, person, key, title, link),
 });
 if (!BOOT_CHECK && !services.opts.off) timerAlerts.start();
+// Each app's DATA_DIR size for Settings and the app's own read (#847): du in the background, never on a request.
+if (!BOOT_CHECK) services.watchDisk(() => store.listContraptions());
 // Every contraption's errors in a daily file in its home scheme's shared folder (#835): failed agent tool calls, 5xx
 // answers through the proxy (set on the proxy below) and its journals' error lines; list_tickets shows yesterday's count.
 const errorDigest = new ErrorDigest(store, {
@@ -1182,6 +1184,23 @@ if (process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.
 } else {
   server.listen(PORT, HOST, () => console.log(`${APP_NAME} listening on http://${HOST}:${boundPort}`));
 }
+// Contraption deploys a restart or crash cut short start again (#847), once: cut short twice, they're left for a person.
+server.on('listening', () => void services.interrupted().then((cut) => {
+  for (const d of cut) {
+    const row = store.getContraption(d.name);
+    if (!row) continue;
+    if (d.resumed) {
+      console.log(`${d.name}'s deploy was cut short by a restart twice: not starting it again.`);
+      continue;
+    }
+    try {
+      startDeploy(app, row, d.by, null, d.uid, true);
+      console.log(`${d.name}'s deploy, cut short by the restart, starts again.`);
+    } catch (err: any) {
+      console.error(`Couldn't start ${d.name}'s deploy again:`, err.message);
+    }
+  }
+}, (err) => console.error('Reading deploys cut short failed:', err)));
 
 // A restart: running turns carry on in their units, and the next server re-attaches. Stop taking
 // requests, end the ones that never finish (event streams, approval long-polls, websockets; their
@@ -1190,6 +1209,7 @@ if (process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.
 const SHUTDOWN_GRACE_MS = 5000;
 process.on('SIGTERM', () => {
   console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
+  services.stopping = true;
   claudeLink.close(); // before detachAll: a turn's start still in flight must not see its container idle and replace it
   runner.detachAll();
   process.once('exit', () => ciLoad.stop()); // at the exit itself, after the last request: writes the runner-load samples it still holds

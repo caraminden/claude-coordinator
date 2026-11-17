@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
-import { AppServices, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
+import { AppServices, heavyWaited, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
 import { fakeSystemd } from './helpers.ts';
 
@@ -14,6 +14,11 @@ import { fakeSystemd } from './helpers.ts';
 // systemctl and a temp unit folder: never the real ones.
 const root = mkdtempSync(join(tmpdir(), 'app-services-'));
 after(() => rmSync(root, { recursive: true, force: true }));
+// Build steps take a slot from the real tools/citadel-heavy (#847), in a lock folder of the test's own.
+const heavyDir = join(root, 'heavy');
+process.env.CITADEL_HEAVY_DIR = heavyDir;
+process.env.CITADEL_HEAVY_MAX_PRESSURE = '101'; // the box's own load doesn't hold these up
+const heavyHistory = () => (existsSync(join(heavyDir, 'history')) ? readFileSync(join(heavyDir, 'history'), 'utf8') : '');
 
 const MANIFEST = {
   start: ['/usr/bin/node', 'src/server.ts'],
@@ -55,6 +60,7 @@ test('the units come from the registry and the manifest, quoted so nothing is a 
     assert.ok(main.includes(`Environment="${env}"`), env);
   }
   assert.ok(main.includes('Environment="ODD=50%% \\"quoted\\" \\\\ back"'), 'quotes, backslashes and % escaped');
+  assert.ok(main.includes(`Environment="CITADEL_HEAVY=${join(import.meta.dirname, '..', 'tools', 'citadel-app-heavy')}"`), 'apps get the heavy-slot command');
   assert.match(main, /^Restart=always$/m);
   assert.match(main, /^RestartSec=5$/m);
   assert.match(main, /^WantedBy=default.target$/m);
@@ -98,6 +104,7 @@ let services: AppServices;
 const opts = (): ServiceOptions => ({
   off: null, unitDir, systemctl: fake.bin, journalctl: fake.journal, home, keysDir: (x) => join(home, 'keys', x), citadelUrl: () => 'http://127.0.0.1:8573',
   logDir: join(home, 'deploy-logs'), healthMs: 3000, minuteMs: 300, gitUrl: (repo) => `file://${join(root, 'remotes', repo)}.git`,
+  systemdRun: fake.run, heavy: join(import.meta.dirname, '..', 'tools', 'citadel-heavy'),
 });
 const appFolder = (name: string, manifest: object = MANIFEST) => {
   mkdirSync(join(home, 'apps', name), { recursive: true });
@@ -109,6 +116,40 @@ beforeEach(() => {
   mkdirSync(unitDir, { recursive: true });
   fake = fakeSystemd(join(root, `systemd${n}`));
   services = new AppServices(opts());
+});
+
+test("a step's wait in line for a heavy slot is read from citadel-heavy's history, so it doesn't count against build_timeout (#847)", async () => {
+  const began = Date.now();
+  const stamp = (ms: number) => spawnSync('date', [`-d@${Math.floor(ms / 1000)}`, '+%FT%T%z'], { encoding: 'utf8' }).stdout.trim();
+  mkdirSync(heavyDir, { recursive: true });
+  appendFileSync(join(heavyDir, 'history'), [
+    `${stamp(began - 60_000)}\twait-app deploy\tsh -c old\tslots\t99\t1\t0\t5\n`,
+    `${stamp(began)}\tother deploy\tsh -c x\tslots\t50\t1\t0\t5\n`,
+    `${stamp(began + 1000)}\twait-app deploy\tsh -c make\tslots\t42\t3\t0\t5\n`,
+  ].join(''));
+  assert.equal(await heavyWaited('wait-app deploy', began), 42, 'its own line from this step, in the +hhmm timestamps the script writes');
+  assert.equal(await heavyWaited('wait-app deploy', began + 10 * 60_000), 0, 'none since the step began');
+  assert.equal(await heavyWaited('nobody deploy', began), 0);
+});
+
+test("disk use (#847): measured in the background with each manifest's warning line, the free disk read on demand", async () => {
+  appFolder('big', { ...MANIFEST, disk_warn_gb: 0.5 });
+  mkdirSync(join(home, '.local/share/big/sub'), { recursive: true });
+  writeFileSync(join(home, '.local/share/big/sub/blob'), Buffer.alloc(300_000));
+  appFolder('fresh');
+  assert.equal(services.diskUse(row('big', 1)), null, 'nothing before the first measure');
+  await services.measureDisk([row('big', 1), row('fresh', 2), row('gone', 3)]);
+  const big = services.diskUse(row('big', 1))!;
+  assert.ok(big.data_bytes! >= 300_000 && big.data_bytes! < 400_000, String(big.data_bytes));
+  assert.equal(big.warn_gb, 0.5);
+  assert.ok(Date.now() - Date.parse(big.measured_at) < 60_000);
+  assert.deepEqual([services.diskUse(row('fresh', 2))!.data_bytes, services.diskUse(row('fresh', 2))!.warn_gb], [null, null], 'no DATA_DIR yet, no warning line');
+  assert.equal(services.diskUse(row('gone', 3))!.warn_gb, null, 'no manifest: still measured');
+  const free = await services.freeDisk();
+  assert.ok(free.free_bytes > 0 && free.total_bytes >= free.free_bytes);
+  assert.throws(() => parseManifest(JSON.stringify({ ...MANIFEST, disk_warn_gb: 0 })), /disk_warn_gb/);
+  assert.throws(() => parseManifest(JSON.stringify({ ...MANIFEST, disk_warn_gb: '100' })), /disk_warn_gb/);
+  assert.equal(parseManifest(JSON.stringify(MANIFEST)).disk_warn_gb, null);
 });
 
 test('install writes its units, reloads, enables and (re)starts them; start, stop and restart run its service', async () => {
@@ -336,9 +377,71 @@ test('a first deploy clones, builds without Citadel\'s environment, installs and
     assert.match(d.tail, /to the log/);
     assert.ok(existsSync(join(unitDir, `citadel-app-${name}.service`)));
     assert.ok(fake.calls().includes(`--user restart citadel-app-${name}.service`));
+    // Each step in its own unit, out of Citadel's cgroup, and in a heavy slot named for the app (#847).
+    assert.equal(fake.calls().filter((x) => x.startsWith(`run --user --wait --collect --unit=citadel-build-${name}.service `)).length, 3);
+    assert.equal(heavyHistory().split('\n').filter((l) => l.split('\t')[1] === `${name} deploy`).length, 3, heavyHistory());
+    assert.ok(!existsSync(join(home, 'deploy-logs', name, 'deploying.json')), 'its marker goes when it ends');
   } finally {
     svc.close();
   }
+});
+
+test('a failed build step says what killed it and quotes its last lines (#847)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest(['echo compiling; echo "out of memory, maybe" >&2; kill -KILL $$']) });
+  const c = { ...row(name, 1), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+  services.deploy(c, 'Cara');
+  const d = await done(name);
+  assert.equal(d.state, 'failed');
+  const failed = d.said.find((l) => l.startsWith('Failed: Build step failed'))!;
+  assert.match(failed, /\(killed by SIGKILL\)/, d.said.join('\n'));
+  assert.match(failed, /Its last lines:\n  compiling\n  out of memory, maybe/);
+});
+
+test('a deploy waits for a build an earlier deploy left running, so two never build at once (#847)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest(['true']) });
+  const left = join(root, `systemd${n}`, `citadel-build-${name}.service.active`);
+  writeFileSync(left, '');
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    services.deploy(c, 'Cara', [], undefined, { uid: 7 });
+    await new Promise((res) => setTimeout(res, 300));
+    const mid = await services.lastDeploy(name);
+    assert.equal(mid!.state, 'running');
+    assert.ok(mid!.said.some((l) => /still running in citadel-build-.*waiting for it to end/.test(l)), mid!.said.join('\n'));
+    assert.ok(!fake.calls().some((x) => x.startsWith('run ')), 'nothing built meanwhile');
+    assert.deepEqual(JSON.parse(readFileSync(join(home, 'deploy-logs', name, 'deploying.json'), 'utf8')), { by: 'Cara', uid: 7, resumed: false, log: mid!.log });
+    rmSync(left);
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.ok(d.said.includes('The earlier build ended: going on.'));
+  } finally {
+    svc.close();
+  }
+});
+
+test('a deploy a restart cut short is found once, its log saying so; one started again says it (#847)', async () => {
+  const dir = join(home, 'deploy-logs', 'cut');
+  mkdirSync(dir, { recursive: true });
+  const log = join(dir, 'x.log');
+  writeFileSync(log, '== Build: cargo build\n');
+  writeFileSync(join(dir, 'deploying.json'), JSON.stringify({ by: 'auto-deploy', uid: 3, resumed: false, log }));
+  mkdirSync(join(home, 'deploy-logs', 'other'), { recursive: true });
+  assert.deepEqual(await services.interrupted(), [{ name: 'cut', by: 'auto-deploy', uid: 3, resumed: false }]);
+  assert.match(readFileSync(log, 'utf8'), /== interrupted: Citadel stopped \(a restart or a crash\) while this deploy ran/);
+  assert.deepEqual(await services.interrupted(), [], 'once');
+
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([]) });
+  const c = { ...row(name, 1), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+  services.deploy(c, 'auto-deploy', [], undefined, { resumed: true });
+  const d = await done(name);
+  assert.equal(d.said[0], 'Started again: a Citadel restart cut the last deploy short.');
 });
 
 /** The real folder the app's folder points at now, and its unit's WorkingDirectory. */

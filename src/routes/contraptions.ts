@@ -34,6 +34,7 @@ function view(app: App, c: ContraptionRow) {
   return {
     name: c.name, title: c.title, icon: c.icon, port: c.port, home_scheme: c.home_scheme, open_paths: JSON.parse(c.open_paths) as string[],
     relay_paths: JSON.parse(c.relay_paths) as string[],
+    disk: app.services.diskUse(c), // DATA_DIR size from the background measure (#847)
     default_model: c.default_model, turn_cap: c.turn_cap, keys_at: c.keys_at, keys_dir: app.contraptions.folder(c.name),
     repo: c.repo, branch: c.branch, folder: c.folder, // as set: null means main and ~/apps/<name>
     people: app.store.contraptionUsers(c.id),
@@ -178,7 +179,7 @@ function deployable(app: App, name: string, caller: Ctx['caller']): ContraptionR
  * install check reads the app's page as person `uid` (none: only the registry's icon is checked), and its to-dos go to
  * its home Taskmaster. Throws a ServiceError when it can't start (no repo, a deploy already running, services off).
  */
-export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx['caller'], uid: number | null) {
+export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx['caller'], uid: number | null, resumed = false) {
   const person = uid != null ? app.store.getUser(uid) : undefined;
   const identity = person ? () => app.contraptions.signIdentity(c.name, person) : undefined;
   const hooks = {
@@ -188,6 +189,8 @@ export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx
       app.store.updateContraption(c.name, { icon });
       return true;
     },
+    uid,
+    resumed,
     todo: (todo: string[]) => void deployTodo(app, c, caller, person?.id ?? null, todo).catch((err) => console.error(`Couldn't send ${c.name}'s deploy to-dos to its home Taskmaster:`, err)),
   };
   return app.services.deploy(c, by, app.store.listContraptions(), identity, hooks);
@@ -363,6 +366,11 @@ export const contraptionRoutes: Route[] = [
     rmSync(file);
     if (!file.endsWith('.json')) rmSync(`${file}.json`, { force: true });
     return json(res, 200, { ok: true });
+  }),
+  // The app's own DATA_DIR size, as last measured in the background (#847), and the disk's free space now.
+  fromContraption('GET', '/api/contraptions/disk', async ({ res, app }, c) => {
+    const d = app.services.diskUse(c);
+    return json(res, 200, { data_bytes: d?.data_bytes ?? null, measured_at: d?.measured_at ?? null, warn_gb: d?.warn_gb ?? null, ...(await app.services.freeDisk()) });
   }),
   // Spend on an outside API, booked to the contraption's home scheme (#839, src/outside-spend.ts).
   fromContraption('POST', '/api/contraptions/spend', async ({ req, res, app }, c) => {

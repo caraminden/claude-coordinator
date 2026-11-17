@@ -193,5 +193,19 @@ exit 0
   const journal = join(dir, 'journalctl');
   writeFileSync(journal, '#!/bin/sh\necho "journal $*"\n');
   chmodSync(journal, 0o755);
-  return { bin, journal, calls: () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n') : []), state: (f: string) => existsSync(join(dir, f)) };
+  // systemd-run --user --wait for a build step (#847): the unit shows active to the systemctl above while it runs, which
+  // runs the command with only the --setenv environment, its output appended to the StandardOutput file.
+  const run = join(dir, 'systemd-run');
+  writeFileSync(run, `#!/bin/bash
+d="${dir}"; echo "run $*" >> "$d/calls"; unit= cwd=. out=/dev/null; envs=()
+while [ $# -gt 0 ]; do case $1 in
+  --) shift; break;;
+  --unit=*) unit=\${1#--unit=};; --working-directory=*) cwd=\${1#--working-directory=};;
+  --setenv=*) envs+=("\${1#--setenv=}");; --property=StandardOutput=append:*) out=\${1#--property=StandardOutput=append:};;
+esac; shift; done
+touch "$d/$unit.active"; trap 'rm -f "$d/$unit.active"' EXIT
+(cd "$cwd" && env -i "\${envs[@]}" "$@") >>"$out" 2>&1
+`);
+  chmodSync(run, 0o755);
+  return { bin, journal, run, calls: () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n') : []), state: (f: string) => existsSync(join(dir, f)) };
 }

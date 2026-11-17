@@ -10,9 +10,9 @@
 // A boot check, a preview or a dev copy without a stand-in systemctl gets `off`: it never touches systemd.
 import { execFile, spawn } from 'node:child_process';
 import { closeSync, existsSync, openSync, readdirSync } from 'node:fs';
-import { appendFile, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat, statfs, symlink, writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
-import { homedir } from 'node:os';
+import { constants as osConstants, homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { ContraptionRow } from './db.ts';
 import { installCheck } from './pwa-check.ts';
@@ -36,10 +36,15 @@ export interface Manifest {
   build: string[];
   /** Minutes the whole build may take (default 20, at most 60). */
   build_timeout: number;
+  /** Settings warns when DATA_DIR grows past this many GB (#847); null: no warning. */
+  disk_warn_gb: number | null;
 }
 
+/** An app's DATA_DIR size, from the last background measure (#847). */
+export interface DiskUse { data_bytes: number | null; measured_at: string; warn_gb: number | null }
+
 /** The environment Citadel sets on every app's units; a manifest can't. */
-export const CITADEL_ENV = ['PORT', 'DATA_DIR', 'CITADEL_KEYS', 'CITADEL_URL', 'BASE_PATH', 'PATH'];
+export const CITADEL_ENV = ['PORT', 'DATA_DIR', 'CITADEL_KEYS', 'CITADEL_URL', 'BASE_PATH', 'PATH', 'CITADEL_HEAVY'];
 const JOB = /^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$/;
 const MAX_TIMERS = 5;
 
@@ -88,7 +93,8 @@ export function parseManifest(text: string): Manifest {
   if (m.health !== undefined && m.health !== null && !(typeof m.health === 'string' && /^\/[\x21-\x7e]{0,199}$/.test(m.health))) throw new Error('health must be a path starting with /, like /health');
   if (m.build !== undefined && (!Array.isArray(m.build) || m.build.length > 20 || !m.build.every((b: unknown) => isText(b, 2000)))) throw new Error('build must be a list of at most 20 shell commands, like ["npm ci", "npm run build"]');
   if (m.build_timeout !== undefined && !(Number.isInteger(m.build_timeout) && m.build_timeout >= 1 && m.build_timeout <= 60)) throw new Error('build_timeout must be whole minutes from 1 to 60');
-  return { start: command(m.start, 'start'), workdir: relDir(m.workdir, 'workdir'), env, timers, health: m.health ?? null, build: m.build ?? [], build_timeout: m.build_timeout ?? 20 };
+  if (m.disk_warn_gb !== undefined && !(typeof m.disk_warn_gb === 'number' && m.disk_warn_gb > 0 && m.disk_warn_gb <= 1e6)) throw new Error('disk_warn_gb must be a number of GB above 0');
+  return { start: command(m.start, 'start'), workdir: relDir(m.workdir, 'workdir'), env, timers, health: m.health ?? null, build: m.build ?? [], build_timeout: m.build_timeout ?? 20, disk_warn_gb: m.disk_warn_gb ?? null };
 }
 
 /** The first line of every unit file Citadel writes; it touches no other. */
@@ -118,6 +124,8 @@ export interface UnitInputs {
 /** Toolchains mise installs, then the usual: a user unit's PATH has neither ~/.local/bin nor mise's shims. */
 const toolPath = (home: string) => `${join(home, '.local/share/mise/shims')}:${join(home, '.local/bin')}:/usr/local/bin:/usr/bin:/bin`;
 
+const TOOLS = join(import.meta.dirname, '..', 'tools');
+
 /** The unit name for a contraption, or one of its jobs. */
 export const unitName = (name: string, job?: string) => `citadel-app-${name}${job ? `-${job}` : ''}`;
 
@@ -132,6 +140,8 @@ export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: 
     CITADEL_KEYS: keysDir,
     CITADEL_URL: citadelUrl,
     BASE_PATH: `/apps/${row.name}`,
+    // An app runs a heavy step as `"$CITADEL_HEAVY" <command>`: a capped hold in a shared slot (#847).
+    CITADEL_HEAVY: join(TOOLS, 'citadel-app-heavy'),
     // The build trusts the app's .mise.toml, so its units do too; an app's own trusted paths are kept after it.
     MISE_TRUSTED_CONFIG_PATHS: [folder, own.MISE_TRUSTED_CONFIG_PATHS].filter(Boolean).join(':'),
   };
@@ -239,7 +249,63 @@ export interface DeployHooks {
   setIcon?: (icon: string) => boolean;
   /** What the deployed app still lacks: no rail icon, or a web manifest that won't install. Empty when it was checked and lacks nothing. */
   todo?: (todo: string[]) => void;
+  /** Whom the install check reads the page as: kept in the deploy's marker, for starting it again after a restart (#847). */
+  uid?: number | null;
+  /** It starts again a deploy a Citadel restart cut short: cut short again, it is left for a person. */
+  resumed?: boolean;
 }
+
+/** A deploy cut short by a Citadel restart or crash, from its marker (#847). */
+export interface Interrupted {
+  name: string;
+  by: string;
+  uid: number | null;
+  resumed: boolean;
+}
+
+/** The user unit an app's build steps run in, one at a time (#847): not citadel-app-…, which a timer named build would be. */
+export const buildUnit = (name: string) => `citadel-build-${name}.service`;
+/** In the app's deploy log folder while a deploy runs: one left there at boot is a deploy a restart cut short. */
+const DEPLOYING = 'deploying.json';
+const SIGNALS: Record<number, string> = Object.fromEntries(Object.entries(osConstants.signals).map(([k, v]) => [v, k]));
+/** The end of a failed step's output in the log, from byte `from`: the lines that say why, for the failure line. */
+async function lastLines(log: string, from: number): Promise<string> {
+  const f = await open(log, 'r').catch(() => null);
+  if (!f) return '';
+  try {
+    const size = (await f.stat()).size;
+    const start = Math.max(from, size - 8192);
+    const buf = Buffer.alloc(size - start);
+    await f.read(buf, 0, buf.length, start);
+    const lines = buf.toString('utf8').split('\n').map((l) => l.trimEnd()).filter(Boolean).slice(-12);
+    return lines.length ? `\nIts last lines:\n${lines.map((l) => `  ${l.slice(0, 300)}`).join('\n')}` : '\nIt printed nothing.';
+  } finally {
+    await f.close();
+  }
+}
+/**
+ * How long the step `who` started at `began` (ms) waited in line for its heavy slot, from citadel-heavy's history (its
+ * format: the script's header); 0 when it isn't there.
+ */
+export async function heavyWaited(who: string, began: number): Promise<number> {
+  const history = join(process.env.CITADEL_HEAVY_DIR || join(homedir(), '.local/share/claude-coordinator/projects/.heavy'), 'history');
+  const f = await open(history, 'r').catch(() => null);
+  if (!f) return 0;
+  try {
+    const size = (await f.stat()).size;
+    const buf = Buffer.alloc(Math.min(size, 65536));
+    await f.read(buf, 0, buf.length, size - buf.length);
+    for (const line of buf.toString('utf8').split('\n').reverse()) {
+      const [at, by, , , waited] = line.split('\t');
+      if (by === who && Date.parse(at) >= began - 2000) return Number(waited) || 0;
+    }
+    return 0;
+  } finally {
+    await f.close();
+  }
+}
+/** A build step's status for people: 128+N is the signal that killed it (a shell's way of saying so). */
+export const exitWhy = (code: number) => (code > 128 && SIGNALS[code - 128] ? `killed by ${SIGNALS[code - 128]}` : code === 75 ? 'no heavy slot came free, status 75' : `exit ${code}`);
 
 export class ServiceError extends Error {
   status: number;
@@ -273,7 +339,16 @@ export interface ServiceOptions {
   minuteMs: number;
   /** Where a repo is cloned from: GitHub, or CITADEL_GIT_BASE (tests). */
   gitUrl: (repo: string) => string;
+  /**
+   * systemd-run, which runs each build step in its own user unit (#847), out of Citadel's cgroup, so a Citadel restart
+   * or crash doesn't kill an app's build; null (a dev copy with a stand-in systemctl) runs them as Citadel's children.
+   */
+  systemdRun: string | null;
+  /** tools/citadel-heavy: every build step waits for a host-wide heavy slot (#847). */
+  heavy: string;
 }
+
+/** Citadel's tools folder, beside src/: the live checkout's on the live server. */
 
 /** Defaults from the environment: CITADEL_SYSTEMCTL and CITADEL_JOURNALCTL stand in for the real ones (tests). */
 export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCheck: boolean, rest: Pick<ServiceOptions, 'keysDir' | 'citadelUrl' | 'logDir'>): ServiceOptions {
@@ -291,6 +366,8 @@ export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCh
     healthMs: Number(env.CITADEL_HEALTH_MS) || 60_000,
     minuteMs: 60_000,
     gitUrl: (repo) => `${env.CITADEL_GIT_BASE || 'https://github.com'}/${repo}.git`,
+    systemdRun: env.CITADEL_SYSTEMD_RUN || (stand ? null : 'systemd-run'),
+    heavy: join(TOOLS, 'citadel-heavy'),
     ...rest,
   };
 }
@@ -308,9 +385,42 @@ export class AppServices {
   drain: (row: ContraptionRow) => Promise<{ said: string | null; release: () => void }> = async () => ({ said: null, release: () => {} });
   /** A deploy reached a stage, or ended (finished_at set): the release monitor records and shows it (#627). */
   onDeploy: (view: DeployView) => void = () => {};
+  /** Set on SIGTERM: a deploy ending now was cut short by the restart, so its marker stays for the next server (#847). */
+  stopping = false;
+
+  /** Each app's DATA_DIR size, measured in the background, never on a request (#847). */
+  private disk = new Map<string, DiskUse>();
 
   constructor(opts: ServiceOptions) {
     this.opts = opts;
+  }
+
+  /** The app's last measured DATA_DIR size and warning line, or null before the first measure. */
+  diskUse(row: Pick<ContraptionRow, 'name'>): DiskUse | null {
+    return this.disk.get(row.name) ?? null;
+  }
+
+  /** Free and total bytes on the disk the apps' data lives on: one statfs, cheap enough for a request. */
+  async freeDisk(): Promise<{ free_bytes: number; total_bytes: number }> {
+    const s = await statfs(join(this.opts.home, '.local/share'));
+    return { free_bytes: s.bavail * s.bsize, total_bytes: s.blocks * s.bsize };
+  }
+
+  /** Measure every app's DATA_DIR one at a time, idle-priority, and keep the sizes and warning lines. */
+  async measureDisk(rows: Pick<ContraptionRow, 'name' | 'folder'>[]): Promise<void> {
+    for (const row of rows) {
+      const warn_gb = (await this.manifest(row).catch(() => null))?.disk_warn_gb ?? null;
+      // du exits 1 on a file it can't read but still prints the total: take the number whatever the status.
+      const r = await run('nice', ['-n', '19', 'ionice', '-c', '3', 'du', '-sbx', this.dataDir(row)], 10 * 60_000);
+      const bytes = Number(r.out.split('\t')[0]);
+      this.disk.set(row.name, { data_bytes: r.out && Number.isFinite(bytes) ? bytes : null, measured_at: new Date().toISOString(), warn_gb });
+    }
+  }
+
+  /** Measure 2 min after boot, then every 30 min after each round ends. */
+  watchDisk(rows: () => Pick<ContraptionRow, 'name' | 'folder'>[]): void {
+    const round = () => void this.measureDisk(rows()).catch((err) => console.warn(`Measuring the apps' disk use failed: ${err.message}`)).finally(() => setTimeout(round, 30 * 60_000).unref());
+    setTimeout(round, 2 * 60_000).unref();
   }
 
   /** The app's DATA_DIR (#834): the only place a turn's images may come from. */
@@ -564,6 +674,49 @@ export class AppServices {
     }
   }
 
+  /**
+   * Deploys a Citadel restart or crash cut short (#847), from the markers they left; each marker goes as it is read, and
+   * its log gets a line saying what happened. server.ts starts again those not started again already.
+   */
+  async interrupted(): Promise<Interrupted[]> {
+    if (this.opts.off) return [];
+    const found: Interrupted[] = [];
+    for (const name of await readdir(this.opts.logDir).catch(() => [] as string[])) {
+      if (this.busy.has(name)) continue;
+      const file = join(this.opts.logDir, name, DEPLOYING);
+      const m = await readFile(file, 'utf8').then((t) => JSON.parse(t), () => null);
+      if (!m || typeof m !== 'object') continue;
+      await rm(file, { force: true });
+      if (typeof m.log === 'string' && dirname(m.log) === join(this.opts.logDir, name)) {
+        await appendFile(m.log, `== interrupted: Citadel stopped (a restart or a crash) while this deploy ran; found at ${new Date().toISOString()}\n`).catch(() => {});
+      }
+      found.push({ name, by: typeof m.by === 'string' ? m.by : 'Citadel', uid: typeof m.uid === 'number' ? m.uid : null, resumed: m.resumed === true });
+    }
+    return found;
+  }
+
+  /**
+   * Waits for a build an earlier deploy left running in the app's build unit (#847): its Citadel restarted mid-build, and
+   * the unit ran on. Never two builds at once in one app's checkouts; after an hour it stops the old one.
+   */
+  private async awaitOlderBuild(name: string, say: (line: string) => Promise<void>) {
+    if (!this.opts.systemdRun) return;
+    const unit = buildUnit(name);
+    const running = async () => /^ActiveState=(active|activating|deactivating|reloading)$/m.test((await run(this.opts.systemctl, ['--user', 'show', unit])).out);
+    const since = Date.now();
+    if (!(await running())) return;
+    await say(`An earlier deploy's build is still running in ${unit} (a Citadel restart cut that deploy short): waiting for it to end.`);
+    while (await running()) {
+      if (Date.now() - since >= 60 * this.opts.minuteMs) {
+        await run(this.opts.systemctl, ['--user', 'stop', unit]);
+        await say(`Stopped ${unit} after waiting an hour for it.`);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, this.opts.minuteMs / 30));
+    }
+    await say('The earlier build ended: going on.');
+  }
+
   /** Its last deploy since this server started, with the end of its log; null when none. */
   async lastDeploy(name: string): Promise<(DeployView & { tail: string }) | null> {
     const d = this.deploys.get(name);
@@ -600,6 +753,8 @@ export class AppServices {
       })
       .finally(async () => {
         await appendFile(log, `== ${view.state} at ${new Date().toISOString()}\n`).catch(() => {});
+        if (this.stopping) await appendFile(log, '== Citadel is restarting: this deploy starts again once it is back.\n').catch(() => {});
+        else await rm(join(this.opts.logDir, row.name, DEPLOYING), { force: true }).catch(() => {});
         this.busy.delete(row.name);
         view.finished_at = Date.now();
         this.safely(view);
@@ -629,10 +784,13 @@ export class AppServices {
       view.said.push(line);
       await appendFile(view.log, `== ${line}\n`);
     };
+    await writeFile(join(dirname(view.log), DEPLOYING), JSON.stringify({ by: view.by, uid: hooks.uid ?? null, resumed: !!hooks.resumed, log: view.log }));
+    if (hooks.resumed) await say('Started again: a Citadel restart cut the last deploy short.');
+    await this.awaitOlderBuild(row.name, say);
     /** Run a command, its output into the log; its exit code (124 when it ran out of time). */
-    const sh = (argv: string[], cwd: string, ms: number) => new Promise<number>((ok) => {
+    const sh = (argv: string[], cwd: string, ms: number, withEnv = env) => new Promise<number>((ok) => {
       const fd = openSync(view.log, 'a');
-      const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: ['ignore', fd, fd] });
+      const child = spawn(argv[0], argv.slice(1), { cwd, env: withEnv, detached: true, stdio: ['ignore', fd, fd] });
       closeSync(fd);
       let late = false;
       const timer = setTimeout(() => {
@@ -742,12 +900,31 @@ export class AppServices {
       let m: Manifest;
       try {
         m = await this.manifest(row, next);
-        const deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
+        let deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
+        const who = `${row.name} deploy`;
         for (const step of m.build) {
           await say(`Build: ${step}`);
-          const code = await sh(['nice', '-n', '10', 'sh', '-c', step], next, deadline - Date.now());
+          const from = (await stat(view.log)).size;
+          const began = Date.now();
+          // In a heavy slot (#847), the time limit inside it, so a wait in line doesn't count against the build.
+          const secs = Math.max(1, Math.ceil((deadline - began) / 1000));
+          const inner = [this.opts.heavy, 'timeout', '-k', '10', String(secs), 'nice', '-n', '10', 'sh', '-c', step];
+          // Citadel's own CITADEL_HEAVY_* settings (a dev copy's lock folder, a test's pressure gate) carry over.
+          const heavyEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('CITADEL_HEAVY_') && k !== 'CITADEL_HEAVY_HELD'));
+          const stepEnv = { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who };
+          const unit = buildUnit(row.name);
+          const argv = this.opts.systemdRun
+            ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, `--working-directory=${next}`, `--property=StandardOutput=append:${view.log}`,
+              `--property=StandardError=append:${view.log}`, ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
+            : inner;
+          // A backstop on the whole wait and run: past it, the unit is stopped too (stopping systemd-run alone leaves it running).
+          const backstop = secs * 1000 + 180 * this.opts.minuteMs;
+          const code = await sh(argv, next, backstop, stepEnv);
+          if (code === 124 && this.opts.systemdRun) await run(this.opts.systemctl, ['--user', 'stop', unit]);
+          if (code === 124 && Date.now() - began >= backstop) throw new Error(`The build waited and ran past ${Math.round(backstop / this.opts.minuteMs)} minutes in all, most of it in line for a heavy slot, at: ${step}`);
+          deadline += (await heavyWaited(who, began)) * 1000;
           if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
-          if (code) throw new Error(`Build step failed (exit ${code}): ${step}`);
+          if (code) throw new Error(`Build step failed (${exitWhy(code)}): ${step}${await lastLines(view.log, from)}`);
         }
       } catch (err: any) {
         // The live slot was never touched, nor its service restarted.

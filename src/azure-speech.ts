@@ -26,9 +26,15 @@ export function formatExt(format: string): string {
   throw new HttpError(400, `output_format ${format}: Azure's output formats start with audio-, riff-, raw-, ogg- or webm- (like ${DEFAULT_FORMAT})`);
 }
 
-/** The characters Azure bills: the text between the tags (a break or a voice tag adds none). */
+/**
+ * The characters Azure bills: everything in the SSML body but the <speak> and <voice> tags (other markup, white space and
+ * punctuation count), and each Chinese, Japanese or Korean character counts twice.
+ */
 export function billedChars(ssml: string): number {
-  return [...ssml.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '')].length;
+  const body = ssml.replace(/<\/?(speak|voice)\b[^>]*>/gi, '');
+  let n = 0;
+  for (const c of body) n += /[\u1100-\u11ff\u2e80-\ua4cf\uac00-\ud7af\uf900-\ufaff\uff00-\uffef\u{20000}-\u{2fa1f}]/u.test(c) ? 2 : 1;
+  return n;
 }
 
 /** What the call costs: HD voices if any voice in it is one (`...:DragonHDLatestNeural`), else neural. */
@@ -82,8 +88,9 @@ export async function azureSpeech(args: Record<string, any>, ctx: AzureContext, 
   }
   const bytes = Buffer.from(await r.arrayBuffer());
   if (!bytes.length) throw new HttpError(502, 'Azure Speech answered with no audio');
+  // Book first: Azure has billed it now, so a failed write must not leave it off the scheme's month.
   const cost = azureCost(ssml, chars);
-  writeOutput(file, bytes, { tool: 'generate_speech', provider: 'azure', ssml, output_format: format, chars, cost_usd: cost, date: new Date().toISOString() });
   const booked = deps.book({ service: 'azure-speech', usd: cost, units: chars, note: `generate_speech ${file.split('/').pop()}` });
+  writeOutput(file, bytes, { tool: 'generate_speech', provider: 'azure', ssml, output_format: format, chars, cost_usd: cost, date: new Date().toISOString() });
   return { paths: [file], cost_usd: cost, month_usd: booked.month_usd, cap_usd: booked.cap_usd, over_cap: booked.over_cap, model: 'azure-speech' };
 }

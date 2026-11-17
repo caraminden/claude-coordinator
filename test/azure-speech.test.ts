@@ -54,7 +54,9 @@ test('a fragment is wrapped, in a voice when one is given; another output format
 });
 
 test('cost counts text only, neural vs HD', () => {
-  assert.equal(billedChars('<speak><voice name="v">Hello <break time="1s"/>you</voice></speak>'), 'Hello you'.length);
+  assert.equal(billedChars('<speak><voice name="v">Hello you</voice></speak>'), 'Hello you'.length);
+  assert.equal(billedChars('<speak><voice name="v">Hi<break time="1s"/></voice></speak>'), 'Hi<break time="1s"/>'.length, 'other markup is billed');
+  assert.equal(billedChars('<voice name="v">你好a</voice>'), 5, 'a CJK character counts twice');
   assert.equal(azureCost('<voice name="en-US-AvaNeural">x</voice>', 1_000_000), 15);
   assert.equal(azureCost('<voice name="en-US-Ava:DragonHDLatestNeural">x</voice>', 1_000_000), 30);
 });

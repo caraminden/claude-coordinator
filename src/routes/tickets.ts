@@ -1035,7 +1035,7 @@ export const ticketRoutes: Route[] = [
       const tool = oneOf(body.tool, MEDIA_TOOLS, 'tool') as MediaTool | null;
       if (!tool) throw new HttpError(400, `tool must be one of: ${MEDIA_TOOLS.join(', ')}`);
       const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
-      // provider "azure" (#842): raw SSML to Azure Speech on the scheme's own key, booked to the scheme as outside spend (#839), not OpenRouter.
+      // provider "azure" (#842): any minion of the scheme spends the scheme's own key, with no per-person cap (the scheme's outside-spend cap only warns): raw SSML to Azure Speech on the scheme's own key, booked to the scheme as outside spend (#839), not OpenRouter.
       if (tool === 'generate_speech' && args.provider === 'azure') {
         return json(res, 200, await azureSpeech(args, { roots: ticketRoots(app, ticket) }, {
           secret: (name) => app.secrets.get('scheme', ticket.project_id, name),

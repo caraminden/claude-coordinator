@@ -183,7 +183,9 @@ export function artifactViewer(a) {
   } else {
     const comment = commentBox(artifactThread(a), a.path, a.name, body);
     const bridge = { open: { artifact: a.id }, owner: threadName(a) };
-    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.abs ?? a.path, name: a.name }, bridge });
+    // The head reads the list's copy of the artifact, not this one.
+    const onMissing = () => { a.missing = 1; const listed = view.artifacts.find((x) => x.id === a.id); if (listed) listed.missing = 1; comment.remove(); renderArtifactHead(); };
+    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.abs ?? a.path, name: a.name }, bridge, onMissing });
     section.append(comment);
   }
   return section;
@@ -255,7 +257,7 @@ function openViewer(ticket, file, inPlace) {
   else {
     // A page's Send goes to the chat beside it.
     const bridge = viewerBridge(ticket, file);
-    if (!showMedia(ticket, file)) renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name }, bridge });
+    if (!showMedia(ticket, file)) renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name }, bridge, onMissing: (message) => { file.missing = message; renderViewerBar(); } });
   }
   renderViewerBar();
 }
@@ -458,7 +460,8 @@ export function sharedViewer(file) {
   // Comments on a shared page go to the Taskmaster; the page's own Send goes to the minion that linked it, if one did (the server knows).
   const comment = !file.missing && file.kind === 'html' && view.coordinator ? commentBox(view.coordinator, file.abs, file.name, body) : null;
   const bridge = sharedBridge(file);
-  if (!file.missing) renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge });
+  const onMissing = (message) => { file.missing = message; comment?.remove(); renderSharedHead(); };
+  if (!file.missing) renderFileBody(body, { ...file, onMissing, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body, comment ?? '');
 }
 
@@ -522,7 +525,7 @@ function fillWindow(frame) {
  * to files beside it open them (`hrefFor`), and its briefs get Start buttons (`brief` says where the
  * file is, see addBriefButtons).
  */
-function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, bridge, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
+function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, bridge, onMissing, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
   // The full-screen viewer reuses its stage: a text answer for a file opened before the one showing is dropped.
   const load = (body.textLoad = {});
   if (kind === 'image') {
@@ -547,7 +550,15 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
     body.append(h('p', { class: 'muted' }, 'Loading…'));
     const show = (el) => body.textLoad === load && body.replaceChildren(el);
     fetch(src).then(async (res) => {
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+      if (!res.ok) {
+        const message = (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`;
+        // Listed but gone: the viewer's Open, Download and Comment have nothing to act on (#882).
+        if (res.status === 404 && onMissing && body.textLoad === load) {
+          body.replaceChildren(h('p', { class: 'muted' }, `${message}.`));
+          return onMissing(message);
+        }
+        throw new Error(message);
+      }
       const text = await res.text();
       const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
       const imageUrl = (href) => (isLocalPath(href) ? urlFor(joinPath(dir, href.split('#')[0])) : null);
@@ -568,11 +579,11 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
 }
 
 /** A file's body for the Files view's preview: a minion's artifact (it has an id) or a shared-folder file. */
-export function previewBody(file, src) {
+export function previewBody(file, src, onMissing) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, 'This file no longer exists. Unpin it to take it off the list.'));
-  else if (file.id) renderFileBody(body, { ...file, src, ticketId: file.ticket_id, brief: { projectId: file.project_id, path: file.abs ?? file.path, name: file.name }, bridge: { open: { artifact: file.id }, owner: threadName(file) } });
-  else renderFileBody(body, { ...file, src, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge: sharedBridge(file) });
+  else if (file.id) renderFileBody(body, { ...file, src, ticketId: file.ticket_id, brief: { projectId: file.project_id, path: file.abs ?? file.path, name: file.name }, bridge: { open: { artifact: file.id }, owner: threadName(file) }, onMissing });
+  else renderFileBody(body, { ...file, src, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge: sharedBridge(file), onMissing });
   return body;
 }
 

@@ -1698,10 +1698,10 @@ export class Runner {
    * Each pair shares one count, both ways, apart from the Taskmaster's; a person's Continue in either
    * chat releases it. The caller refuses a dismissed receiver: this would reopen it.
    */
-  relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true): boolean | 'cold' | 'mail' | 'parked' {
+  relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true, unparked = false): boolean | 'cold' | 'mail' | 'parked' {
     const { held, cold, parked } = this.guard(minionPairKey(from, to), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, false, from, !wake, urgent);
     if (!held) {
-      this.copyToTaskmaster(to, author, text);
+      this.copyToTaskmaster(to, author, text, unparked);
       return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
     }
     const [a, b] = [from, to].map((id) => `#${this.store.getTicket(id)!.number}`);
@@ -1714,11 +1714,11 @@ export class Runner {
   }
 
   /** The scheme's Taskmaster sees each message between its minions as held mail that wakes nothing (#783). */
-  private copyToTaskmaster(to: number, author: string, text: string) {
+  private copyToTaskmaster(to: number, author: string, text: string, unparked = false) {
     const target = this.store.getTicket(to)!;
     const coordinator = this.store.getCoordinator(target.project_id);
     const line = text.replace(/\s+/g, ' ');
-    if (coordinator) this.leaveMail(coordinator.id, author, `(to #${target.number}, for your tracking; nothing to do) ${line.length > 200 ? line.slice(0, 200) + '…' : line}`);
+    if (coordinator) this.leaveMail(coordinator.id, author, `(${unparked ? `${author.split(' ')[0]} unparked #${target.number}` : `to #${target.number}`}, for your tracking; nothing to do) ${line.length > 200 ? line.slice(0, 200) + '…' : line}`);
   }
 
   /**

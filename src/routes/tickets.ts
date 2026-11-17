@@ -934,9 +934,21 @@ export const ticketRoutes: Route[] = [
       if (target.id === ticket.id) throw new HttpError(400, 'That is you');
       if (target.status === 'closed') throw new HttpError(409, `#${to} is dismissed, and a message from a minion never reopens one. Ask the Taskmaster (message_coordinator) to reopen it or to pass this on.`);
       const author = `#${ticket.number} ${ticket.title}`;
-      const held = runner.relayMinion(ticket.id, target.id, author, text, body.urgent === true, body.wake !== false);
+      // unpark (Cara, 2026-11-16: "minions that are waiting on other minions should be woken without taskmaster involvement"):
+      // the same unpark as the Taskmaster's, and this message is what wakes it. Not a chain a person put on hold.
+      const unparks = body.unpark === true && runner.parked(target);
+      if (unparks) {
+        if (app.waiters.chains().some((c) => c.ticket === target.id && c.held)) throw new HttpError(409, `#${to} is on hold: only a person's Unpark or the Taskmaster starts it. Ask the Taskmaster (message_coordinator).`);
+        await unparkTicket(app, target, `#${ticket.number}`, author, true);
+      }
+      const held = runner.relayMinion(ticket.id, target.id, author, text, body.urgent === true || unparks, body.wake !== false, unparks);
+      if (unparks && held === true && target.state === 'parked' && !runner.isRunning(target.id)) {
+        store.updateTicket(target.id, { state: 'parked' });
+        runner.emit(target.id, 'note', { text: 'The loop guard held the message that unparked it, so it stays parked.' });
+        runner.broadcastTicket(target.id);
+      }
       if (held !== true) {
-        const how = held === 'parked' ? 'Left for' : held ? 'Left held mail for' : 'Sent';
+        const how = held === 'parked' ? 'Left for' : held ? 'Left held mail for' : unparks ? 'Unparked and sent to' : 'Sent';
         runner.emit(ticket.id, 'note', { text: `${how} #${target.number} ${target.title}: ${text}` });
       }
       return json(res, 202, { held, number: target.number, title: target.title, state: target.state });

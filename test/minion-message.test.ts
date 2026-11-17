@@ -99,6 +99,33 @@ test('only minions of its own scheme: a number that exists only in another schem
   assert.equal(events(OTHER.id, 'user_message').length, before);
 });
 
+test('unpark: true wakes a minion parked on the sender, and the Taskmaster gets a held-mail line', async () => {
+  const P = minion(A.id, 'Waiting on #1');
+  store.updateTicket(P.id, { state: 'parked' });
+  const plain = await tool(M1.id, 'message_minion', { ticket_id: P.number, text: 'held only', wake: false });
+  assert.match(plain.text, /resend with unpark: true|Left as held mail|Held for/);
+  assert.equal(store.getTicket(P.id)!.state, 'parked', 'without unpark it stays parked');
+  const r = await tool(M1.id, 'message_minion', { ticket_id: P.number, text: 'my work is on main, go ahead', unpark: true });
+  assert.equal(r.error, false, r.text);
+  assert.equal(store.getTicket(P.id)!.state, null);
+  assert.ok(events(P.id, 'note').some((n) => n.text === '#1 unparked this minion.'));
+  assert.ok(events(P.id, 'user_message').some((m) => m.author === '#1 Sender' && m.text === 'my work is on main, go ahead'));
+  const copy = events(TM.id, 'user_message').at(-1);
+  assert.equal(copy.mail, true);
+  assert.match(copy.text, /^\(#1 unparked #\d+, for your tracking; nothing to do\) my work is on main/);
+});
+
+test('unpark: a chain a person put on hold is refused and stays parked', async () => {
+  const H = minion(A.id, 'Held chain');
+  store.updateTicket(H.id, { state: 'parked' });
+  store.setSetting('chained-minions', [{ ticket: H.id, after: M2.id, when: 'live', message: 'brief', from: 'Cara', base: null, held: true }]);
+  const r = await tool(M1.id, 'message_minion', { ticket_id: H.number, text: 'go', unpark: true });
+  assert.equal(r.error, true);
+  assert.match(r.text, /on hold.*Taskmaster/);
+  assert.equal(store.getTicket(H.id)!.state, 'parked');
+  store.setSetting('chained-minions', []);
+});
+
 test('a dismissed minion is refused and stays dismissed', async () => {
   const r = await tool(M1.id, 'message_minion', { ticket_id: GONE.number, text: 'wake up', urgent: true });
   assert.equal(r.error, true);

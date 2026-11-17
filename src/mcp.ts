@@ -1305,13 +1305,13 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this scheme's Taskmaster, waking it by default: for what only it can do, such as starting, closing, reopening or unparking a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, message it yourself (message_minion). Status reports, landed notes with no ask and for-your-tracking notes need nothing from it now: send them with wake: false, which shows in its chat at once and reaches it on its next turn, whoever wakes it. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
+      "Send a message to this scheme's Taskmaster, waking it by default: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Status reports, landed notes with no ask and for-your-tracking notes need nothing from it now: send them with wake: false, which shows in its chat at once and reaches it on its next turn, whoever wakes it. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now (a status report, a landed note with no ask). Default true: it runs now, or after its current turn' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text'] },
   },
   {
     name: 'message_minion',
     description:
-      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken; one idle over 55 minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing, reopening and unparking minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After 6 messages either way between two minions in 10 minutes, the next is held until a person continues. Find who owns a file or a piece of work with list_tickets and read_minion.",
+      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over 55 minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After 6 messages either way between two minions in 10 minutes, the next is held until a person continues. Find who owns a file or a piece of work with list_tickets and read_minion.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1319,6 +1319,7 @@ const THREAD_TOOLS = [
         text: { type: 'string', maxLength: 10000, description: 'Self-contained: it cannot see your chat, so give file paths in full. At most 10,000 characters (`message` is accepted too)' },
         wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent)' },
         urgent: URGENT,
+        unpark: { type: 'boolean', description: "For a minion parked waiting on you (your work, your word): true unparks it and this message wakes it now, so don't ask the Taskmaster. A chain a person put on hold is refused: only their Unpark or the Taskmaster starts it." },
       },
       required: ['ticket_id', 'text'],
     },
@@ -1815,10 +1816,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const n = Number(args.ticket_id);
       if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
       sharedFilesExist(args.text ?? args.message, 'Send this');
-      const r = await call('POST', `/api/tickets/${TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}) });
+      const r = await call('POST', `/api/tickets/${TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.unpark === true ? { unpark: true } : {}) });
       const who = `#${r.number} ${r.title}`;
       if (r.held === true) return `Held, not delivered: you and #${r.number} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.`;
-      if (r.held === 'parked') return `Held for ${who}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken. Do not resend it; if it must run now, ask the Taskmaster to unpark it.`;
+      if (r.held === 'parked') return `Held for ${who}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken. Do not resend it; if it is parked on you, resend with unpark: true.`;
       if (r.held === 'cold') return COLD(`#${r.number}`);
       if (r.held === 'mail') return `Left as held mail: ${who} reads it on its next turn, whoever wakes it. Do not resend it.`;
       return `Sent. ${who} runs it now, or after its current turn.`;

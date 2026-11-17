@@ -2948,6 +2948,12 @@ export class Store {
       .all(since) as unknown as { payer: number | null; project_id: number; cost: number }[];
   }
 
+  /** What one payer's turns on one of their accounts cost since `since`; a turn from before #905 kept no account and counts as account 1's. */
+  accountSpend(payer: number | null, account: number, since: number): number {
+    return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE payer IS ? AND ended_at >= ? AND ${account === 1 ? '(account IS NULL OR account = 1)' : 'account = ?'}`)
+      .get(payer, since, ...(account === 1 ? [] : [account])) as { c: number }).c;
+  }
+
   /**
    * One payer's turns that ended in [since, until), one row per model each turn ran (#905), with what "where it went" groups
    * them by. A turn from before the split was kept has one row, `model` null, its whole cost under `cost`.

@@ -529,6 +529,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/costs/mine": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "409 No person asked for this turn, so there is no one whose spend to show",
+  "tmB": "409 No person asked for this turn, so there is no one whose spend to show",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/files/t1-0.zzzzzz.forged/report.md": {
   "anon": "403 This link has expired; open the file from Citadel again",
   "person": "404 That file is no longer there",

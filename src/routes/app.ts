@@ -1,7 +1,7 @@
 // The app as a whole: signing in and out, health for tools/deploy.sh, who you are, the event stream,
 // costs and which minion owns each PR.
 import { hashPassword, looksLikeUrl, NOT_PEOPLE, type Session } from '../auth.ts';
-import { costDays, dayBudget, spendSplit } from '../costs.ts';
+import { costDays, dayBudget, spendSplit, weekLimit, whereItWent } from '../costs.ts';
 import { fallbacks } from '../fallbacks.ts';
 import { prOwners } from '../prlinks.ts';
 import { ServiceError } from '../app-services.ts';
@@ -134,6 +134,14 @@ export const appRoutes: Route[] = [
   } },
   // Every scheme's spend on the server's Claude login, so only for admins.
   { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner, outsideSpend } }) => json(res, 200, { outside: outsideSpend.bill(), days: costDays(store), dayBudget: dayBudget(store, runner.usageOf(store.serverLoginOwner())?.weekly), split: spendSplit(store) }) },
+  // Where your own spend went this week (#905): yours only, so any person (Cara, 2026-11-17: "Per person only"); a Taskmaster
+  // reads its asker's (usage_split).
+  { method: 'GET', path: '/api/costs/mine', who: ['person', 'taskmaster'], handler: ({ res, app: { store, runner }, session, caller }) => {
+    const uid = session.uid ?? (caller ? store.turnAsker(caller.id) : null);
+    if (!uid) throw new HttpError(409, 'No person asked for this turn, so there is no one whose spend to show');
+    const payer = runner.payerOf(uid);
+    return json(res, 200, whereItWent(store, payer, weekLimit(store, payer, runner.usageOf(uid))));
+  } },
   // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).
   { method: 'GET', path: '/api/prs', who: ['person'], handler: async ({ res, app: { store }, session }) => {
     const seen = store.visibleProjects(session);

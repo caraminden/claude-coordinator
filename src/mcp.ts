@@ -393,6 +393,11 @@ const CI_FILES = {
 const TOOLS = [
   LIST_TICKETS,
   {
+    name: 'usage_split',
+    description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings) and the 10 costliest minions, each as a share of one Claude account's weekly limit with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'read_ticket',
     description: "Read a minion's details, its worktree, the link to each of its cards waiting on people (link a card wherever you mention it) and the most recent messages in its conversation. With live: true, read what its turn is doing now instead: the tool call it waits on and for how long, or that it waits on the model, a person's card, the usage limit or the land line, its queued messages, and its last few tool calls with their output trimmed. Use it to tell a hung minion from a busy one; its session transcript isn't readable from here.",
     inputSchema: {
@@ -1012,6 +1017,28 @@ async function openTwins(title: string, message: string): Promise<{ number: numb
   if (!res?.ok) return [];
   const { hits } = (await res.json().catch(() => ({}))) as { hits?: any[] };
   return (hits ?? []).filter((h) => h.twin);
+}
+
+/** usage_split's answer (#905): each slice as a share of one account's week with its dollars, against last week. */
+export function usageSplitText(w: any): string {
+  const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
+  const pct = (n: number) => { const p = (n / w.weekUsd) * 100; return p && p < 0.1 ? '<0.1' : p < 10 ? p.toFixed(1) : String(Math.round(p)); };
+  const amount = (n: number) => (w.weekUsd ? `${pct(n)}% (${usd(n)})` : usd(n));
+  const line = (s: any) => `- ${s.name}: ${amount(s.usd)}, last week ${amount(s.lastWeek)}${s.estimated > 0.005 ? `, ${usd(s.estimated)} estimated` : ''}`;
+  const fable = (k: 'usd' | 'lastWeek', all: number) => {
+    const f = w.models.filter((m: any) => m.name.startsWith('Fable')).reduce((a: number, m: any) => a + m[k], 0);
+    return all ? `${Math.round((f / all) * 100)}%` : '0%';
+  };
+  const estimated = w.models.reduce((a: number, m: any) => a + m.estimated, 0);
+  return [
+    `Last 7 days: ${amount(w.total)}; the 7 before: ${amount(w.lastWeek)}. ${w.weekUsd ? `100% is one Claude account's weekly limit, about ${usd(w.weekUsd)} at API prices.` : 'No weekly meter can price a share yet, so dollars at API prices only.'}`,
+    `Fable's share of spend: ${fable('usd', w.total)} this week, ${fable('lastWeek', w.lastWeek)} last week.`,
+    'By model:', ...w.models.map(line),
+    'By scheme:', ...w.schemes.map(line),
+    'By kind of work:', ...w.kinds.map(line),
+    'Costliest minions this week:', ...w.top.map((m: any) => `- ${m.number === null ? `ticket ${m.id}` : `#${m.number}`} ${m.title} (${m.scheme}): ${amount(m.usd)}`),
+    ...(estimated > 0.005 ? [`${usd(estimated)} of this week is from turns before the split was kept (2026-11-17), counted under each minion's own model.`] : []),
+  ].join('\n');
 }
 
 /** search_memory's answer: each hit as a header line and its text, cut so a call stays small. */
@@ -1669,6 +1696,8 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'generate_image_codex':
       return codexImage(args);
+    case 'usage_split':
+      return usageSplitText(await call('GET', '/api/costs/mine'));
     case 'report_spend': {
       const r = await call('POST', `/api/tickets/${TICKET}/spend`, args);
       return `Booked $${Number(args.usd).toFixed(4)} on ${args.service}: $${Number(r.month_usd).toFixed(2)} this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? " (over it; the scheme's members were told)" : ''}`}.`;

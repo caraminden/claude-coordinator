@@ -133,7 +133,7 @@ export interface WhereItWent {
   schemes: (Slice & { id: number })[];
   kinds: Slice[];
   /** The 10 minions that cost the most this week. */
-  top: { id: number; project_id: number; number: number | null; title: string; usd: number }[];
+  top: { id: number; project_id: number; scheme: string; number: number | null; title: string; usd: number }[];
 }
 
 /** The kind of work a turn was: keepalive pings, Taskmasters, scheduled runs, else the minion's `type`. */
@@ -170,7 +170,7 @@ export function whereItWent(store: Store, payer: number | null, weekUsd: number 
   };
   const minions = new Map<number, WhereItWent['top'][number]>();
   for (const [r, usd] of cur) {
-    const m = minions.get(r.ticket_id) ?? minions.set(r.ticket_id, { id: r.ticket_id, project_id: r.project_id, number: r.number, title: r.title, usd: 0 }).get(r.ticket_id)!;
+    const m = minions.get(r.ticket_id) ?? minions.set(r.ticket_id, { id: r.ticket_id, project_id: r.project_id, scheme: projects.get(r.project_id) ?? `Scheme ${r.project_id}`, number: r.number, title: r.title, usd: 0 }).get(r.ticket_id)!;
     m.usd += usd;
   }
   const sum = (rs: [SpendRowRaw, number, boolean][]) => rs.reduce((a, [, usd]) => a + usd, 0);
@@ -181,4 +181,21 @@ export function whereItWent(store: Store, payer: number | null, weekUsd: number 
     kinds: merge(kindOf, (k) => k).map(([, s]) => s),
     top: [...minions.values()].sort((a, b) => b.usd - a.usd).slice(0, 10),
   };
+}
+
+/**
+ * One account's weekly limit at API prices for a payer (#905): what their turns on the account in use cost since its week
+ * opened, scaled up by how full its meter is. While the meter is too coarse, the payer's last estimate stands in (the
+ * server login's falls back to dayBudget's); null before any.
+ */
+export function weekLimit(store: Store, payer: number | null, usage: { weekly: { utilization: number; resetsAt: number | null } | null; account?: number } | null | undefined, now = Date.now()): number | null {
+  const key = `week_usd:${payer ?? 'host'}`;
+  const last = store.getSetting<number>(key) ?? (payer === null ? (store.getSetting<number>(LAST_BUDGET) ?? 0) * 7 || null : null);
+  const w = usage?.weekly;
+  if (!w?.resetsAt || w.resetsAt <= now || w.utilization < MIN_UTILIZATION) return last;
+  const spent = store.accountSpend(payer, usage?.account ?? 1, w.resetsAt - 7 * 86400_000);
+  if (!(spent > 0)) return last;
+  const usd = spent / w.utilization;
+  if (usd !== last) store.setSetting(key, usd);
+  return usd;
 }

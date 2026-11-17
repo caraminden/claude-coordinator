@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { costDays, dayBudget, localDay, modelName, spendSplit, whereItWent } from '../src/costs.ts';
 import { Store } from '../src/db.ts';
+import { usageSplitText } from '../src/mcp.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'costs-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -196,4 +197,19 @@ test('model names read like the model picker', () => {
   assert.equal(modelName('claude-sonnet-5-5+opus-advisor'), 'Sonnet 5.5');
   assert.equal(modelName('opus'), 'Opus');
   assert.equal(modelName('gpt-5.1-codex'), 'gpt-5.1-codex');
+});
+
+test("usage_split's text gives shares of one account's week with dollars, and Fable's share each week (#905)", () => {
+  const s = (name: string, usd: number, lastWeek: number, estimated = 0) => ({ name, usd, lastWeek, estimated });
+  const text = usageSplitText({
+    total: 50, lastWeek: 80, weekUsd: 500,
+    models: [s('Opus 5.5', 30, 40, 10), s('Fable 5.2', 10, 40), s('Sonnet 5.5', 10, 0)],
+    schemes: [s('Citadel', 50, 80)], kinds: [s('Feature', 50, 80)],
+    top: [{ id: 3, number: 12, title: 'Big one', scheme: 'Citadel', usd: 20 }],
+  });
+  assert.match(text, /^Last 7 days: 10% \(\$50\); the 7 before: 16% \(\$80\)\. 100% is one Claude account's weekly limit, about \$500/);
+  assert.match(text, /Fable's share of spend: 20% this week, 50% last week\./);
+  assert.match(text, /- Opus 5\.5: 6\.0% \(\$30\), last week 8\.0% \(\$40\), \$10 estimated/);
+  assert.match(text, /- #12 Big one \(Citadel\): 4\.0% \(\$20\)/);
+  assert.match(usageSplitText({ total: 1, lastWeek: 0, weekUsd: null, models: [], schemes: [], kinds: [], top: [] }), /^Last 7 days: \$1\.00; .* dollars at API prices only/);
 });

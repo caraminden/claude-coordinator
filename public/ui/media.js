@@ -499,7 +499,7 @@ export function panner(img, opts = {}) {
     const box = view.clientWidth / Math.max(1, view.clientHeight - (fits ? barH : 0));
     fits = !!view.clientWidth && w / h <= box * 1.02;
     root.classList.toggle('cui-pan-fits', fits);
-    if (fits !== told) opts.onFit?.((told = fits));
+    if (img.naturalWidth && fits !== told) opts.onFit?.((told = fits));
     const f = Math.min(1, box / (w / h));
     win.setAttribute('width', String(Math.max(4, f * 1000)));
   }

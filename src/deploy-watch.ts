@@ -272,7 +272,8 @@ export class DeployWatch {
       }
     }
     const scheme = this.d.scheme();
-    const tm = scheme && store.getCoordinator(scheme.id);
+    // Nobody's in particular: the Overlord's (#921), the scheme's only Taskmaster before a split.
+    const tm = scheme && store.getOverlord(scheme.id);
     if (!tm) return;
     const woke = suspects.length ? `Woke ${suspects.map((s) => `#${s.number ?? s.ticketId}`).join(', ')}.` : 'No minion to wake: none of its commits names one.';
     const loose = unowned.length ? ` Commits with no minion: ${unowned.slice(0, 5).map((c) => `${c.sha.slice(0, 8)} ${c.subject.slice(0, 80)}`).join('; ')}${unowned.length > 5 ? `; and ${unowned.length - 5} more` : ''}.` : '';

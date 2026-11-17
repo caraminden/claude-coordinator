@@ -611,6 +611,7 @@ services.onDeploy = (view) => {
   if (shipped?.home_scheme != null && meant && view.to && meant !== view.to) tellHome(shipped.home_scheme, `Auto-deploy of ${shipped.title} (${shipped.name}) went live at ${view.to.slice(0, 9)}, but your clone's ${view.branch} is at ${meant.slice(0, 9)}: GitHub didn't have it yet. Push ${view.branch}, then press Deploy on its card on the Releases page (or call deploy_contraption).`);
 };
 /** A message from Citadel to a scheme's Taskmaster, if it has one. */
+// Scheme-wide news (auto-deploys, alerts) is nobody's in particular: the Overlord's (#921), the only Taskmaster before a split.
 const tellHome = (projectId: number, text: string) => {
   const tm = store.getOverlord(projectId);
   if (tm) runner.send(tm.id, APP_NAME, text);
@@ -852,7 +853,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
   if (!c || !identity) return false;
   const wakes = title !== null && !quiet;
   const scheme = wakes ? alertScheme(project.id) : 0;
-  if (scheme && store.getCoordinator(scheme)) link = `/c/#/p/${scheme}`;
+  if (scheme && store.getOverlord(scheme)) link = `/c/#/p/${scheme}`;
   try {
     const { status, answer } = await callMandate(c, identity, key, title === null ? undefined : { title, alert: !quiet, link });
     if (status === 200 && wakes) alertWakes.raise({ from: project, key, title, link, person: person.name, parts });

@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
+import { Runner } from '../src/runner.ts';
 import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'overlord-'));
@@ -102,4 +103,21 @@ test("the Overlord hears of every start, and gets a card when one reads like ano
   const solo = await start(Solo.id, 'Retry loop in land.sh after a refused push');
   await new Promise((r) => setTimeout(r, 500));
   assert.ok(!mail(soloTm.id).some((t) => t.includes(`#${solo.number}`)));
+});
+
+test("an Overlord turn runs for whoever started it, else the scheme's owner, never its last person (Cara's R4)", () => {
+  const s = new Store(join(root, 'r4.db'));
+  const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = s.createUser({ name: 'Josh', login: 'josh' });
+  const p = s.createProject('Shared', null, cara.id);
+  s.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  s.splitScheme(p.id, josh.id);
+  const lord = s.getOverlord(p.id)!;
+  s.updateTicket(lord.id, { person_id: josh.id }); // Josh answered its last card
+  const runner = new Runner(s, () => {}, () => ({}), '/bin/false');
+  runner.personOf = (author) => s.findUser('name', author)?.id ?? null;
+  const turnPerson = (batch: any[]) => (runner as any).turnPerson(s.getTicket(lord.id), s.getProject(p.id), batch);
+  assert.equal(turnPerson([{ author: 'Josh', text: 'Both stay', images: [], own: true }]), josh.id, 'the starter');
+  assert.equal(turnPerson([{ author: 'Citadel', text: 'CI went red', images: [] }]), cara.id, 'an alert: the owner, not Josh from last time');
+  s.db.close();
 });

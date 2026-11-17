@@ -2224,7 +2224,7 @@ export class Runner {
 
   /** Held mail to the Citadel scheme's Taskmaster about keepalives. */
   private tellCitadel(text: string) {
-    const tm = this.store.getCoordinator(GLOBAL_OWNER);
+    const tm = this.store.getOverlord(GLOBAL_OWNER);
     if (tm) this.leaveMail(tm.id, 'Citadel (keepalives)', text);
   }
 
@@ -2340,6 +2340,7 @@ export class Runner {
    * Who a turn runs for (its GitHub login, and #177's Claude plan): the first person in its messages
    * (a relay counts as its sender's), else the minion's last person, else the scheme's owner. A relay
    * from someone outside this scheme (a non-member's ask to Citadel) runs as the scheme's owner (#211).
+   * A split scheme's Overlord has no last person (Cara's R4, "Starter, else owner", #921): it is nobody's own.
    */
   private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[]): number | null {
     // A person's own Taskmaster (#919) runs for them; a card answered there by someone else wakes it on theirs (R5).
@@ -2356,7 +2357,8 @@ export class Runner {
       const user = m.from ? this.store.getUser(p) : null;
       return user && !this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? project.owner_id : p;
     }
-    return ticket.person_id ?? project.owner_id;
+    const overlord = ticket.kind === 'coordinator' && ticket.coordinator_of == null && this.store.isSplit(project.id);
+    return (overlord ? null : ticket.person_id) ?? project.owner_id;
   }
 
   private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0) {

@@ -34,7 +34,7 @@ trap 'rm -f "$tmp"' EXIT
 sqlite3 "$DB" ".timeout 30000" "VACUUM INTO '$tmp'"
 # The contraption turn audit (#844) holds players' words for 14 days only, so no copy keeps it (#850).
 # secure_delete zeroes the freed pages, so no trace is left without a second VACUUM of the whole file.
-if [[ $(sqlite3 "$tmp" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'contraption_turn_audit'") == 1 ]]; then
+if [[ $(sqlite3 "$tmp" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'contraption_turn_audit'") != 0 ]]; then # a probe that errors falls through, and the DELETE fails the backup
   sqlite3 "$tmp" "PRAGMA journal_mode = MEMORY" "PRAGMA secure_delete = ON" "DELETE FROM contraption_turn_audit" >/dev/null
 fi
 sqlite3 "$tmp" "PRAGMA journal_mode = WAL" >/dev/null # like the live file, so a restore is a drop-in

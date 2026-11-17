@@ -241,7 +241,7 @@ turn_units() {
 # Drop the contraption turn audit (#844) from database copy $1: it holds players' words for 14 days only, so
 # no copy keeps it (#850). secure_delete zeroes the freed pages, so no trace is left without a second VACUUM.
 strip_audit() {
-  [ "$(sqlite3 "$1" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'contraption_turn_audit'")" = 1 ] || return 0
+  [ "$(sqlite3 "$1" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'contraption_turn_audit'")" = 0 ] && return 0 # a probe that errors falls through, and the DELETE fails the copy
   sqlite3 "$1" "PRAGMA journal_mode = MEMORY" "PRAGMA secure_delete = ON" "DELETE FROM contraption_turn_audit" >/dev/null
 }
 

@@ -10,11 +10,13 @@ read -r cmd name extra <<<"${SSH_ORIGINAL_COMMAND:-}" || true
 names='^(coordinator-[0-9]{4}-[0-9]{2}-[0-9]{2}|coordinator-weekly-[0-9]{4}-W[0-9]{2}|state-[0-9]{4}-[0-9]{2}-[0-9]{2})\.db$'
 # An app's nightly backup (#828): apps/<contraption>/<day>/<file>, one plain name per part, no `..` anywhere.
 app_names='^apps/[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?/[0-9]{4}-[0-9]{2}-[0-9]{2}/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'
+# An Android app's release key or its password file (#837): keys/<contraption>-release.jks or .pass.
+key_names='^keys/[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?-release\.(jks|pass)$'
 
 case ${cmd:-} in
   list) exec cat -- "$OUT/SHA256SUMS" ;;
   get)
-    if [[ -z ${extra:-} && (${name:-} =~ $names || (${name:-} =~ $app_names && $name != *..*)) && -f $OUT/$name && ! -L $OUT/$name ]]; then exec cat -- "$OUT/$name"; fi
+    if [[ -z ${extra:-} && (${name:-} =~ $names || ${name:-} =~ $key_names || (${name:-} =~ $app_names && $name != *..*)) && -f $OUT/$name && ! -L $OUT/$name ]]; then exec cat -- "$OUT/$name"; fi
     echo "No such backup: ${name:-}" >&2
     exit 2
     ;;

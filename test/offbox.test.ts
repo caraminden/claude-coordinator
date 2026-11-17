@@ -15,7 +15,8 @@ after(() => rmSync(root, { recursive: true, force: true }));
 
 const deploy = join(import.meta.dirname, '..', 'deploy');
 const appsData = join(root, 'apps-data'); // stands in for ~/.local/share, where each contraption's DATA_DIR is
-const env = { ...process.env, DATA_DIR: root, APPS_DATA: appsData };
+const keyDir = join(root, 'citadel-android'); // stands in for ~/.config/citadel-android, the Android apps' release keys
+const env = { ...process.env, DATA_DIR: root, APPS_DATA: appsData, KEY_DIR: keyDir };
 const run = (script: string) => execFileSync(join(deploy, script), { env, encoding: 'utf8' });
 const serve = (command: string) => spawnSync(join(deploy, 'offbox-serve.sh'), { env: { ...env, SSH_ORIGINAL_COMMAND: command } });
 const backups = join(root, 'backups');
@@ -209,6 +210,48 @@ test("the backup key can fetch an app's backup, and only by a strict name", () =
   rmSync(join(offbox, 'apps', 'mandate', d, 'planted.db'));
 });
 
+test("every Android app's release key and its password go off-box under keys/ as mode-600 hard links, and nothing else in that folder does (#837)", () => {
+  mkdirSync(keyDir, { recursive: true, mode: 0o700 });
+  for (const [f, body] of [['twi-release.jks', 'twi keystore'], ['twi-release.pass', 'twi password'], ['voice-release.jks', 'voice keystore'], ['voice-release.pass', 'voice password'],
+    ['mandate-google-services.json', 'not a key'], ['Bad_Name-release.jks', 'x'], ['twi-release.jks.bak', 'x'], ['.twi-tmp-release.pass', 'x']]) writeFileSync(join(keyDir, f), body, { mode: 0o600 });
+  symlinkSync(join(root, 'coordinator.db'), join(keyDir, 'evil-release.jks'));
+  mkdirSync(join(offbox, 'keys'), { recursive: true });
+  writeFileSync(join(offbox, 'keys', 'stray-release.pass'), 'left from before');
+
+  const out = run('offbox.sh');
+  assert.match(out, /Release keys: 4 files/);
+  const names = ['twi-release.jks', 'twi-release.pass', 'voice-release.jks', 'voice-release.pass'];
+  assert.deepEqual(readdirSync(join(offbox, 'keys')).sort(), names);
+  for (const f of names) {
+    const st = statSync(join(offbox, 'keys', f));
+    assert.equal(st.ino, statSync(join(keyDir, f)).ino, `${f}: a hard link`);
+    assert.equal(st.mode & 0o777, 0o600, f);
+  }
+  const sums = readFileSync(join(offbox, 'SHA256SUMS'), 'utf8');
+  for (const f of names) assert.ok(sums.includes(`${sha(join(keyDir, f))}  keys/${f}\n`), f);
+  assert.doesNotMatch(sums, /google|Bad_Name|bak|tmp|evil|stray/);
+
+  const got = serve('get keys/twi-release.pass');
+  assert.equal(got.status, 0);
+  assert.equal(got.stdout.toString(), 'twi password');
+  for (const bad of ['get keys/../coordinator.db', 'get keys/mandate-google-services.json', 'get keys/Twi-release.jks', 'get keys/twi-release.jks x', 'get keys/twi-release.key',
+    'get keys/sub/twi-release.jks', 'get /keys/twi-release.jks', 'get keys/evil-release.jks', 'get keys/stray-release.pass']) {
+    const r = serve(bad);
+    assert.equal(r.status, 2, bad);
+    assert.equal(r.stdout.length, 0, bad);
+  }
+
+  // A key gone from perigee leaves the set; the key folder itself is never touched.
+  const voice = readFileSync(join(keyDir, 'voice-release.jks'));
+  rmSync(join(keyDir, 'voice-release.pass'));
+  run('offbox.sh');
+  assert.deepEqual(readdirSync(join(offbox, 'keys')).sort(), ['twi-release.jks', 'twi-release.pass', 'voice-release.jks']);
+  assert.deepEqual(readFileSync(join(keyDir, 'voice-release.jks')), voice);
+  assert.ok(existsSync(join(keyDir, 'mandate-google-services.json')));
+  writeFileSync(join(keyDir, 'voice-release.pass'), 'voice password', { mode: 0o600 });
+  run('offbox.sh');
+});
+
 // The desktop's pull script, run here in pwsh against the real serve script through a stand-in ssh.
 const pwsh = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0']);
 test('the desktop pull fetches app backups into apps\\<app>\\<day>\\ and prunes each app to its days', { skip: pwsh.error ? 'no pwsh on PATH' : false, timeout: 120_000 }, () => {
@@ -231,4 +274,16 @@ test('the desktop pull fetches app backups into apps\\<app>\\<day>\\ and prunes 
   assert.doesNotMatch(r.stdout, /Skipping unexpected/);
   const again = pull();
   assert.match(again.stdout, /Done: 0 new, 0 failed/, 'a second run fetches nothing');
+  assert.equal(readFileSync(join(dest, 'keys', 'twi-release.pass'), 'utf8'), 'twi password', 'release keys come down to keys\\');
+
+  // A release key perigee no longer matches is kept here and the run fails; one gone from perigee stays here.
+  rmSync(join(keyDir, 'twi-release.pass'));
+  writeFileSync(join(keyDir, 'twi-release.pass'), 'a different password', { mode: 0o600 });
+  rmSync(join(keyDir, 'voice-release.jks'));
+  run('offbox.sh');
+  const changed = pull();
+  assert.equal(changed.status, 1, changed.stdout);
+  assert.match(changed.stdout, /FAILED keys\/twi-release\.pass: perigee's copy differs/);
+  assert.equal(readFileSync(join(dest, 'keys', 'twi-release.pass'), 'utf8'), 'twi password');
+  assert.equal(readFileSync(join(dest, 'keys', 'voice-release.jks'), 'utf8'), 'voice keystore', 'keys\\ is never pruned');
 });

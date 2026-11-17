@@ -16,13 +16,19 @@ Each night at 04:00 perigee's `deploy/backup.sh` backs up Citadel, then `deploy/
   count (today that's Mandate, at 03:30); the run's output names the apps it skipped and any whose newest
   folder isn't from today. These are copied as the app wrote them: whatever secrets an app keeps in its
   backups travel too.
+- every Android app's release key (#837) under `keys/`: each `~/.config/citadel-android/<app>-release.jks`
+  and the `<app>-release.pass` beside it, as hard links, for as long as each exists there. Nothing else in that
+  folder goes. These are real signing secrets: a lost key means every phone has to uninstall its app to take the
+  next update, so they travel as they are, and `%USERPROFILE%\CitadelBackups\keys` is as private as the keys
+  themselves.
 - `SHA256SUMS`, the list the desktop checks every download against.
 
 The desktop pulls that folder over SSH with a key that can do nothing but list and fetch it
 (`deploy/offbox-serve.sh` is its forced command). perigee holds no key to the desktop. The desktop keeps
 14 dailies, 8 weeklies and 2 session-state copies in `%USERPROFILE%\CitadelBackups`, plus 14 days of
-each app's backups in `apps\<app>\<day>\` (an app gone from perigee keeps what the desktop has), and logs
-each run to `pull.log` there.
+each app's backups in `apps\<app>\<day>\` (an app gone from perigee keeps what the desktop has), every
+release key in `keys\` (never pruned, and never replaced: a key whose copy on perigee no longer matches is
+kept and the run fails), and logs each run to `pull.log` there.
 
 ## Setup (once, about 10 minutes)
 
@@ -96,4 +102,12 @@ Scheduler shows as Last Run Result `0x1`, when perigee is unreachable, a downloa
 
 ## Restoring
 
-See the restore guide in the scheme's shared folder, `reports/offbox-backup-restore.md`.
+A release key goes back to `~/.config/citadel-android/` on perigee with mode 600, both files of the pair.
+Run this in **Windows PowerShell** on the desktop, with the app's name for `twireader`:
+
+```powershell
+scp "$env:USERPROFILE\CitadelBackups\keys\twireader-release.jks" "$env:USERPROFILE\CitadelBackups\keys\twireader-release.pass" cara@perigee.tail59477f.ts.net:.config/citadel-android/
+ssh cara@perigee.tail59477f.ts.net chmod 600 .config/citadel-android/twireader-release.jks .config/citadel-android/twireader-release.pass
+```
+
+For everything else, see the restore guide in the scheme's shared folder, `reports/offbox-backup-restore.md`.

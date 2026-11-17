@@ -44,9 +44,13 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
 
 ## Release signing
 
-- Cara makes each app's keystore once: `~/.config/citadel-android/<app>-release.jks`, with its
-  password in `<app>-release.pass` beside it. Both are mode 600.
-- Never copy either into a repo, the shared folder, a chat or a log. Container homes don't have
+- Each app has one keystore: `~/.config/citadel-android/<app>-release.jks`, with its password in
+  `<app>-release.pass` beside it. Both are mode 600. Citadel makes it on the server (#837): a
+  Capacitor contraption with none gets a **Make release key** button on its Releases card, and the
+  `make_release_key` tool posts a card any member of its scheme approves. Neither ever replaces a key
+  that exists. Never run keytool for one yourself.
+- Every key and its password go off-box nightly (`deploy/offbox.sh`, `keys/` on Cara's desktop).
+- Never copy either into a repo, the shared folder, a chat or a log, and never read the .pass file. Container homes don't have
   `~/.config/citadel-android`, so release builds run in a host turn.
 - A Capacitor app's releases build themselves (Delivery below). Its release build type has no
   `signingConfig`, so Gradle writes `app-release-unsigned.apk` and Citadel signs it with the key.
@@ -79,8 +83,8 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
     `build.gradle` alone; `versionName` is read from it.
   - Needs: the app's release key (above), `npm ci` in its `citadel-app.json` build steps (the
     build uses the live slot's `node_modules`), and a release build type with no `signingConfig`.
-  - A failed build, or one with no key yet, tells the scheme's Taskmaster once per commit and
-    publishes nothing. A risky release manifest flag (above) is told but still publishes.
+  - A failed build tells the scheme's Taskmaster once per commit, and a missing key once until
+    it's made; neither publishes anything. A risky release manifest flag (above) is told but still publishes.
   - Each build shows on the Releases page. An app whose `apk:` release target has a CI workflow
     (Mandate) keeps that path instead.
 - The feed is in the contraption's `DATA_DIR/android/`: `latest.json` and the newest three

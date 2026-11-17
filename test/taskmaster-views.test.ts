@@ -102,10 +102,14 @@ test('the front end merges only when the scheme has split: Mine takes your chat 
   assert.equal(mergedView(9, 5, [{ id: 5, person_id: null, person_name: null }], 'mine'), null, 'one Taskmaster: a plain chat');
   assert.equal(mergedView(9, 4, tms, 'mine'), null, 'a chat that isn\'t a Taskmaster of this scheme: plain');
   const mine = mergedView(9, 1, tms, 'mine');
-  assert.deepEqual(mine.parts.map((p) => [p.id, p.label, p.mine]), [[1, undefined, undefined], [3, 'Overlord', true]]);
+  assert.deepEqual(mine.parts.map((p) => [p.id, p.label, p.mine]), [[1, undefined, false], [3, 'Overlord', true]]);
+  const notYet = mergedView(9, 3, tms, 'mine');
+  assert.deepEqual(notYet.parts.map((p) => [p.id, p.mine]), [[3, true]], 'no Taskmaster of your own yet: Mine is the Overlord\'s for-everyone items, not its whole chat');
+  assert.ok(!inMerged(notYet, { ticket_id: 3, kind: 'claude', data: '{}' }) && inMerged(notYet, { ticket_id: 3, kind: 'note', data: '{"everyone":true}' }));
+  assert.ok(!mergedView(9, 3, tms, 'everyone').parts[0].mine);
   assert.equal(mine.src, 'api/projects/9/taskmaster-events?view=mine');
   const all = mergedView(9, 1, tms, 'everyone');
-  assert.deepEqual(all.parts.map((p) => [p.id, p.label, p.mine]), [[1, undefined, undefined], [2, "Alex's Taskmaster", false], [3, 'Overlord', false]]);
+  assert.deepEqual(all.parts.map((p) => [p.id, p.label, p.mine]), [[1, undefined, false], [2, "Alex's Taskmaster", false], [3, 'Overlord', false]]);
   const ev = (ticket_id: number, data: object, kind = 'claude') => ({ ticket_id, kind, data: JSON.stringify(data) });
   assert.ok(inMerged(mine, ev(1, { type: 'assistant' })), 'your own session: everything');
   assert.ok(!inMerged(mine, ev(3, { type: 'assistant' })), 'the Overlord\'s own work stays out of Mine');
@@ -122,7 +126,8 @@ test('through the server: each person opens their own Taskmaster, Mine adds the 
   const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const Alex = store.createUser({ name: 'Alex', login: 'alex' });
   const p = store.createProject('Shared', null, Cara.id);
-  store.addMember(p.id, Alex.id);
+  const Rachel = store.createUser({ name: 'Rachel', login: 'rachel' });
+  for (const u of [Alex, Rachel]) store.addMember(p.id, u.id);
   const first = store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
   const cara = store.addEvent(first.id, 'user_message', { author: 'Cara', text: 'Cara asks hers' }).id;
   const alexTm = store.splitScheme(p.id, Alex.id);
@@ -143,6 +148,10 @@ test('through the server: each person opens their own Taskmaster, Mine adds the 
     assert.deepEqual(await evs('view=everyone'), [cara, alex, work, alert]);
     assert.deepEqual(await evs(`view=everyone&before=${work}`), [cara, alex], 'one id cursor pages them all');
     assert.deepEqual((await get(`/api/projects/${p.id}/taskmaster-events?view=mine&after=${alex}`)).map((e: any) => e.id), [alert]);
+    // Rachel hasn't written yet, so she has no Taskmaster of her own: the Overlord's work stays out of her Mine.
+    const rachel = new Auth(PASSWORD, SECRET).issueCookie(Rachel, false).split(';')[0];
+    const hers = await (await fetch(`${srv.base}/api/projects/${p.id}/taskmaster-events?view=mine`, { headers: { Cookie: rachel } })).json() as any;
+    assert.deepEqual(hers.events.map((e: any) => e.id), [alert]);
   } finally {
     await srv.stop();
   }

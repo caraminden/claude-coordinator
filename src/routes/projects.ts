@@ -607,7 +607,8 @@ export const projectRoutes: Route[] = [
       const list = store.listCoordinators(project.id);
       const own = store.coordinatorFor(project.id, session.uid) ?? list[0];
       const everyone = url.searchParams.get('view') === 'everyone';
-      const parts = !own ? [] : [{ id: own.id }, ...list
+      // Someone who hasn't written yet has no Taskmaster of their own, so theirs is the Overlord: Mine filters it too.
+      const parts = !own ? [] : [{ id: own.id, mine: !everyone && own.coordinator_of == null && list.length > 1 }, ...list
         .filter((t) => t.id !== own.id && (everyone || t.coordinator_of == null))
         .map((t) => ({ id: t.id, mine: !everyone }))];
       const num = (k: string) => Number(url.searchParams.get(k)) || undefined;

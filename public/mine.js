@@ -5,7 +5,7 @@
 export function inMine(event) {
   if (['question_result', 'plan_result', 'approval_result'].includes(event.kind)) return true;
   const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-  return data?.everyone === true || (event.kind === 'user_message' && (data.answer != null || data.plan != null));
+  return data?.everyone === true || (event.kind === 'user_message' && (data?.answer != null || data?.plan != null));
 }
 
 /**
@@ -20,7 +20,8 @@ export function mergedView(projectId, ownId, taskmasters, mode) {
   return {
     mode: everyone ? 'everyone' : 'mine',
     src: `api/projects/${projectId}/taskmaster-events?view=${everyone ? 'everyone' : 'mine'}`,
-    parts: [{ id: ownId }, ...others.map((t) => ({
+    // Someone who hasn't written yet has the Overlord as theirs (src/routes/projects.ts): Mine filters it too.
+    parts: [{ id: ownId, mine: !everyone && taskmasters.find((t) => t.id === ownId).person_id == null }, ...others.map((t) => ({
       id: t.id, mine: !everyone, overlord: t.person_id == null,
       label: t.person_id == null ? 'Overlord' : `${t.person_name ?? 'Someone'}'s Taskmaster`,
     }))],

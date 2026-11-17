@@ -190,6 +190,9 @@ test('no job.start without its owner\'s go: someone else\'s answer is refused, t
   const at = (kind: string) => chat.findIndex((e: any) => e.kind === kind && JSON.parse(e.data).job === j.id);
   assert.ok(at('job') > at('question') && at('question') >= 0, 'a job event follows the go card');
   assert.equal(j.decider_id, box.owner_id);
+  assert.deepEqual([card.recipe.kind.image, card.recipe.inputs, card.recipe.limit_s], [IMAGE('a'), [{ name: 'chapter.wav', size: 15 }], 7200], 'the card carries the recipe whole');
+  assert.equal(JSON.parse(chat[at('job')].data).view.state, 'needs-go', 'the job event carries the view it draws from');
+  assert.equal(j.ticket_number, ticket.number);
   assert.equal(typeof j.decider_id, 'number');
   await assert.rejects(answer('Dana', j.id, 'Run in job hours'), /403/);
   await assert.rejects(call('Dana', `/api/jobs/${j.id}/go`, { choice: 'now' }), /403/);

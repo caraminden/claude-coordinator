@@ -179,7 +179,7 @@ export function hoursOpen(s: JobSettings, now = Date.now()): boolean {
 }
 
 /** A job's public fields: what the UI, the minion's job_status and a contraption's GET read. */
-export function jobView(j: MachineJob, extra: { machine?: string; waits?: string | null; decider?: number | null } = {}) {
+export function jobView(j: MachineJob, extra: { machine?: string; waits?: string | null; decider?: number | null; ticketNumber?: number | null } = {}) {
   const parse = (s: string | null, d: unknown) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
   const kind = parse(j.kind, {}) as JobKind;
   const live = parse(j.live, {}) as Record<string, unknown>;
@@ -189,6 +189,8 @@ export function jobView(j: MachineJob, extra: { machine?: string; waits?: string
     machine: extra.machine ?? null,
     project_id: j.project_id,
     ticket_id: j.ticket_id,
+    /** The minion's number in its scheme, for a link to its chat. */
+    ticket_number: extra.ticketNumber ?? null,
     contraption_id: j.contraption_id,
     asked_by: j.asked_by,
     /** The person whose go, Pause, Resume, Stop and Run now it takes (an admin may too): the machine's owner. */
@@ -241,7 +243,7 @@ export interface JobDeps {
   online(machineId: number): boolean;
   broadcast(msg: object): void;
   /** Post the go card; returns where it is, or null when there is nowhere to post it. */
-  postCard(job: MachineJob, card: { questions: unknown[]; to?: string }): { ticket: number; question: string } | null;
+  postCard(job: MachineJob, card: { questions: unknown[]; recipe?: object; to?: string }): { ticket: number; question: string } | null;
   /** The card was answered from somewhere else (the Machines page): settle it, and say in its chat what happened. */
   settleCard(card: { ticket: number; question: string }, by: string, line: string): void;
   /** Tell the minion that queued a job that it ended or was refused; this wakes it, as CI does. */
@@ -249,7 +251,7 @@ export interface JobDeps {
   /** A line in the minion's chat that wakes nobody. */
   note(ticketId: number, text: string): void;
   /** Put a minion's live job card at the bottom of its chat: when queued (after the go card), and again each time it starts, pauses or ends. */
-  placed?(job: MachineJob, stage: JobStage): void;
+  placed?(job: MachineJob, stage: JobStage, view: JobView): void;
   /** Where a job's results go: the scheme's shared folder's jobs/<id>/ for a minion's, the app's DATA_DIR/jobs/<id>/ for a contraption's. */
   resultsDir(job: MachineJob): string | null;
   now?: () => number;
@@ -323,15 +325,15 @@ export class MachineJobs {
 
   view(job: MachineJob): JobView {
     const m = this.store.getMachine(job.machine_id);
-    return jobView(job, { machine: m?.name, waits: m ? this.waits(job, m) : null, decider: m ? this.ownerOf(m)?.id ?? null : null });
+    return jobView(job, { machine: m?.name, waits: m ? this.waits(job, m) : null, decider: m ? this.ownerOf(m)?.id ?? null : null, ticketNumber: job.ticket_id === null ? null : this.store.getTicket(job.ticket_id)?.number ?? null });
   }
 
   /** Tell the job's viewers what changed: the scheme's people, and its machine's owner wherever they are. */
   private changed(id: number) {
     const job = this.store.getMachineJob(id);
     if (!job) return;
-    this.place(job);
     const view = this.view(job);
+    this.place(job, view);
     this.d.broadcast({ type: 'machine_job', projectId: job.project_id, job: view });
     const owner = this.ownerOf(this.machineOf(job));
     if (owner && !this.store.canSee({ uid: owner.id, admin: this.store.isAdmin(owner) }, job.project_id)) this.d.broadcast({ type: 'machine_job', to: owner.id, job: view });
@@ -339,7 +341,7 @@ export class MachineJobs {
 
   /** The stage each live minion's job card was last put at the bottom for; read back from the chat after a restart. */
   private stages = new Map<number, JobStage>();
-  private place(job: MachineJob) {
+  private place(job: MachineJob, view: JobView) {
     if (job.ticket_id === null || !this.d.placed) return;
     const stage = jobStage(job.state);
     // 'starting' (the go given, the machine told) is still waiting to the eye, and moves nothing until it runs.
@@ -349,7 +351,7 @@ export class MachineJobs {
       const ev = this.store.eventsOfKinds(job.ticket_id, ['job']).map((e) => JSON.parse(e.data)).filter((d) => d.job === job.id).at(-1);
       last = ev ? (ev.stage ?? 'waiting') : undefined;
     }
-    if (last !== shown) this.d.placed(job, shown);
+    if (last !== shown) this.d.placed(job, shown, view);
     if (shown === 'ended') this.stages.delete(job.id);
     else this.stages.set(job.id, shown);
   }
@@ -419,6 +421,8 @@ export class MachineJobs {
     const owner = this.ownerOf(m);
     const card = this.d.postCard(job, {
       questions: [{ header: 'GPU job go', question, options: CHOICES.map(({ label, description }, i) => ({ label, description, ...(i === (job.run_when === 'now' ? 1 : 0) ? { recommended: true } : {}) })) }],
+      // The page lays these out whole (#859); the question's text is the same, cut to 500 characters, for everything else.
+      recipe: { machine: m.name, asked_by: job.asked_by, when: job.run_when, reason: job.reason, limit_s: job.limit_s, kind: { name: k.name, image: k.image, command: k.command, reads: k.reads, gpu: k.gpu, network: k.network, resumable: k.resumable }, inputs: inputs.map(({ name, size }) => ({ name, size })) },
       // Addressed to its owner when they are in the scheme; otherwise it waits in the chat and on their Machines page.
       ...(owner && this.store.canSee({ uid: owner.id, admin: this.store.isAdmin(owner) }, job.project_id) ? { to: owner.name } : {}),
     });

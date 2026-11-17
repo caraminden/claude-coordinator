@@ -355,7 +355,8 @@ const jobs = new MachineJobs({
   },
   wake: (id, text) => runner.send(id, APP_NAME, text),
   note: (id, text) => { runner.emit(id, 'note', { text }); runner.broadcastTicket(id); },
-  placed: (job, stage) => { runner.emit(job.ticket_id!, 'job', { job: job.id, stage }); runner.broadcastTicket(job.ticket_id!); },
+  // The view rides along so the card draws at once, sized as it will stay; machine_job events keep it live after.
+  placed: (job, stage, view) => { runner.emit(job.ticket_id!, 'job', { job: job.id, stage, view }); runner.broadcastTicket(job.ticket_id!); },
   resultsDir: (job) => {
     if (job.contraption_id === null) return join(projectSharedDir(DATA_DIR, job.project_id), 'jobs', String(job.id));
     const c = store.listContraptions().find((r) => r.id === job.contraption_id);

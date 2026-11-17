@@ -12,7 +12,7 @@ import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
-export interface Card { questions: unknown[]; kind?: 'merge'; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; to?: string; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string } }
+export interface Card { questions: unknown[]; kind?: 'merge'; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string } }
 export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string } }
 
 export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
@@ -21,10 +21,10 @@ const short = (sha: string) => sha.slice(0, 7);
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
 export function postCard(app: App, ticket: Ticket, card: Card): { id: string; href: string } {
   const { runner } = app;
-  const { questions, kind, to, notice, doc, secret, job } = card;
+  const { questions, kind, to, notice, doc, secret, job, recipe } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
-    id, questions, ...(kind ? { kind } : {}), ...(job ? { job } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}),
+    id, questions, ...(kind ? { kind } : {}), ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}),
   });
   runner.broadcastTicket(ticket.id);
   app.notify(ticket.id, { kind: 'question', questions: notice ? [{ question: notice }] : doc ? [{ question: `Make your picks on “${doc.title}”` }] : secret ? [{ question: `Save a secret as ${secret.name}` }] : questions, eventId: event.id, ...(to ? { to } : {}) });

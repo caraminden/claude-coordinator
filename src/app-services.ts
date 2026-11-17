@@ -8,7 +8,7 @@
 // files that do. Units an app's people installed by hand before (same port, or run from its folder) are
 // reported, and stopped and disabled only when an admin asks with replace: their files stay.
 // A boot check, a preview or a dev copy without a stand-in systemctl gets `off`: it never touches systemd.
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, existsSync, openSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat, statfs, symlink, writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
@@ -283,27 +283,6 @@ async function lastLines(log: string, from: number): Promise<string> {
     await f.close();
   }
 }
-/**
- * How long the step `who` started at `began` (ms) waited in line for its heavy slot, from citadel-heavy's history (its
- * format: the script's header); 0 when it isn't there.
- */
-export async function heavyWaited(who: string, began: number): Promise<number> {
-  const history = join(process.env.CITADEL_HEAVY_DIR || join(homedir(), '.local/share/claude-coordinator/projects/.heavy'), 'history');
-  const f = await open(history, 'r').catch(() => null);
-  if (!f) return 0;
-  try {
-    const size = (await f.stat()).size;
-    const buf = Buffer.alloc(Math.min(size, 65536));
-    await f.read(buf, 0, buf.length, size - buf.length);
-    for (const line of buf.toString('utf8').split('\n').reverse()) {
-      const [at, by, , , waited] = line.split('\t');
-      if (by === who && Date.parse(at) >= began - 2000) return Number(waited) || 0;
-    }
-    return 0;
-  } finally {
-    await f.close();
-  }
-}
 /** A build step's status for people: 128+N is the signal that killed it (a shell's way of saying so). */
 export const exitWhy = (code: number) => (code > 128 && SIGNALS[code - 128] ? `killed by ${SIGNALS[code - 128]}` : code === 75 ? 'no heavy slot came free, status 75' : `exit ${code}`);
 
@@ -344,7 +323,7 @@ export interface ServiceOptions {
    * or crash doesn't kill an app's build; null (a dev copy with a stand-in systemctl) runs them as Citadel's children.
    */
   systemdRun: string | null;
-  /** tools/citadel-heavy: every build step waits for a host-wide heavy slot (#847). */
+  /** tools/citadel-heavy: a deploy build holds one host-wide heavy slot for all its steps (#847, #885). */
   heavy: string;
 }
 
@@ -900,31 +879,52 @@ export class AppServices {
       let m: Manifest;
       try {
         m = await this.manifest(row, next);
-        let deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
         const who = `${row.name} deploy`;
-        for (const step of m.build) {
-          await say(`Build: ${step}`);
-          const from = (await stat(view.log)).size;
-          const began = Date.now();
-          // In a heavy slot (#847), the time limit inside it, so a wait in line doesn't count against the build.
-          const secs = Math.max(1, Math.ceil((deadline - began) / 1000));
-          const inner = [this.opts.heavy, 'timeout', '-k', '10', String(secs), 'nice', '-n', '10', 'sh', '-c', step];
+        // One heavy slot (#847) for all its steps, taken ahead of minions' jobs waiting in line (#885): a holder process keeps
+        // it until its stdin closes. The time limit starts once it holds it, so the wait in line doesn't count against it.
+        // shortcut: a Citadel restart mid-build ends the holder while the build unit runs on unslotted, a few minutes at most.
+        let holder: ChildProcess | null = null;
+        if (m.build.length) {
           // Citadel's own CITADEL_HEAVY_* settings (a dev copy's lock folder, a test's pressure gate) carry over.
           const heavyEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('CITADEL_HEAVY_') && k !== 'CITADEL_HEAVY_HELD'));
-          const stepEnv = { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who };
-          const unit = buildUnit(row.name);
-          const argv = this.opts.systemdRun
-            ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, `--working-directory=${next}`, `--property=StandardOutput=append:${view.log}`,
-              `--property=StandardError=append:${view.log}`, ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
-            : inner;
-          // A backstop on the whole wait and run: past it, the unit is stopped too (stopping systemd-run alone leaves it running).
-          const backstop = secs * 1000 + 180 * this.opts.minuteMs;
-          const code = await sh(argv, next, backstop, stepEnv);
-          if (code === 124 && this.opts.systemdRun) await run(this.opts.systemctl, ['--user', 'stop', unit]);
-          if (code === 124 && Date.now() - began >= backstop) throw new Error(`The build waited and ran past ${Math.round(backstop / this.opts.minuteMs)} minutes in all, most of it in line for a heavy slot, at: ${step}`);
-          deadline += (await heavyWaited(who, began)) * 1000;
-          if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
-          if (code) throw new Error(`Build step failed (${exitWhy(code)}): ${step}${await lastLines(view.log, from)}`);
+          const fd = openSync(view.log, 'a');
+          holder = spawn(this.opts.heavy, ['sh', '-c', 'echo; exec cat >/dev/null'], {
+            cwd: next, env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` }, stdio: ['pipe', 'pipe', fd],
+          });
+          closeSync(fd);
+          holder.stdin!.on('error', () => {}); // it may be gone already when the build ends
+          const asked = Date.now();
+          const ended = await new Promise<number | null>((ok) => {
+            holder!.stdout!.once('data', () => ok(null));
+            holder!.once('close', (code) => ok(code ?? 1));
+            holder!.once('error', () => ok(127));
+          });
+          if (ended !== null) throw new Error(`Waiting for a heavy slot ended (${exitWhy(ended)}): see the log.`);
+          const waited = Math.round((Date.now() - asked) / 1000);
+          if (waited >= 2) await say(`Got a heavy slot after ${waited} s in line.`);
+        }
+        try {
+          const deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
+          for (const step of m.build) {
+            await say(`Build: ${step}`);
+            const from = (await stat(view.log)).size;
+            const secs = Math.max(1, Math.ceil((deadline - Date.now()) / 1000));
+            const inner = ['timeout', '-k', '10', String(secs), 'nice', '-n', '10', 'sh', '-c', step];
+            // In the deploy's slot: a step that calls citadel-heavy itself runs straight away rather than queue behind it.
+            const stepEnv = { ...env, CITADEL_HEAVY_HELD: '1', CITADEL_HEAVY_WHO: who };
+            const unit = buildUnit(row.name);
+            const argv = this.opts.systemdRun
+              ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, `--working-directory=${next}`, `--property=StandardOutput=append:${view.log}`,
+                `--property=StandardError=append:${view.log}`, ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
+              : inner;
+            // A backstop past timeout's own kill: the unit is stopped too (stopping systemd-run alone leaves it running).
+            const code = await sh(argv, next, secs * 1000 + 15_000, stepEnv);
+            if (code === 124 && this.opts.systemdRun) await run(this.opts.systemctl, ['--user', 'stop', unit]);
+            if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
+            if (code) throw new Error(`Build step failed (${exitWhy(code)}): ${step}${await lastLines(view.log, from)}`);
+          }
+        } finally {
+          holder?.stdin!.end();
         }
       } catch (err: any) {
         // The live slot was never touched, nor its service restarted.

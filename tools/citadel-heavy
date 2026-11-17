@@ -28,6 +28,12 @@
 # containers can't interleave; a failed write is ignored. Past about 5 MB the job that notices keeps the newest
 # half, by a rename. Nested calls and runs without a lock folder write nothing.
 #
+# Priority (#885): CITADEL_HEAVY_PRIORITY=1 (a contraption's deploy build, which src/app-services.ts holds in one slot
+# for all its steps) goes ahead of every job waiting in the plain line, and skips the load wait: it is seconds of
+# niced work someone is waiting on, and paid 15-20 min a step behind minions' suites. Priority jobs keep a line of
+# their own (queue.first); its head says so in $CITADEL_HEAVY_DIR/first, freshened at every look, and the plain
+# line's jobs leave free slots alone while that file is fresh. CITADEL_HEAVY_WHAT names the job in place of the command.
+#
 # Exits with the command's status. Nested calls (a wrapped script that wraps its own step) run straight
 # away in the outer call's slot. When the lock folder or flock is missing, it warns and runs unlocked.
 set -uo pipefail
@@ -43,7 +49,8 @@ if ! command -v flock >/dev/null || ! mkdir -p "$dir" 2>/dev/null || ! : 2>/dev/
 fi
 
 who=${CITADEL_HEAVY_WHO:-$(id -un 2>/dev/null || echo someone)}
-what="$*"
+what=${CITADEL_HEAVY_WHAT:-$*}
+first=${CITADEL_HEAVY_PRIORITY:+1}
 [ ${#what} -le 100 ] || what="${what:0:97}..."
 psi=${CITADEL_HEAVY_PRESSURE:-/proc/pressure/cpu}
 max_pressure=${CITADEL_HEAVY_MAX_PRESSURE:-50}
@@ -94,8 +101,9 @@ waiting=
 load_since=
 forced=
 admit() {
+  if first_waits; then waiting=first; return 1; fi
   take || { waiting=slots; return 1; }
-  read_pressure && [ "$pressure" -ge "$max_pressure" ] || return 0
+  read_pressure && [ "$pressure" -ge "$max_pressure" ] && [ -z "$first" ] || return 0
   load_since=${load_since:-$SECONDS}
   if [ $((SECONDS - load_since)) -ge "$load_wait" ]; then forced=1; return 0; fi
   exec 8>&-
@@ -119,7 +127,9 @@ dur() { if [ "$1" -ge 60 ]; then echo "$(($1 / 60)) min"; else echo "$1 s"; fi; 
 # Why it waits, said when that changes and again every minute.
 tell() {
   local after=$1
-  if [ "$waiting" = load ]; then
+  if [ "$waiting" = first ]; then
+    say "${after}$(first_who) goes first (a deploy build, ahead of the line); waiting for it to take a slot ($who: $what)"
+  elif [ "$waiting" = load ]; then
     say "${after}a heavy slot is free, but the box is busy: $(load_text). Waiting for it to ease, at most $(dur "$load_wait"), then it starts anyway ($who: $what). Raising the slot count would make every suite slower, not faster."
   else
     say "${after}all heavy slots ($(slots)) are busy; waiting for one ($who: $what)"
@@ -137,7 +147,8 @@ find "$dir" -maxdepth 1 -name 'wait-*' -mmin +10 -delete 2>/dev/null || true
 reason=none # what it waited on last, for the history line
 waiting_on() { reason=$1; printf '%s\n' "$who" "$what" "$started" "$1" >"$waitfile.tmp" 2>/dev/null && mv -f "$waitfile.tmp" "$waitfile" 2>/dev/null; }
 started=$(date +%s)
-trap 'rm -f "$waitfile" "$waitfile.tmp"' EXIT
+marked= # it wrote $dir/first, as the priority line's head
+trap 'rm -f "$waitfile" "$waitfile.tmp"; [ -z "$marked" ] || rm -f "$dir/first"' EXIT
 
 # No wait is endless (#553): when no slot has changed hands for $max_wait s of waiting (a holder stopped or stuck),
 # it gives up with status 75 and runs nothing. Slots that do change hands restart the clock, so a long line is fine.
@@ -162,13 +173,18 @@ stuck() {
 # before this doesn't freshen the file, so it can be passed over while healthy: that costs it its turn, nothing else.
 poll=${CITADEL_HEAVY_POLL:-2}
 head_stale=${CITADEL_HEAVY_HEAD_STALE:-60}
-next() { cat "$dir/queue.who" 2>/dev/null || echo "a job that doesn't say"; }
+headfile=$dir/queue.who
+[ -z "$first" ] || headfile=$dir/first
+next() { cat "$headfile" 2>/dev/null || echo "a job that doesn't say"; }
 head_age() {
   local m
-  m=$(stat -c %Y "$dir/queue.who" 2>/dev/null) || return 1 # none yet: nobody is passed over
+  m=$(stat -c %Y "$1" 2>/dev/null) || return 1 # none yet: nobody is passed over
   echo $(($(date +%s) - m))
 }
-exec 7<>"$dir/queue"
+# A priority job waits for a slot: a plain job leaves free slots to it. A marker its writer stopped freshening doesn't count.
+first_waits() { [ -z "$first" ] && age=$(head_age "$dir/first") && [ "$age" -lt "$head_stale" ]; }
+first_who() { local l; l=$(cat "$dir/first" 2>/dev/null); echo "${l%%: *}"; }
+exec 7<>"$dir/queue${first:+.first}"
 since=$SECONDS
 exec 6<>"$dir/queue.past"
 past= told_past= got= # past: it is the one going past a stopped head; got: it holds a slot already, taken past a stopped head
@@ -180,7 +196,7 @@ if ! flock -n 7; then
   until flock -w "$poll" 7; do
     touch "$waitfile" 2>/dev/null
     stuck
-    if age=$(head_age) && [ "$age" -ge "$head_stale" ]; then
+    if age=$(head_age "$headfile") && [ "$age" -ge "$head_stale" ]; then
       [ -n "$told_past" ] || say "the job next in line ($(next)) has not moved for $age s (stopped or frozen), so this one goes past it ($who: $what)"
       told_past=1
       # One at a time past the head, as in the line itself: each would else run its own load clock and start together.
@@ -195,7 +211,7 @@ if ! flock -n 7; then
     fi
   done
 fi
-[ -n "$got" ] || printf '%s: %s (since %s)\n' "$who" "$what" "$(date +%H:%M)" >"$dir/queue.who" 2>/dev/null
+[ -n "$got" ] || { printf '%s: %s (since %s)\n' "$who" "$what" "$(date +%H:%M)" >"$headfile" 2>/dev/null && marked=$first; }
 if [ -z "$got" ] && ! admit; then
   waiting_on "$waiting"
   tell ""
@@ -203,7 +219,7 @@ if [ -z "$got" ] && ! admit; then
   said=$waiting
   until admit; do
     sleep "$poll"
-    touch "$dir/queue.who" 2>/dev/null
+    touch "$headfile" 2>/dev/null
     stuck
     if [ "$waiting" = "$said" ]; then touch "$waitfile" 2>/dev/null; else waiting_on "$waiting"; fi
     if [ "$waiting" != "$said" ] || [ $((SECONDS - told)) -ge 60 ]; then
@@ -213,6 +229,9 @@ if [ -z "$got" ] && ! admit; then
     fi
   done
 fi
+# The marker goes before the line's lock, so the next priority job's own isn't deleted.
+[ -z "$marked" ] || rm -f "$dir/first"
+marked=
 exec 7>&- 6>&-
 rm -f "$waitfile"
 [ -z "$forced" ] || say "the box is still busy ($(load_text)) after $(dur "$load_wait") waiting on it, so this starts anyway in slot $((slot + 1))"

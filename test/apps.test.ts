@@ -363,9 +363,10 @@ test('keys that don\'t open: a page gets Citadel\'s styled panel with a Settings
   const made = await srv.call('/api/contraptions', { name: 'locked', title: 'Locked', port: stubPort });
   assert.equal(made.status, 201, JSON.stringify(made.data));
   assert.equal((await srv.call(`/api/contraptions/locked/people/${cara}`, { enabled: true }, 'PUT')).status, 200);
+  const scheme = (await srv.call('/api/projects', { name: 'Scheme' })).data.id;
   const db = new DatabaseSync(join(srv.data, 'coordinator.db'));
   try {
-    db.prepare("UPDATE contraptions SET identity_private = 'garbage', home_scheme = 7 WHERE name = 'locked'").run();
+    db.prepare("UPDATE contraptions SET identity_private = 'garbage' WHERE name = 'locked'").run();
   } finally {
     db.close();
   }
@@ -374,7 +375,7 @@ test('keys that don\'t open: a page gets Citadel\'s styled panel with a Settings
   const body = await res.text();
   assert.match(body, /Locked can&#39;t open/);
   assert.match(body, /id="back"[^>]*>Back to /);
-  assert.match(body, /href="\/c\/#\/p\/7\/contraptions"/);
+  assert.ok(body.includes(`href="/c/#/p/${scheme}/contraptions"`));
   const api = await get('/apps/locked/x', asCara());
   assert.equal(api.status, 503);
   assert.match(await api.text(), /keys don't open/);

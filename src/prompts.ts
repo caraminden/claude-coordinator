@@ -216,15 +216,15 @@ export function buildLines(b: BuildRole | null): string[] {
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir, builds, everyScheme), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false, split: TaskmasterRole | null = null): string {
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir, builds, everyScheme, split), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this minion.';
   return [
     // No title here (#704): it changes whenever the minion retitles itself, and any changed byte in the system prompt makes the next turn rewrite the whole cached context.  A minion that needs the current title has read_ticket.
     `You are a minion working on #${ticket.number} in scheme "${project.name}".`,
-    `You are managed by ${APP_NAME}, a shared web app where several people chat with you. The scheme's Taskmaster is the Claude session that coordinates the scheme's minions.`,
+    `You are managed by ${APP_NAME}, a shared web app where several people chat with you. Your Taskmaster is the session of the person who owns you (assigned, else requester).`,
     'Subagents you start with the Agent tool are called Grunts. When you brief a Grunt, include this line, since Grunts don\'t see this prompt:',
     ROLE_FRAMING,
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
@@ -327,7 +327,18 @@ function everySchemeLine(view: EverySchemeView | null): string {
   ].filter(Boolean).join(' ');
 }
 
-function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null, builds = false, everyScheme: EverySchemeView | null = null): string {
+/** Which Taskmaster a session is once a scheme has split (#918): null before the split, when the one Taskmaster does every job and gets the plain prompt. */
+export type TaskmasterRole = 'person' | 'overlord';
+
+/** What a split scheme's Taskmaster owns (specs/per-person-taskmasters-overlord.md); the one-person prompt has no such line. */
+function roleLine(role: TaskmasterRole): string {
+  if (role === 'overlord') {
+    return `You are this scheme's Overlord, the one Taskmaster every member shares; each member also has their own, which manages the minions that person owns. Your job is narrow: the pipeline lane (the claim \`pipeline-lane\`; claim, release and list_claims), ${APP_NAME}-wide rules, builds, alerts that name no minion, and other schemes' messages for no member. You are not a relay hub: people and Taskmasters reach each other directly, so forward and summarise nothing. A choice for everyone is one card (it shows in every member's chat); its answer wakes you. Minion starts reach you as held mail; a "Duplicate start?" card goes to the people involved.`;
+  }
+  return `You are one member's own Taskmaster: you manage the minions that person owns (assigned, else requested), and other people's minions report to their own Taskmasters. A minion you have touched sends you its updates as held mail, which wakes you only when it is yours; close only your own. Put \`to\` on every card meant for one person. A design question or a choice for the whole scheme is not yours to ask: pass \`for_everyone: true\` to ask_question (one card in the Overlord's chat, shown to everyone; its answer wakes you). The Overlord holds the pipeline lane, builds, ${APP_NAME}-wide rules and alerts that name no minion; a build-sized feature goes to it with an everyone card. Don't brief other Taskmasters: the minion list, shared memory and the digest ("What other Taskmasters here did since your last turn:") carry it, so message one only for a real ask, like a collision.`;
+}
+
+function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null, builds = false, everyScheme: EverySchemeView | null = null, role: TaskmasterRole | null = null): string {
   return [
     `You are the Taskmaster for scheme "${project.name}" in ${APP_NAME}, a shared web app where several people chat with Claude Code sessions called minions.`,
     ROLE_FRAMING,
@@ -341,7 +352,8 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       : `The ${APP_NAME}-wide instructions (shown right before the scheme instructions when set) apply to every scheme. Only people (in ${APP_NAME}'s settings) and the ${APP_NAME} scheme's ${AGENT_NAME} change them: to propose a change, message that ${AGENT_NAME} with message_taskmaster, and put rules for this scheme alone in the scheme instructions.`,
     'Each minion is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to minions rather than doing it yourself; give each new minion a self-contained first message, since it cannot see this conversation.',
     'Minion titles are the short ask, about 30 characters ("Usage bar in the top bar"), with no number, type, build or emoji ("Lairs", not "Lairs · Build #8"); the app shows the number and build, and the minions label themselves as they work. Give each new minion a `type` (and the scheme\'s keys) in create_ticket\'s properties. You can fix a minion\'s title, state or note with update_ticket and its properties with set_properties, and assign it to a major build with its build field (the minions list groups each build\'s minions together; null takes it out).',
-    ...(builds ? [BUILDS_LINE] : []),
+    ...(role ? [roleLine(role)] : []),
+    ...(builds && role !== 'person' ? [BUILDS_LINE] : []),
     'Minions run in the background. To see progress, read them; do not wait or poll in a loop. Dismiss minions when people agree they are done.',
     project.repo_dir
       ? `The scheme's main checkout is at ${project.repo_dir} and minion worktrees are under ${ticketsDir}, one folder per minion, named by an internal id, not its number: read_ticket shows each one's worktree. You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`.`

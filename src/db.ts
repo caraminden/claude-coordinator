@@ -2423,9 +2423,10 @@ export class Store {
     }
   }
 
-  /** A chat's newest plan card, or undefined. */
+  /** A chat's newest plan card, or undefined: a real plan, not a machine's notes (#617) or a release key card (#837), which ride the same event kind. */
   latestPlan(ticketId: number): EventRow | undefined {
-    return this.db.prepare("SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' ORDER BY id DESC LIMIT 1").get(ticketId) as unknown as EventRow | undefined;
+    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' AND json_extract(data, '$.machine') IS NULL
+      AND json_extract(data, '$.releaseKey') IS NULL ORDER BY id DESC LIMIT 1`).get(ticketId) as unknown as EventRow | undefined;
   }
 
   /** The backup chat's lines (src/backup.ts): the newest `limit` messages, notes, errors and replies with text after `afterId`, oldest first. */

@@ -66,6 +66,7 @@ const lastMessage = async () => (await events('user_message')).at(-1).text;
 const keytoolRuns = () => (existsSync(join(root, 'keytool.jsonl')) ? jsonLines(join(root, 'keytool.jsonl')) : []);
 
 let ticket: any;
+let dataDir = '';
 let project: any;
 let other: any;
 
@@ -83,8 +84,14 @@ before(async () => {
   const store = new Store(join(srv.data, 'coordinator.db'));
   let n = 0;
   const app = (name: string, home_scheme: number) => store.createContraption({ name, title: name.toUpperCase(), icon: null, port: 39000 + n, home_scheme, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: `h${n++}`, keys_at: 0 });
-  for (const name of ['twi', 'later', 'pressed']) app(name, project.id);
+  for (const name of ['twi', 'later', 'pressed', 'unbuilt']) app(name, project.id);
   app('qapp', other.id);
+  // Their builds found no key, as src/apk-build.ts marks it: only such an app is offered one. unbuilt's never got that far.
+  for (const name of ['twi', 'later', 'pressed']) {
+    mkdirSync(join(home, '.cache/citadel-apk', name), { recursive: true });
+    writeFileSync(join(home, '.cache/citadel-apk', name, 'key-missing-told'), 'c');
+  }
+  dataDir = srv.data;
   ticket = await call('Cara', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'make the key' } });
   await until('the first turn', () => turns().length >= 1);
   await idle();
@@ -99,6 +106,7 @@ test('a minion asks for a key: a card naming where it goes, never the password; 
   assert.ok(card.plan.includes(join(keyDir, 'twi-release.jks')));
   await assert.rejects(ask('qapp'), /403 qapp isn't one of this scheme's contraptions/);
   await assert.rejects(ask('nope'), /403/);
+  await assert.rejects(ask('unbuilt'), /409 UNBUILT isn't waiting for a release key/);
   await assert.rejects(call('Cara', `/api/tickets/${ticket.id}/release-key`, { method: 'POST', body: { contraption: 'twi' } }), /403/);
   await assert.rejects(verdict('minion', id, 'approve'), /403/);
   assert.deepEqual(keytoolRuns(), []);
@@ -114,6 +122,9 @@ test('a plan card and a key card for another app leave it open; a newer one for 
   status = Object.fromEntries((await events('plan')).map((c: any) => [c.id, c.status]));
   assert.deepEqual([status[first.id], status[again.id], status[later.id]], ['superseded', 'pending', 'pending']);
   await assert.rejects(verdict('Dana', first.id, 'approve'), /409 A newer card for this key replaced this one/);
+  const store = new Store(join(dataDir, 'coordinator.db'));
+  assert.equal(JSON.parse(store.latestPlan(ticket.id)!.data).summary, 'A plan', 'a key card never stands in for the chat\'s plan (a setup round reads it)');
+  store.db.close();
 });
 
 test('a member approves: the key is made, mode 600, its password only in its file; it is never made twice', async () => {

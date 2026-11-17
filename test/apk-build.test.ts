@@ -153,6 +153,9 @@ test('a missing release key is told once, not once per commit; it tells again on
   commit(live, { 'android/app/a.txt': '4' });
   await b.check(row, '#5');
   assert.equal(told.length, 2, 'the key went missing again: told again');
+  assert.match(told[1], /half of its release key is missing: .*nokey-release\.pass is there but .*nokey-release\.jks isn't\. Restore it/, 'half a key is a lost one: restore, never make');
+  assert.doesNotMatch(told[1], /Make release key/);
+  assert.equal(b.keyless('nokey'), false, 'and no button offers a new one');
 });
 
 test("makeKey makes a keyless app's key, forgets the told notice and builds at once; keyless names it until then", async () => {

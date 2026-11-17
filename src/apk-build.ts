@@ -170,10 +170,14 @@ export class ApkBuilds {
     const { jks: key, pass } = keyFiles(this.d.keyDir, row.name);
     // A missing key is told once, not per commit (a night of deploys woke the Taskmaster ten times): the marker stays until a check finds the key.
     const keyTold = join(dir, 'key-missing-told');
-    if (existsSync(key) && existsSync(pass)) rmSync(keyTold, { force: true });
+    const there = [key, pass].filter((f) => existsSync(f));
+    if (there.length === 2) rmSync(keyTold, { force: true });
     else {
       if (existsSync(keyTold)) return { skipped: 'no release key yet, already told' };
-      const out = fail(`it has no release key yet (${key} and its .pass). A member makes it with Make release key on its Releases card, or approves the card make_release_key posts; until then no APK is built after its deploys.`);
+      // Half a pair is a key that was lost, not one never made: restore it, never make a new one (phones would have to uninstall).
+      const out = fail(there.length
+        ? `half of its release key is missing: ${there[0]} is there but ${there[0] === key ? pass : key} isn't. Restore it from the desktop's CitadelBackups\\keys (deploy/desktop/README.md, "Restoring"); a new key is never made over half of one. Until then no APK is built after its deploys.`
+        : `it has no release key yet (${key} and its .pass). A member makes it with Make release key on its Releases card, or approves the card make_release_key posts; until then no APK is built after its deploys.`);
       writeFileSync(keyTold, commit);
       return out;
     }

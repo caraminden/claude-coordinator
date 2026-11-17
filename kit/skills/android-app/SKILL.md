@@ -67,7 +67,10 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   (each one can call the app's native plugins). Checklist after Cap-go/capgo-skills @e82217b (MIT),
   in our words.
 - A lost keystore means every friend uninstalls (losing local data) and reinstalls, so never
-  delete or regenerate one. If it's missing, stop and ask Cara.
+  delete or regenerate one. Citadel can't tell a lost key from one never made: use
+  `make_release_key` only for an app that never had one. If an app that had a key is told it has
+  none, or half of one, stop: it's restored from the desktop's `keys\` backup
+  (`deploy/desktop/README.md`, "Restoring"), so ask Cara.
 
 ## Delivery
 

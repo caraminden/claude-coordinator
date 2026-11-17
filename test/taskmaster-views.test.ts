@@ -1,12 +1,14 @@
 // Mine and Everyone (#920): several Taskmaster sessions paged as one chat by event id.
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { mergedPage, mergedAfter } from '../src/history.ts';
 import { inMerged, inMine, mergedView } from '../public/mine.js';
+import { bootServer, PASSWORD, SECRET } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'tm-views-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -111,4 +113,37 @@ test('the front end merges only when the scheme has split: Mine takes your chat 
   assert.ok(!inMerged(mine, ev(2, { type: 'assistant' })), 'another person\'s Taskmaster: only in Everyone');
   assert.ok(inMerged(all, ev(2, { type: 'assistant' })) && inMerged(all, ev(3, { type: 'assistant' })));
   assert.ok(!inMerged(all, ev(4, { type: 'assistant' })) && !inMerged(null, ev(1, {})), 'a minion\'s event never lands in the Taskmaster chat');
+});
+
+test('through the server: each person opens their own Taskmaster, Mine adds the Overlord\'s for-everyone items, Everyone adds the rest', async () => {
+  const dir = join(root, 'server');
+  mkdirSync(join(dir, 'data'), { recursive: true });
+  const store = new Store(join(dir, 'data', 'coordinator.db'));
+  const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const Alex = store.createUser({ name: 'Alex', login: 'alex' });
+  const p = store.createProject('Shared', null, Cara.id);
+  store.addMember(p.id, Alex.id);
+  const first = store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  const cara = store.addEvent(first.id, 'user_message', { author: 'Cara', text: 'Cara asks hers' }).id;
+  const alexTm = store.splitScheme(p.id, Alex.id);
+  const ovl = store.getOverlord(p.id)!;
+  const alex = store.addEvent(alexTm.id, 'user_message', { author: 'Alex', text: 'Alex asks his' }).id;
+  const work = store.addEvent(ovl.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'checking CI' }] } }).id;
+  const alert = store.addEvent(ovl.id, 'note', { text: 'CI is red', everyone: true }).id;
+  store.db.close();
+  const srv = await bootServer({ root: dir });
+  try {
+    const cookie = new Auth(PASSWORD, SECRET).issueCookie(Alex, false).split(';')[0];
+    const get = async (path: string) => (await fetch(srv.base + path, { headers: { Cookie: cookie } })).json() as Promise<any>;
+    const scheme = await get(`/api/projects/${p.id}`);
+    assert.equal(scheme.coordinator.id, alexTm.id, 'the scheme opens on your own Taskmaster');
+    assert.deepEqual(scheme.taskmasters.map((t: any) => [t.id, t.person_name]), [[first.id, 'Cara'], [ovl.id, null], [alexTm.id, 'Alex']]);
+    const evs = async (q: string) => (await get(`/api/projects/${p.id}/taskmaster-events?${q}`)).events.map((e: any) => e.id);
+    assert.deepEqual(await evs('view=mine'), [alex, alert], 'Mine: yours and the Overlord\'s alert, not its work nor Cara\'s chat');
+    assert.deepEqual(await evs('view=everyone'), [cara, alex, work, alert]);
+    assert.deepEqual(await evs(`view=everyone&before=${work}`), [cara, alex], 'one id cursor pages them all');
+    assert.deepEqual((await get(`/api/projects/${p.id}/taskmaster-events?view=mine&after=${alex}`)).map((e: any) => e.id), [alert]);
+  } finally {
+    await srv.stop();
+  }
 });

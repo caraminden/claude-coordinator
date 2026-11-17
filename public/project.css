@@ -5,9 +5,8 @@ main:has(> .split) { max-width: none; }
 /* New scheme: a modal box on desktop, a sheet along the bottom on phones; the scheme switcher's menu. */
 .card.new-scheme { max-width: 480px; margin: 10vh auto; }
 .card.new-scheme h2 { margin-bottom: 1rem; }
-/* The dialogs are the kit's cui-dialog (ui/base.css): head pinned, backdrop click closes (ui/dialog.js). */
+/* The dialogs are the kit's cui-dialog, built by ui/dialog.js's openDialog (#872): head pinned, ✕, backdrop click closes. */
 dialog.new-scheme { --cui-dialog-width: 440px; }
-dialog.new-scheme .close, dialog.secret-ask .close { min-width: var(--citadel-control-h); min-height: var(--citadel-control-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1; }
 dialog.new-scheme form > :last-child { margin-bottom: 0; }
 /* The code source: one radio a line, the picked one's URL or folder field under it. */
 .new-scheme fieldset.sources { border: 0; padding: 0; margin: 0 0 0.75rem; min-width: 0; }

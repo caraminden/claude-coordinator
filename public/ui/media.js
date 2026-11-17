@@ -9,6 +9,8 @@
 // attributes and scrollLeft), and its exports are an API apps depend on (test/ui-contract.test.ts). Add, never
 // rename. It brings its own constructed stylesheet, as chat.js does, and needs base.css for its buttons.
 //
+import { openDialog } from './dialog.js';
+
 // The parts store nothing: pins come in as numbers (ms) and go out through callbacks, and the app saves them.
 
 const CSS = `
@@ -66,9 +68,10 @@ const CSS = `
 :where(.cui-pan-look) { width: 140px; margin: 0; accent-color: var(--citadel-accent); }
 :where(.cui-pan-dir) { width: auto; }
 
-:where(.cui-lightbox) { --cui-dialog-pad: 0px; width: calc(100vw - 2 * var(--citadel-space-3)); height: calc(100dvh - var(--cui-dialog-top, 0px) - 2 * var(--citadel-space-3)); }
+/* 100% of the viewport the dialog sits in, not 100vw, which counts a page's reserved scrollbar gutter and puts it off-centre. */
+:where(.cui-lightbox) { --cui-dialog-pad: 0px; width: calc(100% - 2 * var(--citadel-space-3)); height: calc(100dvh - var(--cui-dialog-top, 0px) - 2 * var(--citadel-space-3)); }
 :where(.cui-lightbox[open]) { display: flex; flex-direction: column; overflow: hidden; }
-:where(.cui-lightbox > .cui-dialog-head) { margin: 0; }
+:where(.cui-lightbox > .cui-dialog-head) { margin: 0; padding-inline-start: var(--citadel-space-3); }
 :where(.cui-lb) { display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 :where(.cui-lb-stage) { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; container-type: size; touch-action: pan-y; }
 :where(.cui-lb-stage > img, .cui-lb-stage > video) { display: block; flex: 1; width: 100%; min-height: 0; object-fit: contain; }
@@ -109,7 +112,7 @@ const CSS = `
   :where(.cui-pan-map) { flex: 1 1 140px; width: auto; }
   :where(.cui-pan-look) { flex: 1 1 100px; }
   :where(.cui-pan-dir) { flex: 1 1 auto; }
-  :where(.cui-lightbox) { width: calc(100vw - 2 * var(--citadel-space-2)); height: calc(100dvh - var(--cui-dialog-top, 0px) - 2 * var(--citadel-space-2)); }
+  :where(.cui-lightbox) { width: calc(100% - 2 * var(--citadel-space-2)); height: calc(100dvh - var(--cui-dialog-top, 0px) - 2 * var(--citadel-space-2)); }
   /* A phone swipes or taps the strip, and its bars wrap, so ‹ › would sit on them; Space is a keyboard's. */
   :where(.cui-lb-step, .cui-pan-label) { display: none; }
 }
@@ -619,12 +622,9 @@ export function lightbox(items, opts = {}) {
   let dialog = null;
   if (opts.into) opts.into.append(root);
   else {
-    title = el('h2', { id: `cui-lb-${Math.random().toString(36).slice(2)}` });
-    const close = el('button', { class: 'cui-btn cui-ghost cui-icon', 'aria-label': 'Close', text: '✕' });
-    dialog = el('dialog', { class: 'cui-dialog cui-lightbox', 'aria-labelledby': title.id }, el('form', { method: 'dialog', class: 'cui-dialog-head' }, title, close), root);
-    dialog.addEventListener('close', () => { stop(); dialog.remove(); opts.onClose?.(); });
-    document.body.append(dialog);
-    dialog.showModal();
+    // The kit dialog (#872), which also closes it on a backdrop click.
+    dialog = openDialog({ title: '', className: 'cui-lightbox', body: root, onClose: () => { stop(); opts.onClose?.(); } });
+    title = dialog.querySelector('.cui-dialog-head > h2');
   }
 
   function stop() {
@@ -644,7 +644,10 @@ export function lightbox(items, opts = {}) {
     count.textContent = `${i + 1} / ${items.length}`;
     thumbs.forEach((b, k) => b.setAttribute('aria-current', String(k === i)));
     thumbs[i]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-    if (title) title.textContent = item.caption ? `${item.caption} · ${i + 1} / ${items.length}` : `${i + 1} / ${items.length}`;
+    // One item has no count to give: its caption (or alt) alone names it.
+    const n = items.length > 1 ? `${i + 1} / ${items.length}` : '';
+    // The heading names the dialog, so a lone picture with no caption or alt is still called something.
+    if (title) title.textContent = [item.caption ?? (n ? null : item.alt), n].filter(Boolean).join(' · ') || 'Picture';
   }
   // A person's move: the app hears of it (to update its URL, say). go() from the app stays quiet.
   function move(i) {

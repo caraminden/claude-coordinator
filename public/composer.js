@@ -5,6 +5,8 @@ import { account, api, formatSize, h, isCoordinator, me, uploadUrl, view } from 
 import { codex, reloadWhenIdle, scrollToBottom, sending, setSending } from './core.js';
 import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
+import { openDialog } from './ui/dialog.js';
+import { lightbox } from './ui/media.js';
 import { optimistic } from './ui/optimistic.js';
 import { pastedFiles } from './paste.js';
 import { looksSecret } from './secret-check.js';
@@ -443,15 +445,9 @@ function createAttachments(chatId, onChange) {
   return state;
 }
 
-/** An image waiting to send, full size (#654), until Esc, its ✕ or a click off the picture. */
+/** An image waiting to send, full size (#654), in the kit's lightbox (#872): Esc, its ✕ or a backdrop click closes it. */
 function zoomImage(src) {
-  const dialog = h('dialog', { class: 'image-zoom', 'aria-label': 'Image to send' },
-    h('img', { src, alt: 'Image to send, full size' }),
-    h('button', { type: 'button', class: 'close', title: 'Close', 'aria-label': 'Close' }, '✕'));
-  dialog.addEventListener('click', (e) => e.target.tagName !== 'IMG' && dialog.close());
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  lightbox([{ src, caption: 'Image to send', alt: 'Image to send, full size' }]);
 }
 
 /** PUT a file into the thread's uploads folder, streamed, with progress (fetch can't report upload progress). */
@@ -500,10 +496,7 @@ function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
     h('div', { class: 'row' }, save,
       h('button', { type: 'button', class: 'secondary', onclick: () => { dialog.close(); sendAnyway(); } }, 'Send anyway'),
       h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel')));
-  const dialog = h('dialog', { class: 'cui-dialog secret-ask', 'aria-label': 'This looks like a secret' },
-    h('div', { class: 'cui-dialog-head' }, h('h2', {}, 'This looks like a secret. Save it as one instead?'),
-      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
-    form);
+  const dialog = openDialog({ title: 'This looks like a secret. Save it as one instead?', className: 'secret-ask', body: form });
   form.onsubmit = async (e) => {
     e.preventDefault();
     save.disabled = true;
@@ -519,9 +512,6 @@ function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
       save.disabled = false;
     }
   };
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
   name.focus();
 }
 

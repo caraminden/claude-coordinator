@@ -10,6 +10,8 @@
 // opened with showModal() when a click lands on its backdrop. Only a press that starts and ends outside the
 // box counts, so selecting text inside and letting go on the backdrop keeps it open. It closes the way
 // Escape does (requestClose(), where the browser has it), so a `cancel` listener can keep it open.
+// openDialog() builds that markup, opens it and takes it out of the page once closed, so a page that makes a
+// dialog per use writes only its body (#872, Cara 2026-11-17: "using reusable components").
 
 const mounted = new WeakSet();
 
@@ -35,4 +37,37 @@ export function mountDialogs(root = document) {
     if (typeof d.requestClose === 'function') d.requestClose();
     else d.close();
   });
+}
+
+let ids = 0;
+
+/**
+ * Build a .cui-dialog, open it with showModal() and return it: the head (an h2 of `title`, which names it, and
+ * the ✕), then `body`. `className` adds classes (a width, a sheet); it leaves the page once closed unless
+ * `keep`; `onClose` runs on close. Backdrop clicks close it (it mounts mountDialogs on the document).
+ */
+export function openDialog({ title, body = [], className = '', keep = false, onClose } = {}) {
+  mountDialogs();
+  const h2 = document.createElement('h2');
+  h2.id = `cui-dialog-${++ids}-${Math.random().toString(36).slice(2, 7)}`;
+  h2.textContent = title ?? '';
+  const x = document.createElement('button');
+  x.className = 'cui-btn cui-ghost cui-icon';
+  x.setAttribute('aria-label', 'Close');
+  x.textContent = '✕';
+  const head = document.createElement('form');
+  head.method = 'dialog';
+  head.className = 'cui-dialog-head';
+  head.append(h2, x);
+  const dialog = document.createElement('dialog');
+  dialog.className = `cui-dialog ${className}`.trim();
+  dialog.setAttribute('aria-labelledby', h2.id);
+  dialog.append(head, ...[body].flat().filter((n) => n != null && n !== false));
+  dialog.addEventListener('close', () => {
+    if (!keep) dialog.remove();
+    onClose?.();
+  });
+  document.body.append(dialog);
+  dialog.showModal();
+  return dialog;
 }

@@ -14,3 +14,17 @@
  * `cancel` listener that calls preventDefault() keeps it open, as with Escape. Call once; again does nothing.
  */
 export function mountDialogs(root?: Document | Element): void;
+
+/**
+ * Build a `dialog.cui-dialog` with the markup above, open it with showModal() and return it: the head is an h2 of
+ * `title` (which names the dialog) and the ✕, then `body`. `className` adds classes; the dialog leaves the page
+ * once closed unless `keep`; `onClose` runs on close. It calls mountDialogs(), so a backdrop click closes it.
+ * Close it from your own buttons with `dialog.close()`.
+ */
+export function openDialog(opts: {
+  title: string;
+  body?: Node | string | (Node | string | null | undefined | false)[];
+  className?: string;
+  keep?: boolean;
+  onClose?: () => void;
+}): HTMLDialogElement;

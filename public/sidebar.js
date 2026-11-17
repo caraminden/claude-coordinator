@@ -13,6 +13,7 @@ import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.j
 import { renderInbox } from './inbox.js';
 import { pendingRelease } from './releases.js';
 import { replaceHash } from './navstack.js';
+import { openDialog } from './ui/dialog.js';
 
 // ---------- projects ----------
 
@@ -122,13 +123,7 @@ async function linkedRepo(form, onLinked) {
 
 /** The new-scheme form in a modal: a centred box on desktop, a sheet along the bottom on phones. */
 export function openNewScheme() {
-  const dialog = h('dialog', { class: 'cui-dialog new-scheme', 'aria-label': 'New scheme' },
-    h('div', { class: 'cui-dialog-head' }, h('h2', {}, 'New scheme'),
-      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
-    newSchemeForm());
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  openDialog({ title: 'New scheme', className: 'new-scheme', body: newSchemeForm() });
 }
 
 /** A promoted group's heading: its value's label in the registry, or the value capitalised ("area: balance" → "Balance"). */

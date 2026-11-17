@@ -19,7 +19,8 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   ${Array.from({ length: 40 }, (_, i) => `<p id="p${i}">Line ${i + 1} of a long body that scrolls under the pinned head.</p>`).join('')}
 </dialog>
 <script type="module">
-  import { mountDialogs } from '/ui/dialog.js';
+  import { mountDialogs, openDialog } from '/ui/dialog.js';
+  window.openDialog = openDialog;
   mountDialogs();
   mountDialogs(); // twice is once
   window.d = document.getElementById('d');
@@ -116,4 +117,29 @@ test('Escape and the ✕ close it', { skip }, async () => {
   const x = await page.centre('#x');
   await drag(page, x, x);
   assert.equal(await page.eval('d.open'), false, 'the ✕');
+});
+
+// #872 (Cara, 2026-11-17: "using reusable components"): openDialog builds the same markup from script, so no page
+// hand-builds a dialog's head, ✕ and name again.
+test('openDialog builds a named cui-dialog with the ✕, opens it, and removes it once closed', { skip }, async () => {
+  const page = await browser.page(base, { width: 1000, height: 600 });
+  const r = await page.eval<Record<string, unknown>>(`(() => {
+    window.shut = 0;
+    const p = document.createElement('p'); p.id = 'body1'; p.textContent = 'Body';
+    window.od = openDialog({ title: 'Rename', body: [p, null, false, 'tail'], className: 'mine', onClose: () => shut++ });
+    const h2 = od.querySelector(':scope > .cui-dialog-head > h2');
+    return { open: od.open, modal: od.matches(':modal'), cls: od.className, name: document.getElementById(od.getAttribute('aria-labelledby'))?.textContent,
+      h2: h2 === document.getElementById(od.getAttribute('aria-labelledby')), x: od.querySelector('.cui-dialog-head > button.cui-btn.cui-icon')?.getAttribute('aria-label'),
+      kids: [...od.childNodes].map((n) => n.id || n.className || n.textContent) };
+  })()`);
+  assert.deepEqual(r, { open: true, modal: true, cls: 'cui-dialog mine', name: 'Rename', h2: true, x: 'Close', kids: ['cui-dialog-head', 'body1', 'tail'] });
+  await drag(page, { x: 20, y: 20 }, { x: 20, y: 20 });
+  await page.eval(frame);
+  assert.deepEqual(await page.eval('[od.open, od.isConnected, shut]'), [false, false, 1], 'a backdrop click closes it, removes it and calls onClose');
+  await page.eval(`(window.od = openDialog({ title: 'Kept', keep: true }), ${frame})`);
+  const x = await page.centre('dialog[open] .cui-dialog-head > button');
+  await drag(page, x, x);
+  assert.deepEqual(await page.eval('[od.open, od.isConnected]'), [false, true], 'the ✕ closes it; keep leaves it in the page');
+  const ids = await page.eval<string[]>(`[openDialog({ title: 'a' }), openDialog({ title: 'b' })].map((d) => (d.close(), d.getAttribute('aria-labelledby')))`);
+  assert.notEqual(ids[0], ids[1], 'each has its own heading id');
 });

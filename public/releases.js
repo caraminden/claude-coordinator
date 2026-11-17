@@ -7,6 +7,7 @@
 import { ago, api, fileUrl, h, icon, schemeIcon, view } from './base.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { iconSrc } from './schemes.js';
+import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
 import { segTrack, TRACK } from './wait.js';
@@ -249,14 +250,9 @@ function openPicker(scope, ids) {
   const row = (s) => h('a', { class: `rel-opt${scope === s ? ' on' : ''}`, href: pageHref(s), 'aria-current': scope === s ? 'page' : undefined, onclick: () => dialog.close() },
     pickIcon(s), h('span', { class: 'rel-opt-name' }, scopeName(s)),
     h('span', { class: 'rel-opt-sub' }, s === 'all' ? 'every scheme' : targetNames(s)), h('span', { class: 'rel-opt-check', 'aria-hidden': 'true' }, scope === s ? '✓' : ''));
-  // new-scheme: project.css's modal that is a sheet along the bottom on phones, as briefstart.js and ultrareview.js use it.
-  const dialog = h('dialog', { class: 'cui-dialog new-scheme rel-sheet', 'aria-labelledby': 'rel-sheet-title' },
-    h('div', { class: 'cui-dialog-head' }, h('h2', { id: 'rel-sheet-title' }, 'Releases of'),
-      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
-    h('nav', { class: 'rel-opts', 'aria-label': 'Schemes' }, row('all'), ids.map(row)));
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  // new-scheme: project.css's sizing, a sheet along the bottom on phones, as briefstart.js and ultrareview.js use it.
+  const dialog = openDialog({ title: 'Releases of', className: 'new-scheme rel-sheet',
+    body: h('nav', { class: 'rel-opts', 'aria-label': 'Schemes' }, row('all'), ids.map(row)) });
 }
 
 /** A scheme's cards (take D): one per target, then its test copies of no target. */

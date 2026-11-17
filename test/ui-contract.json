@@ -25,7 +25,8 @@
       "mountComposer"
     ],
     "dialog.js": [
-      "mountDialogs"
+      "mountDialogs",
+      "openDialog"
     ],
     "media.js": [
       "clock",

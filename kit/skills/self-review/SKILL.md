@@ -150,8 +150,11 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 For a diff that touches the front end, each of these is a Should-fix finding. The rules behind
 them are "The rules" in `citadel:contraption-ui`.
 
-- In a contraption (an app under `/apps/<name>/`): hand-rolled markdown, a chat log, a composer or
-  a tooltip that Citadel UI serves; a copied Citadel hex colour instead of its `--citadel-*` variable.
+- A hand-built twin of a part the kit serves (Cara, 2026-11-17: "using reusable components"): a
+  dialog not built with `openDialog` or `cui-dialog`, a toast not from `toast`, a tooltip not from
+  `data-tip`, a picture viewer not from `lightbox`, or, in a contraption (an app under
+  `/apps/<name>/`), hand-rolled markdown, a chat log or a composer. Where the part lacks something,
+  the fix is adding it to the part. A copied Citadel hex colour instead of its `--citadel-*` variable.
 - A clickable `div` or `span` where a native control (`<button>`, `<a href>`, an input) belongs;
   an icon-only button with no `aria-label`; an `<img>` with no `alt`; a field other than the
   composer named only by its placeholder.

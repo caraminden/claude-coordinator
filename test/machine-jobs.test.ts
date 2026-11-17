@@ -185,6 +185,12 @@ test('no job.start without its owner\'s go: someone else\'s answer is refused, t
   assert.equal(card.to, 'Josh', 'the card is the owner\'s');
   assert.deepEqual(card.questions[0].options.map((o: any) => o.label), ['Run in job hours', 'Run now', 'Always allow this kind', 'No']);
   assert.match(card.questions[0].question, /whisperx.*josh-gpu[\s\S]*Reads models; GPU yes; network no; limit 2 h[\s\S]*chapter\.wav/);
+  // The live job card sits in the chat right after the go card, and the view says whose go it needs (#859).
+  const chat = await call('Cara', `/api/tickets/${ticket.id}/events?after=0`);
+  const at = (kind: string) => chat.findIndex((e: any) => e.kind === kind && JSON.parse(e.data).job === j.id);
+  assert.ok(at('job') > at('question') && at('question') >= 0, 'a job event follows the go card');
+  assert.equal(j.decider_id, box.owner_id);
+  assert.equal(typeof j.decider_id, 'number');
   await assert.rejects(answer('Dana', j.id, 'Run in job hours'), /403/);
   await assert.rejects(call('Dana', `/api/jobs/${j.id}/go`, { choice: 'now' }), /403/);
   await assert.rejects(raw(`/api/jobs/${j.id}/go`, { who: 'minion', body: { choice: 'now' } }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }), /403/);
@@ -348,6 +354,18 @@ test('a contraption queues on its home scheme\'s machine, and can\'t read or sto
   await assert.rejects(app('appb', `/api/contraptions/jobs/${j.id}/stop`, {}), /404/);
   await assert.rejects(app('appa', '/api/contraptions/jobs', { machine: 'josh-gpu', kind: KIND, inputs: ['/etc/passwd'] }), /400/);
   assert.equal((await app('appa', `/api/contraptions/jobs/${j.id}/stop`, {})).state, 'stopped');
+});
+
+test('the owner removes an always-allowed kind: the next one asks again; nobody else may (#859)', async () => {
+  const { kinds } = await call('Josh', `/api/machines/${box.id}/jobs`);
+  const hash = kinds.find((k: any) => k.name === 'whisperx').hash;
+  await assert.rejects(call('Dana', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), /403/);
+  assert.deepEqual(await call('Josh', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), { ok: true });
+  assert.equal((await call('Josh', `/api/machines/${box.id}/jobs`)).kinds.some((k: any) => k.hash === hash), false);
+  await assert.rejects(call('Josh', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), /404/);
+  const asks = await queue({});
+  assert.equal(asks.state, 'needs-go', 'no standing go any more');
+  await wakes(() => call('Josh', `/api/jobs/${asks.id}/go`, { choice: 'no' }));
 });
 
 test('on the clock: hours pause and resume a job, a late "running" keeps the pause, the limit stops it, old results are swept', async () => {

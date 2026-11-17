@@ -355,6 +355,7 @@ const jobs = new MachineJobs({
   },
   wake: (id, text) => runner.send(id, APP_NAME, text),
   note: (id, text) => { runner.emit(id, 'note', { text }); runner.broadcastTicket(id); },
+  placed: (job) => { runner.emit(job.ticket_id!, 'job', { job: job.id }); runner.broadcastTicket(job.ticket_id!); },
   resultsDir: (job) => {
     if (job.contraption_id === null) return join(projectSharedDir(DATA_DIR, job.project_id), 'jobs', String(job.id));
     const c = store.listContraptions().find((r) => r.id === job.contraption_id);

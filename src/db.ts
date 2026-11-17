@@ -3200,6 +3200,11 @@ export class Store {
     this.db.prepare('INSERT OR REPLACE INTO machine_job_kinds (machine_id, hash, name, recipe, allowed_by, at) VALUES (?, ?, ?, ?, ?, ?)').run(machineId, hash, name, recipe, by, Date.now());
   }
 
+  /** Take back a standing go; false if there was none. */
+  forgetJobKind(machineId: number, hash: string): boolean {
+    return this.db.prepare('DELETE FROM machine_job_kinds WHERE machine_id = ? AND hash = ?').run(machineId, hash).changes > 0;
+  }
+
   /** A machine's standing goes, newest first. */
   jobKinds(machineId: number): { hash: string; name: string; recipe: string; allowed_by: string; at: number }[] {
     return this.db.prepare('SELECT hash, name, recipe, allowed_by, at FROM machine_job_kinds WHERE machine_id = ? ORDER BY at DESC').all(machineId) as any;

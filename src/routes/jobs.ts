@@ -97,6 +97,14 @@ export const jobRoutes: Route[] = [
     handler: async (ctx) => json(ctx.res, 200, ctx.app.jobs.setSettings(ctx.machine, await readJson(ctx.req), actor(ctx))),
   },
   {
+    // Remove an "Always allow this kind" (#859): the next job of that kind takes a go card again.
+    method: 'DELETE', path: '/api/machines/:machine/job-kinds/:hash', ...people,
+    handler(ctx) {
+      ctx.app.jobs.forgetKind(ctx.machine, String(ctx.params.hash), actor(ctx));
+      return json(ctx.res, 200, { ok: true });
+    },
+  },
+  {
     method: 'GET', path: '/api/jobs/:job', ...people,
     handler: (ctx) => json(ctx.res, 200, ctx.app.jobs.view(readable(ctx.app, ctx, jobId(ctx)))),
   },

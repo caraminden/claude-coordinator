@@ -179,7 +179,7 @@ export function hoursOpen(s: JobSettings, now = Date.now()): boolean {
 }
 
 /** A job's public fields: what the UI, the minion's job_status and a contraption's GET read. */
-export function jobView(j: MachineJob, extra: { machine?: string; waits?: string | null } = {}) {
+export function jobView(j: MachineJob, extra: { machine?: string; waits?: string | null; decider?: number | null } = {}) {
   const parse = (s: string | null, d: unknown) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
   const kind = parse(j.kind, {}) as JobKind;
   const live = parse(j.live, {}) as Record<string, unknown>;
@@ -191,6 +191,8 @@ export function jobView(j: MachineJob, extra: { machine?: string; waits?: string
     ticket_id: j.ticket_id,
     contraption_id: j.contraption_id,
     asked_by: j.asked_by,
+    /** The person whose go, Pause, Resume, Stop and Run now it takes (an admin may too): the machine's owner. */
+    decider_id: extra.decider ?? null,
     kind: { ...kind, max_limit_h: kind.max_limit_s / 3600 },
     kind_hash: j.kind_hash,
     inputs: (parse(j.inputs, []) as { name: string; size: number; sha256: string }[]).map(({ name, size, sha256 }) => ({ name, size, sha256 })),
@@ -246,6 +248,8 @@ export interface JobDeps {
   wake(ticketId: number, text: string): void;
   /** A line in the minion's chat that wakes nobody. */
   note(ticketId: number, text: string): void;
+  /** A minion's job was queued: put its live job card in that minion's chat, after the go card. */
+  placed?(job: MachineJob): void;
   /** Where a job's results go: the scheme's shared folder's jobs/<id>/ for a minion's, the app's DATA_DIR/jobs/<id>/ for a contraption's. */
   resultsDir(job: MachineJob): string | null;
   now?: () => number;
@@ -308,7 +312,7 @@ export class MachineJobs {
 
   view(job: MachineJob): JobView {
     const m = this.store.getMachine(job.machine_id);
-    return jobView(job, { machine: m?.name, waits: m ? this.waits(job, m) : null });
+    return jobView(job, { machine: m?.name, waits: m ? this.waits(job, m) : null, decider: m ? this.ownerOf(m)?.id ?? null : null });
   }
 
   /** Tell the job's viewers what changed: the scheme's people, and its machine's owner wherever they are. */
@@ -356,6 +360,7 @@ export class MachineJobs {
       ...(standing ? { go: 'standing' as const, go_by: this.store.jobKind(q.machine.id, hash)!.allowed_by } : {}),
     });
     if (!standing) this.askOwner(job, q.machine);
+    if (job.ticket_id !== null) this.d.placed?.(job);
     this.changed(job.id);
     this.pump(q.machine.id);
     return this.store.getMachineJob(job.id)!;
@@ -495,6 +500,12 @@ export class MachineJobs {
     if (!sent) this.ended(id, `Job #${id} (${job.kind_name}) on ${m.name} was stopped by ${by}; ${m.name} is offline and is told when it reconnects.`, 'asker' in who);
     else this.changed(id);
     return this.store.getMachineJob(id)!;
+  }
+
+  /** The owner (or an admin) takes back an "Always allow": the next job of that kind asks again. */
+  forgetKind(m: Machine, hash: string, who: Actor) {
+    if (!this.mayDecide(who, m)) throw new HttpError(403, `Only ${m.name}'s owner or an admin can change what it always allows`);
+    if (!this.store.forgetJobKind(m.id, hash)) throw new HttpError(404, `${m.name} doesn't always allow that kind`);
   }
 
   /** A machine's job hours, one-off window or Pause changed (its owner's): pause or resume what runs, start what may. */

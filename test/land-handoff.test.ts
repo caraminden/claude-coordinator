@@ -117,6 +117,22 @@ test('each kind of failed land wakes the minion with the end of its output, and 
   }
 });
 
+test('a land whose branch moved but whose push to origin failed says it landed locally and what to do, never that it did not go through (#911)', async () => {
+  const s = setup('unpushed');
+  const out = 'land: CI passed on d1a5c2f6\nland: master is now at d1a5c2f "#15: seed the tree"\nland: master moved, but the push to origin failed: remote: Repository not found.\nfatal: repository \'https://github.com/o/r.git/\' not found\nland: the next landing retries it; if origin\'s master moved on its own (rejected as non-fast-forward), a person merges it into /repo first\n';
+  await s.land(out, 1);
+  await s.handoffs.poll();
+  assert.equal(s.sent.length, 1, 'woken once');
+  assert.doesNotMatch(s.sent[0], /didn't go through|hand it off again with hand_off_land/);
+  assert.match(s.sent[0], /master moved locally to d1a5c2f "#15: seed the tree"/);
+  assert.match(s.sent[0], /push to origin failed: remote: Repository not found\.\nfatal: repository 'https:\/\/github\.com\/o\/r\.git\/' not found/);
+  assert.match(s.sent[0], /git push origin master/, 'says how to push it now');
+  assert.ok(s.notes.some((n) => n.startsWith('Shipped d1a5c2f "#15: seed the tree"') && /not pushed to origin/i.test(n)), 'the shipped line says it landed but is not pushed');
+  assert.equal(s.ticket.state, null, 'left open for the minion to push');
+  assert.ok(!s.did.some((d) => d.startsWith('close')), 'not dismissed');
+  assert.deepEqual(landResult(out, 1), { kind: 'unpushed', commit: 'd1a5c2f', subject: '#15: seed the tree', branch: 'master', error: "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found" });
+});
+
 test('exit 75 (no CI verdict) parks the minion until the runners are back, or wakes it when there are none to watch', async () => {
   const s = setup('no-ci');
   await s.land('land: CI gave no verdict\n', 75);

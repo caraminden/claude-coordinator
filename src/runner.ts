@@ -609,7 +609,11 @@ export class Runner {
     const project = this.store.getProject(ticket.project_id);
     // land.sh's retro_log and run-tests.sh's log_flake write there, as they do from a turn.
     const shared = project && this.sharedDir(project);
-    return { ...turnEnv(process.env), ...this.coordinatorEnv(ticket, token), ...this.heavyEnv(ticket, ticket.person_id), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id), ...(shared ? { COORDINATOR_SHARED_DIR: shared } : {}) };
+    // Its pushes and gh calls go out as the person the minion's turns run for, as from the turn (#911): the box's gh
+    // login can't see a member's private repo. Its gh folder is the person's, since the land outlives the turn's folder.
+    const person = (this.turns.has(ticket.id) ? this.store.getSetting<TurnState>(turnKey(ticket.id))?.person : null) ?? ticket.person_id;
+    const github = this.githubFor?.(person, join(this.dataDir, 'people', String(person ?? 'nobody')))?.env;
+    return { ...turnEnv(process.env), ...github, ...this.coordinatorEnv(ticket, token), ...this.heavyEnv(ticket, ticket.person_id), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id), ...(shared ? { COORDINATOR_SHARED_DIR: shared } : {}) };
   }
 
   /** citadel-heavy's slots (#325), in the projects folder every person's container mounts at the same path, and who a job runs for. */

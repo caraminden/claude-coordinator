@@ -502,8 +502,9 @@ test('weekly on one account and 5-hour on another: the note says which account i
     await until(() => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.state === 'limited', 'both accounts to hit their limits');
     const note = events(id, 'note').at(-1)!;
     assert.match(note, /This account \(two@x\) is out until [^\n]*\(weekly\)\./);
-    assert.match(note, /one@x is out until \S+\./);
-    assert.match(note, /carries on at \S+, when one@x's limit resets/);
+    // The 5-hour reset is two hours off, so from 10pm Pacific it falls tomorrow and the clock carries a weekday ("Tue 12:00am").
+    assert.match(note, /one@x is out until (?:[A-Z][a-z]{2} )?\d{1,2}:\d{2}[ap]m\./);
+    assert.match(note, /carries on at (?:[A-Z][a-z]{2} )?\d{1,2}:\d{2}[ap]m, when one@x's limit resets/);
     assert.doesNotMatch(note, /Every linked Claude account is limited now\. It resumes/);
     const v = runner.view(store.getTicket(id)!);
     assert.equal(v.limit_resume_at! < week, true, 'waits for the 5-hour account, not the week');

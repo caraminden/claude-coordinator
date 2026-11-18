@@ -427,6 +427,7 @@ window.COLOURS = [
         <tr><td><code>theme.css</code></td><td>Every token below, as <code>--citadel-*</code>. Built from Citadel's own <code>public/style.css</code> by <code>src/theme.ts</code>, so Citadel and the apps read one source.</td><td><code>&lt;link rel="stylesheet"&gt;</code>, as today</td></tr>
         <tr><td><code>ui/base.css</code></td><td>Buttons, inputs, chips, notices, the spinner, busy regions and skeletons, the focus ring: class-only parts (<code>cui-*</code>).</td><td><code>&lt;link&gt;</code> after theme.css</td></tr>
         <tr><td><code>ui/markdown.js</code></td><td>Markdown to safe DOM, one link rule, a streaming mode.</td><td>ES module import</td></tr>
+        <tr><td><code>ui/marks.js</code></td><td>Marks on a picture (#946, #960): boxes, arrows, pens, numbered pins and labels, drawn on a canvas (<code>drawMark</code>) or as an SVG over a chat picture (<code>marksOverlay</code>), and the marks title an agent writes (<code>parseMarks</code>, <code>marksTitle</code>). The markdown renderer uses it by itself.</td><td>ES module import, only to draw marks yourself</td></tr>
         <tr><td><code>ui/chat.js</code></td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line, fed the turn API's events as they come. Citadel's own action, phase and Grunt rows draw their marks with it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/tip.js</code></td><td>Tooltips: <code>data-tip</code> on anything, one <code>mountTips()</code> call. Hover, keyboard focus, a tap or a long press opens it; it sits below or above the thing, never over it; a slow body shows skeleton lines. Ported from Theory of Crafting (#296).</td><td>ES module; its look is <code>.cui-tip</code> in base.css</td></tr>
@@ -774,6 +775,13 @@ background: var(--citadel-warn-tint);</code></pre></div>
       <div class="mk-about">
         <p>The agent's words as safe DOM: headings 22/18/16 in a doc (16 at most in a chat reply), lists with their markers and a nested indent, a table that scrolls in its own box, code blocks with a Copy button (top right, on hover; always on a phone), quotes. External links open a new tab.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/markdown.js</code> · <code>.cui-md</code></p>
+      </div>
+    </div>
+    <div class="mk-specimen">
+      <div class="mk-show doc-block"><div class="cui-md" id="marks-demo"><p>Open the page beside the repo to see the marked picture.</p></div></div>
+      <div class="mk-about">
+        <p>A marked picture (#960): an agent points at part of a picture with boxes, arrows, numbered pins and short labels, written in the image's title (<code>![Save](shot.png "marks 1280x900: box 71 4 80 8; arrow 52 20 70 7; pin 1 81 6; label 40 22 Click Save")</code>, numbers in percent from the top left). The marks lie over the picture as an SVG that scales with it, in #946's red and yellow at its line weight, and a Marks toggle under it hides them. Citadel's chats add ✎ Draw on it (the <code>drawMarks</code> option), which opens the picture in the drawing tools with the agent's marks as marks people can undo or add to. A title with any wrong mark shows the picture plain. Live: the real renderer, on a code-made picture.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/marks.js</code>, through <code>renderMarkdown</code> · <code>.cui-marked</code>, <code>.cui-marks</code>, <code>.cui-marks-toggle</code>, <code>.cui-marks-draw</code></p>
       </div>
     </div>
   </section>
@@ -1363,6 +1371,15 @@ row.innerHTML =
   applyTheme('auto');
   measures();
 })();
+</script>
+<script type="module">
+// The marked picture runs the real renderer over a code-made "settings" picture.
+try {
+  const { markdownElement } = await import('../../public/ui/markdown.js');
+  const pic = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#24262b"/><rect width="640" height="44" fill="#31343a"/><text x="20" y="28" fill="#ddd" font-family="sans-serif" font-size="16">Settings</text><rect x="470" y="9" width="70" height="26" rx="5" fill="#3d7bd9"/><text x="505" y="27" fill="#fff" font-family="sans-serif" font-size="13" text-anchor="middle">Save</text><rect x="40" y="80" width="560" height="34" rx="4" fill="#31343a"/><rect x="40" y="130" width="560" height="34" rx="4" fill="#31343a"/><rect x="40" y="180" width="260" height="34" rx="4" fill="#31343a"/></svg>');
+  const image = (href, alt, title) => `<img src="${href}" alt="${alt}"${title ? ` title="${title}"` : ''}>`;
+  document.getElementById('marks-demo').replaceWith(markdownElement(`Press **Save** at the top right:\n\n![Settings page](${pic} "marks 640x360: box 72 1.5 86 10.5; arrow 55 30 71 9; pin 1 89 6; label 40 33 Save is here; box yellow 5 49 48 61")`, { image, drawMarks: true }));
+} catch {}
 </script>
 <script type="module">
 // The media viewer specimen runs the real parts; a page opened without the repo beside it keeps the notice.

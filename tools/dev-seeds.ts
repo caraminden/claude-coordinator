@@ -4,6 +4,8 @@
 // to a scheme named "Seeded", so they work on --data empty and on a copy of the live data alike.
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { deflateSync } from 'node:zlib';
+import { marksTitle } from '../public/ui/marks.js';
 import type { Project, Store, Ticket } from '../src/db.ts';
 import { projectDir } from '../src/workspace.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
@@ -75,6 +77,39 @@ function chat(c: SeedCtx, t: Ticket, steps: number) {
 
 const hex = () => Math.random().toString(16).slice(2, 14).padEnd(12, '0');
 const route = (c: SeedCtx, t: Ticket, eventId?: number) => `#/p/${c.project.id}/t/${t.number}${eventId ? `?e=${eventId}` : ''}`;
+
+/** A code-made PNG "screenshot" (#960): a settings page as plain boxes, `rects` as [x, y, w, h, rgb]. */
+function pngOf(w: number, h: number, rects: [number, number, number, number, number][]): Buffer {
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const hit = rects.findLast(([rx, ry, rw, rh]) => x >= rx && x < rx + rw && y >= ry && y < ry + rh);
+      const rgb = hit ? hit[4] : 0x1e2024;
+      raw.writeUIntBE(rgb, y * (w * 3 + 1) + 1 + x * 3, 3);
+    }
+  }
+  const chunk = (type: string, data: Buffer) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    out.write(type, 4, 'latin1');
+    data.copy(out, 8);
+    out.writeInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const head = Buffer.alloc(13);
+  head.writeUInt32BE(w, 0);
+  head.writeUInt32BE(h, 4);
+  head.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', head), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+function crc32(b: Buffer): number {
+  let c = ~0;
+  for (const byte of b) {
+    c ^= byte;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c;
+}
 
 export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => string }> = {
   'question-card': {
@@ -330,6 +365,40 @@ mock.boards('#takes', { boards: [
         ].join('\n'));
         w.done(`Week ${i} summarised.`);
       }
+      return route(c, t);
+    },
+  },
+  'marked-picture': {
+    about: 'someone pasted a screenshot and the minion answered with a box, an arrow, a pin and a label drawn over it (#960)',
+    seed(c) {
+      const t = minion(c, 'Where do I start a fresh session?', { state: 'ready', note: 'pointed at the button' });
+      const [w, h] = [1280, 800];
+      const png = pngOf(w, h, [[0, 0, 1280, 64, 0x2b2e34], [24, 20, 160, 24, 0x5a5f69], [960, 14, 150, 36, 0x3d7bd9], [1130, 14, 126, 36, 0x3a3e46],
+        [0, 64, 260, 736, 0x24272c], [24, 96, 210, 30, 0x3a3e46], [24, 140, 210, 30, 0x31343a], [24, 184, 210, 30, 0x31343a],
+        [300, 104, 940, 120, 0x2b2e34], [300, 248, 700, 120, 0x2b2e34], [300, 392, 940, 120, 0x2b2e34], [300, 690, 940, 80, 0x31343a]]);
+      const name = `${hex()}${hex()}.png`;
+      const uploads = join(projectDir(c.dataDir, c.project.id), 'uploads', String(t.id));
+      const shared = join(projectDir(c.dataDir, c.project.id), 'shared', String(t.id));
+      for (const dir of [uploads, shared]) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, name), png);
+      }
+      const px = (x: number, y: number) => ({ x: (x * w) / 100, y: (y * h) / 100 });
+      const title = marksTitle(w, h, [
+        { tool: 'box', colour: 'red', pts: [px(74, 1), px(87.5, 7.5)] },
+        { tool: 'arrow', colour: 'red', pts: [px(55, 22), px(73, 7)] },
+        { tool: 'pin', colour: 'red', n: 1, pts: [px(89.5, 4.2)] },
+        { tool: 'label', colour: 'red', text: 'Fresh session', pts: [px(48, 25)] },
+        { tool: 'box', colour: 'yellow', pts: [px(1.5, 11), px(19, 16.5)] },
+      ]);
+      const ch = chat(c, t, 1);
+      ch.put('user_message', { author: c.who, text: 'Where do I click to start a fresh session?', images: [name] });
+      ch.call('mcp__thread__mark_image', { image: join(uploads, name), alt: 'Where Fresh session is', marks: [] }, 'Put this line in your reply as it is.');
+      ch.said([
+        'It\'s the blue button at the top right (**1**). The yellow box is the minion you\'re on.', '',
+        `![Where Fresh session is](${join(shared, name)} "${title}")`,
+      ].join('\n'));
+      ch.done('Pointed.');
       return route(c, t);
     },
   },

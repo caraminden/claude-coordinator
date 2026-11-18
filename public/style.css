@@ -112,10 +112,10 @@ body {
   font: var(--size-body)/1.5 var(--font);
 }
 a { color: inherit; }
-/* These three not inside Citadel UI's media parts (ui/media.js, #833), nor on its buttons (.cui-btn, the dialog's ✕,
+/* These not inside Citadel UI's media parts (ui/media.js, #833) or a marked picture's bar (#960), nor on its buttons (.cui-btn, the dialog's ✕,
    #872), which draw their own controls as they do in apps: :not(:where(…)) adds no weight, so every rule that outranked them still does. */
 :is(button, input, select):not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *, .cui-btn)), textarea { font: inherit; color: inherit; }
-button:not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *, .cui-btn)) {
+button:not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *, .cui-btn, .cui-marks-bar *)) {
   background: var(--accent);
   color: var(--on-accent);
   border: 0;
@@ -126,15 +126,15 @@ button:not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *, .cui-btn)) {
 button.secondary, a.button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--control-line); }
 a.button { display: inline-block; text-decoration: none; border-radius: 6px; padding: 0.2rem 0.65rem; font-size: 0.85em; }
 button:disabled { opacity: 0.5; cursor: default; }
-input:not(:where(.cui-scrubber *, .cui-panner *)), textarea, select:not(:where(.cui-panner *)) {
+input:not(:where(.cui-scrubber *, .cui-panner *, .cui-marks-bar *)), textarea, select:not(:where(.cui-panner *)) {
   background: var(--panel);
   border: 1px solid var(--control-line);
   border-radius: 6px;
   padding: 0.45rem 0.6rem;
   width: 100%;
 }
-label { display: block; margin-bottom: 0.75rem; color: var(--muted); font-size: 0.9em; }
-label input, label textarea, label select { margin-top: 0.25rem; color: var(--ink); font-size: 1rem; }
+label:not(:where(.cui-marks-bar *)) { display: block; margin-bottom: 0.75rem; color: var(--muted); font-size: 0.9em; }
+label:not(:where(.cui-marks-bar *)) :is(input, textarea, select) { margin-top: 0.25rem; color: var(--ink); font-size: 1rem; }
 code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
 /* A row's one status chip (#492): Citadel UI's tone chip, never squeezed or wrapped by the row's text. */
 .state-chip { flex: none; white-space: nowrap; vertical-align: 0.08em; }

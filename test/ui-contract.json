@@ -19,6 +19,17 @@
       "slug",
       "updateMarkdown"
     ],
+    "marks.js": [
+      "COLOURS",
+      "MAX_LABEL",
+      "MAX_MARKS",
+      "drawMark",
+      "lineWidth",
+      "markSvg",
+      "marksOverlay",
+      "marksTitle",
+      "parseMarks"
+    ],
     "composer.js": [
       "continueList",
       "fitHeight",
@@ -176,6 +187,12 @@
       "cui-copy-text",
       "cui-front-matter",
       "cui-link",
+      "cui-marked",
+      "cui-marked-pic",
+      "cui-marks",
+      "cui-marks-bar",
+      "cui-marks-draw",
+      "cui-marks-toggle",
       "cui-md",
       "cui-shell",
       "cui-table",

@@ -11,8 +11,10 @@ export interface MarkdownOptions {
   headingBase?: number;
   /** A link's HTML, given its target unescaped and its text as HTML: for `[text](href)`, `<https://…>`, and bare URLs, DOIs and web addresses (a DOI's target is its https://doi.org/ address; "example.com/x" goes to https://example.com/x). Default: http(s) and mailto open a new tab (`rel="noopener noreferrer"`, never `_top`); anything else is an inert span.cui-link. */
   link?: (href: string, html: string) => string;
-  /** An image's HTML, given its target unescaped and its alt text escaped. Default: the alt text. */
+  /** An image's HTML, given its target unescaped and its alt text escaped. Default: the alt text. An image whose title is a marks title (`marks 1280x900: box 10 20 30 40; arrow 50 50 60 10`, see marks.js) gets the marks drawn over it, with a Marks toggle; its title reaches the hook as null. */
   image?: (href: string, alt: string, title: string | null) => string;
+  /** Give a marked image a "Draw on it" button (`button.cui-marks-draw`) for the page's own drawing tools (default false). */
+  drawMarks?: boolean;
   /** Runs over the inline HTML outside code and links (bare URLs, DOIs and web addresses are already links), e.g. to link bare words. Default: as is. */
   text?: (html: string) => string;
 }

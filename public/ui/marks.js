@@ -1,3 +1,6 @@
+// Citadel UI: marks on a picture. Served to apps as /apps/_citadel/ui/marks.js (types: marks.d.ts beside it).
+// Like every file in public/ui/, standalone: no imports from outside ui/.
+//
 // Marks on a picture (#946, #960): pen, arrow and box (people's drawing) and numbered pins and short labels (a
 // minion pointing at a screenshot). One look, drawn two ways: on a canvas while someone draws (drawMark), and as
 // an SVG over a chat picture, from the marks a minion wrote in the image's title (marksTitle, markSvg).

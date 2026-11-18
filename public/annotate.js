@@ -4,8 +4,6 @@
 import { h } from './base.js';
 import { COLOURS, drawMark, lineWidth } from './ui/marks.js';
 
-export { COLOURS, drawMark, lineWidth };
-
 const TOOLS = [['pen', '✎', 'Pen'], ['arrow', '↗', 'Arrow'], ['box', '▭', 'Box']];
 
 // The page's CSP refuses style attributes; a property set from script is allowed.

@@ -1837,11 +1837,11 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call(clear === true ? 'DELETE' : 'PUT', path, clear === true ? undefined : fields);
       return `Mandate answered ${r.status}: ${typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer)}`;
     }
-    case 'generate_image':
     case 'mark_image': {
       const r = await call('POST', `/api/tickets/${TICKET}/mark-image`, args);
       return `Put this line in your reply as it is; the chat draws the marks over the picture (${r.w}x${r.h}):\n${r.markdown}`;
     }
+    case 'generate_image':
     case 'edit_image':
     case 'generate_audio':
     case 'generate_speech': {

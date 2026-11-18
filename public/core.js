@@ -1114,14 +1114,16 @@ document.addEventListener('click', (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
   const el = e.target instanceof Element ? e.target : null;
   const marked = el?.closest('.cui-marked');
-  const img = el?.closest('.cui-marks-draw') ? marked?.querySelector('img') : el?.closest('.msg a > img, .md a > img, .msg a .cui-marked-pic > img, .md a .cui-marked-pic > img');
-  const link = img?.closest('a');
-  if (!link?.href) return;
+  // Draw on it takes the picture itself: a file preview's link is the file viewer's route, not the picture.
+  const draw = el?.closest('.cui-marks-draw');
+  const img = draw ? marked?.querySelector('img') : el?.closest('.msg a > img, .md a > img, .msg a .cui-marked-pic > img, .md a .cui-marked-pic > img');
+  const src = draw ? img?.src : img?.closest('a')?.href;
+  if (!src) return;
   e.preventDefault();
   const own = marked?.querySelector('.cui-marks-toggle > input')?.checked ? parseMarks(marked.dataset.marks) : null;
   // Ready to draw on (#946), as an image waiting to send: Done puts the marked copy in this chat's message box.
   const chatId = view?.kind === 'project' && view.main === 'chat' && img.closest('#log') ? view.id : null;
-  const lb = lightbox([{ src: link.href, alt: img.alt || 'Picture' }], chatId == null || !drawable(link.href) ? {} : {
+  const lb = lightbox([{ src, alt: img.alt || 'Picture' }], chatId == null || !drawable(src) ? {} : {
     render: (item, stage) => annotator(stage, item.src, {
       ...(own ? { marks: own.marks, size: { w: own.w, h: own.h } } : {}),
       doneLabel: 'Add to message',

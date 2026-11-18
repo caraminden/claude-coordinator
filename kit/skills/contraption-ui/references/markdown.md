@@ -18,6 +18,13 @@ closes a half `**`, `` ` `` or `[link`), `headingBase` (the level `#` draws as: 
 reply sits under your page's headings; a document passes 1), and hooks `link(href, html)`,
 `image(href, alt, title)`, `text(html)` returning HTML.
 
+Marked pictures (#960): an image whose title is a marks title draws its marks over the picture, with a
+Marks toggle under it. An agent writes them as `![Save button](shot.png "marks 1280x900: box 71 4 80 8;
+arrow 52 20 70 7; pin 1 81 6; label 40 22 Click Save")`: the picture's own size, then marks split by `;`,
+each a kind (`box`/`arrow` x1 y1 x2 y2, `pin` n x y, `label` x y words up to 40 characters), an optional
+`red` or `yellow`, numbers in percent of the picture from its top left. A title with any wrong mark shows
+the picture plain. Tell your app's agent this in its prompt if it should point at pictures.
+
 - Output is escaped first; the only tags are the renderer's own, so `innerHTML` with it is safe.
 - Bare URLs, `<https://…>`, DOIs (`10.1234/x`, `doi:10.1234/x`, to https://doi.org/) and web
   addresses with no scheme (`console.firebase.google.com/x`, to https://; only .com, .org, .net, .io,

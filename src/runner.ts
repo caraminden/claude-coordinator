@@ -3726,8 +3726,9 @@ export class Runner {
     // A split scheme's Overlord asks for everyone (#921): its cards show in every member's chat (#920 reads the flag). A note is for
     // everyone only when its emitter says so (`everyone: true`, and only on the Overlord): most are one person's.
     const lord = (EVERYONES.has(kind) || (data as { everyone?: unknown } | null)?.everyone === true) && this.isOverlord(this.store.getTicket(ticketId));
+    // The flag goes last, whatever order the caller wrote it in: the db's `data LIKE '{"text":…'` queries match a prefix.
+    if (data && typeof data === 'object' && 'everyone' in data) { const { everyone: _, ...rest } = data as Record<string, unknown>; data = rest; }
     if (lord) data = { ...(data as object), everyone: true };
-    else if (data && typeof data === 'object' && 'everyone' in data) { const { everyone: _, ...rest } = data as Record<string, unknown>; data = rest; }
     const row = this.store.addEvent(ticketId, kind, data);
     this.broadcast({ type: 'event', event: row });
     if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId);

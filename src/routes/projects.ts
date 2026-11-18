@@ -745,7 +745,7 @@ export const projectRoutes: Route[] = [
         store.setProjectUpstream(project.id, repoUrl, null);
         const coordinator = store.getOverlord(project.id);
         if (coordinator) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
         }
       }
       for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
@@ -758,22 +758,22 @@ export const projectRoutes: Route[] = [
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each minion's next turn.` });
         }
         if (coordinator && settings.plugin_dirs !== undefined) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each minion's next turn.` });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each minion's next turn.` });
         }
         if (coordinator && settings.optional_plugin_dirs !== undefined) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} set the optional plugin folders to: ${shown(settings.optional_plugin_dirs)}. Minions load them only when they pick them, from their next turn.` });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the optional plugin folders to: ${shown(settings.optional_plugin_dirs)}. Minions load them only when they pick them, from their next turn.` });
         }
         if (coordinator && settings.ci_quiet !== undefined) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} set the quiet CI workflows to: ${shown(settings.ci_quiet)}. Their red scheduled and dispatched runs no longer tell you.` });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the quiet CI workflows to: ${shown(settings.ci_quiet)}. Their red scheduled and dispatched runs no longer tell you.` });
         }
         if (coordinator && settings.ci_watch !== undefined) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} set the watched CI workflows to: ${shown(settings.ci_watch)}. When one goes red on main, you're woken once per red streak and told when it's back to green.` });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the watched CI workflows to: ${shown(settings.ci_watch)}. When one goes red on main, you're woken once per red streak and told when it's back to green.` });
         }
         if (coordinator && settings.default_effort !== undefined) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
         }
         if (coordinator && settings.onboarding === 'skipped') {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} skipped the scheme's setup. Tell the ${AGENT_NAME} to pick it up again any time.` });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} skipped the scheme's setup. Tell the ${AGENT_NAME} to pick it up again any time.` });
         }
       }
       if (instructions !== project.instructions) {

@@ -104,7 +104,7 @@ let pillTips = null;
 
 const badge = { on: null };
 /** The installed app's icon badge follows the purple pills (#980). */
-const updateBadge = () => syncBadge(wantsBadge(view?.projects, view?.projectId, seenHere), badge);
+export const updateBadge = () => syncBadge(wantsBadge(view?.projects, view?.projectId, seenHere), badge);
 
 // The items each scheme last told the server you saw (sorted keys, joined), so a redraw with nothing new writes nothing.
 const seenSent = new Map();

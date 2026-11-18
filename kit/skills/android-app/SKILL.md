@@ -172,6 +172,10 @@ citadel-android down               # when you're done
 - **Reach a dev server on perigee with `adb reverse`**:
   `adb -s emulator-5554 reverse tcp:<port> tcp:<port>`, then `http://127.0.0.1:<port>` in the phone.
   `10.0.2.2` inside the phone is the desktop, not perigee.
+- **The rail hides itself in a wrapper** (#935). A shell that loads the contraption (`server.url`) needs
+  nothing set: the kit's rail.js sees `window.Capacitor.isNativePlatform()` and draws no switcher rail, swipe
+  handle or Alt+` there. Only a non-Capacitor shell sets `CitadelApp` in its WebView's user agent
+  (Capacitor's own option is `appendUserAgent`). Check it on the emulator: the page shows no left panel.
 - **A Capacitor shell's WebView.** The page's console is in logcat under the tags `Capacitor` and
   `Capacitor/Console`; a debug build's WebView also shows in `chrome://inspect/#devices`. Replay a
   permission flow without reinstalling: `adb -s emulator-5554 shell pm revoke <appId>

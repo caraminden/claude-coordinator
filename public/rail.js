@@ -44,6 +44,21 @@ const host = inContraption && framedIn ? {
 const showing = () => (inContraption ? location.pathname.match(/\/apps\/([^/]+)\//) : location.hash.match(/^#\/apps\/([^/]+)$/))?.[1] ?? null;
 
 /**
+ * Whether this page runs inside an app's own native shell (a Capacitor WebView loading the contraption by `server.url`):
+ * a single-app window, where the switcher rail, its swipe handle and Alt+` have nothing to switch to. Needs nothing from
+ * the app: Capacitor injects `window.Capacitor` even for a remote page (`isNativePlatform()` true, `getPlatform()` 'android'
+ * or 'ios'), and a shell of another make can add "CitadelApp" to its user agent (capacitor.config `appendUserAgent`).
+ */
+export function inNativeApp(win = typeof window === 'object' ? window : null) {
+  if (!win) return false;
+  const cap = win.Capacitor;
+  try {
+    if (typeof cap?.isNativePlatform === 'function' ? cap.isNativePlatform() : cap?.getPlatform?.() && cap.getPlatform() !== 'web') return true;
+  } catch {}
+  return /\bCitadelApp\b/.test(win.navigator?.userAgent ?? '');
+}
+
+/**
  * The rail's entries for the contraptions `mine` (GET /api/contraptions/mine), with `current` the
  * contraption showing (null: Citadel's own views): Citadel first, then each contraption, which opens in
  * Citadel's window (#/apps/<name>): in the page from Citadel itself, through Citadel's root from a
@@ -419,6 +434,7 @@ function retryIcon(pic, tile, tries = 1) {
 
 /** Fetch your contraptions and draw the rail, or take it away when there are none. */
 export async function showRail() {
+  if (inNativeApp()) { hideRail(); return false; } // an app's own shell: no rail, handle or Alt+` switcher
   if (host) {
     // Framed in Citadel: no rail of its own, just the phone's way to Citadel's switcher.
     hideRail();

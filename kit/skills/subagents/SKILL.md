@@ -32,6 +32,7 @@ design.
 | `citadel:check-runner` | haiku | low |
 | `citadel:reviewer` | sonnet | medium |
 | `citadel:reviewer` on a high-risk change | opus | high |
+| `citadel:reviewer` on a build's final review | fable | medium |
 | `citadel:finding-checker` | opus | medium |
 | `citadel:finding-checker` on a high-risk change | fable | medium |
 | `citadel:fresh-eyes` | opus | high |

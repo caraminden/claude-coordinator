@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { after, test } from 'node:test';
 import { bridge, editorConnected, ensureEditor, idleCheck, idleVerdict, needsEditor, settings } from '../deploy/perigee-godot/godot-on-demand.mjs';
+import { until } from './wait.ts';
 
 // deploy/perigee-godot/godot-on-demand.mjs (#505): the Godot editor starts on the first tool call and stops
 // after 2 hours unused. Against a stub systemctl, a fake activity file and a fake clock.
@@ -14,10 +15,6 @@ const root = mkdtempSync(join(tmpdir(), 'perigee-godot-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const H = 3600_000;
 const NOW = Date.parse('2026-11-10T12:00:00Z');
-const until = async (ok: () => boolean) => {
-  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
-  assert.ok(ok());
-};
 
 /** A stub systemctl that logs its arguments and answers `show` with the given unit state. */
 function stub(name: string, unit: { ActiveState: string; FreezerState?: string; since?: number }) {
@@ -71,7 +68,7 @@ test('idle-check run as the timer runs it holds the stop lock while it stops the
   const script = join(import.meta.dirname, '..', 'deploy', 'perigee-godot', 'godot-on-demand.mjs');
   const run = spawn(process.execPath, [script, 'idle-check'], { stdio: 'ignore', env: { ...process.env, GODOT_SYSTEMCTL: s.cfg.systemctl, GODOT_ACTIVITY: s.cfg.activity, GODOT_STOP_LOCKED: '' } });
   after(() => run.exitCode === null && run.kill());
-  await until(() => existsSync(join(s.dir, 'stopping')));
+  await until("existsSync(join(s.dir, 'stopping'))", () => existsSync(join(s.dir, 'stopping')));
   const probe = spawn('flock', ['-n', '-s', join(s.dir, 'stop.lock'), 'true']);
   assert.equal(await new Promise((r) => probe.on('exit', r)), 1, 'a call would wait for this stop');
   assert.equal(await new Promise((r) => run.on('exit', r)), 0);
@@ -214,11 +211,11 @@ test('bridge: the handshake goes straight through, a tool call waits for the edi
   const b = fakeBridge(s);
   s.used(NOW - 3 * H);
   b.send({ jsonrpc: '2.0', id: 1, method: 'initialize' });
-  await until(() => b.seen(1));
+  await until('b.seen(1)', () => b.seen(1));
   // Every turn in a lent scheme opens a session: its handshake isn't use, or the editor never goes idle (#615).
   assert.equal(b.fresh(), false, 'the handshake does not count as use');
   b.send({ jsonrpc: '2.0', id: 4, method: 'ping' });
-  await until(() => b.seen(4));
+  await until('b.seen(4)', () => b.seen(4));
   assert.equal(b.fresh(), false, 'nor does a ping');
 
   // U+2028 in the arguments, as script text can hold: JSON leaves it raw, and the line must stay whole.
@@ -228,14 +225,14 @@ test('bridge: the handshake goes straight through, a tool call waits for the edi
   assert.equal(b.seen(3), false, 'the listing waits behind the held call, to keep the order');
   assert.ok(b.fresh(), 'a tool call counts as use');
   b.ready();
-  await until(() => b.seen(3));
+  await until('b.seen(3)', () => b.seen(3));
   assert.equal(b.seen(2), false);
 
   // The call is in flight (the fake holds it): the keep-alive stamps the file again after it is set back.
   s.used(NOW - 3 * H);
-  await until(b.fresh);
+  await until('b.fresh', b.fresh);
   b.send({ jsonrpc: '2.0', method: 'test/release' });
-  await until(() => b.seen(2));
+  await until('b.seen(2)', () => b.seen(2));
   assert.equal(b.replies.find((r) => r.id === 2).result.params.arguments.text, 'a\u2028b\u2029c');
   // Answered: nothing in flight, so nothing stamps it any more.
   await new Promise((r) => setTimeout(r, 30));
@@ -251,7 +248,7 @@ test('bridge: a call the client cancelled stops keeping the editor up', async ()
   b.ready();
   b.send({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'project_run' } });
   s.used(NOW - 3 * H);
-  await until(b.fresh);
+  await until('b.fresh', b.fresh);
   b.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7 } });
   await new Promise((r) => setTimeout(r, 30));
   s.used(NOW - 3 * H);
@@ -266,12 +263,12 @@ test('bridge: a tool call and its answer each count as use, with no keep-alive t
   b.ready();
   s.used(NOW - 3 * H);
   b.send({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'editor_state' } });
-  await until(b.fresh);
+  await until('b.fresh', b.fresh);
   // Past the stamp throttle (300 ms here, 5 s live), as an answer after a long call is.
   await new Promise((r) => setTimeout(r, 400));
   s.used(NOW - 3 * H);
   b.send({ jsonrpc: '2.0', method: 'test/release' });
-  await until(() => b.seen(8));
+  await until('b.seen(8)', () => b.seen(8));
   assert.ok(b.fresh(), 'the answer counts as use');
   assert.equal(await b.close(), 0);
 });

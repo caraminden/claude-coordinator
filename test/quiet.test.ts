@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
 import { checkProcess, descendants, GRACE_MS, longestTool, noteEvent, QUIET_MS, quietAt, toolLimit } from '../src/quiet.ts';
+import { until } from './wait.ts';
 
 const use = (id: string, name: string, input: object) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
 const result = (id: string) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id }] } });
@@ -78,11 +79,6 @@ const tick = setInterval(() => {
 `);
 chmodSync(fake, 0o755);
 
-async function until(check: () => boolean) {
-  for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
-
 test('the runner saves a turn going quiet, not while it waits on a person, and clears it when the turn talks again (#906)', async () => {
   const store = new Store(join(root, 'test.db'));
   const project = store.createProject('Test', null);
@@ -91,7 +87,7 @@ test('the runner saves a turn going quiet, not while it waits on a person, and c
   const r = new Runner(store, () => {}, () => ({}), fake);
   r.pollMs = 10;
   r.send(t.id, 'Cara', 'go');
-  await until(() => !!(r as any).turns.get(t.id));
+  await until('!!(r as any).turns.get(t.id)', () => !!(r as any).turns.get(t.id));
   const live = (r as any).turns.get(t.id);
   const saved = () => store.getSetting<{ quiet?: number }>(`turn:${t.id}`)?.quiet ?? null;
   const goQuiet = () => {
@@ -116,9 +112,9 @@ test('the runner saves a turn going quiet, not while it waits on a person, and c
   goQuiet();
   assert.ok(saved());
   writeFileSync(join(root, 'talk'), '');
-  await until(() => saved() === null);
+  await until('saved() === null', () => saved() === null);
   assert.equal(r.activityOf(t.id)!.quiet_since, null);
 
   writeFileSync(join(root, 'release'), '');
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
 });

@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { isNetworkFailure, MAX_NET_RESUMES, Runner } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // A turn that died because the network or the API was unreachable waits for one server-wide probe to
@@ -63,10 +64,6 @@ function makeRunner() {
 let runner = makeRunner();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(cond: () => boolean, what: string) {
-  for (let i = 0; i < 250 && !cond(); i++) await sleep(20);
-  assert.ok(cond(), `timed out waiting for ${what}`);
-}
 
 function minion() {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
@@ -79,7 +76,7 @@ function minion() {
 async function turn(id: number, result: string, text = 'go', author = 'Cara') {
   setRelease(result);
   runner.send(id, author, text);
-  await until(() => !runner.isRunning(id), 'the turn to end');
+  await until('the turn to end', () => !runner.isRunning(id));
   return store.getTicket(id)!;
 }
 
@@ -127,10 +124,10 @@ test('an outage waits for the probe, backing off, then resumes with the messages
   const before = turnsRun();
   rmSync(release, { force: true });
   runner.send(id, 'Cara', 'go');
-  await until(() => runner.isRunning(id), 'the turn to start');
+  await until('the turn to start', () => runner.isRunning(id));
   runner.send(id, 'Cara', 'queued behind it');
   setRelease(OUTAGE);
-  await until(() => !runner.isRunning(id), 'the turn to die');
+  await until('the turn to die', () => !runner.isRunning(id));
   let t = store.getTicket(id)!;
   assert.equal(t.status, 'error');
   assert.equal(t.note, 'Network outage: resumes once it is back');
@@ -139,13 +136,13 @@ test('an outage waits for the probe, backing off, then resumes with the messages
   assert.equal(pushes.length, 0, 'an outage pushes nobody');
   assert.equal(runner.netWait(id)?.tries, 1);
   // The probe backs off, doubling up to the cap, and no turn starts while it fails.
-  await until(() => probes.length >= 4, 'four failed probes');
+  await until('four failed probes', () => probes.length >= 4);
   assert.deepEqual(probes.slice(0, 4), [20, 40, 80, 80]);
   await sleep(100);
   assert.equal(turnsRun(), before + 1, 'the queued message did not start a turn into the outage');
   setRelease('ok');
   up = true;
-  await until(() => turnsRun() === before + 2 && !runner.isRunning(id), 'the resume');
+  await until('the resume', () => turnsRun() === before + 2 && !runner.isRunning(id));
   assert.match(lastPrompt(), /network or the model's API was unreachable[\s\S]*check the state of your work \(git first/);
   assert.match(lastPrompt(), /queued behind it/);
   assert.ok(events(id, 'note').includes('Resumed after a network outage'));
@@ -171,7 +168,7 @@ test('one probe serves every waiting thread, and each resumes', async () => {
   up = true;
   gate = null;
   open();
-  await until(() => turnsRun() === before + 2 && !runner.isRunning(a) && !runner.isRunning(b), 'both resumes');
+  await until('both resumes', () => turnsRun() === before + 2 && !runner.isRunning(a) && !runner.isRunning(b));
   assert.equal(store.getSetting('net-resumes'), null);
 });
 
@@ -190,7 +187,7 @@ test("a turn that ends well clears the failure note a failed turn left, and only
     const before = turnsRun();
     setRelease(result);
     runner.send(id, 'Cara', text);
-    await until(() => turnsRun() > before && !runner.isRunning(id), 'the turn to run');
+    await until('the turn to run', () => turnsRun() > before && !runner.isRunning(id));
     return store.getTicket(id)!;
   };
   assert.equal((await turn(id, 'ok')).note, 'before', "a note the agent set stays through a turn that doesn't touch it");
@@ -215,7 +212,7 @@ test("a Taskmaster's note only ever says how its last turn failed, so its next t
   const before = turnsRun();
   setRelease('ok');
   runner.send(tm.id, 'Cara', 'hi');
-  await until(() => turnsRun() > before && !runner.isRunning(tm.id), 'the turn to run');
+  await until('the turn to run', () => turnsRun() > before && !runner.isRunning(tm.id));
   assert.equal(store.getTicket(tm.id)!.note, null);
 });
 
@@ -224,7 +221,7 @@ test(`it stops retrying after ${MAX_NET_RESUMES} network resumes in a row`, asyn
   const id = minion();
   const before = turnsRun();
   await turn(id, OUTAGE);
-  await until(() => store.getTicket(id)!.note?.startsWith('Network: stopped retrying') ?? false, 'it to stop retrying');
+  await until('it to stop retrying', () => store.getTicket(id)!.note?.startsWith('Network: stopped retrying') ?? false);
   assert.equal(turnsRun() - before, 1 + MAX_NET_RESUMES);
   assert.equal(store.getTicket(id)!.note, `Network: stopped retrying after ${MAX_NET_RESUMES} resumes`);
   assert.match(events(id, 'error').at(-1)!, /EAI_AGAIN[\s\S]*resumed 3 times in a row after a network outage, so it stopped retrying/);
@@ -245,15 +242,15 @@ test("a person's message that arrives first wins, and takes the held messages wi
   const id = minion();
   rmSync(release, { force: true });
   runner.send(id, 'Cara', 'go');
-  await until(() => runner.isRunning(id), 'the turn to start');
+  await until('the turn to start', () => runner.isRunning(id));
   runner.send(id, 'Cara', 'held one');
   setRelease(OUTAGE);
-  await until(() => !runner.isRunning(id), 'the turn to die');
+  await until('the turn to die', () => !runner.isRunning(id));
   assert.ok(runner.netWait(id));
   const before = turnsRun();
   setRelease('ok');
   runner.send(id, 'Cara', 'are you there?');
-  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), "the person's turn");
+  await until("the person's turn", () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.match(lastPrompt(), /held one[\s\S]*are you there\?/);
   assert.doesNotMatch(lastPrompt(), /network or the model's API was unreachable/, 'their turn, not a resume');
   assert.equal(runner.netWait(id), null);
@@ -278,7 +275,7 @@ test('a stop or a dismissal ends the wait', async () => {
   assert.equal(turnsRun(), before, 'neither resumed');
   setRelease('ok');
   runner.send(a, 'Cara', 'carry on');
-  await until(() => turnsRun() > before && !runner.isRunning(a), 'the turn after the stop');
+  await until('the turn after the stop', () => turnsRun() > before && !runner.isRunning(a));
   assert.equal(store.getTicket(a)!.note, null, "the stop's note goes with the next good turn");
 });
 
@@ -287,21 +284,21 @@ test('the wait and its held messages outlive a restart while the network is stil
   const id = minion();
   rmSync(release, { force: true });
   runner.send(id, 'Cara', 'go');
-  await until(() => runner.isRunning(id), 'the turn to start');
+  await until('the turn to start', () => runner.isRunning(id));
   runner.send(id, 'Cara', 'held across the restart');
   setRelease(OUTAGE);
-  await until(() => !runner.isRunning(id), 'the turn to die');
+  await until('the turn to die', () => !runner.isRunning(id));
   const before = turnsRun();
   // A new server on the same database; the old one's probe stops with it.
   runner.detachAll();
   runner = makeRunner();
   runner.recover();
   probes.length = 0;
-  await until(() => probes.length >= 1, 'the new server to probe');
+  await until('the new server to probe', () => probes.length >= 1);
   assert.equal(turnsRun(), before);
   setRelease('ok');
   up = true;
-  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume after the restart');
+  await until('the resume after the restart', () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.match(lastPrompt(), /network or the model's API was unreachable[\s\S]*held across the restart/);
   assert.equal(store.getSetting('net-resumes'), null);
 });
@@ -319,7 +316,7 @@ test("a resume keeps the dead turn's asker, and with it their machines", async (
     const before = turnsRun();
     setRelease('ok');
     up = true;
-    await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume');
+    await until('the resume', () => turnsRun() === before + 1 && !runner.isRunning(id));
     assert.deepEqual(seen.at(-1), [josh.id], 'the resume answers the same person');
   } finally {
     runner.personOf = undefined;
@@ -347,7 +344,7 @@ test("the wait stays saved until the resume's turn starts, so a restart during t
     finish();
   }
   setRelease('ok');
-  await until(() => !runner.isRunning(id) && runner.netWait(id) === null && events(id, 'note').includes('Resumed after a network outage'), 'the resume after the save');
+  await until('the resume after the save', () => !runner.isRunning(id) && runner.netWait(id) === null && events(id, 'note').includes('Resumed after a network outage'));
 });
 
 test('a message held by the network wait shows as queued and can be taken back (#468 S03-9)', async () => {
@@ -355,11 +352,11 @@ test('a message held by the network wait shows as queued and can be taken back (
   const id = minion();
   rmSync(release, { force: true });
   runner.send(id, 'Cara', 'go');
-  await until(() => runner.isRunning(id), 'the turn to start');
+  await until('the turn to start', () => runner.isRunning(id));
   runner.send(id, 'Cara', 'never mind this');
   const msg = store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!;
   writeFileSync(release, OUTAGE);
-  await until(() => !runner.isRunning(id), 'the turn to die');
+  await until('the turn to die', () => !runner.isRunning(id));
   assert.deepEqual(runner.netWait(id)?.queued?.map((m) => m.id), [msg.id]);
   const shown = runner.view(store.getTicket(id)!);
   assert.deepEqual([shown.queued, shown.queued_ids], [1, [msg.id]]);
@@ -369,7 +366,7 @@ test('a message held by the network wait shows as queued and can be taken back (
   const before = turnsRun();
   writeFileSync(release, 'ok');
   up = true;
-  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume');
+  await until('the resume', () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.doesNotMatch(lastPrompt(), /never mind this/);
 });
 
@@ -378,22 +375,22 @@ test("a resume whose Claude can't start keeps the held messages for the next tur
   const id = minion();
   rmSync(release, { force: true });
   runner.send(id, 'Cara', 'go');
-  await until(() => runner.isRunning(id), 'the turn to start');
+  await until('the turn to start', () => runner.isRunning(id));
   runner.send(id, 'Cara', 'held through it all');
   setRelease(OUTAGE);
-  await until(() => !runner.isRunning(id), 'the turn to die');
+  await until('the turn to die', () => !runner.isRunning(id));
   assert.ok(runner.netWait(id));
   runner.placeFor = () => ({ refused: 'No Claude login for this turn.' });
   const before = turnsRun();
   try {
     setRelease('ok');
     up = true;
-    await until(() => events(id, 'note').includes('No Claude login for this turn.'), 'the refused resume');
+    await until('the refused resume', () => events(id, 'note').includes('No Claude login for this turn.'));
     assert.equal(turnsRun(), before);
   } finally {
     runner.placeFor = undefined;
   }
   runner.send(id, 'Cara', 'now?');
-  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), "the person's turn");
+  await until("the person's turn", () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.match(lastPrompt(), /held through it all[\s\S]*now\?/);
 });

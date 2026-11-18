@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_RESUMES, Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // A stand-in for `claude -p` that logs each prompt it gets and runs until a release file appears. It ignores
@@ -55,7 +56,7 @@ function newTicket() {
 /** The server dies mid-turn and its turn goes with it (no unit, or the unit died too): nothing records the turn's end. */
 async function crash(r: Runner, id: number) {
   const dir: string = (r as any).turns.get(id).dir;
-  await until(() => existsSync(join(dir, 'pid.json')));
+  await until("existsSync(join(dir, 'pid.json'))", () => existsSync(join(dir, 'pid.json')));
   r.detachAll();
   const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
   for (const pid of [wrapper, -claude]) {
@@ -66,17 +67,12 @@ async function crash(r: Runner, id: number) {
     }
   }
   // A killed process lingers for a moment; the next server must find it dead, as it would after a real crash.
-  await until(() => !existsSync(`/proc/${wrapper}`) || !readFileSync(`/proc/${wrapper}/cmdline`, 'utf8').includes(dir));
-}
-
-async function until(check: () => boolean) {
-  for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
+  await until('!existsSync(`/proc/${wrapper}`) || !readFileSync(`/proc/${wrapper}/cmdline`, ...', () => !existsSync(`/proc/${wrapper}`) || !readFileSync(`/proc/${wrapper}/cmdline`, 'utf8').includes(dir));
 }
 
 async function finish(r: Runner, id: number) {
   writeFileSync(join(root, 'release'), '');
-  await until(() => !r.isRunning(id));
+  await until('!r.isRunning(id)', () => !r.isRunning(id));
   rmSync(join(root, 'release'), { force: true });
 }
 
@@ -95,9 +91,9 @@ test('an interrupted turn resumes after a restart, with the messages queued behi
   const after = server();
   after.recover();
   assert.equal(store.getTicket(id)!.status, 'idle');
-  await until(() => after.isRunning(id));
+  await until('after.isRunning(id)', () => after.isRunning(id));
   assert.ok(notes(id).includes('Resumed after a server restart'));
-  await until(() => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('also add a test'));
+  await until("existsSync(prompts) && readFileSync(prompts, 'utf8').includes('also add a test')", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('also add a test'));
   const prompt = readFileSync(prompts, 'utf8');
   assert.match(prompt, /\[System\]: The \S+ server restarted while you were working/);
   assert.match(prompt, /\[Josh\]: also add a test/);
@@ -112,7 +108,7 @@ test('a stopped turn is not resumed, even if the server restarts before it ends'
   before.send(id, 'Cara', 'build it');
   before.send(id, 'Cara', 'never mind');
   // Stopped once its claude has its prompt, and so its SIGTERM handler: a stop while it still starts lands as it starts (#470).
-  await until(() => readFileSync(prompts, 'utf8').includes('build it'));
+  await until("readFileSync(prompts, 'utf8').includes('build it')", () => readFileSync(prompts, 'utf8').includes('build it'));
   before.stop(id);
   await crash(before, id);
 
@@ -132,7 +128,7 @@ test(`a thread is resumed at most ${MAX_RESUMES} times in a row`, async () => {
     await crash(r, id);
     r = server();
     r.recover();
-    await until(() => r.isRunning(id));
+    await until('r.isRunning(id)', () => r.isRunning(id));
   }
   await crash(r, id);
   r = server();
@@ -147,7 +143,7 @@ test(`a thread is resumed at most ${MAX_RESUMES} times in a row`, async () => {
   await crash(r, id);
   r = server();
   r.recover();
-  await until(() => r.isRunning(id));
+  await until('r.isRunning(id)', () => r.isRunning(id));
   await finish(r, id);
 });
 
@@ -169,8 +165,8 @@ test('a resume still owed when the server restarts again is resumed by the next 
 
   const third = server();
   third.recover();
-  await until(() => third.isRunning(id));
-  await until(() => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs'));
+  await until('third.isRunning(id)', () => third.isRunning(id));
+  await until("existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs')", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs'));
   assert.match(readFileSync(prompts, 'utf8'), /\[System\]: The \S+ server restarted while you were working/);
   await finish(third, id);
   assert.equal(store.getSetting(`resume-owed:${id}`), null, 'the debt is paid once the resume starts');
@@ -192,6 +188,6 @@ test("messages queued behind a cut-off turn that isn't resumed outlive a second 
   r.detachAll();
   r = server();
   r.recover();
-  await until(() => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('queued behind it'));
+  await until("existsSync(prompts) && readFileSync(prompts, 'utf8').includes('queued behind it')", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('queued behind it'));
   await finish(r, id);
 });

@@ -10,6 +10,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { until } from './wait.ts';
 import { agentToken, bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'overlord-'));
@@ -69,14 +70,6 @@ const start = async (projectId: number, title: string) => {
 const events = (ticketId: number) => db.listEvents(ticketId).map((e) => ({ kind: e.kind, data: JSON.parse(e.data) }));
 const mail = (ticketId: number) => events(ticketId).filter((e) => e.kind === 'user_message' && e.data.mail).map((e) => String(e.data.text));
 const cards = (ticketId: number) => events(ticketId).filter((e) => e.kind === 'question').map((e) => e.data);
-async function until<T>(get: () => T, ok: (v: T) => boolean): Promise<T> {
-  let v = get();
-  for (let i = 0; i < 100 && !ok(v); i++) {
-    await new Promise((r) => setTimeout(r, 100));
-    v = get();
-  }
-  return v;
-}
 
 test("the Overlord hears of every start, and gets a card when one reads like another person's open minion", async () => {
   // Josh's minion has to be indexed before a look-alike can be found.
@@ -84,9 +77,9 @@ test("the Overlord hears of every start, and gets a card when one reads like ano
   for (let i = 0; i < 100 && !(await hits()).some((h: any) => h.ticket_id === joshWork.id); i++) await new Promise((r) => setTimeout(r, 100));
 
   const twin = await start(Shared.id, 'Fix the retry loop in land.sh after a refused push');
-  const heard = await until(() => mail(overlord.id), (m) => m.some((t) => t.includes(`#${twin.number}`)));
+  const heard = await until(`mail naming #${twin.number}`, () => { const m = mail(overlord.id); return m.some((t) => t.includes(`#${twin.number}`)) && m; });
   assert.ok(heard.some((t) => t.startsWith(`Cara started #${twin.number} `)), heard.join('\n'));
-  const [card] = await until(() => cards(overlord.id), (c) => c.length > 0);
+  const [card] = await until('a card for the look-alike', () => { const c = cards(overlord.id); return c.length > 0 && c; });
   assert.ok(card, 'a card for the look-alike');
   const q = card.questions[0];
   assert.match(q.question, new RegExp(`Cara started #${twin.number} .*Josh's #${joshWork.number} `));
@@ -95,13 +88,15 @@ test("the Overlord hears of every start, and gets a card when one reads like ano
 
   // A start that reads like nothing still reaches it, with no card.
   const other = await start(Shared.id, 'Paint the rail a calmer blue');
-  await until(() => mail(overlord.id), (m) => m.some((t) => t.includes(`#${other.number}`)));
-  await new Promise((r) => setTimeout(r, 500));
-  assert.equal(cards(overlord.id).length, 1);
+  await until(`mail naming #${other.number}`, () => mail(overlord.id).some((t) => t.includes(`#${other.number}`)));
+  // The card search runs after the mail line, so a second look-alike's card is the positive signal that it has had its turn.
+  const twin2 = await start(Shared.id, 'Fix the retry loop in land.sh after a refused push, again');
+  await until(`a card for #${twin2.number}`, () => cards(overlord.id).some((c) => c.questions[0].question.includes(`#${twin2.number} `)));
+  assert.ok(!cards(overlord.id).some((c) => c.questions[0].question.includes(`#${other.number} `)), 'no card for the unrelated start');
 
   // A scheme nobody else is in has no Overlord apart from its Taskmaster: no line for its own starts.
   const solo = await start(Solo.id, 'Retry loop in land.sh after a refused push');
-  await new Promise((r) => setTimeout(r, 500));
+  // The Overlord's mail line is left before the start's response returns, so there's nothing left to wait for.
   assert.ok(!mail(soloTm.id).some((t) => t.includes(`#${solo.number}`)));
 });
 
@@ -127,7 +122,7 @@ test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't;
   });
   assert.equal(res.status, 202);
   for (const tm of [ownCara, ownJosh]) {
-    const got = await until(() => mail(tm.id), (m) => m.some((t) => t.includes('Who takes the pipeline lane next?')));
+    const got = await until(`the answer in mail for Taskmaster #${tm.id}`, () => { const m = mail(tm.id); return m.some((t) => t.includes('Who takes the pipeline lane next?')) && m; });
     assert.ok(got.some((t) => /Cara answered the Overlord's card[\s\S]*→ Josh/.test(t)), got.join('\n'));
   }
   assert.ok(!mail(overlord.id).some((t) => t.includes('for your tracking')), 'the Overlord, the card\'s own chat, gets no tracking mail');
@@ -154,7 +149,7 @@ test("a person's Taskmaster asks for everyone: the card sits with the Overlord, 
     method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: id, answers: [{ selected: ['No'] }] }),
   });
   assert.equal(answered.status, 202);
-  const told = await until(() => events(ownJosh.id).filter((e) => e.kind === 'user_message' && !e.data.mail).map((e) => String(e.data.text)), (t) => t.some((x) => x.includes('Freeze lands')));
+  const told = await until("a plain message with 'Freeze lands' for Josh's Taskmaster", () => { const t = events(ownJosh.id).filter((e) => e.kind === 'user_message' && !e.data.mail).map((e) => String(e.data.text)); return t.some((x) => x.includes('Freeze lands')) && t; });
   assert.ok(told.some((t) => /for everyone[\s\S]*Freeze lands over the weekend\?\n→ No/.test(t)), told.join('\n'));
   const lord = events(overlord.id).filter((e) => e.kind === 'user_message');
   assert.ok(lord.some((e) => e.data.answer?.questionId === id && !e.data.mail), "the answer is in the Overlord's chat, where the card is");

@@ -13,6 +13,7 @@ import { fallbacks } from '../src/fallbacks.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TURN_SLICE } from '../src/turn-launch.ts';
 import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
@@ -111,10 +112,6 @@ function newTicket() {
   store.setTicketDir(t.id, root, null);
   return t.id;
 }
-async function until(check: () => boolean) {
-  for (let i = 0; i < 500 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 const status = (id: number) => store.getTicket(id)!.status;
 
@@ -122,11 +119,11 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   const id = newTicket();
   const r = runner(inContainer);
   r.send(id, 'Josh', 'build it');
-  await until(() => status(id) === 'running');
+  await until("status(id) === 'running'", () => status(id) === 'running');
   // A server restart doesn't stop a container turn, so it doesn't hold up the idle restart.
   assert.equal(r.inContainer('citadel-claude-test-2'), 1);
   assert.equal(r.interruptible(), 0);
-  await until(() => status(id) === 'idle');
+  await until("status(id) === 'idle'", () => status(id) === 'idle');
   const execs = jsonLines(calls);
   const start = execs.find((a) => a[0] === 'exec' && a[1] === '-d');
   assert.equal(start[2], 'citadel-claude-test-2');
@@ -171,7 +168,7 @@ test("a container turn answering the person's own typed message carries their id
   const id = newTicket();
   const r = runner(inContainer);
   r.send(id, 'Josh', 'what is on my list?', [], { typed: true });
-  await until(() => status(id) === 'idle');
+  await until("status(id) === 'idle'", () => status(id) === 'idle');
   const env = jsonLines(seen).at(-1).env;
   assert.deepEqual([env.CITADEL_PERSON_ID, env.CITADEL_PERSON_LOGIN, env.COORDINATOR_CONTAINER], [String(josh.id), 'josh', '1']);
 });
@@ -181,7 +178,7 @@ test("a container turn's exec runs in a scope of its own under the turns slice, 
   const r = runner(inContainer);
   r.units = true;
   r.send(id, 'Josh', 'build it');
-  await until(() => status(id) === 'idle');
+  await until("status(id) === 'idle'", () => status(id) === 'idle');
   const execs = jsonLines(calls);
   const scope = execs.findLast((c) => c[0] === 'systemd-run');
   assert.ok(scope, 'the exec starts through systemd-run');
@@ -200,7 +197,7 @@ test("a container turn still runs when systemd-run fails, with a plain podman ex
   try {
     const before = lines(calls).length;
     r.send(id, 'Josh', 'build it');
-    await until(() => status(id) === 'idle');
+    await until("status(id) === 'idle'", () => status(id) === 'idle');
     const execs = jsonLines(calls).slice(before);
     const failed = execs.findIndex((c) => c[0] === 'systemd-run');
     assert.ok(failed >= 0, 'it tried the scope first');
@@ -222,7 +219,7 @@ test('turns that fall back to the server, on the host or in a container, are cou
     const onHost = runner(() => ({ host: true }));
     onHost.units = true;
     onHost.send(host, 'Josh', 'build it');
-    await until(() => status(host) === 'idle');
+    await until("status(host) === 'idle'", () => status(host) === 'idle');
     assert.equal(fallbacks.count, count + 1, 'the host turn ran as the server\'s child, and counts');
     assert.equal(alerts.length, 1);
     assert.equal(alerts[0].ticketId, host);
@@ -232,7 +229,7 @@ test('turns that fall back to the server, on the host or in a container, are cou
     const r = runner(inContainer);
     r.units = true;
     r.send(inBox, 'Josh', 'build it');
-    await until(() => status(inBox) === 'idle');
+    await until("status(inBox) === 'idle'", () => status(inBox) === 'idle');
     assert.equal(fallbacks.count, count + 2, "the container turn's exec ran in the server's cgroup, and counts");
     assert.equal(alerts.length, 1, 'the same cause raises no second alert');
   } finally {
@@ -244,7 +241,7 @@ test("a person who can't run turns gets the reason as a note and no turn", async
   const id = newTicket();
   const r = runner(() => ({ refused: 'Turns for Josh start once they link their Claude account' }));
   r.send(id, 'Josh', 'build it');
-  await until(() => notes(id).some((n) => /link their Claude account/.test(n)));
+  await until('notes(id).some((n) => /link their Claude account/.test(n))', () => notes(id).some((n) => /link their Claude account/.test(n)));
   assert.notEqual(status(id), 'running');
 });
 
@@ -254,7 +251,7 @@ test('a sign-in Anthropic refuses mid-turn marks the link expired and says so', 
   const expired: number[] = [];
   r.onAuthFailure = (p) => expired.push(p);
   r.send(id, 'Josh', 'expired');
-  await until(() => notes(id).some((n) => /sign-in expired/.test(n)));
+  await until('notes(id).some((n) => /sign-in expired/.test(n))', () => notes(id).some((n) => /sign-in expired/.test(n)));
   assert.deepEqual(expired, [josh.id]);
 });
 
@@ -434,7 +431,7 @@ test("a person's container mounts their own turns' files, never another person's
   const b = newTicket();
   r.send(a, 'Ann', 'go');
   r.send(b, 'Ben', 'go');
-  await until(() => status(a) === 'idle' && status(b) === 'idle');
+  await until("status(a) === 'idle' && status(b) === 'idle'", () => status(a) === 'idle' && status(b) === 'idle');
   // The wrapper's folder, from each container's `podman exec -d <container> node <wrapper> <dir>`.
   const execs = jsonLines(calls);
   const dirOf = (container: string) => execs.findLast((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === container).at(-1) as string;
@@ -552,7 +549,7 @@ test('a podman exec that never returns fails the turn after its time limit, not 
   process.env.FAKE_PODMAN_HANGS = '1';
   try {
     r.send(id, 'Josh', 'build it');
-    await until(() => status(id) === 'error');
+    await until("status(id) === 'error'", () => status(id) === 'error');
   } finally {
     delete process.env.FAKE_PODMAN_HANGS;
   }
@@ -568,12 +565,12 @@ test('Stop ends a container turn whose claude has not started, and never will (C
   const dir = () => (r as any).turns.get(id)?.dir as string | undefined;
   try {
     r.send(id, 'Josh', 'build it');
-    await until(() => status(id) === 'running');
+    await until("status(id) === 'running'", () => status(id) === 'running');
     const turnDir = dir()!;
     assert.ok(!existsSync(join(turnDir, 'pid.json')));
     const stopped = Date.now();
     assert.equal(r.stop(id), true);
-    await until(() => !r.isRunning(id));
+    await until('!r.isRunning(id)', () => !r.isRunning(id));
     assert.ok(Date.now() - stopped < 1000, `ended ${Date.now() - stopped} ms after the stop, not when the exec gave up`);
     assert.equal(status(id), 'idle');
     // The exec gives up later, its turn's folder long gone: nothing is written, said or thrown.
@@ -590,10 +587,10 @@ test('a turn stopped while its container starts never reaches podman exec (C6)',
   let ready!: () => void;
   const r = runner(() => ({ ...inContainer(), ensure: () => new Promise<void>((res) => (ready = res)) }));
   r.send(id, 'Josh', 'build it');
-  await until(() => status(id) === 'running');
+  await until("status(id) === 'running'", () => status(id) === 'running');
   const before = jsonLines(calls).length;
   r.stop(id);
-  await until(() => !r.isRunning(id));
+  await until('!r.isRunning(id)', () => !r.isRunning(id));
   ready();
   await new Promise((res) => setTimeout(res, 200));
   assert.deepEqual(jsonLines(calls).slice(before), []);
@@ -614,17 +611,17 @@ test("a container turn's claude that starts just after the stop is still signall
   try {
     r.send(id, 'Josh', 'build it');
     const turnDir = (r as any).turns.get(id).dir as string;
-    await until(() => jsonLines(calls).some((c) => c.includes(turnDir))); // podman exec is under way
+    await until('jsonLines(calls).some((c) => c.includes(turnDir))', () => jsonLines(calls).some((c) => c.includes(turnDir))); // podman exec is under way
     r.stop(id);
     assert.ok(!existsSync(join(turnDir, 'pid.json')));
     assert.ok(existsSync(join(turnDir, 'exit.json')), 'the stop ends the turn at its next poll');
-    await until(() => existsSync(join(turnDir, 'pid.json')));
+    await until("existsSync(join(turnDir, 'pid.json'))", () => existsSync(join(turnDir, 'pid.json')));
     const before = jsonLines(calls).length;
     (r as any).poll(id);
     assert.equal(r.isRunning(id), true, 'its claude runs, so the turn is not cut loose');
-    await until(() => jsonLines(calls).length > before);
+    await until('jsonLines(calls).length > before', () => jsonLines(calls).length > before);
     assert.match(jsonLines(calls)[before].join(' '), /^exec citadel-claude-test-2 sh -c kill -TERM/);
-    await until(() => {
+    await until('{ (r as any).poll(id); return !r.isRunning(id); }', () => {
       (r as any).poll(id);
       return !r.isRunning(id);
     });

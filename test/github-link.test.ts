@@ -11,6 +11,7 @@ import { newToken } from '../src/machines.ts';
 import { hideTokens } from '../src/hide-tokens.ts';
 import { pushKind, Runner, slimEvent } from '../src/runner.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // People link their own GitHub (#182): the token is kept encrypted, and each turn gets the token of the
@@ -386,16 +387,12 @@ function newTicket() {
   return { id: t.id, dir };
 }
 
-async function until(check: () => boolean) {
-  for (let i = 0; i < 500 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
 const seen = (dir: string): string[] => jsonLines(join(dir, 'seen.txt'));
 const env = (dir: string) => JSON.parse(readFileSync(join(dir, 'env.json'), 'utf8'));
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 async function finish(r: Runner, t: { id: number; dir: string }) {
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
   rmSync(join(t.dir, 'release'));
 }
 
@@ -403,7 +400,7 @@ test('a turn runs for its sender: their token, a line in its prompt, a note on e
   const t = newTicket();
   const r = runner();
   r.send(t.id, 'Josh', 'push now');
-  await until(() => notes(t.id).some((n) => n.startsWith('Pushed')));
+  await until("notes(t.id).some((n) => n.startsWith('Pushed'))", () => notes(t.id).some((n) => n.startsWith('Pushed')));
   assert.deepEqual(env(t.dir), { token: 'gho_new', author: 'Josh D' });
   assert.match(seen(t.dir)[0], /GitHub: this turn runs for Josh/);
   assert.ok(notes(t.id).includes('Pushed as @joshdev (Josh\'s GitHub)'));
@@ -412,7 +409,7 @@ test('a turn runs for its sender: their token, a line in its prompt, a note on e
 
   // Cara hasn't linked: no token, and the failed push says why.
   r.send(t.id, 'Cara', 'push now');
-  await until(() => notes(t.id).some((n) => n.startsWith('Couldn\'t push')));
+  await until("notes(t.id).some((n) => n.startsWith('Couldn\'t push'))", () => notes(t.id).some((n) => n.startsWith('Couldn\'t push')));
   assert.deepEqual(env(t.dir), { token: null, author: 'Cara' });
   assert.match(notes(t.id).at(-1)!, /runs for Cara, who hasn't linked GitHub/);
   await finish(r, t);
@@ -422,7 +419,7 @@ test("a land the server runs for a minion (hand_off_land, the land tool) pushes 
   const t = newTicket();
   const r = runner();
   r.send(t.id, 'Josh', 'build it');
-  await until(() => seen(t.dir).length === 1);
+  await until('seen(t.dir).length === 1', () => seen(t.dir).length === 1);
   const mid = r.hostEnv(store.getTicket(t.id)!, 'tok');
   assert.equal(mid.GH_TOKEN, 'gho_new', "the turn's person's token, not the box's gh login");
   assert.equal(mid.GIT_AUTHOR_NAME, 'Josh D');
@@ -435,7 +432,7 @@ test("a land the server runs for a minion (hand_off_land, the land tool) pushes 
   assert.equal(r.hostEnv(store.getTicket(t.id)!, 'tok').GH_TOKEN, 'gho_new');
   // Cara hasn't linked: no token at all, never the box's own.
   r.send(t.id, 'Cara', 'build it');
-  await until(() => seen(t.dir).length === 2);
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   const unlinked = r.hostEnv(store.getTicket(t.id)!, 'tok');
   assert.equal(unlinked.GH_TOKEN, undefined);
   assert.equal(unlinked.GIT_AUTHOR_NAME, 'Cara');
@@ -446,15 +443,15 @@ test('a message from someone else waits for its own turn instead of steering; a 
   const t = newTicket();
   const r = runner();
   r.send(t.id, 'Josh', 'build it');
-  await until(() => seen(t.dir).length === 1);
+  await until('seen(t.dir).length === 1', () => seen(t.dir).length === 1);
   r.send(t.id, 'Cara', 'also this', [], {}, true);
   r.send(t.id, 'Josh', 'and tabs', [], {}, true);
-  await until(() => seen(t.dir).length === 2);
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   assert.match(seen(t.dir)[1], /and tabs/);
   assert.equal(store.listEvents(t.id).filter((e) => e.kind === 'user_message' && JSON.parse(e.data).steered).length, 1);
   await finish(r, t);
   // Cara's waited, and starts a turn of her own.
-  await until(() => seen(t.dir).some((l) => l.includes('also this')));
+  await until("seen(t.dir).some((l) => l.includes('also this'))", () => seen(t.dir).some((l) => l.includes('also this')));
   assert.equal(store.getTicket(t.id)!.person_id, cara.id);
   assert.equal(r.relayedBy(t.id), null, 'a person\'s turn was relayed by no one');
   await finish(r, t);
@@ -463,12 +460,12 @@ test('a message from someone else waits for its own turn instead of steering; a 
   const tm = store.createTicket({ project_id: project.id, kind: 'thread', title: 'TM', permission_mode: 'default', created_by: 'Cara' });
   store.updateTicket(tm.id, { person_id: josh.id });
   r.send(t.id, 'Taskmaster', 'over to you', [], { from: tm.id });
-  await until(() => seen(t.dir).some((l) => l.includes('over to you')));
+  await until("seen(t.dir).some((l) => l.includes('over to you'))", () => seen(t.dir).some((l) => l.includes('over to you')));
   assert.equal(store.getTicket(t.id)!.person_id, josh.id);
   assert.equal(env(t.dir).token, 'gho_new');
   assert.equal(r.relayedBy(t.id), tm.id, 'a new minion it starts this turn is the relayer\'s (#197)');
   r.send(t.id, 'Josh', 'start one for me', [], {}, true);
-  await until(() => r.relayedBy(t.id) === null);
+  await until('r.relayedBy(t.id) === null', () => r.relayedBy(t.id) === null);
   await finish(r, t);
 });
 
@@ -540,7 +537,7 @@ test("a person's message shows with its key hidden, and the turn still gets it a
   const t = newTicket();
   const r = runner();
   r.send(t.id, 'Josh', 'the key is AKIAIOSFODNN7EXAMPLE');
-  await until(() => seen(t.dir).length > 0);
+  await until('seen(t.dir).length > 0', () => seen(t.dir).length > 0);
   const stored = store.listEvents(t.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).text);
   assert.deepEqual(stored, ['the key is [AWS key hidden]']);
   assert.match(seen(t.dir)[0], /the key is AKIAIOSFODNN7EXAMPLE/);

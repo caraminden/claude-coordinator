@@ -7,6 +7,7 @@ import { codexSwitchKey, codexThreadKey, codexUsageKey, type CodexThread } from 
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Codex fallback (#337) through the runner: a Codex pick or the person's switch runs the turn on the shim
@@ -115,10 +116,6 @@ function runner() {
   r.codexPlaceFor = (uid) => (uid === cara.id && caraContainer ? caraPlace : null);
   return r;
 }
-async function until(check: () => boolean) {
-  for (let i = 0; i < 1000 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
 const calls = () => jsonLines(seen);
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 const turnStarts = () => calls().filter((c) => c.who === 'claude' || c.method === 'turn/start');
@@ -138,11 +135,11 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   store.updateTicket(t.id, { model: 'claude-opus-5-5' });
   const r = runner();
   r.send(t.id, 'Josh', 'first ask');
-  await until(() => turnStarts().length === 1 && idle(t.id)());
+  await until('turnStarts().length === 1 && idle(t.id)()', () => turnStarts().length === 1 && idle(t.id)());
 
   assert.equal(r.setCodexSwitch(josh.id, true), null);
   r.send(t.id, 'Josh', 'second ask');
-  await until(() => turnStarts().length === 2 && idle(t.id)());
+  await until('turnStarts().length === 2 && idle(t.id)()', () => turnStarts().length === 2 && idle(t.id)());
   const start = calls().find((c) => c.method === 'thread/start');
   assert.equal(start.params.model, 'gpt-6-astra', 'Opus maps to the frontier Codex model');
   const first = calls().filter((c) => c.method === 'turn/start')[0].params;
@@ -160,7 +157,7 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   assert.ok(store.getSetting(codexUsageKey(josh.id)), "Codex's usage is kept for the bar");
 
   r.send(t.id, 'Josh', 'third ask');
-  await until(() => turnStarts().length === 3 && idle(t.id)());
+  await until('turnStarts().length === 3 && idle(t.id)()', () => turnStarts().length === 3 && idle(t.id)());
   const resumed = calls().filter((c) => c.method === 'thread/resume');
   assert.equal(resumed.length, 1);
   assert.equal(resumed[0].params.threadId, 'th1');
@@ -169,7 +166,7 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
 
   assert.equal(r.setCodexSwitch(josh.id, false), null);
   r.send(t.id, 'Josh', 'fourth ask');
-  await until(() => turnStarts().length === 4 && idle(t.id)());
+  await until('turnStarts().length === 4 && idle(t.id)()', () => turnStarts().length === 4 && idle(t.id)());
   const back = calls().filter((c) => c.who === 'claude')[1];
   assert.equal(back.resume, 'sess-1');
   assert.equal(back.model, 'claude-opus-5-5');
@@ -185,13 +182,13 @@ test("a hand-back Claude turn that fails keeps the Codex turns but not their thr
   const r = runner();
   assert.equal(r.setCodexSwitch(josh.id, true), null);
   r.send(t.id, 'Josh', 'on codex');
-  await until(() => turnStarts().length === 1 && idle(t.id)());
+  await until('turnStarts().length === 1 && idle(t.id)()', () => turnStarts().length === 1 && idle(t.id)());
   assert.equal(store.getSetting<CodexThread>(codexThreadKey(t.id))!.thread, 'th1');
 
   r.setCodexSwitch(josh.id, false);
   writeFileSync(mode, 'claude-limit');
   r.send(t.id, 'Josh', 'back on claude');
-  await until(() => turnStarts().length === 2 && idle(t.id)());
+  await until('turnStarts().length === 2 && idle(t.id)()', () => turnStarts().length === 2 && idle(t.id)());
   const kept = store.getSetting<CodexThread>(codexThreadKey(t.id))!;
   assert.equal(kept.thread, null, "its thread never saw the Claude turn");
   assert.match(kept.log, /on codex/);
@@ -200,7 +197,7 @@ test("a hand-back Claude turn that fails keeps the Codex turns but not their thr
   rmSync(mode, { force: true });
   r.setCodexSwitch(josh.id, true);
   r.send(t.id, 'Josh', 'codex again');
-  await until(() => turnStarts().length === 3 && idle(t.id)());
+  await until('turnStarts().length === 3 && idle(t.id)()', () => turnStarts().length === 3 && idle(t.id)());
   assert.equal(calls().filter((c) => c.method === 'thread/resume').length, 0);
   assert.equal(calls().filter((c) => c.method === 'thread/start').length, 2);
   const said = calls().filter((c) => c.method === 'turn/start')[1].params.input.map((i: any) => i.text).join('\n');
@@ -215,7 +212,7 @@ test("a Codex pick by someone without Codex runs on Claude's default, saying why
   store.updateTicket(t.id, { model: 'gpt-6-luna' });
   const r = runner();
   r.send(t.id, 'Josh', 'go');
-  await until(() => turnStarts().length === 1 && idle(t.id)());
+  await until('turnStarts().length === 1 && idle(t.id)()', () => turnStarts().length === 1 && idle(t.id)());
   signedIn = true;
   assert.equal(turnStarts()[0].who, 'claude');
   assert.equal(turnStarts()[0].model, null, "no Codex model reaches claude");
@@ -229,13 +226,13 @@ test('the server login runs its Codex turns in its own container, from its Claud
   const t = minion(10);
   const r = runner();
   r.send(t.id, 'Cara', 'first ask');
-  await until(() => turnStarts().length === 1 && idle(t.id)());
+  await until('turnStarts().length === 1 && idle(t.id)()', () => turnStarts().length === 1 && idle(t.id)());
   assert.ok(!calls().some((c) => c.who === 'podman'), 'her Claude turn runs on the host');
 
   assert.equal(r.setCodexSwitch(cara.id, true), null);
   assert.equal(r.codexView(cara.id)?.on, true);
   r.send(t.id, 'Cara', 'second ask');
-  await until(() => turnStarts().length === 2 && idle(t.id)());
+  await until('turnStarts().length === 2 && idle(t.id)()', () => turnStarts().length === 2 && idle(t.id)());
   const exec = calls().find((c) => c.who === 'podman')!.args;
   assert.deepEqual(exec.slice(0, 3), ['exec', '-d', caraPlace.container]);
   assert.ok(exec.at(-1).startsWith(caraPlace.turnsDir + '/'), `its turn folder is the one her container mounts: ${exec.at(-1)}`);
@@ -244,7 +241,7 @@ test('the server login runs its Codex turns in its own container, from its Claud
 
   r.setCodexSwitch(cara.id, false);
   r.send(t.id, 'Cara', 'third ask');
-  await until(() => turnStarts().length === 3 && idle(t.id)());
+  await until('turnStarts().length === 3 && idle(t.id)()', () => turnStarts().length === 3 && idle(t.id)());
   assert.equal(calls().filter((c) => c.who === 'podman').length, 1, 'back on Claude, on the host');
   assert.match(calls().filter((c) => c.who === 'claude').at(-1).text, /CODEX REPLY/);
 });
@@ -257,7 +254,7 @@ test("the server login's Codex turn runs on Claude, saying why, until its contai
   try {
     assert.equal(r.setCodexSwitch(cara.id, true), null);
     r.send(t.id, 'Cara', 'go');
-    await until(() => turnStarts().length === 1 && idle(t.id)());
+    await until('turnStarts().length === 1 && idle(t.id)()', () => turnStarts().length === 1 && idle(t.id)());
     assert.equal(turnStarts()[0].who, 'claude');
     assert.ok(!calls().some((c) => c.who === 'podman'));
     assert.ok(notes(t.id).some((n) => /Codex's container isn't there yet/.test(n)));
@@ -274,12 +271,12 @@ test("switching on carries a minion waiting out Claude's limit on at once, on Co
   const r = runner();
   r.setCodexSwitch(josh.id, false);
   r.send(t.id, 'Josh', 'go');
-  await until(() => store.getTicket(t.id)!.state === 'limited' && idle(t.id)());
+  await until("store.getTicket(t.id)!.state === 'limited' && idle(t.id)()", () => store.getTicket(t.id)!.state === 'limited' && idle(t.id)());
   assert.ok(r.limitWait(t.id));
 
   writeFileSync(mode, 'codex-limit');
   assert.equal(r.setCodexSwitch(josh.id, true), null);
-  await until(() => calls().some((c) => c.method === 'turn/start') && idle(t.id)() && store.getTicket(t.id)!.state === 'limited');
+  await until("calls().some((c) => c.method === 'turn/start') && idle(t.id)() && ...", () => calls().some((c) => c.method === 'turn/start') && idle(t.id)() && store.getTicket(t.id)!.state === 'limited');
   const said = calls().find((c) => c.method === 'turn/start').params.input.map((i: any) => i.text).join('\n');
   assert.match(said, /switched to Codex/);
   assert.ok(notes(t.id).includes('Resumed on Codex: its person switched to Codex'));
@@ -299,7 +296,7 @@ test("the server login's host turns name its Codex container for their Codex rev
   r.wakeCodex = (uid) => woken.push(uid);
   const t = minion(12);
   r.send(t.id, 'Cara', 'review this');
-  await until(() => turnStarts().length === 1 && idle(t.id)());
+  await until('turnStarts().length === 1 && idle(t.id)()', () => turnStarts().length === 1 && idle(t.id)());
   const host = calls().find((c) => c.who === 'claude');
   assert.deepEqual(host.codex.container, { name: caraPlace.container, turnsDir: caraPlace.turnsDir, env: caraPlace.env });
   assert.equal(host.codex.mode, undefined, 'the review-mode config, as container turns get it');
@@ -309,7 +306,7 @@ test("the server login's host turns name its Codex container for their Codex rev
   caraContainer = false;
   try {
     r.send(t.id, 'Cara', 'again, before her Codex sign-in');
-    await until(() => turnStarts().length === 2 && idle(t.id)());
+    await until('turnStarts().length === 2 && idle(t.id)()', () => turnStarts().length === 2 && idle(t.id)());
     assert.equal(calls().filter((c) => c.who === 'claude')[1].codex.container, undefined);
     assert.equal(calls().filter((c) => c.who === 'claude')[1].codexImages, null, 'a host turn with no Codex container gets no Codex images');
   } finally {
@@ -318,7 +315,7 @@ test("the server login's host turns name its Codex container for their Codex rev
 
   const j = minion(13);
   r.send(j.id, 'Josh', 'his turn, in his own container');
-  await until(() => turnStarts().length === 3 && idle(j.id)());
+  await until('turnStarts().length === 3 && idle(j.id)()', () => turnStarts().length === 3 && idle(j.id)());
   assert.equal(calls().filter((c) => c.who === 'claude')[2].codex.container, undefined);
   assert.equal(calls().filter((c) => c.who === 'claude')[2].codexImages, '1', 'a container turn runs Codex where it is');
   assert.deepEqual(woken, [cara.id]);

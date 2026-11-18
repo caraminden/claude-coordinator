@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './wait.ts';
 
 // tools/citadel-heavy (#325): the host-wide slots for heavy builds, on a throwaway lock folder.
 const heavy = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
@@ -32,10 +33,6 @@ function job(env: NodeJS.ProcessEnv, who: string, script: string): Job {
   let err = '';
   child.stderr!.on('data', (b) => (err += b));
   return { child, err: () => err, done: new Promise((r) => child.on('close', (code) => r(code))) };
-}
-async function until(what: string, check: () => boolean) {
-  for (let i = 0; i < 400 && !check(); i++) await new Promise((r) => setTimeout(r, 25));
-  assert.ok(check(), `timed out waiting for ${what}`);
 }
 const touch = (f: string) => `touch '${f}'`;
 // Bounded, so a failed assertion can't leave a job holding its slot (and the test file) open for good.

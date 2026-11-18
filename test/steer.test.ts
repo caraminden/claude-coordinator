@@ -7,6 +7,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, unsentSteers } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Mid-turn messages steer: the runner appends them to the turn's steer.jsonl and the wrapper
@@ -64,11 +65,6 @@ function newTicket(kind: 'thread' | 'coordinator' = 'thread') {
   return { id: t.id, dir };
 }
 
-async function until(check: () => boolean) {
-  for (let i = 0; i < 500 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
-
 const seen = (dir: string) => lines(join(dir, 'seen.txt'));
 const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => ({ id: e.id, ...JSON.parse(e.data) }));
 const turnDir = (r: Runner, id: number): string => (r as any).turns.get(id).dir;
@@ -76,7 +72,7 @@ const turnDir = (r: Runner, id: number): string => (r as any).turns.get(id).dir;
 /** Start a turn with Cara's first message, and wait until claude has it. */
 async function started(r: Runner, t: { id: number; dir: string }) {
   r.send(t.id, 'Cara', 'build it');
-  await until(() => seen(t.dir).length === 1);
+  await until('seen(t.dir).length === 1', () => seen(t.dir).length === 1);
 }
 
 test('a steer reaches the running turn, and nothing is left for a next turn', async () => {
@@ -84,12 +80,12 @@ test('a steer reaches the running turn, and nothing is left for a next turn', as
   const r = server();
   await started(r, t);
   r.send(t.id, 'Cara', 'use tabs instead', [], {}, true);
-  await until(() => seen(t.dir).length === 2);
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   assert.deepEqual(seen(t.dir), ['[Cara]: build it', '[Cara]: use tabs instead']);
   assert.equal(r.queued(t.id), 0);
   assert.equal(events(t.id, 'user_message')[1].steered, true);
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
   assert.equal(store.getTicket(t.id)!.status, 'idle');
   await new Promise((res) => setTimeout(res, 100));
   assert.ok(!r.isRunning(t.id), 'no second turn');
@@ -105,9 +101,9 @@ test('"Send after this turn" queues, and the queued message starts the next turn
   assert.equal(r.queued(t.id), 1);
   assert.equal(events(t.id, 'user_message')[1].steered, undefined);
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => seen(t.dir).length === 2);
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   assert.equal(seen(t.dir)[1], '[Cara]: later please');
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
 });
 
 test('a steer still lands after a restart re-attached to the turn', async () => {
@@ -119,9 +115,9 @@ test('a steer still lands after a restart re-attached to the turn', async () => 
   next.recover();
   assert.ok(next.isRunning(t.id));
   next.send(t.id, 'Cara', 'after the restart', [], {}, true);
-  await until(() => seen(t.dir).length === 2);
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => !next.isRunning(t.id));
+  await until('!next.isRunning(t.id)', () => !next.isRunning(t.id));
 });
 
 test('a steer that came in as the reply went out starts the next turn', async () => {
@@ -134,19 +130,19 @@ test('a steer that came in as the reply went out starts the next turn', async ()
   clearInterval((r as any).turns.get(t.id).timer);
   writeFileSync(join(t.dir, 'hold'), '');
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => existsSync(join(t.dir, 'replied')));
+  await until("existsSync(join(t.dir, 'replied'))", () => existsSync(join(t.dir, 'replied')));
   await new Promise((res) => setTimeout(res, 600));
   r.send(t.id, 'Cara', 'just too late', [], {}, true);
   rmSync(join(t.dir, 'hold'));
   r.pollMs = 10; // before the first poll: if claude has already exited, that poll starts the next turn, which needs a real timer
   (r as any).poll(t.id);
   // Over when its exit.json is there, or already handled by that poll (the runner then drops the turn and its folder).
-  await until(() => existsSync(join(dir, 'exit.json')) || (r as any).turns.get(t.id)?.dir !== dir);
+  await until("existsSync(join(dir, 'exit.json')) || (r as any).turns.get(t.id)?.dir !== dir", () => existsSync(join(dir, 'exit.json')) || (r as any).turns.get(t.id)?.dir !== dir);
   (r as any).poll(t.id); // ends the turn if the first poll came before claude's exit; otherwise it follows the next turn
-  await until(() => seen(t.dir).length === 2);
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   assert.equal(seen(t.dir)[1], '[Cara]: just too late');
   assert.ok(events(t.id, 'note').some((n) => /arrived as the turn ended/.test(n.text)));
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
 });
 
 test('a message sent after Stop, before the turn has died, queues for a turn of its own (#468 S03-1)', async () => {
@@ -158,10 +154,10 @@ test('a message sent after Stop, before the turn has died, queues for a turn of 
   assert.ok(r.isRunning(t.id));
   r.send(t.id, 'Cara', 'do this instead', [], {}, true);
   assert.equal(events(t.id, 'user_message')[1].steered, undefined, 'not steered into the dying turn');
-  await until(() => seen(t.dir).length === 2);
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   assert.equal(seen(t.dir)[1], '[Cara]: do this instead');
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
 });
 
 test('a message queued after Stop survives a restart that finds the stopped turn gone (#468 S03-1)', async () => {
@@ -171,10 +167,10 @@ test('a message queued after Stop survives a restart that finds the stopped turn
   store.updateTicket(t.id, { status: 'running' });
   store.setSetting(`turn:${t.id}`, { resumes: 0, stopped: true, queued: [{ author: 'Cara', text: 'after the stop', images: [] }] });
   r.recover();
-  await until(() => seen(t.dir).length === 1);
+  await until('seen(t.dir).length === 1', () => seen(t.dir).length === 1);
   assert.equal(seen(t.dir)[0], '[Cara]: after the stop');
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
 });
 
 test('the Taskmaster steers its minion; a minion\'s message to a busy Taskmaster queues', async () => {
@@ -183,7 +179,7 @@ test('the Taskmaster steers its minion; a minion\'s message to a busy Taskmaster
   const r = server();
   await started(r, t);
   r.relay(t.id, t.id, 'Taskmaster', 'stop and rebase');
-  await until(() => seen(t.dir).length === 2);
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   assert.equal(seen(t.dir)[1], '[Taskmaster]: stop and rebase');
 
   await started(r, coord);
@@ -192,7 +188,7 @@ test('the Taskmaster steers its minion; a minion\'s message to a busy Taskmaster
   assert.equal(seen(coord.dir).length, 1);
   assert.equal(r.queued(coord.id), 1);
   for (const x of [t, coord]) writeFileSync(join(x.dir, 'release'), '');
-  await until(() => !r.isRunning(t.id) && seen(coord.dir).length === 2);
+  await until('!r.isRunning(t.id) && seen(coord.dir).length === 2', () => !r.isRunning(t.id) && seen(coord.dir).length === 2);
 });
 
 test('✕ takes back a queued message, which then never reaches claude', async () => {
@@ -208,7 +204,7 @@ test('✕ takes back a queued message, which then never reaches claude', async (
   assert.deepEqual(events(t.id, 'unqueued').map((e) => [e.id, e.by]), [[msg.id, 'Cara']]);
   assert.deepEqual((store.getSetting(`turn:${t.id}`) as any).queued, [], 'a restart would not bring it back');
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
   await new Promise((res) => setTimeout(res, 100));
   assert.ok(!r.isRunning(t.id));
   assert.equal(seen(t.dir).length, 1);
@@ -223,8 +219,8 @@ test('a turn started before steering existed (no steer.jsonl) queues instead', a
   assert.equal(r.queued(t.id), 1);
   assert.equal(events(t.id, 'user_message')[1].steered, undefined);
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => seen(t.dir).length === 2);
-  await until(() => !r.isRunning(t.id));
+  await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
 });
 
 test('a reader never sees steer.sent empty or half-written while steers go in', async () => {
@@ -247,12 +243,12 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
   let out = '';
   reader.stdout.on('data', (d) => (out += d));
   const exited = new Promise((res) => reader.on('exit', res));
-  await until(() => out.includes('ready')); // the reader is spinning before the first steer goes in
+  await until("out.includes('ready')", () => out.includes('ready')); // the reader is spinning before the first steer goes in
   // Each steer waits until the wrapper has passed it on (it writes steer.sent then), so every write is read against.
   try {
     for (let i = 0; i < 6; i++) {
       r.send(t.id, 'Cara', `steer ${i}`, [], {}, true);
-      await until(() => seen(t.dir).length === i + 2);
+      await until('seen(t.dir).length === i + 2', () => seen(t.dir).length === i + 2);
     }
   } finally {
     writeFileSync(sentFile + '.stop', ''); // the reader spins until this exists, even when a steer never arrives
@@ -262,7 +258,7 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
   assert.ok(reads > 0, 'the reader saw steer.sent');
   assert.deepEqual(bad, []);
   writeFileSync(join(t.dir, 'release'), '');
-  await until(() => !r.isRunning(t.id));
+  await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
 });
 
 test('an unreadable steer.sent redelivers nothing; a missing one, everything', () => {

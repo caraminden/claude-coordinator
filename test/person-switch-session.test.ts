@@ -9,6 +9,7 @@ import { ticketWorktree } from '../src/build-output.ts';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { projectSlug, restoreAhead, restoreSession, saveSession, transcriptPath } from '../src/sessions.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // #250: a minion whose turns move from one Claude login to another between turns (Josh's container,
@@ -85,10 +86,6 @@ function runner() {
   r.placeFor = (uid) => (uid === josh.id ? joshPlace : { host: true });
   return r;
 }
-async function until(check: () => boolean) {
-  for (let i = 0; i < 500 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
 const turns = () => jsonLines(seen);
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 
@@ -100,10 +97,10 @@ test("a message that arrives during Josh's turn, from Cara, resumes the same con
   store.setTicketDir(t.id, cwd, null);
   const r = runner();
   r.send(t.id, 'Josh', 'build it');
-  await until(() => store.getTicket(t.id)!.status === 'running');
+  await until("store.getTicket(t.id)!.status === 'running'", () => store.getTicket(t.id)!.status === 'running');
   // Cara answers while Josh's turn still runs: her turn starts the moment his ends.
   r.send(t.id, 'Cara', 'merge and ship');
-  await until(() => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
+  await until("turns().length === 2 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
   const [first, second] = turns();
   assert.equal(first.config, join(volume, '.claude'));
   assert.equal(second.config, hostConfig);
@@ -123,7 +120,7 @@ test('a session nobody has a copy of starts fresh with a note, instead of failin
   store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'Kept them; the bill is PR #4.' }] } });
   const r = runner();
   r.send(t.id, 'Cara', 'hello?');
-  await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
+  await until("turns().length === 1 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[0].resume, null, 'no --resume of a transcript that is nowhere');
   assert.equal(store.getTicket(t.id)!.status, 'idle');
   assert.notEqual(store.getTicket(t.id)!.session_id, 'lost-session');
@@ -143,9 +140,9 @@ test("a minion whose creation was cut off before its worktree was recorded runs 
   store.updateTicket(t.id, { person_id: cara.id });
   const r = runner();
   r.send(t.id, 'Cara', 'one');
-  await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
+  await until("turns().length === 1 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
   r.send(t.id, 'Cara', 'two');
-  await until(() => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
+  await until("turns().length === 2 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
   const [first, second] = turns();
   assert.equal(realpathSync(first.cwd), realpathSync(dir), 'the turn runs in its own folder, not the home folder');
   assert.equal(store.getTicket(t.id)!.cwd, dir, 'the folder is recorded');
@@ -168,7 +165,7 @@ test("a restore that fails doesn't cost the database its copy: the turn resumes,
   writeFileSync(join(hostConfig, 'projects', projectSlug(cwd)), '');
   const r = runner();
   r.send(t.id, 'Cara', 'one');
-  await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
+  await until("turns().length === 1 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[0].resume, 'kept');
   // The restore ahead on a worker failed too (#612): only the turn start's own try says so, once.
   assert.equal(notes(t.id).filter((n) => n.startsWith('Could not restore the session from the database')).length, 1, notes(t.id).join('\n'));
@@ -177,7 +174,7 @@ test("a restore that fails doesn't cost the database its copy: the turn resumes,
   assert.ok(store.getClaudeState(path), "the database's copy survives the failed turn");
   rmSync(join(hostConfig, 'projects', projectSlug(cwd)));
   r.send(t.id, 'Cara', 'two');
-  await until(() => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
+  await until("turns().length === 2 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[1].resume, 'kept');
   assert.equal(store.getTicket(t.id)!.status, 'idle');
 });
@@ -241,10 +238,10 @@ test('while a turn waits for its restore, its message is saved for a restart, an
   r.send(t.id, 'Cara', 'one');
   assert.equal(r.isRunning(t.id), false, 'the turn waits for the restore');
   assert.deepEqual(store.getSetting<{ text: string }[]>(`waiting:${t.id}`)?.map((m) => m.text), ['one'], 'a restart now would still run it');
-  await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
+  await until("turns().length === 1 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[0].resume, 'waits');
   assert.equal(store.getSetting(`waiting:${t.id}`), null, 'the turn took it');
-  await until(() => !(r as any).lanes.busy(t.id)); // its save
+  await until('!(r as any).lanes.busy(t.id)', () => !(r as any).lanes.busy(t.id)); // its save
   // Again, with the host's copy gone, and dismissed before the restore is back.
   rmSync(join(hostConfig, 'projects', projectSlug(cwd)), { recursive: true });
   put();

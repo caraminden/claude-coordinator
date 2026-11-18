@@ -9,6 +9,7 @@ import { askerKey, Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, PASSWORD, SECRET, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Admin-only tools and routes look at who asked for a Taskmaster's turn, not whom it runs as (#255).
@@ -69,11 +70,6 @@ const CitadelTM = taskmaster(Citadel, Cara.id);
 const DelveTM = taskmaster(Delve, Cara.id);
 const ObsidianTM = taskmaster(Obsidian, Rachel.id);
 
-async function until(check: () => boolean) {
-  for (let i = 0; i < 500 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
-
 test("a non-member's relay runs as Citadel's owner but is the non-member's ask, and that carries on", async () => {
   const r = new Runner(store, () => {}, () => ({}), fake);
   r.pollMs = 10;
@@ -83,7 +79,7 @@ test("a non-member's relay runs as Citadel's owner but is the non-member's ask, 
   };
   const turn = async (to: number, author: string, from?: number) => {
     r.send(to, author, 'please', [], from ? { from } : {});
-    await until(() => !r.isRunning(to) && r.queued(to) === 0);
+    await until('!r.isRunning(to) && r.queued(to) === 0', () => !r.isRunning(to) && r.queued(to) === 0);
   };
   const relayAuthor = 'Taskmaster of Obsidian, for Rachel, not a Citadel member';
   release(true);
@@ -108,14 +104,14 @@ test("a non-member's relay runs as Citadel's owner but is the non-member's ask, 
   // Mid-turn on Rachel's ask, Cara's message waits for a turn of its own rather than steer into it.
   release(false);
   r.send(CitadelTM.id, relayAuthor, 'and another', [], { from: ObsidianTM.id });
-  await until(() => r.isRunning(CitadelTM.id));
+  await until('r.isRunning(CitadelTM.id)', () => r.isRunning(CitadelTM.id));
   r.send(CitadelTM.id, 'Cara', 'stop that', [], {}, true);
   assert.equal(r.queued(CitadelTM.id), 1, 'queued, not steered');
   // Cara's message and Rachel's relay in one turn: Rachel's ask rides along, so it counts as hers.
   r.send(CitadelTM.id, relayAuthor, 'one more', [], { from: ObsidianTM.id });
   assert.equal(r.queued(CitadelTM.id), 2);
   release(true);
-  await until(() => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0);
+  await until('!r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0', () => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0);
   assert.equal(store.turnAsker(CitadelTM.id), Rachel.id);
 });
 
@@ -125,7 +121,7 @@ test("a contraption's ask is its person's, and a held relay keeps the asker it h
   r.personOf = messagePerson(store);
   const turn = async (to: number, author: string, extra: object = {}) => {
     r.send(to, author, 'please', [], extra);
-    await until(() => !r.isRunning(to) && r.queued(to) === 0);
+    await until('!r.isRunning(to) && r.queued(to) === 0', () => !r.isRunning(to) && r.queued(to) === 0);
   };
   writeFileSync(join(CitadelTM.dir, 'release'), '');
   await turn(CitadelTM.id, 'Cara');
@@ -137,14 +133,14 @@ test("a contraption's ask is its person's, and a held relay keeps the asker it h
   let held = false;
   for (let i = 0; i < 10 && !held; i++) {
     held = r.relayTaskmaster(ObsidianTM.id, CitadelTM.id, relayAuthor, `ask ${i}`).held;
-    await until(() => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0);
+    await until('!r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0', () => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0);
   }
   assert.ok(held, 'the loop guard held one');
   await turn(CitadelTM.id, 'Cara');
   // Cara then writes in Obsidian's Taskmaster chat: its turn is hers, and that continues the held relay.
   store.setSetting(askerKey(ObsidianTM.id), Cara.id);
   r.continueLoop(ObsidianTM.id, 'Cara');
-  await until(() => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0 && store.turnAsker(CitadelTM.id) !== Cara.id);
+  await until('!r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0 && ...', () => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0 && store.turnAsker(CitadelTM.id) !== Cara.id);
   assert.equal(store.turnAsker(CitadelTM.id), Rachel.id, 'still Rachel\'s ask');
   store.deleteSetting(askerKey(ObsidianTM.id));
 });

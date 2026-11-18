@@ -12,6 +12,7 @@ import { startTime } from '../src/codex-lock.ts';
 import { jsonLines } from './helpers.ts';
 // @ts-expect-error: a plain .mjs, shipped into the image as is.
 import { patchPaths } from '../deploy/claude-container/codex/citadel-hook.mjs';
+import { until } from './wait.ts';
 
 // Codex as a read-only second-opinion reviewer (#330): the managed tripwire hook baked into each
 // person's container, and the app-server driver behind citadel-codex-review.
@@ -515,13 +516,13 @@ const wait = setInterval(() => {
     assert.deepEqual(argv, ['exec', '-i', 'citadel-claude-2', 'codex', 'login', '--device-auth', '-c', 'cli_auth_credentials_store="file"']);
     // OpenAI turns the code down: the sign-in says why, without the link or the code.
     writeFileSync(go, 'expired');
-    await until(() => codex.status(2).state === 'not linked');
+    await until("codex.status(2).state === 'not linked'", () => codex.status(2).state === 'not linked');
     assert.match(codex.status(2).error!, /exit 1.*device code expired/);
     assert.doesNotMatch(codex.status(2).error!, /AB12|auth\.openai/);
     rmSync(go);
     await codex.link(2);
     writeFileSync(go, 'ok');
-    await until(() => codex.status(2).state === 'linked');
+    await until("codex.status(2).state === 'linked'", () => codex.status(2).state === 'linked');
     // Signing out runs codex logout in the container, which deletes the login.
     await codex.unlink(2);
     assert.deepEqual(codex.status(2), { state: 'not linked' });
@@ -533,12 +534,6 @@ const wait = setInterval(() => {
     process.env.PATH = savedPath;
   }
 });
-
-async function until(check: () => boolean, ms = 5000) {
-  const end = Date.now() + ms;
-  while (!check() && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
 
 test('Codex usage: a review is skipped past 80% of a window, or when a window is used faster than an even pace to its reset', () => {
   const now = Date.UTC(2026, 10, 5, 12);

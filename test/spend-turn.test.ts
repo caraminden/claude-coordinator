@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { inboxItems } from '../src/inbox.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // The spend alert on a real turn's stream (#723): a fake `claude -p` streams Opus messages of $10 each (2.5M input
@@ -53,10 +54,6 @@ const pushes: { ticket: number; text: string; eventId: number }[] = [];
 runner.onSpendAlert = (ticket, text, eventId) => pushes.push({ ticket, text, eventId });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(cond: () => boolean, what: string) {
-  for (let i = 0; i < 250 && !cond(); i++) await sleep(20);
-  assert.ok(cond(), `timed out waiting for ${what}`);
-}
 function minion() {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
@@ -71,7 +68,7 @@ test('a turn posts one card and one push per stage it passes', async () => {
   writeFileSync(go, '');
   const id = minion();
   runner.send(id, 'Cara', 'go');
-  await until(() => !runner.isRunning(id), 'the turn to end');
+  await until('the turn to end', () => !runner.isRunning(id));
   const got = cards(id);
   assert.deepEqual(got.map((c) => [c.stage, c.usd]), [[25, 30], [50, 50], [100, 100]]);
   assert.match(got[0].text, /^This turn has used about \$30 in 1 min\.$/);
@@ -83,7 +80,7 @@ test('Keep going mutes the rest of its own turn only, and the next turn alerts a
   writeFileSync(script, JSON.stringify({ before: 3, after: 8 }));
   const id = minion();
   runner.send(id, 'Cara', 'go');
-  await until(() => cards(id).length === 1, 'the $25 card');
+  await until('the $25 card', () => cards(id).length === 1);
   const started = runner.turnStartedAt(id)!;
   // The list row's badge and the Needs-you item (#723) show the open alert until Keep going.
   const alert = runner.view(store.getTicket(id)!).spend_alert;
@@ -96,14 +93,14 @@ test('Keep going mutes the rest of its own turn only, and the next turn alerts a
   assert.equal(runner.view(store.getTicket(id)!).spend_alert, null);
   assert.deepEqual(inboxItems(store, approvals, project.id, 'Cara').filter((i) => i.kind === 'spend'), []);
   writeFileSync(go, '');
-  await until(() => !runner.isRunning(id), 'the turn to end');
+  await until('the turn to end', () => !runner.isRunning(id));
   assert.equal(cards(id).length, 1);
   assert.equal(runner.muteSpend(id, 'Josh', started), false); // no turn running
 
   writeFileSync(script, JSON.stringify({ before: 3, after: 0 }));
   runner.send(id, 'Cara', 'again'); // it waits its turn on the minion's lane, so isRunning isn't true at once
-  await until(() => cards(id).length === 2, 'the second turn\'s $25 card');
+  await until('the second turn\'s $25 card', () => cards(id).length === 2);
   assert.equal(cards(id)[1].usd, 30);
-  await until(() => !runner.isRunning(id) && existsSync(go), 'the second turn to end');
+  await until('the second turn to end', () => !runner.isRunning(id) && existsSync(go));
   assert.equal(runner.view(store.getTicket(id)!).spend_alert, null); // the turn's end clears it
 });

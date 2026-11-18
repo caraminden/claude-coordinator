@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { MAX_LIMIT_RESUMES, nextLimitResume, Runner } from '../src/runner.ts';
 import { clockTime, parseResetTime } from '../src/pacific.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // A failed turn says why. A usage limit is a wait: the minion is `limited`, resumes by itself after the
@@ -56,10 +57,6 @@ function makeRunner() {
 let runner = makeRunner();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(cond: () => boolean, what: string) {
-  for (let i = 0; i < 250 && !cond(); i++) await sleep(20);
-  assert.ok(cond(), `timed out waiting for ${what}`);
-}
 
 function minion(state: any = null) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
@@ -72,7 +69,7 @@ function minion(state: any = null) {
 async function turn(id: number, result: string, text = 'go') {
   setRelease(result);
   runner.send(id, 'Cara', text);
-  await until(() => !runner.isRunning(id), 'the turn to end');
+  await until('the turn to end', () => !runner.isRunning(id));
   return store.getTicket(id)!;
 }
 
@@ -182,7 +179,7 @@ test('after the reset it resumes, with the messages held while it waited', async
   assert.equal(runner.isRunning(id), false, 'held, not run into the limit');
   assert.match(events(id, 'note').at(-1)!, /^Held for the resume at/);
   assert.equal(runner.view(store.getTicket(id)!).queued, 1);
-  await until(() => turnsRun() === before + 2 && !runner.isRunning(id), 'the resume to run');
+  await until('the resume to run', () => turnsRun() === before + 2 && !runner.isRunning(id));
   const prompt = lines(prompts).at(-1)!;
   assert.match(prompt, /usage limit, which has now reset/);
   assert.match(prompt, /also do this/);
@@ -211,7 +208,7 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.equal(runner.isRunning(id), false, 'the relay waits for the reset');
     const before = turnsRun();
     runner.send(id, 'Josh', 'carry on, josh');
-    await until(() => turnsRun() === before + 1 && !runner.isRunning(id), "Josh's turn");
+    await until("Josh's turn", () => turnsRun() === before + 1 && !runner.isRunning(id));
     t = store.getTicket(id)!;
     assert.equal(t.person_id, josh.id);
     assert.equal(t.state, null);
@@ -233,7 +230,7 @@ test("a person's own message tries now, whatever reset time Claude gave: a reset
     const before = turnsRun();
     setRelease('ok');
     runner.send(id, 'Cara', 'I reset it');
-    await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the turn to run now');
+    await until('the turn to run now', () => turnsRun() === before + 1 && !runner.isRunning(id));
     const t = store.getTicket(id)!;
     assert.equal(t.status, 'idle');
     assert.equal(t.state, null);
@@ -247,7 +244,7 @@ test('a turn on the same plan getting through resumes every minion waiting on it
   runner.limitFallbackMs = 50;
   const gaveUp = minion();
   await turn(gaveUp, "You've hit your session limit");
-  await until(() => store.getTicket(gaveUp)!.note?.startsWith('Usage limit: gave up') ?? false, 'it to give up');
+  await until('it to give up', () => store.getTicket(gaveUp)!.note?.startsWith('Usage limit: gave up') ?? false);
   runner.limitFallbackMs = 60 * 60 * 1000;
   const [a, b] = [minion(), minion()];
   await turn(a, LIMIT);
@@ -256,7 +253,7 @@ test('a turn on the same plan getting through resumes every minion waiting on it
   const before = turnsRun();
   // The account works again: one turn gets through, and the waits end now rather than at the stated time.
   await turn(minion(), 'ok');
-  await until(() => turnsRun() === before + 4 && [a, b, gaveUp].every((id) => !runner.isRunning(id)), 'the waiting minions to resume');
+  await until('the waiting minions to resume', () => turnsRun() === before + 4 && [a, b, gaveUp].every((id) => !runner.isRunning(id)));
   for (const id of [a, b, gaveUp]) {
     const t = store.getTicket(id)!;
     assert.equal(t.status, 'idle');
@@ -272,7 +269,7 @@ test("a turn getting through says nothing of another model's limit: a minion on 
   const gaveUp = minion();
   store.updateTicket(gaveUp, { model: 'opus' });
   await turn(gaveUp, "You've hit your Opus limit");
-  await until(() => store.getTicket(gaveUp)!.note?.startsWith('Usage limit: gave up') ?? false, 'it to give up');
+  await until('it to give up', () => store.getTicket(gaveUp)!.note?.startsWith('Usage limit: gave up') ?? false);
   runner.limitFallbackMs = 60 * 60 * 1000;
   const waiting = minion();
   store.updateTicket(waiting, { model: 'opus' });
@@ -292,7 +289,7 @@ test("a turn getting through says nothing of another model's limit: a minion on 
   const opus = minion();
   store.updateTicket(opus, { model: 'opus' });
   await turn(opus, 'ok');
-  await until(() => turnsRun() === before + 4 && [waiting, gaveUp].every((id) => !runner.isRunning(id) && !runner.limitWait(id)), 'the Opus minions to resume');
+  await until('the Opus minions to resume', () => turnsRun() === before + 4 && [waiting, gaveUp].every((id) => !runner.isRunning(id) && !runner.limitWait(id)));
   for (const id of [waiting, gaveUp]) assert.equal(store.getTicket(id)!.state, null);
   pushes.length = 0;
 });
@@ -320,7 +317,7 @@ test("a rate-limit event saying the plan works again ends the waits mid-turn, wi
   (runner as any).updateUsage({ unifiedWindows: { five_hour: { utilization: 1, status: 'rejected' } } });
   assert.ok(runner.limitWait(id)!.at > Date.now() + 60_000);
   (runner as any).updateUsage({ unifiedWindows: { five_hour: { utilization: 0.02, status: 'allowed' } } });
-  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume');
+  await until('the resume', () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.equal(store.getTicket(id)!.state, null);
   store.deleteSetting('usage');
 });
@@ -344,7 +341,7 @@ test(`it gives up after ${MAX_LIMIT_RESUMES} resumes in a row`, async () => {
   const id = minion();
   const before = turnsRun();
   await turn(id, "You've hit your session limit");
-  await until(() => store.getTicket(id)!.note?.startsWith('Usage limit: gave up') ?? false, 'it to give up');
+  await until('it to give up', () => store.getTicket(id)!.note?.startsWith('Usage limit: gave up') ?? false);
   assert.equal(turnsRun() - before, 1 + MAX_LIMIT_RESUMES);
   const t = store.getTicket(id)!;
   assert.equal(t.state, 'limited');
@@ -369,7 +366,7 @@ test('the wait and its held messages outlive a restart', async () => {
   store.setSetting('limit-resumes', list.map((w) => ({ ...w, at: Date.now() })));
   runner = makeRunner();
   runner.recover();
-  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume after the restart');
+  await until('the resume after the restart', () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.match(lines(prompts).at(-1)!, /held across the restart/);
   assert.equal(store.getSetting('limit-resumes'), null);
 });
@@ -391,7 +388,7 @@ test('a turn whose claude never starts says why', async () => {
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
   const id = minion();
   r.send(id, 'Cara', 'go');
-  await until(() => !r.isRunning(id), 'the turn to end');
+  await until('the turn to end', () => !r.isRunning(id));
   assert.match(store.getTicket(id)!.note!, /^Could not start claude: /);
   assert.match(pushes.at(-1)!.text, /^Could not start claude: /);
   pushes.length = 0;
@@ -425,7 +422,7 @@ test('a turn that hits its account\'s limit carries on at once with the next rea
     const before = turnsRun();
     setRelease(LIMIT);
     runner.send(id, 'Pat', 'go');
-    await until(() => turnsRun() === before + 2 && !runner.isRunning(id), 'the turn on account 2');
+    await until('the turn on account 2', () => turnsRun() === before + 2 && !runner.isRunning(id));
     const t = store.getTicket(id)!;
     assert.equal(t.status, 'idle');
     assert.equal(t.state, null, 'never limited: it carried on');
@@ -455,7 +452,7 @@ test('a minion\'s turn names its session to the account pick once it has one, an
     for (const text of ['go', 'again']) {
       const before = turnsRun();
       runner.send(id, 'Pat', text);
-      await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the turn');
+      await until('the turn', () => turnsRun() === before + 1 && !runner.isRunning(id));
       // The fake claude reports no session: the second turn resumes this one.
       store.updateTicket(id, { session_id: 'sess-793' });
     }
@@ -477,7 +474,7 @@ test('when every account is limited, the turn waits for the first of them to res
     const before = turnsRun();
     setRelease(LIMIT);
     runner.send(id, 'Pat', 'go');
-    await until(() => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.state === 'limited', 'both accounts to hit their limits');
+    await until('both accounts to hit their limits', () => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.state === 'limited');
     assert.equal(s.limited.size, 2);
     assert.equal(runner.view(store.getTicket(id)!).limit_resume_at, Math.min(...s.limited.values()));
     assert.match(events(id, 'note').at(-1)!, /This account \(\w+@x\) is out until [^\n]*\. \w+@x is out until [^\n]*\. This minion carries on at/);
@@ -501,7 +498,7 @@ test('weekly on one account and 5-hour on another: the note says which account i
     const before = turnsRun();
     setRelease(LIMIT); // account 1: 5-hour; account 2 then hits its weekly limit
     runner.send(id, 'Pat', 'go');
-    await until(() => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.state === 'limited', 'both accounts to hit their limits');
+    await until('both accounts to hit their limits', () => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.state === 'limited');
     const note = events(id, 'note').at(-1)!;
     assert.match(note, /This account \(two@x\) is out until [^\n]*\(weekly\)\./);
     // The 5-hour reset is two hours off, so from 10pm Pacific it falls tomorrow and the clock carries a weekday ("Tue 12:00am").

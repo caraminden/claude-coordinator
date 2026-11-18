@@ -9,6 +9,7 @@ import { Lanes } from '../src/lanes.ts';
 import { Runner } from '../src/runner.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // #259: every step of a minion's turn lifecycle runs on one serial lane per minion, and cleanups
@@ -64,10 +65,6 @@ const project = store.createProject('Test', null);
 store.setProjectRepoDir(project.id, repo);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(cond: () => boolean, what: string) {
-  for (let i = 0; i < 400 && !cond(); i++) await sleep(20);
-  assert.ok(cond(), `timed out waiting for ${what}`);
-}
 const turnsRun = () => lines(prompts).length;
 
 /** A gate a test opens by hand: `wait` resolves once `open()` is called. */
@@ -131,7 +128,7 @@ test('a lane runs one step at a time per minion, different minions side by side,
   await sleep(10);
   assert.deepEqual(log, ['1a start', '2a'], 'the second step waits for the first');
   first.open();
-  await until(() => !lanes.busy(1), 'lane 1 to drain');
+  await until('lane 1 to drain', () => !lanes.busy(1));
   assert.deepEqual(log, ['1a start', '2a', '1a end', '1b']);
   assert.deepEqual(idle.sort(), [1, 2], 'each lane says once when it has drained');
   // A step that throws doesn't stall the lane.
@@ -139,7 +136,7 @@ test('a lane runs one step at a time per minion, different minions side by side,
     throw new Error('boom');
   });
   lanes.run(3, 'after', () => void log.push('3b'));
-  await until(() => !lanes.busy(3), 'lane 3 to drain');
+  await until('lane 3 to drain', () => !lanes.busy(3));
   assert.equal(log.at(-1), '3b');
 });
 
@@ -152,14 +149,14 @@ test("a usage-limit resume that comes due while the last turn's session is still
   writeFileSync(result, "You've hit your session limit");
   writeFileSync(go, '');
   r.send(id, 'Cara', 'go');
-  await until(() => save.saves() === 1, 'the limited turn to end and start saving');
+  await until('the limited turn to end and start saving', () => save.saves() === 1);
   assert.equal(store.getTicket(id)!.state, 'limited');
   writeFileSync(result, 'ok');
   await sleep(200);
   assert.equal(turnsRun(), 1, 'no resume while the save is still under way');
   assert.equal(r.isRunning(id), false);
   save.open();
-  await until(() => turnsRun() === 2 && !r.isRunning(id), 'the resume to run once the save is in');
+  await until('the resume to run once the save is in', () => turnsRun() === 2 && !r.isRunning(id));
   assert.match(lines(prompts).join('\n'), /usage limit, which has now reset/);
 });
 
@@ -182,7 +179,7 @@ test("the boot sweep's session save holds the minion's next turn until it is don
   assert.equal(r.isRunning(id), false, 'the turn waits for the sweep');
   held.open();
   await swept;
-  await until(() => turnsRun() === 1 && !r.isRunning(id), 'the turn to run after the sweep');
+  await until('the turn to run after the sweep', () => turnsRun() === 1 && !r.isRunning(id));
 });
 
 test("an older copy of a session file never replaces the database's newer one (the boot sweep on a stale login)", async () => {
@@ -210,13 +207,13 @@ test("a memory note another login saved during this turn isn't pruned by this tu
   put('old.md', 'restored at the turn start, then deleted by it');
   writeFileSync(rm, join(memory, 'old.md'));
   r.send(id, 'Cara', 'go');
-  await until(() => r.isRunning(id), 'the turn to start');
+  await until('the turn to start', () => r.isRunning(id));
   assert.ok(existsSync(join(config, memory, 'old.md')), 'restored before the turn');
   // Another minion, on another person's Claude login, saves a new note while this turn runs.
   put('theirs.md', 'from another login');
   writeFileSync(go, '');
-  await until(() => !r.isRunning(id), 'the turn to end');
-  await until(() => !store.getClaudeState(join(memory, 'old.md')), 'the note this turn deleted to be pruned');
+  await until('the turn to end', () => !r.isRunning(id));
+  await until('the note this turn deleted to be pruned', () => !store.getClaudeState(join(memory, 'old.md')));
   assert.ok(store.getClaudeState(join(memory, 'theirs.md')), "the other login's note is kept: this config dir never had it");
 });
 
@@ -228,10 +225,10 @@ for (const when of ['during the turn', 'during the save']) {
     const { id, cwd } = minion();
     r1.send(id, 'Cara', 'one');
     // The turn may first restore the earlier test's memory note off the event loop (#612): a message sent then rides along.
-    await until(() => r1.isRunning(id), 'the turn to start');
+    await until('the turn to start', () => r1.isRunning(id));
     if (when === 'during the turn') r1.send(id, 'Cara', `two, ${when}`);
     writeFileSync(go, '');
-    await until(() => save.saves() === 1, 'the turn to end and start saving');
+    await until('the turn to end and start saving', () => save.saves() === 1);
     const session = store.getTicket(id)!.session_id!;
     if (when === 'during the save') r1.send(id, 'Cara', `two, ${when}`);
     assert.equal(r1.isRunning(id), false, 'waits for the save');
@@ -239,7 +236,7 @@ for (const when of ['during the turn', 'during the save']) {
     r1.detachAll();
     const r2 = makeRunner();
     r2.recover();
-    await until(() => turnsRun() === 2 && !r2.isRunning(id), 'the queued message to run after the restart');
+    await until('the queued message to run after the restart', () => turnsRun() === 2 && !r2.isRunning(id));
     assert.match(lines(prompts).at(-1)!, new RegExp(`two, ${when}`));
     assert.ok(store.getClaudeState(join('projects', projectSlug(cwd), `${session}.jsonl`)), 'the save was redone');
   });
@@ -252,7 +249,7 @@ test("a dismissal's cleanup waits for the last turn's save, and a turn's end tha
   const { id } = minion();
   writeFileSync(go, '');
   r.send(id, 'Cara', 'one');
-  await until(() => save.saves() === 1, 'the turn to end and start saving');
+  await until('the turn to end and start saving', () => save.saves() === 1);
   const tmp = join(r.tmpRoot(project.id), String(id));
   assert.ok(existsSync(tmp));
   const closed = r.close(id, 'Dismissed.');
@@ -269,9 +266,9 @@ test("a dismissal's cleanup waits for the last turn's save, and a turn's end tha
     throw new Error('onTurnEnd broke');
   };
   r.send(id, 'Cara', 'two');
-  await until(() => thrown && !r.isRunning(id), 'the turn whose end throws to end');
+  await until('the turn whose end throws to end', () => thrown && !r.isRunning(id));
   r.send(id, 'Cara', 'three');
-  await until(() => turnsRun() === 3 && !r.isRunning(id), 'the next message to run');
+  await until('the next message to run', () => turnsRun() === 3 && !r.isRunning(id));
 });
 
 test("a restart's sweep keeps a turn folder whose wrapper hasn't started yet, and removes one that never will", () => {

@@ -7,6 +7,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Turns run in a process of their own (src/turn-wrapper.ts) and write to a turn folder, so a server
@@ -60,11 +61,6 @@ function newTicket() {
   return t.id;
 }
 
-async function until(check: () => boolean) {
-  for (let i = 0; i < 300 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(check(), 'timed out');
-}
-
 const texts = (id: number) =>
   store.listEvents(id).filter((e) => e.kind === 'claude').flatMap((e) => JSON.parse(e.data).message?.content ?? []).map((b: any) => b.text);
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
@@ -75,7 +71,7 @@ async function started(id: number, text = 'build it') {
   rmSync(release, { force: true });
   const r = server();
   r.send(id, 'Cara', text);
-  await until(() => texts(id).length > 0);
+  await until('texts(id).length > 0', () => texts(id).length > 0);
   return r;
 }
 
@@ -90,7 +86,7 @@ test('a turn outlives its server, and the next one re-attaches and shows the res
   assert.ok(next.isRunning(id));
   assert.equal(store.getTicket(id)!.status, 'running');
   writeFileSync(release, '');
-  await until(() => !next.isRunning(id));
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
   assert.deepEqual(texts(id), ['working on it', 'all done']);
   assert.equal(store.getTicket(id)!.status, 'idle');
   assert.ok(!notes(id).some((n) => /restart/i.test(n)), 'no interruption note, no resume');
@@ -104,11 +100,11 @@ test('a turn that ends while no server is running is finished by the next one', 
   const dir = turnDir(before, id);
   before.detachAll();
   writeFileSync(release, '');
-  await until(() => existsSync(join(dir, 'exit.json')));
+  await until("existsSync(join(dir, 'exit.json'))", () => existsSync(join(dir, 'exit.json')));
 
   const next = server();
   next.recover();
-  await until(() => !next.isRunning(id));
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
   assert.deepEqual(texts(id), ['working on it', 'all done']);
   assert.equal(store.getTicket(id)!.status, 'idle');
 });
@@ -133,7 +129,7 @@ test('a card waiting through a restart still waits in the re-attached turn, and 
   assert.ok(next.approvals.isTripwire(tripwire), 'a tripwire card comes back as one, for admins only');
   assert.equal(next.approvals.decide(id, tripwire, false, 'Cara').state, 'denied');
   writeFileSync(release, '');
-  await until(() => !next.isRunning(id));
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
   const results = store.listEvents(id).filter((e) => e.kind === 'approval_result').map((e) => JSON.parse(e.data).state);
   assert.deepEqual(results, ['allowed', 'denied'], 'no expiry from the restart');
 });
@@ -143,19 +139,19 @@ test("a typed go that started a turn survives a restart, its turn's end and the 
   rmSync(release, { force: true });
   const before = server();
   before.send(id, 'Cara', 'Fold it', [], { typed: true });
-  await until(() => texts(id).length > 0);
+  await until('texts(id).length > 0', () => texts(id).length > 0);
   before.detachAll();
 
   const next = server();
   next.recover();
   assert.ok(next.approvals.hasGo(project.id), 'kept through the restart');
   writeFileSync(release, '');
-  await until(() => !next.isRunning(id));
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
   assert.ok(next.approvals.hasGo(project.id), 'and through the end of its turn');
   assert.equal(store.getSetting(`turn:${id}`), null, 'the ended turn left nothing behind');
   rmSync(release, { force: true });
   next.send(id, 'GitHub', 'CI passed');
-  await until(() => next.isRunning(id));
+  await until('next.isRunning(id)', () => next.isRunning(id));
   next.detachAll();
   const third = server();
   third.recover();
@@ -163,7 +159,7 @@ test("a typed go that started a turn survives a restart, its turn's end and the 
   third.send(id, 'Cara', 'hold on', [], { typed: true }, true);
   assert.equal(third.approvals.hasGo(project.id), false, 'her next words in that chat take it back');
   writeFileSync(release, '');
-  await until(() => !third.isRunning(id));
+  await until('!third.isRunning(id)', () => !third.isRunning(id));
 });
 
 test('a card whose turn did not survive the restart expires', async () => {
@@ -173,11 +169,11 @@ test('a card whose turn did not survive the restart expires', async () => {
   const dir = turnDir(before, id);
   before.detachAll();
   writeFileSync(release, '');
-  await until(() => existsSync(join(dir, 'exit.json')));
+  await until("existsSync(join(dir, 'exit.json'))", () => existsSync(join(dir, 'exit.json')));
 
   const next = server();
   next.recover();
-  await until(() => !next.isRunning(id));
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
   assert.equal(next.approvals.get(id, card).state, 'expired');
   assert.equal(next.approvals.pending().length, 0);
 });
@@ -195,14 +191,14 @@ test('a re-attached turn can be stopped, and messages queued behind it survive t
   next.recover();
   assert.equal(next.queued(queued), 1);
   assert.ok(next.stop(stopped));
-  await until(() => !next.isRunning(stopped));
+  await until('!next.isRunning(stopped)', () => !next.isRunning(stopped));
   assert.equal(store.getTicket(stopped)!.status, 'idle');
   assert.ok(notes(stopped).includes('Stopped by user.'));
 
   writeFileSync(release, '');
   // The queued message runs as the next turn once the re-attached one ends.
-  await until(() => lines(seen).some((l) => l.includes('and then this')));
-  await until(() => !next.isRunning(queued));
+  await until("lines(seen).some((l) => l.includes('and then this'))", () => lines(seen).some((l) => l.includes('and then this')));
+  await until('!next.isRunning(queued)', () => !next.isRunning(queued));
 });
 
 test('the turn keeps its own tripwire and MCP copies, the env allowlist, and no token on disk', async () => {
@@ -220,14 +216,14 @@ test('the turn keeps its own tripwire and MCP copies, the env allowlist, and no 
   assert.ok(!run.env.includes('DBUS_SESSION_BUS_ADDRESS'));
   assert.ok(!existsSync(join(dir, 'spec.json')), 'the wrapper deletes the spec, which holds the token');
   writeFileSync(release, '');
-  await until(() => !r.isRunning(id));
+  await until('!r.isRunning(id)', () => !r.isRunning(id));
 });
 
 test('a stream line longer than the read buffer arrives whole', async () => {
   const id = newTicket();
   const r = await started(id, 'big line please');
   writeFileSync(release, '');
-  await until(() => !r.isRunning(id));
+  await until('!r.isRunning(id)', () => !r.isRunning(id));
   assert.equal(texts(id)[0].length, 1.5e6);
   assert.equal(texts(id)[1], 'all done');
 });
@@ -257,6 +253,6 @@ test('a running ticket says when its turn started, before any claude event, and 
   next.recover();
   assert.equal(next.view(store.getTicket(id)!).turnStartedAt, at);
   writeFileSync(release, '');
-  await until(() => !next.isRunning(id));
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
   assert.equal(next.view(store.getTicket(id)!).turnStartedAt, null);
 });

@@ -11,7 +11,7 @@ import { lines } from './approvals.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
-import { tableText } from '../public/model-table.js';
+import { advisedModel, tableText } from '../public/model-table.js';
 import type { QueuedMessage } from './runner.ts';
 
 /** The live checkout: the code this server runs, which Citadel's own Taskmaster may read. */
@@ -287,6 +287,10 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
         : 'Your working directory is a dedicated folder for this minion.'],
       build: buildLines(build),
+      // The advisor trial (#817, #954): only a `+…-advisor` model gets it, and it rides the turn message because it depends on the model.
+      advisor: advisedModel(ticket.model).advisor
+        ? [`You run with the ${advisedModel(ticket.model).advisor} advisor tool, and this is an advisor trial: call it once with your plan before your first code edit, once with your diff summary before you land, and again whenever a fix did not hold. A trial minion that never consults it is a failed trial run.`]
+        : [],
     // Parked on start_after (#261): messages wait for its start (#718); a card's answer or a notice still wakes it.
     held: held ? [`You are parked: your brief is held until ${held}. Handle what woke you (a card's answer, a notice) without starting the work; Unpark on your page (or the Taskmaster's message_ticket with unpark) starts you with your brief. End the turn with the state and note you have now.`] : [],
     // The details only while the branch has an open PR (#760): the line changes once when one opens, costing one cache rewrite.

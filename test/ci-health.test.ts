@@ -719,7 +719,7 @@ test("the land alarm wakes its Taskmaster once, with each run's link, failed ste
   assert.deepEqual([told[0][0], told[0][2]], ['Peek Auras', true]);
   assert.match(told[0][1], /^Peek Auras: CI: the land gate fell back to perigee on 4 lands in a row.*\. Why: .*\. Fix: /);
   assert.match(told[0][1], /https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/7002: tests › the runner's clock failed on DESKTOP-G248IJ8-desktop/);
-  assert.match(told[0][1], /runs\/7003: tests › the runner's clock/);
+  assert.match(told[0][1], /runs\/7004: tests › the runner's clock/, 'the run that tipped it over is in the wake');
 });
 
 /** A world whose minions and Taskmaster hear of runs no PR started (#678), with what each was sent. */

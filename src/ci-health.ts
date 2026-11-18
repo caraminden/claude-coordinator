@@ -726,9 +726,10 @@ export class CiHealth {
     const p = this.store.getProject(projectId);
     if (p) {
       await this.deliver(p, w.problems.filter((x) => x.quiet), w as Required<LandWatch>);
-      await this.wakeFor(p, w.problems, 'ci-health:woke:land', now);
     }
     if (changed || before !== JSON.stringify([w.state, w.sent])) this.store.setSetting(LAND_WATCH, w);
+    // After the save: the wake's text reads the fallen-back runs from it.
+    if (p) await this.wakeFor(p, w.problems, 'ci-health:woke:land', now);
     if (changed) await this.alert();
   }
 

@@ -346,9 +346,10 @@ export class Approvals {
     if (go && where.number !== null) goes.push({ ...said, pr: go.pr, branch: where.branch });
     else if (go?.named === 'pr') goes.push({ ...said, pr: go.pr, branch: null });
     else if (go?.named === null) goes.push({ ...said, pr: null, branch: null, bare: true });
-    else if (go?.named === 'hash') {
-      const target = minion?.(go.pr!);
+    else if (go) {
+      const target = go.named === 'hash' ? minion?.(go.pr!) : null;
       if (target?.branch && target.number !== null) goes.push({ ...said, pr: null, branch: target.branch, to: target.number });
+      else this.emit(where.id, 'note', { text: `${m.author}'s "${said.text}" names no minion with a branch, so it covers nothing: "fold #N" names minion N, "fold PR N" a PR.` });
     }
     this.goes.set(scheme, goes.slice(-MAX_GOES));
   }
@@ -361,19 +362,20 @@ export class Approvals {
   private relayed(scheme: number, where: GoPlace, text: string, from: number) {
     if (where.number === null || !where.branch) return;
     const goes = this.goes.get(scheme);
-    const quoted = goes.filter((g) => g.bare && g.ticket === from && g.to !== where.number && quotes(text, g.text));
-    if (!quoted.length) return;
-    for (const g of quoted) {
-      if (g.to === undefined) {
-        g.to = where.number;
-        g.branch = where.branch;
-        this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" now covers #${where.number}'s PR: the Taskmaster quoted it to #${where.number}.` });
-      } else {
-        this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" was quoted to #${g.to}, then also quoted to #${where.number}, so it covers neither. Give the go again naming the minion ("fold #N"), or in its own chat.` });
-      }
+    const quoted = goes.filter((g) => g.bare && g.ticket === from && quotes(text, g.text));
+    if (!quoted.length || quoted.some((g) => g.to === where.number)) return;
+    // The same words typed again: the newest go not yet handed on goes to this minion, the others stay where they went.
+    const free = quoted.findLast((g) => g.to === undefined);
+    if (free) {
+      free.to = where.number;
+      free.branch = where.branch;
+      this.emit(free.ticket, 'note', { text: `${free.by}'s go "${free.text}" now covers #${where.number}'s PR: the Taskmaster quoted it to #${where.number}.` });
+      return this.goes.set(scheme, goes);
     }
-    this.goes.set(scheme, goes.filter((g) => !quoted.includes(g) || g.to === where.number));
+    for (const g of quoted) this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" was quoted to #${g.to}, then also quoted to #${where.number}, so it covers neither. Give the go again naming the minion ("fold #N"), or in its own chat.` });
+    this.goes.set(scheme, goes.filter((g) => !quoted.includes(g)));
   }
+
 
   /** A queued message taken back before any turn read it: a go it gave goes with it. */
   unsaid(scheme: number, message: number) {

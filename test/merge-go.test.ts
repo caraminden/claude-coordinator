@@ -267,6 +267,15 @@ test("a relay counts only as a person's typed go quoted from the Taskmaster's ch
   assert.equal(g.merge(), 'pending', 'and stays gone');
 
   g = gate();
+  g.say('fold it', TASKMASTER, 1);
+  g.a.said(1, FEEDER, relay('Cara: "fold it"'));
+  g.say('fold it', TASKMASTER, 2);
+  g.a.said(1, CATEGORY, relay('Cara: "fold it"'));
+  assert.equal(g.merge(), 'allowed', 'the same words typed again and quoted to another minion leave the first go where it went');
+  assert.equal(g.merge(BUILD.id, { number: 198, head: CATEGORY.branch, open: true }), 'allowed', 'and the second covers #42');
+  assert.equal(g.notes.filter((n) => /covers neither/.test(n.text)).length, 0);
+
+  g = gate();
   g.say('fold it', TASKMASTER);
   g.say('hm, wait', TASKMASTER);
   g.a.said(1, FEEDER, relay('Cara said "fold it"'));
@@ -302,6 +311,7 @@ test('in the Taskmaster chat "#N" names minion N; "PR N" names a PR; a bare numb
   assert.equal(g.merge(), 'pending', 'not #50s');
   tm('fold 50');
   assert.equal(g.merge(), 'pending', 'a bare number: minion or PR is a guess, so the card');
+  assert.match(g.notes.at(-1)!.text, /"fold 50" names no minion with a branch, so it covers nothing/, 'and the Taskmaster chat says why');
   assert.equal(g.merge(BUILD.id, { number: 50, head: 'ticket/9-x', open: true }), 'pending', 'and not PR 50 either');
   tm('merge #77');
   assert.equal(g.merge(BUILD.id, { number: 77, head: 'ticket/77-x', open: true }), 'pending', 'no minion #77: nothing');

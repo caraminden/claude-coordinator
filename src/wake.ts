@@ -43,6 +43,8 @@ export interface Waiter {
   reason: string;
   /** The commit the server ran when the waiter was set; a no-commit waiter wakes once that changes. */
   since: string | null;
+  /** Its wake is a machine's notice of success (a handed-off land now live, #942), which runs at low effort (#951). */
+  light?: true;
 }
 
 /** A minion created parked, whose brief is held until minion `after`'s work is live or merged. */
@@ -182,7 +184,7 @@ export class LiveWaiters {
   private store: Store;
   /** The live checkout: the server's own code. */
   private repo: string;
-  private send: (ticketId: number, text: string) => void;
+  private send: (ticketId: number, text: string, light?: boolean) => void;
   /**
    * Start a chained minion: give it its held brief. Its chain stays stored until then, so a start that
    * never sends (the server dies while it catches up the branch) runs again after a restart: the start
@@ -202,7 +204,7 @@ export class LiveWaiters {
   private last: Promise<unknown> = Promise.resolve();
   prs: PrLookup = githubPrs();
 
-  constructor(store: Store, repo: string, head: string | null, send: (ticketId: number, text: string) => void) {
+  constructor(store: Store, repo: string, head: string | null, send: (ticketId: number, text: string, light?: boolean) => void) {
     this.store = store;
     this.repo = repo;
     this.head = head;
@@ -469,11 +471,11 @@ export class LiveWaiters {
    * Wait for `commit` (a full hash, or null for the next deploy). Returns false, storing nothing, when
    * it is live already. A second call for the same ticket and commit replaces the first.
    */
-  async add(ticket: number, commit: string | null, reason: string): Promise<boolean> {
+  async add(ticket: number, commit: string | null, reason: string, light = false): Promise<boolean> {
     let w: Waiter;
     // Asked again if a deploy went live meanwhile: its check has been and gone without this waiter.
     do {
-      w = { ticket, commit, reason, since: this.head };
+      w = { ticket, commit, reason, since: this.head, ...(light ? { light: true as const } : {}) };
       if (commit && (await this.live(w))) return false;
     } while (w.since !== this.head);
     this.store.setSetting(KEY, [...this.list().filter((o) => o.ticket !== ticket || o.commit !== commit), w]);
@@ -521,7 +523,7 @@ export class LiveWaiters {
     for (const w of woken) {
       try {
         if (w.commit && (await this.elsewhere(w.ticket))) this.send(w.ticket, `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`);
-        else this.send(w.ticket, `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`);
+        else this.send(w.ticket, `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`, !!w.light);
       } catch (err) {
         console.error(`Waking #${w.ticket} failed:`, err); // the others still get theirs
       }

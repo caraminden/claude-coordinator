@@ -346,7 +346,7 @@ export interface HandoffDeps {
   store: { getTicket(id: number): { status: string; state: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
-    send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean }): void;
+    send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean; light?: boolean }): void;
     close(id: number, text: string): Promise<void>;
     unpark(id: number, by: string, author: string, quiet?: boolean): boolean;
     relayMinion(from: number, to: number, author: string, text: string, urgent?: boolean, wake?: boolean, unparked?: boolean): unknown;
@@ -366,7 +366,7 @@ export interface HandoffDeps {
   runnersBack(id: number, reason: string): boolean;
   /** Whether the server already runs this minion's branch (a restart that went live before land.sh's end was read). */
   liveAlready(id: number): Promise<boolean>;
-  /** Wake the minion with `text` once `commit` (null: the next deploy) is live, the way wake_when_live does; false when it is live already. */
+  /** Wake the minion with `text` once `commit` (null: the next deploy) is live, the way wake_when_live does, as a success notice (low effort, #951); false when it is live already. */
   wakeWhenLive?(id: number, commit: string | null, text: string): Promise<boolean>;
   /** The minion's scheme's apps a clean land on main deploys (#712): its home contraptions; none where deploys can't run. */
   apps?(id: number): string[];
@@ -484,7 +484,8 @@ export class LandHandoffs {
         store.updateTicket(id, { state: null, note: null });
         runner.broadcastTicket(id);
       }
-      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`);
+      // light (#951): a land that landed is a success notice; whoever wrote meanwhile keeps the minion's own effort.
+      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`, [], { light: true });
       return;
     }
     if (h.stayOpen && h.waitingOn) {
@@ -496,7 +497,7 @@ export class LandHandoffs {
       const queued = restart ? await this.d.wakeWhenLive?.(id, r.commit ?? null, text('live now')) : undefined;
       store.updateTicket(id, { state: queued ? 'outside' : null, note: `${queued ? 'landed, wakes once live' : 'landed'}; waiting on: ${h.waitingOn}`.slice(0, 120) });
       runner.broadcastTicket(id);
-      if (!queued) runner.send(id, from, text(r.kind !== 'restart' ? where.toLowerCase().replace(/\.$/, '') : queued === undefined && restart ? 'live after the restart' : 'live now'));
+      if (!queued) runner.send(id, from, text(r.kind !== 'restart' ? where.toLowerCase().replace(/\.$/, '') : queued === undefined && restart ? 'live after the restart' : 'live now'), [], { light: true });
       return;
     }
     if (h.stayOpen) {

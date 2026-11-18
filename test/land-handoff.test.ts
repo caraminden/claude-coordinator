@@ -27,6 +27,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
   const ticket = { number: 7, title: 'Wake the owner', status: 'idle', state: 'outside' as string | null, note: 'landing: handed to the server' as string | null };
   const did: string[] = [];
   const sent: string[] = [];
+  const light: boolean[] = [];
   const notes: string[] = [];
   const owned: any[] = [];
   const waits: { commit: string | null; text: string }[] = [];
@@ -35,7 +36,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
     store: { getTicket: (id: number) => (id === 1 ? ticket : { number: 9, title: 'The build', status: 'idle', state: opts.ownerState ?? null }), updateTicket: (_id, f) => { Object.assign(ticket, f); did.push(`state ${f.state}`); } },
     runner: {
       emit: (_id, _kind, data: any) => { notes.push(data.text); },
-      send: (_id, _from, text) => { sent.push(text); },
+      send: (_id, _from, text, _images, extra) => { sent.push(text); light.push(!!extra?.light); },
       unpark: (id, by) => { did.push(`unpark ${id} by ${by}`); return true; },
       relayMinion: (from, to, author, text, urgent, wake, unparked) => { owned.push({ from, to, author, text, urgent, wake, unparked }); return false; },
       close: async (_id, text) => { ticket.status = 'closed'; did.push(`close: ${text}`); },
@@ -59,7 +60,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
     assert.ok(landings.handOff(1, cwd, { PATH: process.env.PATH! }, args, { ...H, ...h }));
     await until('land.sh ends', () => landings.get(1)?.code !== null);
   };
-  return { owned, waits, landings, ticket, did, sent, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
+  return { owned, waits, landings, ticket, did, sent, light, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
 }
 
 test('a clean land that is live now posts the shipped line and dismisses the minion, with no message to it', async () => {
@@ -121,6 +122,7 @@ test('stay_open with waiting_on: a clean land wakes the minion with the shipped 
   assert.match(live.sent[0], /abc1234 "#9: usage bar"/);
   assert.match(live.sent[0], /live now/i);
   assert.match(live.sent[0], /Cara confirming on her phone/);
+  assert.deepEqual(live.light, [true], 'a land that landed is a success notice: its wake runs at low effort (#951)');
 
   // Waiting for the restart: woken by the live check (wake_when_live's waiter), not before, and not twice.
   const restart = setup('stay-waiting-restart');
@@ -168,6 +170,7 @@ test('stay_open does not change a failed land: it wakes the minion with the outp
   await s.handoffs.poll();
   assert.equal(s.sent.length, 1);
   assert.match(s.sent[0], /didn't go through/);
+  assert.deepEqual(s.light, [false], "a failure keeps the minion's own effort (#951)");
   assert.equal(s.ticket.state, null);
   assert.ok(!s.did.some((d) => d.startsWith('close')));
 });

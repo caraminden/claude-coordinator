@@ -280,7 +280,7 @@ if (runner.units && !BOOT_CHECK) {
 }
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
-const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
+const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}));
 // The scheme whose code this server runs (its repo has the live commit); checked again once a deploy moves the live commit.
 let own: { head: string | null; id: number | null } | null = null;
 function ownScheme(): Project | null {
@@ -360,7 +360,7 @@ const jobs = new MachineJobs({
     runner.emit(card.ticket, 'note', { text: line });
     runner.broadcastTicket(card.ticket);
   },
-  wake: (id, text) => runner.send(id, APP_NAME, text),
+  wake: (id, text, light) => runner.send(id, APP_NAME, text, [], light ? { light } : {}),
   note: (id, text) => { runner.emit(id, 'note', { text }); runner.broadcastTicket(id); },
   // The view rides along so the card draws at once, sized as it will stay; machine_job events keep it live after.
   placed: (job, stage, view) => { runner.emit(job.ticket_id!, 'job', { job: job.id, stage, view }); runner.broadcastTicket(job.ticket_id!); },
@@ -863,7 +863,8 @@ if (!BOOT_CHECK || PREVIEW) {
 }
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
-const github = new GithubWatcher(store, (ticketId, text, fyi, quiet) => (quiet ? runner.leaveMail(ticketId, GITHUB_NAME, text) : runner.send(ticketId, GITHUB_NAME, text, [], fyi ? { fyi } : {})));
+// An fyi is only news of success (CI passed, the PR merged), so it also runs at low effort (#951).
+const github = new GithubWatcher(store, (ticketId, text, fyi, quiet) => (quiet ? runner.leaveMail(ticketId, GITHUB_NAME, text) : runner.send(ticketId, GITHUB_NAME, text, [], fyi ? { fyi, light: true } : {})));
 github.as = githubOf;
 github.onPr = (id, repo, as, pr) => {
   if (pr) prs.set(id, pr);
@@ -910,7 +911,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   mandate: (from, person, key, title, quiet, link, parts) => mandateAlert('CI health', from, person, key, title, link, quiet, parts),
-  wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi } : {}),
+  wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {}),
   // A failed scheduled run (#588), or a dispatched one on main, is held mail for the scheme's Taskmaster (#678), to start a bug minion;
   // a watched workflow gone red on main wakes it (#774).
   tell: (project, text, wake) => {
@@ -936,7 +937,7 @@ const landHandoffs = new LandHandoffs({
   // A stay_open land with waiting_on wakes its minion once live (#942), through wake_when_live's waiter.
   wakeWhenLive: async (id, commit, text) => {
     const full = commit && (await waiters.resolve(commit, store.getProject(store.getTicket(id)?.project_id ?? 0)?.repo_dir ?? null));
-    return waiters.add(id, full || null, text);
+    return waiters.add(id, full || null, text, true);
   },
   buildOwner: (id, n) => store.getSetting<number>(buildOwnerKey(store.getTicket(id)?.project_id ?? 0, n)) ?? null,
   // A clean land on main deploys the scheme's home contraptions on main (#712), through auto-deploy's start, which marks the commit tried.

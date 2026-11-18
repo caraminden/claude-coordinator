@@ -120,6 +120,7 @@ export interface QueuedMessage {
   fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
   parked?: string; // held for a parked minion (#718): when it was sent, "2026-11-14 18:02" UTC
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
+  light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
 }
 
 /**
@@ -193,6 +194,8 @@ interface TurnState {
   /** The fingerprint of its cached prefix and its parts (src/keepalive.ts), which a real turn's end starts a keepalive series from. */
   fp?: string;
   fpParts?: Record<string, string>;
+  /** It runs at low effort (#951): its batch was only machine notices of success, or it keeps such a turn's cache warm. */
+  light?: true;
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -1616,9 +1619,9 @@ export class Runner {
    * running keeps for its next turn instead of starting one ('parked'). Wakes (wake_when_live, a chained start,
    * runners back, a card's answer, GitHub) leave it off and start a turn as before.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; hold?: boolean } & object = {}, steer = false, files: MessageFile[] = []): 'parked' | void {
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean } & object = {}, steer = false, files: MessageFile[] = []): 'parked' | void {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
-    const { asker: askedBy, fyi, hold, ...shown } = extra;
+    const { asker: askedBy, fyi, light, hold, ...shown } = extra;
     extra = shown;
     if (!fyi) this.onMessage?.(ticketId);
     const ticket = this.store.getTicket(ticketId);
@@ -1638,14 +1641,15 @@ export class Runner {
     // Nor one typed for by someone else (#295): its process carries their CITADEL_PERSON_ID, which can't change mid-turn.
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
     // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
-    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
+    // Nor a low-effort turn (#951) something other than a success notice: it waits for a turn at the minion's own effort.
+    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !otherPerson && !(turn.light && !light) && existsSync(join(live.dir, 'steer.jsonl')));
     const parked = !!(hold && !live && ticket && this.parked(ticket));
     // The chat shows it masked; the turn still gets it as typed, for a key someone hands over on purpose.
     const row = this.emit(ticketId, 'user_message', {
       author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}), ...(parked ? { mail: true, parked: true } : {}),
     });
-    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), asker };
+    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), ...(light ? { light: true as const } : {}), asker };
     // A person's typed "merge it" stands for the whole scheme until its PR merges (#260), whenever a turn reads it.
     // In the Taskmaster chat "#N" names minion N (#939).
     if (ticket) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg, (n) => {
@@ -2455,7 +2459,7 @@ export class Runner {
     // Codex (#337): a Codex pick, or the sender's "Enable Codex override" (which maps a Claude pick by tier),
     // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why. The server
     // login's Codex turns run in its own container, never on the host (#341): only there is Codex's hook.
-    const { model: picked, effort } = turnSettings(ticket, project);
+    const { model: picked, effort: itsEffort } = turnSettings(ticket, project);
     const switched = person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person));
     const wantsCodex = isCodexModel(picked) || switched;
     let codexWhy = wantsCodex ? this.codexWhy(person) : null;
@@ -2468,6 +2472,13 @@ export class Runner {
       this.emit(ticket.id, 'note', { text: name ? `This minion is set to ${name}, but ${codexWhy}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${codexWhy}, so this turn runs on Claude.` });
     }
     const model = isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, project).model : picked;
+    // A minion's turn whose whole batch is machine notices of success runs at low effort (#951): it relays news or
+    // checks state. A person's or Taskmaster's message, a failure or a resume keeps its own. A keepalive replays
+    // the effort of the turn whose cache it keeps warm, so its launch matches that turn's.
+    const light = !codex && ticket.kind !== 'coordinator' && (keepalive
+      ? !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light
+      : !resumes && !limitTries && !netTries && batch.length > 0 && batch.every((m) => m.light));
+    const effort = light ? 'low' : itsEffort;
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
     // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a
     // schedule, a wake, a relay or a batch mixing people, which fall back to someone who didn't ask.
@@ -2619,7 +2630,7 @@ export class Runner {
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex || light, ...(light ? { light: true as const } : {}), ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
       ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
@@ -3021,7 +3032,7 @@ export class Runner {
     }
     if (turn && status === 'idle' && !stopped && !signal && !closing) this.freshAtTurnEnd(ticketId, turn);
     // A real turn that ended well starts a keepalive series from the prefix it cached (#862); anything else ends the series.
-    if (turn?.fp && turn.fpParts && status === 'idle' && !stopped && !signal && !closing) this.store.setSetting(keepaliveKey(ticketId), { fp: turn.fp, parts: turn.fpParts, since: Date.now() } satisfies KeepaliveSeries);
+    if (turn?.fp && turn.fpParts && status === 'idle' && !stopped && !signal && !closing) this.store.setSetting(keepaliveKey(ticketId), { fp: turn.fp, parts: turn.fpParts, since: Date.now(), ...(turn.light ? { light: true as const } : {}) } satisfies KeepaliveSeries);
     else this.store.deleteSetting(keepaliveKey(ticketId));
     // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.
     if (this.deployedMidTurn.delete(ticketId) && status === 'idle' && !stopped && !signal && !closing) this.deployLive(ticketId);
@@ -3498,7 +3509,9 @@ export class Runner {
     if (!p.finished?.length) return;
     const t = this.store.getTicket(ticketId);
     try {
-      this.store.addStepTimes(ticketId, p.finished, t?.last_effort ?? t?.effort ?? null);
+      // The effort it ran at: a low-effort turn's steps (#951) are low, whatever the minion's own.
+      const light = this.store.getSetting<TurnState>(turnKey(ticketId))?.light;
+      this.store.addStepTimes(ticketId, p.finished, light ? 'low' : t?.last_effort ?? t?.effort ?? null);
       p.finished.length = 0;
     } catch (err) {
       // Kept for the next event's try: the backfill has run, so nothing else would record them.

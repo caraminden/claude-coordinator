@@ -448,7 +448,7 @@ export interface CiHealthDeps {
   get?: GhGet;
   /** A REST POST (the sweep's cancel); the gh CLI by default. */
   post?: (path: string, as: GithubEnv) => Promise<{ status: number }>;
-  /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing. No message, no wakes. */
+  /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing: a dispatched run that passed, which also runs at low effort (#951). No message, no wakes. */
   wake?: (ticketId: number, text: string, fyi?: boolean) => void;
   /** Held mail for a scheme's Taskmaster (a failed scheduled run), or a message that wakes it (`wake`: a watched workflow gone red); false (no Taskmaster) or none at all, and those wait untold. */
   tell?: (project: Project, text: string, wake?: boolean) => boolean;

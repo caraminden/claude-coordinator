@@ -246,8 +246,8 @@ export interface JobDeps {
   postCard(job: MachineJob, card: { questions: unknown[]; recipe?: object; to?: string }): { ticket: number; question: string } | null;
   /** The card was answered from somewhere else (the Machines page): settle it, and say in its chat what happened. */
   settleCard(card: { ticket: number; question: string }, by: string, line: string): void;
-  /** Tell the minion that queued a job that it ended or was refused; this wakes it, as CI does. */
-  wake(ticketId: number, text: string): void;
+  /** Tell the minion that queued a job that it ended or was refused; this wakes it, as CI does. `light` for a job that finished OK (#951). */
+  wake(ticketId: number, text: string, light?: boolean): void;
   /** A line in the minion's chat that wakes nobody. */
   note(ticketId: number, text: string): void;
   /** Put a minion's live job card at the bottom of its chat: when queued (after the go card), and again each time it starts, pauses or ends. */
@@ -561,7 +561,7 @@ export class MachineJobs {
     this.changed(id);
     if (job.ticket_id !== null && !quiet) {
       const res = job.state === 'done' ? ` Results: ${job.upload_bytes ? `jobs/${id}/ in the scheme's shared folder` : 'none uploaded'}.` : '';
-      this.d.wake(job.ticket_id, `${text}${res} job_status ${id} has the details.`);
+      this.d.wake(job.ticket_id, `${text}${res} job_status ${id} has the details.`, job.state === 'done');
     }
   }
 

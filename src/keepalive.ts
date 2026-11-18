@@ -40,6 +40,8 @@ export interface KeepaliveSeries {
   parts: Record<string, string>;
   /** When the real turn that started it ended. */
   since: number;
+  /** The real turn ran at low effort (#951): its keepalives launch the same way, so their prefix matches. */
+  light?: true;
   /** Why it stopped: dirty (the prefix moved), missed (a ping wrote the cache), failed (a ping failed). */
   stopped?: 'dirty' | 'missed' | 'failed';
 }

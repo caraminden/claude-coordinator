@@ -512,7 +512,8 @@ export function questionCard(ticketId, card, opts = {}) {
       // "Multi select image cards cant be unselected"); its thumbnail still only looks.
       const pickBtn = (o, thumb) => h('button', {
         type: 'button', class: `opt${thumb ? ' pic' : ''}`, 'data-label': o.label,
-        onclick: () => {
+        onclick: (e) => {
+          if (e.target.closest?.('pre')) return; // a command in the description: Copy and selecting it don't pick
           const unpick = !answered && picks[i].selected.has(o.label);
           thumb && !unpick ? thumb.click() : choose(o);
         },

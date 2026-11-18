@@ -25,7 +25,7 @@ const ACTIONS = ['ask_question', 'propose_plan', 'message_coordinator', 'message
 
 /** What one turn did, read from its transcript. */
 export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; cardText?: string };
-// `cardText`: the question, header and option text of the turn's ask_question calls, where a command can sit too.
+// `cardText`: the question and option description text of the turn's ask_question calls, where a command can sit too.
 // `steered` covers every turn cut short rather than ended: a steer, a stop, a usage-limit or API error.
 
 const isNotification = (text: string) => /^\s*<task-notification>/.test(text);

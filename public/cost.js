@@ -7,8 +7,10 @@ import { renderSidebar } from './sidebar.js';
 let days = null;
 // Every payer's spend by person and by scheme, week and month (src/costs.ts spendSplit, #689).
 let split = null;
-// What an even day's share of the weekly limit comes to at API prices (src/costs.ts dayBudget), or null.
+// What an even day's share of the weekly limit comes to at API prices (a seventh of src/costs.ts hostWeek's limit, every account together), or null.
 let budget = null;
+// Each Claude account's part of that limit (src/costs.ts hostWeek), for the chip's tooltip.
+let parts = [];
 // This month's spend on outside APIs and OpenRouter by scheme and service, with each scheme's cap (src/outside-spend.ts, #839).
 let outside = [];
 
@@ -37,8 +39,10 @@ export function costChip() {
 export async function renderCost() {
   if (!account?.admin) return; // the server login's costs across Citadel, so only admins see them
   const before = budget;
+  let limit;
   try {
-    ({ days, dayBudget: budget, split, outside } = await api('api/costs'));
+    ({ days, week: { limit, parts }, split, outside } = await api('api/costs'));
+    budget = limit && limit / 7;
   } catch {
     return; // keep the last figures; the next turn tries again
   }
@@ -49,9 +53,11 @@ export async function renderCost() {
     const today = days[0].total;
     const over = budget && today > budget;
     chip.querySelector('summary').replaceChildren(budget ? 'Day ' : 'Today ', h('b', { class: over ? 'warn' : '' }, budget ? pct(today) : costText(today)));
+    const accounts = parts.length > 1 ? ` across ${parts.length} Claude accounts` : '';
+    const made = parts.map((p) => `${p.label || 'the server login'} ${costText(p.limit)}${p.assumed ? ' (assumed, not priced yet)' : ''}`).join(' + ');
     chip.querySelector('summary').title = budget
-      ? `Today's turns on the server login: ${costText(today)} at API prices, ${pct(today)} of an even day's share of the weekly limit (${costText(budget)}).${over ? '\nOver it: at this pace the week runs out early.' : ''}`
-      : `Today's turns on the server login: ${costText(today)} at API prices. Shown against the weekly limit once its meter reaches 3%.`;
+      ? `Today's turns${accounts}: ${costText(today)} at API prices, ${pct(today)} of an even day's share (${costText(budget)}) of the combined weekly limit.\nWeekly limit ${costText(budget * 7)}${parts.length > 1 ? ` = ${made}` : ''}, divided by 7.${over ? '\nOver it: at this pace the week runs out early.' : ''}`
+      : `Today's turns${accounts}: ${costText(today)} at API prices. Shown against the weekly limit once its meter reaches 3%.`;
     if (chip.open) drawPop(chip);
   }
 }

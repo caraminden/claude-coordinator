@@ -1,6 +1,6 @@
 // The cards in a chat that wait on a person: approval (and merge), plan, loop and question cards.
 // appendEvent in thread.js builds them, and each registers itself in view.cards so later events settle it.
-import { account, ago, api, fileHref, fileKind, fileUrl, h, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
+import { account, ago, api, fileHref, fileKind, fileUrl, h, noAutofill, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
 import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 import { changesLine, collapseRuns, planChanges } from './plan-diff.js';
@@ -605,10 +605,11 @@ function noticeCard(ticketId, card, opts) {
 function secretCard(ticketId, card, opts) {
   const { name, scope, why } = card.secret;
   const head = whoLine('asks', card, opts);
-  const input = h('input', { type: 'password', class: 'secret-value', autocomplete: 'off', spellcheck: 'false', 'aria-label': `The secret to save as ${name}`, placeholder: 'Paste or type it here' });
+  const input = h('input', { type: 'password', class: 'secret-value', ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', 'aria-label': `The secret to save as ${name}`, placeholder: 'Paste or type it here' });
   const save = h('button', { type: 'button', class: 'small', disabled: true }, 'Save');
   const status = h('span', { class: 'muted' }, scope === 'scheme' ? 'Every turn in this scheme gets it' : 'Saved as yours: turns that run as you get it');
-  const field = h('div', { class: 'row secret-row' }, input, save);
+  // Its own form, so a manager doesn't pair this password field with another text box as a login (#934).
+  const field = h('form', { class: 'row secret-row', autocomplete: 'off', onsubmit: (e) => e.preventDefault() }, input, save);
   const el = h('div', { class: 'qcard secret' }, head.el,
     h('div', { class: 'qtitle' }, 'A secret, saved as ', h('code', {}, name), why ? h('div', { class: 'desc' }, why) : ''),
     field, h('div', { class: 'row' }, status));

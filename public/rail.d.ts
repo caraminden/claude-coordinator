@@ -68,3 +68,6 @@ export function installMode(at: { own: boolean; standalone: boolean; prompt: boo
 
 /** An Android intent:// link that opens `url` in Chrome itself (a Custom Tab's menu has no Install), else the plain URL. */
 export const chromeIntent: (url: URL) => string;
+
+/** Whether the page runs inside an app's native shell (Capacitor WebView or a "CitadelApp" user agent), where the rail never renders. */
+export function inNativeApp(win?: unknown): boolean;

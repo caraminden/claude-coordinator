@@ -61,6 +61,15 @@ Cara, 2026-11-02, after the first take opened each contraption in its own instal
 - **From your own installed app,** they open **in your window** (#311, Josh 2026-11-04: "Same window, as Citadel"). Citadel's page covers yours as a full-window layer (`.citadel-layer`, a frame beside your `<body>`, which goes inert under it). The window never leaves your scope, so there's no close ✕, no Custom Tab and no second window. Your page stays alive under the layer. Picking you in Citadel's rail, or with Alt+`, puts the layer away. Nothing to do on your side. The layer sits at z-index 2147483000, so don't put anything above it.
 - **Alt+` works on your own page too.** rail.js loads Citadel's switcher (`/apps/_citadel/appswitch.js`) once the rail is drawn: hold Alt and tap ` to step through the apps, most recent first, and let go to switch. It picks through the rail's own links, so it follows the two rules above.
 
+## In an app's own native shell (#935)
+
+Inside a Capacitor (or other native) wrapper that loads the contraption, the rail, its swipe handle and Alt+` switching
+never render: the shell is a single-app window, so there is nothing to switch to (Cara, 2026-11-17: "If I open via the
+app, the far left panel ... should not render"). rail.js's `inNativeApp()` decides: `window.Capacitor.isNativePlatform()`
+(Capacitor injects it even for a remote `server.url`), or "CitadelApp" in the user agent. An app sets nothing and changes
+nothing; a `data-citadel-rail="slot"` page gets `false` from `mountRail`, so it drops its slot like any app with no rail.
+Don't reimplement it per app. A wrapper that isn't Capacitor adds `CitadelApp` to its WebView's user agent.
+
 ## Phone drawers (drawers.js)
 
 Cara's Mandate phone layout (2026-11-01): "the main view should be the list, right swipe is the Acolyte, left is different sections, currently only notes, then left again is Contraptions/Citadel". She picked "Citadel's edge drawers" for those, and "Share it, served by Citadel" for the code. So Citadel serves its own phone drawers, and Citadel's page uses the same module: a fix reaches every app.

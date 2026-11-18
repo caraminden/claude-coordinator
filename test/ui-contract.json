@@ -9,6 +9,7 @@
       "stepMark"
     ],
     "markdown.js": [
+      "copyPayload",
       "copyText",
       "linkify",
       "linkifyHtml",
@@ -27,12 +28,6 @@
     "dialog.js": [
       "mountDialogs",
       "openDialog"
-    ],
-    "media.js": [
-      "clock",
-      "lightbox",
-      "panner",
-      "scrubber"
     ],
     "status.js": [
       "statusSlot",
@@ -58,6 +53,12 @@
       "mountUpload",
       "startUpload"
     ],
+    "media.js": [
+      "clock",
+      "lightbox",
+      "panner",
+      "scrubber"
+    ],
     "optimistic.js": [
       "optimistic"
     ],
@@ -67,6 +68,7 @@
       "closeRail",
       "hasRail",
       "hideRail",
+      "inNativeApp",
       "installMode",
       "leaveEdge",
       "mountRail",

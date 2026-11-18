@@ -31,7 +31,7 @@ design.
 | `Plan` | opus | high |
 | `citadel:check-runner` | haiku | low |
 | `citadel:reviewer` | sonnet | medium |
-| `citadel:reviewer` on a high-risk change | fable | medium |
+| `citadel:reviewer` on a high-risk change | opus | high |
 | `citadel:finding-checker` | opus | medium |
 | `citadel:finding-checker` on a high-risk change | fable | medium |
 | `citadel:fresh-eyes` | opus | high |
@@ -39,8 +39,9 @@ design.
 | `citadel:critic` | from the rubric | from the rubric |
 
 - A call's `model` takes an alias (`sonnet`, `opus`, `haiku`, `fable`), and a call's `model` and
-  `effort` beat the definition's: a high-risk review passes `fable` and `medium` over the
-  reviewer's own pins. The `citadel:critic` gets both from its rubric (`citadel:critique`).
+  `effort` beat the definition's: a high-risk review passes `opus` and `high` to the reviewer
+  and `fable` and `medium` to the finding-checker, over their own pins. The `citadel:critic` gets
+  both from its rubric (`citadel:critique`).
 - Effort left unset is an accident either way: a Grunt on the session's model runs at the
   session's level (high), and one on any other model at that model's default, medium. Nothing
   above high unless a person asks (xhigh only after a Fable run has failed twice; never max).
@@ -49,6 +50,10 @@ design.
 - Judging Grunts run on Opus: on Delve's art critic Opus caught about 9 of 13 of Cara's notes,
   Sonnet 5. The stalled-worker row is Cara's (2026-11-14, "Widen to known-shape work"), the same
   tier Citadel's model table gives minions.
+- The high-risk reviewer is Opus at high, not Fable: on 8 past high-risk diffs Opus caught 10 of
+  18 real medium-or-high findings and Fable 11, each missing some the other caught, for $1.02 a
+  run against $1.46 (#950, 2026-11-17, `reports/highrisk-review-ab-2026-11.md` in the shared folder).
+  The checker stays on Fable: it wasn't tested.
 - Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work
   in obra/superpowers' subagent-driven-development. Use `haiku` only when the brief holds
   everything the Grunt needs.

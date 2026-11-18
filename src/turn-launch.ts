@@ -601,7 +601,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (facts.env.secrets) env = { ...env, ...facts.env.secrets };
   // Grunts on a Fable turn default to Opus, not Fable (#705, Cara 2026-11-14: "No Fable for helper Grunts"):
   // general-purpose Grunts were most of a week's $691 of Fable Grunts. An Agent call's own `model` (self-review's
-  // `fable` reviewers and finding-checkers) and an agent definition's `model:`, `inherit` included, still win.
+  // `fable` finding-checkers and build reviewers) and an agent definition's `model:`, `inherit` included, still win.
   // Not CLAUDE_CODE_SUBAGENT_MODEL_FORCE: that would drop the explicit `fable` on a high-risk review too.
   // A backstop now (#947): the kit's grunt-model hook sends back Agent calls with no model, so few Grunts reach it.
   if (model && /fable/i.test(model)) env.CLAUDE_CODE_SUBAGENT_MODEL = 'claude-opus-5-5';

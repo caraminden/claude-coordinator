@@ -240,7 +240,7 @@
         const now = summary();
         const done = saving && now !== '' && (now === lastSent || now === pending);
         btn.disabled = done;
-        btn.textContent = done ? 'Sent ✓' : saving ? 'Send picks to the minion' : 'Copy picks';
+        btn.textContent = done ? 'Sent ✓' : saving ? 'Send picks' : 'Copy picks';
         if (!done && /^Sent/.test(sent.textContent)) sent.textContent = '';
         text.innerHTML = picked || notes || marked.size
           ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''}${drawn} · ${where}`

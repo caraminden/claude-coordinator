@@ -170,7 +170,7 @@
       mount(isSaving) {
         saving = isSaving;
         if (node) return this.paint();
-        const btn = el('button', { type: 'button', class: 'mk-btn primary' }, saving ? 'Send picks to the minion' : 'Copy picks');
+        const btn = el('button', { type: 'button', class: 'mk-btn primary' }, saving ? 'Send picks' : 'Copy picks');
         text = el('span', { class: 'mk-dock-text' });
         sent = el('span', { class: 'mk-sent', 'aria-live': 'polite' });
         node = el('div', { class: 'mk-dock' }, el('div', { class: 'mk-dock-msg' }, text, sent), btn);

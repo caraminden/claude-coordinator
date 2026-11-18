@@ -78,7 +78,7 @@ mock.picks({ collection: 'questions', options: ['yes', 'no'], root: document.get
 
 ## The dock
 
-Comes with the first picks set: counts picks and notes, and **Send picks to the minion** posts one
+Comes with the first picks set: counts picks and notes, and **Send picks** posts one
 line per pick straight into your chat as the person who pressed it, which wakes you (`citadel.send`,
 only from a click). A shared-folder page's Send goes to the minion that last linked it, else the
 Taskmaster. Send also settles that minion's choices card for the page (`ask_question` with `doc`:

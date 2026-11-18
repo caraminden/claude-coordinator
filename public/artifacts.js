@@ -358,11 +358,11 @@ export function closeViewer() {
 function watchKeyboard(dialog) {
   const vv = window.visualViewport;
   if (!vv) return;
-  let tallest = vv.height;
+  let tallest = Math.max(vv.height, innerHeight);
   const stop = () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); removeEventListener('focusin', update); removeEventListener('blur', onBlur, true); };
   const update = () => {
     if (!dialog.isConnected) return stop();
-    tallest = Math.max(tallest, vv.height);
+    tallest = Math.max(tallest, vv.height, innerHeight);
     const typing = document.activeElement?.classList.contains('artifact-frame') && matchMedia('(max-width: 800px)').matches
       && vv.height < tallest - 120;
     dialog.classList.toggle('kb-page', !!typing);

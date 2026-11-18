@@ -455,7 +455,7 @@ const CSS = `
 :where(.cui-md .cui-alt) { color: var(--citadel-muted); }
 :where(.cui-md pre.cui-shell) { position: relative; padding-top: 0; border-left: 4px solid var(--cui-shell); }
 :where(.cui-md pre.cui-shell)::before {
-  content: attr(data-label); display: block; margin: 0 -0.6rem 0.5rem -0.6rem; padding: 0.3rem 3.6rem 0.3rem 0.6rem;
+  content: attr(data-label); display: block; margin: 0 -0.6rem 0.5rem -0.6rem; padding: 0.45rem 4.4rem 0.45rem 0.6rem;
   font: 600 var(--citadel-size-small) var(--citadel-font); line-height: 1.3; color: var(--cui-shell);
   background: color-mix(in srgb, var(--cui-shell) 14%, var(--citadel-code-bg)); border-radius: 0 var(--citadel-radius-sm) 0 0;
 }
@@ -471,8 +471,10 @@ const CSS = `
   border: 1px solid var(--citadel-control-border); border-radius: var(--citadel-radius-sm); background: transparent; color: var(--citadel-text);
   font: 500 var(--citadel-size-small) var(--citadel-font); cursor: pointer; user-select: none;
 }
-:where(.cui-md pre.cui-shell > .cui-copy) { position: absolute; top: 0.2rem; right: 0.3rem; float: none; margin: 0; z-index: 1; }
+/* A larger tap area comes from ::after: a host's phone min-height on buttons mustn't stretch Copy out of the header bar (Citadel's style.css resets it). */
+:where(.cui-md pre.cui-shell > .cui-copy) { min-height: 0; position: absolute; top: calc(0.25rem - 1px); right: 0.6rem; padding: 0.2rem 0.6rem; float: none; margin: 0; z-index: 1; }
 :where(.cui-md .cui-copy)::before { content: 'Copy'; }
+:where(.cui-md pre.cui-shell > .cui-copy)::after { content: ''; position: absolute; inset: -0.35rem -0.2rem; }
 :where(.cui-md .cui-copy[data-copied="yes"])::before { content: 'Copied'; }
 :where(.cui-md .cui-copy[data-copied="no"])::before { content: "Couldn't copy"; }
 /* A command block (a shell tag, #898) keeps Copy in view: it is what the block is for, and a screenshot or a first look shouldn't have to hover to find it. */

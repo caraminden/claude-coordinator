@@ -145,6 +145,7 @@ summary { --tap-pad: max(0px, (24px - 1lh) / 2); padding-block: var(--tap-pad); 
 @media (max-width: 800px) {
   button, a.button, select, textarea, input:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color]) { min-height: var(--control-h); }
   a.button { display: inline-flex; align-items: center; justify-content: center; }
+  .cui-md .cui-copy { min-height: 0; } /* its tap area is a ::after, so it fits the header bar of a command block (#944) */
   summary { --tap-pad: max(0px, (var(--control-h) - 1lh) / 2); }
   label:has(> input:is([type=checkbox], [type=radio])) { min-height: var(--control-h); }
 }

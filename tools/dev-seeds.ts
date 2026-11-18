@@ -85,7 +85,7 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       w.asked('The unread badges in the sidebar are hard to see in dark mode. Can you fix them?');
       w.init();
       w.call('Read', { file_path: `${t.cwd}/public/sidebar.css` }, '.badge { background: var(--accent); }');
-      w.said('Two ways to fix the contrast; which do you want? To check the build first, run this in an admin window:\n\n```powershell-admin\nicacls "C:\\citadel" /grant Users:F\n```\n\nand this in WSL:\n\n```wsl\nls ~/citadel\n```');
+      w.said('Two ways to fix the contrast; which do you want? To check the build first, run this in an admin window:\n\n```powershell-admin\nicacls "C:\\citadel" /grant Users:F\n```\n\nthen this in plain PowerShell:\n\n```powershell\nGet-ChildItem C:\\citadel\n```\n\nand this in WSL:\n\n```wsl\nls ~/citadel\n```');
       const e = w.put('question', { id: hex(), questions: [{ question: 'How should unread badges look in dark mode?', header: 'Badge style', multiSelect: false, options: [
         { label: 'Solid accent', description: 'A filled accent-coloured pill with white text: 7.1:1 contrast.', recommended: true },
         { label: 'Outlined', description: 'A 1px accent outline with accent text: quieter, 4.6:1 contrast.' },

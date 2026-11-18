@@ -26,11 +26,15 @@
 // unit, logging next to this file), starting at login and again if it stops.
 // The token can come from CC_MACHINE_TOKEN instead. Needs Node 18 or newer; no other installs.
 import { spawn, spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { appendFileSync, chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, watchFile, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { appendFileSync, chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, watchFile, writeFileSync } from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 // ---------- workspace tools ----------
@@ -95,7 +99,7 @@ export function loadConfig(file, env = process.env) {
   const workspaces = new Map();
   const servers = new Map();
   const problems = [];
-  const none = { workspaces, servers, problems, screenLock: null, screenshots: false };
+  const none = { workspaces, servers, problems, screenLock: null, screenshots: false, jobs: null };
   if (!existsSync(file)) return none;
   let raw;
   try {
@@ -163,7 +167,45 @@ export function loadConfig(file, env = process.env) {
     }
     workspaces.set(name, { name, path, read, gitSync, tasks });
   }
-  return { workspaces, servers, problems, screenLock, screenshots };
+  return { workspaces, servers, problems, screenLock, screenshots, jobs: raw?.jobs === undefined ? null : loadJobs(raw.jobs, problems, env) };
+}
+
+/**
+ * The owner's `jobs` block (#858): { dir, distro?, folders: { <name>: <path> }, max_limit_h?, max_disk_gb, gpu? }.
+ * The outer wall for GPU jobs: whatever the app sends, a job reads only these folders, runs at most max_limit_h
+ * and the jobs folder holds at most max_disk_gb. A broken dir or cap turns jobs off (null) with a problem.
+ */
+function loadJobs(raw, problems, env) {
+  const bad = (why) => (problems.push(`jobs: ${why}, so jobs are off`), null);
+  if (!raw || typeof raw !== 'object') return bad('must be { dir, folders, max_limit_h, max_disk_gb, gpu }');
+  // A comma would end podman's --mount option early and start another.
+  const real = (p) => {
+    const r = realDir(expand(String(p ?? ''), env));
+    if (r.includes(',')) throw new Error(`${r} has a comma, which podman's mounts can't take`);
+    return r;
+  };
+  let dir;
+  try {
+    dir = real(raw.dir);
+  } catch (err) {
+    return bad(`dir: ${err.message}`);
+  }
+  const hours = raw.max_limit_h === undefined ? JOB_LIMIT_H : raw.max_limit_h;
+  if (typeof hours !== 'number' || !(hours > 0) || hours > 48) return bad('"max_limit_h" must be a number of hours, at most 48');
+  if (typeof raw.max_disk_gb !== 'number' || !(raw.max_disk_gb > 0)) return bad('"max_disk_gb" must be a number of GB');
+  if (raw.gpu !== undefined && typeof raw.gpu !== 'boolean') return bad('"gpu" must be true or false');
+  const folders = new Map();
+  for (const [name, p] of Object.entries(raw.folders ?? {})) {
+    if (!NAME.test(name)) problems.push(`jobs, folder "${name}": names use letters, digits, - and _`);
+    else {
+      try {
+        folders.set(name, real(p));
+      } catch (err) {
+        problems.push(`jobs, folder ${name}: ${err.message}`);
+      }
+    }
+  }
+  return { dir, folders, max_limit_h: hours, max_disk_gb: raw.max_disk_gb, gpu: raw.gpu === true };
 }
 
 const claudeConfigFile = (env) => join(env.CLAUDE_CONFIG_DIR ?? homedir(), '.claude.json');
@@ -493,7 +535,7 @@ export class WorkspaceHost {
   }
 
   reload() {
-    ({ workspaces: this.all, servers: this.servers, problems: this.problems, screenLock: this.screenLock, screenshots: this.screenshots } = loadConfig(this.configFile, this.env));
+    ({ workspaces: this.all, servers: this.servers, problems: this.problems, screenLock: this.screenLock, screenshots: this.screenshots, jobs: this.jobsBlock } = loadConfig(this.configFile, this.env));
   }
 
   /** The workspaces minions get: every tool reads these, so one that isn't lent is not there for them. */
@@ -831,6 +873,656 @@ export async function workspaceReply(host, message, who, upload) {
   }
 }
 
+// ---------- GPU jobs (#858) ----------
+// A job is a container the app queues on this computer (specs/desktop-gpu-jobs.md in Citadel's shared folder).
+// The app is trusted but this side is the wall: a job runs only from an image pinned by digest, sees only its own
+// /in (read-only), /out, /state, its kind's /cache and the owner's named folders (read-only), and only /out and
+// its log ever leave. Each job's state lives in its folder, so a job outlives the agent and is picked up again.
+
+const JOB_LIMIT_H = 12;
+// The app's job ids are positive integers; one becomes a folder and a container name.
+const JOB_ID = /^[1-9][0-9]{0,15}$/;
+const JOB_IMAGE = /^[a-z0-9][a-z0-9._/:-]{0,250}@sha256:[a-f0-9]{64}$/;
+const JOB_FILE = /^[A-Za-z0-9_][A-Za-z0-9_ .-]{0,199}$/;
+// An /out path segment the app takes (src/machine-jobs.ts safeRelPath).
+const OUT_SEGMENT = /^[\w][\w .-]{0,199}$/;
+const JOB_ENDED = ['done', 'failed', 'stopped'];
+const JOB_INPUTS_MAX = 2 * 1024 ** 3;
+const JOB_LOG_TAIL = 4096;
+const JOB_LOG_MAX = 20 * 1024 ** 2;
+const JOB_OUTPUTS_MAX = 500;
+const GPU_BUSY_PCT = 5;
+const DISK_CHECK_TICKS = 6;
+// podman's k8s-file log prefixes every line with a time, the stream and F (full) or P (partial).
+const K8S_LOG_PREFIX = /^\S+ (?:stdout|stderr) [FP] ?/gm;
+
+/** The size of everything under a folder, symlinks counted as themselves. */
+function du(path) {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch {
+    return 0;
+  }
+  if (!st.isDirectory()) return st.size;
+  let total = 0;
+  for (const e of readdirSync(path)) total += du(join(path, e));
+  return total;
+}
+
+/** A job's log as people read it: podman's per-line prefixes gone. */
+const cleanLog = (text) => text.replace(K8S_LOG_PREFIX, '');
+
+/** The last bytes of a file, or '' when there is none. */
+function fileTail(file, bytes) {
+  try {
+    const size = statSync(file).size;
+    const fd = openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(Math.min(bytes, size));
+      readSync(fd, buf, 0, buf.length, size - buf.length);
+      return buf.toString('utf8');
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+}
+
+/** One call to the app with this machine's key; resolves with the response (a stream), rejects on a network failure. */
+function appCall(appUrl, token, method, path, { headers = {}, body } = {}) {
+  const url = new URL(path, appUrl);
+  const mod = url.protocol === 'https:' ? https : http;
+  return new Promise((done, fail) => {
+    const req = mod.request(url, { method, headers: { Authorization: `Bearer ${token}`, ...headers } }, done);
+    req.on('error', fail);
+    req.setTimeout(120_000, () => req.destroy(new Error('the app stopped answering')));
+    if (body instanceof Readable) body.on('error', (err) => req.destroy(err)).pipe(req);
+    else req.end(body);
+  });
+}
+
+async function readBody(res) {
+  let text = '';
+  for await (const chunk of res) text += chunk;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text.slice(0, 300) };
+  }
+}
+
+/**
+ * Every file under a job's /out (its real path) that may leave this computer, and every one that may not, with why.
+ * A symlink is followed only to a regular file inside /out; a folder link, a device or a fifo is never read.
+ */
+export function outFiles(out) {
+  const files = [];
+  const walk = (dir, rel) => {
+    for (const e of readdirSync(dir).sort()) {
+      if (files.length >= JOB_OUTPUTS_MAX) return;
+      const abs = join(dir, e);
+      const path = rel ? `${rel}/${e}` : e;
+      const st = lstatSync(abs);
+      if (st.isDirectory()) {
+        walk(abs, path);
+        continue;
+      }
+      const segs = path.split('/');
+      const named = segs.length <= 20 && segs.every((x) => OUT_SEGMENT.test(x) && !x.endsWith('.part'));
+      let real = abs;
+      let why = named ? null : 'a name the app does not take';
+      if (!why && st.isSymbolicLink()) {
+        try {
+          real = realpathSync.native(abs);
+          if (!within(out, real)) why = 'a link to outside /out';
+          else if (!statSync(real).isFile()) why = 'a link to something that is not a file';
+        } catch {
+          why = 'a broken link';
+        }
+      } else if (!why && !st.isFile()) why = 'not a file';
+      files.push({ path, real, size: why ? 0 : statSync(real).size, why });
+    }
+  };
+  walk(out, '');
+  return files;
+}
+
+/** The podman arguments that run a job: the whole wall in one list. */
+export function podmanRunArgs(job, block, resume) {
+  const dir = join(block.dir, job.id);
+  const mount = (src, dst, ro) => ['--mount', `type=bind,src=${src},dst=${dst}${ro ? ',ro' : ''}`];
+  return [
+    'run', '-d', '--name', `citadel-job-${job.id}`, '--label', `citadel.job=${job.id}`,
+    '--cap-drop', 'all', '--security-opt', 'no-new-privileges', '--security-opt', 'label=disable',
+    // The owner's own uid inside, never root; rootless podman maps it to the owner outside too.
+    '--userns', 'keep-id', '-e', 'HOME=/tmp', '-e', 'XDG_CACHE_HOME=/cache',
+    ...(job.kind.network ? [] : ['--network', 'none']),
+    ...(job.kind.gpu && block.gpu ? ['--device', 'nvidia.com/gpu=all'] : []),
+    ...(resume ? ['-e', 'CITADEL_JOB_RESUME=1'] : []),
+    // podman writes the log itself, so it keeps growing while the agent is down.
+    '--log-driver', 'k8s-file', '--log-opt', `path=${join(dir, 'job.log')}`,
+    ...mount(join(dir, 'in'), '/in', true),
+    ...mount(join(dir, 'out'), '/out'),
+    ...mount(join(dir, 'state'), '/state'),
+    // Model downloads, kept between jobs of the same kind so only the first run needs the network.
+    ...mount(join(block.dir, 'cache', cacheName(job.kind.name)), '/cache'),
+    ...job.kind.reads.flatMap((name) => mount(block.folders.get(name), `/private/${name}`, true)),
+    job.kind.image, ...job.kind.command,
+  ];
+}
+
+const cacheName = (kind) => kind.replace(/[^A-Za-z0-9_-]/g, '_');
+
+/** Why a job.start must be refused, or null. Only what the owner's block allows gets past. */
+export function refuseStart(msg, block) {
+  if (!block) return 'this machine has no jobs block in machine-agent.json';
+  const k = msg.kind;
+  if (!k || typeof k !== 'object' || typeof k.name !== 'string' || !k.name) return 'the job has no kind';
+  if (typeof k.image !== 'string' || !JOB_IMAGE.test(k.image)) return `the image must be pinned by digest (name@sha256:…), not ${String(k.image).slice(0, 100)}`;
+  if (!Array.isArray(k.command) || !k.command.length || k.command.length > 64 || !k.command.every((a) => typeof a === 'string' && !a.includes('\0'))) return 'the command must be a list of arguments';
+  if (!Array.isArray(k.reads) || !k.reads.every((r) => typeof r === 'string')) return 'reads must be a list of folder names';
+  const unknown = k.reads.filter((r) => !block.folders.has(r));
+  if (unknown.length) return `this machine's owner doesn't offer the folder${unknown.length > 1 ? 's' : ''} ${unknown.join(', ')}`;
+  if (k.gpu === true && !block.gpu) return "this machine's owner hasn't given jobs the GPU";
+  if (!Number.isInteger(msg.limit_s) || msg.limit_s <= 0) return 'the time limit must be a whole number of seconds';
+  if (msg.limit_s > block.max_limit_h * 3600) return `the time limit is over this machine's ${block.max_limit_h} h`;
+  if (!Array.isArray(msg.inputs) || msg.inputs.length > 500) return 'inputs must be a list';
+  const names = new Set();
+  let total = 0;
+  for (const f of msg.inputs) {
+    if (typeof f?.name !== 'string' || !JOB_FILE.test(f.name) || names.has(f.name)) return `the input name ${String(f?.name).slice(0, 60)} isn't a plain file name`;
+    if (!Number.isInteger(f.size) || f.size < 0 || typeof f.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(f.sha256)) return `input ${f.name} needs a size and a sha256`;
+    names.add(f.name);
+    total += f.size;
+  }
+  if (total > JOB_INPUTS_MAX) return 'the inputs are over 2 GB';
+  if (typeof msg.input_token !== 'string' || !msg.input_token) return 'the job has no input token';
+  return null;
+}
+
+/**
+ * The jobs on this computer, run with podman, at most one at a time. `block` is the owner's jobs block (loadJobs), or
+ * null; `podman` and `nvidiaSmi` are commands as lists (tests hand it fakes). Reports go to the app as they happen.
+ */
+export class JobRunner {
+  constructor({ block, appUrl, token, log = () => {}, podman = ['podman'], nvidiaSmi = ['nvidia-smi'], tickMs = 10_000, graceS = 60 }) {
+    Object.assign(this, { appUrl, token, log, podman, nvidiaSmi, tickMs, graceS });
+    this.jobs = new Map();
+    this.children = new Set();
+    this.ticks = 0;
+    this.lastSample = Date.now();
+    this.timer = setInterval(() => this.tick().catch((err) => this.log(`Jobs: ${err.message}`)), tickMs);
+    this.timer.unref();
+    this.block = null;
+    this.closed = false;
+    this.ready = this.setBlock(block).catch((err) => this.log(`Jobs: could not read the jobs folder: ${err.message}`));
+  }
+
+  /** The owner changed the jobs block. With none, new jobs are refused; jobs already here keep their limits. */
+  async setBlock(block) {
+    const fresh = block && block.dir !== this.block?.dir;
+    this.block = block;
+    if (fresh) await this.restore();
+  }
+
+  /** What the app's info gets: folder names only, never their paths. */
+  offer() {
+    const b = this.block;
+    return b && { folders: [...b.folders.keys()], max_limit_h: b.max_limit_h, max_disk_gb: b.max_disk_gb, gpu: b.gpu };
+  }
+
+  /** The jobs this agent holds and hasn't finished telling the app about, for the app's reconcile on connect. */
+  known() {
+    return [...this.jobs.values()].filter((j) => !j.final_sent).slice(0, 100).map((j) => ({ id: Number(j.id), state: j.state }));
+  }
+
+  close() {
+    this.closed = true;
+    clearInterval(this.timer);
+    for (const c of this.children) c.kill();
+  }
+
+  /** A podman (or nvidia-smi) call; resolves with its exit code and output, never rejects. */
+  exec(cmd, args) {
+    return new Promise((done) => {
+      let stdout = '';
+      let out = '';
+      const p = spawn(cmd[0], [...cmd.slice(1), ...args], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      this.children.add(p);
+      p.stdout.on('data', (d) => ((stdout += d), (out += d)));
+      p.stderr.on('data', (d) => (out += d));
+      p.on('error', (err) => (this.children.delete(p), done({ code: -1, stdout: '', out: err.message })));
+      p.on('close', (code) => (this.children.delete(p), done({ code, stdout: stdout.trim(), out: out.trim() })));
+    });
+  }
+
+  call(method, path, opts) {
+    return appCall(this.appUrl, this.token, method, path, opts);
+  }
+
+  name(job) {
+    return `citadel-job-${job.id}`;
+  }
+
+  dir(job, ...rest) {
+    return join(job.home, job.id, ...rest);
+  }
+
+  save(job) {
+    const file = this.dir(job, 'job.json');
+    writeFileSync(`${file}.new`, JSON.stringify(job, (k, v) => (k.startsWith('_') || k === 'home' ? undefined : v)));
+    renameSync(`${file}.new`, file);
+  }
+
+  runS(job) {
+    return Math.floor((job.run_ms + (job.since ? Date.now() - job.since : 0)) / 1000);
+  }
+
+  /** Paused, stopped or ended: the time limit stops counting. */
+  closeSegment(job) {
+    if (!job.since) return;
+    job.run_ms += Date.now() - job.since;
+    job.since = null;
+  }
+
+  /** Tells the app where a job stands. True once the app has heard it, refusal included; false if it couldn't be reached. */
+  async report(job) {
+    const g = job._gpu;
+    const body = {
+      id: Number(job.id), state: job.state, run_s: this.runS(job), gpu_busy_s: Math.round(job.gpu_busy_s),
+      gpu_pct: g?.pct ?? null, vram_mb: g?.vram ?? null, log_tail: cleanLog(fileTail(this.dir(job, 'job.log'), JOB_LOG_TAIL * 2)).slice(-JOB_LOG_TAIL),
+      ...(job.state === 'paused' && job.paused === 'frozen' && g ? { held_vram_mb: g.vram } : {}),
+      ...(job.outputs.length ? { outputs: job.outputs.map(({ path, size, uploaded }) => ({ path, size, uploaded })) } : {}),
+      ...(JOB_ENDED.includes(job.state) ? { exit_code: job.final.exit_code, ...(job.final.error ? { error: job.final.error } : {}) } : {}),
+    };
+    let res;
+    try {
+      res = await this.call('POST', '/api/machines/job-state', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    } catch (err) {
+      this.log(`Job ${job.id}: could not report ${job.state}: ${err.message}`);
+      return false;
+    }
+    res.resume();
+    // The app ended it, never started it, or doesn't know it: it must not keep running here.
+    if ((res.statusCode === 409 || res.statusCode === 404) && !job.final) this.stop(job, 'stopped', 'the app ended it');
+    return res.statusCode < 500;
+  }
+
+  /** A job.start this agent won't run: the app hears why, and nothing is made on disk. */
+  async refuse(msg, why) {
+    this.log(`Job ${msg.id}: refused: ${why}`);
+    const body = { id: Number(msg.id), state: 'failed', run_s: 0, gpu_busy_s: 0, error: `Refused by the machine: ${why}` };
+    try {
+      (await this.call('POST', '/api/machines/job-state', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).resume();
+    } catch (err) {
+      this.log(`Job ${msg.id}: could not report the refusal: ${err.message}`);
+    }
+  }
+
+  /** One message from the app's stream: { type, id, ... }. */
+  async handle(msg) {
+    await this.ready;
+    const id = String(msg?.id ?? '');
+    if (!JOB_ID.test(id)) return this.log(`Ignored a job message with id ${id.slice(0, 20)}`);
+    const job = this.jobs.get(id);
+    if (msg.type === 'job.start') return job ? this.log(`Job ${id}: already here, start ignored`) : this.start({ ...msg, id });
+    if (!job) return this.log(`Job ${id}: ${msg.type} for a job not on this machine`);
+    if (msg.type === 'job.pause') return this.pause(job);
+    if (msg.type === 'job.resume') return this.resume(job);
+    if (msg.type === 'job.stop') return this.stop(job, 'stopped', null);
+    if (msg.type === 'job.fetch') return this.fetchLeft(job, msg.path);
+    this.log(`Job ${id}: unknown message ${String(msg.type).slice(0, 40)}`);
+  }
+
+  async start(msg) {
+    const block = this.block;
+    let why = refuseStart(msg, block);
+    const busy = [...this.jobs.values()].find((j) => ['starting', 'running', 'paused'].includes(j.state));
+    if (!why && busy) why = `job ${busy.id} holds this machine's GPU slot (${busy.state})`;
+    const need = why ? 0 : msg.inputs.reduce((n, f) => n + f.size, 0);
+    if (!why && !this.makeRoom(need)) why = `the jobs folder would go over its ${block.max_disk_gb} GB`;
+    if (why) return this.refuse(msg, why);
+    const { name, image, command, gpu, network, reads, resumable } = msg.kind;
+    const job = {
+      id: msg.id, home: block.dir, kind: { name, image, command, gpu: gpu === true, network: network === true, reads, resumable: resumable === true },
+      limit_s: msg.limit_s, inputs: msg.inputs.map(({ name: n, size, sha256 }) => ({ name: n, size, sha256 })),
+      state: 'starting', run_ms: 0, since: null, gpu_busy_s: 0, started_at: Date.now(), paused: null, outputs: [], final: null, final_sent: false,
+    };
+    this.jobs.set(job.id, job);
+    for (const d of ['in', 'out', 'state']) mkdirSync(this.dir(job, d), { recursive: true });
+    mkdirSync(join(block.dir, 'cache', cacheName(name)), { recursive: true });
+    this.save(job);
+    this.log(`Job ${job.id}: ${name}, ${image}, up to ${Math.round(job.limit_s / 60)} min`);
+    await this.report(job);
+    try {
+      for (const f of job.inputs) await this.fetchInput(job, f, msg.input_token);
+    } catch (err) {
+      return this.finish(job, 'failed', `input ${err.message}`);
+    }
+    await this.launch(job, msg.resume === true);
+  }
+
+  /** One input file, streamed into /in and checked against its size and sha256. */
+  async fetchInput(job, f, inputToken) {
+    if (job.stopping) return;
+    const url = `/api/machines/job-input?job=${job.id}&name=${encodeURIComponent(f.name)}`;
+    const res = await this.call('GET', url, { headers: { 'X-Job-Token': inputToken } });
+    if (res.statusCode !== 200) throw new Error(`${f.name}: the app answered ${res.statusCode} ${(await readBody(res)).error ?? ''}`.trim());
+    const hash = createHash('sha256');
+    let size = 0;
+    const file = this.dir(job, 'in', f.name);
+    try {
+      await pipeline(res, async function* (source) {
+        for await (const chunk of source) {
+          size += chunk.length;
+          if (size > f.size) throw new Error(`${f.name} is bigger than the ${f.size} bytes it should be`);
+          hash.update(chunk);
+          yield chunk;
+        }
+      }, createWriteStream(file, { flags: 'wx' }));
+      if (size !== f.size) throw new Error(`${f.name} came to ${size} bytes, not ${f.size}`);
+      if (hash.digest('hex') !== f.sha256) throw new Error(`${f.name} doesn't match its sha256`);
+    } catch (err) {
+      rmSync(file, { force: true });
+      throw err;
+    }
+  }
+
+  /** Runs the job's container (again, on resume); the job's own folders are already there. */
+  async launch(job, resume) {
+    if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error);
+    // A resume runs under the owner's block as it is now: a folder taken away since is not mounted.
+    const block = this.block;
+    if (!block) return this.finish(job, 'failed', "this machine's owner turned jobs off");
+    const gone = job.kind.reads.filter((r) => !block.folders.has(r));
+    if (gone.length) return this.finish(job, 'failed', `this machine's owner no longer offers ${gone.join(', ')}`);
+    const r = await this.exec(this.podman, podmanRunArgs(job, { ...block, dir: job.home }, resume));
+    if (r.code !== 0) return this.finish(job, 'failed', `podman run failed: ${r.out.slice(-500)}`);
+    job.state = 'running';
+    job.paused = null;
+    job.since = Date.now();
+    this.save(job);
+    this.watch(job);
+    if (job.stopping) return void this.exec(this.podman, ['rm', '-f', this.name(job)]);
+    await this.report(job);
+  }
+
+  /** Waits on the job's container in the background; its end finishes the job, or completes a pause. */
+  watch(job) {
+    this.exec(this.podman, ['wait', this.name(job)]).then(({ code, stdout }) => {
+      if (this.jobs.get(job.id) !== job || job.final || this.closed) return;
+      const exit = code === 0 ? Number.parseInt(stdout.split('\n').pop(), 10) : NaN;
+      if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error, Number.isInteger(exit) ? exit : null);
+      if (job.pausing) return this.paused(job);
+      this.finish(job, exit === 0 ? 'done' : 'failed', exit === 0 ? null : `it exited with ${Number.isInteger(exit) ? `code ${exit}` : 'no exit code'}`, Number.isInteger(exit) ? exit : null);
+    });
+  }
+
+  /** A resumable job's container has stopped for a pause: all its VRAM is free; its folders stay. */
+  async paused(job) {
+    job.pausing = false;
+    await this.exec(this.podman, ['rm', '-f', this.name(job)]);
+    job.state = 'paused';
+    job.paused = 'stopped';
+    this.save(job);
+    await this.report(job);
+  }
+
+  async pause(job) {
+    if (job.state !== 'running' || job.pausing || job.stopping) return;
+    this.closeSegment(job);
+    if (job.kind.resumable) {
+      // SIGTERM, then the grace, then KILL; watch() sees it end and finishes the pause.
+      job.pausing = true;
+      this.save(job);
+      this.log(`Job ${job.id}: pausing (stopping it, ${this.graceS} s grace)`);
+      return void this.exec(this.podman, ['stop', '-t', String(this.graceS), this.name(job)]);
+    }
+    const r = await this.exec(this.podman, ['pause', this.name(job)]);
+    if (r.code !== 0) {
+      job.since = Date.now();
+      return this.log(`Job ${job.id}: podman pause failed: ${r.out.slice(-300)}`);
+    }
+    job.state = 'paused';
+    job.paused = 'frozen';
+    job._gpu = await this.sampleGpu();
+    this.save(job);
+    await this.report(job);
+  }
+
+  async resume(job) {
+    if (job.state !== 'paused' || job.stopping) return;
+    if (job.paused === 'stopped') {
+      job.state = 'starting';
+      this.save(job);
+      await this.report(job);
+      return this.launch(job, true);
+    }
+    const r = await this.exec(this.podman, ['unpause', this.name(job)]);
+    if (r.code !== 0) return this.log(`Job ${job.id}: podman unpause failed: ${r.out.slice(-300)}`);
+    job.state = 'running';
+    job.paused = null;
+    job.since = Date.now();
+    this.save(job);
+    await this.report(job);
+  }
+
+  /** Ends a job: its container is killed and removed, then what /out holds goes up as for any end. */
+  stop(job, state, error) {
+    if (job.final || job.stopping) return;
+    job.stopping = { state, error };
+    this.save(job);
+    this.log(`Job ${job.id}: stopping${error ? ` (${error})` : ''}`);
+    // Still fetching inputs or pulling its image: start() and launch() look before they go on.
+    if (job.state === 'starting') return;
+    if (job.state === 'paused' && job.paused === 'stopped') return void this.finish(job, state, error);
+    this.closeSegment(job);
+    this.exec(this.podman, ['rm', '-f', this.name(job)]);
+  }
+
+  /**
+   * The job is over: its container goes, then each file in /out uploads, then its log, then its last state.
+   * Picked up again on the next connect if the app couldn't be reached part way.
+   */
+  async finish(job, state, error = null, exitCode = null) {
+    if (job._finishing || job.final_sent) return;
+    job._finishing = true;
+    this.closeSegment(job);
+    job.final ??= { state, error, exit_code: exitCode };
+    job.ended_at ??= Date.now();
+    job.state = 'uploading';
+    this.save(job);
+    this.log(`Job ${job.id}: ended (${job.final.state}${job.final.error ? `: ${job.final.error}` : ''}), uploading /out`);
+    try {
+      // Gone before /out is read, so nothing in the container can swap a file after it is checked.
+      await this.exec(this.podman, ['rm', '-f', this.name(job)]);
+      await this.report(job);
+      if (!(await this.uploadOutputs(job))) return;
+      await this.uploadLog(job);
+      job.state = job.final.state;
+      this.save(job);
+      if (await this.report(job)) {
+        job.final_sent = true;
+        this.save(job);
+        this.log(`Job ${job.id}: ${job.state}`);
+      }
+    } finally {
+      job._finishing = false;
+    }
+  }
+
+  /** Uploads what /out holds and isn't up yet. False when the app couldn't be reached (tried again on connect). */
+  async uploadOutputs(job) {
+    const files = outFiles(realpathSync.native(this.dir(job, 'out')));
+    const before = new Map(job.outputs.map((o) => [o.path, o]));
+    job.outputs = files.map((f) => ({ path: f.path, size: f.size, uploaded: before.get(f.path)?.uploaded === true && before.get(f.path)?.size === f.size, why: f.why }));
+    let ended = false;
+    for (const [i, f] of files.entries()) {
+      const o = job.outputs[i];
+      if (o.uploaded || f.why || ended) continue;
+      let res;
+      try {
+        const url = `/api/machines/job-upload?job=${job.id}&path=${encodeURIComponent(f.path)}`;
+        res = await this.call('POST', url, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(f.size) }, body: createReadStream(f.real) });
+      } catch (err) {
+        this.log(`Job ${job.id}: could not upload ${f.path}: ${err.message}`);
+        this.save(job);
+        return false;
+      }
+      const body = await readBody(res);
+      if (res.statusCode === 201) o.uploaded = true;
+      else {
+        // Over the cap (413) it stays here for job.fetch; once the app ended the job (409, 404) nothing more goes.
+        o.why = body.error ?? `the app answered ${res.statusCode}`;
+        ended = res.statusCode === 409 || res.statusCode === 404;
+        this.log(`Job ${job.id}: ${f.path} not uploaded: ${o.why}`);
+      }
+      this.save(job);
+    }
+    for (const o of job.outputs) if (o.why && !o.uploaded) this.log(`Job ${job.id}: ${o.path} stays here: ${o.why}`);
+    return true;
+  }
+
+  async uploadLog(job) {
+    const log = Buffer.from(cleanLog(fileTail(this.dir(job, 'job.log'), JOB_LOG_MAX * 2)));
+    const body = log.subarray(Math.max(0, log.length - JOB_LOG_MAX));
+    try {
+      const res = await this.call('POST', `/api/machines/job-upload?job=${job.id}&log=1`, { headers: { 'Content-Type': 'text/plain', 'Content-Length': String(body.length) }, body });
+      res.resume();
+    } catch (err) {
+      this.log(`Job ${job.id}: could not upload its log: ${err.message}`);
+    }
+  }
+
+  /** A result left over the cap, sent again when the app asks; the same checks as the first time. */
+  async fetchLeft(job, path) {
+    const o = job.final_sent && job.outputs.find((x) => x.path === path && !x.uploaded);
+    const f = o && outFiles(realpathSync.native(this.dir(job, 'out'))).find((x) => x.path === path && !x.why);
+    if (!f) return this.log(`Job ${job.id}: fetch of ${String(path).slice(0, 100)} refused: not a result left here`);
+    try {
+      const res = await this.call('POST', `/api/machines/job-upload?job=${job.id}&path=${encodeURIComponent(f.path)}`, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(f.size) }, body: createReadStream(f.real) });
+      const body = await readBody(res);
+      if (res.statusCode === 201) o.uploaded = true;
+      this.log(`Job ${job.id}: fetch of ${f.path}: ${res.statusCode === 201 ? 'sent' : body.error ?? res.statusCode}`);
+      this.save(job);
+    } catch (err) {
+      this.log(`Job ${job.id}: fetch of ${f.path} failed: ${err.message}`);
+    }
+  }
+
+  /** Whole-GPU use now (nvidia-smi sees Windows' own too), or null without one. */
+  async sampleGpu() {
+    const r = await this.exec(this.nvidiaSmi, ['--query-gpu=utilization.gpu,memory.used', '--format=csv,noheader,nounits']);
+    const [pct, vram] = (r.code === 0 ? r.stdout.split('\n')[0] : '').split(',').map((v) => Number(v.trim()));
+    return Number.isFinite(pct) && Number.isFinite(vram) ? { pct, vram } : null;
+  }
+
+  /** Every tick: GPU use, the time limit, the disk cap now and then, and a report for each live job. */
+  async tick() {
+    const live = [...this.jobs.values()].filter((j) => (j.state === 'running' || j.state === 'paused') && !j.final);
+    const now = Date.now();
+    const dt = Math.min(now - this.lastSample, 2 * this.tickMs) / 1000;
+    this.lastSample = now;
+    if (!live.length) return;
+    const gpu = await this.sampleGpu();
+    const disk = ++this.ticks % DISK_CHECK_TICKS === 0 && this.block ? du(this.block.dir) : 0;
+    for (const j of live) {
+      j._gpu = gpu;
+      if (j.state === 'running' && !j.pausing) {
+        if (j.kind.gpu && gpu && gpu.pct >= GPU_BUSY_PCT) j.gpu_busy_s += dt;
+        if (this.runS(j) >= j.limit_s) {
+          this.stop(j, 'failed', `it hit its time limit of ${Math.round(j.limit_s / 60)} min`);
+          continue;
+        }
+        if (disk > this.block.max_disk_gb * 1024 ** 3) {
+          this.stop(j, 'failed', `the jobs folder went over its ${this.block.max_disk_gb} GB`);
+          continue;
+        }
+      }
+      this.save(j);
+      await this.report(j);
+    }
+  }
+
+  /** Room for `need` more bytes under the disk cap, deleting the oldest finished job folders if it must. */
+  makeRoom(need) {
+    const cap = this.block.max_disk_gb * 1024 ** 3;
+    let used = du(this.block.dir);
+    if (used + need <= cap) return true;
+    const done = [];
+    for (const e of readdirSync(this.block.dir)) {
+      if (!JOB_ID.test(e) || this.jobs.get(e)?.final_sent === false) continue;
+      try {
+        const j = JSON.parse(readFileSync(join(this.block.dir, e, 'job.json'), 'utf8'));
+        if (j.final_sent) done.push({ id: e, ended: j.ended_at ?? 0 });
+      } catch {}
+    }
+    for (const { id } of done.sort((a, b) => a.ended - b.ended)) {
+      const d = join(this.block.dir, id);
+      used -= du(d);
+      rmSync(d, { recursive: true, force: true });
+      this.jobs.delete(id);
+      this.log(`Job ${id}: its folder deleted to make room`);
+      if (used + need <= cap) return true;
+    }
+    return false;
+  }
+
+  /** At start: every job folder, the unfinished ones picked up again where their containers are. */
+  async restore() {
+    const home = this.block.dir;
+    for (const e of readdirSync(home)) {
+      if (!JOB_ID.test(e) || this.jobs.has(e)) continue;
+      let job;
+      try {
+        job = JSON.parse(readFileSync(join(home, e, 'job.json'), 'utf8'));
+      } catch {
+        continue;
+      }
+      if (job.id !== e) continue;
+      job.home = home;
+      // Finished ones too, for job.fetch and the disk cap.
+      this.jobs.set(e, job);
+      if (job.final_sent || job.final) continue; // connected() finishes telling the app
+      const r = await this.exec(this.podman, ['inspect', '--format', '{{.State.Status}} {{.State.ExitCode}}', this.name(job)]);
+      const [status, code] = r.code === 0 ? r.stdout.split(/\s+/) : [];
+      const exit = Number.parseInt(code, 10);
+      this.log(`Job ${e}: found ${job.state}, its container ${status ?? 'gone'}`);
+      if (status === 'running' || status === 'paused') {
+        job.state = status;
+        job.paused = status === 'paused' ? 'frozen' : null;
+        if (status === 'running') job.since ??= Date.now();
+        else this.closeSegment(job);
+        this.save(job);
+        this.watch(job);
+        // What the agent was doing when it went down, done again.
+        if (job.stopping) this.exec(this.podman, ['rm', '-f', this.name(job)]);
+        else if (job.pausing) this.exec(this.podman, ['stop', '-t', String(this.graceS), this.name(job)]);
+      } else if (job.stopping) {
+        job._end = [job.stopping.state, job.stopping.error, Number.isInteger(exit) ? exit : null];
+      } else if (job.pausing && status) {
+        await this.paused(job);
+      } else if (status === 'exited' || status === 'stopped') {
+        job._end = exit === 0 ? ['done', null, 0] : ['failed', `it exited with ${Number.isInteger(exit) ? `code ${exit}` : 'no exit code'} while the agent was down`, Number.isInteger(exit) ? exit : null];
+      } else if (!(job.state === 'paused' && job.paused === 'stopped')) {
+        job._end = ['failed', 'the machine restarted and its container is gone'];
+      }
+    }
+  }
+
+  /** After each connect (and the info with known()): finish what ended while the app couldn't hear. */
+  async connected() {
+    await this.ready;
+    for (const job of this.jobs.values()) {
+      if (job.final_sent) continue;
+      if (job.final) this.finish(job);
+      else if (job._end) this.finish(job, ...job._end);
+    }
+  }
+}
+
 // ---------- running in the background ----------
 
 /** Copies everything the agent prints to a file as well, so a background agent's errors can be read. */
@@ -1092,14 +1784,18 @@ async function main() {
     if (managed) log(`MCP servers found here: ${found().map((f) => f.name).join(', ') || 'none'}`);
   };
   describeWorkspaces();
+  // GPU jobs (#858): made even without a jobs block, so a job sent here is refused out loud.
+  const runner = new JobRunner({ block: host?.jobsBlock ?? null, appUrl, token, log });
 
   /** Tells the app which servers and workspaces this agent offers; sent on connect and when the config changes. */
   async function sendInfo() {
+    await runner.ready;
+    const jobs = runner.offer();
     await fetch(new URL('/api/machines/info', appUrl), {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
-      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}) }),
+      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), ...(jobs ? { jobs, known_jobs: runner.known() } : {}) }),
     }).then(async (res) => {
       // fetch doesn't throw on a refusal; a silent one hid #301's 404.
       if (!res.ok) log(`The app refused this computer's workspaces: ${res.status} ${(await res.json().catch(() => ({}))).error ?? ''}`);
@@ -1107,8 +1803,11 @@ async function main() {
   }
   if (host) {
     watchFile(configFile, { interval: 3000 }, () => {
+      const folders = JSON.stringify([...(host.jobsBlock?.folders ?? [])]);
       host.reload();
       log('The config changed.');
+      runner.setBlock(host.jobsBlock).catch((err) => log(`Jobs: ${err.message}`));
+      if (JSON.stringify([...(host.jobsBlock?.folders ?? [])]) !== folders) log('The jobs folders changed: if they are Windows folders, add them to /etc/fstab and restart this distro (wsl --terminate).');
       describeWorkspaces();
       sendInfo();
     });
@@ -1270,11 +1969,14 @@ async function main() {
       if (msg.hello) {
         log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Minions can use ${describe}${!managed && host?.workspaces.size ? ` and workspaces ${[...host.workspaces.keys()].join(', ')}` : ''} while this runs.`);
         retry = 0;
-        sendInfo();
+        // After the info that lists what this agent holds: then whatever ended while it was away is reported.
+        sendInfo().then(() => runner.connected());
       } else if (msg.replaced) {
         throw Object.assign(new Error(`another agent connected with this machine's token, from ${msg.by || 'another computer'}; run only one`), { replaced: true });
       } else if (msg.lend) {
         setLend(msg.lend);
+      } else if (msg.job) {
+        runner.handle(msg.job).catch((err) => log(`Job ${msg.job.id}: ${err.message}`));
       } else if (msg.close) {
         stopServer(msg.session);
       } else if (msg.session && msg.server === 'ws') {

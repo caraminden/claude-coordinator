@@ -24,7 +24,9 @@ export const TIERS = [
   { work: 'a read-only check', model: 'claude-sonnet-5-5', effort: 'low' },
   // The advisor trial (#817) has its own row: it is over on its date, and taking the row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts) ends it.
   { work: 'in the advisor trial (#817) until 2026-11-30, about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high at medium, and a stalled Sonnet-medium minion before Opus medium, never a Taskmaster (`node tools/advisor-trial.ts` reads its numbers)', model: 'claude-sonnet-5-5+opus-advisor', effort: 'medium' },
-  { work: 'design, research, ideation, new screens or data models, the land pipeline, runner, tripwire, auth, migrations, multi-file refactors, art, a bug whose first repro failed', model: 'claude-opus-5-5', effort: 'high' },
+  { work: 'design, ideation, new screens or data models, the land pipeline, runner, tripwire, auth, migrations, multi-file refactors, art, a bug whose first repro failed', model: 'claude-opus-5-5', effort: 'high' },
+  // Research on Opus medium (Cara, 2026-11-17, picked "Research on Opus medium" on #940's card): research minions spent $236 in a week on Opus high, and the vendor's curve for research is nearly flat from medium to high.
+  { work: 'research', model: 'claude-opus-5-5', effort: 'medium', then: 'high if the report is thin or sent back' },
   { work: 'rarely: architecture of a big multi-part feature or build, security and risk reviews of a high-risk change, bugs that are intermittent or whose fix failed to hold', model: 'claude-fable-5-2', effort: 'medium' },
 ];
 
@@ -44,7 +46,7 @@ export const BY_TYPE = {
   bug: { model: 'claude-sonnet-5-5', effort: 'medium' },
   feature: { model: 'claude-opus-5-5', effort: 'high' },
   design: { model: 'claude-opus-5-5', effort: 'high' },
-  research: { model: 'claude-opus-5-5', effort: 'high' },
+  research: { model: 'claude-opus-5-5', effort: 'medium' },
   ideation: { model: 'claude-opus-5-5', effort: 'high' },
   art: { model: 'claude-opus-5-5', effort: 'high' },
 };

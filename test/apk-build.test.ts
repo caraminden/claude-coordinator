@@ -87,7 +87,7 @@ test('capacitorApp, apkPaths and manifestWarnings: what makes an app, what goes 
   const { live } = app('plain', false);
   assert.equal(await capacitorApp(live), null);
   const cap = app('shellapp');
-  assert.deepEqual(await capacitorApp(cap.live), { webDir: 'shell' });
+  assert.deepEqual(await capacitorApp(cap.live), { webDir: 'shell', root: '', android: 'android' });
   assert.deepEqual(apkPaths('shell/'), ['android', 'capacitor.config.json', 'capacitor.config.ts', 'shell']);
   assert.deepEqual(apkPaths('../x'), ['android', 'capacitor.config.json', 'capacitor.config.ts'], 'a webDir outside the repo is not a path to diff');
   assert.deepEqual(manifestWarnings('<application android:allowBackup="true" android:debuggable="false"/>'), ['its release manifest sets android:allowBackup="true"']);
@@ -261,4 +261,48 @@ test("the commit a build failed at outlasts a restart: a new builder doesn't tel
   const second = builder();
   assert.deepEqual(await second.b.check(row, 'auto-deploy'), { skipped: 'already failed at this commit' });
   assert.deepEqual(second.told, []);
+});
+
+/** A contraption like voice: Capacitor root android/, native project android/native, webDir android/www, named in citadel-app.json. */
+function subApp(name: string, manifest = true) {
+  const a = app(name, false);
+  commit(a.live, {
+    ...(manifest ? { 'citadel-app.json': JSON.stringify({ capacitor: { root: 'android', android: 'android/native' } }) } : { 'citadel-app.json': '{}' }),
+    'android/capacitor.config.json': JSON.stringify({ appId: 'x', webDir: 'www' }),
+    'android/www/index.html': '<p>shell</p>',
+    'android/native/app/build.gradle': 'android { defaultConfig { versionCode 1\n versionName "2.0" } }',
+  });
+  return a;
+}
+
+test('a Capacitor project in a subfolder named in citadel-app.json is built from there and published', async () => {
+  const { live, row, data } = subApp('sub');
+  key('sub');
+  const { b, calls } = builder();
+  assert.deepEqual(await b.check(row, '#1'), { built: 2 });
+  assert.equal(feed(data).versionName, '2.0');
+  const cap = calls.find((c) => c.includes('sync'))!;
+  assert.ok(cap, 'cap sync ran');
+  const gradle = calls.find((c) => c.includes('assembleRelease'))!;
+  assert.ok(gradle);
+  commit(live, { 'src/server.ts': '2' });
+  assert.deepEqual(await b.check(row, '#2'), { skipped: 'nothing in its APK changed' });
+  commit(live, { 'android/www/index.html': '<p>new</p>' });
+  assert.deepEqual(await b.check(row, '#3'), { built: 4 }, 'a change in the webDir (relative to the Capacitor root) builds again');
+});
+
+test('a keyed contraption skipped as not a Capacitor app is told to its scheme once, naming the field; one without a key is not told', async () => {
+  const { live, row } = subApp('lost', false);
+  key('lost');
+  const { b, told } = builder();
+  assert.deepEqual(await b.check(row, '#1'), { skipped: 'not a Capacitor app' });
+  assert.equal(told.length, 1);
+  assert.match(told[0], /citadel-app\.json/);
+  assert.match(told[0], /"capacitor"/);
+  commit(live, { 'src/server.ts': '2' });
+  await b.check(row, '#2');
+  assert.equal(told.length, 1, 'not again on the next deploy');
+  const plain = app('plainkeyless', false);
+  await b.check(plain.row, '#3');
+  assert.equal(told.length, 1, 'no key, no tell');
 });

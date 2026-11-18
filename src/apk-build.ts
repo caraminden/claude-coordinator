@@ -24,28 +24,39 @@ const KEEP_APKS = 3;
 /** Sets every variant's versionCode from -Pcitadel.versionCode (AGP ignores android.injected.version.code outside the IDE). */
 const VERSION_INIT = join(import.meta.dirname, 'apk-version.init.gradle');
 
-/** A Capacitor app at the checkout's root: its Android project and its Capacitor webDir (null when the config doesn't say). */
-export async function capacitorApp(dir: string): Promise<{ webDir: string | null } | null> {
-  if (!existsSync(join(dir, 'android/app/build.gradle')) && !existsSync(join(dir, 'android/app/build.gradle.kts'))) return null;
-  if (existsSync(join(dir, 'capacitor.config.json'))) {
+/** Where a contraption's Capacitor project sits, from citadel-app.json's `capacitor`: its root (the config's folder) and its Android project, both relative to the checkout. */
+async function capacitorDirs(dir: string): Promise<{ root: string; android: string }> {
+  const c = JSON.parse(await readFile(join(dir, 'citadel-app.json'), 'utf8').catch(() => '{}') || '{}')?.capacitor;
+  // Inside the checkout only: the build copies and diffs these paths.
+  const ok = (v: unknown): v is string => typeof v === 'string' && !v.startsWith('/') && !v.split('/').includes('..');
+  const root = ok(c?.root) ? c.root.replace(/\/+$/, '').replace(/^\.$/, '') : '';
+  return { root, android: ok(c?.android) ? c.android.replace(/\/+$/, '') : join(root, 'android') };
+}
+
+/** A Capacitor app: its Android project and config at the checkout's root, or where citadel-app.json's `capacitor` puts them. webDir is relative to the root (null when the config doesn't say). */
+export async function capacitorApp(dir: string): Promise<{ webDir: string | null; root: string; android: string } | null> {
+  const { root, android } = await capacitorDirs(dir).catch(() => ({ root: '', android: 'android' }));
+  if (!existsSync(join(dir, android, 'app/build.gradle')) && !existsSync(join(dir, android, 'app/build.gradle.kts'))) return null;
+  const at = (f: string) => join(dir, root, f);
+  if (existsSync(at('capacitor.config.json'))) {
     try {
-      const c = JSON.parse(await readFile(join(dir, 'capacitor.config.json'), 'utf8'));
-      return { webDir: typeof c?.webDir === 'string' ? c.webDir : null };
+      const c = JSON.parse(await readFile(at('capacitor.config.json'), 'utf8'));
+      return { webDir: typeof c?.webDir === 'string' ? c.webDir : null, root, android };
     } catch {
-      return { webDir: null };
+      return { webDir: null, root, android };
     }
   }
-  if (existsSync(join(dir, 'capacitor.config.ts'))) {
-    const m = /webDir\s*:\s*['"]([^'"]+)['"]/.exec(await readFile(join(dir, 'capacitor.config.ts'), 'utf8'));
-    return { webDir: m?.[1] ?? null };
+  if (existsSync(at('capacitor.config.ts'))) {
+    const m = /webDir\s*:\s*['"]([^'"]+)['"]/.exec(await readFile(at('capacitor.config.ts'), 'utf8'));
+    return { webDir: m?.[1] ?? null, root, android };
   }
   return null;
 }
 
-/** The paths whose changes go into the APK: a change anywhere else (the server, the web app it loads) needs none. */
-export function apkPaths(webDir: string | null): string[] {
-  const own = webDir && !webDir.startsWith('/') && !webDir.split('/').includes('..') ? [webDir.replace(/\/+$/, '')] : [];
-  return ['android', 'capacitor.config.json', 'capacitor.config.ts', ...own];
+/** The paths (relative to the checkout) whose changes go into the APK: a change anywhere else (the server, the web app it loads) needs none. */
+export function apkPaths(webDir: string | null, root = '', android = join(root, 'android')): string[] {
+  const own = webDir && !webDir.startsWith('/') && !webDir.split('/').includes('..') ? [join(root, webDir.replace(/\/+$/, ''))] : [];
+  return [android, join(root, 'capacitor.config.json'), join(root, 'capacitor.config.ts'), ...own, ...(root && !android.startsWith(`${root}/`) ? [root] : [])].filter((x, i, l) => l.indexOf(x) === i);
 }
 
 /** Lines naming a release manifest's risky flags (citadel:android-app, "Before signing a Capacitor shell"): told, not refused. */
@@ -159,7 +170,16 @@ export class ApkBuilds {
     const live = await realpath(this.d.folder(row)).catch(() => null);
     if (!live) return { skipped: 'not deployed' };
     const cap = await capacitorApp(live);
-    if (!cap) return { skipped: 'not a Capacitor app' };
+    if (!cap) {
+      // A keyed contraption whose Capacitor project isn't where it's looked for would never get an APK, unheard: told once.
+      const told = join(this.d.cacheDir, row.name, 'not-capacitor-told');
+      if (hasKey(this.d.keyDir, row.name) && !existsSync(told)) {
+        mkdirSync(dirname(told), { recursive: true });
+        writeFileSync(told, '');
+        this.d.tell(row, `${row.title} has a release key but no Android build: its Capacitor project isn't at the checkout's root (android/app/build.gradle and capacitor.config.json there). If it sits in a subfolder, name it in citadel-app.json: "capacitor": {"root": "<folder holding capacitor.config.json>", "android": "<folder holding app/build.gradle>"}, e.g. {"root": "android", "android": "android/native"}. Told once; the next deploy builds it.`);
+      }
+      return { skipped: 'not a Capacitor app' };
+    }
     const git = (cwd: string, ...args: string[]) => execResult('git', args, { cwd, timeout: 120_000 }).then((r) => ({ code: r.code, out: r.out.trim() }));
     const commit = (await git(live, 'rev-parse', 'HEAD')).out;
     if (!/^[0-9a-f]{40}$/.test(commit)) return { failed: `couldn't read ${live}'s commit` };
@@ -168,11 +188,11 @@ export class ApkBuilds {
     const current = Number.isInteger(feed?.versionCode) ? (feed!.versionCode as number) : 0;
     if (feed?.commit === commit) return { skipped: 'published at this commit' };
     // A webDir the deploy builds (gitignored dist/) isn't in git: any commit may change it, and the build copies the live one.
-    const web: string | undefined = apkPaths(cap.webDir)[3]; // the webDir, when it's a path inside the repo
+    const web: string | undefined = apkPaths(cap.webDir, cap.root, cap.android)[3]; // the webDir, when it's a path inside the repo
     const built = web && !(await git(live, 'ls-files', '--', web)).out ? web : null;
     if (typeof feed?.commit === 'string' && /^[0-9a-f]{40}$/.test(feed.commit)) {
       // 0: nothing that goes into the APK changed; 1: something did; anything else (a commit it doesn't have): build.
-      if ((await git(live, 'diff', '--quiet', feed.commit, commit, '--', ...(built ? [] : apkPaths(cap.webDir)))).code === 0) return { skipped: 'nothing in its APK changed' };
+      if ((await git(live, 'diff', '--quiet', feed.commit, commit, '--', ...(built ? [] : apkPaths(cap.webDir, cap.root, cap.android)))).code === 0) return { skipped: 'nothing in its APK changed' };
     }
     const dir = join(this.d.cacheDir, row.name);
     // The commit its build last failed or was refused at, kept on disk so a restart doesn't tell it again.
@@ -251,14 +271,14 @@ export class ApkBuilds {
       if (signal) throw new Killed(`${what} was killed by ${signal} (a Citadel restart stops its builds): the next check builds it again`);
       if (c) throw new Error(`${what} failed (exit ${c})`);
     };
-    const gradle = gradleVersion(await readFile(join(src, 'android/app/build.gradle'), 'utf8').catch(() => readFile(join(src, 'android/app/build.gradle.kts'), 'utf8')).catch(() => ''));
-    const unsigned = join(src, 'android/app/build/outputs/apk/release/app-release-unsigned.apk');
+    const gradle = gradleVersion(await readFile(join(src, cap.android, 'app/build.gradle'), 'utf8').catch(() => readFile(join(src, cap.android, 'app/build.gradle.kts'), 'utf8')).catch(() => ''));
+    const unsigned = join(src, cap.android, 'app/build/outputs/apk/release/app-release-unsigned.apk');
     const signed = join(dir, `${row.name}-${code}.apk`);
     try {
       await rm(unsigned, { force: true });
-      await step('cap sync android', ['npx', '--no-install', 'cap', 'sync', 'android'], src);
+      await step('cap sync android', ['npx', '--no-install', 'cap', 'sync', 'android'], join(src, cap.root));
       // The versionCode goes in through an init script, so the app's build.gradle needs no change and keeps its own number for hand builds.
-      await step('gradlew assembleRelease', ['nice', '-n', '10', this.d.heavy, './gradlew', '--no-daemon', '--init-script', VERSION_INIT, `-Pcitadel.versionCode=${code}`, 'assembleRelease'], join(src, 'android'));
+      await step('gradlew assembleRelease', ['nice', '-n', '10', this.d.heavy, './gradlew', '--no-daemon', '--init-script', VERSION_INIT, `-Pcitadel.versionCode=${code}`, 'assembleRelease'], join(src, cap.android));
       if (!existsSync(unsigned)) throw new Error(`no ${unsigned.slice(src.length + 1)} after the build: its release build type must leave signing to Citadel`);
       await rm(signed, { force: true });
       await step('apksigner sign', [apksigner(this.d.home, env.ANDROID_HOME), 'sign', '--ks', key, '--ks-pass', `file:${pass}`, '--out', signed, unsigned], dir);
@@ -267,7 +287,7 @@ export class ApkBuilds {
       if (err instanceof Killed) return { failed: err.message };
       return fail(err.message, await tail());
     }
-    const manifest = join(src, 'android/app/build/intermediates/merged_manifests/release');
+    const manifest = join(src, cap.android, 'app/build/intermediates/merged_manifests/release');
     const xml = (await readdir(manifest, { recursive: true }).catch(() => [] as string[])).find((f) => f.endsWith('AndroidManifest.xml'));
     const warnings = xml ? manifestWarnings(await readFile(join(manifest, xml), 'utf8').catch(() => '')) : [];
     try {

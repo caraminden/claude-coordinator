@@ -86,6 +86,11 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
     `build.gradle` alone; `versionName` is read from it.
   - Needs: the app's release key (above), `npm ci` in its `citadel-app.json` build steps (the
     build uses the live slot's `node_modules`), and a release build type with no `signingConfig`.
+  - **Capacitor project not at the checkout's root?** Name it in `citadel-app.json`:
+    `"capacitor": {"root": "android", "android": "android/native"}`. `root` is the folder holding
+    `capacitor.config.json`/`.ts` (`webDir` is relative to it); `android` is the folder holding
+    `app/build.gradle` (default `<root>/android`). Both are paths inside the checkout. A contraption
+    with a release key but no Capacitor project found tells its Taskmaster once, naming this field.
   - A failed build tells the scheme's Taskmaster once per commit, and a missing key once until
     it's made; neither publishes anything. A risky release manifest flag (above) is told but still publishes.
   - Each build shows on the Releases page. An app whose `apk:` release target has a CI workflow

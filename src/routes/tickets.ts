@@ -15,7 +15,7 @@ import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../a
 import { cardHref } from '../card-links.ts';
 import { keyFiles } from '../release-key.ts';
 import { checkNeed } from '../needs.ts';
-import { armForCi, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
+import { armForCi, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS } from '../../public/model-table.js';
@@ -240,7 +240,7 @@ export async function unparkTicket(app: App, ticket: Ticket, by: string, author:
 
 /** A person's picks for each question of a card: chosen option labels, plus optional free text. */
 function cleanAnswers(questions: any[], raw: unknown) {
-  if (!Array.isArray(raw) || raw.length !== questions.length) throw new HttpError(400, 'Answer every question on the card');
+  if (!Array.isArray(raw) || raw.length !== questions.length) throw new HttpError(400, 'Answer every question on the card (a question may have joined it since you opened it)');
   return questions.map((q, i) => {
     const a: any = raw[i] ?? {};
     const selected = Array.isArray(a.selected) ? [...new Set(a.selected.filter((l: unknown) => q.options.some((o: any) => o.label === l)))] as string[] : [];
@@ -578,18 +578,22 @@ export const ticketRoutes: Route[] = [
       const questions = notice || doc || secret ? [] : await cleanQuestions(app, ticket, body.questions);
       // A card asking for the go to merge or land says so, for the minions list's chip (#575).
       const kind = oneOf(body.kind ?? null, ['merge'], 'kind') as 'merge' | null;
-      const card = { questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
+      const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
+      const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
       // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
       if (body.for_everyone === true) {
         if (ticket.kind !== 'coordinator' || !questions.length || to || body.when_ci_passes === true) throw new HttpError(400, 'for_everyone is a Taskmaster\'s question card, with no to or when_ci_passes');
         const overlord = ticket.coordinator_of != null ? app.store.getOverlord(ticket.project_id) : undefined;
-        if (overlord) return json(res, 201, postCard(app, overlord, { ...card, asker: ticket.id }));
+        if (overlord) {
+          const forAll = { ...card, asker: ticket.id };
+          return json(res, 201, mergeCard(app, overlord, ticket, forAll) ?? postCard(app, overlord, forAll));
+        }
       }
       // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
       const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
       if (armed) return json(res, 202, { armed });
-      return json(res, 201, postCard(app, ticket, card));
+      return json(res, 201, mergeCard(app, ticket, ticket, card) ?? postCard(app, ticket, card));
     },
   },
   {

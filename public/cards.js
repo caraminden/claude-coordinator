@@ -414,8 +414,9 @@ export function questionCard(ticketId, card, opts = {}) {
   if (card.secret) return secretCard(ticketId, card, opts);
   if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
   const picks = cardPicks.get(card.id);
+  while (picks.length < card.questions.length) picks.push({ selected: new Set(), other: '' }); // a card that grew since it was last drawn
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
-  const pictures = card.questions.some((q) => q.options.some((o) => o.image));
+  let pictures = card.questions.some((q) => q.options.some((o) => o.image));
   const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });
   // A machine job's go card: the job's card in the chat links here (#859).
@@ -469,75 +470,86 @@ export function questionCard(ticketId, card, opts = {}) {
   sendBtn.addEventListener('click', send);
 
   const head = whoLine('asks', card, opts);
-  el.append(
-    head.el,
-    ...card.questions.map((q, i) => {
-      // Sent along with the pick, or alone (Cara, 2026-11-14: "Cards should always pass along the text in addition to the selection").
-      const other = h('input', { type: 'text', class: 'other', placeholder: 'Type your own answer or expand on the selection', maxlength: 2000, value: picks[i].other });
-      other.addEventListener('input', () => {
-        picks[i].other = other.value;
-        refresh();
+  const drawQ = (q, i) => {
+    // Sent along with the pick, or alone (Cara, 2026-11-14: "Cards should always pass along the text in addition to the selection").
+    const other = h('input', { type: 'text', class: 'other', placeholder: 'Type your own answer or expand on the selection', maxlength: 2000, value: picks[i].other });
+    other.addEventListener('input', () => {
+      picks[i].other = other.value;
+      refresh();
+    });
+    other.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); }
+    });
+    const choose = (o) => {
+      if (answered) return;
+      const sel = picks[i].selected;
+      // A picked option unpicks on a second click, on single-pick questions too (Cara, 2026-11-16).
+      if (q.multiSelect || sel.has(o.label)) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
+      else {
+        sel.clear();
+        sel.add(o.label);
+      }
+      refresh();
+      revealSend();
+    };
+    // Opening a picture hands the viewer this question's pictures, to step through and pick from; a
+    // click that opens it in a new tab instead leaves the viewer as it is.
+    const pictured = q.options.filter((o) => o.image);
+    const browse = (o) => (e) => {
+      if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      // Selects, never unselects: a second look at a picked option on a pick-any question keeps it.
+      if (!picks[i].selected.has(o.label)) choose(o);
+      setViewerGallery({
+        ticketId, at: pictured.indexOf(o), answered: () => answered,
+        options: pictured.map((o) => ({
+          path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => { if (q.multiSelect || !picks[i].selected.has(o.label)) choose(o); },
+        })),
       });
-      other.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); }
-      });
-      const choose = (o) => {
-        if (answered) return;
-        const sel = picks[i].selected;
-        // A picked option unpicks on a second click, on single-pick questions too (Cara, 2026-11-16).
-        if (q.multiSelect || sel.has(o.label)) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
-        else {
-          sel.clear();
-          sel.add(o.label);
-        }
-        refresh();
-        revealSend();
-      };
-      // Opening a picture hands the viewer this question's pictures, to step through and pick from; a
-      // click that opens it in a new tab instead leaves the viewer as it is.
-      const pictured = q.options.filter((o) => o.image);
-      const browse = (o) => (e) => {
-        if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        // Selects, never unselects: a second look at a picked option on a pick-any question keeps it.
-        if (!picks[i].selected.has(o.label)) choose(o);
-        setViewerGallery({
-          ticketId, at: pictured.indexOf(o), answered: () => answered,
-          options: pictured.map((o) => ({
-            path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => { if (q.multiSelect || !picks[i].selected.has(o.label)) choose(o); },
-          })),
-        });
-      };
-      // A picture option's button selects it and opens its picture, as its thumbnail does; the rest only pick.
-      // A picked option's button unpicks it in place, like a checkbox (Cara, 2026-11-14:
-      // "Multi select image cards cant be unselected"); its thumbnail still only looks.
-      const pickBtn = (o, thumb) => h('button', {
-        type: 'button', class: `opt${thumb ? ' pic' : ''}`, 'data-label': o.label,
-        onclick: (e) => {
-          if (e.target.closest?.('pre')) return; // a command in the description: Copy and selecting it don't pick
-          const unpick = !answered && picks[i].selected.has(o.label);
-          thumb && !unpick ? thumb.click() : choose(o);
-        },
-      }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, cardText(o.description, ticketId)) : '');
-      // With pictures, the options are a gallery of tiles, each a thumbnail over its label.
-      const gallery = q.options.some((o) => o.image);
-      return h('div', { class: 'q', 'data-q': i },
-        // A job's go card lays its recipe out whole (#859) in place of the question's 500-character summary.
-        h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
-          q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
-        card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
-        gallery
-          ? h('div', { class: 'opts gallery' }, q.options.map((o) => {
-            const thumb = o.image && optionThumb(ticketId, o, browse(o));
-            return h('div', { class: 'tile' }, thumb || h('div', { class: 'thumb none' }, 'No picture'), pickBtn(o, thumb));
-          }))
-          : h('div', { class: 'opts' }, q.options.map((o) => pickBtn(o))),
-        other);
-    }),
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), sendBtn));
+    };
+    // A picture option's button selects it and opens its picture, as its thumbnail does; the rest only pick.
+    // A picked option's button unpicks it in place, like a checkbox (Cara, 2026-11-14:
+    // "Multi select image cards cant be unselected"); its thumbnail still only looks.
+    const pickBtn = (o, thumb) => h('button', {
+      type: 'button', class: `opt${thumb ? ' pic' : ''}`, 'data-label': o.label,
+      onclick: (e) => {
+        if (e.target.closest?.('pre')) return; // a command in the description: Copy and selecting it don't pick
+        const unpick = !answered && picks[i].selected.has(o.label);
+        thumb && !unpick ? thumb.click() : choose(o);
+      },
+    }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, cardText(o.description, ticketId)) : '');
+    // With pictures, the options are a gallery of tiles, each a thumbnail over its label.
+    const gallery = q.options.some((o) => o.image);
+    return h('div', { class: 'q', 'data-q': i },
+      // A job's go card lays its recipe out whole (#859) in place of the question's 500-character summary.
+      h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
+        q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
+      card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
+      gallery
+        ? h('div', { class: 'opts gallery' }, q.options.map((o) => {
+          const thumb = o.image && optionThumb(ticketId, o, browse(o));
+          return h('div', { class: 'tile' }, thumb || h('div', { class: 'thumb none' }, 'No picture'), pickBtn(o, thumb));
+        }))
+        : h('div', { class: 'opts' }, q.options.map((o) => pickBtn(o))),
+      other);
+  };
+  const row = h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), sendBtn);
+  el.append(head.el, ...card.questions.map(drawQ), row);
   refresh();
 
   const handle = {
     el,
+    // Questions the minion added to this card later in its turn (question_more, which carries the whole list and
+    // replays after the card itself): only the ones not drawn yet are added, above the Send row.
+    extend(questions) {
+      for (const q of questions.slice(card.questions.length)) {
+        card.questions.push(q);
+        picks.push({ selected: new Set(), other: '' });
+        row.before(drawQ(q, card.questions.length - 1));
+      }
+      sendBtn.textContent = 'Send answers';
+      pictures = card.questions.some((q) => q.options.some((o) => o.image));
+      refresh();
+    },
     markAnswered(answers, author) {
       answered = confirmed = true;
       el.classList.add('answered');

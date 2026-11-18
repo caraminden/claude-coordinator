@@ -1125,6 +1125,8 @@ function drawEvent(event, scroll) {
     nodes.push(stamped(approvalCard(event.ticket_id, data), event));
   } else if (event.kind === 'plan') {
     nodes.push(stamped(planCard(event.ticket_id, data, { at: event.created_at }), event));
+  } else if (event.kind === 'question_more') {
+    view.cards.get(data.id)?.extend(data.questions);
   } else if (event.kind === 'question_result') {
     view.cards.get(data.id)?.markSettled(data.settled);
   } else if (event.kind === 'strike') {

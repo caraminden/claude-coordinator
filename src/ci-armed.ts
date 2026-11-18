@@ -12,7 +12,7 @@ import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
-export interface Card { questions: unknown[]; kind?: 'merge'; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string }; asker?: number }
+export interface Card { questions: unknown[]; kind?: 'merge'; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; /** A plain ask_question card: later questions of the same turn join it (mergeCard). */ mergeable?: true; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string }; asker?: number }
 export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string } }
 
 export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
@@ -21,14 +21,44 @@ const short = (sha: string) => sha.slice(0, 7);
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
 export function postCard(app: App, ticket: Ticket, card: Card): { id: string; href: string } {
   const { runner } = app;
-  const { questions, kind, to, notice, doc, secret, asker, job, recipe } = card;
+  const { questions, kind, to, notice, doc, secret, asker, job, recipe, mergeable } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
-    id, questions, ...(kind ? { kind } : {}), ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}), ...(asker ? { asker } : {}),
+    id, questions, ...(kind ? { kind } : {}), ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}), ...(to ? { to } : {}), ...(mergeable ? { mergeable } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}), ...(asker ? { asker } : {}),
   });
   runner.broadcastTicket(ticket.id);
   app.notify(ticket.id, { kind: 'question', questions: notice ? [{ question: notice }] : doc ? [{ question: `Make your picks on “${doc.title}”` }] : secret ? [{ question: `Save a secret as ${secret.name}` }] : questions, eventId: event.id, ...(to ? { to } : {}) });
   return { id, href: cardHref(ticket, event.id) };
+}
+
+/** Most questions one merged card holds (Cara, 2026-11-18: "Raise cap to 8"); a call still takes 4. */
+export const CARD_MAX = 8;
+
+/**
+ * A question card a turn asks while its own earlier plain card is still unanswered joins that card instead of posting a
+ * second one (Cara, 2026-11-18: "Merge a turn's cards"; Taskmasters too, for_everyone cards included). `chat` is where
+ * the card lives, `asker` the thread whose turn asks. Returns the first card's id and link, or null when nothing merges:
+ * only a card marked mergeable, with the same `to` and asker, posted in this turn, not answered, settled or full.
+ */
+export function mergeCard(app: App, chat: Ticket, asker: Ticket, card: Card): { id: string; href: string; merged: true } | null {
+  const { store, runner } = app;
+  const started = runner.turnStartedAt(asker.id);
+  if (started == null || !card.mergeable) return null;
+  const from = asker.id === chat.id ? undefined : asker.id;
+  const open = store.eventsOfKinds(chat.id, ['question']).reverse().find((e) => {
+    const d = JSON.parse(e.data);
+    return d.mergeable && d.asker === from && d.to === card.to && e.created_at >= started;
+  });
+  if (!open) return null;
+  const data = JSON.parse(open.data);
+  if (data.settled || data.questions.length + card.questions.length > CARD_MAX) return null;
+  if (store.eventsOfKinds(chat.id, ['user_message'], open.id).some((e) => JSON.parse(e.data).answer?.questionId === data.id)) return null;
+  const questions = [...data.questions, ...card.questions];
+  store.setEventData(open.id, { ...data, questions });
+  // The full list rides along, so a page that replays both the card and this event adds only what it lacks.
+  runner.emit(chat.id, 'question_more', { id: data.id, questions });
+  runner.broadcastTicket(chat.id);
+  return { id: data.id, href: cardHref(chat, open.id), merged: true };
 }
 
 /** The Taskmaster that last wrote to a minion (#919): its next message_coordinator goes there, once. */

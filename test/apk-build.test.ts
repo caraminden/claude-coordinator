@@ -204,6 +204,9 @@ test('a build killed by a signal says so; a restart kill is retried at the next 
   assert.match(oom.told[0], /ran out of memory/);
   assert.match(readFileSync(join(root, 'cache/big/build.log'), 'utf8'), /out of memory/);
   assert.deepEqual(await builder().b.check(big.row, '#1'), { skipped: 'already failed at this commit' });
+  const daemon = app('daemon');
+  key('daemon');
+  assert.deepEqual(await builder({ fail: 'assembleRelease', code: 1, oom: true }).b.check(daemon.row, '#1'), { failed: 'gradlew assembleRelease ran out of memory: the kernel killed it (exit 1)' }, 'an OOM kill of Gradle\'s daemon leaves its client exiting 1');
   assert.ok(!existsSync(join(big.data, 'android/latest.json')) && !existsSync(join(data, 'android/killed-0.apk')));
 });
 

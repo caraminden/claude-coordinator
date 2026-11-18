@@ -243,9 +243,10 @@ export class ApkBuilds {
       const c = await run(argv, cwd, env, log, deadline - Date.now());
       if (c === 124) throw new Error(`the build ran past ${BUILD_MS / 60_000} minutes at: ${what}`);
       const signal = c > 128 ? Object.entries(constants.signals).find(([, n]) => n === c - 128)?.[0] : undefined;
-      if (signal && (await ooms()) > before) {
-        await writeFile(log, `== out of memory: the kernel's OOM killer killed it (${signal})\n`, { flag: 'a' });
-        throw new Error(`${what} ran out of memory: the kernel killed it (${signal})`);
+      // Any exit, not only a signal: an OOM kill of Gradle's own daemon leaves its client exiting 1.
+      if (c && (await ooms()) > before) {
+        await writeFile(log, `== out of memory: the kernel's OOM killer killed part of it (exit ${c})\n`, { flag: 'a' });
+        throw new Error(`${what} ran out of memory: the kernel killed it (${signal ?? `exit ${c}`})`);
       }
       if (signal) throw new Killed(`${what} was killed by ${signal} (a Citadel restart stops its builds): the next check builds it again`);
       if (c) throw new Error(`${what} failed (exit ${c})`);

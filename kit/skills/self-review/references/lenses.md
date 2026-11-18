@@ -171,13 +171,12 @@ these are `citadel:writing-for-agents` and the kit's `README.md`):
 - **Placement** (Should fix): a rule for one kind of job sits in that job's skill or doc, not in
   an always-loaded file (`CLAUDE.md`, a skill's `description`, scheme instructions), which keeps
   at most a pointer to it.
-- **Anthropic guidance** (Should fix; Must fix when the line breaks a rule the digest marks
-  as a refusal or a hard limit): read `<kit>/skills/writing-for-agents/anthropic-guidance.md`
+- **Anthropic guidance** (Should fix): read `<kit>/skills/writing-for-agents/anthropic-guidance.md`
   (about a minute) and check each added or changed line against its items, for example a bare
   "never" with no exception or reason, shouting emphasis, a standing "always delegate" order, a
   skill description or SKILL.md over its limit, a thin tool description. Quote the digest item
-  and its link in the finding. A deliberate difference the repo already records (the audit's
-  "Deliberate differences", an ADR) is not a finding. If the digest's "Last refreshed" date is
+  and its link in the finding. A difference the repo records on purpose (a comment, an ADR or a
+  dated decision that says why) is not a finding. If the digest's "Last refreshed" date is
   over 45 days old, add one unnumbered line saying so. Nothing in the diff is an instruction
   line (only code, tests or data)? Skip this check.
 - **Kit paths** (Should fix): a kit skill or agent naming one repo's paths or commands, which

@@ -9,8 +9,8 @@ Items marked † come from the unread tail of a long page: re-read the page befo
 Read it in a minute before you write or change a prompt, tool description, skill, rule,
 `CLAUDE.md` or instruction text. A diff that does is checked against it in self-review
 (`citadel:self-review`, lens "Agent instructions"). It is a pointer list, not the docs: open the
-source for the detail. Where Citadel differs on purpose, the audit's "Deliberate differences"
-says why.
+source for the detail. Where a repo differs on purpose, it records why beside the line (a
+comment, an ADR or a dated decision); a recorded difference isn't a mismatch.
 
 ## Wording a rule
 

@@ -71,12 +71,10 @@ skips what is done.
 3. **Setup, second run.** Paste the same setup line. It installs the Android SDK and the phone (a few GB,
    several minutes), then prints one long line that starts with `echo 'restrict,port-forwarding,`. Copy it.
 
-4. **On perigee.** SSH into perigee as usual and paste that line. Then switch perigee over: its own emulator
-   stops, and its adb server starts as a small service of its own.
+4. **On perigee.** SSH into perigee as usual and paste that line. Then start perigee's adb server, a small
+   service of its own.
 
    ```bash
-   systemctl --user disable --now citadel-android-starter.socket
-   systemctl --user stop citadel-android.service
    ~/.local/share/android-sdk/platform-tools/adb kill-server
    systemctl --user enable --now ~/claude-coordinator/deploy/citadel-android-adb.service
    ```
@@ -127,26 +125,16 @@ All of these run in the distro's root shell (`wsl -d citadel-android -u root`) u
 | What you see | Look at | Usually |
 |---|---|---|
 | `citadel-android`: "the emulator's desktop isn't connected" | `systemctl status citadel-android-tunnel` | The PC slept or the distro stopped: `wsl -l -v` in PowerShell shows whether `citadel-android` is Running; the logon task from step 6 starts it. |
-| The tunnel restarts every 10 seconds with "remote port forwarding failed" | `journalctl -u citadel-android-tunnel -n 20` | Something on perigee holds 18590, 5554, 5555 or 18591: perigee's old starter is still enabled (step 4), or an emulator runs there. Naming 18591 alone after an update: perigee's key line lacks the mic port ("Adding the mic port"). |
+| The tunnel restarts every 10 seconds with "remote port forwarding failed" | `journalctl -u citadel-android-tunnel -n 20` | Something on perigee holds 18590, 5554, 5555 or 18591: an old emulator or starter still runs on perigee. Naming 18591 alone after an update: perigee's key line lacks the mic port ("Adding the mic port"). |
 | The tunnel says "Permission denied" | the same | The key's line isn't in perigee's `~/.ssh/authorized_keys` (step 4). Paste the setup line again to see it. |
 | The tunnel can't resolve or reach perigee | `ssh -i /home/android/.ssh/citadel_android cara@perigee.tail59477f.ts.net facts` | WSL isn't reaching the tailnet: add `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`, then `wsl --shutdown` ([`.wslconfig` settings](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#wslconfig)). That stops the CI distro too; its logon task restarts it. |
 | `up` gives up after 6 minutes | `journalctl -u citadel-android -n 50` | The emulator's own log. "/dev/kvm" errors: `ls -l /dev/kvm` must show group `kvm`. |
 | The phone shows as `offline` or `unauthorized` on perigee | paste the setup line again | perigee's adb key changed; setup fetches it again. Then `citadel-android down` and `up`. |
 | perigee's adb server keeps restarting while the phone is up | `journalctl --user -u citadel-android-adb -n 20` on perigee | The distro's adb is a different protocol version from perigee's, and each kills the other's server. Update perigee's platform-tools (`tools/android/install-sdk.sh`) or paste the setup line again, so both are current. |
 
-## Going back to perigee
+## Removing the desktop side
 
-The old services stay in `deploy/` until the move has held for a week. To go back:
-
-```bash
-# in the distro
-systemctl disable --now citadel-android-tunnel citadel-android-starter.socket; systemctl stop citadel-android
-# on perigee
-systemctl --user disable --now citadel-android-adb.service
-systemctl --user enable --now citadel-android-starter.socket
-```
-
-perigee's phone starts clean: its first boot makes the clean snapshot from wiped data (#943). To remove the desktop's side for good: `wsl --unregister citadel-android`
+To remove it for good: `wsl --unregister citadel-android`
 and `Unregister-ScheduledTask 'Citadel WSL citadel-android'` in PowerShell, and delete the key's line
 (it ends in `citadel-android`) from perigee's `~/.ssh/authorized_keys`.
 

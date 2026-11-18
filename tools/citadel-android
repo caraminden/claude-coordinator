@@ -13,8 +13,6 @@
 # after IDLE seconds unused. Each boot restores the snapshot "clean" (#943, make_clean below), so a phone that was
 # stopped or crashed comes back with nothing another session installed. `up` and every finished step connect to the starter, which starts the service
 # and marks it used. Container turns share the host's network, so all of this reaches them too.
-# perigee's own units (deploy/citadel-android.service and its starter socket) still work as the way back:
-# with that socket on :$STARTER instead of the tunnel, the emulator runs here.
 # The screen is one lock in citadel-heavy's folder ($CITADEL_HEAVY_DIR): each step holds a flock, and its
 # holder keeps the screen for LEASE seconds after a step, so its next step (install, open, shot) comes
 # before anyone else's. Others wait and say for whom; nothing ever kills another holder's work.

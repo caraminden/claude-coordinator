@@ -305,9 +305,8 @@ systemctl --user enable --now citadel-watchdog.timer
 emulator, the `citadel` AVD that `tools/android/install-sdk.sh` makes. It runs in a WSL distro on
 Cara's desktop, started on demand and stopped after 15 idle minutes; a tunnel from there puts its
 starter (`127.0.0.1:18590`) and its console and adb ports on this box's loopback, and the adb server
-stays here (`deploy/citadel-android-adb.service`). Setup, the switch-over and the way back:
-`deploy/desktop/android/README.md`. The units that ran it on perigee (`deploy/citadel-android.service`
-and its starter) stay until the move has held for a week. The `citadel:android-app` kit skill has
+stays here (`deploy/citadel-android-adb.service`). Setup and the switch-over:
+`deploy/desktop/android/README.md`. The `citadel:android-app` kit skill has
 the loop.
 
 **Semantic memory.** `deploy/citadel-embed.service` runs llama-server with

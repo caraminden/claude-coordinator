@@ -213,7 +213,8 @@ done
 echo
 if [[ -n $ok ]]; then
   echo 'The tunnel to perigee is up, and the emulator starts when a minion asks for it.'
-  echo "Last step, on Windows: keep-wsl-up.ps1 -Distro citadel-android (README, \"Keep it up\")."
+  echo "Last step: keep the distro up. In a normal PowerShell on Windows (not this distro), paste:"
+  echo "  \$u = '$url'; iwr \"\$u/ci-runner/keep-wsl-up.ps1\" -UseBasicParsing -OutFile \"\$env:TEMP\\keep-wsl-up.ps1\"; powershell -NoProfile -ExecutionPolicy Bypass -File \"\$env:TEMP\\keep-wsl-up.ps1\" -Distro citadel-android"
 else
   journalctl -u citadel-android-tunnel.service -n 6 --no-pager || true
   echo

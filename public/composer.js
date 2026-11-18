@@ -7,6 +7,7 @@ import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
 import { openDialog } from './ui/dialog.js';
 import { lightbox } from './ui/media.js';
+import { annotator } from './annotate.js';
 import { optimistic } from './ui/optimistic.js';
 import { pastedFiles } from './paste.js';
 import { sideColdCost } from './payer.js';
@@ -417,7 +418,7 @@ function createAttachments(chatId, onChange) {
       ? h('div', { class: 'file-chip' }, h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'name' }, item.upload.label ?? item.file?.name ?? item.upload.name),
         h('span', { class: 'size' }, item.upload.name ? formatSize(item.upload.size) : `${Math.round((item.progress ?? 0) * 100)}%`), removeButton(item))
       : h('div', { class: 'thumb' },
-        h('button', { type: 'button', class: 'zoom', title: 'View larger', onclick: () => zoomImage(item.url) }, h('img', { src: item.url, alt: 'Image to send' })),
+        h('button', { type: 'button', class: 'zoom', title: 'View larger or draw on it', onclick: () => drawOn(item) }, h('img', { src: item.url, alt: 'Image to send' })),
         removeButton(item))));
   };
   const addFile = async (file, label) => {
@@ -449,12 +450,7 @@ function createAttachments(chatId, onChange) {
     let blob;
     try {
       blob = await prepareImage(file);
-      const data = await new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result).split(',')[1]);
-        r.onerror = () => reject(r.error);
-        r.readAsDataURL(blob);
-      });
+      const data = await blobBase64(blob);
       state.items.push({ url: URL.createObjectURL(blob), mediaType: blob.type, data });
       render();
     } catch {
@@ -476,6 +472,7 @@ function createAttachments(chatId, onChange) {
   state.remove = (items) => {
     for (const item of items) {
       if (item.url) URL.revokeObjectURL(item.url);
+      if (item.clean?.url) URL.revokeObjectURL(item.clean.url);
       // shortcut: a file already uploaded stays in the thread's uploads folder; delete it here if they pile up.
       item.xhr?.abort();
     }
@@ -491,12 +488,34 @@ function createAttachments(chatId, onChange) {
     render();
     return restored;
   };
+  /**
+   * An image waiting to send, full size (#654), in the kit's lightbox (#872), ready to draw on (#946): Done swaps in
+   * the marked copy; Esc, its ✕ or a backdrop click closes it unchanged. The clean picture and the marks stay on the
+   * item, so reopening it can undo back to the original.
+   */
+  const drawOn = (item) => {
+    const clean = item.clean ?? { url: item.url, mediaType: item.mediaType, data: item.data };
+    const lb = lightbox([{ src: clean.url, caption: 'Image to send', alt: 'Image to send, full size' }], {
+      render: (_, stage) => annotator(stage, clean.url, {
+        marks: item.marks,
+        onDone: async (canvas, marks) => {
+          lb.close();
+          const blob = canvas && await encodeCanvas(canvas).catch(() => null);
+          if (canvas && !blob) return alertNote('Could not save the marked image: it came out too large.');
+          if (!state.items.includes(item)) return; // removed while open
+          if (item.url !== clean.url) URL.revokeObjectURL(item.url);
+          if (!blob) {
+            Object.assign(item, clean, { clean: undefined, marks: undefined });
+          } else {
+            const data = await blobBase64(blob);
+            Object.assign(item, { url: URL.createObjectURL(blob), mediaType: blob.type, data, clean, marks });
+          }
+          render();
+        },
+      }),
+    });
+  };
   return state;
-}
-
-/** An image waiting to send, full size (#654), in the kit's lightbox (#872): Esc, its ✕ or a backdrop click closes it. */
-function zoomImage(src) {
-  lightbox([{ src, caption: 'Image to send', alt: 'Image to send, full size' }]);
 }
 
 /** PUT a file into the thread's uploads folder, streamed, with progress (fetch can't report upload progress). */
@@ -576,13 +595,25 @@ async function prepareImage(file) {
   canvas.height = Math.round(bitmap.height * scale);
   canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
+  return encodeCanvas(canvas);
+}
+
+/** A canvas as a sendable image: PNG keeps screenshots sharp; JPEG when that is still too big. */
+async function encodeCanvas(canvas) {
   const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
-  // Screenshots stay sharp as PNG; fall back to JPEG when that is still too big.
   let blob = await encode('image/png');
   if (!blob || blob.size > MAX_IMAGE_BYTES) blob = await encode('image/jpeg', 0.85);
   if (!blob || blob.size > MAX_IMAGE_BYTES) throw new Error('image is too large');
   return blob;
 }
+
+/** A blob's bytes as base64, the way a message carries an image. */
+const blobBase64 = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1]);
+  r.onerror = () => reject(r.error);
+  r.readAsDataURL(blob);
+});
 
 export function alertNote(text) {
   document.getElementById('log')?.append(h('div', { class: 'note error' }, text));

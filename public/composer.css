@@ -28,8 +28,20 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 .attachments img { display: block; height: 4.5rem; max-width: 9rem; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
 .attachments .thumb button.remove { position: absolute; top: -0.4rem; right: -0.4rem; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
 .attachments { align-items: center; }
-/* Clicking a thumbnail shows it full size (#654). */
+/* Clicking a thumbnail shows it full size (#654), ready to draw on (#946, public/annotate.js). */
 .attachments .thumb button.zoom { display: block; padding: 0; border: 0; border-radius: 6px; background: none; cursor: zoom-in; }
+.cui-lb-stage.annotate { touch-action: none; }
+.annotate-pic { flex: 1; min-height: 0; display: grid; place-items: center; padding: var(--citadel-space-2); container-type: size; }
+/* A canvas keeps its picture's shape under both caps, so it fits the stage whole. */
+.annotate-canvas { display: block; max-width: 100cqw; max-height: 100cqh; touch-action: none; cursor: crosshair; }
+.annotate-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--citadel-space-2); padding: var(--citadel-space-2) var(--citadel-space-3) var(--citadel-space-3); }
+.annotate-bar .annotate-gap { flex: 1; }
+.annotate-bar .swatch { display: block; width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.25); }
+.annotate-bar .cui-choice { min-width: 40px; min-height: 36px; padding: 0 var(--citadel-space-2); font-size: 18px; line-height: 1; }
+/* A picked colour keeps its own colour, ringed: the accent fill would hide it. */
+.annotate-bar .annotate-colours .cui-choice[aria-pressed="true"] { background: none; border-color: var(--citadel-accent); box-shadow: inset 0 0 0 1px var(--citadel-accent); }
+.annotate-bar .swatch { width: 18px; height: 18px; }
+@media (max-width: 600px) { .annotate-bar .annotate-gap { display: none; } }
 .attachments .file-chip { max-width: min(100%, 22rem); }
 .attachments .file-chip button { flex: none; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
 

@@ -66,6 +66,8 @@ const { readFileSync, writeFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 const settings = args.includes('--settings') ? JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')) : null;
 const system = args.includes('--append-system-prompt-file') ? readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8') : null;
+// The turn's first message, from prompt.jsonl beside it: a minion's own lines open it, its machines' included (#878).
+const message = system === null ? null : JSON.parse(readFileSync(require('node:path').join(require('node:path').dirname(args[args.indexOf('--append-system-prompt-file') + 1]), 'prompt.jsonl'), 'utf8').split('\\n')[0]).message.content.map((b) => b.text ?? '').join('\\n');
 const mcp = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
 // What a Bash call would run for \`citadel-heavy\`, read while the turn's folder still exists.
 const heavy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-heavy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
@@ -74,7 +76,7 @@ const devCopy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(comman
 const ciFailures = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v ci-failures) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
 // citadel-replay (#836) runs from the pin, its replay.ts and contraption-args.ts beside it: with no arguments, its usage.
 const replay = require('node:child_process').spawnSync('citadel-replay', [], { encoding: 'utf8' });
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, mcp, heavy, wait, devCopy, ciFailures, replay: { status: replay.status, stderr: replay.stderr } }));
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, replay: { status: replay.status, stderr: replay.stderr } }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
@@ -254,14 +256,14 @@ test("a minion gets the servers and notes of the machines lent to its scheme, wh
     assert.ok(on.settings.permissions.allow.includes('mcp__perigee-godot'), "the machine's tools are allowed");
     // In claude's argv, the machine's name would let a turn's `pkill -f godot` hit claude itself.
     assert.ok(!on.args.some((a: string) => a.includes('godot')), 'no argument names the machine');
-    assert.match(on.system, /Never restart it/);
+    assert.match(on.message, /Never restart it/);
     // projects.machine_tools is still in the table, unread: off there changes nothing.
     const old = store.createProject('Switch off', null);
     store.db.prepare('UPDATE projects SET machine_tools = 0 WHERE id = ?').run(old.id);
     assert.deepEqual(servers(await turn('ticket', 'connected', {}, undefined, old.id)), ['thread', 'perigee-godot']);
     const taskmaster = await turn('coordinator', 'connected');
     assert.ok(!servers(taskmaster).includes('perigee-godot'));
-    assert.doesNotMatch(taskmaster.system, /perigee-godot|Never restart it/);
+    assert.doesNotMatch(taskmaster.system + taskmaster.message, /perigee-godot|Never restart it/);
   } finally {
     runner.machines = () => [];
   }
@@ -416,7 +418,7 @@ test("only the scheme whose code this server runs hears about deploys, pending-d
     const served = await turn('ticket', 'connected', {}, repo);
     assert.equal(served.env.COORDINATOR_DEPLOYS, '1');
     assert.match(served.system, /deployed and waiting in pending-deploy/);
-    assert.match(served.system, /run `citadel-dev-copy start`.*Stop your other processes by pid/);
+    assert.match(served.system, /use `citadel-dev-copy start\|seed\|env\|stop`.*Stop your other processes by pid/);
     for (const other of [await turn('ticket', 'connected'), await turn('ticket', 'connected', {}, join(root, 'big-scheme', 'repo'))]) {
       assert.equal(other.env.COORDINATOR_DEPLOYS, undefined);
       assert.doesNotMatch(other.system, /deploy\.sh|pending-deploy|citadel-dev-copy/);

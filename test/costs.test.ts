@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { costDays, dayBudget, localDay, modelName, spendSplit, weekLimit, whereItWent } from '../src/costs.ts';
+import { costDays, hostWeek, localDay, modelName, spendSplit, weekLimit, whereItWent } from '../src/costs.ts';
 import { Store } from '../src/db.ts';
 import { usageSplitText } from '../src/mcp.ts';
 
@@ -70,39 +70,53 @@ test('daily totals: seven local days, today first, per scheme and overall', () =
   assert.equal(localDay(yesterday), '2026-10-27');
 });
 
-test("an even day's share of the weekly limit, priced from the meter and what turns cost in its window", () => {
+const win = (utilization: number, resetsAt: number) => ({ weekly: { utilization, resetsAt } });
+
+test("the server login's weekly limit is priced from its turns in the meter's window, one account alone", () => {
   const { store, t } = setup('budget');
-  const resetsAt = Date.now() + 5 * 86400_000; // the window opened two days ago
-  store.recordTurn(t.id, { session_id: 'a', ended_at: Date.now() - 86400_000, session_cost_usd: 140 });
-  store.recordTurn(t.id, { session_id: 'b', ended_at: Date.now(), session_cost_usd: 70 });
-  // Before the window: not counted.
-  store.recordTurn(t.id, { session_id: 'c', ended_at: Date.now() - 3 * 86400_000, session_cost_usd: 1000 });
-  assert.equal(dayBudget(store, { utilization: 0.02, resetsAt }), null); // too coarse yet, and no earlier estimate
-  assert.equal(dayBudget(store, null), null);
-  close(dayBudget(store, { utilization: 0.1, resetsAt })!, 210 / 0.1 / 7);
-  // A fresh window's meter is too coarse again: the last estimate stands in rather than dropping to dollars.
-  close(dayBudget(store, { utilization: 0.01, resetsAt: resetsAt + 7 * 86400_000 })!, 210 / 0.1 / 7);
-  close(dayBudget(store, null)!, 210 / 0.1 / 7);
-  // A meter that has moved but no turns priced in its window yet: the last estimate too.
-  close(dayBudget(store, { utilization: 0.5, resetsAt: resetsAt + 30 * 86400_000 })!, 210 / 0.1 / 7);
-});
-
-test("the day budget prices the server login's meter from the server login's turns only, not other payers' (#468 S05-3)", () => {
-  const { store, t } = setup('payer');
-  const resetsAt = Date.now() + 5 * 86400_000;
-  store.recordTurn(t.id, { session_id: 'host', ended_at: Date.now(), session_cost_usd: 140 });
-  const theirs = store.recordTurn(t.id, { session_id: 'josh', ended_at: Date.now(), session_cost_usd: 140, payer: 7 });
-  assert.equal(theirs.payer, 7);
-  close(dayBudget(store, { utilization: 0.1, resetsAt })!, 140 / 0.1 / 7);
-});
-
-test("a meter whose reset time has passed keeps the last estimate rather than summing turns from before its week (#468 S05-3)", () => {
-  const { store, t } = setup('stale');
   const now = Date.now();
-  store.recordTurn(t.id, { session_id: 'a', ended_at: now - 86400_000, session_cost_usd: 70 });
-  close(dayBudget(store, { utilization: 0.1, resetsAt: now + 5 * 86400_000 }, now)!, 70 / 0.1 / 7);
-  store.recordTurn(t.id, { session_id: 'old', ended_at: now - 8 * 86400_000, session_cost_usd: 700 });
-  close(dayBudget(store, { utilization: 0.2, resetsAt: now - 2 * 86400_000 }, now)!, 70 / 0.1 / 7);
+  const resetsAt = now + 5 * 86400_000; // the window opened two days ago
+  store.recordTurn(t.id, { session_id: 'a', ended_at: now - 86400_000, session_cost_usd: 140, account: 1 });
+  store.recordTurn(t.id, { session_id: 'b', ended_at: now, session_cost_usd: 70, account: 1 });
+  store.recordTurn(t.id, { session_id: 'c', ended_at: now - 3 * 86400_000, session_cost_usd: 1000, account: 1 }); // before the window
+  store.recordTurn(t.id, { session_id: 'josh', ended_at: now, session_cost_usd: 140, payer: 7, account: 1 }); // another payer
+  assert.equal(hostWeek(store, win(0.02, resetsAt), now).limit, null); // too coarse yet, and no earlier estimate
+  assert.equal(hostWeek(store, null, now).limit, null);
+  close(hostWeek(store, win(0.1, resetsAt), now).limit!, 210 / 0.1);
+  // A fresh window's meter is too coarse again, or reset already: the last estimate stands in rather than dropping out.
+  close(hostWeek(store, win(0.01, resetsAt + 7 * 86400_000), now).limit!, 210 / 0.1);
+  close(hostWeek(store, win(0.2, now - 2 * 86400_000), now).limit!, 210 / 0.1);
+  close(hostWeek(store, null, now).limit!, 210 / 0.1);
+});
+
+test("two accounts: the day budget is a seventh of both accounts' limits together, an account at 100% with an old estimate and one reset this morning (Cara, 2026-11-17)", () => {
+  const { store, t } = setup('two');
+  const now = Date.now();
+  // Account 1 sits at 100% with an estimate kept from an earlier window; account 2 reset 9 hours ago and is at 17%.
+  store.setSetting('week_usd:host', 1800);
+  store.recordTurn(t.id, { session_id: 'a2', ended_at: now - 3600_000, session_cost_usd: 230, account: 2 });
+  const usage = { ...win(1, now + 3 * 86400_000), account: 2, accounts: [
+    { n: 1, label: 'the server\'s own login', usage: win(1, now - 3600_000) }, // window already past
+    { n: 2, label: "cara's account", usage: win(0.17, now + 7 * 86400_000 - 9 * 3600_000) },
+  ] };
+  const w = hostWeek(store, usage, now);
+  close(w.limit!, 1800 + 230 / 0.17);
+  assert.deepEqual(w.parts.map((x) => [x.n, x.label]), [[1, "the server's own login"], [2, "cara's account"]]);
+  close(w.parts[1].limit!, 230 / 0.17);
+  // An account never priced counts like the average of the priced ones, flagged as assumed.
+  const { store: s2 } = setup('two-b');
+  const w2 = hostWeek(s2, { ...usage, accounts: [{ n: 1, label: 'a', usage: win(1, now - 1) }, { n: 2, label: 'b', usage: win(0.17, now + 86400_000) }] }, now);
+  assert.equal(w2.limit, null);
+});
+
+test("an unpriced account counts like the priced one beside it, marked assumed", () => {
+  const { store, t } = setup('assume');
+  const now = Date.now();
+  store.recordTurn(t.id, { session_id: 'a2', ended_at: now - 3600_000, session_cost_usd: 100, account: 2 });
+  const usage = { ...win(0.5, now + 86400_000), accounts: [{ n: 1, label: 'a', usage: null }, { n: 2, label: 'b', usage: win(0.5, now + 6 * 86400_000) }] };
+  const w = hostWeek(store, usage, now);
+  close(w.limit!, 400);
+  assert.deepEqual(w.parts.map((x) => x.assumed), [true, false]);
 });
 
 test("the day totals and a minion's share of the week count only the server login's turns, as its meter does (#468 S05-3)", () => {

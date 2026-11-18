@@ -22,7 +22,7 @@ import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
 import { ciFinished } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
-import { Store, type Artifact, type Project, type User } from './src/db.ts';
+import { buildOwnerKey, Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
@@ -895,6 +895,7 @@ const landHandoffs = new LandHandoffs({
     return true;
   },
   liveAlready: async (id) => (await waiters.pendingLive()).includes(id),
+  buildOwner: (id, n) => store.getSetting<number>(buildOwnerKey(store.getTicket(id)?.project_id ?? 0, n)) ?? null,
   // A clean land on main deploys the scheme's home contraptions on main (#712), through auto-deploy's start, which marks the commit tried.
   apps: (id) => {
     const t = store.getTicket(id);

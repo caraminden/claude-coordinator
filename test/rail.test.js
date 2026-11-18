@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chromeIntent, installMode, opensApart, railItems } from '../public/rail.js';
+import { chromeIntent, inNativeApp, installMode, opensApart, railItems } from '../public/rail.js';
 
 test('no contraption enabled: no rail at all', () => {
   assert.deepEqual(railItems([], '/'), []);
@@ -58,4 +58,15 @@ test("the Android link opens the app's page in Chrome, falling back to the page 
   const url = new URL('https://cara.example.net/apps/theory-of-crafting/');
   assert.equal(chromeIntent(url),
     'intent://cara.example.net/apps/theory-of-crafting/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=https%3A%2F%2Fcara.example.net%2Fapps%2Ftheory-of-crafting%2F;end');
+});
+
+test('inNativeApp: a Capacitor WebView (remote server.url included) or a CitadelApp user agent, never a plain browser', () => {
+  const ua = 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP2A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36';
+  assert.equal(inNativeApp({ Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' }, navigator: { userAgent: ua } }), true);
+  assert.equal(inNativeApp({ Capacitor: { getPlatform: () => 'ios' }, navigator: { userAgent: ua } }), true);
+  assert.equal(inNativeApp({ navigator: { userAgent: ua + ' CitadelApp' } }), true);
+  // Capacitor's web fallback (a browser that loaded its script) and plain tabs are not the app.
+  assert.equal(inNativeApp({ Capacitor: { isNativePlatform: () => false, getPlatform: () => 'web' }, navigator: { userAgent: ua } }), false);
+  assert.equal(inNativeApp({ navigator: { userAgent: ua } }), false);
+  assert.equal(inNativeApp(null), false);
 });

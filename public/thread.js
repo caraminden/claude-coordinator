@@ -1,6 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { presenceHead } from './presence.js';
-import { account, ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight, icon, isCoordinator, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
+import { account, ago, api, baseName, clearHighlights, fileHref, formatSize, h, noAutofill, highlight, icon, isCoordinator, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { mergedView } from './mine.js';
 import { toast } from './ui/status.js';
 import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
@@ -328,7 +328,7 @@ export function chatSection(chatId, ticket) {
 
 /** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
 function chatFindBox() {
-  const input = h('input', { type: 'search', class: 'chat-find', placeholder: matchMedia('(max-width: 800px)').matches ? '🔍 Find' : 'Find in chat', 'aria-label': 'Find in chat', autocomplete: 'off' });
+  const input = h('input', { type: 'search', class: 'chat-find', placeholder: matchMedia('(max-width: 800px)').matches ? '🔍 Find' : 'Find in chat', 'aria-label': 'Find in chat', ...noAutofill('chat-find') });
   const count = h('span', { class: 'find-count muted' });
   const state = { marks: [], at: -1 };
   const show = (i) => {
@@ -475,8 +475,8 @@ export function renderTicketHead() {
       const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while parked';
       unparkSlot.hidden = !parked;
       unparkSlot.replaceChildren(...(parked ? [
-        h('button', { type: 'button', class: 'secondary small act-unpark', title, onclick: () => unpark(t) }, 'Unpark'),
-        h('button', { type: 'button', class: 'secondary small act-send-unpark', title: 'Send your message and unpark it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unpark'),
+        h('button', { type: 'button', class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unpark'),
+        h('button', { type: 'button', class: 'secondary act-send-unpark', title: 'Send your message and unpark it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unpark'),
       ] : []));
     }
     const hint = form.querySelector('.parked-hint');

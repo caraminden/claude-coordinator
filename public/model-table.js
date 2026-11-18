@@ -9,7 +9,7 @@ export const CLAUDE_MODELS = [
   ['claude-opus-5-5', 'Opus 5.5'],
   ['claude-sonnet-5-5', 'Sonnet 5.5'],
   // The advisor trial (#817, Cara 2026-11-16 "Start the trial"): Sonnet runs the turn and consults Opus at hard points.
-  // Experimental in Claude Code; to drop it, take this row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts).
+  // Experimental in Claude Code; to drop it, take this row and its TIERS row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts).
   ['claude-sonnet-5-5+opus-advisor', 'Sonnet 5.5 + Opus advisor'],
   ['claude-haiku-5-5', 'Haiku 5.5'],
   ['claude-fable-5-1', 'Fable 5.1'],
@@ -19,13 +19,13 @@ export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /** The tiers, in the order the prompt reads them: the work each covers, its model and effort, and when to move off it. */
 export const TIERS = [
-  { work: 'a chore (docs, instruction edits, config, renames, checklists, setup)', model: 'claude-sonnet-5-5', effort: 'medium' },
-  { work: 'a read-only check', model: 'claude-sonnet-5-5', effort: 'low' },
   // Known-shape middle work on Sonnet (Cara, 2026-11-14, "Widen to known-shape work"; "a sonnet minion can remove a link or move something somewhere I ask it to, but it cant build new screens").
-  { work: 'middle work of known shape (a bug with a clear repro and a known place to look, a small feature or UI tweak with a clear spec and no new data model or screen, a follow-up to a shipped change, adopting a handoff, a deploy or release, a doc or skill edit needing judgment)', model: 'claude-sonnet-5-5', effort: 'medium', then: 'if it stalls or the fix does not hold claude-sonnet-5-5+opus-advisor (trial, #817), then claude-opus-5-5 at medium, then high' },
-  { work: 'ordinary design, research that needs judgment, ideation, a bug whose first repro failed', model: 'claude-opus-5-5', effort: 'high', then: 'Fable only if that falls short' },
-  { work: 'only architecture shaping a big multi-part feature or major build, security and risk reviews of a high-risk change, and bugs whose fix failed to hold or that are intermittent', model: 'claude-fable-5-2', effort: 'medium' },
-  { work: 'everything else (a feature needing design, a new screen or data model, the land pipeline, runner, tripwire, auth or a migration, multi-file refactors, art)', model: 'claude-opus-5-5', effort: 'high' },
+  { work: 'chores (docs, instruction edits, config, renames, setup) and known-shape work (a bug with a clear repro and a known place to look, a small spec\'d tweak with no new data model or screen, a follow-up to a shipped change, adopting a handoff, a deploy or release, a doc or skill edit needing judgment)', model: 'claude-sonnet-5-5', effort: 'medium', then: 'if it stalls or the fix does not hold Opus 5.5 at medium, then high' },
+  { work: 'a read-only check', model: 'claude-sonnet-5-5', effort: 'low' },
+  // The advisor trial (#817) has its own row: it is over on its date, and taking the row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts) ends it.
+  { work: 'in the advisor trial (#817) until 2026-11-30, about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high at medium, and a stalled Sonnet-medium minion before Opus medium, never a Taskmaster (`node tools/advisor-trial.ts` reads its numbers)', model: 'claude-sonnet-5-5+opus-advisor', effort: 'medium' },
+  { work: 'design, research, ideation, new screens or data models, the land pipeline, runner, tripwire, auth, migrations, multi-file refactors, art, a bug whose first repro failed', model: 'claude-opus-5-5', effort: 'high' },
+  { work: 'rarely: architecture of a big multi-part feature or build, security and risk reviews of a high-risk change, bugs that are intermittent or whose fix failed to hold', model: 'claude-fable-5-2', effort: 'medium' },
 ];
 
 /**

@@ -1,5 +1,5 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
-import { account, ago, api, h, icon, view } from './base.js';
+import { account, ago, api, h, noAutofill, icon, view } from './base.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
 import { settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
@@ -434,7 +434,7 @@ function secretsCard() {
   const card = h('div', { class: 'account-card secrets-card' }, h('p', { class: 'muted' }, 'Loading secrets…'));
   let schemes = [];
   const where = (s) => s.scope === 'scheme' ? { scope: 'scheme', project: s.project } : { scope: 'person' };
-  const valueInput = () => h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'The value', required: true, 'aria-label': 'The value' });
+  const valueInput = () => h('input', { type: 'password', ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', placeholder: 'The value', required: true, 'aria-label': 'The value' });
   const row = (s, st) => {
     const status = h('span', { class: 'muted small', role: 'status' });
     const replace = h('button', { type: 'button', class: 'secondary small' }, 'Replace');
@@ -508,7 +508,7 @@ function openrouterCard() {
   const capInput = (value) => h('input', { type: 'number', name: 'cap', min: '1', max: '1000', step: '1', value: String(value), inputmode: 'decimal', class: 'cap-input', 'aria-label': 'Monthly cap in dollars' });
   // Connecting asks OpenRouter whether the key works, so it shows busy on this card until it answers.
   const connectForm = (st, again) => {
-    const key = h('input', { type: 'password', name: 'openrouter-key', autocomplete: 'off', spellcheck: 'false', placeholder: 'sk-or-v1-…', required: true });
+    const key = h('input', { type: 'password', ...noAutofill('openrouter-key', 'new-password'), spellcheck: 'false', placeholder: 'sk-or-v1-…', required: true });
     const cap = capInput(st.cap_usd ?? st.default_cap_usd ?? 10);
     const status = h('span', { class: 'muted small', role: 'status' });
     const button = h('button', { type: 'submit', class: 'small' }, again ? 'Connect again' : 'Connect');

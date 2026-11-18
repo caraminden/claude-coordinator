@@ -26,12 +26,15 @@ test('only the build field counts, not a build named in the title', () => {
   ]), [['build-9', true, [3]], ['feature', false, [1]], ['design', false, [2]]]);
 });
 
-test('parked minions leave their build or type for a Parked section at the bottom', () => {
+test('parked minions leave their type for a Parked section at the bottom, but stay in their build after the active rows (Cara, 2026-11-17)', () => {
   assert.deepEqual(shape([
     m(1, 'bug', { state: 'parked', status: 'idle' }), m(2, 'bug'), m(3, 'feature', { build: 7, state: 'parked' }),
     m(4, 'feature', { build: 8 }), m(5, 'ideation', { build: 9 }), m(6, 'ideation', { state: 'parked', status: 'running' }),
     m(7, 'design', { state: 'parked', approvals: 1 }),
-  ]), [['build-8', true, [4]], ['bug', false, [2]], ['design', false, [7]], ['ideation', false, [6]], ['build-9', false, [5]], ['parked', false, [1, 3]]]);
+  ]), [['build-7', true, [3]], ['bug', false, [2]], ['design', false, [7]], ['ideation', false, [6]], ['build-8', false, [4]], ['build-9', false, [5]], ['parked', false, [1]]]);
+  // Parked rows follow the active ones; a build of only parked minions still gets its section.
+  assert.deepEqual(shape([m(1, 'feature', { build: 3, state: 'parked' }), m(2, 'feature', { build: 3 }), m(3, 'chore', { build: 4, state: 'parked', wakes_on: 'x' })]),
+    [['build-3', true, [2, 1]], ['build-4', false, [3]]]);
 });
 
 test('a minion parked on start_after rests (under Waiting) before it ever runs; a new one without a chain does not (#261)', () => {

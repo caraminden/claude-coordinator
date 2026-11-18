@@ -8,6 +8,7 @@ import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
 import { pinTurnFiles, type TurnPins } from '../src/turn-launch.ts';
 import { until } from './wait.ts';
+import { isTurnNote } from '../src/codex.ts';
 
 /**
  * The pinned turn files (src/turn-launch.ts) for a test that starts turns or builds their hooks: server.ts
@@ -87,6 +88,9 @@ export function lines(path: string): string[] {
   return text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean);
 }
 export const jsonLines = (path: string): any[] => lines(path).map((l) => JSON.parse(l));
+
+/** A turn message's blocks without the [System] note of the minion's own lines that opens it (#878), for tests about the rest. */
+export const withoutTurnNote = (content: any[]): any[] => content.filter((c) => !isTurnNote(c?.text ?? ''));
 export const PASSWORD = 'test-password-123';
 export const SECRET = 'x'.repeat(40);
 

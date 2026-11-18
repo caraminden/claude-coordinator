@@ -5,6 +5,7 @@ import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 import { Claims } from './claims.ts';
 import { Memory } from './memory.ts';
+import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
 
 /** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
@@ -339,6 +340,8 @@ export interface Turn {
   cache_write_tokens: number | null;
   /** Whose plan paid (Runner.payerOf): null for the server login's, else that person's id. */
   payer: number | null;
+  /** Its hash log as JSON (#878): Store.promptHashes parses it. Not "hashes": host_check masks columns named like a secret. */
+  prompt_digest: string | null;
   /** 1 for a hidden keepalive turn (#862), costed apart; null for a real turn. */
   keepalive: number | null;
   /** Which of the payer's Claude accounts ran it (#779); null for turns from before #905 and Codex turns. */
@@ -373,6 +376,8 @@ export interface TurnResult {
   duration_ms?: number | null;
   usage?: any;
   payer?: number | null;
+  /** What it was launched with (#878, src/prompt-hashes.ts). */
+  hashes?: PromptHashes | null;
   keepalive?: boolean;
   account?: number | null;
   /** The result's `modelUsage`: each model's running session cost, Grunts' models included (#905). */
@@ -678,6 +683,7 @@ CREATE TABLE IF NOT EXISTS turns (
   cache_read_tokens INTEGER,
   cache_write_tokens INTEGER,
   payer INTEGER,
+  prompt_digest TEXT,
   keepalive INTEGER
 );
 CREATE INDEX IF NOT EXISTS turns_ticket ON turns(ticket_id, id);
@@ -1139,6 +1145,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'last_check', 'ALTER TABLE machines ADD COLUMN last_check TEXT'],
   ['machines', 'lend', 'ALTER TABLE machines ADD COLUMN lend TEXT'],
   ['turns', 'payer', 'ALTER TABLE turns ADD COLUMN payer INTEGER'],
+  ['turns', 'prompt_digest', 'ALTER TABLE turns ADD COLUMN prompt_digest TEXT'],
   ['turns', 'keepalive', 'ALTER TABLE turns ADD COLUMN keepalive INTEGER'],
   ['turns', 'account', 'ALTER TABLE turns ADD COLUMN account INTEGER'],
   ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
@@ -1215,8 +1222,9 @@ export const SCHEMA_HISTORY = [
   [59, 'contraption_turn_audit (#844)'],
   [60, 'stored_secrets (#838)'],
   [61, 'turns.keepalive (#862)'],
-  [62, 'tickets.coordinator_of, one_coordinator per person, ticket_touches, taskmaster_digest (#919)'],
-  [63, 'claims (#921)'],
+  [62, 'turns.prompt_digest (#878)'],
+  [63, 'tickets.coordinator_of, one_coordinator per person, ticket_touches, taskmaster_digest (#919)'],
+  [64, 'claims (#921)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2994,10 +3002,10 @@ export class Store {
     const n = (v: unknown) => (typeof v === 'number' ? v : null);
     const row = this.db
       .prepare(`INSERT INTO turns (ticket_id, event_id, session_id, ended_at, cost_usd, session_cost_usd, duration_ms,
-          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer, keepalive, account) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
+          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer, keepalive, account, prompt_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
       .get(ticketId, r.event_id ?? null, r.session_id ?? null, r.ended_at, r.session_cost_usd - base, r.session_cost_usd,
         n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens), r.payer ?? null, r.keepalive ? 1 : null,
-        n(r.account)) as unknown as Turn;
+        n(r.account), r.hashes ? JSON.stringify(r.hashes) : null) as unknown as Turn;
     // Each model's running total, less its total at the session's previous turn, as the whole turn's cost is (#905).
     const models = r.modelUsage && typeof r.modelUsage === 'object' ? Object.entries(r.modelUsage) : [];
     const was = this.db.prepare('SELECT session_cost_usd FROM turn_models WHERE turn_id = ? AND model = ?');
@@ -3023,6 +3031,13 @@ export class Store {
           t.cache_read_tokens, t.cache_write_tokens, t.keepalive FROM turns t JOIN tickets k ON k.id = t.ticket_id
           WHERE t.ended_at >= ? AND k.kind != 'coordinator' ORDER BY t.ended_at, t.id`)
       .all(since) as unknown as KeepaliveRow[];
+  }
+
+  /** A minion's latest turns' hash logs (#878), newest first, with how much of each turn's prompt came from the cache. */
+  promptHashes(ticketId: number, limit = 1): { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; hashes: PromptHashes }[] {
+    const rows = this.db.prepare(`SELECT ended_at, cache_read_tokens, cache_write_tokens, prompt_digest FROM turns
+        WHERE ticket_id = ? AND prompt_digest IS NOT NULL ORDER BY id DESC LIMIT ?`).all(ticketId, limit) as any[];
+    return rows.map(({ prompt_digest, ...r }) => ({ ...r, hashes: JSON.parse(prompt_digest) }));
   }
 
   /**

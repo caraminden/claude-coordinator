@@ -1,8 +1,8 @@
 # Retros
 
-One file per milestone or build (`citadel:retro`). The ledger below lists mistakes found in more than one retro, and
-what now stops each one. Add a row when a finding shows up in a second retro.
+Each milestone's retro (the `citadel:retro` skill), one file each. This README is the ledger:
+mistakes more than one retro has found, and what now stops each. A row needs two retros.
 
 | Mistake | Retros | Guard |
 |---|---|---|
-| (none repeated yet) | | |
+| Build minion not woken when a feeder merges in | `build-2-prompt-bundle.md`, `build-3-per-person-taskmasters.md` | #927: a feeder's merge wakes and unparks the build owner |

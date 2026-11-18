@@ -6,6 +6,9 @@
 // Resting threads leave their build or group (Cara, 2026-11-14: "Lets move the deploying tickets to their own category at
 // the top below Pinned? and then waiting goes above Parked"): Deploying on top, then Waiting (parked, but something wakes
 // it by itself: start_after, wake_when_live, runners back) and Parked (only a person or the Taskmaster wakes it) at the bottom.
+// Newer word, parked only (Cara, 2026-11-17: "I think parked minions that are part of a major build should show in the
+// build group as well"): a parked minion with a build sits in its Build N section (its row keeps the parked look, after the
+// active rows); parked ones outside a build stay in Waiting/Parked. Deploying still leaves its build.
 
 /** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
@@ -23,12 +26,15 @@ const wakesItself = (t) => !!t.wakes_on;
  * promoted "key: value"s.
  */
 export function threadSections(all, types, groups = []) {
-  const parked = all.filter(isParked);
-  const deploying = all.filter(isDeploying);
-  const open = all.filter((t) => !isParked(t) && !isDeploying(t));
   const buildOf = (t) => t.build ?? 0;
-  const builds = [...new Set(open.map(buildOf).filter(Boolean))].sort((a, b) => a - b);
-  const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i === 0, rows: open.filter((t) => buildOf(t) === build) });
+  const deploying = all.filter(isDeploying);
+  const parked = all.filter((t) => isParked(t) && !buildOf(t));
+  const parkedInBuild = all.filter((t) => isParked(t) && buildOf(t));
+  const open = all.filter((t) => !isParked(t) && !isDeploying(t));
+  const builds = [...new Set([...open, ...parkedInBuild].map(buildOf).filter(Boolean))].sort((a, b) => a - b);
+  // Parked rows follow the active ones in their build.
+  const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i === 0,
+    rows: [...open, ...parkedInBuild].filter((t) => buildOf(t) === build) });
   const has = (t, group) => {
     const i = group.indexOf(':');
     return [t.properties?.[group.slice(0, i).trim()]].flat().map(String).includes(group.slice(i + 1).trim());

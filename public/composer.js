@@ -1,7 +1,7 @@
 // The message box under a chat, on Citadel UI's composer (public/ui/composer.js: autogrow, Enter rules,
 // IME guard, list continuation, the text back on a failed send, the text draft). Citadel's own around it:
 // pasted and dropped files with their drafts, the model and effort pickers, and steer or queue mid-turn.
-import { account, api, formatSize, h, isCoordinator, me, uploadUrl, view } from './base.js';
+import { account, api, formatSize, h, noAutofill, isCoordinator, me, uploadUrl, view } from './base.js';
 import { codex, reloadWhenIdle, scrollToBottom, sending, setSending } from './core.js';
 import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
@@ -492,7 +492,7 @@ const SECRET_ENV = 'CITADEL_SECRET_';
  * Saved, the message says $CITADEL_SECRET_<NAME> where the value was, for the person to look over and send.
  */
 function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
-  const value = h('input', { type: 'password', value: found, autocomplete: 'off', spellcheck: 'false', required: true, 'aria-label': 'The value' });
+  const value = h('input', { type: 'password', value: found, ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', required: true, 'aria-label': 'The value' });
   const name = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', required: true, placeholder: 'SITE_PASSWORD', pattern: '[A-Za-z][A-Za-z0-9_]{0,63}', 'aria-label': 'Name' });
   const whose = h('select', { 'aria-label': 'Whose' }, h('option', { value: 'person' }, 'Mine'),
     ticket?.project_id != null ? h('option', { value: 'scheme' }, 'This scheme\'s') : null);

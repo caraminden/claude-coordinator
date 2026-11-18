@@ -90,6 +90,13 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 /**
+ * Attributes for a search or filter box so no browser or password manager fills it (#934: a person's name
+ * landed in Find in chat unasked). Chromium's address autofill and the managers ignore autocomplete=off, so the
+ * token is one nothing recognises (a password field gets new-password, which stops a saved login being filled), the name is neutral, and each manager's own opt-out is set.
+ */
+export const noAutofill = (name, token = 'nope') => ({ autocomplete: token, name, 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': 'true', 'data-form-type': 'other' });
+
+/**
  * A scheme's favicon (#222), only ever as an <img> (an SVG there can't run scripts); hidden when it has
  * none, so refreshSchemeCounts can swap it in once a merge brings one.
  */

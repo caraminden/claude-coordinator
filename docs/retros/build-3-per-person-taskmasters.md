@@ -11,8 +11,8 @@ All four started at once around 13:36 PST and had all merged into `build/3` by 1
    and dismisses the feeder, but never wakes the build owner (`buildOwnerKey`). The build sat for about 45 minutes
    until Cara noticed ("Why are you waiting? 919 is dismissed"). #855 (Build 1) and #875 (Build 2) are parked the
    same way right now.
-   Fix: wake the build owner from that branch with the feeder's summary and risk. `src/land.ts` is in the pipeline
-   lane, so it went to the Taskmaster on 2026-11-17, not into this build.
+   Fix: #927 (landed 2026-11-17) wakes and unparks the build owner from that branch with the feeder's summary and
+   risk. Build 2's retro found the same gap, so it is the ledger's first row (`README.md`).
 2. **Every feeder's self-review missed a login bug.** `turnPerson` in `src/runner.ts` picked the person's login
    only for a card answer. A plan verdict, a file comment, a /backup message, or a card answer for everyone from
    another person all ran on the Taskmaster owner's login. That breaks the "never one person's request on another's

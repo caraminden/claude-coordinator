@@ -75,7 +75,7 @@ export async function instructionSources(project: Project, configDir: string, da
     }
     const dir = join(configDir, 'projects', memorySlug!, 'memory');
     for (const name of await markdownFiles(dir)) {
-      await add('This scheme', `Memory: ${name}`, join(dir, name), 'Minions already load this auto-memory; the Taskmaster does not.');
+      await add('This scheme', `Memory: ${name}`, join(dir, name), 'Minions and the Taskmaster already load this auto-memory.');
     }
   }
 

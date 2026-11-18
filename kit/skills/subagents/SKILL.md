@@ -92,9 +92,10 @@ Ask one question: will the session need what this step reads, or only what it co
   tokens or more. The session would re-read all of that on every later call. A check whose raw
   output is long (an untrimmed build or test log) goes to the `citadel:check-runner` agent; a
   wrapper that already trims output (`citadel-test`, a scheme's check script) runs inline.
-- **A sweep or a chain of lookups.** A question that needs 5 or more files read goes to an `Explore` Grunt on Sonnet,
-  briefed for the conclusion and the exact lines that matter, not file dumps; a shorter look stays in
-  the session, since the Grunt's own base context costs more than the reads. Hops where each result only
+- **A sweep or a chain of lookups.** A sweep whose raw reads the session won't need again (many files,
+  long ones, a chain of lookups) goes to an `Explore` Grunt on Sonnet, briefed for the conclusion and
+  the exact lines that matter, not file dumps. A few targeted reads, or reads the session will act on
+  (code it is about to edit), stay in the session: the Grunt's own 30 to 50k start costs more than they do. Hops where each result only
   names the next lookup are one script that prints only the answer (in the session or in the Grunt),
   capped with `| head -50`.
 - **The session is already big.** Past about 150k context, the savings grow quickly. Off a 90k

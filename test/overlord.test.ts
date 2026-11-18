@@ -158,7 +158,7 @@ test("a person's Taskmaster asks for everyone: the card sits with the Overlord, 
   assert.ok(told.some((t) => /for everyone[\s\S]*Freeze lands over the weekend\?\n→ No/.test(t)), told.join('\n'));
   const lord = events(overlord.id).filter((e) => e.kind === 'user_message');
   assert.ok(lord.some((e) => e.data.answer?.questionId === id && !e.data.mail), "the answer is in the Overlord's chat, where the card is");
-  assert.ok(lord.some((e) => e.data.mail && String(e.data.text).includes('Freeze lands')), 'the Overlord hears it as held mail');
+  assert.ok(!lord.some((e) => e.data.mail && String(e.data.text).includes('Freeze lands')), 'the Overlord, where the card is, gets no tracking mail about it');
   assert.ok(mail(ownCara.id).some((t) => t.includes('Freeze lands')), "so does Cara's own");
   assert.ok(!mail(ownJosh.id).some((t) => t.includes('Freeze lands')), 'the asker gets it once, as its wake');
   const again = await fetch(`${srv.base}/api/tickets/${overlord.id}/answer`, {

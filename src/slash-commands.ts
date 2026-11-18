@@ -22,6 +22,10 @@ const BUILT_IN: Record<string, string> = {
   'claude-api': 'Claude API and Anthropic SDK reference',
   dataviz: 'Charts, graphs and data visualizations',
   'plugin-authoring': 'Make a mod: a change to Claude\'s own interface or behaviour',
+  'code-review': 'Review the branch\'s changes',
+  'security-review': 'Security review of the branch\'s changes',
+  init: 'Write a CLAUDE.md for the repo',
+  loop: 'Run a prompt again on an interval',
 };
 
 const SAFE = /^[\w.-]+$/;

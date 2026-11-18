@@ -1,9 +1,7 @@
-// The CI desktop panel on the Machines page (#534): each PC that hosts CI runners, as src/ci-load.ts sees it: a
-// verdict, what it is doing now, the last 24 hours, and each pool of runners with its queue. It reads
-// /api/ci-desktop when shown and every minute while it stays on screen; it changes nothing.
-import { ago, api, h } from './base.js';
+// The CI desktop cards on the CI page's Runners tab (#534, moved there from Machines by #968): each PC that hosts CI runners, as src/ci-load.ts sees it: a
+// verdict, what it is doing now, the last 24 hours, and each pool of runners with its queue (public/ci.js reads them).
+import { ago, h } from './base.js';
 
-const REFRESH_MS = 60_000;
 const GB = 1024 ** 3;
 // Hyper-V lists WSL's own VM under an id, not a name.
 const VM_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -93,7 +91,7 @@ function pools(pc) {
       cell(p.cpu === null ? '–' : `${Math.round(p.cpu)}%`, 'num'))))));
 }
 
-function pcCard(pc) {
+export function pcCard(pc) {
   const now = pc.now;
   const shares = now ? [`CI runners ${Math.round(now.runners)}%`, now.wsl === null ? '' : `WSL ${Math.round(now.wsl)}%`, ...Object.entries(now.vms).map(([name, pct]) => `${VM_ID.test(name) ? 'WSL VM' : name} ${Math.round(pct)}%`)].filter(Boolean).join(' · ') : '';
   const facts = now ? [
@@ -116,49 +114,10 @@ function pcCard(pc) {
     pools(pc));
 }
 
-/** What the overview warns of (Cara, 2026-11-11): CI overloading the PC, a crash under load, or a PC that stopped reporting in the last day. */
-function trouble(pc) {
+/** What the CI chip warns of (Cara, 2026-11-11): CI overloading the PC, a crash under load, or a PC that stopped reporting in the last day. */
+export function trouble(pc) {
   if (pc.verdict.kind === 'over') return 'CI is overloading its desktop';
   if (pc.verdict.kind === 'crash') return 'CI desktop crashed under load';
   if (pc.verdict.kind === 'none' && pc.series.some((s) => s[1] !== null)) return 'CI desktop is offline';
   return '';
-}
-
-/** The overview's warning lines under the usage bar, one per PC in trouble and none otherwise; each opens the Machines page. */
-export function ciWarning(href) {
-  const el = h('div', { class: 'ci-warnings' });
-  const load = async () => {
-    if (el.dataset.loaded && !el.isConnected) return;
-    el.dataset.loaded = '1';
-    try {
-      const { pcs } = await api('api/ci-desktop');
-      el.replaceChildren(...pcs.filter(trouble).map((pc) => h('div', { class: 'machine-warning' },
-        h('span', { class: `dot ${pc.verdict.kind === 'none' ? 'fix' : 'down'}` }),
-        h('a', { href, title: `${pc.host}: ${pc.verdict.text}` }, trouble(pc)))));
-    } catch {
-      // The last answer stays: the next minute asks again.
-    }
-    setTimeout(load, REFRESH_MS);
-  };
-  load();
-  return el;
-}
-
-/** The panel: empty (and no heading) until a PC with a runner agent is there for this person to see. */
-export function ciDesktopPanel() {
-  const el = h('div', { class: 'ci-desktops' });
-  const load = async () => {
-    // Off the page: stop asking.
-    if (el.dataset.loaded && !el.isConnected) return;
-    el.dataset.loaded = '1';
-    try {
-      const { pcs } = await api('api/ci-desktop');
-      el.replaceChildren(...(pcs.length ? [h('h4', { class: 'machine-group' }, 'CI desktop load'), ...pcs.map(pcCard)] : []));
-    } catch {
-      // The last view stays: the next minute asks again.
-    }
-    setTimeout(load, REFRESH_MS);
-  };
-  load();
-  return el;
 }

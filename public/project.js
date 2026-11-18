@@ -1,7 +1,7 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
-import { ciWarning } from './ci-desktop.js';
+import { ciChip, ciPage } from './ci.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, projectTitle, pushControls, renderGithubStrip } from './settings.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
@@ -73,6 +73,7 @@ function renderCrumbs(main) {
       : main.kind === 'usage' ? [projectLink, ' / ', settingsLink, ' / ', 'Usage']
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
+      : main.kind === 'ci' ? [projectLink, ' / ', 'CI']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]));
@@ -160,10 +161,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const shelf = h('details', { class: 'shelf', open: panelOpen('shelf') },
     h('summary', { title: 'Show or hide the overview' }, projectTitle(project)),
     h('section', { class: 'account' },
-      usageMeter(),
+      // The CI chip by the usage meter (#968, Cara: "Chip by the usage meter"), its dot the CI page's worst.
+      h('div', { class: 'meter-row' }, usageMeter(), ciChip(projectId)),
       pushControls(project),
-      // Only while CI overloads its desktop, crashed it, or the desktop went offline (#534).
-      ciWarning(`#/p/${projectId}/machines`),
       // Settings shows in the header beside the scheme; who is signed in sits with Sign out along the box's foot.
       h('div', { class: 'foot' },
         h('span', { class: 'who' }, me),
@@ -206,6 +206,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'usage' ? usagePage()
     : main.kind === 'releases' ? releasesPage()
+    : main.kind === 'ci' ? ciPage(projectId)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket);

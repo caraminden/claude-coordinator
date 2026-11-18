@@ -472,3 +472,46 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 }
 /* After the rows' own rules, which set their padding: phones give them --control-h of tap room (#471). */
 @media (max-width: 800px) { .nav-item { padding-block: max(0.3rem, (var(--control-h) - 1lh) / 2); } .scheme-hide { min-height: var(--control-h); } }
+
+/* The CI page (#968, layout B): schemes with CI on the left, the picked one's detail on the right. */
+.ci-page { min-width: 0; padding: var(--space-3); }
+.ci-split { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.ci-list { display: grid; gap: 2px; position: sticky; top: calc(var(--topbar-h, 0px) + var(--space-3)); }
+.ci-li { display: grid; grid-template-columns: 0.6rem minmax(0, 1fr); gap: 0.1rem 0.5rem; align-items: center; padding: 0.4rem 0.6rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.ci-li:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.ci-li.on { background: var(--panel); box-shadow: inset 2px 0 0 var(--accent); }
+.ci-li-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci-li-state { grid-column: 2; font-size: 0.8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci-detail { display: grid; gap: var(--space-3); min-width: 0; align-content: start; }
+.ci-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.8rem; }
+.ci-head h3 { margin: 0; }
+.ci-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); }
+.ci-tabs button { padding: 0.4rem 0.7rem; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; border-radius: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.ci-tabs button.on { color: var(--ink); font-weight: 650; border-bottom-color: var(--accent); }
+.ci-block { display: grid; gap: var(--space-2); }
+.ci-block h4 { margin: 0; font-size: 0.85em; color: var(--muted); font-weight: 650; }
+.ci-block > p { margin: 0; }
+.ci-problems { display: grid; gap: var(--space-2); }
+.ci-problem { display: grid; gap: 0.3rem; padding: 0.6rem 0.8rem; border: 1px solid var(--line); border-left: 3px solid var(--waiting-tint); border-radius: var(--radius-sm); background: var(--panel); }
+.ci-problem.rings { border-left-color: var(--error); }
+.ci-problem p { margin: 0; font-size: 0.9em; }
+.ci-problem-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.ci-problem-head .dot { flex: none; transform: translateY(-0.05rem); }
+.ci-problem-head strong { flex: 1; min-width: 0; }
+.ci-tag { flex: none; font-size: 0.75em; padding: 0.1rem 0.45rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.ci-problem.rings .ci-tag { color: var(--error); border-color: var(--error); }
+.ci-runs { display: grid; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.ci-runs > * + * { border-top: 1px solid var(--line); }
+.ci-run { display: grid; grid-template-columns: 0.6rem 5.5rem minmax(0, 1.4fr) minmax(0, 1fr) 6rem; gap: 0.6rem; align-items: center; padding: 0.4rem 0.7rem; font-size: 0.88em; color: inherit; text-decoration: none; }
+a.ci-run:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.ci-run > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci-run-age { text-align: right; font-variant-numeric: tabular-nums; }
+.ci-skipped { margin: 0; padding: 0 0.7rem 0.4rem 1.9rem; font-size: 0.8em; }
+.ci-desktops { gap: var(--space-2); }
+@media (max-width: 800px) {
+  .ci-page { padding: var(--space-2); }
+  .ci-split { grid-template-columns: minmax(0, 1fr); }
+  .ci-list { position: static; grid-auto-flow: column; grid-auto-columns: minmax(9rem, max-content); overflow-x: auto; }
+  .ci-run { grid-template-columns: 0.6rem 4.5rem minmax(0, 1fr) 4rem; }
+  .ci-run-branch { display: none; }
+}

@@ -635,6 +635,44 @@ mock.boards('#takes', { boards: [
       return route(c, t, first);
     },
   },
+  ci: {
+    about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), a queue, runs and runners; the CI chip turns red',
+    seed(c) {
+      c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
+      const now = Date.now();
+      const iso = (min: number) => new Date(now - min * 60_000).toISOString();
+      const url = (id: number) => `https://github.com/caraminden/seeded/actions/runs/${id}`;
+      const run = (id: number, name: string, branch: string, min: number, status: string, conclusion: string | null, event = 'push') => ({ id, name, branch, event, status, conclusion, at: iso(min), url: url(id) });
+      c.store.setSetting(`ci-health:view:${c.project.id}`, {
+        at: now - 2 * 60_000, slug: 'caraminden/seeded', branch: 'main',
+        runners: [
+          { name: 'DESKTOP-G248IJ8-desktop', status: 'offline', busy: false, labels: ['self-hosted', 'Windows', 'seeded-ci'], job: null, offlineSince: now - 42 * 60_000 },
+          { name: 'DESKTOP-G248IJ8-linux', status: 'online', busy: true, labels: ['self-hosted', 'Linux', 'seeded-ci-linux'], job: 'tests (linux)', offlineSince: null },
+        ],
+        waiting: [{ name: 'windows build', labels: ['self-hosted', 'seeded-ci'], since: iso(31), run: 9104 }],
+        workflows: [
+          { name: 'tests', file: 'tests.yml', verdict: run(9101, 'tests', 'main', 55, 'completed', 'success'), skipped: ['windows build'] },
+          { name: 'drift', file: 'drift.yml', verdict: run(9090, 'drift', 'main', 190, 'completed', 'failure', 'schedule'), skipped: [] },
+          { name: 'release', file: 'release.yml', verdict: null, skipped: [] },
+        ],
+        runs: [
+          run(9104, 'tests', 'ticket/42-seeded', 31, 'queued', null, 'pull_request'),
+          run(9103, 'tests', 'land/41', 12, 'in_progress', null),
+          run(9101, 'tests', 'main', 55, 'completed', 'success'),
+          run(9099, 'tests', 'ticket/40-seeded', 80, 'completed', 'cancelled', 'pull_request'),
+          run(9090, 'drift', 'main', 190, 'completed', 'failure', 'schedule'),
+        ],
+      });
+      c.store.setSetting(`ci-health:${c.project.id}`, {
+        offline: {}, sent: {},
+        problems: [
+          { key: 'stuck:self-hosted,seeded-ci', title: 'CI, Seeded: 1 job on self-hosted, seeded-ci has waited for a runner since 31 min ago.', why: 'every runner that serves self-hosted, seeded-ci (DESKTOP-G248IJ8-desktop) is offline, since 42 min ago', fix: 'turn on or wake DESKTOP-G248IJ8, or start its runner service' },
+          { key: 'red:drift.yml', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: 'the Taskmaster starts a fix minion naming run 9090; fix minion #12 started', quiet: true },
+        ],
+      });
+      return `#/p/${c.project.id}/ci`;
+    },
+  },
   'inbox-full': {
     about: 'a Needs-you inbox of 25 minions waiting on people, enough to scroll it open (#668)',
     seed(c) {

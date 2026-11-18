@@ -270,6 +270,15 @@ h2 { font-size: 1.15rem; margin: 0; }
 .usage.codex .which:empty { display: none; }
 .topbar .meters { display: flex; flex-direction: column; gap: 0.25rem; }
 .topbar .meters:not(:has(> :not([hidden]))) { display: none; }
+/* The usage meter with the CI chip beside it (#968): the top bar's and the overview's. */
+.meter-row { display: flex; align-items: center; gap: 0.5rem; }
+.topbar .meters.meter-row { flex-direction: row; }
+.meter-row > .usage { flex: 1; min-width: 0; }
+.ci-chip { flex: none; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.5rem; border: 1px solid var(--line); border-radius: 999px; font-size: 0.8em; line-height: 1.3; color: var(--muted); text-decoration: none; }
+.ci-chip:hover { color: var(--ink); border-color: var(--muted); }
+.ci-chip:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+.ci-chip .dot { flex: none; }
+.ci-chip[hidden] { display: none; }
 
 /* Today's cost after the weekly bar (public/cost.js), opening to the last 7 days. */
 .cost-chip { flex: none; }

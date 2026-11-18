@@ -15,6 +15,7 @@ import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, onSeenIt
 import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
 import { loadReleases, onReleases } from './releases.js';
+import { ciChip } from './ci.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
 import { filesUploading } from './files.js';
@@ -884,6 +885,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(members|people|contraptions|account|usage)$/))) await showProject(Number(m[1]), { kind: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/ci$/))) await showProject(Number(m[1]), { kind: 'ci' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'files' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/releases\/(all|\d+)(?:\/(\d+))?$/))) await showReleases(Number(m[1]), m[2] === 'all' ? 'all' : Number(m[2]), m[3] ? Number(m[3]) : null);
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
@@ -1068,6 +1070,9 @@ export function start(who) {
   meEl.replaceChildren(me, h('button', { class: 'secondary', onclick: logout }, 'Sign out'));
   connectStream();
   loadPrs();
+  // The top bar's CI chip (#968), beside its usage meter: the one phones see.
+  const meters = document.querySelector('.topbar .meters');
+  if (!meters.querySelector('.ci-chip')) meters.append(ciChip());
   route();
   showRail();
   initAppSwitch(me);

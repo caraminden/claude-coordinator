@@ -304,12 +304,15 @@ h2[data-shape="star"] .mk-glyph { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68
 .mk-dock .mk-sent { height: 1.4rem; line-height: 1.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 899px) { .mk-dock .mk-dock-text { min-height: 2.8rem; } }
 /* Phones: one short line (the count, with Send beside it), no reserved block. The message's second line
-   (Sent / an error) drops under the count only when there is one. */
+   (Sent / an error) covers it. */
 @media (max-width: 560px) {
   .mk-dock { grid-template-columns: minmax(0, 1fr) auto; margin-top: 1rem; padding-block: 0.4rem calc(0.4rem + env(safe-area-inset-bottom)); gap: 0.5rem; font-size: 0.82rem; }
-  .mk-dock > button { width: auto; max-width: 9rem; padding: 0.35rem 0.8rem; }
+  .mk-dock > button { width: 7rem; padding: 0.35rem 0.5rem; }
   .mk-dock .mk-dock-text { min-height: 0; line-height: 1.3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mk-dock .mk-sent { height: auto; line-height: 1.2rem; }
+  /* Sent / an error covers the count's line instead of adding one, so the dock never changes height. */
+  .mk-dock:not(.stuck) { position: relative; }
+  .mk-dock .mk-dock-msg { position: static; }
+  .mk-dock .mk-sent { position: absolute; left: max(1rem, env(safe-area-inset-left)); right: 8.5rem; top: 0.4rem; height: 1.3rem; line-height: 1.3rem; background: var(--mk-band); }
   .mk-dock .mk-sent:empty { display: none; }
   /* A focused field scrolls into view above the sticky dock, not under it. */
   html { scroll-padding-bottom: 4.5rem; }

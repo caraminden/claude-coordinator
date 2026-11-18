@@ -79,7 +79,8 @@ const replay = require('node:child_process').spawnSync('citadel-replay', [], { e
 writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, replay: { status: replay.status, stderr: replay.stderr } }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
-console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
+const initErrors = require('node:fs').existsSync(${JSON.stringify(join(root, 'init-errors'))}) ? JSON.parse(readFileSync(${JSON.stringify(join(root, 'init-errors'))}, 'utf8')) : {};
+console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [], ...initErrors }));
 console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
 `,
 );
@@ -444,4 +445,19 @@ test("only the Citadel scheme's Taskmaster is offered the Citadel-wide instructi
   } finally {
     store.setAppInstructions('', 'Cara');
   }
+});
+
+test("a turn whose init lists plugin or MCP server load errors says so in the chat and on the minion's note", async () => {
+  const file = join(root, 'init-errors');
+  writeFileSync(file, JSON.stringify({ plugin_errors: [{ plugin: 'citadel', error: 'bad manifest' }], mcp_server_errors: [{ name: 'other', error: 'spawn ENOENT' }] }));
+  try {
+    const t = await turn('ticket', 'connected');
+    assert.equal(t.events.length, 1);
+    assert.match(t.events[0], /citadel plugin: bad manifest/);
+    assert.match(t.events[0], /other MCP server: spawn ENOENT/);
+    assert.equal(errors.length, 1);
+  } finally {
+    rmSync(file, { force: true });
+  }
+  assert.deepEqual((await turn('ticket', 'connected')).events, [], 'no errors, no note');
 });

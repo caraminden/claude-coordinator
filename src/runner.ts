@@ -3174,6 +3174,7 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.mcp_servers)) this.checkMcp(ticketId, ev.mcp_servers);
+    if (ev.type === 'system' && ev.subtype === 'init') this.checkLoadErrors(ticketId, ev);
     if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.slash_commands)) this.saveCommands(ticketId, ev);
     if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.claude_code_version === 'string') {
       const hashes = this.store.getSetting<TurnState>(turnKey(ticketId))?.hashes;
@@ -3361,6 +3362,28 @@ export class Runner {
     const text = `The ${role} MCP server is ${typeof status === 'string' ? status : 'missing'} in this turn, so its mcp__${role} tools are unavailable. Check the server log.`;
     console.error(`Ticket ${ticketId}: ${text}`);
     const event = this.emit(ticketId, 'error', { text });
+    this.onTurnError(ticketId, text, event.id);
+  }
+
+  /**
+   * A plugin or MCP server that fails to load is skipped and the turn still exits 0 (AG-03): say so in the chat as an error
+   * and on the minion's note. It warns and doesn't end the turn: a missing thread/coordinator server already has checkMcp's error.
+   */
+  private checkLoadErrors(ticketId: number, ev: any) {
+    const line = (e: any, kind: string) => {
+      const name = typeof e === 'object' ? e?.plugin ?? e?.name ?? e?.server : null;
+      const why = typeof e === 'string' ? e : e?.error ?? e?.message ?? JSON.stringify(e);
+      return `${name ? `${name} ` : ''}${kind}: ${why}`;
+    };
+    const lines = [
+      ...(Array.isArray(ev.plugin_errors) ? ev.plugin_errors.map((e: any) => line(e, 'plugin')) : []),
+      ...(Array.isArray(ev.mcp_server_errors) ? ev.mcp_server_errors.map((e: any) => line(e, 'MCP server')) : []),
+    ];
+    if (!lines.length) return;
+    const text = `This turn started with load errors, so some of its skills, hooks or tools are missing: ${lines.join('; ')}`.slice(0, 1500);
+    console.error(`Ticket ${ticketId}: ${text}`);
+    const event = this.emit(ticketId, 'error', { text });
+    this.setFailNote(ticketId, { note: text.slice(0, 200) });
     this.onTurnError(ticketId, text, event.id);
   }
 

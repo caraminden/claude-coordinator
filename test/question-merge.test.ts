@@ -111,3 +111,35 @@ test('a card holds 8 questions; the ninth starts a new card', async () => {
   assert.notEqual(c.id, a.id);
   await end();
 });
+
+test("a Taskmaster's for-everyone cards merge with the same asker's, never another Taskmaster's, and the Overlord's chat hears question_more", async () => {
+  const { Store } = await import('../src/db.ts');
+  const { mergeCard, postCard } = await import('../src/ci-armed.ts');
+  const store = new Store(join(root, 'merge.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const p = store.createProject('Shared', null, cara.id);
+  store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  store.splitScheme(p.id, josh.id);
+  const lord = store.getOverlord(p.id)!;
+  const [a, b] = [store.coordinatorFor(p.id, cara.id)!, store.coordinatorFor(p.id, josh.id)!];
+  // A stand-in app: every thread is mid-turn; emit stores the event as the runner does (the Overlord's marked everyone).
+  const app: any = {
+    store,
+    notify() {},
+    runner: { turnStartedAt: () => 0, broadcastTicket() {}, emit: (id: number, kind: string, d: object) => store.addEvent(id, kind, id === lord.id && kind === 'question' ? { ...d, everyone: true } : d) },
+  };
+  const card = (asker: any, text: string) => ({ questions: q(text), mergeable: true as const, asker: asker.id });
+  const first = postCard(app, lord, card(a, 'a'));
+  const merged = mergeCard(app, lord, a, card(a, 'b'));
+  assert.equal(merged?.id, first.id);
+  assert.equal(mergeCard(app, lord, b, card(b, 'c')), null, "another Taskmaster's card never joins it");
+  const kinds = store.eventsOfKinds(lord.id, ['question', 'question_more']);
+  assert.deepEqual(kinds.map((e) => e.kind), ['question', 'question_more']);
+  assert.equal(JSON.parse(kinds[0].data).questions.length, 2);
+  assert.equal(JSON.parse(kinds[0].data).everyone, true, 'the card keeps its everyone mark');
+  // Mine lets question_more through to every member's page, as it does the card's results.
+  const { inMine } = await import('../public/mine.js');
+  assert.equal(inMine({ kind: 'question_more', data: '{}' }), true);
+  store.db.close();
+});

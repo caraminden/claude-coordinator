@@ -21,7 +21,6 @@ const PATTERNS: Record<string, RegExp> = {
 const ALLOWED: Record<string, Record<string, string>> = {
   'artifacts.js': { dialog: "the file viewer fills the page with the file and its chat side by side on a grid, not a box with a head; its picture view already uses the kit's lightbox" },
   'drawers.js': { dialog: "it is itself a shared part (served to apps as /apps/_citadel/drawers.js): the phone's side panels as named modal drawers" },
-  'cost.js': { tooltip: 'the day-cost chip opens a click-opened table of spend in a popover, a panel to read and not a tip on hover or focus' },
 };
 
 function files(dir: string): string[] {

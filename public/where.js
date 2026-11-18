@@ -1,7 +1,8 @@
 // "Where it went" (#905): your own spend over the last 7 days against the 7 before, by model, scheme, kind of work,
 // and the 10 costliest minions, from /api/costs/mine (src/costs.ts whereItWent). One series per table, so one hue and no legend.
-import { api, costText, h, icon, threadHref, view } from './base.js';
+import { account, api, costText, h, icon, threadHref, view } from './base.js';
 import { settingsTabs } from './settings.js';
+import { costDetail } from './cost.js';
 
 /** A share of the weekly limit (all your accounts together), "4.2%", or null while no meter can price it. */
 function share(usd, weekUsd) {
@@ -97,7 +98,7 @@ export function usagePage() {
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.')),
-    pick, slot);
+    pick, slot, account?.admin ? costDetail() : '');
 }
 
 let pickedRange = 'week';

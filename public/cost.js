@@ -1,6 +1,5 @@
-// Today's use beside the weekly meter, as a share of an even day (a seventh of the week), opening to the last 7 days.
+// Spend against an even day (a seventh of the week): the 7-day breakdown on the usage page, and the week share minion rows use.
 import { account, api, costText, h, view } from './base.js';
-import { closeOnClickAway } from './properties.js';
 import { toast } from './ui/status.js';
 import { renderSidebar } from './sidebar.js';
 
@@ -14,25 +13,11 @@ let parts = [];
 // This month's spend on outside APIs and OpenRouter by scheme and service, with each scheme's cap (src/outside-spend.ts, #839).
 let outside = [];
 
-/** "Day 38%" after the weekly bar: today against an even day's share of the week. It opens to the last 7 days. */
-export function costChip() {
-  const chip = h('details', { class: 'cost-chip', hidden: true },
-    h('summary', {}),
-    h('div', { class: 'cost-pop', popover: 'manual' }));
-  chip.addEventListener('toggle', () => {
-    const pop = chip.querySelector('.cost-pop');
-    if (!chip.open) return pop.hidePopover();
-    drawPop(chip);
-    // In the top layer, so neither the panel (or phone drawer) around it nor the minions list beside it covers it.
-    pop.showPopover();
-    const row = chip.closest('.usage').getBoundingClientRect();
-    pop.style.top = `${row.bottom + 6}px`;
-    pop.style.maxHeight = `${innerHeight - row.bottom - 14}px`; // the person and scheme tables make it taller than a phone (#689)
-    pop.style.left = `${Math.max(8, Math.min(row.left, innerWidth - pop.offsetWidth - 8))}px`;
-    // It would drift once the page or the panel scrolls (not the chat, which scrolls as turns run).
-    for (const el of [window, chip.closest('.shelf')]) el?.addEventListener('scroll', () => (chip.open = false), { once: true });
-  });
-  return closeOnClickAway(chip);
+/** The 7-day breakdown, on Settings → Usage for admins (it used to open from a "Day 38%" chip beside the weekly bar). */
+export function costDetail() {
+  const el = h('section', { class: 'cost-detail cost-pop', hidden: true });
+  renderCost();
+  return el;
 }
 
 /** Fetch the daily totals again (a turn just ended) and redraw. */
@@ -48,17 +33,9 @@ export async function renderCost() {
   }
   // Minion rows show their cost against the week, so they redraw when that estimate moves.
   if (budget !== before && view?.kind === 'project') renderSidebar();
-  for (const chip of document.querySelectorAll('.cost-chip')) {
-    chip.hidden = false;
-    const today = days[0].total;
-    const over = budget && today > budget;
-    chip.querySelector('summary').replaceChildren(budget ? 'Day ' : 'Today ', h('b', { class: over ? 'warn' : '' }, budget ? pct(today) : costText(today)));
-    const accounts = parts.length > 1 ? ` across ${parts.length} Claude accounts` : '';
-    const made = !budget ? '' : parts.map((p) => `${p.label || 'the server login'} ${costText(p.limit)}${p.assumed ? ' (assumed, not priced yet)' : ''}`).join(' + ');
-    chip.querySelector('summary').title = budget
-      ? `Today's turns${accounts}: ${costText(today)} at API prices, ${pct(today)} of an even day's share (${costText(budget)}) of the combined weekly limit.\nWeekly limit ${costText(budget * 7)}${parts.length > 1 ? ` = ${made}` : ''}, divided by 7.${over ? '\nOver it: at this pace the week runs out early.' : ''}`
-      : `Today's turns${accounts}: ${costText(today)} at API prices. Shown against the weekly limit once its meter reaches 3%.`;
-    if (chip.open) drawPop(chip);
+  for (const el of document.querySelectorAll('.cost-detail')) {
+    el.hidden = false;
+    drawPop(el);
   }
 }
 
@@ -121,7 +98,7 @@ function drawPop(chip) {
     !usd ? '–' : budget ? [pct(usd / n), h('span', { class: 'usd' }, costText(usd / n))] : costText(usd));
   const here = (d) => d.byProject[pid] ?? 0;
   const sum = (f) => days.reduce((s, d) => s + f(d), 0);
-  chip.querySelector('.cost-pop').replaceChildren(
+  chip.replaceChildren(
     h('h4', {}, budget ? "Each day against an even share of the week" : 'Cost at API prices, not a bill'),
     h('table', {},
       h('thead', {}, h('tr', {}, h('th', {}), h('th', { class: 'num' }, 'This scheme'), h('th', { class: 'num' }, 'All schemes'))),

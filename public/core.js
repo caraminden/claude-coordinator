@@ -3,7 +3,7 @@
 import { inMerged } from './mine.js';
 import { ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, me, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { onAppInstructionsUpdate, onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
-import { costChip, renderCost } from './cost.js';
+import { renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
@@ -433,7 +433,7 @@ addEventListener('hashchange', syncUsageLinks);
 
 /** A weekly-limit bar; one lives in the top bar and one in a project's side panel. */
 export const usageMeter = () => h('a', { class: 'usage', href: usageHref(), hidden: true },
-  h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), costChip());
+  h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
 
 /**
  * One window combined across a person's accounts (Cara, 2026-11-16: "just combine all accounts into a single bar"):
@@ -496,7 +496,7 @@ export function renderUsage(next = usage) {
 }
 
 /** A bar in the Claude bar's look (#342); `.codex` keeps it out of the Claude bars' loops. */
-const codexBar = () => h('a', { class: 'usage codex', href: usageHref(), 'aria-label': 'Usage details', hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), h('span', { class: 'which' }));
+const codexBar = () => h('a', { class: 'usage codex', href: usageHref(), 'aria-label': 'Usage details', hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
 const setBar = (bar, pct, label) => {
   bar.querySelector('.label').textContent = label;
   bar.style.setProperty('--pct', `${pct}%`);
@@ -512,8 +512,7 @@ function renderCodexMeter(meter) {
   if (bar.hidden) return bar;
   const top = codexTop(codex.usage);
   setBar(bar, top, `Codex ${top}%`);
-  // Which window it is, where the Claude bar has its cost chip.
-  bar.querySelector('.which').textContent = windowName(codexWindows(codex.usage).find((w) => w.pct === top)?.windowDurationMins).replace(' window', '');
+  bar.setAttribute('aria-label', `Usage details: Codex ${windowName(codexWindows(codex.usage).find((w) => w.pct === top)?.windowDurationMins).replace(' window', '').toLowerCase()} ${top}%`);
   bar.title = [...codexWindows(codex.usage).map(windowText), `As of the last Codex read, ${ago(codex.usage.updatedAt)}`].join('\n');
   return bar;
 }

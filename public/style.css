@@ -266,8 +266,6 @@ h2 { font-size: 1.15rem; margin: 0; }
 .codex-windows dd { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.75rem; }
 .codex-windows .usage .label { min-width: 4ch; }
 .codex-windows .usage .track { width: 8rem; }
-.usage.codex .which { font-size: 0.9em; }
-.usage.codex .which:empty { display: none; }
 .topbar .meters { display: flex; flex-direction: column; gap: 0.25rem; }
 .topbar .meters:not(:has(> :not([hidden]))) { display: none; }
 /* The usage meter with the CI chip beside it (#968): the top bar's and the overview's. */
@@ -280,14 +278,9 @@ h2 { font-size: 1.15rem; margin: 0; }
 .ci-chip .dot { flex: none; }
 .ci-chip[hidden] { display: none; }
 
-/* Today's cost after the weekly bar (public/cost.js), opening to the last 7 days. */
-.cost-chip { flex: none; }
-.cost-chip[hidden] { display: none; }
-.cost-chip > summary { font-variant-numeric: tabular-nums; list-style: none; cursor: pointer; padding: var(--tap-pad) 0.4rem; border-radius: 6px; }
-.cost-chip > summary::-webkit-details-marker { display: none; }
-.cost-chip > summary:hover, .cost-chip[open] > summary { background: var(--line); color: var(--ink); }
-.cost-chip b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
-.cost-chip .warn { color: var(--waiting); }
+/* The 7-day cost breakdown on the usage page (public/cost.js). */
+.cost-detail { position: static; width: auto; max-width: 40rem; margin-top: 1rem; box-shadow: none; }
+.cost-detail[hidden] { display: none; }
 .cost-pop { position: fixed; inset: auto; margin: 0; width: max-content; overflow-y: auto; max-width: calc(100vw - 16px); box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.45); padding: 0.6rem 0.7rem; font-size: 1.1em; color: var(--ink); white-space: normal; cursor: default; }
 .cost-pop h4 { margin: 0 0 0.3rem; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .cost-pop table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }

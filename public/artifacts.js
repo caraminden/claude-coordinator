@@ -349,7 +349,6 @@ export function closeViewer() {
   return threadHref(ticket);
 }
 
-/** × or Esc: back to the chat, as the browser's back button would when it was opened from there. */
 /**
  * Phones: while the keyboard is up for a field inside the viewed page (focus is on its frame), the page gets the
  * whole screen: `kb-page` hides the chat under it and sizes the dialog to the visual viewport. Both come back when
@@ -372,12 +371,15 @@ function watchKeyboard(dialog) {
     dialog.style.bottom = typing ? 'auto' : '';
   };
   const onBlur = () => setTimeout(update);
+  // A rotated phone has a new tallest height.
+  screen.orientation?.addEventListener('change', () => { tallest = 0; update(); });
   vv.addEventListener('resize', update);
   vv.addEventListener('scroll', update);
   addEventListener('focusin', update);
   addEventListener('blur', onBlur, true);
 }
 
+/** × or Esc: back to the chat, as the browser's back button would when it was opened from there. */
 function leaveViewer() {
   if (viewer.inPlace) history.back();
   else replaceHash(threadHref(viewer.ticket));

@@ -2,7 +2,7 @@
 // the images and files people attach to messages.
 import { randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -16,6 +16,8 @@ import { place } from '../chunked-uploads.ts';
 import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload, uploadFolder } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
 import { HttpError, json, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
+import { imageSize } from '../image-size.ts';
+import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks } from '../../public/ui/marks.js';
 
 export function artifactView(app: App, a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
   const ticket = a.ticket_title === undefined ? app.store.getTicket(a.ticket_id) : null;
@@ -377,7 +379,73 @@ export async function messageFiles(app: App, ticket: Ticket, raw: unknown): Prom
   }));
 }
 
+/**
+ * mark_image (#960): the markdown line that shows `image` in a reply with marks drawn over it (public/ui/marks.js). The
+ * picture is one pasted in this chat (copied into the minion's files folder, so it shows like any file it links) or an
+ * image in its folders; marks are { kind, at, to, n, text, colour } in percent of the picture from its top left.
+ */
+export async function markImage(app: App, ticket: Ticket, body: any): Promise<{ markdown: string; path: string; w: number; h: number }> {
+  const image = str(body.image, 'image', 2000);
+  const alt = body.alt == null ? 'Marked picture' : str(body.alt, 'alt', 200);
+  if (/[[\]\n]/.test(alt)) throw new HttpError(400, 'alt must be one line with no square brackets');
+  let path: string;
+  const uploads = uploadsDir(app, ticket);
+  if (isAbsolute(image) && normalize(join(image, '..')) === uploads && IMAGE_NAME.test(basename(image))) {
+    const src = join(uploads, basename(image));
+    const dir = app.sharedDir(ticket);
+    path = join(dir, basename(image));
+    await mkdir(dir, { recursive: true });
+    await copyFile(src, path).catch((e) => { throw e?.code === 'ENOENT' ? new HttpError(404, `No pasted picture ${basename(image)} in this chat`) : e; });
+  } else {
+    const found = await resolveTicketFile(app, ticket, image);
+    if (!found || found.type.kind !== 'image') throw new HttpError(400, 'image must be a picture pasted in this chat (its path from the turn) or a PNG, JPEG, GIF or WebP file in your working directory, files folder or shared folder');
+    path = found.abs;
+  }
+  if (/[\s()"<>]/.test(path)) throw new HttpError(400, `The picture's path has a space, bracket or quote, which a markdown link can't hold: copy it to a plain name first (${path})`);
+  const size = imageSize(await readFile(path));
+  if (!size) throw new HttpError(400, 'mark_image draws on PNG, JPEG, GIF or WebP pictures');
+  const { w, h } = size;
+  const raw = body.marks;
+  if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'marks must be a list of at least one mark');
+  if (raw.length > MAX_MARKS) throw new HttpError(400, `At most ${MAX_MARKS} marks on one picture`);
+  const point = (v: unknown, what: string) => {
+    if (!Array.isArray(v) || v.length !== 2 || v.some((n) => typeof n !== 'number' || !Number.isFinite(n))) throw new HttpError(400, `${what} must be [x, y] in percent`);
+    if (v.some((n) => n < 0 || n > 100)) throw new HttpError(400, `${what} is off the picture: x and y are percent of its width and height, 0 to 100 (it is ${w}x${h})`);
+    return { x: (v[0] * w) / 100, y: (v[1] * h) / 100 };
+  };
+  let pins = 0;
+  const marks = raw.map((m: any, i: number) => {
+    const what = `Mark ${i + 1}`;
+    const kind = m?.kind;
+    if (!['box', 'arrow', 'pin', 'label'].includes(kind)) throw new HttpError(400, `${what}: kind must be box, arrow, pin or label`);
+    const colour = m.colour ?? 'red';
+    if (colour !== 'red' && colour !== 'yellow') throw new HttpError(400, `${what}: colour must be red or yellow`);
+    const pts = [point(m.at, `${what}'s at`)];
+    if (kind === 'box' || kind === 'arrow') pts.push(point(m.to, `${what}'s to`));
+    const mark: any = { tool: kind, colour, pts };
+    if (kind === 'pin') {
+      mark.n = m.n ?? ++pins;
+      if (!Number.isInteger(mark.n) || mark.n < 0 || mark.n > 99) throw new HttpError(400, `${what}: n must be a whole number 0 to 99`);
+    }
+    if (kind === 'label') {
+      const text = typeof m.text === 'string' ? m.text.trim().replace(/\s+/g, ' ') : '';
+      if (!text || text.length > MAX_LABEL || /[;"]/.test(text)) throw new HttpError(400, `${what}: text must be 1 to ${MAX_LABEL} characters with no ; or "`);
+      mark.text = text;
+    }
+    return mark;
+  });
+  const title = marksTitle(w, h, marks);
+  if (parseMarks(title)?.marks.length !== marks.length) throw new HttpError(500, 'The marks did not read back; nothing was drawn');
+  return { markdown: `![${alt}](${path} "${title}")`, path, w, h };
+}
+
 export const fileRoutes: Route[] = [
+  {
+    method: 'POST', path: '/api/tickets/:ticket/mark-image', who: ['minion'],
+    async handler({ req, res, app, ticket }) {
+      return json(res, 200, await markImage(app, ticket, await readJson(req)));
+    },
+  },
   {
     method: 'GET', path: '/api/projects/:project/artifacts', who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project }) {

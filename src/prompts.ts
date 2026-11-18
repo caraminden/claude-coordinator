@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
+import { imageSize } from './image-size.ts';
 import { AGENT_NAME } from './auth.ts';
 import { onboardingOpen, type Machine, type PersonalLayer, type Project, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
@@ -88,7 +89,11 @@ export function promptMessage(batch: QueuedMessage[]): string {
     }
     for (const img of m.images) {
       try {
-        content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: readFileSync(img.path).toString('base64') } });
+        const data = readFileSync(img.path);
+        content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: data.toString('base64') } });
+        // Its path and size, so a reply can point at parts of it with mark_image (#960).
+        const size = imageSize(data);
+        content.push({ type: 'text', text: `(${m.author}'s picture${size ? `, ${size.w}x${size.h}` : ''}: ${img.path})` });
       } catch {
         content.push({ type: 'text', text: `(An image ${m.author} attached could not be loaded.)` });
       }
@@ -118,6 +123,7 @@ function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string
     '- Link files by absolute path, never `../`: a relative link resolves against your working directory and breaks at the wrong depth.',
     '- `![caption](path)` shows an inline preview: use it for images, GIFs and videos.',
     '- `[title](path)` shows a card: use it for documents, web pages and PDFs. A card for a .zip, .7z, .tar, .gz or .apk file downloads it when clicked.',
+    ticket.kind === 'coordinator' ? '' : '- To point at part of a picture (where to click, what changed), draw on it with mark_image rather than describe where.',
     filesDir ? filesLine(filesDir) : '',
     'Linking a file is the only way people see it; they cannot browse your folders. Files you link are also listed in the scheme\'s artifacts, so link only what is meant for people, not files you made for your own use (test pages, scratch notes, fixtures).',
     sharedDir

@@ -16,6 +16,8 @@
 // Raw HTML is escaped, all but <br>.
 
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+import { marksOverlay, parseMarks } from './marks.js';
+
 const unescapeHtml = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
 
 /** Info string → [tone, header label] for a fence that names where its commands run (#898); other tags draw plain. */
@@ -215,18 +217,36 @@ function mendStreaming(src) {
 }
 
 /**
+ * An image whose title holds marks (#960): the hook's picture with the marks drawn over its first <img>, and a
+ * "Marks" toggle (and with `draw`, a "Draw on it" button) under it. Any other title, or a hook that draws no
+ * <img>, is the hook's own HTML.
+ */
+function markedImage(image, href, alt, title, draw) {
+  const parsed = parseMarks(title);
+  const html = image(href, alt, parsed ? null : title);
+  if (!parsed || !/<img\b/i.test(html)) return html;
+  const pic = html.replace(/<img\b[^>]*>/i, (img) => `<span class="cui-marked-pic">${img}${marksOverlay(parsed)}</span>`);
+  return `<span class="cui-marked" data-marks="${escapeHtml(title)}">${pic}<span class="cui-marks-bar">`
+    + `<label class="cui-marks-toggle"><input type="checkbox" checked> Marks</label>`
+    + `${draw ? '<button type="button" class="cui-marks-draw">✎ Draw on it</button>' : ''}</span></span>`;
+}
+
+/**
  * `src` as HTML. Options:
  * - `breaks`: keep single line breaks as typed, as chat does;
  * - `streaming`: the text is still arriving (see mendStreaming);
  * - `headingBase`: the level a `#` is drawn as (default 3, so a reply's headings sit under the
  *   page's own; a document passes 1);
+ * - `drawMarks`: a marked image (see ui/marks.js) also gets a "Draw on it" button, `.cui-marks-draw`, for a page
+ *   that can open drawing tools on it (Citadel's chat); the page handles its click;
  * and hooks, each given the target unescaped and the text as HTML:
  * - `link(href, html)`: a link's HTML, for `[text](href)`, `<https://…>` and bare URLs and DOIs (a DOI's href is
  *   its https://doi.org/ address). Default: http(s) and mailto open a new tab, anything else is inert;
- * - `image(href, alt, title)`: an image's HTML (default: its alt text);
+ * - `image(href, alt, title)`: an image's HTML (default: its alt text). A title of marks (ui/marks.js: "marks 1280x900: box …")
+ *   is drawn over the image's <img>, with a toggle under it, and the hook gets no title;
  * - `text(html)`: runs over the inline HTML outside code and links, e.g. to link #N.
  */
-export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s, breaks = false, streaming = false, headingBase = 3 } = {}) {
+export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s, breaks = false, streaming = false, headingBase = 3, drawMarks = false } = {}) {
   image ??= (_href, alt) => `<span class="cui-alt">[image: ${alt}]</span>`;
   if (streaming) src = mendStreaming(src);
   const base = Math.min(Math.max(Math.trunc(headingBase) || 1, 1), 6) - 1;
@@ -258,7 +278,7 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
       .replace(/\\(&lt;|&gt;|[*_`|[\]~#])/g, (_, c) => hold(c))
       .replace(/&lt;br\s*\/?&gt;/gi, () => hold('<br>'))
       // Images first, so a linked image ("[![alt](a.png)](https://x)") keeps its picture.
-      .replace(new RegExp(`!${LINK.source}`, 'g'), (_, alt, href, title) => hold(image(unescapeHtml(href), plain(alt), title ?? null)))
+      .replace(new RegExp(`!${LINK.source}`, 'g'), (_, alt, href, title) => hold(markedImage(image, unescapeHtml(href), plain(alt), title == null ? null : unescapeHtml(title), drawMarks)))
       .replace(LINK, (_, label, href) => hold(link(unescapeHtml(href), emphasis(label))))
       // "<https://x>", then bare URLs and DOIs, go through `link` too. Their trailing marks stay
       // outside: "**https://x/**." is bold, then a full stop.
@@ -453,6 +473,20 @@ const CSS = `
 :where(.cui-md .cui-front-matter) { color: var(--citadel-muted); font-size: 0.85em; }
 :where(.cui-md .cui-link) { text-decoration: underline dotted; }
 :where(.cui-md .cui-alt) { color: var(--citadel-muted); }
+:where(.cui-md .cui-marked) { display: inline-block; max-width: 100%; vertical-align: top; }
+:where(.cui-md .cui-marked img) { max-height: 40rem; }
+:where(.cui-md .cui-marked-pic) { position: relative; display: inline-block; max-width: 100%; line-height: 0; vertical-align: top; }
+:where(.cui-md .cui-marked-pic > img) { max-width: 100%; }
+:where(.cui-md .cui-marks) { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+:where(.cui-md .cui-marked:has(.cui-marks-toggle > input:not(:checked)) .cui-marks) { display: none; }
+:where(.cui-md .cui-marks-bar) { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; line-height: 1.2; }
+:where(.cui-md :is(.cui-marks-toggle, .cui-marks-draw)) {
+  display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem; border-radius: 999px; cursor: pointer;
+  font: 600 var(--citadel-size-small) var(--citadel-font); line-height: 1.2; color: var(--citadel-text);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-border);
+}
+:where(.cui-md .cui-marks-toggle > input) { margin: 0; accent-color: #e5383b; }
+:where(.cui-md :is(.cui-marks-toggle, .cui-marks-draw):hover) { border-color: var(--citadel-accent); }
 :where(.cui-md pre.cui-shell) { position: relative; padding-top: 0; border-left: 4px solid var(--cui-shell); }
 :where(.cui-md pre.cui-shell)::before {
   content: attr(data-label); display: block; margin: 0 -0.6rem 0.5rem -0.6rem; padding: 0.45rem 4.4rem 0.45rem 0.6rem;

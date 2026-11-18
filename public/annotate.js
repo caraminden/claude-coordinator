@@ -2,42 +2,11 @@
 // picture's own size so thin lines stay readable when Claude sees it. It fills a lightbox stage (lightbox's
 // opts.render) with the pen already on; Done hands back the marked canvas, closing without Done changes nothing.
 import { h } from './base.js';
+import { COLOURS, drawMark, lineWidth } from './ui/marks.js';
 
-export const COLOURS = { red: '#e5383b', yellow: '#ffd23f' };
+export { COLOURS, drawMark, lineWidth };
+
 const TOOLS = [['pen', '✎', 'Pen'], ['arrow', '↗', 'Arrow'], ['box', '▭', 'Box']];
-
-/** Draws one mark: { tool, colour, pts: [{x, y}, …] } in image pixels; arrows and boxes use the first and last point. */
-export function drawMark(g, m, width) {
-  g.strokeStyle = g.fillStyle = COLOURS[m.colour] ?? m.colour;
-  g.lineWidth = width;
-  g.lineCap = g.lineJoin = 'round';
-  const a = m.pts[0];
-  const b = m.pts[m.pts.length - 1];
-  g.beginPath();
-  if (m.tool === 'pen') {
-    g.moveTo(a.x, a.y);
-    for (const p of m.pts) g.lineTo(p.x, p.y);
-    g.stroke();
-  } else if (m.tool === 'box') {
-    g.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
-  } else {
-    const ang = Math.atan2(b.y - a.y, b.x - a.x);
-    const head = width * 4.5;
-    // The shaft stops short of the tip so its round cap doesn't poke through the head.
-    g.moveTo(a.x, a.y);
-    g.lineTo(b.x - head * 0.6 * Math.cos(ang), b.y - head * 0.6 * Math.sin(ang));
-    g.stroke();
-    g.beginPath();
-    g.moveTo(b.x, b.y);
-    g.lineTo(b.x - head * Math.cos(ang - 0.45), b.y - head * Math.sin(ang - 0.45));
-    g.lineTo(b.x - head * Math.cos(ang + 0.45), b.y - head * Math.sin(ang + 0.45));
-    g.closePath();
-    g.fill();
-  }
-}
-
-/** A line about 1/200 of the picture's longer edge: 10 px on a 2000 px screenshot, never under 3. */
-export const lineWidth = (w, h) => Math.max(3, Math.round(Math.max(w, h) / 200));
 
 // The page's CSP refuses style attributes; a property set from script is allowed.
 const swatch = (hex) => {
@@ -48,10 +17,11 @@ const swatch = (hex) => {
 
 /**
  * Fills `stage` with the picture and its drawing tools. `marks` (kept by the caller) start on it, so reopening
- * a marked picture can undo back to the clean one. onDone(canvas, marks) runs on Done, with the marked picture
+ * a marked picture can undo back to the clean one; a minion's marks (#960) come with `size`, the picture size they
+ * were placed on, and are scaled to the picture as it loads. onDone(canvas, marks) runs on Done, with the marked picture
  * (null when every mark was undone); the caller closes the lightbox.
  */
-export function annotator(stage, src, { marks = [], onDone, doneLabel = 'Done' }) {
+export function annotator(stage, src, { marks = [], size = null, onDone, doneLabel = 'Done' }) {
   marks = [...marks];
   const s = { tool: 'pen', colour: 'red' };
   const canvas = h('canvas', { class: 'annotate-canvas', 'aria-label': 'Picture to draw on' });
@@ -67,7 +37,13 @@ export function annotator(stage, src, { marks = [], onDone, doneLabel = 'Done' }
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     width = lineWidth(canvas.width, canvas.height);
+    if (size && (size.w !== canvas.width || size.h !== canvas.height)) {
+      const sx = canvas.width / size.w;
+      const sy = canvas.height / size.h;
+      marks = marks.map((m) => ({ ...m, pts: m.pts.map((p) => ({ x: p.x * sx, y: p.y * sy })) }));
+    }
     paint();
+    sync();
   };
   img.src = src;
 

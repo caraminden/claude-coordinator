@@ -1394,6 +1394,36 @@ const LAND_PROPS = {
   fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: lands it anyway (LAND_FIX=1 for land.sh)' },
 };
 
+const MARK_IMAGE = {
+  name: 'mark_image',
+  description: "Point at parts of a picture (#960): boxes, arrows, numbered pins and short labels drawn over it in the chat, which people can hide, and edit or add to before replying. Returns a markdown image line: put it in your reply as it is. Use it when someone asks where something is on a screenshot or your answer points at part of one, instead of describing where.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      image: { type: 'string', description: "The picture: a pasted one's path from the turn's picture line, or a PNG, JPEG, GIF or WebP in your working directory, files folder or shared folder" },
+      alt: { type: 'string', description: 'Optional: a few words on what it shows' },
+      marks: {
+        type: 'array',
+        maxItems: 20,
+        description: 'Coordinates are percent of the picture from its top left: [0, 0] top left, [100, 100] bottom right',
+        items: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['box', 'arrow', 'pin', 'label'] },
+            at: { type: 'array', items: { type: 'number' }, description: '[x, y]: a box\'s corner, an arrow\'s tail, a pin\'s or label\'s centre' },
+            to: { type: 'array', items: { type: 'number' }, description: "Box and arrow: [x, y] of the box's opposite corner or the arrow's tip" },
+            n: { type: 'integer', description: 'Pin: its number, by default 1, 2, 3 in order' },
+            text: { type: 'string', maxLength: 40, description: 'Label: its words' },
+            colour: { type: 'string', enum: ['red', 'yellow'], description: 'Optional, default red' },
+          },
+          required: ['kind', 'at'],
+        },
+      },
+    },
+    required: ['image', 'marks'],
+  },
+};
+
 const THREAD_TOOLS = [
   {
     name: 'set_thread_status',
@@ -1405,6 +1435,7 @@ const THREAD_TOOLS = [
   SETTLE_QUESTION,
   STRIKE_TEXT,
   PROPOSE_PLAN,
+  MARK_IMAGE,
   { ...LIST_TICKETS, description: `${LIST_TICKETS.description} Read-only: each one's line with its branch, worktree and latest activity line, not its conversation (read_minion reads that).` },
   LIST_PROPERTIES,
   {
@@ -1807,6 +1838,10 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Mandate answered ${r.status}: ${typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer)}`;
     }
     case 'generate_image':
+    case 'mark_image': {
+      const r = await call('POST', `/api/tickets/${TICKET}/mark-image`, args);
+      return `Put this line in your reply as it is; the chat draws the marks over the picture (${r.w}x${r.h}):\n${r.markdown}`;
+    }
     case 'edit_image':
     case 'generate_audio':
     case 'generate_speech': {

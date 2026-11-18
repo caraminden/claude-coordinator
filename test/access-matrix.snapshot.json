@@ -2422,6 +2422,16 @@
   "m1": "400 Machine is required",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/mark-image": {
+  "anon": "401 Not logged in",
+  "person": "403 Not for people",
+  "member": "403 Not for people",
+  "outsider": "403 Not for people",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "400 image is required",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/messages": {
   "anon": "401 Not logged in",
   "person": "405 Method not allowed",
@@ -3099,6 +3109,16 @@
   "outsider": "403 Only the minion itself can propose a machine's notes in its chat",
   "tmA": "403 Only the minion itself can propose a machine's notes in its chat",
   "tmB": "403 Only the minion itself can propose a machine's notes in its chat",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/mark-image": {
+  "anon": "401 Not logged in",
+  "person": "403 Not for people",
+  "member": "403 Not for people",
+  "outsider": "403 Not for people",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

@@ -22,6 +22,7 @@ import { onJobUpdate } from './jobs.js';
 import { linkifyHtml, markdownElement } from './ui/markdown.js';
 import { lightbox } from './ui/media.js';
 import { annotator, canvasBlob, drawable } from './annotate.js';
+import { parseMarks } from './ui/marks.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
 import { toast } from './ui/status.js';
@@ -165,7 +166,7 @@ export function markdownDoc(src, opts = {}) {
   const text = threadRefsHtml;
   // Citadel UI's element (ui/markdown.js), so Citadel and the apps draw markdown with one stylesheet;
   // .md carries Citadel's own extras (file cards, chat headings in style.css). Headings as written.
-  const div = markdownElement(src, { link, image, text, breaks, headingBase: 1 });
+  const div = markdownElement(src, { link, image, text, breaks, headingBase: 1, drawMarks: ticketId != null });
   div.classList.add('md');
   if (ticketId != null) checkFileLinks(div, ticketId);
   // "#a-heading" would change the app's route, so scroll to the heading instead.
@@ -1107,16 +1108,22 @@ export function openHash(hash) {
 
 // A picture in a chat message (a pasted or uploaded image, or a markdown one) opens in the kit's lightbox, a modal over
 // the chat, not a browser tab (#945). Ctrl/⌘/Shift/middle-click still open the tab.
+// A minion's marked picture (#960) opens with its marks on, as marks people can undo, when its Marks toggle is on; its
+// "Draw on it" button opens it the same way.
 document.addEventListener('click', (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-  const img = e.target instanceof Element ? e.target.closest('.msg a > img, .md a > img') : null;
-  const link = img?.parentElement;
+  const el = e.target instanceof Element ? e.target : null;
+  const marked = el?.closest('.cui-marked');
+  const img = el?.closest('.cui-marks-draw') ? marked?.querySelector('img') : el?.closest('.msg a > img, .md a > img, .msg a .cui-marked-pic > img, .md a .cui-marked-pic > img');
+  const link = img?.closest('a');
   if (!link?.href) return;
   e.preventDefault();
+  const own = marked?.querySelector('.cui-marks-toggle > input')?.checked ? parseMarks(marked.dataset.marks) : null;
   // Ready to draw on (#946), as an image waiting to send: Done puts the marked copy in this chat's message box.
   const chatId = view?.kind === 'project' && view.main === 'chat' && img.closest('#log') ? view.id : null;
   const lb = lightbox([{ src: link.href, alt: img.alt || 'Picture' }], chatId == null || !drawable(link.href) ? {} : {
     render: (item, stage) => annotator(stage, item.src, {
+      ...(own ? { marks: own.marks, size: { w: own.w, h: own.h } } : {}),
       doneLabel: 'Add to message',
       onDone: async (canvas) => {
         lb.close();

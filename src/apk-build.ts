@@ -188,7 +188,7 @@ export class ApkBuilds {
     const current = Number.isInteger(feed?.versionCode) ? (feed!.versionCode as number) : 0;
     if (feed?.commit === commit) return { skipped: 'published at this commit' };
     // A webDir the deploy builds (gitignored dist/) isn't in git: any commit may change it, and the build copies the live one.
-    const web: string | undefined = apkPaths(cap.webDir, cap.root, cap.android)[3]; // the webDir, when it's a path inside the repo
+    const web = cap.webDir && apkPaths(cap.webDir, cap.root, cap.android).find((x) => x === join(cap.root, cap.webDir!.replace(/\/+$/, ''))); // the webDir, when it's a path inside the repo
     const built = web && !(await git(live, 'ls-files', '--', web)).out ? web : null;
     if (typeof feed?.commit === 'string' && /^[0-9a-f]{40}$/.test(feed.commit)) {
       // 0: nothing that goes into the APK changed; 1: something did; anything else (a commit it doesn't have): build.

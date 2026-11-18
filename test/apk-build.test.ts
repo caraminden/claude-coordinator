@@ -47,11 +47,13 @@ function app(name: string, cap = true) {
 /** A builder with every outside step faked; `calls` records what ran, `told` what the Taskmaster was told. */
 function builder(o: { ciRelease?: boolean; fail?: string; code?: number; oom?: boolean } = {}) {
   const calls: string[][] = [];
+  const cwds = new Map<string, string>();
   const told: string[] = [];
   const published: [string, number, string][] = [];
   let ooms = 0;
   const run: Runner = async (argv, cwd) => {
     calls.push(argv);
+    cwds.set(argv.join(' '), cwd);
     if (o.fail && argv.join(' ').includes(o.fail)) {
       if (o.oom) ooms++;
       return o.code ?? 1;
@@ -74,7 +76,7 @@ function builder(o: { ciRelease?: boolean; fail?: string; code?: number; oom?: b
     run, certs: async () => ['k1'], oomKills: async () => ooms,
     keytool: async (args) => writeFileSync(args[args.indexOf('-keystore') + 1], 'jks'),
   });
-  return { b, calls, told, published };
+  return { b, calls, told, published, cwds };
 }
 
 const key = (name: string) => {
@@ -278,13 +280,13 @@ function subApp(name: string, manifest = true) {
 test('a Capacitor project in a subfolder named in citadel-app.json is built from there and published', async () => {
   const { live, row, data } = subApp('sub');
   key('sub');
-  const { b, calls } = builder();
+  const { b, calls, cwds } = builder();
   assert.deepEqual(await b.check(row, '#1'), { built: 2 });
   assert.equal(feed(data).versionName, '2.0');
   const cap = calls.find((c) => c.includes('sync'))!;
-  assert.ok(cap, 'cap sync ran');
+  assert.equal(cwds.get(cap.join(' ')), join(root, 'cache/sub/src/android'), 'cap sync runs in the Capacitor root');
   const gradle = calls.find((c) => c.includes('assembleRelease'))!;
-  assert.ok(gradle);
+  assert.equal(cwds.get(gradle.join(' ')), join(root, 'cache/sub/src/android/native'), 'Gradle runs in the Android project');
   commit(live, { 'src/server.ts': '2' });
   assert.deepEqual(await b.check(row, '#2'), { skipped: 'nothing in its APK changed' });
   commit(live, { 'android/www/index.html': '<p>new</p>' });

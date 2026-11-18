@@ -212,6 +212,8 @@ interface LiveTurn {
   timer: NodeJS.Timeout;
   ticks: number;
   stopTimer?: NodeJS.Timeout;
+  /** A stop's SIGINT-to-SIGTERM wait. */
+  stopGraceTimer?: NodeJS.Timeout;
   /** What it last did and the tool calls still open (#906): when it counts as quiet. */
   activity: Activity;
   /** Stopped before its claude had started (no pid.json): signalled once it has. */
@@ -734,6 +736,7 @@ export class Runner {
     for (const t of this.turns.values()) {
       clearInterval(t.timer);
       clearTimeout(t.stopTimer);
+      clearTimeout(t.stopGraceTimer);
     }
     this.turns.clear();
   }
@@ -1946,15 +1949,38 @@ export class Runner {
     this.saveTurn(ticketId, { stopped: true, queued: [], steered: [] });
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
     live.stopPending = !existsSync(join(live.dir, 'pid.json'));
-    this.signal(live, 'SIGTERM');
+    // claude has a pid: SIGINT first, so it writes its result (cost, usage) before it exits. Not yet: nothing to
+    // interrupt, so as before (this stops its unit); poll sends the SIGINT chain once claude starts.
+    if (live.stopPending) this.signal(live, 'SIGTERM');
+    else this.stopSignals(live, ticketId);
     // A container turn with no claude yet has no pid or unit to signal, and a start that hangs never gets one:
     // this ends it at the next poll. `stopped` tells poll it is not the wrapper's, should claude start after all.
     if (live.stopPending && live.container) writeFileSync(join(live.dir, 'exit.json'), JSON.stringify({ code: null, signal: null, stopped: true }));
     // A turn that ignores the stop (or hadn't started claude yet) gets killed.
-    clearTimeout(live.stopTimer);
-    live.stopTimer = setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGKILL'), 15_000);
-    live.stopTimer.unref();
+    if (live.stopPending) this.armKill(live, ticketId);
     return true;
+  }
+
+  /** How long a stopped claude has after SIGINT to write its result before SIGTERM, and in all before SIGKILL (ms). */
+  stopGraceMs = 5_000;
+  stopKillMs = 15_000;
+
+  private armKill(live: LiveTurn, ticketId: number) {
+    clearTimeout(live.stopTimer);
+    live.stopTimer = setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGKILL'), this.stopKillMs);
+    live.stopTimer.unref();
+  }
+
+  /**
+   * A stop on a started claude: SIGINT, so it ends its turn with a result event (SIGTERM exits 143 with none, so the
+   * turn's cost went unrecorded, AG-04); then SIGTERM after the grace period; then the SIGKILL retry.
+   */
+  private stopSignals(live: LiveTurn, ticketId: number) {
+    this.signal(live, 'SIGINT');
+    clearTimeout(live.stopGraceTimer);
+    live.stopGraceTimer = setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGTERM'), this.stopGraceMs);
+    live.stopGraceTimer.unref();
+    this.armKill(live, ticketId);
   }
 
   /** Signal a turn's claude and, as it runs in its own process group, its tool subprocesses too. */
@@ -2763,7 +2789,7 @@ export class Runner {
       // Stopped while still starting: its claude has a pid now (#468 S03-2). The SIGKILL retry still follows.
       if (live.stopPending && existsSync(join(live.dir, 'pid.json'))) {
         live.stopPending = false;
-        this.signal(live, 'SIGTERM');
+        this.stopSignals(live, ticketId);
       }
       if (live.ticks % 40 === 0) this.checkQuiet(ticketId, live);
       // Gone without a word: killed with its unit (out of memory, say).
@@ -2834,6 +2860,7 @@ export class Runner {
   private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string } | null) {
     clearInterval(live.timer);
     clearTimeout(live.stopTimer);
+    clearTimeout(live.stopGraceTimer);
     this.turns.delete(ticketId);
     this.spends.delete(ticketId);
     // Kept for the failure note below, which quotes its stderr.

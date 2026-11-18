@@ -380,6 +380,8 @@ test('serve makes the clean snapshot once, on a port turns cannot reach, then bo
   const home = join(root, 'home-clean');
   const avd = join(root, 'avd-clean');
   mkdirSync(home, { recursive: true });
+  // The AVD's folder is there before serve runs, as a real one is (config.ini).
+  mkdirSync(join(avd, 'citadel.avd'), { recursive: true });
   writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
   const killer = (f: string) => (line: string) => { if (line === 'kill') process.kill(Number(readFileSync(join(sdk, f), 'utf8'))); };
   const maker = await stubConsole((line) => {

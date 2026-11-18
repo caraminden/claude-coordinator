@@ -122,7 +122,7 @@ alike. It runs on Cara's desktop, behind a tunnel to perigee (Citadel's
 perigee are the same as when it ran here:
 
 ```
-citadel-android up                 # boot it (quick boot ~6s, cold ~40s) and wait until it's ready
+citadel-android up                 # boot it (~10s; a few minutes the first boot after an update) and wait until it's ready
 citadel-android install app/build/outputs/apk/debug/app-debug.apk
 citadel-android open https://citadel.zip/c/                                   # in Chrome (an app: https://<name>.citadel.zip/, the short link people get)
 citadel-android shot "$TMPDIR/shot.png"                                    # then Read the PNG
@@ -162,8 +162,9 @@ citadel-android down               # when you're done
 - **Run `down` when you're done**, unless the emulator was already up when you started (someone
   else's session may use it). It also stops itself after 15 minutes with no `citadel-android` call.
   Its RAM is the desktop's, not perigee's.
-- The phone keeps its state between boots (apps, Chrome tabs, logins), from every scheme that used
-  it. Don't rely on a clean device; uninstall what you need gone.
+- **Every boot starts clean** (#943): no app another session installed, no tabs, no logins. While it
+  stays up it keeps everyone's state, so uninstall what you need gone. After an `up` that booted it
+  (it says "starting the emulator"), install your APK again.
 - It's a Citadel page or app without its cookie, so expect a sign-in page.
 - **"the emulator's desktop isn't connected"**: Cara's PC is asleep, restarting or logged off, so
   there is no emulator right now. Nothing on perigee fixes it and nothing falls back; it returns by
@@ -201,7 +202,7 @@ citadel-android down               # when you're done
     and Android filled in silence. Try again later.
   - **"no emulator microphone"**: the desktop hasn't been set up again since the mic arrived
     (Citadel's `deploy/desktop/android/README.md`, "Adding the mic port"). Ask your Taskmaster.
-- It renders in software (SwiftShader, no GPU) with guest Vulkan off: fine for screenshots and
+- It renders in software (ANGLE on SwiftShader, `-gpu swangle_indirect`, no GPU) with guest Vulkan off: fine for screenshots and
   flows, not for frame rates or graphics bugs. Test those on a real phone.
 
 ## Icons: one SVG feeds them all

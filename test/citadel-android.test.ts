@@ -22,7 +22,7 @@ if [ -n "\${ADB_STUB_FAR:-}" ] && [ ! -e '${sdk}/far-up' ]; then case "$*" in *g
 case "$*" in
   'shell getprop sys.boot_completed') echo 1 ;;
   get-state) [ -e '${sdk}/killed' ] && exit 1; echo device ;;
-  # A real stop saves the quick-boot snapshot first, which takes seconds.
+  # A real stop takes seconds.
   'emu kill') [ -n "\${ADB_STUB_NO_TOKEN:-}" ] && { echo "KO: unknown command, try 'help'"; exit 0; }; touch '${sdk}/killed'; [ -e '${sdk}/emu.pid' ] && { sleep 1; kill "$(cat '${sdk}/emu.pid')"; } ;;
   'exec-out screencap -p') printf PNG ;;
   'install -r -t '*bad.apk) echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]'; exit 1 ;;
@@ -32,7 +32,10 @@ mkdirSync(join(sdk, 'platform-tools'), { recursive: true });
 writeFileSync(join(sdk, 'platform-tools', 'adb'), adb);
 chmodSync(join(sdk, 'platform-tools', 'adb'), 0o755);
 mkdirSync(join(sdk, 'emulator'));
-writeFileSync(join(sdk, 'emulator', 'emulator'), `#!/bin/sh\necho "$*" >'${sdk}/emu.args'\necho $$ >'${sdk}/emu.pid'\nexec sleep 60\n`);
+// The clean snapshot's boot (-wipe-data, #943) keeps its own files, so emu.pid is always the phone turns use.
+writeFileSync(join(sdk, 'emulator', 'emulator'), `#!/bin/sh
+case "$*" in *-wipe-data*) echo "$*" >'${sdk}/emu.make.args'; echo $$ >'${sdk}/emu.make.pid'; echo 'INFO | Boot completed in 1 ms'; exec sleep 60 ;; esac
+echo "$*" >'${sdk}/emu.args'\necho $$ >'${sdk}/emu.pid'\nexec sleep 60\n`);
 chmodSync(join(sdk, 'emulator', 'emulator'), 0o755);
 // The helper only checks that something listens where the adb server would.
 const server = createServer((s) => s.end());
@@ -40,7 +43,9 @@ let env: NodeJS.ProcessEnv;
 before(async () => {
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   // Port 1 for the starter: nothing listens there, and the real one on this box would start the real emulator.
-  env = { ...process.env, ANDROID_HOME: sdk, ANDROID_ADB_SERVER_PORT: String((server.address() as AddressInfo).port), CITADEL_HEAVY_DIR: join(root, 'locks'), CITADEL_ANDROID_STARTER: '1' };
+  env = { ...process.env, ANDROID_HOME: sdk, ANDROID_ADB_SERVER_PORT: String((server.address() as AddressInfo).port), CITADEL_HEAVY_DIR: join(root, 'locks'), CITADEL_ANDROID_STARTER: '1',
+    // No real AVD, and nothing on port 1 to save a clean snapshot: serve's attempt fails at once and it boots anyway.
+    ANDROID_AVD_HOME: join(root, 'avd'), CITADEL_ANDROID_CLEAN_PORT: '1', CITADEL_ANDROID_SETTLE: '0' };
 });
 after(() => {
   server.close();
@@ -136,7 +141,8 @@ test('serve stops the emulator once nobody has used it for the idle time, and en
     // The mic's gRPC port (#843): every method but injectAudio needs a token nobody here holds.
     const args = readFileSync(join(sdk, 'emu.args'), 'utf8');
     assert.match(args, / -audio none /);
-    assert.match(args, new RegExp(` -grpc 18591 -grpc-use-jwt -grpc-allowlist ${join(locks, 'android-grpc.json')} `));
+    assert.match(s.out(), /saving the clean snapshot failed/);
+    assert.match(args, new RegExp(` -grpc 18591 -grpc-use-jwt -grpc-allowlist ${join(locks, 'android-grpc.json')}\\s`));
     assert.deepEqual(JSON.parse(readFileSync(join(locks, 'android-grpc.json'), 'utf8')), { unprotected: ['/android.emulation.control.EmulatorController/injectAudio'], allowlist: [] });
   } finally {
     if (alive(pid)) process.kill(pid);
@@ -147,8 +153,9 @@ test('serve waits for a step that holds the screen before it stops the emulator'
   const locks = join(root, 'serve-2');
   mkdirSync(locks, { recursive: true });
   const held = join(root, 'held');
-  // A step in progress: the screen's flock, held for 3 seconds.
-  const step: ChildProcess = spawn('flock', [join(locks, 'android.lock'), 'sh', '-c', `touch '${held}'; sleep 3`], { stdio: 'ignore' });
+  // A step in progress: the screen's flock, held until the test lets go (serve's start first tries the clean snapshot).
+  const release = join(root, 'release');
+  const step: ChildProcess = spawn('flock', [join(locks, 'android.lock'), 'sh', '-c', `touch '${held}'; while [ ! -e '${release}' ]; do sleep 0.1; done`], { stdio: 'ignore' });
   const stepDone = new Promise((r) => step.on('close', r));
   for (let i = 0; i < 200 && !existsSync(held); i++) await new Promise((r) => setTimeout(r, 25));
   const s = serve(locks);
@@ -156,6 +163,7 @@ test('serve waits for a step that holds the screen before it stops the emulator'
   try {
     await new Promise((r) => setTimeout(r, 2000));
     assert.ok(alive(pid), 'still up while the step runs');
+    writeFileSync(release, '');
     await stepDone;
     assert.equal(await s.done, 0);
     assert.ok(!alive(pid));
@@ -364,6 +372,44 @@ test('on the desktop serve starts no adb server and stops the idle emulator thro
   } finally {
     if (alive(pid)) process.kill(pid);
     consoleServer.close();
+  }
+});
+
+// #943: every boot restores the snapshot "clean", made once from a wiped cold boot that no turn can reach.
+test('serve makes the clean snapshot once, on a port turns cannot reach, then boots from it and saves nothing', async () => {
+  const home = join(root, 'home-clean');
+  const avd = join(root, 'avd-clean');
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
+  const killer = (f: string) => (line: string) => { if (line === 'kill') process.kill(Number(readFileSync(join(sdk, f), 'utf8'))); };
+  const maker = await stubConsole((line) => {
+    if (line === 'avd snapshot save clean') mkdirSync(join(avd, 'citadel.avd', 'snapshots', 'clean'), { recursive: true });
+    killer('emu.make.pid')(line);
+  });
+  const phone = await stubConsole(killer('emu.pid'));
+  const start = () => {
+    for (const f of [join(sdk, 'emu.pid'), join(sdk, 'emu.make.args'), calls]) rmSync(f, { force: true });
+    const s = spawn(helper, ['serve'], { env: { ...env, HOME: home, ANDROID_AVD_HOME: avd, CITADEL_HEAVY_DIR: join(root, 'serve-clean'), CITADEL_ANDROID_IDLE: '1', CITADEL_ANDROID_ROLE: 'desktop', CITADEL_ANDROID_CONSOLE_PORT: phone.port, CITADEL_ANDROID_CLEAN_PORT: maker.port }, stdio: 'ignore' });
+    return new Promise<number | null>((r) => s.on('close', r));
+  };
+  try {
+    assert.equal(await start(), 0);
+    const make = readFileSync(join(sdk, 'emu.make.args'), 'utf8');
+    assert.match(make, new RegExp(` -port ${maker.port} -wipe-data -no-snapshot-load -no-snapshot-save`));
+    assert.doesNotMatch(make, /-grpc/);
+    assert.ok(maker.got.includes('avd snapshot save clean'));
+    assert.ok(existsSync(join(avd, 'citadel.avd', 'clean.recipe')));
+    const args = readFileSync(join(sdk, 'emu.args'), 'utf8');
+    assert.match(args, /-gpu swangle_indirect /);
+    assert.match(args, / -snapshot clean -no-snapshot-save /);
+    assert.doesNotMatch(args, /-wipe-data/);
+    // The next start finds it and boots from it straight away.
+    assert.equal(await start(), 0);
+    assert.ok(!existsSync(join(sdk, 'emu.make.args')), 'not made again');
+    assert.match(readFileSync(join(sdk, 'emu.args'), 'utf8'), / -snapshot clean -no-snapshot-save /);
+  } finally {
+    maker.consoleServer.close();
+    phone.consoleServer.close();
   }
 });
 

@@ -9,7 +9,7 @@ Type=simple
 Environment=ANDROID_HOME=%h/.local/share/android-sdk
 Environment=CITADEL_HEAVY_DIR=%h/.local/share/claude-coordinator/projects/.heavy
 ExecStart=%h/claude-coordinator/tools/citadel-android serve
-# TERM to the serve loop, which shuts the emulator down cleanly (saving quick boot); the rest after that.
+# TERM to the serve loop, which shuts the emulator down cleanly (it saves nothing: each boot restores the clean snapshot); the rest after that.
 KillMode=mixed
 TimeoutStopSec=120
 Nice=5

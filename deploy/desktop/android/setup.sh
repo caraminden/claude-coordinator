@@ -146,7 +146,7 @@ Environment=CITADEL_ANDROID_MEMORY=4096
 # perigee's adb server, through the tunnel: where the emulator announces itself and sends its own adb commands.
 Environment=ANDROID_ADB_SERVER_PORT=$adb_here
 ExecStart=$dir/citadel-android serve
-# TERM to the serve loop, which shuts the emulator down cleanly (saving quick boot); the rest after that.
+# TERM to the serve loop, which shuts the emulator down cleanly (it saves nothing: each boot restores the clean snapshot); the rest after that.
 KillMode=mixed
 TimeoutStopSec=120
 EOF

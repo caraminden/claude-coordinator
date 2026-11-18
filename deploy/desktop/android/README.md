@@ -101,7 +101,8 @@ The phone starts empty: apps, Chrome tabs and logins on perigee's old phone don'
 
 Paste the setup line again in the distro (`wsl -d citadel-android -u root`). It downloads the current
 `citadel-android` and rewrites the services. A change to `tools/citadel-android` that only touches perigee's
-side (most of them) needs nothing here.
+side (most of them) needs nothing here. A change to `serve` (the emulator's own flags, #943's clean snapshot)
+does. After #943 the first boot makes the clean snapshot: a cold boot on wiped data, a few minutes, once.
 
 ## Adding the mic port
 

@@ -10,7 +10,8 @@
 # and `adb forward` end here, where the dev servers are. While the desktop is asleep, off or logged out
 # the starter doesn't answer, and `up` says so.
 # The emulator runs in citadel-android.service there, never always-on: `serve` (its main process) stops it
-# after IDLE seconds unused. `up` and every finished step connect to the starter, which starts the service
+# after IDLE seconds unused. Each boot restores the snapshot "clean" (#943, make_clean below), so a phone that was
+# stopped or crashed comes back with nothing another session installed. `up` and every finished step connect to the starter, which starts the service
 # and marks it used. Container turns share the host's network, so all of this reaches them too.
 # perigee's own units (deploy/citadel-android.service and its starter socket) still work as the way back:
 # with that socket on :$STARTER instead of the tunnel, the emulator runs here.
@@ -108,17 +109,18 @@ console_step() {
 }
 
 # Host side (serve): one console command after auth. Prints OK or the console's KO line; never the token.
+# Arguments: the command, then optionally the console's port and seconds to wait for each answer.
 console() {
-  local token line
+  local token line port=${2:-$CONSOLE_PORT} secs=${3:-10}
   read_ok() {
-    while IFS= read -r -t 10 line <&4; do
+    while IFS= read -r -t "$secs" line <&4; do
       line=${line%$'\r'}
       case $line in OK) return 0 ;; KO*) echo "$line"; return 1 ;; esac
     done
     echo "KO: no answer from the emulator console"; return 1
   }
   token=$(cat "$HOME/.emulator_console_auth_token" 2>/dev/null)
-  exec 4<>"/dev/tcp/127.0.0.1/$CONSOLE_PORT" 2>/dev/null || { echo "KO: the emulator console isn't listening"; return 1; }
+  exec 4<>"/dev/tcp/127.0.0.1/$port" 2>/dev/null || { echo "KO: the emulator console isn't listening"; return 1; }
   if read_ok && { [ -z "$token" ] || { printf 'auth %s\r\n' "$token" >&4 && read_ok; }; } && printf '%s\r\n' "$1" >&4 && read_ok; then
     echo OK
   fi
@@ -168,7 +170,7 @@ up() {
     say "the emulator's desktop isn't connected (asleep, restarting, or Cara isn't logged on there). It comes back by itself when the PC does; nothing here needs fixing. Until then there is no emulator: say so rather than wait."
     exit 1
   fi
-  say "starting the emulator ($AVD); a quick boot takes seconds, a cold one a few minutes"
+  say "starting the emulator ($AVD); it takes seconds, or a few minutes the first time after an update"
   say "$reply"
   until booted; do
     nudge
@@ -208,21 +210,62 @@ adb_serve() {
 # (CITADEL_ANDROID_ROLE=desktop) there is no adb server, and "used" is the starter's mark, not a step's
 # lock: shortcut: a single step that runs longer than IDLE can meet the idle stop, give the starter a
 # "busy" word if one ever does.
+# Every boot restores the snapshot "clean" and saves nothing (#943): the phone starts with no app or tab another
+# session left, and a crash can't bring back an older state. It is made once, from a cold boot on wiped data on
+# a port that isn't tunnelled (so no turn reaches the phone half made), and made again when the emulator, the
+# system image or RECIPE changes. Bump RECIPE when the AVD's settings or the emulator's flags change.
+# -gpu swangle_indirect: with swiftshader_indirect every boot from a snapshot crashed once Chrome drew a page,
+# in gfxstream's cleanupProcGLObjects (#943, a core dump on perigee); swangle restores cleanly.
+RECIPE=1
+GPU=swangle_indirect
+avd_dir=${ANDROID_AVD_HOME:-$HOME/.android/avd}/$AVD.avd
+recipe() {
+  local img
+  img=$(sed -n 's/^image.sysdir.1 *= *//p' "$avd_dir/config.ini" 2>/dev/null)
+  echo "$RECIPE $GPU $(sed -n 's/^Pkg.Revision=//p' "$SDK/emulator/source.properties" 2>/dev/null) $(sed -n 's/^Pkg.Revision=//p' "$SDK/$img/source.properties" 2>/dev/null)"
+}
+make_clean() {
+  local port=${CITADEL_ANDROID_CLEAN_PORT:-$((CONSOLE + 100))} log="$dir/android-clean.log" p t0=$SECONDS
+  echo "making the clean snapshot: a cold boot from wiped data, once (a few minutes)"
+  rm -rf "$avd_dir/snapshots/clean" "$avd_dir/snapshots/default_boot" "$avd_dir/clean.recipe"
+  "$1" "${@:2}" -port "$port" -wipe-data -no-snapshot-load -no-snapshot-save >"$log" 2>&1 &
+  p=$!
+  until grep -q 'Boot completed' "$log"; do
+    if ! kill -0 "$p" 2>/dev/null || [ $((SECONDS - t0)) -ge 900 ]; then
+      echo "the clean snapshot's boot failed; its log: $log"; kill "$p" 2>/dev/null; wait "$p"; return 1
+    fi
+    sleep 2
+  done
+  # Let the first boot's own jobs settle, so the snapshot doesn't catch them half done.
+  sleep "${CITADEL_ANDROID_SETTLE:-30}"
+  if [ "$(console 'avd snapshot save clean' "$port" 120)" = OK ]; then
+    recipe >"$avd_dir/clean.recipe"
+    console kill "$port" >/dev/null 2>&1
+    for _ in $(seq 30); do kill -0 "$p" 2>/dev/null || break; sleep 1; done
+  else
+    echo "saving the clean snapshot failed"
+  fi
+  kill "$p" 2>/dev/null; wait "$p"
+  [ -f "$avd_dir/clean.recipe" ]
+}
+
 serve() {
   local emu="$SDK/emulator/emulator" pid far=
   [ "${CITADEL_ANDROID_ROLE:-}" != desktop ] || far=1
   mkdir -p "$dir" && touch "$used"
   [ -n "$far" ] || "$ADB" start-server
-  # Saving the quick-boot snapshot writes ~2.6 GB and took 17s here; the emulator's default 20s cut one short.
   export ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL=90
   # The gRPC port for `mic`: a JWT is needed for every method but injectAudio, and nobody here holds one.
   printf '{"unprotected":["/android.emulation.control.EmulatorController/injectAudio"],"allowlist":[]}\n' >"$dir/android-grpc.json"
   # -audio none: no host sound card or server; the mic is fed through gRPC only (hw.audioInput=yes in the AVD).
-  "$emu" -avd "$AVD" -port "$CONSOLE" -no-window -audio none -no-boot-anim -no-metrics \
-    -grpc "$GRPC" -grpc-use-jwt -grpc-allowlist "$dir/android-grpc.json" \
-    -gpu swiftshader_indirect -feature -Vulkan -memory "${CITADEL_ANDROID_MEMORY:-2048}" -cores "${CITADEL_ANDROID_CORES:-2}" &
+  local args=(-avd "$AVD" -no-window -audio none -no-boot-anim -no-metrics
+    -gpu "$GPU" -feature -Vulkan -memory "${CITADEL_ANDROID_MEMORY:-2048}" -cores "${CITADEL_ANDROID_CORES:-2}")
+  # Without the snapshot the boot below is a cold one from whatever data is there; the next start tries again.
+  [ "$(cat "$avd_dir/clean.recipe" 2>/dev/null)" = "$(recipe)" ] && [ -d "$avd_dir/snapshots/clean" ] || make_clean "$emu" "${args[@]}"
+  "$emu" "${args[@]}" -port "$CONSOLE" -snapshot clean -no-snapshot-save \
+    -grpc "$GRPC" -grpc-use-jwt -grpc-allowlist "$dir/android-grpc.json" &
   pid=$!
-  # `adb emu kill` shuts it down cleanly, which saves the quick-boot snapshot; plain signals are the fallback.
+  # `adb emu kill` shuts it down cleanly (and saves nothing); plain signals are the fallback.
   stop() {
     if [ -n "$far" ]; then console kill >/dev/null 2>&1; else adb emu kill >/dev/null 2>&1; fi
     for _ in $(seq 100); do kill -0 "$pid" 2>/dev/null || return 0; sleep 1; done
@@ -239,7 +282,7 @@ serve() {
     kill "$nap" 2>/dev/null
     relay
     [ "$(idle)" -ge "$IDLE" ] || continue
-    # No step is running (a step holds the flock), and none starts until the stop and its snapshot save are
+    # No step is running (a step holds the flock), and none starts until the stop is
     # done: a caller arriving meanwhile waits on the lock, then its `up` starts the service again.
     exec 9<>"$lock"
     if flock -n 9 && [ "$(idle)" -ge "$IDLE" ]; then
@@ -254,7 +297,7 @@ serve() {
 
 down() {
   if ! port_open "$ADB_PORT" || ! ask get-state >/dev/null 2>&1; then say "not running"; return 0; fi
-  say "stopping the emulator (saving its quick-boot snapshot)"
+  say "stopping the emulator (its next boot starts from the clean snapshot)"
   # A container turn can't read the console's token, so its `adb emu kill` is refused (KO, exit 0): then the
   # service, which holds the token, does it.
   case "$(adb emu kill 2>&1)" in *KO*) console_step kill >/dev/null 2>&1 ;; esac

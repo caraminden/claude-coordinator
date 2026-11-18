@@ -1,6 +1,6 @@
 // Slash commands in the composer (#937). Citadel's own (/btw, /fresh, /help) run in the page and never reach a turn;
 // the rest are what the chat's turns load (src/slash-commands.ts, from Claude Code's init event) and go as text.
-// A /word in neither list is refused with a hint (Cara, 2026-11-17: "Refuse with a hint"); `//` sends a leading slash.
+// A /word in neither list is refused with a hint (Cara, 2026-11-17: "Refuse with a hint"); `//` sends it as typed.
 
 /** Citadel's own commands: `minion` ones are for minions' chats only. */
 export const CITADEL_COMMANDS = [

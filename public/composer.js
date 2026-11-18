@@ -167,9 +167,12 @@ export function composer(chatId, ticket) {
         return askSide(cmd.rest), false;
       }
       if (cmd?.name === 'help') return (box.value = ''), slash.open(true), false;
-      if (cmd?.name === 'fresh') return startFresh(), false;
+      if (cmd?.name === 'fresh') {
+        if (cmd.rest) return alertNote('/fresh takes nothing after it: send the rest as its own message once the fresh session starts.'), false;
+        return startFresh(), false;
+      }
       if (cmd && commands.loaded && !commands.names.has(cmd.name)) {
-        return alertNote(`/${cmd.name} isn't a command here: type / to see the list, or start with // to send it as text.`), false;
+        return alertNote(`/${cmd.name} isn't a command here: type / to see the list, or start with // to send it anyway, both slashes included.`), false;
       }
       const found = !sendAnyway && looksSecret(text);
       sendAnyway = false;

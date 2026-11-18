@@ -898,6 +898,7 @@ export const projectRoutes: Route[] = [
       if (body.scope !== 'scheme' && body.scope !== 'citadel') throw new HttpError(400, 'scope must be "scheme" or "citadel"');
       if (!Array.isArray(body.edits) || !body.edits.length) throw new HttpError(400, 'edits must be a non-empty list of { find, replace }');
       const edits = body.edits as { find?: unknown; replace?: unknown }[];
+      // Scheme text: any minion of its scheme, as any minion may change its scheme's repo (handoff, #961). Citadel-wide: only a turn run for a member.
       const citadel = body.scope === 'citadel';
       if (citadel) {
         const refused = adminAskRefusal(store, ticket.id);
@@ -922,7 +923,8 @@ export const projectRoutes: Route[] = [
       if (citadel) store.setAppInstructions(text, by);
       else store.setProjectInstructions(project.id, text, by);
       const where = citadel ? `${APP_NAME}-wide` : 'scheme';
-      const shown = (edits as { find: string; replace: string }[]).map((e, i) => `${i + 1}. Before: ${e.find}\n   After: ${e.replace}`).join('\n');
+      const cut = (t: string) => (t.length > 2000 ? `${t.slice(0, 2000)}… (${t.length - 2000} more characters)` : t);
+      const shown = (edits as { find: string; replace: string }[]).map((e, i) => `${i + 1}. Before: ${cut(e.find)}\n   After: ${cut(e.replace)}`).join('\n');
       runner.emit(ticket.id, 'note', { text: `Saved the ${where} Settings text as ${by}; it applies from each minion's next turn.\n${shown}` });
       const note = `${by} ${text ? 'updated' : 'cleared'} the ${where} instructions; they apply from each minion's next turn.`;
       if (citadel) {

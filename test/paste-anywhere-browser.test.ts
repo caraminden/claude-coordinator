@@ -91,11 +91,11 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
     assert.equal(await page.eval(`${box}.value`), 'draft and more');
     await shoot(page, `${label}-pasted.png`);
 
-    // Clicking (tapping) the thumbnail shows it full size; a click off the picture closes it.
+    // Clicking (tapping) the thumbnail shows it large, ready to draw on (#946); a click off the picture closes it.
     await click(page, width, '.attachments .thumb .zoom');
     await waitFor(page, 'the viewer', '!!document.querySelector("dialog.cui-lightbox[open]")');
-    assert.equal(await page.eval(`document.querySelector('dialog.cui-lightbox img').src === document.querySelector('.attachments .thumb img').src`), true);
-    assert.ok(await page.eval<number>(`document.querySelector('dialog.cui-lightbox img').getBoundingClientRect().width`) > 300, 'larger than the thumbnail');
+    // Waited for, not read once: the picture loads, then the dialog's opening animation scales it up.
+    await waitFor(page, 'the picture larger than the thumbnail', `document.querySelector('dialog.cui-lightbox canvas.annotate-canvas')?.width > 0 && document.querySelector('dialog.cui-lightbox canvas.annotate-canvas').getBoundingClientRect().width > 300`);
     await shoot(page, `${label}-zoom.png`);
     await press(page, width, 4, 796); // the kit lightbox leaves 12 px of backdrop round it (8 px on a phone)
     await waitFor(page, 'the viewer to close on a click outside', '!document.querySelector("dialog.cui-lightbox")');

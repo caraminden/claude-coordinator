@@ -136,3 +136,21 @@ test('a card addressed to one person (#687): to must be a member; a notice takes
   await idle(ticket.id);
   assert.ok(JSON.stringify(turns().at(-1).prompt).includes('Direct?\\n→ B'));
 });
+
+// Cara, 2026-11-18: a pasted screenshot rides in the card's answer message, the pick and the picture together.
+test('a card answer carries pasted images to the minion in the same message, and the answer event names them', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAHnOcQAAAAABJRU5ErkJggg==';
+  const { id } = await ask('Picture too?');
+  const before = turns().length;
+  await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['A'], other: '' }], images: [{ mediaType: 'image/png', data: Buffer.from('not an image').toString('base64') }] } }), /415/);
+  await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['A'], other: 'see this' }], images: [{ mediaType: 'image/png', data: png }] } });
+  await until('the answer turn', () => turns().length > before);
+  await idle(ticket.id);
+  const prompt = JSON.stringify(turns().at(-1).prompt);
+  assert.ok(prompt.includes('Picture too?\\n→ A\\n  Added: see this'), prompt);
+  assert.ok(prompt.includes('"type":"image"') && prompt.includes(png.slice(0, 20)), prompt);
+  const events = await call(`/api/tickets/${ticket.id}/events?after=0`);
+  const answer = events.map((e: any) => JSON.parse(e.data)).find((d: any) => d.answer?.questionId === id);
+  assert.equal(answer.images.length, 1);
+  assert.match(answer.images[0], /\.png$/);
+});

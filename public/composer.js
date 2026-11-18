@@ -508,6 +508,9 @@ function chatAttachments(chatId) {
   return attachments;
 }
 
+/** A card's answer box takes pictures the way the composer does (pasted, dropped or attached); `onChange` runs as its strip changes. */
+export const cardAttachments = (chatId, onChange) => createAttachments(chatId, onChange);
+
 /** Put a marked picture (#946: drawn on a chat image) in a chat's message box, as if pasted. */
 export const attachImage = (chatId, blob) => chatAttachments(chatId).add([new File([blob], 'marked.png', { type: blob.type })], true);
 

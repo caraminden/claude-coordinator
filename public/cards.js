@@ -5,6 +5,8 @@ import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 import { changesLine, collapseRuns, planChanges } from './plan-diff.js';
 import { adoptTicket } from './thread.js';
+import { cardAttachments } from './composer.js';
+import { pastedFiles } from './paste.js';
 import { refreshViewerBar, setViewerGallery } from './artifacts.js';
 import { jobRecipe } from './jobs.js';
 
@@ -407,6 +409,8 @@ function answerRefButton(cardEl, text) {
  */
 // Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
 const cardPicks = new Map();
+// The pictures pasted into a card's box, by card id: switching chats rebuilds the card, and they stay with it.
+const cardPictures = new Map();
 
 export function questionCard(ticketId, card, opts = {}) {
   if (card.notice) return noticeCard(ticketId, card, opts);
@@ -417,6 +421,8 @@ export function questionCard(ticketId, card, opts = {}) {
   while (picks.length < card.questions.length) picks.push({ selected: new Set(), other: '' }); // a card that grew since it was last drawn
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
   let pictures = card.questions.some((q) => q.options.some((o) => o.image));
+  if (!cardPictures.has(card.id)) cardPictures.set(card.id, cardAttachments(ticketId, () => {}));
+  const atts = cardPictures.get(card.id);
   const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });
   // A machine job's go card: the job's card in the chat links here (#859).
@@ -438,6 +444,7 @@ export function questionCard(ticketId, card, opts = {}) {
     el.classList.toggle('answered', on);
     for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = on;
     sendBtn.hidden = on;
+    attach.hidden = on;
     if (pictures) refreshViewerBar();
   };
   // Once the picks are complete, bring the Send button clear of the sticky message box: on a phone it
@@ -450,14 +457,18 @@ export function questionCard(ticketId, card, opts = {}) {
   };
   const send = () => {
     if (answered || !ready()) return;
+    if (atts.busy || atts.uploading) return void (status.textContent = 'Wait for the attachment to finish');
+    status.textContent = '';
     const answers = picks.map((p) => ({ selected: [...p.selected], other: p.other.trim() }));
+    const images = atts.items.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
+    const files = atts.items.filter((i) => i.upload?.name).map(({ upload }) => upload);
     optimistic({
       key: `card:${card.id}`,
       apply: () => {
         lock(true);
         status.textContent = `Answered by ${me}`;
       },
-      send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers } }),
+      send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) } }),
       undo: () => {
         if (confirmed) return;
         lock(false);
@@ -532,8 +543,24 @@ export function questionCard(ticketId, card, opts = {}) {
         : h('div', { class: 'opts' }, q.options.map((o) => pickBtn(o))),
       other);
   };
-  const row = h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), sendBtn);
-  el.append(head.el, ...card.questions.map(drawQ), row);
+  // No accept filter, as in the composer: a phone offers its files too.
+  const picker = h('input', { type: 'file', multiple: true, hidden: true });
+  picker.addEventListener('change', () => { atts.add(picker.files); picker.value = ''; });
+  const attach = h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() }, h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach'));
+  const row = h('div', { class: 'row' }, attach, status, h('span', { class: 'spacer' }), sendBtn);
+  el.addEventListener('paste', (e) => {
+    const files = e.target.closest?.('.other') ? pastedFiles(e.clipboardData) : [];
+    if (answered || !files.length) return;
+    e.preventDefault();
+    atts.add(files);
+  });
+  el.addEventListener('dragover', (e) => { if (!answered && e.dataTransfer.types.includes('Files')) e.preventDefault(); });
+  el.addEventListener('drop', (e) => {
+    if (answered || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    atts.add(e.dataTransfer.files);
+  });
+  el.append(head.el, ...card.questions.map(drawQ), atts.el, picker, row);
   refresh();
 
   const handle = {
@@ -544,15 +571,21 @@ export function questionCard(ticketId, card, opts = {}) {
       for (const q of questions.slice(card.questions.length)) {
         card.questions.push(q);
         picks.push({ selected: new Set(), other: '' });
-        row.before(drawQ(q, card.questions.length - 1));
+        atts.el.before(drawQ(q, card.questions.length - 1));
       }
       sendBtn.textContent = 'Send answers';
       pictures = card.questions.some((q) => q.options.some((o) => o.image));
       refresh();
     },
-    markAnswered(answers, author) {
+    // `pictures`: the urls of the images the answer carried; this viewer's own strip already shows theirs.
+    markAnswered(answers, author, pictureUrls = []) {
       answered = confirmed = true;
       el.classList.add('answered');
+      attach.hidden = true;
+      if (pictureUrls.length && !atts.items.length) {
+        atts.el.hidden = false;
+        atts.el.replaceChildren(...pictureUrls.map((src) => h('div', { class: 'thumb' }, h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Image sent with the answer' })))));
+      }
       answers.forEach((a, i) => {
         picks[i].selected = new Set(a.selected);
         const other = el.querySelector(`[data-q="${i}"] .other`);
@@ -573,6 +606,7 @@ export function questionCard(ticketId, card, opts = {}) {
       for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = true;
       for (const other of el.querySelectorAll('.other')) other.hidden = true;
       sendBtn.hidden = true;
+      attach.hidden = true;
       status.textContent = 'Answered in the chat';
       head.done('settled in the chat');
       if (pictures) refreshViewerBar();

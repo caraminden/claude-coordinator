@@ -1077,7 +1077,7 @@ function drawEvent(event, scroll) {
     // line pointing back up when messages below have pushed the card out of the way.
     const card = view.cards.get(data.answer?.questionId ?? (data.plan?.verdict === 'approve' ? data.plan.planId : null));
     // A secret card's answer (#838) carries only the name it was saved as; its question_result shuts the card.
-    if (data.answer?.answers) card?.markAnswered(data.answer.answers, data.author);
+    if (data.answer?.answers) card?.markAnswered(data.answer.answers, data.author, (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`));
     if (card) {
       if (messagesBelow(card.el)) nodes.push(stamped(answerRef(card.el, data), event));
       // Someone else's answer counts as new, so the unread divider can still land on the card.

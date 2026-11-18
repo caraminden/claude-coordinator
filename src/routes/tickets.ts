@@ -213,9 +213,9 @@ function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
  * and whether or not the card was addressed (`to`), so a cold asker wakes too (Cara, 2026-11-14: "normal cards in
  * your own minions should initiate a response from that minion"; #702 undid #687's held mail for answers).
  */
-function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object) {
+function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
   // A card's answer wakes a parked minion too (#718): answering is as deliberate as Unpark.
-  app.runner.send(ticketId, author, text, [], extra);
+  app.runner.send(ticketId, author, text, images, extra, false, files);
 }
 
 /**
@@ -646,7 +646,8 @@ export const ticketRoutes: Route[] = [
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
       const { store, runner } = app;
-      const body = await readJson(req);
+      // Room for pasted screenshots, as /messages has (the card's box takes images too).
+      const body = await readJson(req, 45_000_000);
       const card = store.eventsOfKinds(id, ['question']).find((e) => JSON.parse(e.data).id === body.questionId);
       if (!card) throw new HttpError(404, 'No such question');
       // Its answer can only come after it: the chat's earlier messages are never read.
@@ -684,12 +685,16 @@ export const ticketRoutes: Route[] = [
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
       const answer = { answer: { questionId: body.questionId, answers } };
+      // Pictures and files pasted into the card's box ride in the answer message, as in the composer.
+      const files = await messageFiles(app, ticket, body.files);
       // A Taskmaster's card for everyone (#921): kept where the card is, acted on by the Taskmaster that asked.
       const asker = data.asker != null ? store.getTicket(data.asker) : undefined;
       if (asker && asker.status !== 'closed') {
-        runner.recordAnswer(id, session.name, `My answers to the question card:\n\n${text}`, answer);
-        deliverAnswer(app, asker.id, session.name, `My answers to your question card for everyone (in the Overlord's chat):\n\n${text}`, {});
-      } else deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, answer);
+        // Saved in both chats: the card's chat shows them on the settled card, the asker's turn reads its own copy.
+        const kept = await saveImages(app, ticket, body.images);
+        runner.recordAnswer(id, session.name, `My answers to the question card:\n\n${text}`, { ...answer, ...(kept.length ? { images: kept.map((i) => i.name) } : {}) });
+        deliverAnswer(app, asker.id, session.name, `My answers to your question card for everyone (in the Overlord's chat):\n\n${text}`, {}, await saveImages(app, asker, body.images), files);
+      } else deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, answer, await saveImages(app, ticket, body.images), files);
       runner.echoOverlordAnswer(ticket, session.name, text, asker && asker.status !== 'closed' ? asker.id : id);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));

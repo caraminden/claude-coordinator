@@ -158,3 +158,7 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 .pcard .rev-diff .del { text-decoration: line-through; }
 .pcard .rev-diff details.gap { margin: 0.2rem 0; }
 .pcard .rev-diff details.gap summary { cursor: pointer; color: var(--muted); }
+
+/* Pictures pasted into a card's answer box: the composer's strip, kept clear of the Send row; no × once answered. */
+.qcard .attachments { margin: 0.5rem 0 0; }
+.qcard.answered .attachments .remove { display: none; }

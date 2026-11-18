@@ -1009,3 +1009,29 @@ test('a red on main wakes at red and once more when it rings, naming the run; no
   await h2.tick(night + 6 * HOUR + MIN);
   assert.equal(held.length, 1, 'after 9');
 });
+
+test('one PC offline for two schemes wakes Citadel once; for one scheme alone, that scheme (#983)', async () => {
+  const told: [string, string][] = [];
+  const mk = () => {
+    const w = world({ delve: true });
+    const home = w.store.listProjects().find((p) => p.name === 'Notes')!;
+    return { w, health: new CiHealth(w.store, { ...w.deps, home: () => home, tell: (p, text) => (told.push([p.name, text]), true) }) };
+  };
+  const t0 = Date.parse('2026-11-11T20:00:00Z');
+  const both = mk();
+  both.w.gh.runners = [desk('offline', 'DESKTOP-G248IJ8')];
+  both.w.gh.delveRunners = [desk('offline', 'DESKTOP-G248IJ8-linux')];
+  waitingRun(both.w, t0);
+  await both.health.tick(t0 + WAIT_MS);
+  await both.health.tick(t0 + WAIT_MS + 5 * MIN);
+  assert.deepEqual(told.map(([n]) => n), ['Notes'], "one wake, Citadel's");
+  assert.match(told[0][1], /It touches Delve, Peek Auras\./);
+
+  told.length = 0;
+  const alone = mk();
+  alone.w.gh.runners = [desk('offline', 'DESKTOP-G248IJ8-desktop'), desk('offline', 'DESKTOP-G248IJ8-2')];
+  waitingRun(alone.w, t0);
+  await alone.health.tick(t0 + WAIT_MS);
+  await alone.health.tick(t0 + WAIT_MS + 5 * MIN);
+  assert.deepEqual(told.map(([n]) => n), ['Peek Auras'], 'a PC only one scheme uses is that scheme\'s');
+});

@@ -915,8 +915,7 @@ const ciHealth = new CiHealth(store, {
   mandate: (from, person, key, title, quiet, link, parts) => mandateAlert('CI health', from, person, key, title, link, quiet, parts),
   wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {}),
   home: () => store.getProject(alertScheme(0)),
-  // A failed scheduled run (#588), or a dispatched one on main, is held mail for the scheme's Taskmaster (#678), to start a bug minion;
-  // a watched workflow gone red on main wakes it (#774).
+  // Wakes (a red on main, any trigger, #774/#968; a problem that rings, #983) or held mail (back to green) for the scheme's Taskmaster.
   tell: (project, text, wake) => {
     const coordinator = store.getOverlord(project.id);
     if (coordinator) {

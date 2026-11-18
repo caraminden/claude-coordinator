@@ -18,7 +18,7 @@
 // nightly runs the pipeline tests lands leave out); the scheme's Taskmaster hears once per run, to start a bug minion.
 // #678 (Cara's pick on Peek Auras #355's card, 2026-11-14: "Ask Citadel to watch it") widens that to every run no PR
 // started: a workflow_dispatch run on a minion's branch wakes that minion with its result, red or green, as a PR's CI
-// would; a failed one on the default branch, like a failed scheduled run, is held mail for the Taskmaster, and the
+// would; a failed one on the default branch, like a failed scheduled run, wakes the Taskmaster as any red on main does (#968, #983), and the
 // next green run of that workflow says it's back to green. A scheme quiets a workflow in its settings (ci_quiet).
 // #774 (Cara's pick on a Peek card, 2026-11-15: "Land, then alert"): a scheme also lists workflows to watch (ci_watch).
 // When one's newest verdict on the default branch, from any trigger (a land's push too), is red, the Taskmaster is
@@ -141,7 +141,7 @@ export interface Problem {
   fix?: string;
   /** Informational: a plain item, never an alarm. */
   quiet?: boolean;
-  /** Not one scheme's (a PC's runners several schemes use, an account's billing): what it's shared by, so Citadel's Taskmaster is woken once for all of them (#983). */
+  /** What it's shared by (`host:<computer>`, or `billing`): a problem touching several schemes wakes Citadel's Taskmaster once; one scheme's alone wakes that scheme's (#983). */
   shared?: string;
 }
 
@@ -201,7 +201,7 @@ export function stuckProblems(runners: Runner[], jobs: Job[], offline: Record<st
       key: `stuck:${labels}`,
       title: `CI: ${plural(waiting.length, 'job')} on ${labels} ${waiting.length === 1 ? 'has' : 'have'} waited for a runner since ${clock(since)}`,
       why: `every runner that serves ${labels} (${names.join(', ')}) is offline, since ${clock(down)}`,
-      ...(sharedHost(names) ? { shared: `host:${host}` } : {}),
+      shared: `host:${computerOf(names)}`,
       fix: host ? `turn on ${host} or restart its runner service; once one is online the jobs start by themselves` : `bring one of those runners back online; the jobs start by themselves`,
     };
   });
@@ -328,6 +328,9 @@ export function skippedJobs(latestJobs: Job[], beforeJobs: Job[]): string[] {
 
 /** The schemes named, up to three, or counted. */
 const schemesText = (names: string[]) => (names.length > 3 ? `${names.length} schemes` : names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]);
+
+/** The computer a runner is on: its name without the -desktop, -2, -perf or -linux that add-runner appends. Schemes on one PC share it. */
+export const computerOf = (names: string[]) => names.map((n) => n.replace(/(-(desktop|linux|perf|\d+))+$/i, '')).sort()[0];
 
 /**
  * The PC a set of runners share, if they do: runner names are its computer name, with -2, -perf or -linux and the
@@ -671,23 +674,32 @@ export class CiHealth {
     this.store.setSetting(key, woke);
   }
 
-  /** Problems several schemes share (a PC's runners, billing), after every scheme's check: Citadel's Taskmaster hears once, naming the schemes it touches. */
+  /**
+   * Problems tagged shared (a computer's runners, billing), after every scheme's check: one touching several schemes (billing
+   * always) wakes Citadel's Taskmaster once, naming them; a computer only one scheme uses wakes that scheme's.
+   */
   private wakeShared(now: number) {
     const home = this.deps.home?.();
-    if (!this.deps.tell || !home) return;
-    const open = new Map<string, { schemes: string[]; problem: Problem }>();
+    if (!this.deps.tell) return;
+    const open = new Map<string, { to: Project | undefined; schemes: string[]; problem: Problem }>();
+    const by = new Map<string, { p: Project; problem: Problem }[]>();
     for (const p of this.store.listProjects()) {
       for (const x of this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []) {
-        if (x.quiet || !x.shared) continue;
-        const e = open.get(x.shared) ?? { schemes: [], problem: x };
-        e.schemes.push(p.name);
-        open.set(x.shared, e);
+        if (!x.quiet && x.shared) by.set(x.shared, [...(by.get(x.shared) ?? []), { p, problem: x }]);
       }
+    }
+    for (const [k, list] of by) {
+      if (k.startsWith('host:') && list.length === 1) open.set(`${k}#${list[0].p.id}`, { to: list[0].p, schemes: [list[0].p.name], problem: list[0].problem });
+      else open.set(k, { to: home, schemes: list.map((e) => e.p.name), problem: list[0].problem });
     }
     const key = 'ci-health:woke:shared';
     const woke = (this.store.getSetting<string[]>(key) ?? []).filter((k) => open.has(k));
     if (quietUntil(now) === null) {
-      for (const [k, { schemes, problem }] of open) if (!woke.includes(k) && this.say(home, k, `${itemText(problem)}\nIt touches ${schemes.join(', ')}.\n${WAKE_STEPS}`, true)) woke.push(k);
+      for (const [k, { to, schemes, problem }] of open) {
+        if (woke.includes(k) || !to) continue;
+        const touches = schemes.length > 1 || !k.includes('#') ? `\nIt touches ${schemes.join(', ')}.` : '';
+        if (this.say(to, k, `${to.name}: ${itemText(problem)}${touches}\n${WAKE_STEPS}`, true)) woke.push(k);
+      }
     }
     this.store.setSetting(key, woke);
   }

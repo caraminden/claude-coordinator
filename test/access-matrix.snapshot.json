@@ -2392,6 +2392,16 @@
   "m1": "200",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/side": {
+  "anon": "401 Not logged in",
+  "person": "400 text is required",
+  "member": "400 text is required",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/spend": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can report its spend",
@@ -3009,6 +3019,16 @@
   "outsider": "403 Only the minion itself can settle its question cards",
   "tmA": "200",
   "tmB": "403 Only the minion itself can settle its question cards",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/side": {
+  "anon": "401 Not logged in",
+  "person": "400 Side questions are for minions, not the Taskmaster",
+  "member": "400 Side questions are for minions, not the Taskmaster",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

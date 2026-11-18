@@ -67,6 +67,7 @@
       "closeRail",
       "hasRail",
       "hideRail",
+      "inNativeApp",
       "installMode",
       "leaveEdge",
       "mountRail",

@@ -61,7 +61,7 @@ export function schemeRefs(project: Project, projects: Project[], tickets: Ticke
 }
 
 /** The chat event kinds that post or settle a card waiting on people (a person's message answers one). */
-const CARD_KINDS = new Set(['question', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
+const CARD_KINDS = new Set(['question', 'question_more', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
 const EVERYONES = new Set(['question', 'plan', 'approval', 'note']);
 
 // Stream events that carry no information for the ticket view.

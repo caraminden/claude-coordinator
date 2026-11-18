@@ -87,6 +87,10 @@ test('two asks in one turn make one card, answered in one message; other kinds, 
   const short = await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: first.id, answers: [{ selected: ['A'] }] }, fail: true });
   assert.equal(short.status, 400);
   await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: first.id, answers: [{ selected: ['A'] }, { selected: ['B'] }, { selected: ['A'], other: 'because' }] } });
+  // The minion gets every question and pick in the one message.
+  const said = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+  const reply = said.find((m: any) => m.answer?.questionId === first.id);
+  for (const t of ['1. a0?', '2. a1?', '3. b0?', 'Added: because']) assert.ok(reply.text.includes(t), `${t} in ${reply.text}`);
   // Answered: a new ask is a new card.
   const after = await ask(q('c'));
   assert.notEqual(after.id, first.id);

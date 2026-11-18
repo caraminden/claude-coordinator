@@ -18,8 +18,11 @@ const listeners = new Set();
 const ACTIVE = ['starting', 'running', 'paused', 'uploading'];
 const PILL = { 'needs-go': 'needs go', queued: 'queued', starting: 'starting', running: 'running', paused: 'paused', uploading: 'uploading', done: 'done', failed: 'failed', stopped: 'stopped', refused: 'refused' };
 
-/** The machine's owner or an admin: the only people with buttons on a job (spec, "who decides"). */
+/** The machine owner or an admin: the only people with buttons on a job (spec, "who decides"); the go itself is the owner's alone. */
 export const mayAct = (v) => !!account && (account.admin || (v.decider_id != null && account.id === v.decider_id));
+
+/** The machine's owner alone: the go, Run now, Always allow and job hours are theirs (spec, "who decides"); an admin only pauses, resumes and stops. */
+const isOwner = (v) => !!account && v.decider_id != null && account.id === v.decider_id;
 
 /** A clock time people read: always Pacific, labelled (Citadel-wide rule), with the day once it's over 12 hours ago. */
 export function pacific(ms) {
@@ -225,13 +228,14 @@ function actions(v, where) {
   const btn = (label, action, cls = 'small') => h('button', { type: 'button', class: cls, onclick: () => act(v, action) }, label);
   let items = [];
   if (v.state === 'needs-go') {
-    if (where === 'chat') {
+    if (!isOwner(v)) items = [btn('Stop', 'stop', 'small secondary')];
+    else if (where === 'chat') {
       const goCard = document.querySelector(`[data-go-job="${v.id}"]`);
       items = goCard ? [h('a', { href: '#', onclick: (e) => { e.preventDefault(); goCard.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }, 'Answer on the go card')] : [];
     } else {
       items = [btn('Run in job hours', 'go:hours'), btn('Run now', 'go:now', 'small secondary'), btn('Always allow this kind', 'go:always', 'small secondary'), btn('No', 'go:no', 'small secondary')];
     }
-  } else if (v.state === 'queued') items = [btn('Run now', 'run-now'), btn('Stop', 'stop', 'small secondary')];
+  } else if (v.state === 'queued') items = [...(isOwner(v) ? [btn('Run now', 'run-now')] : []), btn('Stop', 'stop', 'small secondary')];
   else if (v.state === 'starting' || v.state === 'uploading') items = [btn('Stop', 'stop', 'small secondary')];
   else if (v.state === 'running') items = [btn('Pause', 'pause'), btn('Stop', 'stop', 'small secondary')];
   else if (v.state === 'paused') {

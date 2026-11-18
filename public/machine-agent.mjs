@@ -1502,7 +1502,8 @@ export class JobRunner {
       if (!JOB_ID.test(e) || this.jobs.get(e)?.final_sent === false) continue;
       try {
         const j = JSON.parse(readFileSync(join(this.block.dir, e, 'job.json'), 'utf8'));
-        if (j.final_sent) done.push({ id: e, ended: j.ended_at ?? 0 });
+        // Results the server never took (over its cap, or an upload that failed) exist only here: the owner clears those.
+        if (j.final_sent && !(j.outputs ?? []).some((o) => o && o.uploaded === false)) done.push({ id: e, ended: j.ended_at ?? 0 });
       } catch {}
     }
     // Oldest first, and only as many as it takes; none at all when even every one wouldn't make room.

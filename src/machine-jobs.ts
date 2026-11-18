@@ -298,9 +298,14 @@ export class MachineJobs {
     return this.store.listUsers().find((u) => u.name === m.created_by) ?? null;
   }
 
-  /** Whether this person may give a go, pause, resume, stop or run now on a machine's jobs: its owner, or an admin (a Citadel scheme member). */
+  /** Whether this person may pause, resume or stop a machine's jobs, or see them: its owner, or an admin (a Citadel scheme member). The go itself is isOwner. */
   mayDecide(who: Actor, m: Machine): boolean {
     return who.admin || this.ownerOf(m)?.id === who.uid;
+  }
+
+  /** Whether this person is the machine's owner: the go, "Always allow", run now and job hours are theirs alone (spec 6: it is their PC), admins and scheme members included. */
+  isOwner(who: Actor, m: Machine): boolean {
+    return this.ownerOf(m)?.id === who.uid;
   }
 
   machineOf(job: MachineJob): Machine {
@@ -441,7 +446,7 @@ export class MachineJobs {
   decide(id: number, choice: Choice, who: Actor, fromCard = false): MachineJob {
     const job = this.get(id);
     const m = this.machineOf(job);
-    if (!this.mayDecide(who, m)) throw new HttpError(403, `Only ${this.ownerOf(m)?.name ?? 'its owner'} (${m.name}'s owner) or an admin can give this job its go`);
+    if (!this.isOwner(who, m)) throw new HttpError(403, `Only ${this.ownerOf(m)?.name ?? 'its owner'} (${m.name}'s owner) can give this job its go`);
     if (job.state !== 'needs-go') throw new HttpError(409, `Job #${id} isn't waiting on a go (it is ${job.state})`);
     const card = job.card ? JSON.parse(job.card) as { ticket: number; question: string } : null;
     const said = CHOICES.find((c) => c.choice === choice)!.label;
@@ -469,7 +474,7 @@ export class MachineJobs {
   runNow(id: number, who: Actor): MachineJob {
     const job = this.get(id);
     const m = this.machineOf(job);
-    if (!this.mayDecide(who, m)) throw new HttpError(403, `Only ${m.name}'s owner or an admin can run a job now`);
+    if (!this.isOwner(who, m)) throw new HttpError(403, `Only ${m.name}'s owner can run a job now`);
     if (job.state === 'needs-go') return this.decide(id, 'now', who);
     if (job.state === 'paused' && job.paused_by === 'hours') {
       this.store.updateMachineJob(id, { go: 'now', go_by: who.name });
@@ -536,13 +541,13 @@ export class MachineJobs {
 
   /** The owner (or an admin) takes back an "Always allow": the next job of that kind asks again. */
   forgetKind(m: Machine, hash: string, who: Actor) {
-    if (!this.mayDecide(who, m)) throw new HttpError(403, `Only ${m.name}'s owner or an admin can change what it always allows`);
+    if (!this.isOwner(who, m)) throw new HttpError(403, `Only ${m.name}'s owner can change what it always allows`);
     if (!this.store.forgetJobKind(m.id, hash)) throw new HttpError(404, `${m.name} doesn't always allow that kind`);
   }
 
   /** A machine's job hours, one-off window or Pause changed (its owner's): pause or resume what runs, start what may. */
   setSettings(m: Machine, body: unknown, who: Actor): JobSettings {
-    if (!this.mayDecide(who, m)) throw new HttpError(403, `Only ${m.name}'s owner or an admin can change its job hours`);
+    if (!this.isOwner(who, m)) throw new HttpError(403, `Only ${m.name}'s owner can change its job hours`);
     const s = cleanSettings(storedSettings(m), body ?? {}, this.now());
     this.store.updateMachine(m.id, { job_settings: JSON.stringify(s) });
     this.pump(m.id);
@@ -808,6 +813,8 @@ export async function jobInputs(paths: unknown, roots: string[]): Promise<{ name
     total += st.size;
     if (total > JOB_CAPS.inputBytes) throw new HttpError(413, `A job's inputs are limited to ${JOB_CAPS.inputBytes / 1024 ** 3} GB`);
     const name = r.split(sep).pop()!;
+    // The agent's own pattern (public/machine-agent.mjs JOB_FILE): a name it would refuse at start fails here, before the owner is asked.
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_ .-]{0,199}$/.test(name)) throw new HttpError(400, `${name}: an input's name may use letters, digits, spaces, dots, dashes and underscores only, and not start with a dot or dash`);
     if (out.some((o) => o.name === name)) throw new HttpError(400, `Two inputs are called ${name}; inputs land side by side in /in`);
     const hash = createHash('sha256');
     await pipeline(createReadStream(r), hash);

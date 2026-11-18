@@ -832,8 +832,8 @@
  "DELETE /api/machines/:m/job-kinds/nohash": {
   "anon": "401 Not logged in",
   "person": "404 mx doesn't always allow that kind",
-  "member": "403 Only mx's owner or an admin can change what it always allows",
-  "outsider": "403 Only mx's owner or an admin can change what it always allows",
+  "member": "403 Only mx's owner can change what it always allows",
+  "outsider": "403 Only mx's owner can change what it always allows",
   "tmA": "403 Only people decide on a machine's jobs",
   "tmB": "403 Only people decide on a machine's jobs",
   "m1": "403 A minion may only update itself",
@@ -842,8 +842,8 @@
  "PATCH /api/machines/:m/job-settings": {
   "anon": "401 Not logged in",
   "person": "200",
-  "member": "403 Only mx's owner or an admin can change its job hours",
-  "outsider": "403 Only mx's owner or an admin can change its job hours",
+  "member": "403 Only mx's owner can change its job hours",
+  "outsider": "403 Only mx's owner can change its job hours",
   "tmA": "403 Only people decide on a machine's jobs",
   "tmB": "403 Only people decide on a machine's jobs",
   "m1": "403 A minion may only update itself",

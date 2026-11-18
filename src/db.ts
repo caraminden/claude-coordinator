@@ -1335,7 +1335,7 @@ export const SCHEMA_HISTORY = [
   [63, 'tickets.coordinator_of, one_coordinator per person, ticket_touches, taskmaster_digest (#919)'],
   [64, 'claims (#921)'],
   [65, 'turns.side (#932)'],
-  [66, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings, cara-desktop-* owners (#857)'],
+  [66, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings (#857)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

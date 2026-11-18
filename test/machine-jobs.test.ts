@@ -196,6 +196,9 @@ test('no job.start without its owner\'s go: someone else\'s answer is refused, t
   assert.equal(typeof j.decider_id, 'number');
   await assert.rejects(answer('Dana', j.id, 'Run in job hours'), /403/);
   await assert.rejects(call('Dana', `/api/jobs/${j.id}/go`, { choice: 'now' }), /403/);
+  // An admin (any Citadel scheme member) is not the owner: the go is Josh's alone (spec 6), review finding.
+  await assert.rejects(answer('Cara', j.id, 'Run in job hours'), /403/);
+  await assert.rejects(call('Cara', `/api/jobs/${j.id}/go`, { choice: 'now' }), /403/);
   await assert.rejects(raw(`/api/jobs/${j.id}/go`, { who: 'minion', body: { choice: 'now' } }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }), /403/);
   assert.deepEqual(agent.jobs('job.start'), [], 'nothing starts without a go');
   await answer('Josh', j.id, 'Run in job hours');

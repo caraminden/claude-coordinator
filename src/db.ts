@@ -400,11 +400,9 @@ export interface Turn {
   side: number | null;
 }
 
-/** Store.spendRows: a turn's spend on one model, with its minion's facts (#905). */
+/** Store.spendRows: a minion's spend on one model (keepalive and side turns apart) over a window, with its minion's facts (#905, #956). */
 export interface SpendRowRaw {
-  turn_id: number;
   ticket_id: number;
-  account: number | null;
   keepalive: number | null;
   side: number | null;
   project_id: number;
@@ -3281,17 +3279,18 @@ export class Store {
   }
 
   /**
-   * One payer's turns that ended in [since, until), one row per model each turn ran (#905), with what "where it went" groups
-   * them by. A turn from before the split was kept has one row, `model` null, its whole cost under `cost`.
+   * One payer's turns that ended in [since, until), summed in the database to one row per minion, kind of turn and model (#905,
+   * #956: all time stays a few thousand rows, never one per turn). Turns from before the split was kept sum under `model` null.
    */
   spendRows(payer: number | null, since: number, until: number): SpendRowRaw[] {
     return this.db
-      .prepare(`SELECT u.id AS turn_id, u.ticket_id, u.account, u.keepalive, u.side, k.project_id, k.number, k.title, k.kind, k.created_by,
-          coalesce(k.last_model, k.model) AS minion_model, m.model, coalesce(m.cost_usd, u.cost_usd) AS cost,
+      .prepare(`SELECT u.ticket_id, u.keepalive, u.side, k.project_id, k.number, k.title, k.kind, k.created_by,
+          coalesce(k.last_model, k.model) AS minion_model, m.model, sum(coalesce(m.cost_usd, u.cost_usd)) AS cost,
           (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
             WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type
         FROM turns u JOIN tickets k ON k.id = u.ticket_id LEFT JOIN turn_models m ON m.turn_id = u.id
-        WHERE u.ended_at >= ? AND u.ended_at < ? AND u.payer IS ?`)
+        WHERE u.ended_at >= ? AND u.ended_at < ? AND u.payer IS ?
+        GROUP BY u.ticket_id, u.keepalive, u.side, m.model`)
       .all(since, until, payer) as unknown as SpendRowRaw[];
   }
 

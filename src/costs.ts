@@ -124,6 +124,7 @@ export interface Slice {
 }
 
 export interface WhereItWent {
+  range: 'week' | 'all';
   since: number;
   until: number;
   total: number;
@@ -150,8 +151,8 @@ function kindOf(r: SpendRowRaw): string {
  * Where one payer's spend went (#905): the last 7 days against the 7 before, by model (Grunts' models apart), scheme,
  * kind of work, and the top 10 minions. Turns from before the split count under their minion's model, marked estimated.
  */
-export function whereItWent(store: Store, payer: number | null, weekUsd: number | null, now = Date.now()): WhereItWent {
-  const week = 7 * 86400_000;
+export function whereItWent(store: Store, payer: number | null, weekUsd: number | null, now = Date.now(), range: 'week' | 'all' = 'week'): WhereItWent {
+  const week = 7 * 86400_000, all = range === 'all';
   const projects = new Map(store.listProjects().map((p) => [p.id, p.name]));
   const group = <K>(rows: [SpendRowRaw, number, boolean][], key: (r: SpendRowRaw) => K, name: (k: K) => string, cur: boolean) => {
     const out = new Map<K, Slice>();
@@ -164,7 +165,8 @@ export function whereItWent(store: Store, payer: number | null, weekUsd: number 
   };
   const rows = (since: number, until: number) => store.spendRows(payer, since, until).map((r): [SpendRowRaw, number, boolean] =>
     [{ ...r, model: modelName(r.model ?? r.minion_model ?? 'claude-opus-5-5') }, r.cost, r.model === null]);
-  const cur = rows(now - week, now), prev = rows(now - 2 * week, now - week);
+  // All time (#956): everything recorded, no week before to set it against.
+  const cur = rows(all ? 0 : now - week, now + 1), prev = all ? [] : rows(now - 2 * week, now - week);
   const merge = <K>(key: (r: SpendRowRaw) => K, name: (k: K) => string) => {
     const m = group(cur, key, name, true);
     for (const [k, s] of group(prev, key, name, false)) (m.get(k) ?? m.set(k, { ...s, lastWeek: 0 }).get(k)!).lastWeek = s.lastWeek;
@@ -177,7 +179,7 @@ export function whereItWent(store: Store, payer: number | null, weekUsd: number 
   }
   const sum = (rs: [SpendRowRaw, number, boolean][]) => rs.reduce((a, [, usd]) => a + usd, 0);
   return {
-    since: now - week, until: now, total: sum(cur), lastWeek: sum(prev), weekUsd,
+    range, since: all ? 0 : now - week, until: now, total: sum(cur), lastWeek: sum(prev), weekUsd,
     models: merge((r) => r.model!, (k) => k).map(([, s]) => s),
     schemes: merge((r) => r.project_id, (id) => projects.get(id) ?? `Scheme ${id}`).map(([id, s]) => ({ ...s, id })),
     kinds: merge(kindOf, (k) => k).map(([, s]) => s),

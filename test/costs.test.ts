@@ -244,3 +244,18 @@ test("one account's week is priced from that account's turns since its reset, on
   close(weekLimit(store, 7, meter(0.01, 2), now)!, 20);
   assert.equal(weekLimit(store, 8, fresh, now), null);
 });
+
+test('where it went: all time covers every turn, summed in the database (#956)', () => {
+  const { store, t } = setup('alltime');
+  const now = Date.now(), day = 86400_000;
+  const turn = (at: number, usd: number) => store.recordTurn(t.id, { session_id: `s${Math.random()}`, ended_at: at, session_cost_usd: usd, modelUsage: usage({ 'claude-opus-5-5': usd }) });
+  turn(now - day, 1);
+  turn(now - 40 * day, 2);
+  turn(now - 400 * day, 4);
+  close(whereItWent(store, null, null, now).total, 1);
+  const w = whereItWent(store, null, null, now, 'all');
+  assert.equal(w.range, 'all');
+  close(w.total, 7);
+  close(w.models[0].usd, 7);
+  assert.equal(w.lastWeek, 0);
+});

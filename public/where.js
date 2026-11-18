@@ -24,50 +24,54 @@ function bar(pct) {
 }
 
 /** One table: a row per slice with a bar against the biggest this week, this week, and last week. */
-function sliceTable(head, rows, weekUsd, name = (r) => r.name) {
+function sliceTable(head, rows, weekUsd, name = (r) => r.name, all = false) {
   const max = Math.max(...rows.map((r) => r.usd), 0);
   return h('table', { class: 'where-table' },
-    h('thead', {}, h('tr', {}, h('th', {}, head), h('th', { class: 'bar-col', 'aria-hidden': 'true' }), h('th', { class: 'num' }, 'This week'), h('th', { class: 'num' }, 'Last week'))),
-    h('tbody', {}, rows.map((r) => h('tr', { title: `${r.name}: ${costText(r.usd)} this week${r.estimated ? ` (${costText(r.estimated)} estimated)` : ''}, ${costText(r.lastWeek)} last week` },
+    h('thead', {}, h('tr', {}, h('th', {}, head), h('th', { class: 'bar-col', 'aria-hidden': 'true' }), h('th', { class: 'num' }, all ? 'All time' : 'This week'), all ? '' : h('th', { class: 'num' }, 'Last week'))),
+    h('tbody', {}, rows.map((r) => h('tr', { title: `${r.name}: ${costText(r.usd)} ${all ? 'in all' : 'this week'}${r.estimated ? ` (${costText(r.estimated)} estimated)` : ''}${all ? '' : `, ${costText(r.lastWeek)} last week`}` },
       h('th', { scope: 'row' }, name(r), r.estimated > 0.005 ? h('span', { class: 'est', title: "Partly estimated: turns from before 2026-11-17 kept no split, so they count under their minion's own model" }, ' est.') : ''),
       h('td', { class: 'bar-col' }, bar(max ? Math.max(2, (r.usd / max) * 100) : 0)),
       h('td', { class: 'num' }, amount(r.usd, weekUsd)),
-      h('td', { class: 'num last' }, r.lastWeek ? (share(r.lastWeek, weekUsd) ?? costText(r.lastWeek)) : '–')))));
+      all ? '' : h('td', { class: 'num last' }, r.lastWeek ? (share(r.lastWeek, weekUsd) ?? costText(r.lastWeek)) : '–')))));
 }
 
 /** Fable's share of all spend, this week and last: the number "use it half as often" is checked by. */
-function fableShare(w) {
+function fableShare(w, all) {
   const sum = (k) => w.models.filter((m) => m.name.startsWith('Fable')).reduce((a, m) => a + m[k], 0);
   const pct = (part, all) => (all ? `${Math.round((part / all) * 100)}%` : '–');
+  if (all) return h('p', { class: 'where-fable' }, 'Fable: ', h('b', {}, pct(sum('usd'), w.total)), ' of all spend');
   return h('p', { class: 'where-fable' }, 'Fable: ', h('b', {}, pct(sum('usd'), w.total)), ' of spend this week, ', h('b', {}, pct(sum('lastWeek'), w.lastWeek)), ' last week');
 }
 
-/** The whole view for one fetched summary. */
+/** The whole view for one fetched summary. All time (#956) has no week before to compare, and a share of a weekly limit means little over months, so it reads in dollars. */
 export function whereView(w) {
+  const all = w.range === 'all';
+  const weekUsd = all ? null : w.weekUsd;
   const est = w.models.reduce((a, m) => a + m.estimated, 0);
   const top = w.top.map((m) => ({ ...m, name: m.kind === 'coordinator' ? 'Taskmaster' : `#${m.number} ${m.title}`, lastWeek: 0, estimated: 0 }));
   return h('div', { class: 'where' },
     h('div', { class: 'where-head' },
-      h('div', { class: 'where-total' }, h('span', { class: 'label' }, 'Last 7 days'), amount(w.total, w.weekUsd)),
-      h('div', { class: 'where-total' }, h('span', { class: 'label' }, 'The 7 before'), amount(w.lastWeek, w.weekUsd)),
-      fableShare(w)),
+      h('div', { class: 'where-total' }, h('span', { class: 'label' }, all ? 'All time' : 'Last 7 days'), amount(w.total, weekUsd)),
+      all ? '' : h('div', { class: 'where-total' }, h('span', { class: 'label' }, 'The 7 before'), amount(w.lastWeek, weekUsd)),
+      fableShare(w, all)),
     w.total || w.lastWeek ? [
-      h('h4', {}, 'By model'), sliceTable('Model', w.models, w.weekUsd),
-      h('h4', {}, 'By scheme'), sliceTable('Scheme', w.schemes, w.weekUsd),
-      h('h4', {}, 'By kind of work'), sliceTable('Kind', w.kinds, w.weekUsd),
-      h('h4', {}, 'Costliest minions this week'),
-      sliceTable('Minion', top, w.weekUsd, (m) => h('a', { href: threadHref(m) }, m.name, h('span', { class: 'scheme' }, ` · ${m.scheme}`))),
-    ] : h('p', { class: 'key' }, 'No turns on your plan in the last two weeks.'),
+      h('h4', {}, 'By model'), sliceTable('Model', w.models, weekUsd, undefined, all),
+      h('h4', {}, 'By scheme'), sliceTable('Scheme', w.schemes, weekUsd, undefined, all),
+      h('h4', {}, 'By kind of work'), sliceTable('Kind', w.kinds, weekUsd, undefined, all),
+      h('h4', {}, all ? 'Costliest minions' : 'Costliest minions this week'),
+      sliceTable('Minion', top, weekUsd, (m) => h('a', { href: threadHref(m) }, m.name, h('span', { class: 'scheme' }, ` · ${m.scheme}`)), all),
+    ] : h('p', { class: 'key' }, all ? 'No turns on your plan yet.' : 'No turns on your plan in the last two weeks.'),
     h('p', { class: 'foot' },
-      w.weekUsd ? `100% is the weekly limit of ${w.accounts > 1 ? `all ${w.accounts} of your Claude accounts together` : 'your Claude account'}, ≈ $${Math.round(w.weekUsd)} at API prices, priced from your weekly meter. ` : 'Dollars at API prices until your weekly meter reaches 3%; then shares of the week. ',
+      all ? 'Every turn on your plan since the start, in dollars at API prices. '
+        : w.weekUsd ? `100% is the weekly limit of ${w.accounts > 1 ? `all ${w.accounts} of your Claude accounts together` : 'your Claude account'}, ≈ $${Math.round(w.weekUsd)} at API prices, priced from your weekly meter. ` : 'Dollars at API prices until your weekly meter reaches 3%; then shares of the week. ',
       "Your plan's turns only, Grunts counted under their own model. ",
-      est > 0.005 ? `${costText(est).slice(2)} of this week is from turns before 2026-11-17, counted under each minion's own model (marked est.).` : ''));
+      est > 0.005 ? `${costText(est).slice(2)} of ${all ? 'it' : 'this week'} is from turns before 2026-11-17, counted under each minion's own model (marked est.).` : ''));
 }
 
 /** Fetch your summary and draw it into `into`, which keeps its reserved height until then; a failure leaves a line saying so. */
-export async function renderWhere(into) {
+export async function renderWhere(into, range = 'week') {
   try {
-    into.replaceChildren(whereView(await api('api/costs/mine')));
+    into.replaceChildren(whereView(await api(`api/costs/mine${range === 'all' ? '?range=all' : ''}`)));
   } catch (err) {
     into.replaceChildren(h('p', { class: 'key' }, `Couldn't load where it went: ${err.message}`));
   }
@@ -77,12 +81,23 @@ export async function renderWhere(into) {
 /** Settings' Usage tab (Cara, 2026-11-17: "Settings → Usage"): where your own spend went. */
 export function usagePage() {
   const slot = h('div', { class: 'where-slot loading' }, h('p', { class: 'key' }, 'Loading…'));
-  setTimeout(() => renderWhere(slot));
+  // The range picker (#956): two buttons of one fixed width, so choosing one moves nothing; the page keeps its last pick.
+  const pick = h('div', { class: 'range-pick', role: 'group', 'aria-label': 'Range' },
+    [['week', 'Last 7 days'], ['all', 'All time']].map(([key, label]) => h('button', { type: 'button', 'data-range': key, onclick: () => choose(key) }, label)));
+  const choose = (key) => {
+    pickedRange = key;
+    for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.range === key));
+    slot.classList.add('loading');
+    renderWhere(slot, key);
+  };
+  setTimeout(() => choose(pickedRange));
   return h('section', { class: 'artifacts-main usage-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before.')),
-    slot);
+      h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.')),
+    pick, slot);
 }
+
+let pickedRange = 'week';

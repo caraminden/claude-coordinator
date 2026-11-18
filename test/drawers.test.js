@@ -77,3 +77,37 @@ test('a drawer fires citadel-drawer-open as it comes out and citadel-drawer-clos
   drawers.destroy();
   for (const k of ['Element', 'HTMLDetailsElement', 'CSSStyleSheet', 'MutationObserver', 'matchMedia', 'requestAnimationFrame', 'window', 'document']) delete globalThis[k];
 });
+
+test('a link in a drawer panel\'s bar is followed, not swallowed by the bar\'s close', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const body = new FakeEl('body');
+  Object.assign(globalThis, {
+    Element: FakeEl,
+    HTMLDetailsElement: class extends FakeEl {},
+    CSSStyleSheet: class { replaceSync() {} },
+    MutationObserver: class { observe() {} disconnect() {} },
+    matchMedia: (q) => ({ matches: q.includes('max-width'), addEventListener() {} }),
+    requestAnimationFrame: (fn) => fn(),
+    window: Object.assign(new EventTarget(), { innerWidth: 390, scrollBy() {} }),
+    document: Object.assign(new EventTarget(), { body, activeElement: body, adoptedStyleSheets: [], createElement: () => new FakeEl('made') }),
+  });
+  const side = new FakeEl('side');
+  const drawers = initDrawers({ left: { el: side, label: 'Overview' }, main: new FakeEl('main') });
+  drawers.open('left');
+  // The overview's Settings link sits in the panel's <summary> (#647); a tap on it must reach the link's own navigation.
+  const summary = { parentElement: side };
+  const link = { closest: (sel) => (sel === 'summary' ? summary : sel.split(', ').includes('a[href]') ? link : null) };
+  side.contains = () => true;
+  const tap = (target) => {
+    const e = new Event('click', { cancelable: true });
+    Object.defineProperty(e, 'target', { value: target });
+    document.dispatchEvent(e);
+    return e;
+  };
+  assert.equal(tap(link).defaultPrevented, false, 'the link is not cancelled');
+  // The bar itself still closes the drawer.
+  const bar = { closest: (sel) => (sel === 'summary' ? summary : null) };
+  assert.equal(tap(bar).defaultPrevented, true);
+  drawers.destroy();
+  for (const k of ['Element', 'HTMLDetailsElement', 'CSSStyleSheet', 'MutationObserver', 'matchMedia', 'requestAnimationFrame', 'window', 'document']) delete globalThis[k];
+});

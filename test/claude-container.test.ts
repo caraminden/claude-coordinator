@@ -601,7 +601,7 @@ test("a container turn's claude that starts just after the stop is still signall
   const id = newTicket();
   // A claude that runs until it is told to stop.
   const patient = join(root, 'claude-patient');
-  writeFileSync(patient, `#!${process.execPath}\nprocess.on('SIGTERM', () => process.exit(143));\nsetInterval(() => {}, 1000);\n`);
+  writeFileSync(patient, `#!${process.execPath}\nprocess.on('SIGINT', () => process.exit(130));\nsetInterval(() => {}, 1000);\n`);
   chmodSync(patient, 0o755);
   const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), patient);
   r.personOf = () => josh.id;
@@ -620,7 +620,7 @@ test("a container turn's claude that starts just after the stop is still signall
     (r as any).poll(id);
     assert.equal(r.isRunning(id), true, 'its claude runs, so the turn is not cut loose');
     await until('jsonLines(calls).length > before', () => jsonLines(calls).length > before);
-    assert.match(jsonLines(calls)[before].join(' '), /^exec citadel-claude-test-2 sh -c kill -TERM/);
+    assert.match(jsonLines(calls)[before].join(' '), /^exec citadel-claude-test-2 sh -c kill -INT/); // SIGINT first, so claude records its result (AG-04)
     await until('{ (r as any).poll(id); return !r.isRunning(id); }', () => {
       (r as any).poll(id);
       return !r.isRunning(id);

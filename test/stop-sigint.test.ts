@@ -39,7 +39,7 @@ const project = store.createProject('Test', null);
 const runner = new Runner(store, () => {}, () => ({}), fake);
 runner.pollMs = 10;
 (runner as any).stopGraceMs = 300;
-(runner as any).stopKillMs = 900;
+(runner as any).stopKillMs = 1500;
 
 async function stopped(text: string) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
@@ -65,11 +65,24 @@ test('a claude that ignores SIGINT still dies by SIGTERM after the grace period'
   const { took, ticket } = await stopped('plain');
   assert.equal(ticket.status, 'idle');
   assert.ok(took >= 250, `waited out the grace period (${took} ms)`);
-  assert.ok(took < 880, `SIGTERM ended it before the SIGKILL retry (${took} ms)`);
+  assert.ok(took < 1400, `SIGTERM ended it before the SIGKILL retry (${took} ms)`);
 });
 
 test('a claude that ignores SIGINT and SIGTERM is SIGKILLed', async () => {
   const { took, ticket } = await stopped('ignore-sigterm');
   assert.equal(ticket.status, 'idle');
-  assert.ok(took >= 850, `killed by the SIGKILL retry (${took} ms)`);
+  assert.ok(took >= 1450, `killed by the SIGKILL retry (${took} ms)`);
+});
+
+test('a second Stop does not push the SIGKILL out', async () => {
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(t.id, root, null);
+  runner.send(t.id, 'Cara', 'ignore-sigterm');
+  for (let i = 0; i < 500 && !store.listEvents(t.id).some((e) => e.kind === 'claude'); i++) await new Promise((r) => setTimeout(r, 20));
+  const at = Date.now();
+  runner.stop(t.id);
+  await new Promise((r) => setTimeout(r, 700));
+  runner.stop(t.id);
+  for (let i = 0; i < 500 && runner.isRunning(t.id); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(Date.now() - at < 2100, `killed ${Date.now() - at} ms after the first Stop`);
 });

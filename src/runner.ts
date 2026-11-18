@@ -1976,6 +1976,7 @@ export class Runner {
    * turn's cost went unrecorded, AG-04); then SIGTERM after the grace period; then the SIGKILL retry.
    */
   private stopSignals(live: LiveTurn, ticketId: number) {
+    if (live.stopGraceTimer) return; // a second Stop must not restart the grace period or push the SIGKILL out
     this.signal(live, 'SIGINT');
     clearTimeout(live.stopGraceTimer);
     live.stopGraceTimer = setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGTERM'), this.stopGraceMs);

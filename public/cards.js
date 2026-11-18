@@ -50,7 +50,7 @@ function approvalOutcome(r) {
   const v = r.state === 'allowed' && r.via;
   if (v?.scheme && v.message) {
     const here = view?.projectId === v.scheme && view.ticket?.number === v.ticket;
-    const where = here ? '' : v.ticket == null ? ` in the ${taskmasterName(v.scheme)} chat` : ` in #${v.ticket}`;
+    const where = (here ? '' : v.ticket == null ? ` in the ${taskmasterName(v.scheme)} chat` : ` in #${v.ticket}`) + (v.to != null ? `, for #${v.to}` : '');
     const href = `#/p/${v.scheme}${v.ticket == null ? '' : `/t/${v.ticket}`}?e=${v.message}`;
     return ['✓ Approved on ', h('a', { href, title: v.text }, `${r.by}'s go${where}`)];
   }

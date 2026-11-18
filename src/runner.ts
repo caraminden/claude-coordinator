@@ -1646,7 +1646,11 @@ export class Runner {
     });
     const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), asker };
     // A person's typed "merge it" stands for the whole scheme until its PR merges (#260), whenever a turn reads it.
-    if (ticket) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg);
+    // In the Taskmaster chat "#N" names minion N (#939).
+    if (ticket) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg, (n) => {
+      const m = this.store.getTicketByNumber(ticket.project_id, n);
+      return m ? { id: m.id, number: m.number, branch: m.branch } : null;
+    });
     // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
     if (this.store.getTicket(ticketId)?.replies) {
       this.store.updateTicket(ticketId, { replies: null });
@@ -1814,6 +1818,9 @@ export class Runner {
     // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
     list.push({ author: `Held mail from ${author}, sent ${sent} UTC`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: cold ? this.personOf?.(author, from) ?? null : null });
     this.store.setSetting(mailKey(to), list);
+    // A Taskmaster's relay that quotes a person's go hands it over when sent, as held mail too (#939).
+    const ticket = this.store.getTicket(to);
+    if (ticket && from) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, { author, text, from });
     this.broadcastTicket(to); // held_ids now lists it, so its bubble reads "Not sent yet" (#910)
   }
 

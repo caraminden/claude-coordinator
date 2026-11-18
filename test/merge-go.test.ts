@@ -235,7 +235,7 @@ test("a bare go typed to the Taskmaster, quoted in its relay to one minion, lets
   a.said(1, FEEDER, relay('Again, Cara said “fold it”.'));
   assert.equal(merge(), 'allowed', 'quoting it again to the same minion changes nothing');
   assert.equal(merge(BUILD.id, { number: 197, head: 'ticket/51-other', open: true }), 'pending', "no other minion's PR");
-  assert.equal(merge(BUILD.id, { number: 196, head: CATEGORY.branch, open: true }), 'pending', "nor #42's");
+  assert.equal(merge(BUILD.id, { number: 198, head: CATEGORY.branch, open: true }), 'pending', "nor #42's");
   assert.equal(merge(FEEDER.id, { ...own, open: false }), 'pending', 'merged');
   assert.equal(merge(), 'pending', 'the go ended with the merge');
 });

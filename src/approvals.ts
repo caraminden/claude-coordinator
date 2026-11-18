@@ -112,19 +112,33 @@ export function pluginDirArgs(dirs: string[], cwd: string): string[] {
 export type Decision =
   | { state: 'pending' }
   // via: the typed go that let it through, and the chat it was typed in (#260): scheme, and minion number or null for the Taskmaster.
-  | { state: 'allowed' | 'denied'; by: string; via?: { message?: number; text: string; scheme: number; ticket: number | null } }
+  // to: for a go typed in the Taskmaster chat, the minion it covered (#939).
+  | { state: 'allowed' | 'denied'; by: string; via?: { message?: number; text: string; scheme: number; ticket: number | null; to?: number } }
   | { state: 'expired'; reason: string };
 
 // A message that is only a go to merge (#201): "merge it", "ok, fold it", "yes merge PR #191", "ship it", "you can fold 196".
 const GO = /^(?:(?:ok|okay|yes|yep|great|lgtm|looks good|go ahead|go|please|pls|plz),? )?(?:and )?(?:you can )?(?:merge|fold|land|squash|ship)(?: (?:it|this|the pr|pr #?(\d{1,7})|#(\d{1,7})|(\d{1,7})))?(?: in)?(?: (?:please|pls|plz|now))?$/;
 
-/** The PR a message that says nothing but "merge it" means: its number, or null for the minion's own; null if it isn't one. */
-export function mergeGo(text: string): { pr: number | null } | null {
-  const m = GO.exec(text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!]+$/, '').trimEnd());
+const words = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!]+$/, '').trimEnd();
+
+/** A go and how it names its number: "PR 5", "#5", a bare "5", or none. */
+function parseGo(text: string): { pr: number | null; named: 'pr' | 'hash' | 'bare' | null } | null {
+  const m = GO.exec(words(text));
   if (!m) return null;
   const n = m[1] ?? m[2] ?? m[3];
-  return { pr: n ? Number(n) : null };
+  return { pr: n ? Number(n) : null, named: m[1] ? 'pr' : m[2] ? 'hash' : m[3] ? 'bare' : null };
 }
+
+/** The PR a message that says nothing but "merge it" means: its number, or null for the minion's own; null if it isn't one. */
+export function mergeGo(text: string): { pr: number | null } | null {
+  const go = parseGo(text);
+  return go && { pr: go.pr };
+}
+
+// Text in double, curly or back quotes: a relay quotes a go word for word in one of these (#939). Not plain
+// single quotes, which apostrophes would open.
+const QUOTED = /"([^"\n]{1,200})"|“([^”\n]{1,200})”|‘([^’\n]{1,200})’|`([^`\n]{1,200})`/g;
+const quotes = (text: string, go: string) => [...text.matchAll(QUOTED)].some((q) => words(q[1] ?? q[2] ?? q[3] ?? q[4]) === words(go));
 
 /**
  * A person's typed go to merge, kept for its whole scheme (#260): who typed it, where, and the PR it
@@ -141,6 +155,10 @@ export interface Go {
   text: string;
   /** A merge it covers was sent back once with the plain command to run (#209). */
   hinted?: boolean;
+  /** Typed in the Taskmaster chat (#939): the minion it covers, named as "#N" or the one a relay quoted it to. */
+  to?: number;
+  /** A bare go typed in the Taskmaster chat: it covers nothing until the Taskmaster quotes it in a relay to one minion. */
+  bare?: true;
 }
 
 /** The minion a message was typed in, as a go records it. */
@@ -297,7 +315,7 @@ export class Approvals {
         go!.pr = target!.number;
         this.goes.set(scheme, found.goes);
       }
-      if (go) this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text, scheme, ticket: go.number } });
+      if (go) this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text, scheme, ticket: go.number, ...(go.to !== undefined ? { to: go.to } : {}) } });
       return { id };
     }
     const why = explanation(input);
@@ -313,13 +331,48 @@ export class Approvals {
    * A message delivered to one of a scheme's chats. Only `typed` ones count: what a signed-in person sent
    * from the chat, as the messages route marks it. A go stands for the whole scheme until its PR is seen
    * merged or closed, or until a later typed message in the same chat that isn't one (newest word wins).
+   * In the Taskmaster chat (#939) "#N" names minion N (`minion` looks it up), "PR N" a PR, and a bare
+   * number nothing; a bare go waits for the Taskmaster to quote it to one minion (relayed).
    */
-  said(scheme: number, where: GoPlace, m: { author: string; text: string; id?: number; typed?: boolean }) {
-    if (!m.typed) return;
-    const go = mergeGo(m.text);
-    const goes = this.goes.get(scheme).filter((g) => g.ticket !== where.id || go);
-    if (go) goes.push({ by: m.author, pr: go.pr, ticket: where.id, number: where.number, branch: where.branch, message: m.id, text: m.text.trim().slice(0, 200) });
+  said(scheme: number, where: GoPlace, m: { author: string; text: string; id?: number; typed?: boolean; from?: number }, minion?: (n: number) => GoPlace | null) {
+    if (!m.typed) {
+      if (m.from) this.relayed(scheme, where, m.text, m.from);
+      return;
+    }
+    const go = parseGo(m.text);
+    // A word in a minion's chat also takes back a go the Taskmaster chat handed it.
+    const goes = this.goes.get(scheme).filter((g) => go || (g.ticket !== where.id && (where.number === null || g.to !== where.number)));
+    const said = { by: m.author, ticket: where.id, number: where.number, message: m.id, text: m.text.trim().slice(0, 200) };
+    if (go && where.number !== null) goes.push({ ...said, pr: go.pr, branch: where.branch });
+    else if (go?.named === 'pr') goes.push({ ...said, pr: go.pr, branch: null });
+    else if (go?.named === null) goes.push({ ...said, pr: null, branch: null, bare: true });
+    else if (go?.named === 'hash') {
+      const target = minion?.(go.pr!);
+      if (target?.branch && target.number !== null) goes.push({ ...said, pr: null, branch: target.branch, to: target.number });
+    }
     this.goes.set(scheme, goes.slice(-MAX_GOES));
+  }
+
+  /**
+   * The Taskmaster's relay to a minion (`from`: the chat it came from). A bare go typed in that chat which the
+   * relay quotes word for word now covers this minion's PR, as if typed in its own chat; quoted to a second
+   * minion, it covers neither. The Taskmaster's chat gets a note either way, so a misroute shows before a merge.
+   */
+  private relayed(scheme: number, where: GoPlace, text: string, from: number) {
+    if (where.number === null || !where.branch) return;
+    const goes = this.goes.get(scheme);
+    const quoted = goes.filter((g) => g.bare && g.ticket === from && g.to !== where.number && quotes(text, g.text));
+    if (!quoted.length) return;
+    for (const g of quoted) {
+      if (g.to === undefined) {
+        g.to = where.number;
+        g.branch = where.branch;
+        this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" now covers #${where.number}'s PR: the Taskmaster quoted it to #${where.number}.` });
+      } else {
+        this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" was quoted to #${g.to}, then also quoted to #${where.number}, so it covers neither. Give the go again naming the minion ("fold #N"), or in its own chat.` });
+      }
+    }
+    this.goes.set(scheme, goes.filter((g) => !quoted.includes(g) || g.to === where.number));
   }
 
   /** A queued message taken back before any turn read it: a go it gave goes with it. */

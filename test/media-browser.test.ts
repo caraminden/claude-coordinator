@@ -151,6 +151,10 @@ test('lightbox: a wide picture shows whole unless the app opts in to panning', {
   await waitFor(page, 'the opted-in panner', `!!document.querySelector('.cui-panner')`);
   await page.eval(`lb.destroy(); box.replaceChildren(); window.lb = lightbox([{ src: '/media/panorama.svg', pan: 'ltr' }], { into: box })`);
   await waitFor(page, 'an item that asks for pan', `!!document.querySelector('.cui-panner')`);
+  await page.eval(`lb.destroy(); box.replaceChildren(); window.lb = lightbox([{ src: '/media/panorama.svg', pan: 'ltr' }], { into: box, pan: false })`);
+  await waitFor(page, 'the picture to load', `document.querySelector('.cui-lb-stage img')?.complete`);
+  await frames(page, 5);
+  assert.equal(await page.eval(`!!document.querySelector('.cui-panner')`), false, 'pan: false beats an item\'s pan');
 });
 
 test('lightbox: ←/→ step and wrap, the app hears of a person\'s move but not of its own go(); keys in a field stay there', { skip }, async () => {

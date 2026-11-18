@@ -625,7 +625,7 @@ function show(item, stage, opts) {
   const img = el('img', { src: item.src, alt: item.alt ?? item.caption ?? '', class: item.rotate ? `cui-r${item.rotate}` : null });
   stage.append(img);
   // Panning is opt-in: the lightbox's `pan: true`, or the item's own pan direction or onPan. Otherwise the picture shows whole.
-  if (item.rotate || !(opts.pan === true || item.pan || item.onPan)) return null;
+  if (item.rotate || opts.pan === false || !(opts.pan === true || item.pan || item.onPan)) return null;
   // An opted-in picture twice as wide as tall pans when it doesn't fit its box (the panner shows it whole when it does).
   const ctl = { toggle() {} };
   const wide = () => {

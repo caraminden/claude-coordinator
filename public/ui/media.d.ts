@@ -151,7 +151,7 @@ export interface LightboxOptions {
   render?: (item: LightboxItem, stage: HTMLElement, at: number) => { toggle?(): void; destroy?(): void } | null | void;
   /** Clips start playing as they show, muted and on a loop, as a GIF would (default false). */
   autoplay?: boolean;
-  /** true: pictures at least twice as wide as tall pan (the panner). Default false: every picture shows whole, fit to the box. An item with its own `pan` or `onPan` pans either way. */
+  /** true: pictures at least twice as wide as tall pan (the panner). false: none do, even an item with its own `pan`. Default: every picture shows whole, fit to the box, except an item with its own `pan` or `onPan`. */
   pan?: boolean;
   /** false: no ←/→ and Space on the document. */
   keys?: boolean;

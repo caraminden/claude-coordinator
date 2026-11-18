@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -8,6 +8,7 @@ import { jobCheck, MAX_STOP_BLOCKS, stopHook } from '../kit/hooks/job-check.ts';
 import { bashLines, failedTests, logPath, note, refusals } from '../kit/hooks/retro-log.ts';
 import { isSourceFile, REMINDER, testFirstHook } from '../kit/hooks/test-first.ts';
 import { bigReadHook } from '../kit/hooks/big-read.ts';
+import { gruntModelHook, jobTable } from '../kit/hooks/grunt-model.ts';
 
 const HOOKS = join(import.meta.dirname, '..', 'kit', 'hooks');
 const running = { id: 'b1', type: 'shell', status: 'running', description: 'Run the test suite', command: 'node --test' };
@@ -262,4 +263,66 @@ test('big-read guard: sends back whole reads and plain cat/sed of big files, let
   const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
   const pre = (tool: string) => hooks.PreToolUse.some((m: any) => new RegExp(m.matcher).test(tool) && m.hooks.some((h: any) => h.command.includes('big-read.ts')));
   assert.ok(pre('Read') && pre('Bash'));
+});
+
+test('grunt-model guard: sends back an Agent call with no deliberate model or effort, lets pinned ones and forks through', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'kit-grunt-model-'));
+  mkdirSync(join(repo, '.claude', 'agents'), { recursive: true });
+  writeFileSync(join(repo, '.claude', 'agents', 'pinned.md'), '---\nname: pinned\ndescription: x\nmodel: sonnet\neffort: low\n---\nBody\n');
+  writeFileSync(join(repo, '.claude', 'agents', 'half.md'), '---\nname: half\ndescription: x\neffort: high\n---\nBody\n');
+  writeFileSync(join(repo, '.claude', 'agents', 'inherits.md'), '---\nname: inherits\ndescription: x\nmodel: inherit\neffort: medium\n---\n');
+  writeFileSync(join(repo, '.claude', 'agents', 'renamed-file.md'), '---\nname: other-name\ndescription: x\nmodel: opus\neffort: high\n---\n');
+  const call = (tool_input: object, tool_name = 'Agent') => gruntModelHook({ hook_event_name: 'PreToolUse', tool_name, cwd: repo, tool_input: { description: 'd', prompt: 'p', ...tool_input } });
+  const denied = (out: string | null) => out && JSON.parse(out).hookSpecificOutput.permissionDecision === 'deny';
+  const reason = (out: string | null) => JSON.parse(out!).hookSpecificOutput.permissionDecisionReason as string;
+
+  // A bare call (general-purpose by default) and built-ins with half a choice are sent back, pointing at the table.
+  for (const ti of [{}, { subagent_type: 'general-purpose' }, { subagent_type: 'Explore', model: 'sonnet' }, { subagent_type: 'Plan', effort: 'high' }]) assert.ok(denied(call(ti)), JSON.stringify(ti));
+  const bare = reason(call({}));
+  assert.match(bare, /citadel:subagents/);
+  assert.match(bare, /Known-shape worker.*sonnet.*medium/, 'quotes the table rows');
+  assert.match(reason(call({ subagent_type: 'Explore' })), /Row for Explore: .*sonnet, low/, 'names the row when the agent type has one');
+  assert.match(reason(call({ subagent_type: 'Explore', model: 'sonnet' })), /no effort/);
+  // Both on the call, a definition that pins both, or a definition plus the missing half on the call go through.
+  assert.equal(call({ subagent_type: 'general-purpose', model: 'sonnet', effort: 'medium' }), null);
+  assert.equal(call({ model: 'haiku', effort: 'low' }), null);
+  assert.equal(call({ subagent_type: 'pinned' }), null);
+  assert.equal(call({ subagent_type: 'other-name' }), null, 'found by its name: field, not only its file name');
+  assert.ok(denied(call({ subagent_type: 'half' })), 'a definition with effort but no model');
+  assert.equal(call({ subagent_type: 'half', model: 'opus' }), null);
+  assert.ok(denied(call({ subagent_type: 'inherits' })), 'model: inherit is not a choice');
+  assert.equal(call({ subagent_type: 'inherits', model: 'sonnet' }), null);
+  // The kit's own agents pin both, so a plain call goes through.
+  for (const f of readdirSync(join(HOOKS, '..', 'agents'))) assert.equal(call({ subagent_type: `citadel:${f.replace(/\.md$/, '')}` }), null, f);
+  // Forks run on the parent by design; agents it can't read (another plugin's, a missing one) and other tools fail open.
+  assert.equal(call({ subagent_type: 'fork' }), null);
+  assert.equal(call({ subagent_type: 'someplugin:thing' }), null);
+  assert.equal(call({ subagent_type: 'nowhere' }), null);
+  assert.equal(gruntModelHook({ tool_name: 'Read', cwd: repo, tool_input: {} }), null);
+  // The older tool name is checked too.
+  assert.ok(denied(call({}, 'Task')));
+
+  // The script prints the deny for Claude Code and nothing on a broken input; wired for Agent before it runs.
+  const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'grunt-model.ts')], { input, encoding: 'utf8' });
+  assert.match(run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', cwd: repo, tool_input: { prompt: 'p' } })).stdout, /"deny"/);
+  assert.equal(run('not json').stdout, '');
+  const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
+  assert.ok(hooks.PreToolUse.some((m: any) => new RegExp(m.matcher).test('Agent') && m.hooks.some((h: any) => h.command.includes('grunt-model.ts'))));
+});
+
+test('grunt-model table: every kit agent pins model and effort, and its frontmatter matches its row in citadel:subagents', () => {
+  const rows = jobTable();
+  assert.ok(rows.length >= 10, 'the table parses');
+  for (const r of rows) assert.ok(r.job && r.model && r.effort, JSON.stringify(r));
+  for (const f of readdirSync(join(HOOKS, '..', 'agents'))) {
+    const head = readFileSync(join(HOOKS, '..', 'agents', f), 'utf8').split('\n---')[0];
+    const model = head.match(/^model:\s*(\S+)/m)?.[1];
+    const effort = head.match(/^effort:\s*(\S+)/m)?.[1];
+    assert.ok(model && model !== 'inherit' && effort, `${f} pins model and effort`);
+    const name = `citadel:${f.replace(/\.md$/, '')}`;
+    const row = rows.find((r) => r.job === `\`${name}\``);
+    assert.ok(row, `${name} has its own row`);
+    // The critic's row reads "from the rubric"; its frontmatter is only the backstop.
+    if (/^(sonnet|opus|haiku|fable)$/.test(row.model)) assert.deepEqual([model, effort], [row.model, row.effort], name);
+  }
 });

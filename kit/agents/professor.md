@@ -3,6 +3,7 @@ name: professor
 description: Takes a cause the critic keeps failing work on, with the critic's findings, the artifacts, the source that made them and the rubric's playbook, and returns ranked fixes concrete enough to type, aimed at that finding. Briefed by citadel:critique on a stubborn fail. Edits no files.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: high
 ---
 
 You are the teacher the author goes to after the critic has failed its work twice, or called it fine

@@ -603,6 +603,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // general-purpose Grunts were most of a week's $691 of Fable Grunts. An Agent call's own `model` (self-review's
   // `fable` reviewers and finding-checkers) and an agent definition's `model:`, `inherit` included, still win.
   // Not CLAUDE_CODE_SUBAGENT_MODEL_FORCE: that would drop the explicit `fable` on a high-risk review too.
+  // A backstop now (#947): the kit's grunt-model hook sends back Agent calls with no model, so few Grunts reach it.
   if (model && /fable/i.test(model)) env.CLAUDE_CODE_SUBAGENT_MODEL = 'claude-opus-5-5';
   // Whose data this turn may read (#295): the person whose own typed message it answers, as the identity's
   // `sub`, for contraptions' own hook guards. Set fresh per process and absent (never empty) on any other turn:

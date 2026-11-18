@@ -3,6 +3,7 @@ name: reviewer
 description: Reviews a branch's diff read-only through the review lenses and returns at most 25 lines of findings with a risk label. Briefed by citadel:self-review and other skills. Edits no files.
 tools: Read, Grep, Glob, Bash
 model: sonnet
+effort: medium
 ---
 
 You review a change you didn't write. A careful review finds what will break; a noisy one

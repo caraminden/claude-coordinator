@@ -10,32 +10,55 @@ minions). The first section sets which effort and model each kind of job gets; t
 whether a step should leave the session at all. The agents named here come from the Citadel kit,
 so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:fresh-eyes`).
 
-## Effort and model per job
+## Model and effort per job
 
-- Effort: sessions run at high. Agent calls set `effort` per call when the work is mechanical:
-  `low` for a read-only search that finds where something lives, `medium` for one that reads and
-  summarises (code, transcripts, usage data, docs lookups). Building and general-purpose workers
-  inherit high. Nothing above high unless a person asks (xhigh only after a Fable run has failed twice; never max). Never put `effort` on a skill: it would hold for the rest of a long turn, and a
-  switch mid-session may restart the prompt cache.
-- Models: Agent calls set `model` too. A general-purpose Grunt gets `sonnet` by default (reading,
-  research legwork, regeneration, reviewer passes); `haiku` for bulk reads; the
-  `citadel:check-runner` agent runs on `haiku` at `low` effort (its answer is a verdict). Only a
-  Grunt that judges (`citadel:fresh-eyes`, `citadel:finding-checker`) inherits the session's
-  model: on Delve's art critic Opus caught about 9 of 13 of Cara's notes, Sonnet 5. The
-  `citadel:critic` takes its model and effort from its rubric (`citadel:critique`).
-  The exception: on a high-risk self-review `citadel:reviewer` and `citadel:finding-checker` run
-  on `fable` (`claude-fable-5-2`) at `medium`, set per call. On a Fable turn, a Grunt with no
-  `model` on its call or its definition runs on Opus, not Fable, the judging Grunts included
-  (#705): Citadel launches Fable turns with `CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5`. A call's
-  own `model` and a definition's `model:` still win, `model: inherit` too (so a Grunt definition
-  that should follow this default leaves `model:` out), and a Grunt that must run on Fable names
-  `fable` on the call. A Grunt doing known-shape middle work (a clear-repro bug fix, a small clear-spec change, a
-  follow-up) runs `sonnet` at `medium`; one that stalls or whose fix doesn't hold moves to `opus`
-  at `medium`, then high (Cara, 2026-11-14, "Widen to known-shape work", the same tier
-  Citadel's model table gives minions).
+Every Grunt gets its model and effort on purpose, from its job (Cara, 2026-11-17: "Why should a
+grunt have the same effort or model as its parent? shouldnt we be making that decision
+intentionally?"). A kit agent pins both in its definition; every other Agent call passes `model`
+and `effort` from its job's row. The kit's grunt-model hook sends back a call that leaves either
+unset. Forks (`subagent_type: "fork"`) are the one exception: they run on the session's model by
+design.
+
+| Job | Model | Effort |
+|---|---|---|
+| Find where something lives (a read-only search) | sonnet | low |
+| `Explore` sweep | sonnet | low |
+| Read and summarise (code, transcripts, usage data, docs lookups) | sonnet | medium |
+| Bulk reads with a brief that holds everything the Grunt needs | haiku | low |
+| Known-shape worker (clear-repro fix, small clear-spec change, regeneration, batch edits) | sonnet | medium |
+| Known-shape worker that stalled or whose fix didn't hold | opus | medium, then high |
+| Worker on a hard or design-shaped build | opus | high |
+| `Plan` | opus | high |
+| `citadel:check-runner` | haiku | low |
+| `citadel:reviewer` | sonnet | medium |
+| `citadel:reviewer` on a high-risk change | fable | medium |
+| `citadel:finding-checker` | opus | medium |
+| `citadel:finding-checker` on a high-risk change | fable | medium |
+| `citadel:fresh-eyes` | opus | high |
+| `citadel:professor` | opus | high |
+| `citadel:critic` | from the rubric | from the rubric |
+
+- A call's `model` takes an alias (`sonnet`, `opus`, `haiku`, `fable`), and a call's `model` and
+  `effort` beat the definition's: a high-risk review passes `fable` and `medium` over the
+  reviewer's own pins. The `citadel:critic` gets both from its rubric (`citadel:critique`).
+- Effort left unset is an accident either way: a Grunt on the session's model runs at the
+  session's level (high), and one on any other model at that model's default, medium. Nothing
+  above high unless a person asks (xhigh only after a Fable run has failed twice; never max).
+  Never put `effort` on a skill: it would hold for the rest of a long turn, and a switch
+  mid-session may restart the prompt cache.
+- Judging Grunts run on Opus: on Delve's art critic Opus caught about 9 of 13 of Cara's notes,
+  Sonnet 5. The stalled-worker row is Cara's (2026-11-14, "Widen to known-shape work"), the same
+  tier Citadel's model table gives minions.
 - Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work
   in obra/superpowers' subagent-driven-development. Use `haiku` only when the brief holds
   everything the Grunt needs.
+- A scheme's own agents (`.claude/agents/`) pin `model:` and `effort:` too, never `inherit`; the
+  hook reads them there. On a Fable turn Citadel still sets `CLAUDE_CODE_SUBAGENT_MODEL` to Opus
+  (#705) as a backstop for any Grunt that slips through, so a Grunt that must run on Fable names
+  `fable` on the call.
+- To retune, edit the row. A kit agent's row and its definition's `model:` and `effort:` change in
+  the same commit (a test in Citadel's repo checks they match), and the hook quotes the table as
+  written.
 
 ## How the cost works
 
@@ -54,15 +77,15 @@ known-shape work to Sonnet halves it. Keeping noisy work out of the session save
 
 Ask one question: will the session need what this step reads, or only what it concludes?
 - If it needs only the conclusion, use a subagent.
-- If that conclusion is a verdict (pass or fail, a table, "it lives in X.ts"), give the subagent
-  Sonnet, or Haiku when the brief holds everything it needs.
-- If the conclusion is a judgment, leave the model unset so the subagent inherits the session's.
+- Its row in the table above sets its model and effort: a verdict (pass or fail, a table, "it lives
+  in X.ts") runs on Sonnet or Haiku, a judgment on Opus.
 
 ## Use a subagent when
 
 - **The step is noisy.** Test logs, searches across many files and data pulls often come to 20k
-  tokens or more. The session would re-read all of that on every later call. The `citadel:check-runner`
-  agent exists for exactly this.
+  tokens or more. The session would re-read all of that on every later call. A check whose raw
+  output is long (an untrimmed build or test log) goes to the `citadel:check-runner` agent; a
+  wrapper that already trims output (`citadel-test`, a scheme's check script) runs inline.
 - **A sweep or a chain of lookups.** A question that needs 5 or more files read goes to an `Explore` Grunt on Sonnet,
   briefed for the conclusion and the exact lines that matter, not file dumps; a shorter look stays in
   the session, since the Grunt's own base context costs more than the reads. Hops where each result only

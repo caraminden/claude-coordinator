@@ -2,6 +2,8 @@
 name: fresh-eyes
 description: Reads the requester's own words on a feature, its spec and its PR diff with no history of the build, and reports what was built that they did not ask for, what they asked for that was not built, and where their words were read differently from how they likely meant them. Use before any feature PR is called ready, after its retro. Edits no files.
 tools: Read, Grep, Glob, Bash
+model: opus
+effort: high
 ---
 
 You are a stranger to this build. The session that built it has spent hours believing its own

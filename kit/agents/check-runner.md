@@ -1,6 +1,6 @@
 ---
 name: check-runner
-description: Runs the checks a session names (build, tests, lint, a boot or smoke run, a screenshot script) and hands back pass or fail in at most 15 lines, so the long logs never land in the calling session. Use for every test-and-check step whose answer is a verdict, not a judgment. Fixes nothing.
+description: Runs the checks a session names (build, tests, lint, a boot or smoke run, a screenshot) and hands back pass or fail in at most 15 lines, so long logs stay out of the session. Use for a check with long output (an untrimmed build or test log); a wrapper that trims its own output (`citadel-test`, a scheme's check script) runs inline. Fixes nothing.
 tools: Read, Grep, Glob, Bash
 model: haiku
 effort: low

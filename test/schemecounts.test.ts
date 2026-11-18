@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, turnMoved } from '../public/schemecounts.js';
+import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -109,4 +109,21 @@ test('the scheme you\'re in: a new ask is new unless the chat you\'re on asks it
   assert.deepEqual([...seen].sort(), ['plan:3', 'state:8'], 'moving to any chat sees all of it, and what stopped waiting drops out');
   const gone = seenInScheme(seen, [b], 7, false);
   assert.equal(seenInScheme(gone, [b, c], 7, false).has('plan:3'), false, 'an item that stops waiting and waits again later is new again');
+});
+
+test('app badge: on while any visible scheme is purple, the open scheme by this page\'s own word (#980)', () => {
+  const ps = [{ id: 1, inbox: 2, fresh: true }, { id: 2, inbox: 1, fresh: false }, { id: 3, inbox: 1, fresh: true, hidden: true }];
+  assert.equal(wantsBadge(ps, 2, null), true);
+  assert.equal(wantsBadge(ps, 1, { projectId: 1, fresh: false }), false, 'you have seen it here');
+  assert.equal(wantsBadge([{ id: 1, inbox: 0, fresh: true }], null, null), false, 'nothing waiting');
+  assert.equal(wantsBadge(undefined, null, null), false);
+});
+
+test('app badge: calls the API only on a change, and nothing without it (#980)', () => {
+  const calls: string[] = [];
+  const nav = { setAppBadge: () => (calls.push('set'), Promise.resolve()), clearAppBadge: () => (calls.push('clear'), Promise.resolve()) };
+  const st = { on: null as boolean | null };
+  syncBadge(true, st, nav); syncBadge(true, st, nav); syncBadge(false, st, nav); syncBadge(false, st, nav);
+  assert.deepEqual(calls, ['set', 'clear']);
+  assert.equal(syncBadge(true, { on: null }, {} as any), false);
 });

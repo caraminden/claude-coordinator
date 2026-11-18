@@ -45,6 +45,25 @@ export function schemePill(p) {
 }
 
 /**
+ * Whether the installed app's icon wears a badge: any visible scheme's pill is purple (`schemePill(p).fresh`, the one
+ * source of that colour). A plain dot, not a count: purple is per scheme, so a number would be ambiguous (#980).
+ * `projects` as api/projects sends them; the open scheme's `fresh` is this page's own (`seen`, as inbox.js holds it).
+ */
+export const wantsBadge = (projects, openId, seen) =>
+  (projects || []).some((p) => !p.hidden && schemePill(p.id === openId && seen?.projectId === p.id ? { ...p, fresh: seen.fresh } : p).fresh);
+
+/**
+ * Set or clear the app badge to match `want`, only when it changed since the last call (`state.on`), and only where
+ * the browser has the Badging API. Returns whether it called.
+ */
+export function syncBadge(want, state, nav = globalThis.navigator) {
+  if (!nav || !('setAppBadge' in nav) || state.on === want) return false;
+  state.on = want;
+  (want ? nav.setAppBadge() : nav.clearAppBadge()).catch?.(() => {});
+  return true;
+}
+
+/**
  * Which of the open scheme's waiting items (`{ key, ticketId }`) you've seen, given what you'd seen at the last
  * redraw and the chat open now (#548; Josh, 2026-11-11: "put the purple up on the scheme you are viewing unless you
  * are actively looking at the minion that is now asking for something and until you move minions"). Opening a chat

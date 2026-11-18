@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, me, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
-import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, turnMoved } from './schemecounts.js';
+import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 import { askWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
@@ -39,6 +39,7 @@ export function refreshSchemeCounts() {
       for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
     }
     // Refetch, not just redraw: another scheme's minion dismissed or reopened takes its cards addressed to you (#687) with it.
+    updateBadge();
     refreshInbox();
   }, () => {});
 }
@@ -101,6 +102,10 @@ export function schemeCount(p) {
 
 let pillTips = null;
 
+const badge = { on: null };
+/** The installed app's icon badge follows the purple pills (#980). */
+const updateBadge = () => syncBadge(wantsBadge(view?.projects, view?.projectId, seenHere), badge);
+
 // The items each scheme last told the server you saw (sorted keys, joined), so a redraw with nothing new writes nothing.
 const seenSent = new Map();
 // The open scheme's waiting items you've seen (seenInScheme), the chat you were on at the last redraw, and whether anything's new.
@@ -150,6 +155,7 @@ export function renderInbox() {
   Object.assign(seenHere, { projectId: view.projectId, chatId: view.id ?? seenHere.chatId, keys, fresh: waiting.some((i) => !keys.has(i.key)) });
   if (!hidden) markItemsSeen(view.projectId, [...keys]);
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working }));
+  updateBadge();
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();
   let open = false;

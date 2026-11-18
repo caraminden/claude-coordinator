@@ -7,6 +7,8 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
+import { Relay, clip, coldKey, loopKey, mailKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
+export { LOOP_LIMIT, LOOP_WINDOW_MS };
 import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
@@ -316,35 +318,10 @@ const savingKey = (ticketId: number) => `saving:${ticketId}`;
 const waitingKey = (ticketId: number) => `waiting:${ticketId}`;
 /** A restart's resume of a cut-off turn not started yet, with what it carries, so a second restart still owes it (#468 S03-8). */
 const owedKey = (ticketId: number) => `resume-owed:${ticketId}`;
-/** Held mail (#405): message_taskmaster's wake: false messages, waiting for the receiving Taskmaster's next turn. */
-const mailKey = (ticketId: number) => `mail:${ticketId}`;
-/** Cold hold (#413): when the first machine message held for a cold session was held, for the cap. */
-const coldKey = (ticketId: number) => `cold:${ticketId}`;
 /** Idle this long, a session's prompt cache (1 hour) is about to lapse, so a machine message to it waits (#413). */
 export const COLD_MS = 55 * 60_000;
 /** The longest a message held for a cold session waits before it wakes the session anyway. */
 export const COLD_HOLD_MAX_MS = 3 * 3600_000;
-
-/** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
-export const LOOP_LIMIT = 6;
-export const LOOP_WINDOW_MS = 10 * 60 * 1000;
-
-/** A loop guard's count and held messages (a minion's under `loop:<minion id>`, two Taskmasters' under pairKey), in the settings table so they outlive a restart. */
-interface LoopState {
-  /** When each recent message went through. */
-  sent: number[];
-  /** Messages waiting for a person to continue, oldest first. */
-  /** `asker` as it was when held (#255): the sender may since have started a turn for someone else. */
-  held: { to: number; author: string; text: string; from?: number; asker?: number | null; mail?: true }[];
-}
-
-const loopKey = (minionId: number) => `loop:${minionId}`;
-/** Two schemes' Taskmasters share one loop, stored the same way whichever wrote first. */
-const pairKey = (a: number, b: number) => `loop:taskmasters:${Math.min(a, b)}:${Math.max(a, b)}`;
-/** Two minions messaging each other directly (#783) share one loop, apart from each one's loop with its Taskmaster. */
-const MINION_PAIRS = 'loop:minions:';
-const minionPairKey = (a: number, b: number) => `${MINION_PAIRS}${Math.min(a, b)}:${Math.max(a, b)}`;
-const clip = (text: string) => (text.length > 140 ? text.slice(0, 140) + '…' : text);
 
 /** Claude's words for an account problem only a person can fix, like "API Error: 400 Identity verification is required to continue.": never retried. */
 export const ACCOUNT_ERROR = /identity verification|credit balance|oauth token|invalid api key|run \/login|organization has been disabled/i;
@@ -594,6 +571,7 @@ export class Runner {
   wakesOn: (ticketId: number) => string | null = () => null;
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
+  private relays: Relay;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null, warm?: string) => TurnPlace | { refused: string };
   /** A Claude turn of session `key` (warmKey) ended on `account`, so the session stays there while its cache is warm (ClaudeLink.ran, #793). */
@@ -704,6 +682,7 @@ export class Runner {
       // The threads list shows which threads are waiting on an approval.
       this.broadcastTicket(ticketId);
     }, { get: (p) => store.getSetting<Go[]>(goesKey(p)) ?? [], set: (p, goes) => store.setSetting(goesKey(p), goes) });
+    this.relays = new Relay({ store, approvals: this.approvals, emit: (id, kind, data) => this.emit(id, kind, data), now: () => this.now(), isRunning: (id) => this.isRunning(id), send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer), personOf: () => this.personOf, broadcastTicket: (id) => this.broadcastTicket(id), cold: (id) => this.cold(id), parked: (t) => this.parked(t) });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     // Messages that arrived while a step ran start a turn once the minion's lane is free.
@@ -1739,126 +1718,20 @@ export class Runner {
     return true;
   }
 
-  /**
-   * A message between a minion and its Taskmaster, either way (`to` is the receiving ticket). Up to
-   * LOOP_LIMIT per LOOP_WINDOW_MS go through; after that each is held, with a note in both chats asking
-   * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
-   * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
-   */
-  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string, sender?: number): boolean | 'cold' | 'mail' | 'parked' {
-    const minion = this.store.getTicket(minionId)!;
-    const from = to === minionId ? sender ?? this.store.ownerCoordinator(minion)?.id : minionId;
-    const { held, cold, parked } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent, need);
-    if (!held) return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
-    const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
-    const note = held === 1
-      ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`
-      : `Also held: ${what}.`;
-    for (const id of this.loopChats(minion)) this.emit(id, 'loop_paused', { minion: minionId, text: note });
-    return true;
+  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string, sender?: number) {
+    return this.relays.relay(minionId, to, author, text, urgent, wake, need, sender);
   }
 
-  /**
-   * A message from one minion to another in its scheme (message_minion, #783): the same wake rules as
-   * relay (busy: after its turn; parked: held; cold: mail unless urgent), never steering a running turn.
-   * Each pair shares one count, both ways, apart from the Taskmaster's; a person's Continue in either
-   * chat releases it. The caller refuses a dismissed receiver: this would reopen it.
-   */
-  relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true, unparked = false): boolean | 'cold' | 'mail' | 'parked' {
-    const { held, cold, parked } = this.guard(minionPairKey(from, to), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, false, from, !wake, urgent);
-    if (!held) {
-      this.copyToTaskmaster(to, author, text, unparked, from);
-      return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
-    }
-    const [a, b] = [from, to].map((id) => `#${this.store.getTicket(id)!.number}`);
-    const what = `${a}'s message to ${b} ("${clip(text)}")`;
-    const note = held === 1
-      ? `Paused: ${a} and ${b} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`
-      : `Also held: ${what}.`;
-    for (const id of [from, to]) this.emit(id, 'loop_paused', { minion: id, text: note });
-    return true;
+  relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true, unparked = false) {
+    return this.relays.relayMinion(from, to, author, text, urgent, wake, unparked);
   }
 
-  /**
-   * The scheme's Taskmaster sees each message between its minions in its chat (#783), as a row of its own kind
-   * that the chat groups (#924). It is never queued as held mail: the Taskmaster reads a minion with read_ticket.
-   */
-  private copyToTaskmaster(to: number, author: string, text: string, unparked = false, from?: number) {
-    const target = this.store.getTicket(to)!;
-    const coordinator = this.store.ownerCoordinator(target);
-    const line = text.replace(/\s+/g, ' ');
-    const sender = from ? this.store.getTicket(from)?.number : Number(/^#(\d+)/.exec(author)?.[1]) || undefined;
-    if (coordinator) this.emit(coordinator.id, 'minion_copy', { author, from: sender ?? null, to: target.number, text: line.length > 200 ? line.slice(0, 200) + '…' : line, ...(unparked ? { unparked: true } : {}) });
+  relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = '', urgent = false, need?: string) {
+    return this.relays.relayTaskmaster(from, to, author, text, wake, attached, urgent, need);
   }
 
-  /**
-   * A message from one scheme's Taskmaster to another's (message_taskmaster). Each pair shares one
-   * count, both ways: TASKMASTER_LOOP_LIMIT per TASKMASTER_LOOP_WINDOW_MS go through, which stops a
-   * runaway exchange within a few turns but not work spread out over an hour. Past that each is held,
-   * with a note in both chats, until a person continues in either. `left` is how many more may go now.
-   */
-  relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = '', urgent = false, need?: string): { held: boolean; left: number; cold?: true } {
-    const { held, left, cold } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, asData(author, text) + attached, false, from, !wake, urgent, need);
-    if (held) {
-      const [a, b] = [from, to].map((id) => this.store.getProject(this.store.getTicket(id)!.project_id)!.name);
-      const what = `${a}'s message to ${b} ("${clip(text)}")`;
-      const note = held === 1
-        ? `Paused: the ${AGENT_NAME}s of ${a} and ${b} have exchanged ${TASKMASTER_LOOP_LIMIT} messages in ${TASKMASTER_LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`
-        : `Also held: ${what}.`;
-      // Each chat's note names its own Taskmaster, whose Continue releases all its held exchanges.
-      for (const id of [from, to]) this.emit(id, 'loop_paused', { minion: id, text: note });
-    }
-    return { held: held > 0, left, ...(cold ? { cold: true as const } : {}) };
-  }
-
-  /**
-   * Held mail (#405): shown in the receiving chat now, but no turn starts and none is steered. It joins
-   * the receiver's next turn, whoever wakes it, after that turn's own messages, labelled with its sender
-   * and time. It carries no person, so it never decides whose turn that is.
-   */
-  /** Held mail from the app itself (#678: a red scheduled run for a Taskmaster): no loop guard, no turn started. */
   leaveMail(to: number, author: string, text: string) {
-    this.mail(to, author, text);
-  }
-
-  private mail(to: number, author: string, text: string, from?: number, cold = false, need?: string) {
-    const row = this.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(need ? { need } : {}), ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
-    if (cold && !this.store.getSetting<number>(coldKey(to))) this.store.setSetting(coldKey(to), this.now());
-    const sent = pacific(this.now());
-    const list = this.store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];
-    // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
-    list.push({ author: `Held mail from ${author}, sent ${sent}`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: cold ? this.personOf?.(author, from) ?? null : null });
-    this.store.setSetting(mailKey(to), list);
-    // A Taskmaster's relay that quotes a person's go hands it over when sent, as held mail too (#939).
-    const ticket = this.store.getTicket(to);
-    if (ticket && from) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, { author, text, from });
-    this.broadcastTicket(to); // held_ids now lists it, so its bubble reads "Not sent yet" (#910)
-  }
-
-  /** Count a message against the loop at `key`: send it (steering a running turn with `steer`; as held mail with `mail`), or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
-  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false, urgent = false, need?: string): { held: number; left: number; cold: boolean; parked?: true } {
-    const loop = this.store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
-    const now = this.now();
-    loop.sent = loop.sent.filter((t) => now - t < windowMs);
-    // A parked receiver holds it whatever (#718), urgent too: only an unpark wakes it. It wakes nothing, so it
-    // isn't counted: notes left for a parked minion never pause the loop.
-    const receiver = this.store.getTicket(to);
-    if (!mail && !this.isRunning(to) && receiver && this.parked(receiver)) {
-      this.send(to, author, text, [], { from, hold: true, ...(need ? { need } : {}) }, steer);
-      return { held: 0, left: limit - loop.sent.length, cold: false, parked: true };
-    }
-    if (!loop.held.length && loop.sent.length < limit) {
-      loop.sent.push(now);
-      this.store.setSetting(key, loop);
-      // Every message through here is machine-made, so a cold receiver gets it as mail unless it's urgent (#413).
-      const cold = !mail && !urgent && this.cold(to);
-      if (mail || cold) this.mail(to, author, text, from, cold, need);
-      else this.send(to, author, text, [], { from, hold: true, ...(need ? { need } : {}) }, steer);
-      return { held: 0, left: limit - loop.sent.length, cold };
-    }
-    loop.held.push({ to, author, text, from, asker: this.personOf?.(author, from) ?? null, ...(mail ? { mail: true as const } : {}) });
-    this.store.setSetting(key, loop);
-    return { held: loop.held.length, left: 0, cold: false };
+    this.relays.leaveMail(to, author, text);
   }
 
   /**
@@ -1976,7 +1849,7 @@ export class Runner {
     const loops: { key: string; chats: number[]; pair?: true }[] = ticket.kind === 'coordinator'
       ? this.store.listProjects().flatMap((p) => this.store.listCoordinators(p.id)).filter((c) => c && c.id !== ticketId)
         .map((c) => ({ key: pairKey(ticketId, c!.id), chats: [ticketId, c!.id] }))
-      : [{ key: loopKey(ticketId), chats: this.loopChats(ticket) },
+      : [{ key: loopKey(ticketId), chats: this.relays.loopChats(ticket) },
         // Its direct exchanges with the scheme's other minions (#783).
         ...this.store.settingKeys(MINION_PAIRS).map((key) => key.slice(MINION_PAIRS.length).split(':').map(Number)).filter((ids) => ids.includes(ticketId))
           .map(([a, b]) => ({ key: minionPairKey(a, b), chats: [ticketId, a === ticketId ? b : a], pair: true as const }))];
@@ -1992,21 +1865,15 @@ export class Runner {
       for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' || pair ? id : ticketId, by, text });
       // Only the Taskmaster's messages to its minion steer; Taskmasters' and minions' to each other queue.
       for (const m of loop.held) {
-        if (pair) this.copyToTaskmaster(m.to, m.author, m.text);
+        if (pair) this.relays.copyToTaskmaster(m.to, m.author, m.text);
         // A minion dismissed since never reopens for another minion's message (#783): it waits as mail.
-        if (m.mail || (pair && this.store.getTicket(m.to)?.status === 'closed')) this.mail(m.to, m.author, m.text, m.from);
+        if (m.mail || (pair && this.store.getTicket(m.to)?.status === 'closed')) this.relays.mail(m.to, m.author, m.text, m.from);
         else if (pair) this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, false);
         else this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, ticket.kind !== 'coordinator' && m.to === ticketId);
       }
       total += n;
     }
     return total;
-  }
-
-  /** The chats a loop-guard note shows in: the minion's and its Taskmaster's. */
-  private loopChats(minion: Ticket): number[] {
-    const coordinator = this.store.ownerCoordinator(minion);
-    return coordinator ? [minion.id, coordinator.id] : [minion.id];
   }
 
   /** Waiting on a person (an approval or a card): its silence is theirs, not the turn's. */

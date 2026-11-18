@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -18,13 +18,14 @@ const fakes = join(root, 'fakes');
 mkdirSync(fakes);
 const fakePodman = join(root, 'podman.mjs');
 writeFileSync(fakePodman, `
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const [dir, cmd, ...args] = process.argv.slice(2);
 appendFileSync(join(dir, 'argv.log'), JSON.stringify([cmd, ...args]) + '\\n');
 const box = (name) => join(dir, name + '.json');
 const read = (name) => (existsSync(box(name)) ? JSON.parse(readFileSync(box(name), 'utf8')) : null);
-const set = (name, s) => writeFileSync(box(name), JSON.stringify(s));
+// Written whole and renamed in, so a wait or inspect running at the same time never reads half a file.
+const set = (name, s) => (writeFileSync(box(name) + '.new', JSON.stringify(s)), renameSync(box(name) + '.new', box(name)));
 const name = args[args.length - 1];
 if (cmd === 'run') {
   if (args.some((a) => a.includes('fail-run'))) { console.error('Error: image not known'); process.exit(125); }
@@ -32,7 +33,7 @@ if (cmd === 'run') {
 } else if (cmd === 'wait') {
   const tick = () => {
     const s = read(name);
-    if (!s) { console.error('no such container'); process.exit(125); }
+    if (!s || s.waitFails) { console.error(s ? 'Error: wait interrupted' : 'no such container'); process.exit(125); }
     if (s.status === 'exited' || s.status === 'removed') { console.log(s.code); process.exit(0); }
     setTimeout(tick, 30);
   };
@@ -40,7 +41,9 @@ if (cmd === 'run') {
 } else if (cmd === 'inspect') {
   const s = read(name);
   if (!s || s.status === 'removed') { console.error('no such object'); process.exit(125); }
-  console.log(s.status + ' ' + (s.code ?? 0));
+  console.log(args.join(' ').includes('ExitCode') ? s.status + ' ' + (s.code ?? 0) : s.status);
+} else if ((cmd === 'rm' || cmd === 'stop') && read(name)?.stuck) {
+  console.error('Error: container state improper'); process.exit(125);
 } else if (cmd === 'rm') {
   const s = read(name);
   if (s && s.status !== 'removed') set(name, { status: 'removed', code: s.status === 'exited' ? s.code : 137 });
@@ -57,7 +60,9 @@ writeFileSync(fakeSmi, `console.log('42, 5120\\n');`);
 
 const box = (id: number) => join(fakes, `citadel-job-${id}.json`);
 const container = (id: number) => (existsSync(box(id)) ? JSON.parse(readFileSync(box(id), 'utf8')) : null);
-const exitContainer = (id: number, code: number) => writeFileSync(box(id), JSON.stringify({ status: 'exited', code }));
+const setBox = (id: number, s: object) => (writeFileSync(`${box(id)}.new`, JSON.stringify(s)), renameSync(`${box(id)}.new`, box(id)));
+const exitContainer = (id: number, code: number) => setBox(id, { status: 'exited', code });
+const stickContainer = (id: number, stuck: boolean) => setBox(id, { ...container(id), stuck });
 const podmanCalls = () => (existsSync(join(fakes, 'argv.log')) ? readFileSync(join(fakes, 'argv.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
 
 // ---------- the app's side ----------
@@ -68,7 +73,9 @@ const app = {
   logs: new Map<number, string>(),
   inputs: new Map<string, Buffer>(),
   stateStatus: 202,
+  uploadStatus: 201,
 };
+const inputFlaky = new Map<string, { left: number; data: Buffer }>();
 let appUrl = '';
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
@@ -79,6 +86,8 @@ const server = createServer(async (req, res) => {
   if (req.headers.authorization !== 'Bearer machine-key') return send(401, { error: 'key' });
   if (url.pathname === '/api/machines/job-input') {
     if (req.headers['x-job-token'] !== 'tok') return send(403, { error: 'bad token' });
+    const flaky = inputFlaky.get(`${url.searchParams.get('job')}/${url.searchParams.get('name')}`);
+    if (flaky) return flaky.left-- > 0 ? send(502, { error: 'bad gateway' }) : res.writeHead(200).end(flaky.data);
     const data = app.inputs.get(`${url.searchParams.get('job')}/${url.searchParams.get('name')}`);
     return data ? res.writeHead(200).end(data) : send(404, { error: 'no such input' });
   }
@@ -91,6 +100,7 @@ const server = createServer(async (req, res) => {
     if (url.searchParams.get('log')) return app.logs.set(job, body.toString()), send(201, { ok: true });
     const path = url.searchParams.get('path') ?? '';
     if (path.startsWith('huge')) return send(413, { error: 'over the cap' });
+    if (app.uploadStatus !== 201) return send(app.uploadStatus, { error: 'the app is restarting' });
     app.uploads.set(`${job}/${path}`, body);
     return send(201, { ok: true });
   }
@@ -119,8 +129,8 @@ const block = (over: object = {}) => ({ dir: jobsDir, folders: new Map([['voice'
 
 const runners: any[] = [];
 after(() => runners.forEach((r) => r.close()));
-function runner(b: object | null = block()) {
-  const r = new JobRunner({ block: b, appUrl, token: 'machine-key', podman: [node, fakePodman, fakes], nvidiaSmi: [node, fakeSmi], tickMs: 60, graceS: 1 });
+function runner(b: object | null = block(), log: (line: string) => void = () => {}) {
+  const r = new JobRunner({ block: b, appUrl, token: 'machine-key', podman: [node, fakePodman, fakes], nvidiaSmi: [node, fakeSmi], tickMs: 60, graceS: 1, log });
   runners.push(r);
   return r;
 }
@@ -351,14 +361,15 @@ test('the time limit stops a job, and paused time does not count', async () => {
   await until('paused', () => lastState(msg.id)?.state === 'paused');
   assert.equal(container(msg.id).status, 'paused');
   assert.equal(lastState(msg.id)!.held_vram_mb, 5120);
-  // Paused for longer than the whole limit: still paused.
-  await new Promise((done) => setTimeout(done, 1500));
+  // Paused for well over the whole limit: still paused.
+  await new Promise((done) => setTimeout(done, 2500));
   assert.equal(lastState(msg.id)!.state, 'paused');
-  const resumedAt = Date.now();
   await r.handle({ type: 'job.resume', id: msg.id });
   assert.equal(container(msg.id).status, 'running');
   await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed');
-  assert.ok(Date.now() - resumedAt >= 700, 'it stopped before its running time reached the limit');
+  // Its running time reached the limit; the 2.5 s paused would have made it 3 or more.
+  const runS = lastState(msg.id)!.run_s;
+  assert.ok(runS >= 1 && runS <= 2, `run_s ${runS}`);
   assert.match(lastState(msg.id)!.error!, /time limit/);
   assert.equal(container(msg.id).status, 'removed');
 });
@@ -447,5 +458,127 @@ test('a job that ended while the agent was down is finished on connect', async (
   exitContainer(msg.id, 0);
   const second = runner();
   await second.connected();
+  await until('done', () => lastState(msg.id)?.state === 'done');
+});
+
+// ---------- review fixes ----------
+
+test('a container that will not go keeps the job running and /out unread, then stops once it goes', async () => {
+  const r = runner();
+  const msg = start({ limit_s: 1 });
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  writeFileSync(join(jobsDir, String(msg.id), 'out', 'result.txt'), 'done');
+  stickContainer(msg.id, true);
+  await until('rm tried twice', () => podmanCalls().filter((c) => c.join(' ') === `rm -f citadel-job-${msg.id}`).length >= 2, 4000);
+  assert.equal(container(msg.id).status, 'running');
+  assert.equal(lastState(msg.id)!.state, 'running');
+  assert.ok(!app.uploads.has(`${msg.id}/result.txt`), '/out was read while the container was still there');
+  stickContainer(msg.id, false);
+  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed');
+  assert.equal(app.uploads.get(`${msg.id}/result.txt`)?.toString(), 'done');
+});
+
+test('a failed pause leaves the job running, and its time limit still counts', async () => {
+  const r = runner();
+  const msg = start({ limit_s: 1 }, { resumable: true });
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  stickContainer(msg.id, true);
+  await r.handle({ type: 'job.pause', id: msg.id });
+  await until('the stop tried', () => podmanCalls().some((c) => c.join(' ') === `stop -t 1 citadel-job-${msg.id}`));
+  stickContainer(msg.id, false);
+  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', 4000);
+  assert.match(lastState(msg.id)!.error!, /time limit/);
+});
+
+test('with the block taken away, a running job still ticks and stops at its limit', async () => {
+  const lines: string[] = [];
+  const r = runner(block(), (l) => lines.push(l));
+  const msg = start({ limit_s: 1 });
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  await r.setBlock(null);
+  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed');
+  assert.match(lastState(msg.id)!.error!, /time limit/);
+  assert.ok(!lines.some((l) => /Cannot read|TypeError/.test(l)), lines.join('\n'));
+});
+
+test('a running job that fills the jobs folder past its cap is stopped', async () => {
+  const dir = mkdtempSync(join(root, 'capped-'));
+  const r = runner(block({ dir, max_disk_gb: 4096 / 1024 ** 3 }));
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  writeFileSync(join(dir, String(msg.id), 'out', 'big.bin'), Buffer.alloc(8192));
+  await until('stopped', () => lastState(msg.id)?.state === 'failed', 4000);
+  assert.match(lastState(msg.id)!.error!, /went over/);
+});
+
+test('room for a new job deletes the oldest finished folders only, and none when that would not be enough', async () => {
+  const dir = mkdtempSync(join(root, 'room-'));
+  const done = (id: number, ended: number, bytes: number) => {
+    mkdirSync(join(dir, String(id), 'out'), { recursive: true });
+    writeFileSync(join(dir, String(id), 'out', 'r.bin'), Buffer.alloc(bytes));
+    writeFileSync(join(dir, String(id), 'job.json'), JSON.stringify({ id: String(id), kind: { name: 'k' }, state: 'done', final: { state: 'done' }, final_sent: true, ended_at: ended, outputs: [] }));
+  };
+  done(1, 100, 3000);
+  done(2, 200, 3000);
+  done(3, 300, 3000);
+  // About 9 KB used under a 12 KB cap.
+  const r = runner(block({ dir, max_disk_gb: 12_000 / 1024 ** 3 }));
+  await r.ready;
+  // Needs 40 KB: even deleting all three wouldn't do it, so none goes.
+  assert.equal(r.makeRoom(40_000), false);
+  assert.deepEqual(['1', '2', '3'].filter((id) => existsSync(join(dir, id))), ['1', '2', '3']);
+  // Needs 5 KB: the oldest one is enough.
+  assert.equal(r.makeRoom(5000), true);
+  assert.deepEqual(['1', '2', '3'].filter((id) => existsSync(join(dir, id))), ['2', '3']);
+});
+
+test('an upload the app answers with a 5xx is tried again without a reconnect', async () => {
+  const r = runner();
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  writeFileSync(join(jobsDir, String(msg.id), 'out', 'result.txt'), 'words');
+  app.uploadStatus = 503;
+  try {
+    exitContainer(msg.id, 0);
+    await until('uploading', () => lastState(msg.id)?.state === 'uploading');
+    await new Promise((done) => setTimeout(done, 300));
+    assert.notEqual(lastState(msg.id)!.state, 'done');
+  } finally {
+    app.uploadStatus = 201;
+  }
+  await until('done', () => lastState(msg.id)?.state === 'done', 4000);
+  assert.equal(app.uploads.get(`${msg.id}/result.txt`)?.toString(), 'words');
+});
+
+test('an input the app answers with a 5xx is fetched again', async () => {
+  const r = runner();
+  const msg = start();
+  const data = app.inputs.get(`${msg.id}/clip.wav`)!;
+  app.inputs.delete(`${msg.id}/clip.wav`);
+  inputFlaky.set(`${msg.id}/clip.wav`, { left: 1, data });
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running', 8000);
+  assert.equal(readFileSync(join(jobsDir, String(msg.id), 'in', 'clip.wav')).toString(), data.toString());
+  // The GPU slot is free for the next test's runner, which reads the same jobs folder.
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped');
+});
+
+test('podman wait failing while the container still runs does not end the job', async () => {
+  const r = runner();
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  setBox(msg.id, { status: 'running', waitFails: true });
+  await until('wait failed', () => podmanCalls().filter((c) => c.join(' ') === `wait citadel-job-${msg.id}`).length >= 2);
+  setBox(msg.id, { status: 'running' });
+  await new Promise((done) => setTimeout(done, 200));
+  assert.equal(lastState(msg.id)!.state, 'running');
+  exitContainer(msg.id, 0);
   await until('done', () => lastState(msg.id)?.state === 'done');
 });

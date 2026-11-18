@@ -1204,12 +1204,28 @@ export class JobRunner {
     await this.launch(job, msg.resume === true);
   }
 
-  /** One input file, streamed into /in and checked against its size and sha256. */
-  async fetchInput(job, f, inputToken) {
+  /** One input file, streamed into /in and checked against its size and sha256; a dropped line or a 5xx is tried again. */
+  async fetchInput(job, f, inputToken, tries = 3) {
+    for (let i = 1; ; i++) {
+      try {
+        return await this.fetchInputOnce(job, f, inputToken);
+      } catch (err) {
+        if (err.final || i >= tries || job.stopping) throw err;
+        this.log(`Job ${job.id}: input ${err.message}, trying again`);
+        await sleep(2000 * i);
+      }
+    }
+  }
+
+  async fetchInputOnce(job, f, inputToken) {
     if (job.stopping) return;
     const url = `/api/machines/job-input?job=${job.id}&name=${encodeURIComponent(f.name)}`;
     const res = await this.call('GET', url, { headers: { 'X-Job-Token': inputToken } });
-    if (res.statusCode !== 200) throw new Error(`${f.name}: the app answered ${res.statusCode} ${(await readBody(res)).error ?? ''}`.trim());
+    if (res.statusCode !== 200) {
+      const err = new Error(`${f.name}: the app answered ${res.statusCode} ${(await readBody(res)).error ?? ''}`.trim());
+      err.final = res.statusCode < 500;
+      throw err;
+    }
     const hash = createHash('sha256');
     let size = 0;
     const file = this.dir(job, 'in', f.name);
@@ -1217,13 +1233,13 @@ export class JobRunner {
       await pipeline(res, async function* (source) {
         for await (const chunk of source) {
           size += chunk.length;
-          if (size > f.size) throw new Error(`${f.name} is bigger than the ${f.size} bytes it should be`);
+          if (size > f.size) throw Object.assign(new Error(`${f.name} is bigger than the ${f.size} bytes it should be`), { final: true });
           hash.update(chunk);
           yield chunk;
         }
       }, createWriteStream(file, { flags: 'wx' }));
       if (size !== f.size) throw new Error(`${f.name} came to ${size} bytes, not ${f.size}`);
-      if (hash.digest('hex') !== f.sha256) throw new Error(`${f.name} doesn't match its sha256`);
+      if (hash.digest('hex') !== f.sha256) throw Object.assign(new Error(`${f.name} doesn't match its sha256`), { final: true });
     } catch (err) {
       rmSync(file, { force: true });
       throw err;
@@ -1251,13 +1267,18 @@ export class JobRunner {
 
   /** Waits on the job's container in the background; its end finishes the job, or completes a pause. */
   watch(job) {
-    this.exec(this.podman, ['wait', this.name(job)]).then(({ code, stdout }) => {
+    this.exec(this.podman, ['wait', this.name(job)]).then(async ({ code, stdout }) => {
       if (this.jobs.get(job.id) !== job || job.final || this.closed) return;
+      if (code !== 0) {
+        // podman wait itself failed: only a container that is really gone ends the job.
+        const r = await this.exec(this.podman, ['inspect', '--format', '{{.State.Status}}', this.name(job)]);
+        if (['running', 'paused', 'stopping'].includes(r.stdout)) return void setTimeout(() => this.watch(job), this.tickMs).unref();
+      }
       const exit = code === 0 ? Number.parseInt(stdout.split('\n').pop(), 10) : NaN;
       if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error, Number.isInteger(exit) ? exit : null);
       if (job.pausing) return this.paused(job);
-      this.finish(job, exit === 0 ? 'done' : 'failed', exit === 0 ? null : `it exited with ${Number.isInteger(exit) ? `code ${exit}` : 'no exit code'}`, Number.isInteger(exit) ? exit : null);
-    });
+      return this.finish(job, exit === 0 ? 'done' : 'failed', exit === 0 ? null : `it exited with ${Number.isInteger(exit) ? `code ${exit}` : 'no exit code'}`, Number.isInteger(exit) ? exit : null);
+    }).catch((err) => this.log(`Job ${job.id}: ${err.message}`));
   }
 
   /** A resumable job's container has stopped for a pause: all its VRAM is free; its folders stay. */
@@ -1278,7 +1299,14 @@ export class JobRunner {
       job.pausing = true;
       this.save(job);
       this.log(`Job ${job.id}: pausing (stopping it, ${this.graceS} s grace)`);
-      return void this.exec(this.podman, ['stop', '-t', String(this.graceS), this.name(job)]);
+      return void this.exec(this.podman, ['stop', '-t', String(this.graceS), this.name(job)]).then((r) => {
+        if (r.code === 0 || !job.pausing) return;
+        // Still running: the limit counts again and a later pause can try again.
+        job.pausing = false;
+        job.since = Date.now();
+        this.save(job);
+        this.log(`Job ${job.id}: podman stop failed, still running: ${r.out.slice(-300)}`);
+      });
     }
     const r = await this.exec(this.podman, ['pause', this.name(job)]);
     if (r.code !== 0) {
@@ -1317,9 +1345,15 @@ export class JobRunner {
     this.log(`Job ${job.id}: stopping${error ? ` (${error})` : ''}`);
     // Still fetching inputs or pulling its image: start() and launch() look before they go on.
     if (job.state === 'starting') return;
-    if (job.state === 'paused' && job.paused === 'stopped') return void this.finish(job, state, error);
+    if (job.state === 'paused' && job.paused === 'stopped') return void this.finish(job, state, error).catch((err) => this.log(`Job ${job.id}: ${err.message}`));
     this.closeSegment(job);
-    this.exec(this.podman, ['rm', '-f', this.name(job)]);
+    this.exec(this.podman, ['rm', '-f', this.name(job)]).then((r) => {
+      if (r.code === 0 || job.final || job._finishing) return;
+      job.stopping = null;
+      if (job.state === 'running') job.since ??= Date.now();
+      this.save(job);
+      this.log(`Job ${job.id}: podman rm failed, still there: ${r.out.slice(-300)}`);
+    });
   }
 
   /**
@@ -1337,7 +1371,10 @@ export class JobRunner {
     this.log(`Job ${job.id}: ended (${job.final.state}${job.final.error ? `: ${job.final.error}` : ''}), uploading /out`);
     try {
       // Gone before /out is read, so nothing in the container can swap a file after it is checked.
-      await this.exec(this.podman, ['rm', '-f', this.name(job)]);
+      const rm = await this.exec(this.podman, ['rm', '-f', this.name(job)]);
+      if (rm.code !== 0 && (await this.exec(this.podman, ['inspect', '--format', '{{.State.Status}}', this.name(job)])).code === 0) {
+        return this.log(`Job ${job.id}: its container won't go, /out waits: ${rm.out.slice(-300)}`);
+      }
       await this.report(job);
       if (!(await this.uploadOutputs(job))) return;
       await this.uploadLog(job);
@@ -1372,6 +1409,11 @@ export class JobRunner {
         return false;
       }
       const body = await readBody(res);
+      if (res.statusCode >= 500) {
+        this.log(`Job ${job.id}: ${f.path}: the app answered ${res.statusCode}, trying again later`);
+        this.save(job);
+        return false;
+      }
       if (res.statusCode === 201) o.uploaded = true;
       else {
         // Over the cap (413) it stays here for job.fetch; once the app ended the job (409, 404) nothing more goes.
@@ -1425,9 +1467,13 @@ export class JobRunner {
     const now = Date.now();
     const dt = Math.min(now - this.lastSample, 2 * this.tickMs) / 1000;
     this.lastSample = now;
+    const slow = ++this.ticks % DISK_CHECK_TICKS === 0;
+    // An end the app didn't hear (a dropped line, a 5xx) is tried again without waiting for a reconnect.
+    if (slow) this.finishUnsent();
     if (!live.length) return;
     const gpu = await this.sampleGpu();
-    const disk = ++this.ticks % DISK_CHECK_TICKS === 0 && this.block ? du(this.block.dir) : 0;
+    // Without a block now, a running job keeps its time limit; the disk cap needs the block's number.
+    const cap = slow && this.block ? this.block.max_disk_gb * 1024 ** 3 : 0;
     for (const j of live) {
       j._gpu = gpu;
       if (j.state === 'running' && !j.pausing) {
@@ -1436,8 +1482,8 @@ export class JobRunner {
           this.stop(j, 'failed', `it hit its time limit of ${Math.round(j.limit_s / 60)} min`);
           continue;
         }
-        if (disk > this.block.max_disk_gb * 1024 ** 3) {
-          this.stop(j, 'failed', `the jobs folder went over its ${this.block.max_disk_gb} GB`);
+        if (cap && du(j.home) > cap) {
+          this.stop(j, 'failed', `the jobs folder went over its ${cap / 1024 ** 3} GB`);
           continue;
         }
       }
@@ -1449,7 +1495,7 @@ export class JobRunner {
   /** Room for `need` more bytes under the disk cap, deleting the oldest finished job folders if it must. */
   makeRoom(need) {
     const cap = this.block.max_disk_gb * 1024 ** 3;
-    let used = du(this.block.dir);
+    const used = du(this.block.dir);
     if (used + need <= cap) return true;
     const done = [];
     for (const e of readdirSync(this.block.dir)) {
@@ -1459,15 +1505,22 @@ export class JobRunner {
         if (j.final_sent) done.push({ id: e, ended: j.ended_at ?? 0 });
       } catch {}
     }
-    for (const { id } of done.sort((a, b) => a.ended - b.ended)) {
-      const d = join(this.block.dir, id);
-      used -= du(d);
-      rmSync(d, { recursive: true, force: true });
+    // Oldest first, and only as many as it takes; none at all when even every one wouldn't make room.
+    let free = used;
+    const go = [];
+    for (const d of done.sort((a, b) => a.ended - b.ended)) {
+      if (free + need <= cap) break;
+      d.size = du(join(this.block.dir, d.id));
+      free -= d.size;
+      go.push(d);
+    }
+    if (free + need > cap) return false;
+    for (const { id } of go) {
+      rmSync(join(this.block.dir, id), { recursive: true, force: true });
       this.jobs.delete(id);
       this.log(`Job ${id}: its folder deleted to make room`);
-      if (used + need <= cap) return true;
     }
-    return false;
+    return true;
   }
 
   /** At start: every job folder, the unfinished ones picked up again where their containers are. */
@@ -1515,10 +1568,13 @@ export class JobRunner {
   /** After each connect (and the info with known()): finish what ended while the app couldn't hear. */
   async connected() {
     await this.ready;
+    this.finishUnsent();
+  }
+
+  finishUnsent() {
     for (const job of this.jobs.values()) {
-      if (job.final_sent) continue;
-      if (job.final) this.finish(job);
-      else if (job._end) this.finish(job, ...job._end);
+      if (job.final_sent || job._finishing || !(job.final || job._end)) continue;
+      this.finish(job, ...(job.final ? [] : job._end)).catch((err) => this.log(`Job ${job.id}: ${err.message}`));
     }
   }
 }

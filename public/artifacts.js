@@ -9,6 +9,7 @@ import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
 import { linkify } from './ui/markdown.js';
+import { parseMarks } from './ui/marks.js';
 import { lightbox } from './ui/media.js';
 import { optimistic } from './ui/optimistic.js';
 import { renderFiles } from './files.js';
@@ -293,12 +294,19 @@ function showMedia(ticket, file) {
   const prefix = `#/f/${ticket.id}/`;
   const pathOf = (a) => a.dataset.file ?? decodeURIComponent(a.getAttribute('href').slice(prefix.length));
   const link = [...viewer.chat.querySelectorAll(`#log a[href^="${prefix}"]`)].find((a) => pathOf(a) === file.path);
-  const paths = [...new Set([...(link?.closest('.msg')?.querySelectorAll(`a[href^="${prefix}"]`) ?? [])].map(pathOf))]
-    .filter((p) => ['image', 'video'].includes(fileKind(p)));
+  const links = [...(link?.closest('.msg')?.querySelectorAll(`a[href^="${prefix}"]`) ?? [])];
+  const paths = [...new Set(links.map(pathOf))].filter((p) => ['image', 'video'].includes(fileKind(p)));
+  // A minion's marked picture (#960) opens with its marks, as marks people can undo, while its Marks toggle is on.
+  const minionMarks = new Map();
+  for (const a of links) {
+    const marked = a.closest('.cui-marked');
+    const own = marked?.querySelector('.cui-marks-toggle > input')?.checked && parseMarks(marked.dataset.marks);
+    if (own && !minionMarks.has(pathOf(a))) minionMarks.set(pathOf(a), own);
+  }
   if (!paths.includes(file.path)) paths.splice(0, paths.length, file.path);
   const items = paths.map((p) => ({
     src: p === file.path ? `${fileUrl(ticket.id, p)}&v=${file.mtime}` : fileUrl(ticket.id, p),
-    kind: fileKind(p), alt: baseName(p),
+    kind: fileKind(p), alt: baseName(p), marks: minionMarks.get(p),
   }));
   viewer.stage.className = 'viewer-stage k-media';
   const kept = new Map();
@@ -309,7 +317,7 @@ function showMedia(ticket, file) {
     render: (item, stage, _, show) => {
       if (item.kind !== 'image') return show();
       const a = annotator(stage, item.src, {
-        marks: kept.get(item.src),
+        ...(kept.has(item.src) ? { marks: kept.get(item.src) } : item.marks ? { marks: item.marks.marks, size: { w: item.marks.w, h: item.marks.h } } : {}),
         doneLabel: 'Add to message',
         onDone: async (canvas) => {
           if (canvas) attachImage(ticket.id, await canvasBlob(canvas));

@@ -1,10 +1,10 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { presenceHead } from './presence.js';
-import { account, ago, api, baseName, clearHighlights, fileHref, formatSize, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
+import { account, ago, api, baseName, clearHighlights, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { mergedView } from './mine.js';
 import { toast } from './ui/status.js';
 import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
-import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
+import { alertNote, composer, composerPlaceholder, outbox, renderModelPicker } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
 import { composerHint, heldLine } from './heldmsg.js';
@@ -13,22 +13,20 @@ import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
 import { jobCard, jobMovedNote } from './jobs.js';
 import { recapEvent, showRecap } from './recap.js';
-import { noteStrike, struckSource } from './strike.js';
 import { narrationSorter } from './narration.js';
 import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
 import { stepMark } from './ui/chat.js';
 import { optimistic } from './ui/optimistic.js';
-import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { releaseChip } from './releases.js';
-import { askHeader } from './askcard.js';
-import { GITHUB_NAME, machineAuthor, senderTone, shortDuration, shortNote } from './chattext.js';
+import { senderTone, shortDuration, shortNote } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerLine } from './payer.js';
 import { sideEvent } from './sidethread.js';
 import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { applyEvent, createProgress, nowDoing, planEstimate } from './progress.js';
+import { clamp, markQueued, messageBody, previewNodes, showTakenBack, strikeNote, unclamp, userBubble } from './bubbles.js';
 import { headState, initSeen, leftText, narrow, phaseRows, progressUi, renderProgress, scheduleProgress } from './progress-ui.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, spendCard } from './cards.js';
 
@@ -1246,176 +1244,6 @@ function syncHeldBrief() {
   if (first) first.before(el); else if (after) after.before(el); else log.append(el);
 }
 
-/** Show a long message's first lines, with a button for the rest. */
-function clamp(msg) {
-  msg.classList.add('clamped');
-  msg.append(h('button', { type: 'button', class: 'show-all small secondary', onclick: () => unclamp(msg) }, 'Show all'));
-}
-
-function unclamp(msg) {
-  msg.classList.remove('clamped');
-  msg.querySelector(':scope > .show-all')?.remove();
-}
-
-/** A message's rendered text, keeping its source so a strike_text that lands later can redraw it. */
-function messageBody(text, strikes, ticketId, eventId) {
-  const body = markdown(struckSource(text, strikes), ticketId);
-  body.dataset.body = eventId;
-  Object.assign(body, { source: text, ticketId, strikes });
-  return body;
-}
-
-/** An object URL for base64 image data (the page's CSP allows blob: images but not data: ones). */
-export function base64Url(mediaType, data) {
-  return URL.createObjectURL(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: mediaType }));
-}
-
-/** A sent image fetched back as { mediaType, data }, the way the composer holds one. */
-async function imageData(src) {
-  const res = await fetch(src);
-  if (!res.ok) throw new Error(`Could not load its image (HTTP ${res.status})`);
-  const blob = await res.blob();
-  const data = await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(',')[1]);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
-  });
-  return { mediaType: blob.type, data };
-}
-
-/**
- * A strike_text note, or null: "Struck through in #116: ~~the wrong words~~ → the reason", linking the
- * chat that shows the message when that's another one.
- */
-function strikeNote(data) {
-  const s = noteStrike(data);
-  if (!s) return null;
-  const c = s.chat;
-  const where = c === null ? ' above' : c ? [' in ', h('a', { class: 'thread-ref', href: c.number == null ? `#/p/${c.project}` : threadNumberHref(c.project, c.number) },
-    c.number == null ? `the ${taskmasterName(c.project)}'s chat` : `#${c.number}`)] : '';
-  return h('div', { class: 'note strike-note' }, `✎ Struck through`, where, ': ', h('del', {}, s.quote), ' → ', threadRefs(s.reason));
-}
-
-/** A chat message from a person; `about`, for a comment on a file, links that file. */
-/**
- * A message still queued for the next turn says so, with a ✕ to take it back and, on your own, a ✎ to
- * take it back into the message box to fix and resend; it loses them once sent.
- */
-function markQueued(bubble, ticket) {
-  if (bubble.classList.contains('withdrawn')) return; // taken back, or being taken back from this tab
-  const id = Number(bubble.dataset.event);
-  const queued = !!ticket?.queued_ids?.includes(id);
-  const tag = bubble.querySelector('.queued-tag');
-  if (!queued) return tag?.remove();
-  if (tag) return;
-  // Both show at once and send behind; a refusal (the turn took it meanwhile) puts the bubble back as it is now.
-  const takeBack = (label, apply, send, undo = () => {}) => optimistic({
-    key: `unqueue:${id}`,
-    apply: () => {
-      showTakenBack(bubble, me);
-      apply();
-    },
-    send,
-    undo: () => {
-      if (!bubble.querySelector('.taken-back-tag.mine')) return; // the server's own "taken back" came meanwhile
-      bubble.classList.remove('withdrawn');
-      bubble.querySelector('.taken-back-tag')?.remove();
-      markQueued(bubble, view?.id === ticket.id ? view.ticket : ticket);
-      undo();
-    },
-    label,
-  });
-  const unqueue = () => api(`api/tickets/${ticket.id}/unqueue`, { method: 'POST', body: { id } });
-  const sent = bubble.sent;
-  let takeOut;
-  const edit = sent && h('button', { type: 'button', class: 'take-back', title: 'Take back to edit', 'aria-label': 'Take back to edit',
-    onclick: (e) => {
-      e.preventDefault();
-      takeBack('take back the message to edit', () => {
-        const form = view?.id === ticket.id && document.querySelector('.composer');
-        // Its files go in now; its images once they have loaded, below.
-        if (form) takeOut = form.editBack(sent.text, sent.files.map((upload) => ({ upload })));
-        else {
-          // A Retry from another chat: the text waits in this chat's draft (attachments stay in the struck bubble).
-          const draft = loadDraft(`cc-draft:${ticket.id}`)?.trim();
-          saveDraft(`cc-draft:${ticket.id}`, draft ? `${sent.text}\n${draft}` : sent.text);
-          takeOut = null;
-        }
-      }, async () => {
-        // Images first: if one won't load, the message stays queued rather than coming back without it.
-        const images = await Promise.all(sent.images.map((name) => imageData(`api/tickets/${ticket.id}/images/${encodeURIComponent(name)}`)));
-        await unqueue();
-        if (takeOut && view?.id === ticket.id) document.querySelector('.composer')?.attach(images);
-      }, () => takeOut?.());
-    } }, '✎');
-  bubble.querySelector('.who').append(h('span', { class: 'msg-tag queued-tag' }, 'queued for the next turn', edit ?? '',
-    h('button', { type: 'button', class: 'take-back', title: 'Take back this message', 'aria-label': 'Take back this message',
-      onclick: (e) => {
-        e.preventDefault(); // a Taskmaster message's ✕ sits in its <summary>
-        takeBack('take back the message', () => {}, unqueue);
-      } }, '✕')));
-}
-
-/** A message struck through as taken back, by the server's word or (class mine) this tab's click while it sends. */
-function showTakenBack(bubble, by, mine = true) {
-  bubble.querySelector('.queued-tag')?.remove();
-  bubble.querySelector('.taken-back-tag')?.remove();
-  bubble.classList.add('withdrawn');
-  bubble.querySelector('.who').append(h('span', { class: `msg-tag taken-back-tag${mine ? ' mine' : ''}` }, `taken back by ${by}`));
-}
-
-export function userBubble(author, text, imageSrcs, about = null, event = null, files = []) {
-  const github = author === GITHUB_NAME;
-  const msg = h('div', { class: github ? 'msg user github' : 'msg user' }, h('div', { class: 'who' }, author,
-    about ? [' on ', h('a', { class: 'about', href: fileHref(about.ticketId, about.path), title: about.path }, about.name)] : ''));
-  // GitHub's messages end lines with bare URLs, which Markdown alone would leave as text.
-  if (github && text) text = text.replace(/(^|\s)(https?:\/\/[^\s<>]*[^\s<>.,;:!?'")\]])/g, '$1[$2]($2)');
-  if (text) msg.append(event ? messageBody(text, event.strikes, null, event.id) : markdown(text));
-  if (imageSrcs.length) {
-    msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
-      h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
-  }
-  if (files.length) msg.append(h('div', { class: 'files' }, files.map(fileChip)));
-  // A contraption's ask: its header and summary, the full text behind the toggle (askcard.js).
-  if (event?.ask) {
-    msg.querySelector('.who').remove();
-    return h('details', { class: 'msg user ask' },
-      h('summary', {}, h('div', { class: 'who' }, askHeader(event.ask)), h('div', { class: 'ask-summary' }, event.ask.summary)), msg);
-  }
-  // Messages between Claudes and from the app aren't meant for people, so they start collapsed to one line,
-  // except the brief that started the minion: it says what the minion is for.
-  const who = machineAuthor(author);
-  // Sent by another agent: it takes its sender's colour (#693), a Taskmaster's (this scheme's or another's) or a minion's.
-  const tone = senderTone(author) ? ` ${senderTone(author)}` : '';
-  // A schedule's brief starts collapsed (Cara, 2026-11-16: "scheduled briefs can start collapsed"), its row naming the schedule; the rest keep the brief open.
-  if (who && event?.brief && !event.schedule) {
-    msg.querySelector('.who').textContent = who;
-    msg.className += tone;
-  } else if (who) {
-    msg.querySelector('.who').remove();
-    return h('details', { class: `msg user coord${tone}` }, h('summary', {}, h('span', { class: 'who' }, h('span', { class: 'name' }, event?.schedule ? `${who}: ${event.schedule}` : who)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
-  }
-  return msg;
-}
-
-/** A collapsed message's one line: its text without Markdown marks, struck words keeping their line. */
-function previewNodes(text, strikes) {
-  // A heading's # marks go, but not a #575 reference's.
-  const flat = (t) => t.replace(/(^|\s)#{1,6}(?=\s)/g, '$1').replace(/[*_`>\[\]~]/g, '').replace(/\s+/g, ' ');
-  // A URL in the one-line preview is still a link (Citadel-wide: links are clickable); it opens without toggling the message.
-  // URLs are found before the marks go, so a link with _ or # in it keeps them.
-  const links = (t) => t.split(/(https?:\/\/[^\s()<>\[\]`]+[^\s()<>\[\]`.,;:!?'"*_~])/).map((bit, i) => (i % 2
-    ? h('a', { href: bit, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, bit) : flat(bit)));
-  return struckSource((text ?? '').trim(), strikes).split(/~~(.+?)~~/).flatMap((part, i) => (i % 2 ? h('del', {}, flat(part)) : links(part)));
-}
-
-/** An attached file in a message: images and PDFs open in a tab (the server says so), anything else downloads. */
-export function fileChip({ name, size, href }) {
-  const opens = /\.(png|jpe?g|gif|webp|avif|pdf)$/i.test(name); // the same list as INLINE in src/uploads.ts
-  return h('a', { class: 'file-chip', href, title: opens ? `Open ${name}` : `Download ${name}`, ...(opens ? { target: '_blank', rel: 'noopener' } : { download: name }) },
-    h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'name' }, name), h('span', { class: 'size' }, formatSize(size)));
-}
 
 
 /** Whether the running turn is under way here: its init event has arrived (initSeen). */

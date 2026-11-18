@@ -3,7 +3,8 @@
 // pasted and dropped files with their drafts, the model and effort pickers, and steer or queue mid-turn.
 import { account, api, formatSize, h, noAutofill, isCoordinator, me, uploadUrl, view } from './base.js';
 import { codex, reloadWhenIdle, scrollToBottom, sending, setSending } from './core.js';
-import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
+import { adoptTicket, renderTyping } from './thread.js';
+import { base64Url, blobBase64, userBubble } from './bubbles.js';
 import { mountComposer } from './ui/composer.js';
 import { openDialog } from './ui/dialog.js';
 import { lightbox } from './ui/media.js';
@@ -733,14 +734,6 @@ async function encodeCanvas(canvas) {
   if (!blob || blob.size > MAX_IMAGE_BYTES) throw new Error('image is too large');
   return blob;
 }
-
-/** A blob's bytes as base64, the way a message carries an image. */
-const blobBase64 = (blob) => new Promise((resolve, reject) => {
-  const r = new FileReader();
-  r.onload = () => resolve(String(r.result).split(',')[1]);
-  r.onerror = () => reject(r.error);
-  r.readAsDataURL(blob);
-});
 
 export function alertNote(text) {
   document.getElementById('log')?.append(h('div', { class: 'note error' }, text));

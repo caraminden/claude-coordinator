@@ -112,8 +112,10 @@ export function ciPage(projectId) {
         : tab === 'runs' ? [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map(runRow)) : h('p', { class: 'muted' }, 'No runs in the last day.'))]
           : runners(s, data.pcs)));
   };
+  let tried = false;
   const load = async () => {
-    if (data && !el.isConnected) return;
+    if (tried && !el.isConnected) return;
+    tried = true;
     try {
       data = await api('api/ci');
       draw();
@@ -155,7 +157,7 @@ async function readChips() {
 /** The CI chip: a dot and "CI", opening the page for the scheme on screen (or `projectId`). Hidden until a scheme with CI is there. */
 export function ciChip(projectId = null) {
   const c = h('a', { class: 'ci-chip', hidden: true, href: projectId ? `#/p/${projectId}/ci` : '#/',
-    onclick: () => { if (!projectId) c.href = `#/p/${view?.projectId ?? localStorage.getItem(LAST_SCHEME) ?? ''}/ci`; } },
+    onclick: () => { const id = projectId ?? view?.projectId ?? localStorage.getItem(LAST_SCHEME); c.href = id ? `#/p/${id}/ci` : '#/'; } },
   h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, 'CI'));
   chips.add(c);
   if (projectId === null) c.dataset.placed = '1';

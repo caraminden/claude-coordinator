@@ -263,7 +263,7 @@ function openViewer(ticket, file, inPlace) {
 }
 
 /**
- * A picture or clip opens in the kit's lightbox (#833): clips get the scrubber, wide pictures the panner, and
+ * A picture or clip opens in the kit's lightbox (#833): clips get the scrubber, pictures whole (a wide screenshot is not panned), and
  * the other pictures and clips of the message it was linked from come along, stepped with ‹ ›, ←/→ or the
  * filmstrip. A card's picture options keep their own stepping (galleryControls), so they don't come here.
  */

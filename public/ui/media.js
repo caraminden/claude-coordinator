@@ -611,7 +611,7 @@ export function panner(img, opts = {}) {
 
 const kindOf = (item) => item.kind ?? (/\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(item.src) ? 'video' : 'image');
 
-/** What the lightbox shows for an item unless the app passes render: a picture (panned when wide) or a clip with the scrubber. */
+/** What the lightbox shows for an item unless the app passes render: a picture (whole; panned when wide and the app opted in) or a clip with the scrubber. */
 function show(item, stage, opts) {
   if (kindOf(item) === 'video') {
     const auto = !!opts.autoplay;
@@ -624,8 +624,9 @@ function show(item, stage, opts) {
   }
   const img = el('img', { src: item.src, alt: item.alt ?? item.caption ?? '', class: item.rotate ? `cui-r${item.rotate}` : null });
   stage.append(img);
-  if (opts.pan === false || item.rotate) return null;
-  // A picture twice as wide as tall pans when it doesn't fit its box (the panner shows it whole when it does).
+  // Panning is opt-in: the lightbox's `pan: true`, or the item's own pan direction or onPan. Otherwise the picture shows whole.
+  if (item.rotate || !(opts.pan === true || item.pan || item.onPan)) return null;
+  // An opted-in picture twice as wide as tall pans when it doesn't fit its box (the panner shows it whole when it does).
   const ctl = { toggle() {} };
   const wide = () => {
     if (img.isConnected && img.naturalWidth >= 2 * img.naturalHeight) Object.assign(ctl, panner(img, { pan: item.pan, onPan: item.onPan }));

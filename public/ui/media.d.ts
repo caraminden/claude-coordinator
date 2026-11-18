@@ -133,7 +133,7 @@ export interface LightboxItem {
   sprite?: string;
   onStart?: (ms: number | null) => void;
   onEnd?: (ms: number | null) => void;
-  /** A panorama's direction, as PannerOptions has it. */
+  /** A panorama's direction, as PannerOptions has it. Giving it opts this item in to panning when it's wide. */
   pan?: PanDirection;
   onPan?: (pan: PanDirection) => void;
 }
@@ -151,7 +151,7 @@ export interface LightboxOptions {
   render?: (item: LightboxItem, stage: HTMLElement, at: number) => { toggle?(): void; destroy?(): void } | null | void;
   /** Clips start playing as they show, muted and on a loop, as a GIF would (default false). */
   autoplay?: boolean;
-  /** false: wide pictures don't pan. */
+  /** true: pictures at least twice as wide as tall pan (the panner). Default false: every picture shows whole, fit to the box. An item with its own `pan` or `onPan` pans either way. */
   pan?: boolean;
   /** false: no ←/→ and Space on the document. */
   keys?: boolean;
@@ -174,7 +174,7 @@ export interface Lightbox {
 
 /**
  * Pictures and clips one at a time: ‹ › on the stage's edges (not on a phone, which swipes), a filmstrip and count under it, ←/→ and a swipe to
- * step (wrapping round), Space to play the clip or pause the pan. Clips get the scrubber; pictures at least twice
- * as wide as tall get the panner.
+ * step (wrapping round), Space to play the clip or pause the pan. Clips get the scrubber; pictures show whole; with
+ * `pan: true` (or an item's `pan`/`onPan`) those at least twice as wide as tall get the panner.
  */
 export function lightbox(items: LightboxItem[], opts?: LightboxOptions): Lightbox;

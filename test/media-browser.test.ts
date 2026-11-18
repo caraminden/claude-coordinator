@@ -141,6 +141,18 @@ test('panner: a wide picture pans and the slider looks around; reduced motion st
   await waitFor(page, 'a picture that fits to show whole', `q.el.classList.contains('cui-pan-fits')`);
 });
 
+test('lightbox: a wide picture shows whole unless the app opts in to panning', { skip }, async () => {
+  const page = await browser.page(app.base, { width: 700, height: 600 });
+  await page.eval(`window.lb = lightbox([{ src: '/media/panorama.svg' }], { into: box })`);
+  await waitFor(page, 'the picture to load', `document.querySelector('.cui-lb-stage img')?.complete`);
+  await frames(page, 5);
+  assert.equal(await page.eval(`!!document.querySelector('.cui-panner')`), false, 'no panner by default');
+  await page.eval(`lb.destroy(); box.replaceChildren(); window.lb = lightbox([{ src: '/media/panorama.svg' }], { into: box, pan: true })`);
+  await waitFor(page, 'the opted-in panner', `!!document.querySelector('.cui-panner')`);
+  await page.eval(`lb.destroy(); box.replaceChildren(); window.lb = lightbox([{ src: '/media/panorama.svg', pan: 'ltr' }], { into: box })`);
+  await waitFor(page, 'an item that asks for pan', `!!document.querySelector('.cui-panner')`);
+});
+
 test('lightbox: ←/→ step and wrap, the app hears of a person\'s move but not of its own go(); keys in a field stay there', { skip }, async () => {
   const page = await browser.page(app.base, { width: 700, height: 600 });
   await page.eval(`window.lb = lightbox([{ src: '/media/screen-1.svg' }, { src: clip, kind: 'video' }, { src: '/media/screen-2.svg', caption: 'Minions' }],

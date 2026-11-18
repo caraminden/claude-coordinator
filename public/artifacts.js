@@ -255,6 +255,7 @@ function openViewer(ticket, file, inPlace) {
     document.body.append(dialog);
     dialog.showModal();
     viewer = { dialog, stage, bar, chat, placeholder, inPlace, scrollY };
+    watchKeyboard(dialog);
     // Keep the clicked embed in sight in the narrower chat, unless you were following the end.
     const link = [...chat.querySelectorAll('#log a[href]')].reverse().find((a) => a.getAttribute('href') === location.hash);
     // A card's picture keeps the card in sight, so its pick shows beside the picture.
@@ -349,6 +350,34 @@ export function closeViewer() {
 }
 
 /** × or Esc: back to the chat, as the browser's back button would when it was opened from there. */
+/**
+ * Phones: while the keyboard is up for a field inside the viewed page (focus is on its frame), the page gets the
+ * whole screen: `kb-page` hides the chat under it and sizes the dialog to the visual viewport. Both come back when
+ * the keyboard closes. Only a class and a height change, so nothing else moves.
+ */
+function watchKeyboard(dialog) {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  let tallest = vv.height;
+  const stop = () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); removeEventListener('focusin', update); removeEventListener('blur', onBlur, true); };
+  const update = () => {
+    if (!dialog.isConnected) return stop();
+    tallest = Math.max(tallest, vv.height);
+    const typing = document.activeElement?.classList.contains('artifact-frame') && matchMedia('(max-width: 800px)').matches
+      && vv.height < tallest - 120;
+    dialog.classList.toggle('kb-page', !!typing);
+    // Chrome on Android shrinks only the visual viewport: size and place the dialog to it.
+    dialog.style.height = typing ? `${vv.height}px` : '';
+    dialog.style.top = typing ? `${vv.offsetTop}px` : '';
+    dialog.style.bottom = typing ? 'auto' : '';
+  };
+  const onBlur = () => setTimeout(update);
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+  addEventListener('focusin', update);
+  addEventListener('blur', onBlur, true);
+}
+
 function leaveViewer() {
   if (viewer.inPlace) history.back();
   else replaceHash(threadHref(viewer.ticket));

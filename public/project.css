@@ -469,6 +469,9 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
   /* The page is already open, so its card's reminder strip (Open the page, #821) has nothing to add: the page gets the room (#831). */
   dialog.viewer #chat-waiting { display: none; }
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
+  /* The keyboard is up for a field in the page: the page takes the screen, the chat comes back with the keyboard's close (watchKeyboard). */
+  dialog.viewer.kb-page { grid-template-rows: minmax(0, 1fr); }
+  dialog.viewer.kb-page > .chat { display: none; }
 }
 /* After the rows' own rules, which set their padding: phones give them --control-h of tap room (#471). */
 @media (max-width: 800px) { .nav-item { padding-block: max(0.3rem, (var(--control-h) - 1lh) / 2); } .scheme-hide { min-height: var(--control-h); } }

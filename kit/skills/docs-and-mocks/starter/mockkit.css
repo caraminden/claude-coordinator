@@ -303,10 +303,16 @@ h2[data-shape="star"] .mk-glyph { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68
 .mk-dock .mk-dock-text { font-variant-numeric: tabular-nums; line-height: 1.4rem; min-height: 1.4rem; }
 .mk-dock .mk-sent { height: 1.4rem; line-height: 1.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 899px) { .mk-dock .mk-dock-text { min-height: 2.8rem; } }
+/* Phones: one short line (the count, with Send beside it), no reserved block. The message's second line
+   (Sent / an error) drops under the count only when there is one. */
 @media (max-width: 560px) {
-  .mk-dock { grid-template-columns: minmax(0, 1fr); }
-  .mk-dock > button { width: 100%; justify-self: stretch; }
-  .mk-dock .mk-dock-text { min-height: 4.2rem; }
+  .mk-dock { grid-template-columns: minmax(0, 1fr) auto; margin-top: 1rem; padding-block: 0.4rem calc(0.4rem + env(safe-area-inset-bottom)); gap: 0.5rem; font-size: 0.82rem; }
+  .mk-dock > button { width: auto; max-width: 9rem; padding: 0.35rem 0.8rem; }
+  .mk-dock .mk-dock-text { min-height: 0; line-height: 1.3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mk-dock .mk-sent { height: auto; line-height: 1.2rem; }
+  .mk-dock .mk-sent:empty { display: none; }
+  /* A focused field scrolls into view above the sticky dock, not under it. */
+  html { scroll-padding-bottom: 4.5rem; }
 }
 /* In Citadel's viewer a picture opens to draw on (#946); a marked one keeps an accent ring. */
 .mk-draw img:not(a img, button img) { cursor: crosshair; }

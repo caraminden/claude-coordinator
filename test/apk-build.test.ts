@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -268,6 +268,7 @@ test("the commit a build failed at outlasts a restart: a new builder doesn't tel
 /** A contraption like voice: Capacitor root android/, native project android/native, webDir android/www, named in citadel-app.json. */
 function subApp(name: string, manifest = true) {
   const a = app(name, false);
+  mkdirSync(join(a.live, 'android/node_modules'), { recursive: true }); // voice's Capacitor packages: android/package.json
   commit(a.live, {
     ...(manifest ? { 'citadel-app.json': JSON.stringify({ capacitor: { root: 'android', android: 'android/native' } }) } : { 'citadel-app.json': '{}' }),
     'android/capacitor.config.json': JSON.stringify({ appId: 'x', webDir: 'www' }),
@@ -285,6 +286,7 @@ test('a Capacitor project in a subfolder named in citadel-app.json is built from
   assert.equal(feed(data).versionName, '2.0');
   const cap = calls.find((c) => c.includes('sync'))!;
   assert.equal(cwds.get(cap.join(' ')), join(root, 'cache/sub/src/android'), 'cap sync runs in the Capacitor root');
+  assert.equal(readlinkSync(join(root, 'cache/sub/src/android/node_modules')), join(root, 'apps/sub/android/node_modules'), 'the Capacitor root\'s packages are linked, where cap sync and the Gradle files look');
   const gradle = calls.find((c) => c.includes('assembleRelease'))!;
   assert.equal(cwds.get(gradle.join(' ')), join(root, 'cache/sub/src/android/native'), 'Gradle runs in the Android project');
   commit(live, { 'src/server.ts': '2' });

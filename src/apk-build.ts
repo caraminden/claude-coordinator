@@ -234,13 +234,18 @@ export class ApkBuilds {
       const added = await git(live, 'worktree', 'add', '--force', '--detach', src, commit);
       if (added.code !== 0) return fail(`couldn't make a build checkout at ${src}`);
     }
-    // Its packages are the live slot's, which the deploy's build steps installed (npm ci): Capacitor's Android code is in them.
-    const modules = join(live, 'node_modules');
-    if (!existsSync(modules)) return fail(`${live} has no node_modules: its citadel-app.json build steps must install its packages (npm ci) for Capacitor's Android project`);
-    const link = join(src, 'node_modules');
-    if ((await readlink(link).catch(() => null)) !== modules) {
-      if (await lstat(link).catch(() => null)) await rm(link, { recursive: true, force: true });
-      await symlink(modules, link);
+    // Its packages are the live slot's, which the deploy's build steps installed (npm ci): Capacitor's Android code is in them,
+    // at the checkout's root and, for a project in a subfolder, in that folder's own node_modules (cap sync and the Gradle files look there).
+    const folders = cap.root ? ['', cap.root] : [''];
+    const have = folders.filter((f) => existsSync(join(live, f, 'node_modules')));
+    if (!have.length) return fail(`${live} has no node_modules${cap.root ? ` (nor ${cap.root}/node_modules)` : ''}: its citadel-app.json build steps must install its packages (npm ci${cap.root ? ` --prefix ${cap.root}` : ''}) for Capacitor's Android project`);
+    for (const f of have) {
+      const modules = join(live, f, 'node_modules');
+      const link = join(src, f, 'node_modules');
+      if ((await readlink(link).catch(() => null)) !== modules) {
+        if (await lstat(link).catch(() => null)) await rm(link, { recursive: true, force: true });
+        await symlink(modules, link);
+      }
     }
     if (built) {
       // Copied, not linked: cap sync copies a link into the APK's assets as a link.

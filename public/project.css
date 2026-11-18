@@ -480,6 +480,7 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-li { display: grid; grid-template-columns: 0.6rem minmax(0, 1fr); gap: 0.1rem 0.5rem; align-items: center; padding: 0.4rem 0.6rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .ci-li:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .ci-li.on { background: var(--panel); box-shadow: inset 2px 0 0 var(--accent); }
+.ci-more { display: none; }
 .ci-li-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-li-state { grid-column: 2; font-size: 0.8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-detail { display: grid; gap: var(--space-3); min-width: 0; align-content: start; }
@@ -511,7 +512,13 @@ a.ci-run:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 @media (max-width: 800px) {
   .ci-page { padding: var(--space-2); }
   .ci-split { grid-template-columns: minmax(0, 1fr); }
-  .ci-list { position: static; grid-auto-flow: column; grid-auto-columns: minmax(9rem, max-content); overflow-x: auto; }
+  .ci-list { position: static; }
+  .ci-li, .ci-more { min-height: 44px; grid-template-columns: 0.6rem minmax(0, 1fr) auto; }
+  .ci-li-state { grid-column: auto; text-align: right; }
+  .ci-more { display: grid; gap: 0.1rem 0.5rem; align-items: center; padding: 0.4rem 0.6rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+  .ci-more .ci-li-name { font-weight: 500; }
+  .ci-more .ci-li-state { max-width: 55vw; }
+  .ci-list:not(.greens-open) .ci-li[data-state="ready"]:not(.on) { display: none; }
   .ci-run { grid-template-columns: 0.6rem 4.5rem minmax(0, 1fr) 4rem; }
   .ci-run-branch { display: none; }
 }

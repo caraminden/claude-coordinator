@@ -82,6 +82,7 @@ function runners(s, pcs) {
 export function ciPage(projectId) {
   let picked = projectId;
   let tab = 'overview';
+  let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
   const list = h('nav', { class: 'ci-list', 'aria-label': 'Schemes with CI' });
   const detail = h('div', { class: 'ci-detail' }, h('p', { class: 'muted' }, 'Reading CI…'));
@@ -95,13 +96,19 @@ export function ciPage(projectId) {
       return;
     }
     const s = schemes.find((x) => x.id === picked) ?? schemes[0];
-    list.replaceChildren(...schemes.map((x) => {
+    const rows = schemes.map((x) => {
       const st = stateOf(x, now);
       const n = x.problems.length;
-      return h('button', { type: 'button', class: `ci-li${x === s ? ' on' : ''}`, 'aria-current': x === s ? 'true' : null, onclick: () => { picked = x.id; draw(); } },
+      return h('button', { type: 'button', class: `ci-li${x === s ? ' on' : ''}`, 'data-state': st, 'aria-current': x === s ? 'true' : null, onclick: () => { picked = x.id; draw(); } },
         h('span', { class: `dot ${st}` }), h('span', { class: 'ci-li-name' }, x.name),
         h('span', { class: 'ci-li-state muted' }, n ? `${n} problem${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]));
-    }));
+    });
+    // The toggle (phones only, by CSS) lists the hidden all-clear names, so every scheme stays in view.
+    const hidden = schemes.filter((x) => x !== s && stateOf(x, now) === 'ready');
+    list.classList.toggle('greens-open', greensOpen);
+    list.replaceChildren(...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); } },
+      h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide all clear' : `${hidden.length} all clear`),
+      h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '');
     const tabs = [['overview', 'Overview'], ['runs', 'Runs'], ['runners', 'Runners']];
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, s.name), ext(`https://github.com/${s.view.slug}/actions`, `${s.view.slug} on GitHub`),

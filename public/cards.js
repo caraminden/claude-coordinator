@@ -421,15 +421,17 @@ export function questionCard(ticketId, card, opts = {}) {
   while (picks.length < card.questions.length) picks.push({ selected: new Set(), other: '' }); // a card that grew since it was last drawn
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
   let pictures = card.questions.some((q) => q.options.some((o) => o.image));
-  if (!cardPictures.has(card.id)) cardPictures.set(card.id, cardAttachments(ticketId, () => {}));
+  if (!cardPictures.has(card.id)) cardPictures.set(card.id, cardAttachments(ticketId, () => cardPictures.get(card.id)?.onChange?.()));
   const atts = cardPictures.get(card.id);
+  atts.onChange = () => refresh();
   const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });
   // A machine job's go card: the job's card in the chat links here (#859).
   const el = h('div', { class: 'qcard', ...(card.job ? { 'data-go-job': card.job } : {}) });
   let answered = false;
 
-  const ready = () => picks.every((p) => p.selected.size || p.other.trim());
+  // A picture attached counts as the answer for any question left blank (Cara, 2026-11-18).
+  const ready = () => atts.items.some((i) => i.data || i.upload?.name) || picks.every((p) => p.selected.size || p.other.trim());
   const refresh = () => {
     for (const [i, q] of card.questions.entries()) {
       for (const btn of el.querySelectorAll(`[data-q="${i}"] .opt`)) btn.classList.toggle('picked', picks[i].selected.has(btn.dataset.label));

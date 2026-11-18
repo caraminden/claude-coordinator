@@ -239,14 +239,15 @@ export async function unparkTicket(app: App, ticket: Ticket, by: string, author:
 }
 
 /** A person's picks for each question of a card: chosen option labels, plus optional free text. */
-function cleanAnswers(questions: any[], raw: unknown) {
+function cleanAnswers(questions: any[], raw: unknown, pictured = false) {
   if (!Array.isArray(raw) || raw.length !== questions.length) throw new HttpError(400, 'Answer every question on the card (a question may have joined it since you opened it)');
   return questions.map((q, i) => {
     const a: any = raw[i] ?? {};
     const selected = Array.isArray(a.selected) ? [...new Set(a.selected.filter((l: unknown) => q.options.some((o: any) => o.label === l)))] as string[] : [];
     const other = typeof a.other === 'string' ? a.other.trim().slice(0, 2000) : '';
     if (!q.multiSelect && selected.length > 1) throw new HttpError(400, `Pick one answer for question ${i + 1}`);
-    if (!selected.length && !other) throw new HttpError(400, `Answer question ${i + 1}`);
+    // A picture sent with the answer counts for every question left blank (Cara, 2026-11-18).
+    if (!selected.length && !other && !pictured) throw new HttpError(400, `Answer question ${i + 1}`);
     return other ? { selected, other } : { selected };
   });
 }
@@ -667,7 +668,7 @@ export const ticketRoutes: Route[] = [
         return json(res, 202, ticketView(app, id));
       }
       const { questions } = data;
-      const answers = cleanAnswers(questions, body.answers);
+      const answers = cleanAnswers(questions, body.answers, (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0));
       // A machine job's go card (#857): only the machine's owner or an admin answers it, and their pick is the job's go.
       // The minion that asked hears it held, with no turn: it is woken when the job ends or is refused.
       if (data.job) {
@@ -681,7 +682,7 @@ export const ticketRoutes: Route[] = [
       const text = questions.map((q: any, i: number) => {
         const { selected, other } = answers[i];
         // The text typed with a pick expands on it; typed alone, it is the answer.
-        const picked = selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
+        const picked = !selected.length && !other ? '(no option picked; see the attached image)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
       const answer = { answer: { questionId: body.questionId, answers } };

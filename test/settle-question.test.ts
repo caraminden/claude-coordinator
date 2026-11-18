@@ -154,3 +154,17 @@ test('a card answer carries pasted images to the minion in the same message, and
   assert.equal(answer.images.length, 1);
   assert.match(answer.images[0], /\.png$/);
 });
+
+// Cara, 2026-11-18: "you should be able to click send with just the image and no other option or text selected".
+test('an image alone answers a card: no pick needed, the minion is told so beside the image; no image and no pick is still refused', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAHnOcQAAAAABJRU5ErkJggg==';
+  const { id } = await ask('Look at this?');
+  await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: [], other: '' }] } }), /400 Answer question 1/);
+  const before = turns().length;
+  await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: [], other: '' }], images: [{ mediaType: 'image/png', data: png }] } });
+  await until('the answer turn', () => turns().length > before);
+  await idle(ticket.id);
+  const prompt = JSON.stringify(turns().at(-1).prompt);
+  assert.ok(prompt.includes('Look at this?\\n→ (no option picked; see the attached image)'), prompt);
+  assert.ok(prompt.includes('"type":"image"'), prompt);
+});

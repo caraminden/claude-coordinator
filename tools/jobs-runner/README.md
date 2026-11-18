@@ -143,7 +143,7 @@ says so in its log when the folders change.
 
 ## What has been tested
 
-On perigee (#858): `test/machine-jobs.test.ts` drives the runner against a fake podman, a fake `nvidia-smi` and a
+On perigee (#858): `test/machine-agent-jobs.test.ts` drives the runner against a fake podman, a fake `nvidia-smi` and a
 stand-in for the app's job routes: every refusal, the exact `podman run` arguments, links out of `/out`, the time
 limit with paused time left out, pause both ways, stop, and picking jobs up again after an agent restart.
 On the desktop (#856): podman, the GPU, `podman pause`, SIGTERM and the folder wall, by hand, as root inside the

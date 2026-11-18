@@ -444,7 +444,7 @@ export function questionCard(ticketId, card, opts = {}) {
     el.classList.toggle('answered', on);
     for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = on;
     sendBtn.hidden = on;
-    attach.hidden = on;
+    attach.hidden = on || !!card.job;
     if (pictures) refreshViewerBar();
   };
   // Once the picks are complete, bring the Send button clear of the sticky message box: on a phone it
@@ -547,6 +547,7 @@ export function questionCard(ticketId, card, opts = {}) {
   const picker = h('input', { type: 'file', multiple: true, hidden: true });
   picker.addEventListener('change', () => { atts.add(picker.files); picker.value = ''; });
   const attach = h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() }, h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach'));
+  attach.hidden = !!card.job; // a machine job's go card answers with its pick only
   const row = h('div', { class: 'row' }, attach, status, h('span', { class: 'spacer' }), sendBtn);
   el.addEventListener('paste', (e) => {
     const files = e.target.closest?.('.other') ? pastedFiles(e.clipboardData) : [];

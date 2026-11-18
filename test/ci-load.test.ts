@@ -95,7 +95,7 @@ test('the rule: fine, could do more, full, overloading, and no samples', () => {
   assert.match(v(window({ mem_free: 10e9, runners: [] }), []).text, /^Overloading: only 5% of its memory is free\. CI isn't the cause/);
 
   assert.match(v([], full()).text, /^No samples yet: the runner agent on this PC needs its update/);
-  assert.match(v([sample(20 * MIN)], full()).text, /^No samples since Nov 11 13:40: the PC is off/);
+  assert.match(v([sample(20 * MIN)], full()).text, /^No samples since Nov 11, 05:40 PST: the PC is off/);
 });
 
 test('a hard restart with CI jobs running is "crashed under load" for a day, and never "add a runner"', () => {
@@ -108,7 +108,7 @@ test('a hard restart with CI jobs running is "crashed under load" for a day, and
   const jobs = [...killed, ...full(), queued(14 * MIN)];
   const got = verdict(samples, pools(PC, jobs, samples, projects, NOW), jobs, NOW);
   assert.equal(got.kind, 'crash');
-  assert.equal(got.text, 'Crashed under load: the PC restarted without a clean shutdown at about Nov 11 13:29, with 4 CI jobs running (Peek Auras). Add no runners until that\'s explained.');
+  assert.equal(got.text, 'Crashed under load: the PC restarted without a clean shutdown at about Nov 11, 05:29 PST, with 4 CI jobs running (Peek Auras). Add no runners until that\'s explained.');
   // The same restart with nothing running isn't CI's: the queue rule speaks.
   const quiet = [...full(), queued(14 * MIN)];
   assert.equal(verdict(samples, pools(PC, quiet, samples, projects, NOW), quiet, NOW).kind, 'more');

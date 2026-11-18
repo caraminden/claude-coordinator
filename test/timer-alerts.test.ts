@@ -48,7 +48,7 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   assert.equal(calls[0].from, 'Mandate', "from the app's home scheme");
   assert.equal(calls[0].link, `/c/#/p/${scheme.id}`);
   assert.equal(calls[0].key, 'timer.citadel-app-mandate-backup');
-  assert.match(calls[0].title!, /^Mandate's backup timer failed Nov 11 \d\d:00 \(exit 1\)\. Last lines: Copying data for 3 people \| copy failed for josh: EACCES token=\[hidden\] \| Backup failed: 1 of 3 files$/);
+  assert.match(calls[0].title!, /^Mandate's backup timer failed Nov 11, \d\d:00 PST \(exit 1\)\. Last lines: Copying data for 3 people \| copy failed for josh: EACCES token=\[hidden\] \| Backup failed: 1 of 3 files$/);
 
   down = '';
   calls.length = 0;

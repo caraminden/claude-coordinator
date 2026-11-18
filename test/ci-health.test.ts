@@ -136,7 +136,10 @@ test('a red on main is a quiet item while its fix is on the way, and rings when 
   assert.equal(started.title, 'CI: desktop.yml failed on main (run 44370680700, at windows › Test): fix minion #971 started');
 
   const closed = { number: 971, closedAt: NOW + HOUR };
-  assert.equal(redProblem('desktop.yml', 'main', mark, red, closed, NOW + 2 * HOUR)!.quiet, true, 'closed, and no verdict since: waiting on the next run');
+  assert.equal(redProblem('desktop.yml', 'main', mark, red, closed, NOW + HOUR + 30 * MIN)!.quiet, true, 'closed, and no verdict since: waiting on the next run');
+  const stale = redProblem('desktop.yml', 'main', mark, red, closed, NOW + 2 * HOUR)!;
+  assert.equal(stale.quiet, undefined, 'an hour after it closed with no newer run, it rings');
+  assert.match(stale.title, /still red an hour after fix minion #971 closed$/);
   const after = runOf({ id: 44370699999, workflow_id: 9, conclusion: 'failure', head_sha: '323bf97aaaa', created_at: new Date(NOW + 90 * MIN).toISOString() });
   const held = redProblem('desktop.yml', 'main', mark, after, closed, NOW + 2 * HOUR)!;
   assert.equal(held.quiet, undefined, 'still red after the fix closed rings');

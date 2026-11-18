@@ -25,7 +25,7 @@
 // woken once for that red streak, sharing the red mark above, so later red runs say nothing until it's back to green.
 // #968 (Cara, 2026-11-18: "alerts should only happen when something is broken and needs fixing, and there should be
 // more insight into what happened and why and how we can fix it"; her picks on #968's card the same day) narrows what
-// rings to what needs a person, and every item says what, why and the fix, linking the CI page (#/p/N/ci):
+// rings to what needs a person, and every item says what, why and the fix (and links the CI page, #/p/N/ci, once it lands):
 //   - a red on main ("Quiet item, Taskmaster fixes"): every workflow not in ci_quiet is watched as #774's were, its
 //     Taskmaster woken to start a fix minion, and the scheme gets a quiet item; it rings only when no minion naming the
 //     run starts within RED_FIX_MS, or the newest verdict after that minion closed is still red;
@@ -249,7 +249,7 @@ export interface Fix {
 /**
  * A red on main (#968, Cara: "Quiet item, Taskmaster fixes"): a quiet item while a fix is on its way, ringing when none
  * started within RED_FIX_MS of the Taskmaster hearing, or the newest verdict, made after the fix minion closed, is still
- * red. `newest` is the workflow's newest verdict there; green, and there is nothing to say.
+ * red, or that minion closed RED_FIX_MS ago with no newer run. `newest` is the workflow's newest verdict there; green, and there is nothing to say.
  */
 export function redProblem(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number): Problem | null {
   if (newest.conclusion !== 'failure') return null;
@@ -260,6 +260,12 @@ export function redProblem(file: string, branch: string, mark: RedMark, newest: 
     return { key, title: `${what}, and is still red after fix minion #${fix.number} closed`,
       why: `run ${newest.id} on ${short(newest.head_sha)}, made after #${fix.number} closed at ${clock(fix.closedAt)}, failed too, so the fix didn't hold`,
       fix: `reopen #${fix.number} or start another fix minion naming run ${newest.id}; if it's CI itself (a runner, GitHub), add ${file} to the scheme's quiet CI workflows` };
+  }
+  // Closed an hour with no newer run: it landed nothing that ran CI, so main is still red with nobody on it.
+  if (fix?.closedAt != null && now - fix.closedAt >= RED_FIX_MS) {
+    return { key, title: `${what}, and is still red an hour after fix minion #${fix.number} closed`,
+      why: `no ${file} run on ${branch} has gone green since #${fix.number} closed at ${clock(fix.closedAt)}`,
+      fix: `reopen #${fix.number} or start another fix minion naming run ${mark.run}; if a fix landed, re-run ${file} on ${branch} to check it` };
   }
   if (fix) {
     return { key, quiet: true, title: `${what}: fix minion #${fix.number} ${fix.closedAt == null ? 'started' : 'closed, waiting on the next run'}`,

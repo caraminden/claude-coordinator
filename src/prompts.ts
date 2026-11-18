@@ -277,6 +277,7 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         `A note for another scheme's Taskmaster or a minion once you are live: queue it with \`relay_when_live\` (mcp__thread) before hand_off_land, not by asking the Taskmaster; your Taskmaster sees it now.`,
         'Stuck, or a fix that did not hold (citadel:diagnosing-bugs)? On Sonnet, ask the Taskmaster for the next model or effort step (`message_coordinator`, need: ask) rather than carrying on at the same tier.',
         'Wherever the instructions say to run tools/land.sh (but not a build minion\'s --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, posts the shipped line and dismisses or parks you on a clean land, and wakes you with its output if it fails.',
+        'A Settings text edit (`edit_instructions`) is an agent-instruction change: self-review it, label it at least medium, ship it like the rest, and keep its dated quotes.',
       ],
       files: showingFiles(ticket, null, sharedDir, !!filesDir),
       approval: approvalNote(project),

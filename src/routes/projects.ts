@@ -808,7 +808,7 @@ export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects/:project/instructions/history', who: ['person'],
     handler({ res, app, project }) {
-      const history = app.store.instructionHistory(project.id, 5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
+      const history = app.store.instructionHistory(project.id, 5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text), before: h.old_text }));
       return json(res, 200, { history });
     },
   },
@@ -883,8 +883,60 @@ export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/app/instructions/history', who: ['person'], access: 'admin',
     handler({ res, app }) {
-      const history = app.store.appInstructionHistory(5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
+      const history = app.store.appInstructionHistory(5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text), before: h.old_text }));
       return json(res, 200, { history });
+    },
+  },
+  {
+    // edit_instructions (#961): a minion edits its scheme's or the Citadel-wide Settings text like any other instruction file.
+    // Every find must match exactly once, or nothing is saved; one save through the same setters and history as Settings.
+    method: 'POST', path: '/api/tickets/:ticket/edit-instructions', who: ['minion'], refuse: 'Only the minion itself can edit instructions from its chat',
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      const { store, runner } = app;
+      const body = await readJson(req);
+      if (body.scope !== 'scheme' && body.scope !== 'citadel') throw new HttpError(400, 'scope must be "scheme" or "citadel"');
+      if (!Array.isArray(body.edits) || !body.edits.length) throw new HttpError(400, 'edits must be a non-empty list of { find, replace }');
+      const edits = body.edits as { find?: unknown; replace?: unknown }[];
+      const citadel = body.scope === 'citadel';
+      if (citadel) {
+        const refused = adminAskRefusal(store, ticket.id);
+        if (refused) throw new HttpError(403, refused);
+      }
+      const project = store.getProject(ticket.project_id)!;
+      const original = citadel ? store.appInstructions().text : project.instructions;
+      let text = original;
+      const failed: string[] = [];
+      edits.forEach((e, i) => {
+        if (typeof e?.find !== 'string' || !e.find || typeof e.replace !== 'string') return void failed.push(`edit ${i + 1}: find must be non-empty text and replace must be text`);
+        const n = text.split(e.find).length - 1;
+        if (n !== 1) return void failed.push(`edit ${i + 1}: "${e.find.slice(0, 60)}" matches ${n} times, not once`);
+        text = text.replace(e.find, () => e.replace as string);
+      });
+      if (failed.length) throw new HttpError(409, `Nothing saved. ${failed.join('; ')}`);
+      text = text.replace(/\r\n/g, '\n').trim();
+      if (text.length > MAX_INSTRUCTIONS) throw new HttpError(400, `Instructions would be ${text.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
+      if (text === original) throw new HttpError(400, 'Those edits change nothing');
+      const askerId = store.turnAsker(ticket.id);
+      const by = `#${ticket.id} for ${(askerId === null ? undefined : store.getUser(askerId))?.name ?? 'nobody'}`;
+      if (citadel) store.setAppInstructions(text, by);
+      else store.setProjectInstructions(project.id, text, by);
+      const where = citadel ? `${APP_NAME}-wide` : 'scheme';
+      const shown = (edits as { find: string; replace: string }[]).map((e, i) => `${i + 1}. Before: ${e.find}\n   After: ${e.replace}`).join('\n');
+      runner.emit(ticket.id, 'note', { text: `Saved the ${where} Settings text as ${by}; it applies from each minion's next turn.\n${shown}` });
+      const note = `${by} ${text ? 'updated' : 'cleared'} the ${where} instructions; they apply from each minion's next turn.`;
+      if (citadel) {
+        for (const p of store.listProjects()) {
+          const c = store.getOverlord(p.id);
+          if (c) runner.emit(c.id, 'note', { text: note });
+        }
+        app.broadcast({ type: 'app-instructions', instructions: store.appInstructions() });
+      } else {
+        const c = store.getOverlord(project.id);
+        if (c) runner.emit(c.id, 'note', { text: note });
+        app.broadcast({ type: 'project', project: store.getProject(project.id)! });
+      }
+      return json(res, 200, { saved: where, edits: edits.length, length: text.length });
     },
   },
   {

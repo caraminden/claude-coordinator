@@ -458,7 +458,7 @@ function renderInstructionsHead() {
 }
 
 /** The last few saves of some instructions, each with what it removed and added, and how to reload them. */
-function recentChanges(url) {
+function recentChanges(url, restore) {
   const history = h('div', { class: 'instructions-history' });
   const load = async () => {
     try {
@@ -467,7 +467,9 @@ function recentChanges(url) {
         ...saves.map((s) => h('details', {},
           h('summary', {}, `${s.by}, ${ago(s.at)} `,
             h('span', { class: 'muted small' }, `+${s.diff.filter((d) => d.op === '+').length} −${s.diff.filter((d) => d.op === '-').length} lines`)),
-          h('pre', { class: 'instructions-diff' }, ...s.diff.map((d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))))));
+          h('pre', { class: 'instructions-diff' }, ...s.diff.map((d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))),
+          // Fills the field with the text from before this save; nothing is saved until Save.
+          ...(restore && s.before !== undefined ? [h('button', { type: 'button', class: 'secondary', onclick: () => restore(s.before) }, 'Put the text from before this change in the field')] : []))));
     } catch (err) {
       history.replaceChildren(h('p', { class: 'muted small' }, `Could not load recent changes: ${err.message}`));
     }
@@ -653,7 +655,7 @@ export function appInstructionsEditor() {
     status.textContent = '';
     sync();
   });
-  const [history, loadHistory] = recentChanges('api/app/instructions/history');
+  const [history, loadHistory] = recentChanges('api/app/instructions/history', (t) => { textarea.value = t; textarea.dispatchEvent(new Event('input')); textarea.focus(); });
   // Saved at once; a refusal puts the last saved text back as the saved one, and the field keeps what was typed as a draft.
   save.onclick = () => {
     const was = appInstructions;
@@ -808,7 +810,7 @@ export function instructionsEditor() {
     loadInstructionSources(picker, insert);
   };
 
-  const [history, loadHistory] = recentChanges(`api/projects/${p.id}/instructions/history`);
+  const [history, loadHistory] = recentChanges(`api/projects/${p.id}/instructions/history`, (t) => { textarea.value = t; textarea.dispatchEvent(new Event('input')); textarea.focus(); });
 
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'instructions-head' }),

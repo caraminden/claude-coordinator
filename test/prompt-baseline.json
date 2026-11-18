@@ -33,6 +33,7 @@
   "A note for another scheme's Taskmaster or a minion once you ": 197,
   "Stuck, or a fix that did not hold (citadel:diagnosing-bugs)?": 202,
   "Wherever the instructions say to run tools/land.sh (but not ": 278,
+  "A Settings text edit (`edit_instructions`) is an agent-instr": 167,
   "You can show people files (documents, images, GIFs, videos, ": 353,
   "- Link files by absolute path, never `../`: a relative link ": 131,
   "- `![caption](path)` shows an inline preview: use it for ima": 82,

@@ -280,6 +280,24 @@ const PROPOSE_MACHINE_NOTES = {
   },
 };
 
+const EDIT_INSTRUCTIONS = {
+  name: 'edit_instructions',
+  description:
+    "Edit the Settings text the way you edit any other instruction file: this scheme's instructions (scope \"scheme\"), or the Citadel-wide ones (scope \"citadel\", only on a turn run for a member of the Citadel scheme). Give a list of { find, replace } edits; each `find` must match the current text exactly once, or nothing is saved and the failing edits are named. All edits save in one go through Settings' own save, so they show in Settings and its history, by \"#<your number> for <the person your turn runs for>\", and the chat shows each before and after. A Settings edit is an agent-instruction change: self-review it and label its risk (at least medium) like a prompts.ts change. Keep dated quotes in the text: they are the decisions log.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      scope: { type: 'string', enum: ['scheme', 'citadel'], description: "scheme: this scheme's instructions; citadel: the Citadel-wide instructions" },
+      edits: {
+        type: 'array',
+        minItems: 1,
+        items: { type: 'object', properties: { find: { type: 'string', description: 'Exact current text; must occur once' }, replace: { type: 'string', description: 'What it becomes (empty to delete)' } }, required: ['find', 'replace'] },
+      },
+    },
+    required: ['scope', 'edits'],
+  },
+};
+
 const QUEUE_JOB = {
   name: 'queue_job',
   description:
@@ -1974,6 +1992,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const j = await call('POST', `/api/tickets/${TICKET}/jobs/${Number(args.id)}/stop`, {});
       return `Job #${j.id} is ${j.state === 'stopped' ? 'stopped' : 'being stopped on the machine; you are woken when it ends'}.`;
     }
+    case 'edit_instructions': {
+      const r = await call('POST', `/api/tickets/${TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits });
+      return `Saved the ${r.saved} Settings text (${r.edits} edit${r.edits === 1 ? '' : 's'}, ${r.length} characters). It shows in Settings and its history, and applies from each minion's next turn. Self-review it and label its risk like any instruction change.`;
+    }
     case 'propose_machine_notes': {
       if (!MACHINES.includes(String(args.machine ?? '').toLowerCase())) throw new Error(MACHINES.length ? `No machine called ${args.machine} that this turn got: it has ${MACHINES.join(', ')}` : 'This turn got no connected machines, so there are no notes to propose');
       const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
@@ -2197,7 +2219,7 @@ function toolListAll() {
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

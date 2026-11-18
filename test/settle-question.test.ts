@@ -165,6 +165,6 @@ test('an image alone answers a card: no pick needed, the minion is told so besid
   await until('the answer turn', () => turns().length > before);
   await idle(ticket.id);
   const prompt = JSON.stringify(turns().at(-1).prompt);
-  assert.ok(prompt.includes('Look at this?\\n→ (no option picked; see the attached image)'), prompt);
+  assert.ok(prompt.includes('Look at this?\\n→ (no option picked; see what's attached)'), prompt);
   assert.ok(prompt.includes('"type":"image"'), prompt);
 });

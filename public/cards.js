@@ -377,7 +377,7 @@ const cardText = (text, ticketId) => (/^ {0,3}(```|~~~)/m.test(text) ? markdown(
 /** "→ Tabs · keep both" lines for an answer message: the picks, then any text typed with them. */
 export function answerSummary(answers) {
   return h('div', { class: 'answer-lines' }, answers.map((a) =>
-    h('div', {}, '→ ', [...a.selected, ...(a.other ? [a.other] : [])].join(' · '))));
+    h('div', {}, '→ ', [...a.selected, ...(a.other ? [a.other] : [])].join(' · ') || '(attachment only)')));
 }
 
 /** Whether any message or card sits below this card in the chat. */
@@ -389,7 +389,7 @@ export function messagesBelow(el) {
 /** "Cara picked Tabs ↑" at the bottom of the chat, jumping back up to the card it answered. */
 export function answerRef(cardEl, data) {
   if (data.answer?.secret) return answerRefButton(cardEl, `${data.author} saved the secret as ${data.answer.secret}`);
-  const picks = data.answer?.answers.map((a) => [...a.selected, ...(a.other ? [a.other] : [])].join(', ')).join(' · ');
+  const picks = data.answer?.answers.map((a) => [...a.selected, ...(a.other ? [a.other] : [])].join(', ') || 'nothing, only an attachment').join(' · ');
   return answerRefButton(cardEl, picks == null ? `${data.author} approved the plan` : `${data.author} picked ${picks}`);
 }
 

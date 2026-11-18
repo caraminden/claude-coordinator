@@ -394,6 +394,9 @@ function chatAttachments(chatId) {
   return attachments;
 }
 
+/** Put a marked picture (#946: drawn on a chat image) in a chat's message box, as if pasted. */
+export const attachImage = (chatId, blob) => chatAttachments(chatId).add([new File([blob], 'marked.png', { type: blob.type })]);
+
 /** Whether any chat has a file uploading or an image being prepared; a reload now would lose it. */
 export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => a.busy || a.uploading);
 

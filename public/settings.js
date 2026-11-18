@@ -434,10 +434,10 @@ export function approvalsEditor() {
       'Values of this scheme\'s own properties, one per line, like ', h('code', {}, 'area: balance'),
       '. Minions outside a build that carry one get their own group at the top of the minions list; one that matches two sits in the first.'),
     card('Quiet CI workflows', quiet, [], '',
-      'A failed scheduled run, or a failed run someone dispatched on the default branch, tells the Taskmaster. List a workflow file here, one per line, like ',
-      h('code', {}, 'drift.yml'), ', to stop that. A minion that dispatched a run on its own branch still hears its result.'),
+      'Every workflow that goes red on the default branch wakes the Taskmaster, puts a quiet item in Mandate and rings if no fix minion starts within an hour. List a workflow file here, one per line, like ',
+      h('code', {}, 'drift.yml'), ', to leave it unwatched. A minion that dispatched a run on its own branch still hears its result.'),
     card('Watched CI workflows', watch, [], '',
-      'When a workflow listed here goes red on the default branch (a land\'s push included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line, like ',
+      'Watched even when it is in the quiet list above: when a workflow listed here goes red on the default branch (a land\'s push included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line, like ',
       h('code', {}, 'desktop.yml'), '.'),
     h('div', { class: 'row instructions-actions' }, save, discard, status));
   sync();

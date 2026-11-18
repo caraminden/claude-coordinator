@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import {
-  CiHealth, OFFLINE_MS, addRunnerWaiter, onlineRunners, runnerWaiters, QUEUED_MS, VERDICT_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, neverStarted, queuedProblems,
-  runnerProblems, sharedHost, skippedProblem, verdictPair, verdictProblem, type GhAnswer, type Job, type Run,
-  clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, type LandState,
+  CiHealth, addRunnerWaiter, onlineRunners, runnerWaiters, WAIT_MS, HUNG_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, itemText, neverStarted,
+  trackOffline, servers, stuckProblems, hungProblems, redProblem, sharedHost, skippedJobs, verdictPair, type GhAnswer, type Job, type Run,
+  clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, LAND_RING_STREAK, LAND_RING_MS, RED_FIX_MS, type LandState,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import type { AlertPart } from '../src/alert-wakes.ts';
@@ -34,19 +34,50 @@ function runOf(fields: Partial<Run> = {}): Run {
   return { id: ids++, name: 'desktop', workflow_id: 7, head_branch: 'main', head_sha: `${ids}abcdef0123`, status: 'completed', conclusion: 'success', created_at: iso(HOUR), ...fields };
 }
 
-test('a runner alerts once it has been offline for 15 minutes, and clears when back or gone', () => {
+test('trackOffline remembers when each runner went offline, forgetting it once back or gone', () => {
   const offline: Record<string, number> = {};
   const runners = [{ name: 'DESKTOP-G248IJ8-desktop', status: 'offline' }, { name: 'DESKTOP-G248IJ8', status: 'online' }];
-  assert.deepEqual(runnerProblems(runners, offline, NOW), []);
-  assert.deepEqual(runnerProblems(runners, offline, NOW + OFFLINE_MS - 1), []);
-  const [p] = runnerProblems(runners, offline, NOW + OFFLINE_MS);
-  assert.equal(p.key, 'runner:DESKTOP-G248IJ8-desktop');
-  assert.match(p.title, /^CI: runner DESKTOP-G248IJ8-desktop has been offline since Nov \d\d? \d\d:\d\d$/);
-  assert.deepEqual(runnerProblems([{ name: 'DESKTOP-G248IJ8-desktop', status: 'online' }], offline, NOW + HOUR), []);
+  trackOffline(runners, offline, NOW);
+  trackOffline(runners, offline, NOW + HOUR);
+  assert.deepEqual(offline, { 'DESKTOP-G248IJ8-desktop': NOW }, 'first seen offline, kept');
+  trackOffline([{ name: 'DESKTOP-G248IJ8-desktop', status: 'online' }], offline, NOW + HOUR);
   assert.deepEqual(offline, {}, 'back online forgets when it went');
-  runnerProblems(runners, offline, NOW);
-  assert.deepEqual(runnerProblems([], offline, NOW + HOUR), []);
+  trackOffline(runners, offline, NOW);
+  trackOffline([], offline, NOW + HOUR);
   assert.deepEqual(offline, {}, 'a runner removed from GitHub is forgotten');
+});
+
+// Peek's runners as GitHub lists them: four Windows runners on one PC, labelled peek-auras-ci.
+const peekRunner = (name: string, status: string, label = 'peek-auras-ci') => ({ name, status, labels: [{ name: 'self-hosted' }, { name: 'Windows' }, { name: 'X64' }, { name: label }] });
+const queued = (msAgo: number, labels = ['self-hosted', 'peek-auras-ci']) => job({ status: 'queued', conclusion: null, runner_name: null, steps: [], labels, created_at: iso(msAgo) });
+
+test('work stuck on offline runners rings after 10 min, naming the runners, since when and the PC to turn on (#968)', () => {
+  const down = ['DESKTOP-G248IJ8', 'DESKTOP-G248IJ8-2'].map((n) => peekRunner(n, 'offline'));
+  const offline = { 'DESKTOP-G248IJ8': NOW - 3 * HOUR, 'DESKTOP-G248IJ8-2': NOW - 2 * HOUR };
+  const [p, ...rest] = stuckProblems(down, [queued(14 * MIN), queued(12 * MIN), queued(WAIT_MS - 1)], offline, NOW);
+  assert.equal(rest.length, 0);
+  assert.equal(p.key, 'stuck:self-hosted, peek-auras-ci');
+  assert.equal(p.quiet, undefined, 'it rings');
+  assert.equal(p.title, `CI: 2 jobs on self-hosted, peek-auras-ci have waited for a runner since ${clock(NOW - 14 * MIN)}`);
+  assert.equal(p.why, `every runner that serves self-hosted, peek-auras-ci (DESKTOP-G248IJ8, DESKTOP-G248IJ8-2) is offline, since ${clock(NOW - 3 * HOUR)}`);
+  assert.match(p.fix!, /^turn on DESKTOP-G248IJ8 or restart its runner service/);
+  assert.match(clock(NOW), /^Nov 5, 04:00 PST$/, 'times are Pacific');
+
+  assert.deepEqual(stuckProblems(down, [queued(WAIT_MS - 1)], offline, NOW), [], 'under 10 min it waits');
+  assert.deepEqual(stuckProblems(down, [], offline, NOW), [], 'offline with nothing waiting is the page\'s');
+  assert.deepEqual(stuckProblems([...down, peekRunner('DESKTOP-G248IJ8-3', 'online')], [queued(HOUR)], offline, NOW), [], 'a queue behind a busy online runner is the page\'s');
+  assert.deepEqual(stuckProblems(down, [queued(HOUR, ['windows-latest'])], offline, NOW), [], "GitHub's hosted runners aren't the repo's");
+  assert.equal(servers([peekRunner('A', 'online', 'PEEK-AURAS-CI')], { labels: ['peek-auras-ci'] }).length, 1, 'labels match case-blind');
+});
+
+test('a runner on one job over 2 h rings as probably hung; under that is the page\'s (#968)', () => {
+  const running = (msAgo: number) => job({ status: 'in_progress', conclusion: null, run_id: 44370680700, name: 'windows', runner_name: 'DESKTOP-G248IJ8-3', started_at: iso(msAgo) });
+  assert.deepEqual(hungProblems([running(HUNG_MS - MIN), queued(3 * HOUR)], NOW), []);
+  const [p] = hungProblems([running(HUNG_MS)], NOW);
+  assert.equal(p.key, 'hung:DESKTOP-G248IJ8-3');
+  assert.equal(p.title, `CI: runner DESKTOP-G248IJ8-3 has run windows (run 44370680700) since ${clock(NOW - HUNG_MS)}`);
+  assert.match(p.why!, /probably hung/);
+  assert.match(p.fix!, /^cancel run 44370680700 on GitHub/);
 });
 
 test('jobs that never started group by labels, apart from red tests, until a job with those labels starts', () => {
@@ -66,63 +97,59 @@ test('jobs that never started group by labels, apart from red tests, until a job
   assert.equal(groups[0].dead.length, 3);
   const p = deadProblem(groups[0], BILLING);
   assert.equal(p.key, 'nostart:windows-latest');
-  assert.match(p.title, /^CI: 3 jobs on windows-latest didn't start since Nov \d\d? \d\d:\d\d, so they aren't test failures\. GitHub says: "The job was not started because recent account payments have failed/);
-  assert.match(deadProblem({ labels: 'x', dead: [dead(HOUR)] }, null).title, /1 job on x didn't start since .*, so it isn't a test failure\.$/);
+  assert.match(p.title, /^CI: 3 jobs on windows-latest didn't start since Nov \d\d?, \d\d:\d\d PST, so they aren't test failures$/);
+  assert.match(p.why!, /^GitHub says: "The job was not started because recent account payments have failed/);
+  assert.match(p.fix!, /spending limit/, 'a billing block says where to fix it');
+  const none = deadProblem({ labels: 'x', dead: [dead(HOUR)] }, null);
+  assert.match(none.title, /1 job on x didn't start since .*, so it isn't a test failure$/);
+  assert.match(none.fix!, /^check that a runner carries x/);
 
   assert.deepEqual(deadGroups([...jobs, job({ labels: ['windows-latest'], created_at: iso(MIN) })]), [], 'a job that started since clears it');
 });
 
-test('jobs queued 30 minutes with no runner alert per label set', () => {
-  const jobs = [
-    job({ status: 'queued', conclusion: null, runner_name: null, steps: [], labels: ['self-hosted', 'peek-auras-desktop'], created_at: iso(QUEUED_MS) }),
-    job({ status: 'queued', conclusion: null, runner_name: null, steps: [], labels: ['self-hosted', 'peek-auras-desktop'], created_at: iso(HOUR) }),
-    job({ status: 'queued', conclusion: null, runner_name: null, steps: [], created_at: iso(QUEUED_MS - 1) }),
-  ];
-  const ps = queuedProblems(jobs, NOW);
-  assert.equal(ps.length, 1);
-  assert.equal(ps[0].key, 'queued:self-hosted, peek-auras-desktop');
-  assert.match(ps[0].title, /^CI: 2 jobs on self-hosted, peek-auras-desktop have waited for a runner since/);
-});
-
-test('no verdict counts from the first run after the last verdict, so a stream of cancelled runs still alerts', () => {
-  const wf = { id: 7, name: 'desktop' };
-  // Peek's 20 h: the last green 20 h ago, then a run every half hour, each cancelled by the next.
-  const cancelled = Array.from({ length: 39 }, (_, i) => runOf({ conclusion: 'cancelled', created_at: iso(i * 30 * MIN) }));
-  const green = runOf({ head_sha: '4f1e9aa0000', created_at: iso(20 * HOUR) });
-  const p = verdictProblem(wf, 'main', [...cancelled, green], NOW);
-  assert.equal(p?.key, 'verdict:7');
-  assert.match(p!.title, /^CI: no desktop verdict on main since .* \(the last was success on 4f1e9aa; 39 runs since\)$/);
-
-  assert.equal(verdictProblem(wf, 'main', [runOf({ conclusion: 'failure' }), ...cancelled], NOW), null, 'a red verdict is a verdict');
-  assert.equal(verdictProblem(wf, 'main', [runOf({ status: 'in_progress', conclusion: null, created_at: iso(VERDICT_MS - MIN) }), green], NOW), null, 'still within the 4 h');
-  assert.ok(verdictProblem(wf, 'main', [runOf({ status: 'queued', conclusion: null, created_at: iso(VERDICT_MS) }), green], NOW), 'stuck in the queue 4 h');
-  assert.equal(verdictProblem(wf, 'main', [runOf({ created_at: iso(3 * 24 * HOUR) })], NOW), null, 'a quiet repo is fine');
-  assert.equal(verdictProblem(wf, 'main', [runOf({ conclusion: 'cancelled', created_at: iso(8 * 24 * HOUR) })], NOW), null, 'a workflow unused for a week is not missing anything');
-  assert.match(verdictProblem(wf, 'main', cancelled.slice(10), NOW)!.title, /none in its last 29 runs/);
-  assert.equal(verdictProblem(wf, 'main', [], NOW), null);
-});
-
-test('runs skipped by a job-level if: (or neutral) wait for no verdict (#468 S08-4)', () => {
-  const wf = { id: 8, name: 'claude' };
-  const skipped = (h: number) => runOf({ conclusion: 'skipped', created_at: iso(h * HOUR) });
-  assert.equal(verdictProblem(wf, 'main', [skipped(1), skipped(5), runOf({ created_at: iso(30 * HOUR) })], NOW), null);
-  assert.equal(verdictProblem(wf, 'main', [runOf({ conclusion: 'neutral', created_at: iso(2 * HOUR) }), skipped(6)], NOW), null);
-  assert.ok(verdictProblem(wf, 'main', [skipped(1), runOf({ conclusion: 'cancelled', created_at: iso(5 * HOUR) }), runOf({ created_at: iso(30 * HOUR) })], NOW), 'a cancelled run still waits for one');
-});
-
-test('a green run that skipped jobs which ran the time before is a quiet item, never an alert; jobs skipped both times are nothing', () => {
-  const wf = { id: 7, name: 'desktop' };
+test('skippedJobs: the jobs a green run skipped that ran the time before; verdictPair finds the two runs', () => {
   const before = [job({ name: 'screen' }), job({ name: 'capture', conclusion: 'failure' }), job({ name: 'nightly', conclusion: 'skipped' })];
   const latest = runOf({ head_sha: 'a1b2c3d9999' });
-  const p = skippedProblem(wf, 'main', latest, [job({ name: 'screen', conclusion: 'skipped' }), job({ name: 'capture', conclusion: 'skipped' }), job({ name: 'nightly', conclusion: 'skipped' }), job({ name: 'gate' })], before);
-  assert.equal(p?.key, 'green-skipped:7');
-  assert.equal(p!.quiet, true, 'a green run never alarms (Cara, 2026-11-11)');
-  assert.equal(p!.title, 'CI: desktop on main (a1b2c3d) went green with 2 jobs skipped that ran the time before: screen, capture');
-  assert.equal(skippedProblem(wf, 'main', latest, [job({ name: 'screen' }), job({ name: 'nightly', conclusion: 'skipped' })], before), null);
+  assert.deepEqual(skippedJobs([job({ name: 'screen', conclusion: 'skipped' }), job({ name: 'capture', conclusion: 'skipped' }), job({ name: 'nightly', conclusion: 'skipped' }), job({ name: 'gate' })], before), ['screen', 'capture']);
+  assert.deepEqual(skippedJobs([job({ name: 'screen' }), job({ name: 'nightly', conclusion: 'skipped' })], before), []);
 
   const red = runOf({ conclusion: 'failure' });
   assert.equal(verdictPair([runOf({ conclusion: 'cancelled' }), red, latest]), null, 'only a green newest verdict is checked');
   assert.deepEqual(verdictPair([runOf({ status: 'in_progress', conclusion: null }), latest, runOf({ conclusion: 'cancelled' }), red])?.map((r) => r.id), [latest.id, red.id]);
+});
+
+test('a red on main is a quiet item while its fix is on the way, and rings when none starts in an hour or the fix does not hold (#968)', () => {
+  const mark = { run: 44370680700, at: iso(2 * HOUR), told: NOW - 30 * MIN, where: 'windows › Test' };
+  const red = runOf({ id: 44370680700, workflow_id: 9, conclusion: 'failure', created_at: iso(2 * HOUR) });
+  const waiting = redProblem('desktop.yml', 'main', mark, red, null, NOW)!;
+  assert.equal(waiting.key, 'red:9');
+  assert.equal(waiting.quiet, true);
+  assert.equal(waiting.title, 'CI: desktop.yml failed on main (run 44370680700, at windows › Test)');
+  assert.match(waiting.fix!, new RegExp(`rings at ${clock(NOW + 30 * MIN)}`));
+
+  const late = redProblem('desktop.yml', 'main', mark, red, null, NOW + 30 * MIN)!;
+  assert.equal(late.quiet, false, 'an hour with no fix minion rings');
+  assert.match(late.title, /: no fix minion started$/);
+
+  const started = redProblem('desktop.yml', 'main', mark, red, { number: 971, closedAt: null }, NOW + 2 * HOUR)!;
+  assert.equal(started.quiet, true);
+  assert.equal(started.title, 'CI: desktop.yml failed on main (run 44370680700, at windows › Test): fix minion #971 started');
+
+  const closed = { number: 971, closedAt: NOW + HOUR };
+  assert.equal(redProblem('desktop.yml', 'main', mark, red, closed, NOW + 2 * HOUR)!.quiet, true, 'closed, and no verdict since: waiting on the next run');
+  const after = runOf({ id: 44370699999, workflow_id: 9, conclusion: 'failure', head_sha: '323bf97aaaa', created_at: new Date(NOW + 90 * MIN).toISOString() });
+  const held = redProblem('desktop.yml', 'main', mark, after, closed, NOW + 2 * HOUR)!;
+  assert.equal(held.quiet, undefined, 'still red after the fix closed rings');
+  assert.match(held.title, /still red after fix minion #971 closed$/);
+  assert.match(held.why!, /run 44370699999 on 323bf97/);
+
+  assert.equal(redProblem('desktop.yml', 'main', mark, runOf({ workflow_id: 9 }), null, NOW + 2 * HOUR), null, 'green says nothing');
+});
+
+test('an item reads what, why and fix, within Mandate\'s 500 characters', () => {
+  assert.equal(itemText({ key: 'k', title: 'CI: a.', why: 'b', fix: 'c.' }), 'CI: a. Why: b. Fix: c.');
+  assert.equal(itemText({ key: 'k', title: 'CI: a' }), 'CI: a.');
+  assert.equal(itemText({ key: 'k', title: 'x'.repeat(600) }).length, 500);
 });
 
 test('Mandate item keys keep to its characters and length', () => {
@@ -224,6 +251,14 @@ function world({ delve = false } = {}) {
   return { store, peek, gh, puts, parts, from, quiet, mandateUp, deps, health: new CiHealth(store, deps) };
 }
 
+// Peek's desktop runner, offline, and a job on its label waiting: the stuck-runner rule's world.
+const desk = (status: string, name = 'DESKTOP-G248IJ8-desktop') => ({ name, status, labels: [{ name: 'self-hosted' }, { name: 'peek-auras-ci' }] });
+const waitingRun = (w: ReturnType<typeof world>, t: number, id = 3001) => {
+  const r = runOf({ id, status: 'queued', conclusion: null, created_at: new Date(t).toISOString() });
+  w.gh.runs = [r, ...w.gh.runs];
+  w.gh.jobs.set(id, [job({ run_id: id, status: 'queued', conclusion: null, runner_name: null, steps: [], labels: ['self-hosted', 'peek-auras-ci'], created_at: r.created_at })]);
+};
+
 test('a problem is one Mandate alert per admin with Mandate, cleared when fixed, and kept across a restart', async () => {
   const w = world();
   const t0 = NOW;
@@ -231,42 +266,48 @@ test('a problem is one Mandate alert per admin with Mandate, cleared when fixed,
   assert.deepEqual(w.puts, [], 'all clear: nothing sent');
   assert.ok(!w.gh.calls.some((c) => c.startsWith('repos/caraminden/notes/') && !c.includes('/workflows?')), 'a repo with no workflows costs one call');
 
-  // The desktop runner goes offline; 15 minutes later Cara hears, once. Josh isn't an admin; Rachel has no Mandate.
-  w.gh.runners = [{ name: 'DESKTOP-G248IJ8-desktop', status: 'offline' }];
+  // The desktop runner goes offline: with nothing waiting on it, that's the page's, not a ring (#968).
+  w.gh.runners = [desk('offline')];
   await w.health.tick(t0 + 5 * MIN);
+  await w.health.tick(t0 + HOUR);
   assert.deepEqual(w.puts, []);
-  await w.health.tick(t0 + 5 * MIN + OFFLINE_MS);
+  // A job waits on it: 10 minutes later Cara hears, once. Josh isn't an admin; Rachel has no Mandate.
+  waitingRun(w, t0 + HOUR);
+  await w.health.tick(t0 + HOUR + WAIT_MS - MIN);
+  assert.deepEqual(w.puts, []);
+  await w.health.tick(t0 + HOUR + WAIT_MS);
   assert.equal(w.puts.length, 1);
   assert.deepEqual(w.puts[0].slice(0, 2), ['Cara', 'ci.open']);
-  assert.match(w.puts[0][2]!, /^CI, Peek Auras: runner DESKTOP-G248IJ8-desktop has been offline since/);
+  assert.match(w.puts[0][2]!, /^CI, Peek Auras: 1 job on self-hosted, peek-auras-ci has waited for a runner since .*\. Why: every runner that serves .* \(DESKTOP-G248IJ8-desktop\) is offline, since Nov 5, 04:05 PST\. Fix: /);
   assert.equal(w.from[0], 'CI health', 'from CI health, not the scheme');
-  await w.health.tick(t0 + 10 * MIN + OFFLINE_MS);
+  await w.health.tick(t0 + HOUR + WAIT_MS + 5 * MIN);
   assert.equal(w.puts.length, 1, 'unchanged: not put again');
 
   // A restart remembers both when it went offline and what Cara already has.
   const again = new CiHealth(w.store, w.deps);
-  await again.tick(t0 + 15 * MIN + OFFLINE_MS);
+  await again.tick(t0 + HOUR + WAIT_MS + 10 * MIN);
   assert.equal(w.puts.length, 1, 'a restart does not re-send');
 
   // Back online: her item is cleared.
-  w.gh.runners = [{ name: 'DESKTOP-G248IJ8-desktop', status: 'online' }];
-  await again.tick(t0 + 20 * MIN + OFFLINE_MS);
+  w.gh.runners = [desk('online')];
+  await again.tick(t0 + 2 * HOUR);
   assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', null]);
-  await again.tick(t0 + 25 * MIN + OFFLINE_MS);
+  await again.tick(t0 + 2 * HOUR + 5 * MIN);
   assert.equal(w.puts.length, 2, 'cleared once');
 });
 
-test('an alert raised before local midnight is not sent again after it (#509)', async () => {
+test('an alert raised before midnight is not sent again after it (#509)', async () => {
   const w = world();
-  const t0 = new Date(2026, 10, 10, 23, 40).getTime(); // local time, in whatever zone the tests run
-  w.gh.runners = [{ name: 'DESKTOP-G248IJ8-desktop', status: 'offline' }];
+  const t0 = Date.parse('2026-11-11T07:40:00Z'); // 23:40 PST
+  w.gh.runners = [desk('offline')];
+  waitingRun(w, t0);
   await w.health.tick(t0);
-  await w.health.tick(t0 + OFFLINE_MS);
+  await w.health.tick(t0 + WAIT_MS);
   assert.equal(w.puts.length, 1);
-  await w.health.tick(new Date(2026, 10, 11, 0, 5).getTime());
-  await w.health.tick(new Date(2026, 10, 11, 9, 0).getTime());
+  await w.health.tick(t0 + 25 * MIN);
+  await w.health.tick(t0 + 9 * HOUR);
   assert.equal(w.puts.length, 1, 'the next day: not put again');
-  assert.match(w.puts[0][2]!, /since Nov 10 23:40$/);
+  assert.match(w.puts[0][2]!, /waited for a runner since Nov 10, 23:40 PST\./);
 });
 
 test('billing-blocked jobs make one alert that counts up, quoting GitHub, and Mandate being down is retried', async () => {
@@ -364,109 +405,96 @@ test("a repo the scheme's GitHub login can't see says so, naming whose login it 
   assert.equal(w.puts.length, 0, 'an unreadable repo clears and raises nothing');
 });
 
-test('green with skipped jobs goes out quiet, and the alarm item an older build sent for it is cleared (#532)', async () => {
+test("green with skipped jobs is the page's now: the items an older build sent for it are cleared (#532, #968)", async () => {
   const w = world();
   const t = NOW;
   const at = (ago: number) => new Date(t - ago).toISOString();
-  // What the old build left behind: the same trouble, sent as an alarm under the old key.
-  w.store.setSetting(`ci-health:${w.peek.id}`, { offline: {}, sent: { 'skipped:7': { 1: 'CI: desktop on main went green with 1 job skipped' } } });
+  w.store.setSetting(`ci-health:${w.peek.id}`, { offline: {}, sent: { 'skipped:7': { 1: 'CI: desktop on main went green with 1 job skipped' }, 'green-skipped:7': { 1: 'CI: desktop on main went green with 1 job skipped' } } });
   const [green, before] = [runOf({ id: 901, created_at: at(10 * MIN), head_sha: 'a1b2c3d4' }), runOf({ id: 900, created_at: at(HOUR), conclusion: 'failure' })];
   w.gh.mainRuns = [green, before];
   w.gh.jobs.set(901, [job({ run_id: 901, name: 'screen', conclusion: 'skipped' })]);
   w.gh.jobs.set(900, [job({ run_id: 900, name: 'screen', conclusion: 'failure' })]);
   await w.health.tick(t);
-  assert.deepEqual(w.puts.find(([, k]) => k === 'ci.skipped:7'), ['Cara', 'ci.skipped:7', null], 'the alarm already out is cleared');
-  const put = w.puts.find(([, k]) => k === 'ci.green-skipped:7');
-  assert.match(put?.[2] ?? '', /went green with 1 job skipped that ran the time before: screen$/);
-  assert.deepEqual(w.quiet, ['ci.green-skipped:7'], 'and comes back as a quiet item, not an alert');
+  assert.deepEqual(w.puts, [['Cara', 'ci.skipped:7', null], ['Cara', 'ci.green-skipped:7', null]]);
+  assert.deepEqual(w.quiet, []);
 });
 
-test('the one alert names the PC a set of offline runners share, and lists the other problems in full', () => {
+test('the one alert: one problem in full, several counted with each in full, within 500 characters; sharedHost names the PC runners share', () => {
   assert.equal(sharedHost(['DESKTOP-G248IJ8', 'DESKTOP-G248IJ8-2', 'DESKTOP-G248IJ8-perf', 'DESKTOP-G248IJ8-linux-2']), 'DESKTOP-G248IJ8');
   assert.equal(sharedHost(['DESKTOP-G248IJ8-3', 'DESKTOP-G248IJ8-4']), 'DESKTOP-G248IJ8', 'no runner named for the PC alone');
   assert.equal(sharedHost(['DESKTOP-G248IJ8', 'DESKTOP-AB12CD3']), null, "two PCs' default names aren't one PC");
   assert.equal(sharedHost(['DESKTOP-G248IJ8', 'CITADEL-BOX-desktop']), null);
   assert.equal(sharedHost(['DESKTOP-G248IJ8']), null);
 
-  const runner = (scheme: string, name: string) => ({ scheme, problem: { key: `runner:${name}`, title: `CI: runner ${name} has been offline since Nov 11 13:32` } });
-  const schemes = ['Delve', 'Peek Auras', 'Theory of Crafting', 'Mandate', 'Citadel'];
-  const outage = schemes.flatMap((s, i) => [runner(s, i ? `DESKTOP-G248IJ8-${i + 1}` : 'DESKTOP-G248IJ8'), runner(s, `DESKTOP-G248IJ8-linux${i ? `-${i}` : ''}`)]);
-  assert.equal(bundleTitle(outage), 'CI: 10 runners offline on DESKTOP-G248IJ8 in 5 schemes');
-  assert.equal(bundleTitle(outage.slice(0, 4)), 'CI: 4 runners offline on DESKTOP-G248IJ8 in Delve and Peek Auras');
-  const queued = { scheme: 'Delve', problem: { key: 'queued:delve-ci', title: 'CI: 2 jobs on delve-ci have waited for a runner since Nov 11 13:40' } };
-  assert.equal(bundleTitle([...outage.slice(0, 2), queued]), 'CI: 2 runners offline on DESKTOP-G248IJ8 and 1 other problem in Delve. Delve: 2 jobs on delve-ci have waited for a runner since Nov 11 13:40');
-  assert.equal(bundleTitle([queued]), 'CI, Delve: 2 jobs on delve-ci have waited for a runner since Nov 11 13:40');
-  assert.equal(bundleTitle([runner('Delve', 'DESKTOP-G248IJ8'), runner('Peek Auras', 'CITADEL-BOX-desktop')]), 'CI: 2 runners offline in Delve and Peek Auras');
-  assert.equal(bundleTitle(Array.from({ length: 30 }, (_, i) => ({ ...queued, problem: { ...queued.problem, key: `q${i}` } }))).length, 500, 'kept to Mandate\'s 500');
+  const stuck = { scheme: 'Delve', problem: { key: 'stuck:delve-ci', title: 'CI: 2 jobs on delve-ci have waited for a runner since Nov 11, 13:40 PST', why: 'every runner that serves delve-ci (DESKTOP-G248IJ8-linux) is offline', fix: 'turn on DESKTOP-G248IJ8' } };
+  assert.equal(bundleTitle([stuck]), 'CI, Delve: 2 jobs on delve-ci have waited for a runner since Nov 11, 13:40 PST. Why: every runner that serves delve-ci (DESKTOP-G248IJ8-linux) is offline. Fix: turn on DESKTOP-G248IJ8.');
+  const hung = { scheme: 'Peek Auras', problem: { key: 'hung:X', title: 'CI: runner X has run windows (run 1) since Nov 11, 10:00 PST', why: 'probably hung', fix: 'cancel run 1' } };
+  assert.equal(bundleTitle([stuck, hung]), 'CI: 2 problems in Delve and Peek Auras. Delve: 2 jobs on delve-ci have waited for a runner since Nov 11, 13:40 PST. Why: every runner that serves delve-ci (DESKTOP-G248IJ8-linux) is offline. Fix: turn on DESKTOP-G248IJ8; Peek Auras: runner X has run windows (run 1) since Nov 11, 10:00 PST. Why: probably hung. Fix: cancel run 1.');
+  assert.equal(bundleTitle(Array.from({ length: 30 }, (_, i) => ({ ...stuck, problem: { ...stuck.problem, key: `q${i}` } }))).length, 500, 'kept to Mandate\'s 500');
 });
 
 test('an outage across schemes is one alert that rings once, takes new words quietly, clears when all is well, and rings again on the next (#540)', async () => {
   const w = world({ delve: true });
   const t0 = NOW;
-  const off = (name: string) => ({ name, status: 'offline' });
-  w.gh.runners = [off('DESKTOP-G248IJ8'), off('DESKTOP-G248IJ8-2')];
-  w.gh.delveRunners = [off('DESKTOP-G248IJ8-linux')];
+  // Both repos list the same waiting job (the fake answers every repo's runs alike), each with its own offline runner.
+  w.gh.runners = [desk('offline', 'DESKTOP-G248IJ8')];
+  w.gh.delveRunners = [desk('offline', 'DESKTOP-G248IJ8-linux')];
+  waitingRun(w, t0);
   await w.health.tick(t0);
-  await w.health.tick(t0 + OFFLINE_MS);
-  assert.deepEqual(w.puts, [['Cara', 'ci.open', 'CI: 3 runners offline on DESKTOP-G248IJ8 in Delve and Peek Auras']], 'one item, not three');
+  await w.health.tick(t0 + WAIT_MS);
+  assert.equal(w.puts.length, 1, 'one item, not two');
+  assert.match(w.puts[0][2]!, /^CI: 2 problems in Delve and Peek Auras\. Delve: 1 job .*; Peek Auras: 1 job /);
   assert.deepEqual(w.quiet, [], 'an alert');
 
-  // One more drops: the same item takes the new words (Mandate pushes only a new item, so this one doesn't ring).
-  w.gh.delveRunners = [off('DESKTOP-G248IJ8-linux'), off('DESKTOP-G248IJ8-linux-2')];
-  await w.health.tick(t0 + 2 * OFFLINE_MS);
-  await w.health.tick(t0 + 3 * OFFLINE_MS);
-  assert.deepEqual(w.puts.slice(1), [['Cara', 'ci.open', 'CI: 4 runners offline on DESKTOP-G248IJ8 in Delve and Peek Auras']]);
+  // Another job waits: the same item takes the new words (Mandate pushes only a new item, so this one doesn't ring).
+  waitingRun(w, t0 + MIN, 3002);
+  await w.health.tick(t0 + 2 * WAIT_MS);
+  await w.health.tick(t0 + 3 * WAIT_MS);
+  assert.equal(w.puts.length, 2);
+  assert.deepEqual(w.puts[1].slice(0, 2), ['Cara', 'ci.open']);
+  assert.match(w.puts[1][2]!, /Delve: 2 jobs /);
 
-  // Peek's come back first: still open, fewer words; then Delve's, and it clears once.
-  w.gh.runners = [];
-  await w.health.tick(t0 + 4 * OFFLINE_MS);
-  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', 'CI: 2 runners offline on DESKTOP-G248IJ8 in Delve']);
-  w.gh.delveRunners = [];
-  await w.health.tick(t0 + 5 * OFFLINE_MS);
-  await w.health.tick(t0 + 6 * OFFLINE_MS);
+  // Peek's comes back first: still open, fewer words; then Delve's, and it clears once.
+  w.gh.runners = [desk('online', 'DESKTOP-G248IJ8')];
+  await w.health.tick(t0 + 4 * WAIT_MS);
+  assert.match(w.puts.at(-1)![2]!, /^CI, Delve: 2 jobs /);
+  w.gh.delveRunners = [desk('online', 'DESKTOP-G248IJ8-linux')];
+  await w.health.tick(t0 + 5 * WAIT_MS);
+  await w.health.tick(t0 + 6 * WAIT_MS);
   assert.deepEqual(w.puts.slice(3), [['Cara', 'ci.open', null]]);
 
   // The next outage is a new item, so it rings.
-  w.gh.runners = [off('DESKTOP-G248IJ8')];
-  await w.health.tick(t0 + 7 * OFFLINE_MS);
-  await w.health.tick(t0 + 8 * OFFLINE_MS);
+  w.gh.runners = [desk('offline', 'DESKTOP-G248IJ8')];
+  await w.health.tick(t0 + 7 * WAIT_MS);
+  await w.health.tick(t0 + 8 * WAIT_MS);
   assert.equal(w.puts.length, 5);
   assert.deepEqual(w.puts.at(-1)!.slice(0, 2), ['Cara', 'ci.open']);
 });
 
-test("an older build's per-scheme alarm items are cleared from their scheme once the one alert takes over (#540)", async () => {
+test("an older build's per-scheme alarm items are cleared from their scheme, and its runner-offline ring isn't kept (#540, #968)", async () => {
   const w = world();
-  w.store.setSetting(`ci-health:${w.peek.id}`, { offline: { 'DESKTOP-G248IJ8': NOW - OFFLINE_MS }, sent: { 'runner:DESKTOP-G248IJ8': { 1: 'CI: runner DESKTOP-G248IJ8 has been offline since Nov 5 03:45' } } });
-  w.gh.runners = [{ name: 'DESKTOP-G248IJ8', status: 'offline' }];
+  w.store.setSetting(`ci-health:${w.peek.id}`, { offline: { 'DESKTOP-G248IJ8': NOW - HOUR }, problems: [{ key: 'runner:DESKTOP-G248IJ8', title: 'CI: runner DESKTOP-G248IJ8 has been offline since Nov 5 03:45' }], sent: { 'runner:DESKTOP-G248IJ8': { 1: 'CI: runner DESKTOP-G248IJ8 has been offline since Nov 5 03:45' } } });
+  w.store.setSetting('ci-health:alert', { 1: 'CI, Peek Auras: runner DESKTOP-G248IJ8 has been offline since Nov 5 03:45' });
+  w.gh.runners = [desk('offline', 'DESKTOP-G248IJ8')];
   await w.health.tick(NOW);
-  assert.deepEqual(w.puts[0], ['Cara', 'ci.runner:DESKTOP-G248IJ8', null]);
-  assert.deepEqual(w.puts.slice(1).map(([u, k]) => [u, k]), [['Cara', 'ci.open']]);
-  assert.deepEqual(w.from, ['Peek Auras', 'CI health']);
+  assert.deepEqual(w.puts, [['Cara', 'ci.runner:DESKTOP-G248IJ8', null], ['Cara', 'ci.open', null]]);
 });
 
-test("a runner list CI health can't read keeps the runner alerts as they were (#540)", async () => {
+test("a runner list CI health can't read keeps the stuck alerts as they were (#540)", async () => {
   const w = world();
-  w.gh.runners = [{ name: 'DESKTOP-G248IJ8', status: 'offline' }];
+  w.gh.runners = [desk('offline')];
+  waitingRun(w, NOW);
   await w.health.tick(NOW);
-  await w.health.tick(NOW + OFFLINE_MS);
+  await w.health.tick(NOW + WAIT_MS);
   assert.equal(w.puts.length, 1);
   w.gh.runnersDenied = true;
-  await w.health.tick(NOW + 2 * OFFLINE_MS);
-  await w.health.tick(NOW + 3 * OFFLINE_MS);
+  await w.health.tick(NOW + 2 * WAIT_MS);
+  await w.health.tick(NOW + 3 * WAIT_MS);
   assert.equal(w.puts.length, 1, 'not cleared, not re-sent');
   w.gh.runnersDenied = false;
-  w.gh.runners = [{ name: 'DESKTOP-G248IJ8', status: 'online' }];
-  await w.health.tick(NOW + 4 * OFFLINE_MS);
+  w.gh.runners = [desk('online')];
+  await w.health.tick(NOW + 4 * WAIT_MS);
   assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', null], 'cleared once the list says so');
-});
-
-test("an older build's runner alarm moves into the one alert even when the first round after can't read the runner list (#540)", async () => {
-  const w = world();
-  const title = 'CI: runner DESKTOP-G248IJ8 has been offline since Nov 5 03:45';
-  w.store.setSetting(`ci-health:${w.peek.id}`, { offline: { 'DESKTOP-G248IJ8': NOW - OFFLINE_MS }, sent: { 'runner:DESKTOP-G248IJ8': { 1: title } } });
-  w.gh.runnersDenied = true;
-  await w.health.tick(NOW);
-  assert.deepEqual(w.puts, [['Cara', 'ci.runner:DESKTOP-G248IJ8', null], ['Cara', 'ci.open', `CI, Peek Auras: ${title.slice(4)}`]]);
 });
 
 test('wake_when_runners_back (#541): a minion parked on CI hears once, when a runner with its scheme\'s label is online', async () => {
@@ -548,21 +576,27 @@ const noJob: [string, string | null, number][] = [['rebase', null, 5_000], ['ci'
 const green: [string, string | null, number][] = [['rebase', null, 5_000], ['ci', 'jobs', 2 * MIN], ['deploy', null, MIN]];
 const desktopOff: [string, string | null, number][] = [['rebase', null, 5_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]];
 
-test('the land gate alarms once CI falls back to perigee on 2 lands in a row, naming each and why, and the next green land clears it (#561)', () => {
+test('the land gate falling back to perigee is a quiet item from 2 lands in a row and rings at 4, naming each and why; the next green land clears it (#561, #968)', () => {
   const s = newLandState();
   let t = NOW;
   t = through(s, 1, '#544', capHit, t, 43082450082);
-  assert.deepEqual(landProblems(s, t), [], 'one fallback is no alarm');
+  assert.deepEqual(landProblems(s, t), [], 'one fallback is nothing');
   t = through(s, 2, '#555', noJob, t);
   assert.deepEqual(landProblems(s, t), [{
-    key: 'land:fallback',
+    key: 'land:fallback', quiet: true,
     title: "CI: the land gate fell back to perigee on 2 lands in a row: #544 (the desktop suite hit the 6-min cap, run 43082450082), #555 (GitHub never started its run)",
+    why: 'the desktop suite hit the 6-min cap; GitHub never started its run, so each land ran the full suite on perigee instead of waiting on CI',
+    fix: 'open the fallen-back runs on the CI page and fix what stopped them; the next land with a green gate clears this',
   }]);
   t = through(s, 3, '#556', capHit, t, 7);
   assert.match(landProblems(s, t)[0].title, /^CI: the land gate fell back to perigee on 3 lands in a row: #544 .*, #555 .*, #556 \(the desktop suite hit the 6-min cap, run 7\)$/);
-  t = through(s, 4, '#557', green, t);
+  assert.equal(landProblems(s, t)[0].quiet, true);
+  t = through(s, LAND_RING_STREAK, '#557', capHit, t);
+  assert.equal(landProblems(s, t)[0].quiet, false, `${LAND_RING_STREAK} in a row rings`);
+  assert.match(landProblems(s, t)[0].title, /4 lands in a row: 1 more, then #555 /);
+  t = through(s, 5, '#558', green, t);
   assert.deepEqual(landProblems(s, t), [], 'a green gate clears it');
-  t = through(s, 5, '#558', capHit, t);
+  t = through(s, 6, '#559', capHit, t);
   assert.deepEqual(landProblems(s, t), [], 'and starts the count again');
 });
 
@@ -571,10 +605,11 @@ test("the land gate's alarm: a job no runner took is named as that, not as a cap
   let t = NOW;
   t = through(s, 1, '#1', [['rebase', null, 5_000], ['ci', 'queued', 95_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]], t, 9);
   t = through(s, 2, '#2', desktopOff, t);
-  assert.deepEqual(landProblems(s, t), [], "the desktop off isn't the gate failing: the runner-offline alert covers it");
+  assert.deepEqual(landProblems(s, t), [], "the desktop off isn't the gate failing: the stuck-runner rule covers it");
   // Only what CI said while the land waited on it counts: ci-wait drops the run once the land moves on.
   t = through(s, 3, '#3', [['rebase', null, 5_000], ['ci', 'jobs', 30_000], ['ci', 'failed', 2_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]], t, 10);
   assert.equal(landProblems(s, t)[0]?.title, 'CI: the land gate fell back to perigee on 2 lands in a row: #1 (no runner started its job, run 9), #3 (its run failed before the tests ran, run 10)');
+  assert.match(landProblems(s, t)[0].fix!, /^check the desktop's Linux runners are online/, 'a runner cause says where to look');
   t = through(s, 4, '#4', desktopOff, t);
   assert.equal(landProblems(s, t).length, 1, 'still open: only a green gate clears it');
   // A land refused in CI (red tests) leaves from the CI phase: no fallback, no green.
@@ -584,7 +619,7 @@ test("the land gate's alarm: a job no runner took is named as that, not as a cap
   assert.equal(landProblems(s, through(s, 6, 'tools/deploy.sh', [['deploy', null, MIN]], t)).length, 1);
 });
 
-test('a land in the line over 30 min alarms, waiting in line included, until that land ends (#561)', () => {
+test('a land in the line over 30 min is a quiet item, waiting in line included, ringing at 1 h, until that land ends (#561, #968)', () => {
   const s = newLandState();
   const t = NOW;
   landStep(s, [land(1, '#549', 'tests'), land(2, '#551', 'line')], t);
@@ -592,115 +627,64 @@ test('a land in the line over 30 min alarms, waiting in line included, until tha
   assert.deepEqual(landProblems(s, t + 29 * MIN), []);
   landStep(s, [land(2, '#551', 'rebase'), land(3, '#552', 'line')], t + 31 * MIN);
   const slow = landProblems(s, t + 31 * MIN);
-  assert.deepEqual(slow, [{ key: 'land:slow', title: `CI: #551 has been landing since ${clock(t)} (over 30 min)` }]);
+  assert.deepEqual(slow.map((x) => [x.key, x.quiet, x.title]), [['land:slow', true, `CI: #551 has been landing since ${clock(t)} (over 30 min)`]]);
+  assert.match(slow[0].why!, /under 15 min/);
   assert.deepEqual(landProblems(s, t + 40 * MIN), slow, 'the words stay put as the minutes pass, so it is not re-sent');
+  const ringing = landProblems(s, t + LAND_RING_MS);
+  assert.deepEqual(ringing.map((x) => [x.quiet, x.title]), [[false, `CI: #551 has been landing since ${clock(t)} (over 1 h)`]]);
   landStep(s, [land(3, '#552', 'rebase')], t + 41 * MIN);
   assert.deepEqual(landProblems(s, t + 41 * MIN), [], 'cleared when #551 left the line');
-  landStep(s, [land(3, '#552', 'rebase'), land(4, '#553', 'line')], t + 70 * MIN);
-  assert.match(landProblems(s, t + 70 * MIN)[0].title, /^CI: #552 has been landing since /);
+  landStep(s, [land(3, '#552', 'rebase'), land(4, '#553', 'line')], t + 95 * MIN);
+  assert.match(landProblems(s, t + 95 * MIN)[0].title, /^CI: #552 has been landing since /);
 });
 
-test("the land alarm joins CI health's one alert under the live scheme, rings within the poll, and clears itself (#561)", async () => {
+test("the land gate's items: quiet under the live scheme first, then joining CI health's one alert as it rings, and clearing themselves (#561, #968)", async () => {
   const w = world();
   let t = NOW;
   const seen = (seq: number, name: string, phase: string, ci: string | null = null) => w.health.land(w.peek.id, [land(seq, name, phase, ci)], t);
-  for (const [seq, name] of [[1, '#544'], [2, '#555']] as const) {
-    for (const [phase, ci, ms] of capHit) { await seen(seq, name, phase, ci); t += ms; }
-    await w.health.land(w.peek.id, [], t);
-  }
-  assert.deepEqual(w.puts, [['Cara', 'ci.open', 'CI, Peek Auras: the land gate fell back to perigee on 2 lands in a row: #544 (the desktop suite hit the 6-min cap), #555 (the desktop suite hit the 6-min cap)']]);
-  assert.deepEqual(w.quiet, [], 'an alarm');
+  const lands = async (from: number, names: string[], phases = capHit) => {
+    for (const [i, name] of names.entries()) {
+      for (const [phase, ci, ms] of phases) { await seen(from + i, name, phase, ci); t += ms; }
+      await w.health.land(w.peek.id, [], t);
+    }
+  };
+  await lands(1, ['#544', '#555']);
+  assert.deepEqual(w.puts, [['Cara', 'ci.land:fallback', 'CI: the land gate fell back to perigee on 2 lands in a row: #544 (the desktop suite hit the 6-min cap), #555 (the desktop suite hit the 6-min cap). Why: the desktop suite hit the 6-min cap, so each land ran the full suite on perigee instead of waiting on CI. Fix: open the fallen-back runs on the CI page and fix what stopped them; the next land with a green gate clears this.']]);
+  assert.deepEqual(w.quiet, ['ci.land:fallback'], 'a quiet item, from the scheme');
+  assert.deepEqual(w.from, ['Peek Auras']);
+  await lands(3, ['#556', '#557']);
+  assert.deepEqual(w.puts.slice(-2).map(([, k, x]) => [k, x?.slice(0, 84) ?? null]), [['ci.land:fallback', null], ['ci.open', 'CI, Peek Auras: the land gate fell back to perigee on 4 lands in a row: 1 more, then']], 'ringing: the quiet one goes, the alert comes');
   // The 5-min poll keeps it, with GitHub's own problems beside it.
+  const before = w.puts.length;
   await w.health.tick(t);
-  assert.equal(w.puts.length, 1, 'not re-sent');
-  for (const [phase, ci, ms] of green) { await seen(3, '#556', phase, ci); t += ms; }
-  await w.health.land(w.peek.id, [], t);
-  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', null]);
+  assert.equal(w.puts.length, before, 'not re-sent');
+  const sent = w.puts.length;
+  await lands(5, ['#558'], green);
+  assert.deepEqual(w.puts.slice(sent), [['Cara', 'ci.open', null]]);
   // A restart remembers the line and the count.
-  for (const [phase, ci, ms] of capHit) { await seen(4, '#557', phase, ci); t += ms; }
-  await w.health.land(w.peek.id, [], t);
+  await lands(6, ['#559']);
   const again = new CiHealth(w.store, w.deps);
-  for (const [phase, ci, ms] of capHit) { await again.land(w.peek.id, [land(5, '#558', phase, ci)], t); t += ms; }
+  for (const [phase, ci, ms] of capHit) { await again.land(w.peek.id, [land(7, '#560', phase, ci)], t); t += ms; }
   await again.land(w.peek.id, [], t);
-  assert.match(w.puts.at(-1)![2]!, /2 lands in a row: #557 .*#558/);
+  assert.match(w.puts.at(-1)![2]!, /2 lands in a row: #559 .*#560/);
 });
 
 test("the one alert names its problems for the Taskmaster's wake, the land alarm with each run's link, failed step and runner (#869)", async () => {
   const w = world();
   let t = NOW;
   const failed: [string, string | null, number][] = [['rebase', null, 5_000], ['ci', 'failed', 20_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]];
-  for (const [seq, name, run] of [[1, '#866', 7001], [2, '#867', 7002]] as const) {
+  for (const [seq, name, run] of [[1, '#866', 7001], [2, '#867', 7002], [3, '#868', 7003], [4, '#869', 7004]] as const) {
     w.gh.jobs.set(run, [job({ run_id: run, name: 'tests', conclusion: 'failure', runner_name: 'DESKTOP-G248IJ8-desktop', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: "the runner's clock", conclusion: 'failure' }] })]);
     for (const [phase, ci, ms] of failed) { await w.health.land(w.peek.id, [land(seq, name, phase, ci, ci ? run : null)], t); t += ms; }
     await w.health.land(w.peek.id, [], t);
   }
-  assert.equal(w.puts.length, 1);
-  const [part] = w.parts[0]!;
+  const alerts = w.puts.flatMap(([, k], i) => (k === 'ci.open' ? [i] : []));
+  assert.equal(alerts.length, 1);
+  const [part] = w.parts[alerts[0]]!;
   assert.equal(part.id, `${w.peek.id}:land:fallback`);
-  assert.match(part.title, /^Peek Auras: the land gate fell back to perigee on 2 lands in a row/);
-  assert.match(part.facts!, /https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/7001: tests › the runner's clock failed on DESKTOP-G248IJ8-desktop/);
-  assert.match(part.facts!, /runs\/7002: tests › the runner's clock/);
-});
-
-test('a failed scheduled run on main tells its scheme\'s Taskmaster once, failed step and link included; green, push and old runs say nothing (#588)', async () => {
-  const w = world();
-  const told: [string, string][] = [];
-  const deps = { ...w.deps, tell: (p: { name: string }, text: string) => (told.push([p.name, text]), true) };
-  const health = new CiHealth(w.store, deps);
-  const nightly = (fields: Partial<Run>) => runOf({ name: 'Tests', workflow_id: 9, created_at: iso(2 * HOUR), ...fields });
-  const red = nightly({ id: 4242, head_sha: 'abc1234def', conclusion: 'failure' });
-  w.gh.jobs.set(4242, [job({ run_id: 4242, name: 'tests', conclusion: 'failure', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run the suite', conclusion: 'failure' }] })]);
-  // GitHub's event=schedule filter keeps push runs out; a green nightly (before the red one: no back to green), one still running and a red one from two days ago say nothing.
-  w.gh.scheduled = [nightly({ conclusion: 'success', created_at: iso(3 * HOUR) }), nightly({ status: 'in_progress', conclusion: null }), red, nightly({ conclusion: 'failure', created_at: iso(48 * HOUR) })];
-  await health.tick(NOW);
-  assert.equal(told.length, 1);
-  assert.equal(told[0][0], 'Peek Auras');
-  assert.match(told[0][1], /^Peek Auras's scheduled Tests run on main failed on abc1234, at tests › Run the suite \(finished Nov 5, 02:00 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4242\n/);
-  assert.deepEqual(w.puts, [], 'not a Mandate alert');
-
-  await health.tick(NOW + 5 * MIN);
-  assert.equal(told.length, 1, 'a second poll does not repeat it');
-  await new CiHealth(w.store, deps).tick(NOW + 10 * MIN);
-  assert.equal(told.length, 1, 'nor does a restart');
-
-  // The next night's red run is a new run, so it tells again; one whose jobs can't say where just leaves that out.
-  w.gh.scheduled = [nightly({ id: 4343, head_sha: 'def5678abc', conclusion: 'failure', created_at: iso(MIN) }), ...w.gh.scheduled];
-  await health.tick(NOW + 15 * MIN);
-  assert.equal(told.length, 2);
-  assert.match(told[1][1], /^Peek Auras's scheduled Tests run on main failed on def5678 \(finished Nov 5, 03:59 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/4343\n/);
-});
-
-test('a failed scheduled run waits, untold, while nothing can tell the Taskmaster: no hook, no Taskmaster, or a send that throws (#588)', async () => {
-  const w = world();
-  // Queued for most of a day before it ran: aged by when it ended.
-  w.gh.scheduled = [runOf({ id: 4444, name: 'Tests', conclusion: 'failure', created_at: iso(30 * HOUR), updated_at: iso(HOUR) })];
-  await w.health.tick(NOW);
-  const told: string[] = [];
-  let answer: 'none' | 'throw' | 'ok' = 'none';
-  const health = new CiHealth(w.store, { ...w.deps, tell: (_p, text) => {
-    if (answer === 'throw') throw new Error('send failed');
-    if (answer === 'ok') told.push(text);
-    return answer === 'ok';
-  } });
-  await health.tick(NOW + 5 * MIN);
-  answer = 'throw';
-  await health.tick(NOW + 10 * MIN);
-  assert.deepEqual(told, []);
-  answer = 'ok';
-  await health.tick(NOW + 15 * MIN);
-  await health.tick(NOW + 20 * MIN);
-  assert.equal(told.length, 1);
-});
-
-test("a failed scheduled run whose jobs can't be read still tells, without the step (#588)", async () => {
-  const w = world();
-  const told: string[] = [];
-  const health = new CiHealth(w.store, { ...w.deps, tell: (_p, text) => (told.push(text), true) });
-  w.gh.scheduled = [runOf({ id: 4545, name: 'Tests', head_sha: 'feed123abc', conclusion: 'failure' })];
-  w.gh.down = /runs\/4545\/jobs/;
-  await health.tick(NOW);
-  assert.equal(told.length, 1);
-  assert.match(told[0], /^Peek Auras's scheduled Tests run on main failed on feed123 \(finished [^)]+ PST\): https:/);
+  assert.match(part.title, /^Peek Auras: the land gate fell back to perigee on 4 lands in a row.*\. Why: .*\. Fix: /);
+  assert.match(part.facts!, /https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/7002: tests › the runner's clock failed on DESKTOP-G248IJ8-desktop/);
+  assert.match(part.facts!, /runs\/7004: tests › the runner's clock/);
 });
 
 /** A world whose minions and Taskmaster hear of runs no PR started (#678), with what each was sent. */
@@ -714,7 +698,9 @@ function outsideWorld() {
     w.store.setTicketDir(t.id, '/tmp/x', branch);
     return t;
   };
-  return { ...w, woken, told, outside: deps, minion };
+  // The fake answers every repo's main runs alike: a test about Peek's reds quiets Delve's copy.
+  const quietDelve = () => w.store.setProjectSettings(w.store.listProjects().find((p) => p.name === 'Delve')!.id, { ci_quiet: 'desktop.yml' });
+  return { ...w, woken, told, outside: deps, minion, quietDelve };
 }
 const dispatched = (fields: Partial<Run>) => runOf({ event: 'workflow_dispatch', name: 'stress', workflow_id: 11, path: '.github/workflows/stress.yml', created_at: iso(10 * MIN), updated_at: iso(5 * MIN), ...fields });
 
@@ -762,71 +748,9 @@ test('a run a minion dispatched on its branch wakes it once with its result, red
   assert.equal(w.woken.length, 2, 'not again, nor after a restart');
 });
 
-test('a red scheduled run, or a red dispatched one on main, is one message to the Taskmaster; the next green says back to green once; a quiet workflow says nothing (#678)', async () => {
+test('every workflow but a quiet one is watched: a red on main from any trigger wakes the Taskmaster once per streak and says back to green as held mail; ci_quiet silences, ci_watch overrides it (#774, #968)', async () => {
   const w = outsideWorld();
-  const health = new CiHealth(w.store, w.outside);
-  await health.tick(NOW - HOUR); // dispatched runs count from here
-  const drift = (fields: Partial<Run>) => runOf({ event: 'schedule', name: 'drift', workflow_id: 12, path: '.github/workflows/drift.yml', created_at: iso(30 * MIN), updated_at: iso(20 * MIN), ...fields });
-  w.gh.scheduled = [drift({ id: 6002, head_sha: 'd1d1d1d1d1', conclusion: 'failure' })];
-  w.gh.dispatched = [dispatched({ id: 6001, name: 'windows', workflow_id: 13, path: '.github/workflows/windows.yml', head_sha: 'e2e2e2e2e2', conclusion: 'failure', triggering_actor: { login: 'josh' } })];
-  await health.tick(NOW);
-  assert.equal(w.told.length, 2);
-  assert.match(w.told[0][1], /^Peek Auras's scheduled drift run on main failed on d1d1d1d \(finished Nov 5, 03:40 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/6002\n/);
-  assert.match(w.told[0][1], /To stop these for drift\.yml, add it to the scheme's quiet CI workflows/);
-  assert.match(w.told[1][1], /^Peek Auras's dispatched \(by josh\) windows run on main failed on e2e2e2e \(finished Nov 5, 03:55 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/6001\n/);
-  assert.deepEqual(w.woken, []);
-
-  await health.tick(NOW + 5 * MIN);
-  await new CiHealth(w.store, w.outside).tick(NOW + 10 * MIN);
-  assert.equal(w.told.length, 2, 'not again, nor after a restart');
-
-  // The next green of each says so once; a green after that says nothing.
-  w.gh.scheduled = [drift({ id: 6003, head_sha: 'f3f3f3f3f3', created_at: iso(-MIN), updated_at: iso(-10 * MIN) }), ...w.gh.scheduled];
-  w.gh.dispatched = [dispatched({ id: 6004, name: 'windows', workflow_id: 13, path: '.github/workflows/windows.yml', head_sha: 'a4a4a4a4a4', created_at: iso(-MIN), updated_at: iso(-10 * MIN) }), ...w.gh.dispatched];
-  await health.tick(NOW + 15 * MIN);
-  await new CiHealth(w.store, w.outside).tick(NOW + 20 * MIN);
-  assert.deepEqual(w.told.slice(2).map(([, t]) => t), [
-    "Peek Auras's drift is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/6003 (f3f3f3f, Nov 5, 04:10 PST), after run 6002 failed.",
-    "Peek Auras's windows is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/6004 (a4a4a4a, Nov 5, 04:10 PST), after run 6001 failed.",
-  ]);
-  w.gh.scheduled = [drift({ id: 6005, created_at: iso(-20 * MIN), updated_at: iso(-25 * MIN) }), ...w.gh.scheduled];
-  await health.tick(NOW + 30 * MIN);
-  assert.equal(w.told.length, 4);
-
-  // Quieted in the scheme's settings: its red runs no longer tell.
-  w.store.setProjectSettings(w.peek.id, { ci_quiet: 'drift.yml' });
-  w.gh.scheduled = [drift({ id: 6006, conclusion: 'failure', created_at: iso(-30 * MIN), updated_at: iso(-35 * MIN) }), ...w.gh.scheduled];
-  await health.tick(NOW + 40 * MIN);
-  assert.equal(w.told.length, 4);
-});
-
-test('a red nightly fixed by a push to main says back to green from that push run; a red waiting for a Taskmaster reads GitHub once (#678)', async () => {
-  const w = outsideWorld();
-  let taskmaster = false;
-  const health = new CiHealth(w.store, { ...w.outside, tell: (p: { name: string }, text: string) => (taskmaster && w.told.push([p.name, text]), taskmaster) });
-  // Workflow 7 (desktop) runs nightly and on every push to main.
-  const nightly = runOf({ id: 7001, event: 'schedule', workflow_id: 7, conclusion: 'failure', created_at: iso(3 * HOUR), updated_at: iso(2 * HOUR) });
-  w.gh.jobs.set(7001, [job({ run_id: 7001, conclusion: 'failure' })]);
-  w.gh.scheduled = [nightly];
-  w.gh.mainRuns = [nightly];
-  await health.tick(NOW);
-  const reads = () => w.gh.calls.filter((c) => /runs\/7001\/jobs|check-runs/.test(c)).length;
-  const first = reads();
-  assert.ok(first > 0);
-  await health.tick(NOW + 5 * MIN);
-  assert.equal(reads(), first, 'no Taskmaster yet: the next poll retries from what it read');
-  taskmaster = true;
-  await health.tick(NOW + 10 * MIN);
-  assert.equal(w.told.length, 1);
-
-  w.gh.mainRuns = [runOf({ id: 7002, event: 'push', workflow_id: 7, head_sha: 'c0ffee0000', created_at: iso(HOUR), updated_at: iso(50 * MIN) }), nightly];
-  await health.tick(NOW + 15 * MIN);
-  await health.tick(NOW + 20 * MIN);
-  assert.deepEqual(w.told.slice(1).map(([, t]) => t), ["Peek Auras's desktop is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/7002 (c0ffee0, Nov 5, 03:10 PST), after run 7001 failed."]);
-});
-
-test('a watched workflow gone red on main wakes the Taskmaster once per red streak, from any trigger, and says back to green as held mail (#774)', async () => {
-  const w = outsideWorld();
+  w.quietDelve();
   const told: [string, boolean][] = [];
   let taskmaster = true;
   const deps = { ...w.outside, tell: (_p: { name: string }, text: string, wake?: boolean) => (taskmaster && told.push([text, !!wake]), taskmaster) };
@@ -837,56 +761,86 @@ test('a watched workflow gone red on main wakes the Taskmaster once per red stre
     job({ run_id: 8001, name: 'package', conclusion: 'failure', steps: [] }),
     job({ run_id: 8001, name: 'lint', conclusion: 'success' }),
   ]);
+  w.store.setProjectSettings(w.peek.id, { ci_quiet: 'desktop.yml' });
   w.gh.mainRuns = [push({ id: 8001, head_sha: 'bad0001fff', conclusion: 'failure', created_at: iso(40 * MIN), updated_at: iso(30 * MIN) })];
   await health.tick(NOW);
-  assert.deepEqual(told, [], 'not watched yet: a red push run says nothing');
+  assert.deepEqual(told, [], 'quiet: a red says nothing');
 
-  // Watched while main is already red: told at once, waking the Taskmaster.
+  // ci_watch beats ci_quiet; with neither it's watched all the same.
   w.store.setProjectSettings(w.peek.id, { ci_watch: 'desktop.yml' });
   await health.tick(NOW + 5 * MIN);
+  w.store.setProjectSettings(w.peek.id, { ci_quiet: '', ci_watch: '' });
+  await health.tick(NOW + 10 * MIN);
   assert.equal(told.length, 1);
   assert.equal(told[0][1], true, 'it wakes the Taskmaster');
   assert.match(told[0][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8001 failed on bad0001 \(push by caraminden, finished Nov 5, 03:30 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/8001\nFailing jobs: build › Run tests; package\n/);
-  assert.match(told[0][0], /`ci-failures 8001 -R caraminden\/peek-auras` prints its failing tests\. Later red runs of desktop\.yml won't message you again/);
+  assert.match(told[0][0], /Start a fix minion now and put run 8001 in its brief/);
 
   // Later red runs in the streak, and one still running, say nothing, across a restart too.
   w.gh.mainRuns = [push({ id: 8003, status: 'in_progress', conclusion: null, created_at: iso(MIN) }), push({ id: 8002, conclusion: 'failure', created_at: iso(20 * MIN) }), ...w.gh.mainRuns];
-  await health.tick(NOW + 10 * MIN);
-  await new CiHealth(w.store, deps).tick(NOW + 15 * MIN);
+  await health.tick(NOW + 15 * MIN);
+  await new CiHealth(w.store, deps).tick(NOW + 20 * MIN);
   assert.equal(told.length, 1, 'once per streak');
 
-  // The streak ends green: held mail, once.
-  w.gh.mainRuns = [push({ id: 8004, head_sha: 'a00d000fff', created_at: iso(-MIN), updated_at: iso(-10 * MIN) }), ...w.gh.mainRuns.slice(1)];
-  await health.tick(NOW + 20 * MIN);
+  // The streak ends green: held mail, once; a scheduled or dispatched green on main ends it as well as a push.
+  w.gh.mainRuns = [push({ id: 8004, event: 'schedule', head_sha: 'a00d000fff', created_at: iso(-MIN), updated_at: iso(-10 * MIN) }), ...w.gh.mainRuns.slice(1)];
   await health.tick(NOW + 25 * MIN);
+  await health.tick(NOW + 30 * MIN);
   assert.deepEqual(told.slice(1), [["Peek Auras's Desktop is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/8004 (a00d000, Nov 5, 04:10 PST), after run 8001 failed.", false]]);
 
-  // The next red starts a new streak, waiting untold while there's no Taskmaster; then a re-run of it going green ends it.
+  // The next red waits, untold, while there's no Taskmaster; a re-run of it going green ends it.
   taskmaster = false;
-  w.gh.mainRuns = [push({ id: 8005, head_sha: 'bad0005fff', conclusion: 'failure', created_at: iso(-20 * MIN), updated_at: iso(-25 * MIN) }), ...w.gh.mainRuns];
-  await health.tick(NOW + 30 * MIN);
+  w.gh.mainRuns = [push({ id: 8005, event: 'workflow_dispatch', head_sha: 'bad0005fff', conclusion: 'failure', created_at: iso(-20 * MIN), updated_at: iso(-25 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + 35 * MIN);
   assert.equal(told.length, 2);
   taskmaster = true;
-  await health.tick(NOW + 35 * MIN);
-  assert.equal(told.length, 3);
-  assert.match(told[2][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8005 failed on bad0005 /);
-  w.gh.mainRuns = [{ ...w.gh.mainRuns[0], conclusion: 'success', run_attempt: 2, updated_at: iso(-40 * MIN) }, ...w.gh.mainRuns.slice(1)];
   await health.tick(NOW + 40 * MIN);
+  assert.equal(told.length, 3);
+  assert.match(told[2][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8005 failed on bad0005 \(workflow_dispatch by caraminden, /);
+  w.gh.mainRuns = [{ ...w.gh.mainRuns[0], conclusion: 'success', run_attempt: 2, updated_at: iso(-40 * MIN) }, ...w.gh.mainRuns.slice(1)];
+  await health.tick(NOW + 45 * MIN);
   assert.equal(told.length, 4);
   assert.match(told[3][0], /back to green on main: .*runs\/8005 .*after run 8005 failed\.$/);
-  assert.equal(told[3][1], false);
+});
 
-  // A watched workflow's scheduled and dispatched reds on main are the same streak: one wake, never held mail per run.
-  const nightly = push({ id: 8006, event: 'schedule', conclusion: 'failure', created_at: iso(-50 * MIN), updated_at: iso(-55 * MIN) });
-  const dispatch = push({ id: 8007, event: 'workflow_dispatch', conclusion: 'failure', created_at: iso(-60 * MIN), updated_at: iso(-65 * MIN) });
-  w.gh.scheduled = [nightly];
-  w.gh.dispatched = [dispatch];
-  w.gh.mainRuns = [dispatch, nightly, ...w.gh.mainRuns];
-  await health.tick(NOW + 70 * MIN);
-  await health.tick(NOW + 75 * MIN);
-  assert.equal(told.length, 5);
-  assert.equal(told[4][1], true);
-  assert.match(told[4][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8007 failed on .* \(workflow_dispatch by caraminden, /);
+test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on with no fix minion naming the run, or once it is still red after the fix closed (#968)', async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const deps = { ...w.outside, tell: () => true };
+  const health = new CiHealth(w.store, deps);
+  const red = (id: number, msAgo: number) => runOf({ id, event: 'push', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: `${id}abcdef`, conclusion: 'failure', created_at: iso(msAgo), updated_at: iso(msAgo - MIN) });
+  w.gh.jobs.set(9001, [job({ run_id: 9001, name: 'windows', conclusion: 'failure', steps: [{ name: 'Test', conclusion: 'failure' }] })]);
+  w.gh.mainRuns = [red(9001, 20 * MIN)];
+  await health.tick(NOW);
+  const item = (k = 'ci.red:7') => w.puts.filter(([, key]) => key === k).at(-1)?.[2];
+  assert.match(item()!, /^CI: desktop\.yml failed on main \(run 9001, at windows › Test\)\. Why: .*\. Fix: .*rings at Nov 5, 05:00 PST/);
+  assert.ok(w.quiet.includes('ci.red:7'), 'quiet while the Taskmaster has an hour');
+  assert.equal(item('ci.open'), undefined);
+
+  await health.tick(NOW + RED_FIX_MS);
+  assert.match(item('ci.open')!, /^CI, Peek Auras: desktop\.yml failed on main \(run 9001, at windows › Test\): no fix minion started\./, 'an hour with no fix rings');
+  assert.equal(item(), null, 'and the quiet one goes');
+
+  // A minion whose brief names the run: quiet again, with its number.
+  const fix = w.minion(w.peek.id, 'ticket/1-fix');
+  w.store.addEvent(fix.id, 'user_message', { text: 'Fix the red desktop run 9001 on main' });
+  await health.tick(NOW + RED_FIX_MS + 5 * MIN);
+  assert.equal(item('ci.open'), null, 'a fix on the way stops the ring');
+  assert.match(item()!, new RegExp(`: fix minion #${fix.number} started\\.`));
+
+  // It closes; main is still red on a run made after: that rings.
+  w.store.updateTicket(fix.id, { status: 'closed' });
+  const closedAt = w.store.getTicket(fix.id)!.updated_at;
+  await health.tick(NOW + 2 * HOUR);
+  assert.match(item()!, /closed, waiting on the next run/);
+  w.gh.mainRuns = [{ ...red(9002, 0), created_at: new Date(closedAt + MIN).toISOString() }, ...w.gh.mainRuns];
+  await health.tick(NOW + 2 * HOUR + 5 * MIN);
+  assert.match(item('ci.open')!, new RegExp(`still red after fix minion #${fix.number} closed`));
+
+  // Green clears both.
+  w.gh.mainRuns = [{ ...red(9003, 0), conclusion: 'success', created_at: new Date(closedAt + 2 * MIN).toISOString() }, ...w.gh.mainRuns];
+  await health.tick(NOW + 2 * HOUR + 10 * MIN);
+  assert.equal(item('ci.open'), null);
 });
 
 test('orphanRuns: queued land/** runs over an hour old that no landing holds', () => {

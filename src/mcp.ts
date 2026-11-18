@@ -779,12 +779,12 @@ const TOOLS = [
         quiet_workflows: {
           type: 'array',
           items: { type: 'string' },
-          description: "Workflow file names, like drift.yml, whose failed scheduled runs and dispatched runs on the default branch should no longer message you. A minion that dispatched a run on its own branch still hears that run's result.",
+          description: "Workflow file names, like drift.yml, to leave unwatched: every other workflow that goes red on the default branch wakes you once per red streak, puts a quiet item in people's Mandate, and rings them if no fix minion names the run within an hour. A quiet one does none of that. A minion that dispatched a run on its own branch still hears that run's result.",
         },
         watch_workflows: {
           type: 'array',
           items: { type: 'string' },
-          description: "Workflow file names, like desktop.yml, to watch on the default branch: when one's newest finished run there fails, you're woken once for that red streak (any trigger, lands' pushes too), and get held mail when it's back to green.",
+          description: "Workflow file names, like desktop.yml, to watch on the default branch even when quiet_workflows lists them (every workflow is watched unless quiet): when one's newest finished run there fails, you're woken once for that red streak (any trigger, lands' pushes too), and get held mail when it's back to green.",
         },
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
         onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },

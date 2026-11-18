@@ -523,6 +523,8 @@ interface LandWatch {
   project: number;
   state: LandState;
   problems: Problem[];
+  /** The quiet land items each admin has (#968), as `Saved.sent`. */
+  sent?: Saved['sent'];
 }
 const LAND_WATCH = 'ci-health:land';
 
@@ -617,15 +619,26 @@ export class CiHealth {
    * The land line as Waits.poll saw it (#561), for the live checkout's scheme: the gate's alarm, kept across restarts,
    * goes into the one alert as soon as its words change rather than at the next poll.
    */
-  async land(projectId: number, seen: LandSeen[], now = Date.now()) {
+  land(projectId: number, seen: LandSeen[], now = Date.now()): Promise<void> {
+    // One at a time: the line's calls come every 2 s, and a slow Mandate put mustn't let the next one send it twice.
+    const next = this.landing.then(() => this.landNow(projectId, seen, now));
+    this.landing = next.catch(() => {});
+    return next;
+  }
+  private landing: Promise<void> = Promise.resolve();
+
+  private async landNow(projectId: number, seen: LandSeen[], now: number) {
     const kept = this.store.getSetting<LandWatch>(LAND_WATCH);
-    const w: LandWatch = { project: projectId, state: kept?.state ?? newLandState(), problems: [] };
-    const before = JSON.stringify(kept?.state);
+    const w: LandWatch = { project: projectId, state: kept?.state ?? newLandState(), problems: [], sent: kept?.sent ?? {} };
+    const before = JSON.stringify([kept?.state, kept?.sent]);
     landStep(w.state, seen, now);
     w.problems = landProblems(w.state, now);
-    const rang = JSON.stringify([kept?.project, kept?.problems ?? []]) !== JSON.stringify([w.project, w.problems]);
-    if (rang || before !== JSON.stringify(w.state)) this.store.setSetting(LAND_WATCH, w);
-    if (rang) await this.alert();
+    const changed = JSON.stringify([kept?.project, kept?.problems ?? []]) !== JSON.stringify([w.project, w.problems]);
+    // Every call, not only on a change: a put Mandate refused is tried again on the next (sent entries make it a no-op).
+    const p = this.store.getProject(projectId);
+    if (p) await this.deliver(p, w.problems.filter((x) => x.quiet), w as Required<LandWatch>);
+    if (changed || before !== JSON.stringify([w.state, w.sent])) this.store.setSetting(LAND_WATCH, w);
+    if (changed) await this.alert();
   }
 
   private alerting: Promise<void> = Promise.resolve();
@@ -663,7 +676,7 @@ export class CiHealth {
   /** The one alert's problems as the Taskmaster's wake tells them (#869): the land alarm with each fallen-back run's link, failed step and runner. */
   private async parts(open: { scheme: string; problem: Problem; id: number }[], land: LandWatch | undefined): Promise<AlertPart[]> {
     return Promise.all(open.map(async ({ scheme, problem, id }) => {
-      const part: AlertPart = { id: `${id}:${problem.key}`, title: `${scheme}: ${problem.title.replace(/^CI: /, '')}` };
+      const part: AlertPart = { id: `${id}:${problem.key}`, title: `${scheme}: ${itemText(problem).replace(/^CI: /, '')}` };
       const p = this.store.getProject(id);
       const slug = p && repoSlug(p.repo_url);
       if (problem.key !== 'land:fallback' || !p || !slug || !land) return part;
@@ -702,7 +715,8 @@ export class CiHealth {
     this.recent.set(p.id, all);
     this.store.setSetting(`ci-health:recent:${p.id}`, all.map(({ steps, ...j }) => j));
     for (const g of deadGroups(all)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
-    if (runners) out.push(...stuckProblems(runners, all, saved.offline, now));
+    // A runner list it can't read keeps the stuck items as they were: it can't tell, so it neither clears nor rings anew.
+    out.push(...(runners ? stuckProblems(runners, all, saved.offline, now) : (saved.problems ?? []).filter((x) => x.key.startsWith('stuck:'))));
     out.push(...hungProblems(all, now));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';
@@ -971,10 +985,11 @@ export class CiHealth {
    * A scheme's own items, quiet ones only: every admin with Mandate on gets each, updated when its words change, and
    * cleared once it's gone; an alarm item an older build put here is cleared, as the one alert stands for it now.
    */
-  async deliver(p: Project, problems: Problem[], saved: Saved) {
+  async deliver(p: Project, problems: Problem[], saved: Pick<Saved, 'sent'>) {
     const admins = this.admins();
     const open = new Map(problems.map((x) => [x.key, x]));
-    for (const [key, { title, quiet }] of open) {
+    for (const [key, x] of open) {
+      const title = itemText(x), quiet = x.quiet;
       const sent = (saved.sent[key] ??= {});
       for (const u of admins) {
         if (sent[u.id] === title) continue;

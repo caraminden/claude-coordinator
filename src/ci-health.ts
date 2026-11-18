@@ -25,7 +25,7 @@
 // woken once for that red streak, sharing the red mark above, so later red runs say nothing until it's back to green.
 // #968 (Cara, 2026-11-18: "alerts should only happen when something is broken and needs fixing, and there should be
 // more insight into what happened and why and how we can fix it"; her picks on #968's card the same day) narrows what
-// rings to what needs a person, and every item says what, why and the fix (and links the CI page, #/p/N/ci, once it lands):
+// rings to what needs a person, and every item says what, why and the fix and links the CI page (#/p/N/ci):
 //   - a red on main ("Quiet item, Taskmaster fixes"): every workflow not in ci_quiet is watched as #774's were, its
 //     Taskmaster woken to start a fix minion, and the scheme gets a quiet item; it rings only when no minion naming the
 //     run starts within RED_FIX_MS, or the newest verdict after that minion closed is still red;
@@ -101,8 +101,32 @@ export interface Job {
 export interface Runner {
   name: string;
   status: string;
+  busy?: boolean;
   labels?: { name: string }[];
 }
+/** A run as the CI page lists it. */
+export interface ViewRun {
+  id: number;
+  name: string;
+  branch: string;
+  event?: string;
+  status: string;
+  conclusion: string | null;
+  at: string;
+  url: string;
+}
+/** A scheme's CI as the last poll read it, for the CI page (#968): runners, the queue, each workflow's verdict on main, recent runs. */
+export interface CiView {
+  at: number;
+  slug: string;
+  branch: string;
+  /** Null when its runners can't be listed (no repo admin's linked GitHub). */
+  runners: { name: string; status: string; busy: boolean; labels: string[]; job: string | null; offlineSince: number | null }[] | null;
+  waiting: { name: string; labels: string[]; since: string; run: number }[];
+  workflows: { name: string; file: string; verdict: ViewRun | null; skipped: string[] }[];
+  runs: ViewRun[];
+}
+const viewRun = (slug: string, r: Run): ViewRun => ({ id: r.id, name: r.name, branch: r.head_branch, event: r.event, status: r.status, conclusion: r.conclusion, at: r.created_at, url: r.html_url ?? runUrl(slug, r) });
 /** Something wrong now: what the alert says, keyed so the same trouble keeps one item. */
 export interface Problem {
   key: string;
@@ -319,6 +343,8 @@ export function bundleTitle(open: { scheme: string; problem: Problem }[]): strin
 }
 
 /** Who the one alert comes from in Mandate: no scheme of its own, so a switch for CI health alone. */
+/** The CI page's address (#968), which every CI item links. */
+export const ciPage = (projectId: number) => `/c/#/p/${projectId}/ci`;
 export const CI_SENDER = { id: 0, name: 'CI health' };
 const BUNDLE_ITEM = 'ci.open';
 
@@ -669,7 +695,7 @@ export class CiHealth {
     const admins = title ? this.admins() : [];
     const parts = admins.some((u) => sent[u.id] !== title) ? await this.parts(open, land) : [];
     for (const u of admins) {
-      if (sent[u.id] !== title && (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, title, false, `/c/#/p/${open[0].id}`, parts))) sent[u.id] = title!;
+      if (sent[u.id] !== title && (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, title, false, ciPage(open[0].id), parts))) sent[u.id] = title!;
     }
     for (const uid of Object.keys(sent)) {
       if (admins.some((u) => String(u.id) === uid)) continue;
@@ -732,7 +758,37 @@ export class CiHealth {
       onMain.set(w.id, mainRuns);
     }
     out.push(...(await this.outsideRuns(p, slug, branch, onMain, as, now)));
+    const shown: CiView['workflows'] = [];
+    for (const w of workflows) {
+      const mainRuns = onMain.get(w.id) ?? [];
+      const verdict = mainRuns.find((r) => r.status === 'completed' && VERDICTS.has(r.conclusion ?? ''));
+      const pair = verdictPair(mainRuns);
+      const skipped = pair ? skippedJobs(await this.jobs(slug, pair[0], as), await this.jobs(slug, pair[1], as)) : [];
+      shown.push({ name: w.name, file: String(w.path ?? '').split('/').pop() ?? '', verdict: verdict ? viewRun(slug, verdict) : null, skipped });
+    }
+    this.store.setSetting<CiView>(`ci-health:view:${p.id}`, {
+      at: now, slug, branch,
+      runners: runners && runners.map((r) => ({
+        name: r.name, status: r.status, busy: !!r.busy, labels: (r.labels ?? []).map((l) => l.name),
+        job: all.find((j) => j.status === 'in_progress' && j.runner_name === r.name)?.name ?? null, offlineSince: saved.offline[r.name] ?? null,
+      })),
+      waiting: all.filter((j) => j.status === 'queued' || j.status === 'waiting').map((j) => ({ name: j.name, labels: j.labels, since: j.created_at, run: j.run_id })),
+      workflows: shown,
+      runs: runs.slice(0, 30).map((r) => viewRun(slug, r)),
+    });
     return out;
+  }
+
+  /** Every scheme with CI that `canSee` allows, with its last view and its open problems (the land gate's in the live checkout's scheme), for GET /api/ci. */
+  snapshot(canSee: (projectId: number) => boolean) {
+    const land = this.store.getSetting<LandWatch>(LAND_WATCH);
+    // A scheme whose repo has no workflows has no view, so isn't listed.
+    return this.store.listProjects().flatMap((p) => {
+      const view = repoSlug(p.repo_url) && canSee(p.id) ? this.store.getSetting<CiView>(`ci-health:view:${p.id}`) : undefined;
+      if (!view) return [];
+      const problems = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])];
+      return [{ id: p.id, name: p.name, view, problems }];
+    });
   }
 
   /**
@@ -999,7 +1055,7 @@ export class CiHealth {
       const sent = (saved.sent[key] ??= {});
       for (const u of admins) {
         if (sent[u.id] === title) continue;
-        if (await this.deps.mandate(p, u, itemKey(key), title, quiet)) sent[u.id] = title;
+        if (await this.deps.mandate(p, u, itemKey(key), title, quiet, ciPage(p.id))) sent[u.id] = title;
       }
     }
     for (const [key, sent] of Object.entries(saved.sent)) {

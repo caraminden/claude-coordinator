@@ -239,19 +239,21 @@ function world({ delve = false } = {}) {
   const parts: (AlertPart[] | undefined)[] = [];
   const from: string[] = [];
   const quiet: string[] = [];
+  const links: (string | undefined)[] = [];
   const mandateUp = { ok: true };
   const deps = {
     as: () => undefined,
     get,
-    mandate: async (p: { name: string }, u: { name: string }, key: string, title: string | null, q?: boolean, _link?: string, about?: AlertPart[]) => {
+    mandate: async (p: { name: string }, u: { name: string }, key: string, title: string | null, q?: boolean, link?: string, about?: AlertPart[]) => {
       puts.push([u.name, key, title]);
+      links.push(link);
       parts.push(about);
       from.push(p.name);
       if (q) quiet.push(key);
       return mandateUp.ok;
     },
   };
-  return { store, peek, gh, puts, parts, from, quiet, mandateUp, deps, health: new CiHealth(store, deps) };
+  return { store, peek, gh, puts, parts, from, quiet, links, mandateUp, deps, health: new CiHealth(store, deps) };
 }
 
 // Peek's desktop runner, offline, and a job on its label waiting: the stuck-runner rule's world.
@@ -261,6 +263,36 @@ const waitingRun = (w: ReturnType<typeof world>, t: number, id = 3001) => {
   w.gh.runs = [r, ...w.gh.runs];
   w.gh.jobs.set(id, [job({ run_id: id, status: 'queued', conclusion: null, runner_name: null, steps: [], labels: ['self-hosted', 'peek-auras-ci'], created_at: r.created_at })]);
 };
+
+test('the CI page reads each scheme it may see: runners with their job, the queue, verdicts on main with skipped jobs, runs and open problems; items link it (#968)', async () => {
+  const w = world();
+  w.gh.runners = [{ ...desk('online'), busy: true } as any, desk('offline', 'DESKTOP-G248IJ8-2')];
+  const running = runOf({ id: 4001, status: 'in_progress', conclusion: null, created_at: iso(5 * MIN) });
+  w.gh.runs = [running];
+  w.gh.jobs.set(4001, [job({ run_id: 4001, name: 'tests', status: 'in_progress', conclusion: null, runner_name: 'DESKTOP-G248IJ8-desktop', created_at: iso(5 * MIN) }), job({ run_id: 4001, name: 'lint', status: 'queued', conclusion: null, runner_name: null, steps: [], labels: ['self-hosted', 'peek-auras-ci'], created_at: iso(4 * MIN) })]);
+  // Green that skipped the Windows job the red before it ran.
+  w.gh.mainRuns = [runOf({ id: 5002, conclusion: 'success', created_at: iso(HOUR) }), runOf({ id: 5001, conclusion: 'failure', created_at: iso(2 * HOUR) })];
+  w.gh.jobs.set(5002, [job({ run_id: 5002, name: 'windows', conclusion: 'skipped' })]);
+  w.gh.jobs.set(5001, [job({ run_id: 5001, name: 'windows', conclusion: 'failure' })]);
+  await w.health.tick(NOW);
+  waitingRun(w, NOW);
+  w.gh.runners = [desk('offline')];
+  await w.health.tick(NOW + WAIT_MS);
+
+  const [peek, ...rest] = w.health.snapshot(() => true);
+  assert.deepEqual(rest, [], 'only schemes whose repo has CI are listed: Notes has no workflows');
+  assert.equal(peek.name, 'Peek Auras');
+  const v = peek.view!;
+  assert.equal(v.branch, 'main');
+  assert.deepEqual(v.runners!.map((r) => [r.name, r.status, r.offlineSince]), [['DESKTOP-G248IJ8-desktop', 'offline', NOW + WAIT_MS]]);
+  assert.ok(v.waiting.some((j) => j.name === 'lint'), 'the queue lists the waiting job');
+  assert.deepEqual(v.workflows.map((x) => [x.name, x.verdict?.conclusion, x.skipped]), [['desktop', 'success', ['windows']]]);
+  assert.ok(v.runs.some((r) => r.id === 3001 && r.url.endsWith('/runs/3001')));
+  assert.ok(peek.problems.some((x) => x.key.startsWith('stuck:')), 'the ringing problem is on the page with its why and fix');
+  assert.ok(peek.problems.every((x) => x.why && x.fix));
+  assert.equal(w.links.at(-1), `/c/#/p/${w.peek.id}/ci`, 'the alert opens the CI page');
+  assert.deepEqual(w.health.snapshot((id) => id !== w.peek.id), [], "a scheme they can't see isn't listed");
+});
 
 test('a problem is one Mandate alert per admin with Mandate, cleared when fixed, and kept across a restart', async () => {
   const w = world();

@@ -22,6 +22,7 @@ import type { OutsideSpend } from './outside-spend.ts';
 import type { Secrets } from './secrets.ts';
 import type { RepoAccess } from './repo-access.ts';
 import type { CiLoad } from './ci-load.ts';
+import type { CiHealth } from './ci-health.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { ChunkedUploads } from './chunked-uploads.ts';
 import type { CiStore } from './ci-store.ts';
@@ -244,6 +245,8 @@ export interface App {
   runnerTokens: RunnerTokens;
   /** The CI desktop's load: the runner agents' samples, each PC's view and verdict (src/ci-load.ts, #534). */
   ciLoad: CiLoad;
+  /** The CI page's snapshot (#968); absent in tests that don't need it. */
+  ciHealth?: Pick<CiHealth, 'snapshot'>;
   /** Big uploads in chunks, for the shared folder and contraptions (src/chunked-uploads.ts, #832). */
   chunked: ChunkedUploads;
   /** CI output the schemes' runners upload, kept per scheme and swept by rule (src/ci-store.ts, #658). */

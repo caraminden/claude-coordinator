@@ -892,7 +892,8 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
   if (!c || !identity) return false;
   const wakes = title !== null && !quiet;
   const scheme = wakes ? alertScheme(project.id) : 0;
-  if (scheme && store.getOverlord(scheme)) link = `/c/#/p/${scheme}`;
+  // A wake's item opens the Taskmaster's chat, but CI's keep their CI page (#968: what, why and the fix are there).
+  if (scheme && store.getOverlord(scheme) && !link.endsWith('/ci')) link = `/c/#/p/${scheme}`;
   try {
     const { status, answer } = await callMandate(c, identity, key, title === null ? undefined : { title, alert: !quiet, link });
     if (status === 200 && wakes) alertWakes.raise({ from: project, key, title, link, person: person.name, parts });
@@ -1130,7 +1131,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

@@ -239,6 +239,11 @@ export const machineRoutes: Route[] = [
     // Everyone signed in sees every PC (Cara, 2026-11-11: "they should know if and how much their work is affecting the CI machine").
     handler: ({ res, app }) => json(res, 200, { pcs: app.ciLoad.views() }),
   },
+  // The CI page (#968): each scheme they can see with its runners, queue, verdicts, runs and open problems, plus the CI desktop's load.
+  {
+    method: 'GET', path: '/api/ci', ...people,
+    handler: ({ res, app, session }) => json(res, 200, { schemes: app.ciHealth?.snapshot((id) => app.store.canSee(session, id)) ?? [], pcs: app.ciLoad.views(), now: Date.now() }),
+  },
   { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app, session }) => json(res, 200, machinesFor(session, app.machines.list())) },
   {
     method: 'POST', path: '/api/machines', ...people,

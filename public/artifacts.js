@@ -3,7 +3,8 @@ import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, formatSize, h
 import { followChat, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending } from './core.js';
 import { addBriefButtons } from './briefstart.js';
 import { attachBridge, openWithBridge } from './bridge-host.js';
-import { loadDraft, saveDraft } from './composer.js';
+import { attachImage, loadDraft, saveDraft } from './composer.js';
+import { annotator, canvasBlob } from './annotate.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
@@ -282,7 +283,15 @@ function showMedia(ticket, file) {
   }));
   viewer.stage.className = 'viewer-stage k-media';
   const lb = lightbox(items, { at: paths.indexOf(file.path), into: viewer.stage, autoplay: true, label: 'Pictures and clips in this message',
-    onChange: (at) => replaceHash(fileHref(ticket.id, paths[at])) });
+    onChange: (at) => replaceHash(fileHref(ticket.id, paths[at])),
+    // A picture is ready to draw on (#946): Done puts the marked copy in the chat's message box and goes back to it.
+    render: (item, stage, _, show) => item.kind !== 'image' ? show() : annotator(stage, item.src, {
+      doneLabel: 'Add to message',
+      onDone: async (canvas) => {
+        if (canvas) attachImage(ticket.id, await canvasBlob(canvas));
+        leaveViewer();
+      },
+    }) });
   viewer.media = { ticketId: ticket.id, paths, lb };
   return true;
 }

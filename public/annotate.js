@@ -51,7 +51,7 @@ const swatch = (hex) => {
  * a marked picture can undo back to the clean one. onDone(canvas, marks) runs on Done, with the marked picture
  * (null when every mark was undone); the caller closes the lightbox.
  */
-export function annotator(stage, src, { marks = [], onDone }) {
+export function annotator(stage, src, { marks = [], onDone, doneLabel = 'Done' }) {
   marks = [...marks];
   const s = { tool: 'pen', colour: 'red' };
   const canvas = h('canvas', { class: 'annotate-canvas', 'aria-label': 'Picture to draw on' });
@@ -107,7 +107,7 @@ export function annotator(stage, src, { marks = [], onDone }) {
     h('button', { type: 'button', class: 'cui-choice', title, 'aria-label': title, 'aria-pressed': String(pressed), onclick }, extra ?? label);
   const undo = h('button', { type: 'button', class: 'cui-btn cui-icon', title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo', onclick: () => { marks.pop(); paint(); sync(); } }, '↶');
   const clear = h('button', { type: 'button', class: 'cui-btn', onclick: () => { marks = []; paint(); sync(); } }, 'Clear');
-  const done = h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: () => onDone(marks.length ? canvas : null, marks) }, 'Done');
+  const done = h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: () => onDone(marks.length ? canvas : null, marks) }, doneLabel);
   const toolsEl = h('div', { class: 'cui-choices', role: 'group', 'aria-label': 'Tool' });
   const coloursEl = h('div', { class: 'cui-choices annotate-colours', role: 'group', 'aria-label': 'Colour' });
   const sync = () => {
@@ -136,3 +136,19 @@ export function annotator(stage, src, { marks = [], onDone }) {
     },
   };
 }
+
+/**
+ * Whether a picture can be drawn on and saved: one this server sends (or a blob or data URL). A picture from
+ * another site would taint the canvas, so it only shows.
+ */
+export function drawable(src) {
+  try {
+    const u = new URL(src, location.href);
+    return u.protocol === 'blob:' || u.protocol === 'data:' || u.origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** The marked picture as a PNG blob, for the message box (which shrinks it if it must, as a pasted one). */
+export const canvasBlob = (canvas) => new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('could not save the marked picture'))), 'image/png'));

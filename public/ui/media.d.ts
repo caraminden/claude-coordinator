@@ -147,8 +147,8 @@ export interface LightboxOptions {
   onChange?: (at: number, item: LightboxItem) => void;
   /** The dialog closed (not called in `into` mode). */
   onClose?: () => void;
-  /** Draw an item yourself: append to stage, and return something with toggle()/destroy() if Space should reach it. */
-  render?: (item: LightboxItem, stage: HTMLElement, at: number) => { toggle?(): void; destroy?(): void } | null | void;
+  /** Draw an item yourself: append to stage, and return something with toggle()/destroy() if Space should reach it. `show()` draws it the lightbox's own way (and returns what to give back), for items you leave as they are. */
+  render?: (item: LightboxItem, stage: HTMLElement, at: number, show: () => { toggle?(): void; destroy?(): void } | null) => { toggle?(): void; destroy?(): void } | null | void;
   /** Clips start playing as they show, muted and on a loop, as a GIF would (default false). */
   autoplay?: boolean;
   /** true: pictures at least twice as wide as tall pan (the panner). false: none do, even an item with its own `pan`. Default: every picture shows whole, fit to the box, except an item with its own `pan` or `onPan`. */

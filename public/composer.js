@@ -395,7 +395,7 @@ function chatAttachments(chatId) {
 }
 
 /** Put a marked picture (#946: drawn on a chat image) in a chat's message box, as if pasted. */
-export const attachImage = (chatId, blob) => chatAttachments(chatId).add([new File([blob], 'marked.png', { type: blob.type })]);
+export const attachImage = (chatId, blob) => chatAttachments(chatId).add([new File([blob], 'marked.png', { type: blob.type })], true);
 
 /** Whether any chat has a file uploading or an image being prepared; a reload now would lose it. */
 export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => a.busy || a.uploading);
@@ -446,7 +446,7 @@ function createAttachments(chatId, onChange) {
       alertNote(`Could not attach ${file.name}: ${err.message}`);
     }
   };
-  const addImage = async (file) => {
+  const addImage = async (file, marked) => {
     // Past the image limit, an image still goes, as a file Claude can open.
     if (state.items.filter((i) => i.data).length + state.busy >= MAX_IMAGES) return addFile(file);
     state.busy++;
@@ -463,12 +463,13 @@ function createAttachments(chatId, onChange) {
       state.busy--;
     }
     // Shrunk or converted, or not drawable at all: send the untouched original too, so art isn't lost.
-    if (blob !== file) await addFile(file, blob ? `${file.name || 'image'} (original)` : undefined);
+    // A picture marked here has no original worth keeping (Cara, 2026-11-17: "Only the marked copy").
+    if (blob !== file && !(marked && blob)) await addFile(file, blob ? `${file.name || 'image'} (original)` : undefined);
   };
-  state.add = async (files) => {
+  state.add = async (files, marked = false) => {
     // Copied first: the picker's FileList empties when the picker is reset, before the loop gets far.
     for (const file of [...files]) {
-      if (file.type.startsWith('image/')) await addImage(file);
+      if (file.type.startsWith('image/')) await addImage(file, marked);
       else addFile(file);
     }
   };

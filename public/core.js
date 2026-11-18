@@ -16,11 +16,12 @@ import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
 import { loadReleases, onReleases } from './releases.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
-import { renderModelPicker, uploadsRunning } from './composer.js';
+import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
 import { filesUploading } from './files.js';
 import { onJobUpdate } from './jobs.js';
 import { linkifyHtml, markdownElement } from './ui/markdown.js';
 import { lightbox } from './ui/media.js';
+import { annotator, canvasBlob, drawable } from './annotate.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
 import { toast } from './ui/status.js';
@@ -1112,5 +1113,15 @@ document.addEventListener('click', (e) => {
   const link = img?.parentElement;
   if (!link?.href) return;
   e.preventDefault();
-  lightbox([{ src: link.href, alt: img.alt || 'Picture' }]);
+  // Ready to draw on (#946), as an image waiting to send: Done puts the marked copy in this chat's message box.
+  const chatId = view?.kind === 'project' && view.main === 'chat' && img.closest('#log') ? view.id : null;
+  const lb = lightbox([{ src: link.href, alt: img.alt || 'Picture' }], chatId == null || !drawable(link.href) ? {} : {
+    render: (item, stage) => annotator(stage, item.src, {
+      doneLabel: 'Add to message',
+      onDone: async (canvas) => {
+        lb.close();
+        if (canvas) attachImage(chatId, await canvasBlob(canvas));
+      },
+    }),
+  });
 });

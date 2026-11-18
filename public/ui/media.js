@@ -683,7 +683,7 @@ export function lightbox(items, opts = {}) {
     at = i;
     stage.replaceChildren();
     const item = items[i];
-    current = (opts.render ? opts.render(item, stage, i) : show(item, stage, opts)) ?? null;
+    current = (opts.render ? opts.render(item, stage, i, () => show(item, stage, opts)) : show(item, stage, opts)) ?? null;
     if (items.length > 1) stage.append(prev, next);
     count.textContent = `${i + 1} / ${items.length}`;
     thumbs.forEach((b, k) => b.setAttribute('aria-current', String(k === i)));

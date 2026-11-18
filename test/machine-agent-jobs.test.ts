@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { jsonLines } from './helpers.ts';
 // @ts-ignore: a plain .mjs the agent's computers download
 import { JobRunner, loadConfig, outFiles, podmanRunArgs } from '../public/machine-agent.mjs';
 
@@ -63,7 +64,7 @@ const container = (id: number) => (existsSync(box(id)) ? JSON.parse(readFileSync
 const setBox = (id: number, s: object) => (writeFileSync(`${box(id)}.new`, JSON.stringify(s)), renameSync(`${box(id)}.new`, box(id)));
 const exitContainer = (id: number, code: number) => setBox(id, { status: 'exited', code });
 const stickContainer = (id: number, stuck: boolean) => setBox(id, { ...container(id), stuck });
-const podmanCalls = () => (existsSync(join(fakes, 'argv.log')) ? readFileSync(join(fakes, 'argv.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+const podmanCalls = () => jsonLines(join(fakes, 'argv.log'));
 
 // ---------- the app's side ----------
 type State = { id: number; state: string; run_s: number; error?: string; outputs?: { path: string; size: number; uploaded: boolean }[]; exit_code?: number; held_vram_mb?: number; log_tail?: string };

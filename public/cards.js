@@ -369,6 +369,9 @@ export function settleSpend(log, data) {
 
 // ---------- question cards ----------
 
+/** A card's question or option text: plain, unless it holds a fenced block, which draws as in a reply (header, Copy, #898). */
+const cardText = (text, ticketId) => (/^ {0,3}(```|~~~)/m.test(text) ? markdown(text, ticketId) : text);
+
 /** "→ Tabs · keep both" lines for an answer message: the picks, then any text typed with them. */
 export function answerSummary(answers) {
   return h('div', { class: 'answer-lines' }, answers.map((a) =>
@@ -513,12 +516,12 @@ export function questionCard(ticketId, card, opts = {}) {
           const unpick = !answered && picks[i].selected.has(o.label);
           thumb && !unpick ? thumb.click() : choose(o);
         },
-      }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, o.description) : '');
+      }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, cardText(o.description, ticketId)) : '');
       // With pictures, the options are a gallery of tiles, each a thumbnail over its label.
       const gallery = q.options.some((o) => o.image);
       return h('div', { class: 'q', 'data-q': i },
         // A job's go card lays its recipe out whole (#859) in place of the question's 500-character summary.
-        h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : q.question,
+        h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
           q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
         card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
         gallery

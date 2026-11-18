@@ -163,3 +163,12 @@ test('placeholder in a command: a <name> in a shell-tagged block is a hit; redir
   const hits = answerCheck({ toolCalls: [], finalText: block('fish', 'ssh <host>'), steered: false });
   assert.match(hits[0], /^placeholder in a command · "ssh <host>"/);
 });
+
+test('placeholder in a command inside an ask_question card counts, in the question and in an option description (#944)', () => {
+  const ask = (question: string, description = '') => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__thread__ask_question', input: { questions: [{ question, options: [{ label: 'a', description }] }] } }] } });
+  const prompt = JSON.stringify({ type: 'user', message: { content: 'go' } });
+  const hit = (q: string, d?: string) => answerCheck(readTurn([prompt, ask(q, d)].join('\n')));
+  assert.match(hit('Run this?\n```powershell-admin\nicacls <folder>\n```')[0], /^placeholder in a command · "icacls <folder>"/);
+  assert.equal(hit('Run?', '```wsl\nls <dir>\n```').length, 1);
+  assert.deepEqual(hit('Run this?\n```wsl\nls /tmp\n```'), []);
+});

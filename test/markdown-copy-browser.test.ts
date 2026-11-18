@@ -67,27 +67,28 @@ test('only fenced blocks get a button, and the text of the reply stays the code'
 });
 
 /** Whether the first button is hidden by the (hover: hover) rule: headless Chromium has no hover, so the rule's selector is matched by hand. */
-const hoverHides = (page: Page) => page.eval<boolean>(`(() => {
+const hoverHides = (page: Page, i = 0) => page.eval<boolean>(`(() => {
   const rule = document.adoptedStyleSheets.flatMap((s) => [...s.cssRules]).find((r) => r.conditionText === '(hover: hover)');
-  return md.querySelector('.cui-copy').matches(rule.cssRules[0].selectorText) && rule.cssRules[0].style.opacity === '0';
+  return md.querySelectorAll('.cui-copy')[${i}].matches(rule.cssRules[0].selectorText) && rule.cssRules[0].style.opacity === '0';
 })()`);
 
 test('desktop: copies the code exactly through navigator.clipboard, says Copied, then Copy again', { skip }, async () => {
   const page = await browser.page(base, { width: 900, height: 700 });
   await page.eval('useClipboard(true)');
-  assert.equal(await hoverHides(page), true, 'hidden until hover where there is hover');
+  assert.equal(await hoverHides(page), false, 'a shell-tagged command block keeps Copy in view (#944)');
+  assert.equal(await hoverHides(page, 1), true, 'an untagged block hides it until hover where there is hover');
   await click(page, 'pre .cui-copy');
   assert.deepEqual(await page.eval('window.copies'), [`api:${CODE}`]);
   assert.equal(await page.eval('md.querySelector(".cui-copy").dataset.copied'), 'yes');
   assert.equal(await page.eval('getComputedStyle(md.querySelector(".cui-copy"), "::before").content'), '"Copied"');
   await page.mouse(5, 690);
+  assert.equal(await hoverHides(page, 1), true);
   assert.equal(await hoverHides(page), false, 'the feedback stays visible after the pointer leaves');
   await page.eval('new Promise((r) => setTimeout(r, 2100))');
   assert.equal(await page.eval('md.querySelector(".cui-copy").dataset.copied ?? null'), null);
   assert.equal(await page.eval('getComputedStyle(md.querySelector(".cui-copy"), "::before").content'), '"Copy"');
-  assert.equal(await hoverHides(page), false, 'still focused from the click, so still shown');
   await page.eval('document.activeElement.blur()');
-  assert.equal(await hoverHides(page), true);
+  assert.equal(await hoverHides(page), false, 'a command block stays shown');
 });
 
 test('plain http (no navigator.clipboard): the textarea fallback copies the same text, multi-line, indented, quoted', { skip }, async () => {

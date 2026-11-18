@@ -475,7 +475,8 @@ const CSS = `
 :where(.cui-md .cui-copy)::before { content: 'Copy'; }
 :where(.cui-md .cui-copy[data-copied="yes"])::before { content: 'Copied'; }
 :where(.cui-md .cui-copy[data-copied="no"])::before { content: "Couldn't copy"; }
-@media (hover: hover) { :where(.cui-md pre:not(:hover, :focus-within) > .cui-copy:not([data-copied])) { opacity: 0; } }
+/* A command block (a shell tag, #898) keeps Copy in view: it is what the block is for, and a screenshot or a first look shouldn't have to hover to find it. */
+@media (hover: hover) { :where(.cui-md pre:not(.cui-shell, :hover, :focus-within) > .cui-copy:not([data-copied])) { opacity: 0; } }
 :where(.cui-copy-text) { position: fixed; top: 0; left: -9999px; opacity: 0; font-size: 16px; }
 `;
 let sheet = false;

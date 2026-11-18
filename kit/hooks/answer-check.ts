@@ -24,7 +24,8 @@ export const MIN_ANSWER_CHARS = 200;
 const ACTIONS = ['ask_question', 'propose_plan', 'message_coordinator', 'message_taskmaster', 'message_ticket', 'create_ticket'];
 
 /** What one turn did, read from its transcript. */
-export type Turn = { toolCalls: string[]; finalText: string; steered: boolean };
+export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; cardText?: string };
+// `cardText`: the question, header and option text of the turn's ask_question calls, where a command can sit too.
 // `steered` covers every turn cut short rather than ended: a steer, a stop, a usage-limit or API error.
 
 const isNotification = (text: string) => /^\s*<task-notification>/.test(text);
@@ -60,7 +61,14 @@ export function readTurn(transcript: string, promptId?: string): Turn {
         continue;
       }
       for (const b of Array.isArray(e.message?.content) ? e.message.content : []) {
-        if (b?.type === 'tool_use') turn.toolCalls.push(String(b.name ?? ''));
+        if (b?.type === 'tool_use') {
+          turn.toolCalls.push(String(b.name ?? ''));
+          if (/(^|__)ask_question$/.test(String(b.name ?? ''))) {
+            const qs = Array.isArray(b.input?.questions) ? b.input.questions : [];
+            const parts = qs.flatMap((q: any) => [q?.question, ...(Array.isArray(q?.options) ? q.options.map((o: any) => o?.description) : [])]).filter((t: unknown) => typeof t === 'string');
+            if (parts.length) turn.cardText = `${turn.cardText ?? ''}\n${parts.join('\n')}`;
+          }
+        }
         else if (b?.type === 'text' && String(b.text ?? '').trim()) turn.finalText = String(b.text);
       }
     } else if (e?.type === 'attachment' && e.attachment?.type === 'queued_command') {
@@ -106,7 +114,7 @@ export function answerCheck(turn: Turn): string[] {
   // A link to a card (#/p/2/t/475?e=399793) means the proposal already has one, maybe from an earlier turn.
   const acted = /\]\(#\/p\/\d+\/t\/\d+\?e=\d+\)/.test(text) || turn.toolCalls.some((name) => ACTIONS.some((a) => name === a || name.endsWith(`__${a}`)));
   if (!acted && proposalLine(text)) hits.push(`proposal without a card · ${quote}`);
-  const placeholder = placeholderInCommand(text);
+  const placeholder = placeholderInCommand(text) ?? (turn.cardText ? placeholderInCommand(turn.cardText) : null);
   if (placeholder) hits.push(`placeholder in a command · "${placeholder.slice(0, 120)}"`);
   return hits;
 }

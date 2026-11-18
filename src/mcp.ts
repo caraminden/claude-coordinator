@@ -177,7 +177,7 @@ const WHEN_CI_PASSES = {
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type). Use it for any choice you would otherwise put in prose: a go (a lone go may be a reply button instead), A or B, or an offer of work not done yet ("want me to…"); tuning details are yours. Each question marks the option you would pick with `recommended: true` (exactly one; any number on multiSelect), first; a question without one is refused. Options may carry an image, shown as a gallery. A visual or multi-part choice goes on a choices page (citadel:docs-and-mocks): pass `doc` with its path and no questions, and its Send settles the card. For a password, API key or token, pass `secret` and no questions: a masked field; you get only the name, read from $CITADEL_SECRET_<NAME>, used in commands without printing it. After calling it, end your turn with a short reply; the answers arrive as the next message. The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345) ("below" this turn, "above" later).',
+    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type). Use it for any choice you would otherwise put in prose: a go (a lone go may be a reply button instead), A or B, or an offer of work not done yet ("want me to…"); tuning details are yours. Each question marks the option you would pick with `recommended: true` (exactly one; any number on multiSelect), first; a question without one is refused. Options may carry an image, shown as a gallery. A command people run goes in the question (or an option description) as a fenced block tagged with where it runs (```powershell, ```powershell-admin, ```wsl, ```fish, ```bash, ```cmd): the card draws it with the same header and Copy button as a reply, and the same no-placeholder rule holds. A visual or multi-part choice goes on a choices page (citadel:docs-and-mocks): pass `doc` with its path and no questions, and its Send settles the card. For a password, API key or token, pass `secret` and no questions: a masked field; you get only the name, read from $CITADEL_SECRET_<NAME>, used in commands without printing it. After calling it, end your turn with a short reply; the answers arrive as the next message. The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345) ("below" this turn, "above" later).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -188,7 +188,7 @@ const ASK_QUESTION = {
         items: {
           type: 'object',
           properties: {
-            question: { type: 'string', maxLength: 500, description: 'The full question, ending in "?"' },
+            question: { type: 'string', maxLength: 2000, description: 'The full question, ending in "?". A command can go in it as a tagged fenced block (```powershell-admin, ```wsl, …), drawn like one in a reply, with Copy.' },
             header: { type: 'string', maxLength: 24, description: 'A very short label for the card, e.g. "Layout"' },
             multiSelect: { type: 'boolean', description: 'true if several options can be picked (default false)' },
             options: {

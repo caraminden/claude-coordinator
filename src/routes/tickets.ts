@@ -682,7 +682,7 @@ export const ticketRoutes: Route[] = [
       const text = questions.map((q: any, i: number) => {
         const { selected, other } = answers[i];
         // The text typed with a pick expands on it; typed alone, it is the answer.
-        const picked = !selected.length && !other ? '(no option picked; see what's attached)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
+        const picked = !selected.length && !other ? '(no option picked; see the attachment)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
       const answer = { answer: { questionId: body.questionId, answers } };

@@ -1,455 +1,451 @@
 import assert from 'node:assert/strict';
-import { type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { request } from 'node:http';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { Contraptions } from '../src/contraptions.ts';
-import { Store } from '../src/db.ts';
-import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, pacificClock, type JobKind } from '../src/machine-jobs.ts';
-import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until } from './helpers.ts';
+// @ts-ignore: a plain .mjs the agent's computers download
+import { JobRunner, loadConfig, outFiles, podmanRunArgs } from '../public/machine-agent.mjs';
 
-// Jobs on a person's machine (#857, shared/project/specs/desktop-gpu-jobs.md): the real server, a stand-in `claude -p`
-// that records each turn, and a fake machine agent on the real SSE stream that records the job messages it is sent.
+// The machine agent's GPU job runner (#858) against a fake podman, a fake nvidia-smi and a stand-in for the app's
+// three job routes. The fake podman keeps each container as a file; a test ends one by writing that file.
 const root = mkdtempSync(join(tmpdir(), 'machine-jobs-'));
-const data = join(root, 'data');
-mkdirSync(data, { recursive: true });
-const procs: ChildProcess[] = [];
-const agents: { close(): void }[] = [];
-after(async () => {
-  for (const a of agents) a.close();
-  await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
-});
-
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
-const { createInterface } = require('node:readline');
-createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), token: process.env.COORDINATOR_TOKEN, jobs: process.env.COORDINATOR_JOB_MACHINES ?? null }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`);
-chmodSync(fakeClaude, 0o755);
-
-// Before boot: the admin, the scheme, and two contraptions homed in it.
-const pre = new Store(join(data, 'coordinator.db'));
-const cara = pre.createUser({ name: 'Cara', login: 'cara', admin: true });
-pre.updateUser(cara.id, { server_login: 1 }); // her turns run on the server's (stand-in) login
-const scheme = pre.createProject('P', null, cara.id);
-const keys = new Contraptions(pre, SECRET, join(data, 'contraptions'));
-for (const name of ['appa', 'appb']) keys.register({ name, title: name.toUpperCase(), port: 9100, icon: null, home_scheme: scheme.id, open_paths: '[]', default_model: null, turn_cap: null });
-const KEY = (name: string) => readFileSync(join(data, 'contraptions', name, 'contraption.key'), 'utf8');
-
-let base = '';
-const cookies: Record<string, string> = {};
-let ticket: any;
-let box: any;
-let boxToken = '';
-let agent: Agent;
-const shared = projectSharedDir(data, scheme.id);
-
-async function raw(path: string, opts: { method?: string; body?: unknown; who?: string; bearer?: string } = {}) {
-  const auth = opts.bearer ? { Authorization: `Bearer ${opts.bearer}` } : opts.who === 'minion' ? { Authorization: `Bearer ${live()}` } : { Cookie: cookies[opts.who ?? 'Cara'] };
-  return fetch(base + path, {
-    method: opts.method ?? (opts.body ? 'POST' : 'GET'),
-    headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-}
-async function call(who: string, path: string, body?: unknown, method?: string) {
-  const res = await raw(path, { who, body, method });
-  const out = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${out.error}`);
-  return out;
-}
-async function app(name: string, path: string, body?: unknown) {
-  const res = await raw(path, { bearer: KEY(name), body });
-  const out = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${out.error}`);
-  return out;
-}
-
-const turns = () => jsonLines(join(root, 'turns.jsonl'));
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
-const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
-const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
-const job = (id: number) => call('Josh', `/api/jobs/${id}`);
-
-/** A fake machine agent: its stream's messages, and its own calls with the machine's key. */
-interface Agent { msgs: any[]; jobs(type?: string): any[]; close(): void; post(path: string, body: unknown): Promise<Response> }
-async function connect(token: string, info: object): Promise<Agent> {
-  const ctrl = new AbortController();
-  const res = await fetch(`${base}/api/machines/connect?v=2&host=fake`, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
-  assert.equal(res.status, 200);
-  const msgs: any[] = [];
-  void (async () => {
-    const dec = new TextDecoder();
-    let buf = '';
-    for await (const chunk of res.body as any) {
-      buf += dec.decode(chunk, { stream: true });
-      for (let i; (i = buf.indexOf('\n\n')) >= 0; buf = buf.slice(i + 2)) {
-        const line = buf.slice(0, i).split('\n').find((l) => l.startsWith('data: '));
-        if (line) msgs.push(JSON.parse(line.slice(6)));
-      }
-    }
-  })().catch(() => {});
-  await until('the hello', () => msgs.some((m) => m.hello));
-  const post = (path: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const a: Agent = { msgs, jobs: (type) => msgs.filter((m) => m.job && (!type || m.job.type === type)).map((m) => m.job), close: () => ctrl.abort(), post };
-  agents.push(a);
-  assert.equal((await post('/api/machines/info', { v: 2, found: [], workspaces: [], ...info })).status, 202);
-  return a;
-}
-const OFFER = { jobs: { folders: ['models'], max_limit_h: 12, max_disk_gb: 100, gpu: true } };
-const state = (id: number, s: string, extra: object = {}) => agent.post('/api/machines/job-state', { id, state: s, run_s: 5, gpu_busy_s: 3, gpu_pct: 90, vram_mb: 4000, log_tail: 'working', ...extra });
-
-const IMAGE = (c: string) => `ghcr.io/example/whisperx@sha256:${c.repeat(64)}`;
-const KIND = { name: 'whisperx', image: IMAGE('a'), command: ['align', '/in'], reads: ['models'], gpu: true, network: false, resumable: true, max_limit_h: 2 };
-const queue = (body: object) => call('minion', `/api/tickets/${ticket.id}/jobs`, { machine: 'josh-gpu', kind: KIND, ...body });
-/** Answer a job's go card in the chat as `who`. */
-async function answer(who: string, jobId: number, label: string) {
-  const card = (await events('question')).filter((q) => q.job === jobId).at(-1);
-  assert.ok(card, `job #${jobId} has a go card`);
-  return call(who, `/api/tickets/${ticket.id}/answer`, { questionId: card.id, answers: [{ selected: [label] }] });
-}
-const hhmm = (min: number) => { const m = ((min % 1440) + 1440) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
-const hours = (open: boolean) => {
-  const now = pacificClock(Date.now()).minutes;
-  return call('Josh', `/api/machines/${box.id}/job-settings`, open ? { start: hhmm(now - 60), end: hhmm(now + 120) } : { start: hhmm(now + 120), end: hhmm(now + 180) }, 'PATCH');
-};
-/** Do something that wakes the minion, and wait for that turn to start and end: its token replaces the last one. */
-async function wakes<T>(fn: () => Promise<T>): Promise<T> {
-  const n = turns().length;
-  const out = await fn();
-  await until('the minion to be woken', () => turns().length > n);
-  await idle();
-  return out;
-}
-/** End a job as done, so the next test starts with the machine free; the minion is woken with its result. */
-const finish = (id: number) => wakes(async () => {
-  assert.equal((await state(id, 'done', { exit_code: 0 })).status, 202);
-  await until(`job #${id} to end`, async () => (await job(id)).state === 'done');
-});
-
-before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, HOME: join(root, 'home') } });
-  base = srv.base;
-  cookies.Cara = srv.cookie;
-  procs.push(srv.proc);
-  for (const name of ['Josh', 'Dana']) {
-    const made = await call('Cara', '/api/people', { name });
-    const res = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: `${name}-password-1` }) });
-    cookies[name] = res.headers.get('set-cookie')!.split(';')[0];
-    await call('Cara', `/api/projects/${scheme.id}/members`, { person: made.person.id });
-  }
-  ({ machine: box, token: boxToken } = await call('Josh', '/api/machines', { name: 'josh-gpu' }));
-  await call('Josh', `/api/machines/${box.id}`, { projects: [scheme.id] }, 'PATCH');
-  agent = await connect(boxToken, OFFER);
-  await hours(true);
-  mkdirSync(shared, { recursive: true });
-  writeFileSync(join(shared, 'chapter.wav'), 'RIFF fake audio');
-  ticket = await call('Cara', `/api/projects/${scheme.id}/tickets`, { message: 'align chapter 4' });
-  await until('the first turn', () => turns().length >= 1);
-  await idle();
-});
-
-test('job hours wrap midnight, a one-off window opens them, and a kind\'s hash ignores its name', () => {
-  const at = (h: number, m = 0) => Date.UTC(2026, 10, 16, h + 8, m); // Pacific standard time is UTC-8 in November
-  const night = { start: '23:00', end: '08:00', until: null, paused: false };
-  assert.equal(hoursOpen(night, at(23, 30)), true);
-  assert.equal(hoursOpen(night, at(7, 59)), true);
-  assert.equal(hoursOpen(night, at(8, 0)), false);
-  assert.equal(hoursOpen(night, at(12)), false);
-  assert.equal(hoursOpen({ ...night, until: at(13) }, at(12)), true, 'the one-off window opens them');
-  assert.equal(hoursOpen({ ...night, start: '09:00', end: '17:00' }, at(12)), true);
-  const k: JobKind = { name: 'a', image: IMAGE('a'), command: ['x'], reads: [], gpu: true, network: false, resumable: false, max_limit_s: 3600 };
-  assert.equal(kindHash(k), kindHash({ ...k, name: 'b' }));
-  assert.notEqual(kindHash(k), kindHash({ ...k, image: IMAGE('b') }));
-  assert.notEqual(kindHash(k), kindHash({ ...k, network: true }));
-});
-
-test('only a minion whose scheme has a machine with a jobs block gets the job tools', async () => {
-  assert.equal(turns()[0].jobs, 'josh-gpu');
-});
-
-test('no job.start without its owner\'s go: someone else\'s answer is refused, the owner\'s starts it', async () => {
-  const j = await queue({ inputs: [join(shared, 'chapter.wav')] });
-  assert.equal(j.state, 'needs-go');
-  const card = (await events('question')).find((q) => q.job === j.id);
-  assert.equal(card.to, 'Josh', 'the card is the owner\'s');
-  assert.deepEqual(card.questions[0].options.map((o: any) => o.label), ['Run in job hours', 'Run now', 'Always allow this kind', 'No']);
-  assert.match(card.questions[0].question, /whisperx.*josh-gpu[\s\S]*Reads models; GPU yes; network no; limit 2 h[\s\S]*chapter\.wav/);
-  // The live job card sits in the chat right after the go card, and the view says whose go it needs (#859).
-  const chat = await call('Cara', `/api/tickets/${ticket.id}/events?after=0`);
-  const at = (kind: string) => chat.findIndex((e: any) => e.kind === kind && JSON.parse(e.data).job === j.id);
-  assert.ok(at('job') > at('question') && at('question') >= 0, 'a job event follows the go card');
-  assert.equal(j.decider_id, box.owner_id);
-  assert.deepEqual([card.recipe.kind.image, card.recipe.inputs, card.recipe.limit_s], [IMAGE('a'), [{ name: 'chapter.wav', size: 15 }], 7200], 'the card carries the recipe whole');
-  assert.equal(JSON.parse(chat[at('job')].data).view.state, 'needs-go', 'the job event carries the view it draws from');
-  assert.equal(j.ticket_number, ticket.number);
-  assert.equal(typeof j.decider_id, 'number');
-  await assert.rejects(answer('Dana', j.id, 'Run in job hours'), /403/);
-  await assert.rejects(call('Dana', `/api/jobs/${j.id}/go`, { choice: 'now' }), /403/);
-  await assert.rejects(raw(`/api/jobs/${j.id}/go`, { who: 'minion', body: { choice: 'now' } }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }), /403/);
-  assert.deepEqual(agent.jobs('job.start'), [], 'nothing starts without a go');
-  await answer('Josh', j.id, 'Run in job hours');
-  const [start] = await until('job.start', () => agent.jobs('job.start').length && agent.jobs('job.start'));
-  assert.equal(start.id, j.id);
-  assert.deepEqual(start.kind, { name: 'whisperx', image: IMAGE('a'), command: ['align', '/in'], reads: ['models'], gpu: true, network: false, resumable: true });
-  assert.equal(start.limit_s, 7200);
-  assert.equal(start.inputs[0].name, 'chapter.wav');
-  // The input comes with the job's own token only.
-  const input = (token: string) => fetch(`${base}/api/machines/job-input?job=${j.id}&name=chapter.wav`, { headers: { Authorization: `Bearer ${boxToken}`, 'X-Job-Token': token } });
-  assert.equal((await input('wrong')).status, 403);
-  assert.equal(await (await input(start.input_token)).text(), 'RIFF fake audio');
-  assert.equal((await state(j.id, 'running')).status, 202);
-  assert.equal((await job(j.id)).state, 'running');
-  // Starting doesn't move the card; running does, once, however often the agent reports (#859, "the card follows the bottom").
-  await state(j.id, 'running', { gpu_pct: 80 });
-  assert.deepEqual((await events('job')).filter((e) => e.job === j.id).map((e) => e.stage), ['waiting', 'running']);
-});
-
-test('one job at a time: a second one with its go waits behind the first', async () => {
-  const [running] = (await call('Josh', `/api/machines/${box.id}/jobs`)).jobs.filter((x: any) => x.state === 'running');
-  const j = await queue({});
-  await call('Josh', `/api/jobs/${j.id}/go`, { choice: 'hours' });
-  const view = await job(j.id);
-  assert.equal(view.state, 'queued');
-  assert.equal(view.waits, `behind job #${running.id}`);
-  assert.equal(agent.jobs('job.start').length, 1);
-  // The first ending starts the second; the minion is woken with the first's result.
-  await finish(running.id);
-  await until('the second job.start', () => agent.jobs('job.start').some((s) => s.id === j.id));
-  assert.match(JSON.stringify(turns().at(-1).prompt), new RegExp(`Job #${running.id} \\(whisperx\\) on josh-gpu is done`));
-  // A report on a job that ended here is refused, and the agent is told to stop it.
-  assert.equal((await state(running.id, 'running')).status, 409);
-  await until('job.stop for the ended job', () => agent.jobs('job.stop').some((s) => s.id === running.id));
-  await state(j.id, 'running');
-  await finish(j.id);
-});
-
-test('"Always allow" is a standing go for job hours; a changed digest asks again; outside hours it waits; now always asks', async () => {
-  const first = await queue({});
-  await answer('Josh', first.id, 'Always allow this kind');
-  await until('job.start', () => agent.jobs('job.start').some((s) => s.id === first.id));
-  await state(first.id, 'running');
-  await finish(first.id);
-  const cards = (await events('question')).length;
-  // Same recipe, a new name: no card.
-  const again = await queue({ kind: { ...KIND, name: 'whisperx-2' } });
-  assert.equal(again.state, 'starting', 'the machine is free and in its hours: it starts at once');
-  assert.equal(again.go, 'standing');
-  assert.equal((await events('question')).length, cards);
-  await until('job.start', () => agent.jobs('job.start').some((s) => s.id === again.id));
-  await state(again.id, 'running');
-  await finish(again.id);
-  // A new digest is a new recipe.
-  const changed = await queue({ kind: { ...KIND, image: IMAGE('b') } });
-  assert.equal(changed.state, 'needs-go');
-  await wakes(() => call('Josh', `/api/jobs/${changed.id}/go`, { choice: 'no' }));
-  assert.equal((await job(changed.id)).state, 'refused');
-  assert.match(JSON.stringify(turns().at(-1).prompt), new RegExp(`Job #${changed.id} \\(whisperx\\) on josh-gpu was refused by Josh`));
-  // Outside job hours a standing go waits; asked for now, it takes a card.
-  await hours(false);
-  const waits = await queue({});
-  assert.equal(waits.state, 'queued');
-  assert.match(waits.waits, /^outside job hours \(opens \d\d:\d\d P[SD]T\)$/);
-  await assert.rejects(queue({ when: 'now' }), /400 when "now" needs a reason/);
-  const now = await queue({ when: 'now', reason: 'Cara wants chapter 4 tonight' });
-  assert.equal(now.state, 'needs-go');
-  assert.ok((await events('question')).some((q) => q.job === now.id));
-  const started = agent.jobs('job.start').length;
-  await new Promise((r) => setTimeout(r, 300));
-  assert.equal(agent.jobs('job.start').length, started, 'neither starts outside hours without a run-now');
-  // Run now is the owner's: then it starts.
-  await assert.rejects(call('Dana', `/api/jobs/${waits.id}/run-now`, {}), /403/);
-  await call('Josh', `/api/jobs/${waits.id}/run-now`, {});
-  await until('the run-now start', () => agent.jobs('job.start').some((s) => s.id === waits.id));
-  await wakes(() => call('Josh', `/api/jobs/${now.id}/go`, { choice: 'no' }));
-});
-
-test('only the owner (or an admin) pauses, resumes and stops; paused time is the owner\'s', async () => {
-  const [j] = (await call('Josh', `/api/machines/${box.id}/jobs`)).jobs.filter((x: any) => x.state === 'starting');
-  await state(j.id, 'running');
-  for (const action of ['pause', 'resume', 'stop']) await assert.rejects(call('Dana', `/api/jobs/${j.id}/${action}`, {}), /403/);
-  await assert.rejects(raw(`/api/jobs/${j.id}/pause`, { who: 'minion', body: {} }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }), /403/);
-  assert.equal((await call('Josh', `/api/jobs/${j.id}/pause`, {})).state, 'paused');
-  await until('job.pause', () => agent.jobs('job.pause').some((s) => s.id === j.id));
-  assert.equal((await call('Cara', `/api/jobs/${j.id}/resume`, {})).state, 'running', 'an admin may too');
-  await until('job.resume', () => agent.jobs('job.resume').some((s) => s.id === j.id));
-  await call('Josh', `/api/jobs/${j.id}/stop`, {});
-  await until('job.stop', () => agent.jobs('job.stop').some((s) => s.id === j.id));
-  await wakes(() => state(j.id, 'stopped'));
-  assert.equal((await job(j.id)).state, 'stopped');
-  assert.deepEqual((await events('job')).filter((e) => e.job === j.id).map((e) => e.stage), ['waiting', 'running', 'paused', 'running', 'ended']);
-});
-
-test('results upload under the job\'s and the scheme\'s caps', async () => {
-  await hours(true);
-  const j = await queue({});
-  await until('job.start', () => agent.jobs('job.start').some((s) => s.id === j.id));
-  await state(j.id, 'running');
-  const upload = (path: string, body: string | null, length?: number) => new Promise<number>((resolve, reject) => {
-    const req = request(`${base}/api/machines/job-upload?job=${j.id}&${path === 'LOG' ? 'log=1' : `path=${encodeURIComponent(path)}`}`, { method: 'POST', headers: { Authorization: `Bearer ${boxToken}`, ...(length !== undefined ? { 'Content-Length': String(length) } : {}) } }, (res) => {
-      res.resume();
-      resolve(res.statusCode!);
-      req.destroy();
-    });
-    req.on('error', (err: any) => (err.code === 'ECONNRESET' ? undefined : reject(err)));
-    if (body !== null) req.end(body);
-    else req.flushHeaders();
-  });
-  assert.equal(await upload('words/ch4.json', '{"ok":true}'), 201);
-  assert.equal(readFileSync(join(shared, 'jobs', String(j.id), 'words', 'ch4.json'), 'utf8'), '{"ok":true}');
-  assert.equal(await upload('../escape.json', 'x'), 400);
-  assert.equal(await upload('big.bin', null, 2 * 1024 ** 3 + 1), 413, 'over 2 GB per job, refused on its length');
-  // Fill the scheme to 10 bytes under its 20 GB: a file that grows past that while streaming is refused, and nothing is kept.
-  const store = new Store(join(data, 'coordinator.db'));
-  const other = await queue({});
-  await wakes(() => call('Josh', `/api/jobs/${other.id}/stop`, {}));
-  store.db.prepare('UPDATE machine_jobs SET upload_bytes = ? WHERE id = ?').run(20 * 1024 ** 3 - 11 - 11, other.id);
-  assert.equal(await upload('fits.txt', 'x'.repeat(5)), 201);
-  assert.equal(await upload('over.txt', 'x'.repeat(100)), 413);
-  assert.equal(existsSync(join(shared, 'jobs', String(j.id), 'over.txt')), false);
-  assert.equal(await upload('LOG', 'line 1\n'.repeat(20)), 201, 'the log sits outside the result caps');
-  assert.equal(await upload('LOG', null, 20 * 1024 ** 2 + 1), 413, 'under its own 20 MB cap');
-  store.db.prepare('UPDATE machine_jobs SET upload_bytes = 0 WHERE id = ?').run(other.id);
-  await finish(j.id);
-  assert.equal(await upload('LOG', 'the whole log\n'), 201, 'the log may come once the job has ended');
-  assert.equal(await upload('late.txt', 'x'), 409, 'results may not');
-  assert.equal(readFileSync(join(shared, 'jobs', String(j.id), '.job.log'), 'utf8'), 'the whole log\n');
-  assert.equal(store.getMachineJob(j.id)!.upload_bytes, 5 + 11, 'the log doesn\'t count against the job');
-  assert.match(JSON.stringify(turns().at(-1).prompt), new RegExp(`Job #${j.id} .*jobs/${j.id}/ in the scheme's shared folder`));
-});
-
-test('on reconnect the server reconciles: a lost job failed, one it ended is told to stop', async () => {
-  const j = await queue({});
-  await until('job.start', () => agent.jobs('job.start').some((s) => s.id === j.id));
-  await state(j.id, 'running');
-  agent.close();
-  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
-  // It comes back knowing nothing of the running job, and still running an old ended one.
-  agent = await wakes(() => connect(boxToken, { ...OFFER, known_jobs: [{ id: 1, state: 'running' }] }));
-  assert.equal((await job(j.id)).state, 'failed');
-  assert.equal((await job(j.id)).error, 'the machine restarted');
-  await until('job.stop for the old job', () => agent.jobs('job.stop').some((s) => s.id === 1));
-  // One that comes back with no jobs block at all knows none: its running job is lost too.
-  const k = await queue({});
-  await until('job.start', () => agent.jobs('job.start').some((s) => s.id === k.id));
-  await state(k.id, 'running');
-  agent.close();
-  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
-  agent = await wakes(() => connect(boxToken, {}));
-  assert.equal((await job(k.id)).error, 'the machine restarted');
-  agent.close();
-  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
-  agent = await connect(boxToken, OFFER);
-});
-
-test('a contraption queues on its home scheme\'s machine, and can\'t read or stop another app\'s job', async () => {
-  const j = await app('appa', '/api/contraptions/jobs', { machine: 'josh-gpu', kind: KIND, when: 'now', reason: 'render tonight' });
-  assert.equal(j.state, 'needs-go');
-  assert.equal(j.asked_by, 'APPA');
-  assert.equal((await app('appa', `/api/contraptions/jobs/${j.id}`)).id, j.id);
-  await assert.rejects(app('appb', `/api/contraptions/jobs/${j.id}`), /404/);
-  await assert.rejects(app('appb', `/api/contraptions/jobs/${j.id}/stop`, {}), /404/);
-  await assert.rejects(app('appa', '/api/contraptions/jobs', { machine: 'josh-gpu', kind: KIND, inputs: ['/etc/passwd'] }), /400/);
-  assert.equal((await app('appa', `/api/contraptions/jobs/${j.id}/stop`, {})).state, 'stopped');
-});
-
-test('the owner removes an always-allowed kind: the next one asks again; nobody else may (#859)', async () => {
-  const { kinds } = await call('Josh', `/api/machines/${box.id}/jobs`);
-  const hash = kinds.find((k: any) => k.name === 'whisperx').hash;
-  await assert.rejects(call('Dana', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), /403/);
-  assert.deepEqual(await call('Josh', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), { ok: true });
-  assert.equal((await call('Josh', `/api/machines/${box.id}/jobs`)).kinds.some((k: any) => k.hash === hash), false);
-  await assert.rejects(call('Josh', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), /404/);
-  const asks = await queue({});
-  assert.equal(asks.state, 'needs-go', 'no standing go any more');
-  await wakes(() => call('Josh', `/api/jobs/${asks.id}/go`, { choice: 'no' }));
-});
-
-test('on the clock: hours pause and resume a job, a late "running" keeps the pause, the limit stops it, old results are swept', async () => {
-  const dir = join(root, 'clock');
-  mkdirSync(dir);
-  const store = new Store(join(dir, 'coordinator.db'));
-  const owner = store.createUser({ name: 'Owner', login: 'owner' });
-  const who = { uid: owner.id, name: 'Owner', admin: false };
-  const p = store.createProject('U', null, owner.id);
-  const id0 = store.createMachine('gpu-box', 'x', 'Owner', owner.id).id;
-  store.updateMachine(id0, { jobs: JSON.stringify({ folders: [], max_limit_h: 12, max_disk_gb: null, gpu: true }) });
-  let t = Date.now();
-  const sent: any[] = [];
-  const cards: any[] = [];
-  const jobs = new MachineJobs({
-    store, send: (_m, msg) => (sent.push(msg), true), online: () => true, broadcast() {}, postCard: (_j, c) => (cards.push(c), null), settleCard() {}, wake() {}, note() {},
-    resultsDir: (j) => join(dir, 'jobs', String(j.id)), now: () => t,
-  });
-  const m = () => store.getMachine(id0)!;
-  const setHours = (open: boolean) => {
-    const now = pacificClock(t).minutes;
-    store.updateMachine(id0, { job_settings: JSON.stringify({ ...DEFAULT_SETTINGS, ...(open ? { start: hhmm(now - 60), end: hhmm(now + 120) } : { start: hhmm(now + 120), end: hhmm(now + 180) }) }) });
+after(() => rmSync(root, { recursive: true, force: true }));
+const node = process.execPath;
+const fakes = join(root, 'fakes');
+mkdirSync(fakes);
+const fakePodman = join(root, 'podman.mjs');
+writeFileSync(fakePodman, `
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const [dir, cmd, ...args] = process.argv.slice(2);
+appendFileSync(join(dir, 'argv.log'), JSON.stringify([cmd, ...args]) + '\\n');
+const box = (name) => join(dir, name + '.json');
+const read = (name) => (existsSync(box(name)) ? JSON.parse(readFileSync(box(name), 'utf8')) : null);
+const set = (name, s) => writeFileSync(box(name), JSON.stringify(s));
+const name = args[args.length - 1];
+if (cmd === 'run') {
+  if (args.some((a) => a.includes('fail-run'))) { console.error('Error: image not known'); process.exit(125); }
+  set(args[args.indexOf('--name') + 1], { status: 'running' });
+} else if (cmd === 'wait') {
+  const tick = () => {
+    const s = read(name);
+    if (!s) { console.error('no such container'); process.exit(125); }
+    if (s.status === 'exited' || s.status === 'removed') { console.log(s.code); process.exit(0); }
+    setTimeout(tick, 30);
   };
-  const last = () => sent.at(-1);
-  const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: true, max_limit_s: 3600 };
-  setHours(true);
-  const j = jobs.queue({ machine: m(), projectId: p.id, ticketId: null, contraptionId: null, askedBy: 'test', kind, inputs: [], limitS: 600, when: 'hours', reason: '' });
-  jobs.decide(j.id, 'hours', who);
-  assert.equal(last().type, 'job.start');
-  jobs.report(m(), { id: j.id, state: 'running', run_s: 0 });
+  tick();
+} else if (cmd === 'inspect') {
+  const s = read(name);
+  if (!s || s.status === 'removed') { console.error('no such object'); process.exit(125); }
+  console.log(s.status + ' ' + (s.code ?? 0));
+} else if (cmd === 'rm') {
+  const s = read(name);
+  if (s && s.status !== 'removed') set(name, { status: 'removed', code: s.status === 'exited' ? s.code : 137 });
+} else if (cmd === 'stop') {
+  if (read(name)?.status === 'running') set(name, { status: 'exited', code: 143 });
+} else if (cmd === 'pause') {
+  set(name, { status: 'paused' });
+} else if (cmd === 'unpause') {
+  set(name, { status: 'running' });
+}
+`);
+const fakeSmi = join(root, 'nvidia-smi.mjs');
+writeFileSync(fakeSmi, `console.log('42, 5120\\n');`);
 
-  // Hours close: paused by the hours; a "running" sent before the agent got job.pause doesn't undo that.
-  setHours(false);
-  jobs.tickAll();
-  assert.deepEqual(last(), { type: 'job.pause', id: j.id });
-  jobs.report(m(), { id: j.id, state: 'running', run_s: 10 });
-  jobs.report(m(), { id: j.id, state: 'paused', run_s: 10 });
-  assert.deepEqual([store.getMachineJob(j.id)!.state, store.getMachineJob(j.id)!.paused_by], ['paused', 'hours']);
-  // Hours open: resumed.
-  setHours(true);
-  jobs.tickAll();
-  assert.deepEqual(last(), { type: 'job.resume', id: j.id });
-  assert.equal(store.getMachineJob(j.id)!.state, 'running');
-  // The owner's Resume outside hours sticks: it runs now.
-  setHours(false);
-  jobs.tickAll();
-  assert.equal(store.getMachineJob(j.id)!.paused_by, 'hours');
-  jobs.resume(j.id, who);
-  jobs.tickAll();
-  assert.deepEqual([store.getMachineJob(j.id)!.state, store.getMachineJob(j.id)!.go], ['running', 'now']);
+const box = (id: number) => join(fakes, `citadel-job-${id}.json`);
+const container = (id: number) => (existsSync(box(id)) ? JSON.parse(readFileSync(box(id), 'utf8')) : null);
+const exitContainer = (id: number, code: number) => writeFileSync(box(id), JSON.stringify({ status: 'exited', code }));
+const podmanCalls = () => (existsSync(join(fakes, 'argv.log')) ? readFileSync(join(fakes, 'argv.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
 
-  // Past its 10 min limit and the 2 min grace, the server stops it itself.
-  jobs.report(m(), { id: j.id, state: 'running', run_s: 600 + 119 });
-  assert.equal(last().type, 'job.resume', 'inside the grace it runs on');
-  jobs.report(m(), { id: j.id, state: 'running', run_s: 600 + 121 });
-  assert.deepEqual(last(), { type: 'job.stop', id: j.id });
-  jobs.report(m(), { id: j.id, state: 'stopped', run_s: 721 });
-  assert.match(store.getMachineJob(j.id)!.error ?? '', /over its 10 min limit/);
+// ---------- the app's side ----------
+type State = { id: number; state: string; run_s: number; error?: string; outputs?: { path: string; size: number; uploaded: boolean }[]; exit_code?: number; held_vram_mb?: number; log_tail?: string };
+const app = {
+  states: [] as State[],
+  uploads: new Map<string, Buffer>(),
+  logs: new Map<number, string>(),
+  inputs: new Map<string, Buffer>(),
+  stateStatus: 202,
+};
+let appUrl = '';
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url ?? '/', 'http://x');
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c);
+  const body = Buffer.concat(chunks);
+  const send = (status: number, obj: object) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(obj));
+  if (req.headers.authorization !== 'Bearer machine-key') return send(401, { error: 'key' });
+  if (url.pathname === '/api/machines/job-input') {
+    if (req.headers['x-job-token'] !== 'tok') return send(403, { error: 'bad token' });
+    const data = app.inputs.get(`${url.searchParams.get('job')}/${url.searchParams.get('name')}`);
+    return data ? res.writeHead(200).end(data) : send(404, { error: 'no such input' });
+  }
+  if (url.pathname === '/api/machines/job-state') {
+    app.states.push(JSON.parse(body.toString()));
+    return send(app.stateStatus, { ok: true });
+  }
+  if (url.pathname === '/api/machines/job-upload') {
+    const job = Number(url.searchParams.get('job'));
+    if (url.searchParams.get('log')) return app.logs.set(job, body.toString()), send(201, { ok: true });
+    const path = url.searchParams.get('path') ?? '';
+    if (path.startsWith('huge')) return send(413, { error: 'over the cap' });
+    app.uploads.set(`${job}/${path}`, body);
+    return send(201, { ok: true });
+  }
+  send(404, { error: 'no route' });
+});
+before(() => new Promise<void>((done) => server.listen(0, '127.0.0.1', () => ((appUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`), done()))));
+after(() => new Promise<void>((done) => server.close(() => done())));
 
-  // Results are kept 14 days from when the job ended, then deleted here.
-  mkdirSync(join(dir, 'jobs', String(j.id)), { recursive: true });
-  writeFileSync(join(dir, 'jobs', String(j.id), 'out.json'), '{}');
-  t += 13 * 24 * 3600_000;
-  await jobs.sweep();
-  assert.ok(existsSync(join(dir, 'jobs', String(j.id), 'out.json')), 'kept at 13 days');
-  t += 2 * 24 * 3600_000;
-  await jobs.sweep();
-  assert.equal(existsSync(join(dir, 'jobs', String(j.id))), false, 'swept at 15 days');
-  assert.ok(store.getMachineJob(j.id)!.swept_at);
+const statesOf = (id: number) => app.states.filter((s) => s.id === id);
+const lastState = (id: number) => statesOf(id).at(-1);
+async function until(what: string, ok: () => unknown, ms = 6000) {
+  const end = Date.now() + ms;
+  while (!ok()) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}; states: ${JSON.stringify(app.states.slice(-4))}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
 
-  // A card's 500 characters: a long reason and command give way, never what it reads, GPU, network or the image.
-  jobs.queue({ machine: m(), projectId: p.id, ticketId: null, contraptionId: null, askedBy: 'test', kind: { ...kind, command: ['python', 'x'.repeat(900)] }, inputs: [], limitS: 600, when: 'now', reason: 'r'.repeat(200) });
-  const q: string = cards.at(-1).questions[0].question;
-  assert.ok(q.length <= 500, `${q.length} characters`);
-  assert.match(q, /Reads none of your folders; GPU yes; network no; limit 10 min/);
-  assert.match(q, new RegExp(`Image docker\\.io/x/y@sha256:a{64}`));
-  assert.match(q, /Command python x+…/);
-  assert.match(q, /\nInputs none$/, 'the inputs line stays, cut to fit if it must');
-  store.db.close();
+// ---------- the owner's block ----------
+const jobsDir = join(root, 'jobs');
+const voice = join(root, 'voice notes');
+const outside = join(root, 'outside');
+for (const d of [jobsDir, voice, outside]) mkdirSync(d);
+writeFileSync(join(outside, 'secret.txt'), 'never leaves');
+const block = (over: object = {}) => ({ dir: jobsDir, folders: new Map([['voice', voice]]), max_limit_h: 12, max_disk_gb: 5, gpu: true, ...over });
+
+const runners: any[] = [];
+after(() => runners.forEach((r) => r.close()));
+function runner(b: object | null = block()) {
+  const r = new JobRunner({ block: b, appUrl, token: 'machine-key', podman: [node, fakePodman, fakes], nvidiaSmi: [node, fakeSmi], tickMs: 60, graceS: 1 });
+  runners.push(r);
+  return r;
+}
+
+const IMAGE = `ghcr.io/example/whisperx@sha256:${'a'.repeat(64)}`;
+let nextId = 100;
+function start(over: object = {}, kind: object = {}) {
+  const id = nextId++;
+  const data = Buffer.from(`audio for ${id}`);
+  app.inputs.set(`${id}/clip.wav`, data);
+  return {
+    type: 'job.start', id, limit_s: 3600, input_token: 'tok', resume: false,
+    inputs: [{ name: 'clip.wav', size: data.length, sha256: createHash('sha256').update(data).digest('hex') }],
+    kind: { name: 'whisperx', image: IMAGE, command: ['whisperx', '/in/clip.wav'], gpu: true, network: false, reads: ['voice'], resumable: false, ...kind },
+    ...over,
+  };
+}
+
+// ---------- the block ----------
+
+test('loadConfig reads the jobs block, leaves bad folders out, and turns jobs off for a broken one', () => {
+  const file = join(root, 'machine-agent.json');
+  writeFileSync(file, JSON.stringify({ jobs: { dir: jobsDir, folders: { voice, 'bad name!': voice, gone: join(root, 'nope') }, max_disk_gb: 40, gpu: true } }));
+  const c = loadConfig(file, {});
+  assert.deepEqual([...c.jobs.folders], [['voice', voice]]);
+  assert.equal(c.jobs.max_limit_h, 12);
+  assert.equal(c.jobs.gpu, true);
+  assert.equal(c.problems.length, 2);
+
+  for (const [jobs, why] of [
+    [{ dir: jobsDir, folders: {} }, /max_disk_gb/],
+    [{ dir: join(root, 'nope'), max_disk_gb: 1 }, /dir/],
+    [{ dir: jobsDir, max_disk_gb: 1, max_limit_h: 100 }, /max_limit_h/],
+    [{ dir: jobsDir, max_disk_gb: 1, gpu: 'yes' }, /gpu/],
+    ['on', /must be/],
+  ] as const) {
+    writeFileSync(file, JSON.stringify({ jobs }));
+    const broken = loadConfig(file, {});
+    assert.equal(broken.jobs, null, JSON.stringify(jobs));
+    assert.match(broken.problems.join('\n'), why);
+    assert.match(broken.problems.join('\n'), /jobs are off/);
+  }
+  const comma = join(root, 'a,b');
+  mkdirSync(comma);
+  writeFileSync(file, JSON.stringify({ jobs: { dir: comma, max_disk_gb: 1 } }));
+  assert.equal(loadConfig(file, {}).jobs, null);
+  writeFileSync(file, JSON.stringify({ workspaces: {} }));
+  assert.equal(loadConfig(file, {}).jobs, null);
+});
+
+test('the info offers folder names, never their paths', () => {
+  const r = runner();
+  assert.deepEqual(r.offer(), { folders: ['voice'], max_limit_h: 12, max_disk_gb: 5, gpu: true });
+  assert.equal(runner(null).offer(), null);
+});
+
+// ---------- the wall ----------
+
+test('the podman argv: the whole wall, for a GPU kind and a plain one', () => {
+  const job = { id: '7', kind: { name: 'whisper x', image: IMAGE, command: ['whisperx', '/in/a.wav'], gpu: true, network: false, reads: ['voice'] } };
+  const d = join(jobsDir, '7');
+  assert.deepEqual(podmanRunArgs(job, block(), false), [
+    'run', '-d', '--name', 'citadel-job-7', '--label', 'citadel.job=7',
+    '--cap-drop', 'all', '--security-opt', 'no-new-privileges', '--security-opt', 'label=disable',
+    '--userns', 'keep-id', '-e', 'HOME=/tmp', '-e', 'XDG_CACHE_HOME=/cache',
+    '--network', 'none',
+    '--device', 'nvidia.com/gpu=all',
+    '--log-driver', 'k8s-file', '--log-opt', `path=${d}/job.log`,
+    '--mount', `type=bind,src=${d}/in,dst=/in,ro`,
+    '--mount', `type=bind,src=${d}/out,dst=/out`,
+    '--mount', `type=bind,src=${d}/state,dst=/state`,
+    '--mount', `type=bind,src=${jobsDir}/cache/whisper_x,dst=/cache`,
+    '--mount', `type=bind,src=${voice},dst=/private/voice,ro`,
+    IMAGE, 'whisperx', '/in/a.wav',
+  ]);
+  // A kind with the network, no GPU and no folders, resumed; and a GPU kind on a block that withholds the GPU.
+  const plain = podmanRunArgs({ id: '8', kind: { ...job.kind, gpu: false, network: true, reads: [] } }, block(), true);
+  assert.ok(!plain.includes('--network') && !plain.includes('--device') && !plain.some((a: string) => a.includes('/private/')));
+  assert.deepEqual(plain.slice(plain.indexOf('CITADEL_JOB_RESUME=1') - 1, plain.indexOf('CITADEL_JOB_RESUME=1') + 1), ['-e', 'CITADEL_JOB_RESUME=1']);
+  assert.ok(!podmanRunArgs(job, block({ gpu: false }), false).includes('--device'));
+  for (const args of [podmanRunArgs(job, block(), false), plain]) assert.ok(!args.some((a: string) => /privileged|cap-add|host/.test(a)));
+});
+
+test('every refusal reports failed with why, and makes no folder and no container', async () => {
+  const r = runner();
+  const two = Buffer.alloc(10);
+  const cases: [string, object, object?, RegExp?][] = [
+    ['an image not pinned by digest', {}, { image: 'ghcr.io/example/whisperx:latest' }, /pinned by digest/],
+    ['a command that is a string', {}, { command: 'whisperx /in/a.wav' }, /command/],
+    ['an empty command', {}, { command: [] }, /command/],
+    ['a folder the owner does not offer', {}, { reads: ['voice', 'photos'] }, /photos/],
+    ['no time limit', { limit_s: 0 }, {}, /time limit/],
+    ['a fractional time limit', { limit_s: 1.5 }, {}, /time limit/],
+    ['a time limit over the block', { limit_s: 12 * 3600 + 1 }, {}, /over this machine's 12 h/],
+    ['an input path', { inputs: [{ name: '../escape.wav', size: 1, sha256: 'a'.repeat(64) }] }, {}, /plain file name/],
+    ['a hidden input', { inputs: [{ name: '.bashrc', size: 1, sha256: 'a'.repeat(64) }] }, {}, /plain file name/],
+    ['a duplicate input', { inputs: [{ name: 'a.wav', size: 1, sha256: 'a'.repeat(64) }, { name: 'a.wav', size: 1, sha256: 'a'.repeat(64) }] }, {}, /plain file name/],
+    ['an input with no sha256', { inputs: [{ name: 'a.wav', size: 1, sha256: 'x' }] }, {}, /sha256/],
+    ['inputs over 2 GB', { inputs: [{ name: 'a.wav', size: 2 ** 31 + 1, sha256: 'a'.repeat(64) }] }, {}, /2 GB/],
+    ['no input token', { input_token: '' }, {}, /token/],
+    ['no kind', { kind: null }, undefined, /kind/],
+  ];
+  for (const [what, over, kind = {}, why] of cases) {
+    const msg = start(over, kind);
+    if ('kind' in over) msg.kind = over.kind as any;
+    await r.handle(msg);
+    const s = lastState(msg.id);
+    assert.equal(s?.state, 'failed', what);
+    assert.match(s?.error ?? '', /^Refused by the machine: /, what);
+    if (why) assert.match(s?.error ?? '', why, what);
+    assert.ok(!existsSync(join(jobsDir, String(msg.id))), `${what}: made a folder`);
+  }
+  // A GPU kind on a block that withholds the GPU.
+  const noGpu = runner(block({ gpu: false }));
+  const g = start();
+  await noGpu.handle(g);
+  assert.match(lastState(g.id)?.error ?? '', /GPU/);
+  // Over the disk cap: the inputs alone don't fit.
+  const small = runner(block({ max_disk_gb: two.length / 1024 ** 3 }));
+  const big = start();
+  await small.handle(big);
+  assert.match(lastState(big.id)?.error ?? '', /would go over/);
+  // An id that isn't the app's: not even a report.
+  const before = app.states.length;
+  await r.handle({ ...start(), id: '../1' });
+  await r.handle({ ...start(), id: -3 });
+  assert.equal(app.states.length, before);
+  assert.ok(!podmanCalls().some(([cmd]) => cmd === 'run'), 'a refused job reached podman');
+});
+
+test('nothing runs without a jobs block', async () => {
+  const r = runner(null);
+  const msg = start();
+  await r.handle(msg);
+  assert.match(lastState(msg.id)?.error ?? '', /no jobs block/);
+  assert.ok(!existsSync(join(jobsDir, String(msg.id))));
+  assert.ok(!podmanCalls().some(([cmd, ...a]) => cmd === 'run' && a.includes(`citadel-job-${msg.id}`)));
+});
+
+// ---------- a run ----------
+
+test('a job runs, reports, and only what stays inside /out uploads; a symlink out is listed, not read', async () => {
+  const r = runner();
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  const d = join(jobsDir, String(msg.id));
+  assert.equal(readFileSync(join(d, 'in', 'clip.wav'), 'utf8'), `audio for ${msg.id}`);
+  const run = podmanCalls().find(([cmd, ...a]) => cmd === 'run' && a.includes(`citadel-job-${msg.id}`));
+  assert.deepEqual(run, podmanRunArgs({ id: String(msg.id), kind: msg.kind }, block(), false));
+  // The input token is never written down.
+  assert.ok(!readFileSync(join(d, 'job.json'), 'utf8').includes('tok'));
+  // A second job waits for the GPU slot.
+  const second = start();
+  await r.handle(second);
+  assert.match(lastState(second.id)?.error ?? '', /GPU slot/);
+
+  const out = join(d, 'out');
+  writeFileSync(join(out, 'clip.json'), '{"text":"hi"}');
+  mkdirSync(join(out, 'parts'));
+  writeFileSync(join(out, 'parts', 'one.txt'), 'one');
+  symlinkSync(join(out, 'clip.json'), join(out, 'same.json'));
+  symlinkSync(join(outside, 'secret.txt'), join(out, 'secret.txt'));
+  symlinkSync(outside, join(out, 'outside-dir'));
+  writeFileSync(join(out, 'half.part'), 'x');
+  writeFileSync(join(out, 'huge.bin'), 'x'.repeat(100));
+  writeFileSync(join(d, 'job.log'), '2026-11-17T10:00:00.000000000-08:00 stdout F loading model\n2026-11-17T10:00:01.000000000-08:00 stderr F done\n');
+  await until('a run-time report with GPU numbers', () => statesOf(msg.id).some((s: any) => s.state === 'running' && s.gpu_pct === 42 && s.vram_mb === 5120));
+  exitContainer(msg.id, 0);
+  await until('done', () => lastState(msg.id)?.state === 'done');
+  const done = lastState(msg.id)!;
+  assert.equal(done.exit_code, 0);
+  assert.deepEqual([...app.uploads.keys()].filter((k) => k.startsWith(`${msg.id}/`)).sort(), [`${msg.id}/clip.json`, `${msg.id}/parts/one.txt`, `${msg.id}/same.json`]);
+  const listed = Object.fromEntries(done.outputs!.map((o) => [o.path, o.uploaded]));
+  assert.deepEqual(listed, { 'clip.json': true, 'half.part': false, 'huge.bin': false, 'outside-dir': false, 'parts/one.txt': true, 'same.json': true, 'secret.txt': false });
+  assert.ok(![...app.uploads.values()].some((b) => b.toString().includes('never leaves')));
+  assert.equal(app.logs.get(msg.id), 'loading model\ndone\n');
+  assert.ok(statesOf(msg.id).some((s) => s.state === 'uploading'));
+  assert.equal(container(msg.id).status, 'removed');
+  assert.deepEqual(r.known().filter((k: any) => k.id === msg.id), []);
+});
+
+test('outFiles never follows a folder link, and lists a broken link', () => {
+  const out = mkdtempSync(join(root, 'out-'));
+  symlinkSync(join(root, 'missing'), join(out, 'broken'));
+  symlinkSync(root, join(out, 'up'));
+  assert.deepEqual(outFiles(out).map((f: any) => [f.path, f.why]), [['broken', 'a broken link'], ['up', 'a link to outside /out']]);
+});
+
+test('a failed input check fails the job and deletes the file', async () => {
+  const r = runner();
+  const msg = start();
+  msg.inputs[0].sha256 = 'b'.repeat(64);
+  await r.handle(msg);
+  await until('failed', () => lastState(msg.id)?.state === 'failed');
+  assert.match(lastState(msg.id)!.error!, /doesn't match its sha256/);
+  assert.deepEqual(readdirSync(join(jobsDir, String(msg.id), 'in')), []);
+  assert.ok(!podmanCalls().some(([cmd, ...a]) => cmd === 'run' && a.includes(`citadel-job-${msg.id}`)));
+});
+
+test('a non-zero exit fails the job with its code', async () => {
+  const r = runner();
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  exitContainer(msg.id, 3);
+  await until('failed', () => lastState(msg.id)?.state === 'failed');
+  assert.equal(lastState(msg.id)!.exit_code, 3);
+  assert.match(lastState(msg.id)!.error!, /code 3/);
+});
+
+test('podman run failing fails the job', async () => {
+  const r = runner();
+  const msg = start({}, { image: `ghcr.io/example/fail-run@sha256:${'c'.repeat(64)}` });
+  await r.handle(msg);
+  await until('failed', () => lastState(msg.id)?.state === 'failed');
+  assert.match(lastState(msg.id)!.error!, /podman run failed: Error: image not known/);
+});
+
+// ---------- the limit, pause, resume, stop ----------
+
+test('the time limit stops a job, and paused time does not count', async () => {
+  const r = runner();
+  const msg = start({ limit_s: 1 });
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  await r.handle({ type: 'job.pause', id: msg.id });
+  await until('paused', () => lastState(msg.id)?.state === 'paused');
+  assert.equal(container(msg.id).status, 'paused');
+  assert.equal(lastState(msg.id)!.held_vram_mb, 5120);
+  // Paused for longer than the whole limit: still paused.
+  await new Promise((done) => setTimeout(done, 1500));
+  assert.equal(lastState(msg.id)!.state, 'paused');
+  const resumedAt = Date.now();
+  await r.handle({ type: 'job.resume', id: msg.id });
+  assert.equal(container(msg.id).status, 'running');
+  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed');
+  assert.ok(Date.now() - resumedAt >= 700, 'it stopped before its running time reached the limit');
+  assert.match(lastState(msg.id)!.error!, /time limit/);
+  assert.equal(container(msg.id).status, 'removed');
+});
+
+test('a resumable job pauses by stopping, frees its container, and resumes with CITADEL_JOB_RESUME', async () => {
+  const r = runner();
+  const msg = start({}, { resumable: true });
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  writeFileSync(join(jobsDir, String(msg.id), 'state', 'checkpoint'), '41%');
+  await r.handle({ type: 'job.pause', id: msg.id });
+  await until('paused', () => lastState(msg.id)?.state === 'paused');
+  const name = `citadel-job-${msg.id}`;
+  assert.ok(podmanCalls().some((c) => c.join(' ') === `stop -t 1 ${name}`));
+  assert.equal(container(msg.id).status, 'removed');
+  assert.equal(lastState(msg.id)!.held_vram_mb, undefined);
+  await r.handle({ type: 'job.resume', id: msg.id });
+  await until('running again', () => lastState(msg.id)?.state === 'running');
+  const runs = podmanCalls().filter(([cmd, ...a]) => cmd === 'run' && a.includes(name));
+  assert.equal(runs.length, 2);
+  assert.ok(!runs[0].includes('CITADEL_JOB_RESUME=1') && runs[1].includes('CITADEL_JOB_RESUME=1'));
+  assert.equal(readFileSync(join(jobsDir, String(msg.id), 'state', 'checkpoint'), 'utf8'), '41%');
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped');
+});
+
+test('a stop while paused ends the job and still uploads /out', async () => {
+  const r = runner();
+  const msg = start({}, { resumable: true });
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  writeFileSync(join(jobsDir, String(msg.id), 'out', 'partial.txt'), 'so far');
+  await r.handle({ type: 'job.pause', id: msg.id });
+  await until('paused', () => lastState(msg.id)?.state === 'paused');
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped');
+  assert.equal(app.uploads.get(`${msg.id}/partial.txt`)?.toString(), 'so far');
+});
+
+test('the app saying it ended the job stops it here', async () => {
+  const r = runner();
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  app.stateStatus = 409;
+  try {
+    await until('removed', () => container(msg.id)?.status === 'removed');
+  } finally {
+    app.stateStatus = 202;
+  }
+  await until('reported stopped', () => lastState(msg.id)?.state === 'stopped');
+});
+
+// ---------- restarts ----------
+
+test('a new agent re-attaches to a running job, and fails one whose container is gone', async () => {
+  const first = runner();
+  const msg = start();
+  await first.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  first.close();
+  // A job the machine lost while the agent was down.
+  const lost = start();
+  const ld = join(jobsDir, String(lost.id));
+  mkdirSync(join(ld, 'out'), { recursive: true });
+  writeFileSync(join(ld, 'job.json'), JSON.stringify({ id: String(lost.id), kind: lost.kind, limit_s: 3600, inputs: [], state: 'running', run_ms: 0, since: Date.now(), gpu_busy_s: 0, paused: null, outputs: [], final: null, final_sent: false }));
+
+  const second = runner();
+  await second.ready;
+  assert.deepEqual(second.known().filter((k: any) => [msg.id, lost.id].includes(k.id)).sort((a: any, b: any) => a.id - b.id), [{ id: msg.id, state: 'running' }, { id: lost.id, state: 'running' }]);
+  await second.connected();
+  await until('the lost one failed', () => lastState(lost.id)?.state === 'failed');
+  assert.match(lastState(lost.id)!.error!, /machine restarted/);
+  writeFileSync(join(jobsDir, String(msg.id), 'out', 'after.txt'), 'made while the agent was away');
+  exitContainer(msg.id, 0);
+  await until('done', () => lastState(msg.id)?.state === 'done');
+  assert.equal(app.uploads.get(`${msg.id}/after.txt`)?.toString(), 'made while the agent was away');
+});
+
+test('a job that ended while the agent was down is finished on connect', async () => {
+  const first = runner();
+  const msg = start();
+  await first.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running');
+  first.close();
+  exitContainer(msg.id, 0);
+  const second = runner();
+  await second.connected();
+  await until('done', () => lastState(msg.id)?.state === 'done');
 });

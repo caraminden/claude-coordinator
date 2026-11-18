@@ -2072,7 +2072,7 @@ export class Runner {
   }
 
   /** Signal a turn's claude and, as it runs in its own process group, its tool subprocesses too. */
-  private signal(live: Pick<LiveTurn, 'dir' | 'unit' | 'container'>, sig: NodeJS.Signals) {
+  signal(live: Pick<LiveTurn, 'dir' | 'unit' | 'container'>, sig: NodeJS.Signals) {
     let pid = 0;
     try {
       pid = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8')).claude;
@@ -2770,7 +2770,7 @@ export class Runner {
     }
     if (plan.spawn.how === 'container') this.spawnInContainer(place as Extract<TurnPlace, { host: false }>, dir, plan.spawn.wrapper, ticket.id);
     else this.spawnWrapper(plan.spawn.wrapper, dir);
-    return { dir, configDir: plan.configDir, cwd: ticket.cwd, account: place.account ?? 1 };
+    return { dir, configDir: plan.configDir, cwd: ticket.cwd, account: place.account ?? 1, container: place.host ? null : place.container };
   }
 
   /**

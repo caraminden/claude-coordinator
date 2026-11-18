@@ -23,6 +23,17 @@
 // #774 (Cara's pick on a Peek card, 2026-11-15: "Land, then alert"): a scheme also lists workflows to watch (ci_watch).
 // When one's newest verdict on the default branch, from any trigger (a land's push too), is red, the Taskmaster is
 // woken once for that red streak, sharing the red mark above, so later red runs say nothing until it's back to green.
+// #968 (Cara, 2026-11-18: "alerts should only happen when something is broken and needs fixing, and there should be
+// more insight into what happened and why and how we can fix it"; her picks on #968's card the same day) narrows what
+// rings to what needs a person, and every item says what, why and the fix, linking the CI page (#/p/N/ci):
+//   - a red on main ("Quiet item, Taskmaster fixes"): every workflow not in ci_quiet is watched as #774's were, its
+//     Taskmaster woken to start a fix minion, and the scheme gets a quiet item; it rings only when no minion naming the
+//     run starts within RED_FIX_MS, or the newest verdict after that minion closed is still red;
+//   - an offline runner ("Ring when work waits"): only once a job has waited WAIT_MS on labels only offline runners serve;
+//   - a busy queue ("Nothing; page only"): rings only for a runner on one job over HUNG_MS, which is probably hung;
+//   - no verdict for hours ("Drop it") and green with jobs skipped ("Page only"): the CI page shows them, no item;
+//   - the land gate ("Quiet, ring after 1 h"): a quiet item at the old thresholds, ringing at LAND_RING_MS or LAND_RING_STREAK.
+// Jobs that never started (a billing block) still ring.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AlertPart } from './alert-wakes.ts';
@@ -41,17 +52,18 @@ const RATE_LIMITED_MS = 15 * 60_000;
 // Runs looked at for jobs that didn't start or wait for a runner; older ones are history.
 const RUNS = 50;
 const WINDOW_MS = 24 * 3600_000;
-export const OFFLINE_MS = 15 * 60_000;
-export const QUEUED_MS = 30 * 60_000;
-export const VERDICT_MS = 4 * 3600_000;
+/** A job waiting this long on labels only offline runners serve rings. */
+export const WAIT_MS = 10 * 60_000;
+/** A runner on one job this long is probably hung. */
+export const HUNG_MS = 2 * 3600_000;
+/** A red on main with no minion naming its run this long after the Taskmaster heard rings. */
+export const RED_FIX_MS = 3600_000;
 // A land/** run still queued this long has no landing waiting on it (a gate gives up after minutes): GitHub lost it.
 export const ORPHAN_MS = 3600_000;
 // A workflow with no run on main this long is a manual or retired one, never "missing a verdict".
 const ACTIVE_MS = 7 * 24 * 3600_000;
 const VERDICTS = new Set(['success', 'failure']);
 const RAN = new Set(['success', 'failure']);
-// A run whose jobs were all skipped (a job-level `if:`), or neutral, was never meant to give a verdict.
-const NO_VERDICT = new Set(['skipped', 'neutral']);
 
 export interface Run {
   id: number;
@@ -94,10 +106,19 @@ export interface Runner {
 /** Something wrong now: what the alert says, keyed so the same trouble keeps one item. */
 export interface Problem {
   key: string;
+  /** What happened, starting "CI: ". */
   title: string;
+  /** Why it happened, as far as Citadel can tell. */
+  why?: string;
+  /** What fixes it, and who. */
+  fix?: string;
   /** Informational: a plain item, never an alarm. */
   quiet?: boolean;
 }
+
+const cap = (s: string, n = 500) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+/** A problem's words for an item: what, then why and the fix (Mandate keeps 500 characters). */
+export const itemText = (x: Problem, lead = x.title) => cap([lead.replace(/\.$/, ''), x.why && `Why: ${x.why.replace(/\.$/, '')}`, x.fix && `Fix: ${x.fix.replace(/\.$/, '')}`].filter(Boolean).join('. ') + '.');
 
 const at = (s: string) => Date.parse(s);
 const short = (sha: string) => sha.slice(0, 7);
@@ -109,26 +130,59 @@ const DISPATCH_SINCE = 'ci-health:dispatch-since';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** "Nov 5 18:31" in the server's zone. Always dated: a title that dropped it for today would change at midnight and re-send the alert (#509). */
-export function clock(t: number): string {
-  const d = new Date(t);
-  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
-}
+/** "Nov 5, 10:31 PST". Always dated: a title that dropped it for today would change at midnight and re-send the alert (#509). */
+export const clock = pacific;
 
-/** Runners offline for OFFLINE_MS or more. `offline` (runner name → first seen offline) is updated in place. */
-export function runnerProblems(runners: Runner[], offline: Record<string, number>, now: number): Problem[] {
-  const out: Problem[] = [];
+/** Keep `offline` (runner name → first seen offline) in step with the runner list, in place. */
+export function trackOffline(runners: Runner[], offline: Record<string, number>, now: number): void {
   const names = new Set(runners.map((r) => r.name));
   for (const name of Object.keys(offline)) if (!names.has(name)) delete offline[name];
   for (const r of runners) {
-    if (r.status !== 'offline') {
-      delete offline[r.name];
-      continue;
-    }
-    const since = (offline[r.name] ??= now);
-    if (now - since >= OFFLINE_MS) out.push({ key: `runner:${r.name}`, title: `CI: runner ${r.name} has been offline since ${clock(since)}` });
+    if (r.status !== 'offline') delete offline[r.name];
+    else offline[r.name] ??= now;
   }
-  return out;
+}
+
+/** The repo's runners that can take a job: they carry every label it asks for (GitHub matches them case-blind). */
+export function servers(runners: Runner[], j: Pick<Job, 'labels'>): Runner[] {
+  const want = j.labels.map((l) => l.toLowerCase());
+  return runners.filter((r) => want.every((l) => r.labels?.some((x) => x.name.toLowerCase() === l)));
+}
+
+/**
+ * Work stuck on dead runners: jobs queued WAIT_MS or more whose labels only offline runners serve, per set of labels.
+ * A queue behind busy online runners, or on GitHub's hosted runners (none of the repo's serve it), is the page's.
+ */
+export function stuckProblems(runners: Runner[], jobs: Job[], offline: Record<string, number>, now: number): Problem[] {
+  const groups = new Map<string, Job[]>();
+  for (const j of jobs) {
+    if (j.status !== 'queued' || now - at(j.created_at) < WAIT_MS) continue;
+    const can = servers(runners, j);
+    if (can.length && can.every((r) => r.status === 'offline')) groups.set(labelsOf(j), [...(groups.get(labelsOf(j)) ?? []), j]);
+  }
+  return [...groups].map(([labels, waiting]) => {
+    const can = servers(runners, waiting[0]);
+    const names = can.map((r) => r.name);
+    const host = sharedHost(names) ?? (names.length === 1 ? names[0].replace(/(-linux)?(-\d+)?$/i, '') : null);
+    const down = Math.min(...can.map((r) => offline[r.name] ?? now));
+    const since = Math.min(...waiting.map((j) => at(j.created_at)));
+    return {
+      key: `stuck:${labels}`,
+      title: `CI: ${plural(waiting.length, 'job')} on ${labels} ${waiting.length === 1 ? 'has' : 'have'} waited for a runner since ${clock(since)}`,
+      why: `every runner that serves ${labels} (${names.join(', ')}) is offline, since ${clock(down)}`,
+      fix: host ? `turn on ${host} or restart its runner service; once one is online the jobs start by themselves` : `bring one of those runners back online; the jobs start by themselves`,
+    };
+  });
+}
+
+/** Runners on one job HUNG_MS or more: no job here runs that long, so it is probably hung. */
+export function hungProblems(jobs: Job[], now: number): Problem[] {
+  return jobs.filter((j) => j.status === 'in_progress' && j.runner_name && j.started_at && now - at(j.started_at) >= HUNG_MS).map((j) => ({
+    key: `hung:${j.runner_name}`,
+    title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}) since ${clock(at(j.started_at!))}`,
+    why: 'over 2 h on one job is far past a normal run, so it is probably hung (a test waiting forever, or its PC asleep mid-job), and jobs queued for it wait',
+    fix: `cancel run ${j.run_id} on GitHub, then restart the runner if it stays busy`,
+  }));
 }
 
 /** A job that ended without starting: no steps ran and no runner took it (a billing block, or a runner that never came). */
@@ -151,8 +205,14 @@ export function deadGroups(jobs: Job[]): { labels: string; dead: Job[] }[] {
 
 export function deadProblem(g: { labels: string; dead: Job[] }, reason: string | null): Problem {
   const n = g.dead.length;
-  const why = reason ? ` GitHub says: "${reason.length > 300 ? `${reason.slice(0, 299)}…` : reason}"` : '';
-  return { key: `nostart:${g.labels}`, title: `CI: ${plural(n, 'job')} on ${g.labels} didn't start since ${clock(at(g.dead[0].created_at))}, so ${n === 1 ? "it isn't a test failure" : "they aren't test failures"}.${why}` };
+  const billing = !!reason && /billing|spending limit|payment|budget/i.test(reason);
+  return {
+    key: `nostart:${g.labels}`,
+    title: `CI: ${plural(n, 'job')} on ${g.labels} didn't start since ${clock(at(g.dead[0].created_at))}, so ${n === 1 ? "it isn't a test failure" : "they aren't test failures"}`,
+    why: reason ? `GitHub says: "${cap(reason, 300)}"` : 'no runner took them and GitHub gave no reason',
+    fix: billing ? "raise the Actions spending limit or fix the payment in the repo owner's GitHub billing settings, then re-run them"
+      : `check that a runner carries ${g.labels} and is online, then re-run them`,
+  };
 }
 
 /**
@@ -167,31 +227,49 @@ export function orphanRuns(runs: Run[], line: Record<string, { name: string; run
     && !held.some((l) => l.run === r.id || (/^#(\d+)$/.test(l.name) && r.head_branch.includes(`/${l.name.slice(1)}-`))));
 }
 
-/** Jobs waiting QUEUED_MS or more for a runner, per set of labels. */
-export function queuedProblems(jobs: Job[], now: number): Problem[] {
-  const groups = new Map<string, Job[]>();
-  for (const j of jobs) if (j.status === 'queued' && now - at(j.created_at) >= QUEUED_MS) groups.set(labelsOf(j), [...(groups.get(labelsOf(j)) ?? []), j]);
-  return [...groups].map(([labels, waiting]) => {
-    const since = Math.min(...waiting.map((j) => at(j.created_at)));
-    return { key: `queued:${labels}`, title: `CI: ${plural(waiting.length, 'job')} on ${labels} ${waiting.length === 1 ? 'has' : 'have'} waited for a runner since ${clock(since)}` };
-  });
+/** Where a failed job failed: "job › step". */
+const place = (job: Job) => {
+  const step = (job.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
+  return `${job.name}${step ? ` › ${step}` : ''}`;
+};
+
+/** A red on the default branch as kept until it's back to green: its first red run, when its Taskmaster heard, where it failed. */
+export interface RedMark {
+  run: number;
+  at: string;
+  told?: number;
+  where?: string;
+}
+/** The minion fixing a red, and when it closed (null while open). */
+export interface Fix {
+  number: number;
+  closedAt: number | null;
 }
 
 /**
- * A workflow on the default branch whose last verdict (success or failure; cancelled isn't one) is older than the
- * runs after it by VERDICT_MS: measured from the first run that hasn't got one, so a stream of runs each cancelling
- * the last still counts. `runs` is the workflow's runs on that branch, newest first.
+ * A red on main (#968, Cara: "Quiet item, Taskmaster fixes"): a quiet item while a fix is on its way, ringing when none
+ * started within RED_FIX_MS of the Taskmaster hearing, or the newest verdict, made after the fix minion closed, is still
+ * red. `newest` is the workflow's newest verdict there; green, and there is nothing to say.
  */
-export function verdictProblem(workflow: { id: number; name: string }, branch: string, all: Run[], now: number): Problem | null {
-  const runs = all.filter((r) => !(r.status === 'completed' && NO_VERDICT.has(r.conclusion ?? '')));
-  if (!runs.length || now - at(runs[0].created_at) > ACTIVE_MS) return null;
-  const v = runs.findIndex((r) => r.status === 'completed' && VERDICTS.has(r.conclusion ?? ''));
-  if (v === 0) return null;
-  const waiting = v < 0 ? runs : runs.slice(0, v);
-  const since = at(waiting.at(-1)!.created_at);
-  if (now - since < VERDICT_MS) return null;
-  const last = v < 0 ? `none in its last ${plural(runs.length, 'run')}` : `the last was ${runs[v].conclusion} on ${runs[v].head_sha.slice(0, 7)}`;
-  return { key: `verdict:${workflow.id}`, title: `CI: no ${workflow.name} verdict on ${branch} since ${clock(since)} (${last}; ${plural(waiting.length, 'run')} since)` };
+export function redProblem(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number): Problem | null {
+  if (newest.conclusion !== 'failure') return null;
+  const told = mark.told ?? now;
+  const key = `red:${newest.workflow_id}`;
+  const what = `CI: ${file} failed on ${branch} (run ${mark.run}${mark.where ? `, at ${mark.where}` : ''})`;
+  if (fix?.closedAt != null && at(newest.created_at) > fix.closedAt) {
+    return { key, title: `${what}, and is still red after fix minion #${fix.number} closed`,
+      why: `run ${newest.id} on ${short(newest.head_sha)}, made after #${fix.number} closed at ${clock(fix.closedAt)}, failed too, so the fix didn't hold`,
+      fix: `reopen #${fix.number} or start another fix minion naming run ${newest.id}; if it's CI itself (a runner, GitHub), add ${file} to the scheme's quiet CI workflows` };
+  }
+  if (fix) {
+    return { key, quiet: true, title: `${what}: fix minion #${fix.number} ${fix.closedAt == null ? 'started' : 'closed, waiting on the next run'}`,
+      why: `the newest ${file} verdict on ${branch} is red`, fix: `#${fix.number} is on it; this clears when ${file} is back to green` };
+  }
+  const late = now - told >= RED_FIX_MS;
+  return { key, quiet: !late, title: `${what}${late ? ': no fix minion started' : ''}`,
+    why: late ? `its Taskmaster heard at ${clock(told)} and no minion naming run ${mark.run} has started since` : `the newest ${file} verdict on ${branch} is red; its Taskmaster heard at ${clock(told)}`,
+    fix: late ? `ask the Taskmaster to start a fix minion naming run ${mark.run}, or add ${file} to the scheme's quiet CI workflows if the red is expected`
+      : `the Taskmaster starts a fix minion naming run ${mark.run}; this rings at ${clock(told + RED_FIX_MS)} if none has` };
 }
 
 /** The newest two verdict runs of a workflow's runs on the default branch (newest first): the one to check, and the one before. */
@@ -201,15 +279,12 @@ export function verdictPair(runs: Run[]): [Run, Run] | null {
 }
 
 /**
- * A green run that skipped jobs which ran (passed or failed) in the verdict before it: green that proves less than it
- * says. Quiet, since it is still a green run; its key changed from skipped: when it stopped alarming (#532), so the
- * alarm items already out are cleared.
+ * The jobs a green run skipped that ran (passed or failed) in the verdict before it: green that proves less than it
+ * says. The CI page shows them (#968, Cara: "Page only"), as a docs-only land skips them on purpose.
  */
-export function skippedProblem(workflow: { id: number; name: string }, branch: string, latest: Run, latestJobs: Job[], beforeJobs: Job[]): Problem | null {
+export function skippedJobs(latestJobs: Job[], beforeJobs: Job[]): string[] {
   const ran = new Set(beforeJobs.filter((j) => RAN.has(j.conclusion ?? '')).map((j) => j.name));
-  const skipped = latestJobs.filter((j) => j.conclusion === 'skipped' && ran.has(j.name)).map((j) => j.name);
-  if (!skipped.length) return null;
-  return { key: `green-skipped:${workflow.id}`, quiet: true, title: `CI: ${workflow.name} on ${branch} (${latest.head_sha.slice(0, 7)}) went green with ${plural(skipped.length, 'job')} skipped that ran the time before: ${skipped.join(', ')}` };
+  return latestJobs.filter((j) => j.conclusion === 'skipped' && ran.has(j.name)).map((j) => j.name);
 }
 
 /** The schemes named, up to three, or counted. */
@@ -226,20 +301,15 @@ export function sharedHost(names: string[]): string | null {
   return names.every((n) => n.toLowerCase() === h || n.toLowerCase().startsWith(`${h}-`)) ? host : null;
 }
 
-/** The one alert's words for every scheme's open problems: led by offline runners and the PC they share, then the rest in full. */
+/**
+ * The one alert's words for every scheme's open problems: one in full (what, why, fix); several counted, then each in
+ * turn, cut to Mandate's 500 characters. The CI page it links has them all.
+ */
 export function bundleTitle(open: { scheme: string; problem: Problem }[]): string {
-  const text = (x: { problem: Problem }) => x.problem.title.replace(/^CI: /, '');
-  const cut = (s: string) => (s.length > 500 ? `${s.slice(0, 499)}…` : s);
-  if (open.length === 1) return cut(`CI, ${open[0].scheme}: ${text(open[0])}`);
-  const runners = open.filter((x) => x.problem.key.startsWith('runner:'));
-  const others = open.filter((x) => !x.problem.key.startsWith('runner:'));
-  const host = sharedHost(runners.map((x) => x.problem.key.slice('runner:'.length)));
-  const head = [
-    runners.length ? `${plural(runners.length, 'runner')} offline${host ? ` on ${host}` : ''}` : '',
-    others.length ? plural(others.length, runners.length ? 'other problem' : 'problem') : '',
-  ].filter(Boolean).join(' and ');
-  const detail = others.map((x) => `${x.scheme}: ${text(x)}`).join('; ');
-  return cut(`CI: ${head} in ${schemesText([...new Set(open.map((x) => x.scheme))])}${detail ? `. ${detail}` : ''}`);
+  const what = (x: { problem: Problem }) => x.problem.title.replace(/^CI: /, '');
+  if (open.length === 1) return itemText(open[0].problem, `CI, ${open[0].scheme}: ${what(open[0])}`);
+  const each = open.map((x) => itemText(x.problem, `${x.scheme}: ${what(x)}`).replace(/\.$/, ''));
+  return cap(`CI: ${plural(open.length, 'problem')} in ${schemesText([...new Set(open.map((x) => x.scheme))])}. ${each.join('; ')}.`);
 }
 
 /** Who the one alert comes from in Mandate: no scheme of its own, so a switch for CI health alone. */
@@ -259,6 +329,9 @@ export const itemKey = (key: string) => `ci.${key.replace(/[^A-Za-z0-9._:-]+/g, 
 // reached the CI wait (no runner online, LAND_CI=0, GitHub not answering) neither counts nor clears.
 export const LAND_STREAK = 2;
 export const LAND_SLOW_MS = 30 * 60_000;
+// #968 (Cara: "Quiet, ring after 1 h"): those make a quiet item; these ring.
+export const LAND_RING_STREAK = 4;
+export const LAND_RING_MS = 3600_000;
 // land.sh's CI_LIMIT is 360 s: a run still going this far into the CI wait was cut off by it.
 const LAND_CAP_MS = 5 * 60_000;
 
@@ -324,19 +397,32 @@ export function landStep(s: LandState, seen: LandSeen[], now: number): LandState
   return s;
 }
 
-/** The land gate's problems now, for the one alert. */
+/** The land gate's problems now: quiet items, ringing at LAND_RING_STREAK fallbacks or LAND_RING_MS in the line. */
 export function landProblems(s: LandState, now: number): Problem[] {
   const out: Problem[] = [];
   const n = s.fellBack.length;
   if (n >= LAND_STREAK) {
     const named = s.fellBack.slice(-3).map((f) => `${f.name} (${f.why}${f.run ? `, run ${f.run}` : ''})`);
-    out.push({ key: 'land:fallback', title: `CI: the land gate fell back to perigee on ${n} lands in a row: ${n > 3 ? `${n - 3} more, then ` : ''}${named.join(', ')}` });
+    const whys = [...new Set(s.fellBack.slice(-3).map((f) => f.why))];
+    out.push({
+      key: 'land:fallback', quiet: n < LAND_RING_STREAK,
+      title: `CI: the land gate fell back to perigee on ${n} lands in a row: ${n > 3 ? `${n - 3} more, then ` : ''}${named.join(', ')}`,
+      why: `${whys.join('; ')}, so each land ran the full suite on perigee instead of waiting on CI`,
+      fix: whys.some((w) => /runner/.test(w)) ? "check the desktop's Linux runners are online (the CI page's Runners tab); lands go back to CI by themselves"
+        : 'open the fallen-back runs on the CI page and fix what stopped them; the next land with a green gate clears this',
+    });
   }
   const slow = Object.values(s.lands).filter((l) => now - l.joined >= LAND_SLOW_MS).sort((a, b) => a.joined - b.joined);
   if (slow.length) {
     const names = slow.map((l) => l.name);
+    const ring = now - slow[0].joined >= LAND_RING_MS;
     const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} have` : `${names[0]} has`;
-    out.push({ key: 'land:slow', title: `CI: ${who} been landing since ${clock(slow[0].joined)} (over 30 min)` });
+    out.push({
+      key: 'land:slow', quiet: !ring,
+      title: `CI: ${who} been landing since ${clock(slow[0].joined)} (over ${ring ? '1 h' : '30 min'})`,
+      why: 'a land normally takes under 15 min, so its CI run, the suite or the deploy is stuck',
+      fix: "read the landing minion's land output for its last queue: line; if nothing has moved for 15 min, tell the Citadel Taskmaster the land is jammed",
+    });
   }
   return out;
 }
@@ -602,49 +688,30 @@ export class CiHealth {
     }
     const out: Problem[] = [];
 
-    const runners = await this.read(`repos/${slug}/actions/runners?per_page=100`, as, true);
-    if (Array.isArray(runners?.runners)) {
-      out.push(...runnerProblems(runners.runners, saved.offline, now));
-      this.wakeParked(p, runners.runners);
-    } else {
-      // Unreadable isn't fine: the runners already alerting stay as they were, and new ones go unseen.
-      // Before #540 only the items' titles were kept, so the first round after it reads them back from those.
-      const was = saved.problems ?? Object.entries(saved.sent).map(([key, by]) => ({ key, title: Object.values(by)[0] ?? '' }));
-      out.push(...was.filter((x) => x.key.startsWith('runner:') && x.title));
-      this.sayOnce(`runners:${p.id}`, `CI health: can't list ${slug}'s runners (needs a repo admin's linked GitHub), so offline runners there go unseen.`);
-      this.wakeParked(p, null);
-    }
+    const listed = await this.read(`repos/${slug}/actions/runners?per_page=100`, as, true);
+    const runners: Runner[] | null = Array.isArray(listed?.runners) ? listed.runners : null;
+    if (runners) trackOffline(runners, saved.offline, now);
+    else this.sayOnce(`runners:${p.id}`, `CI health: can't list ${slug}'s runners (needs a repo admin's linked GitHub), so work stuck on offline runners there goes unseen.`);
+    this.wakeParked(p, runners);
 
     const runs: Run[] = ((await this.read(`repos/${slug}/actions/runs?per_page=${RUNS}`, as))?.workflow_runs ?? [])
       .filter((r: Run) => now - at(r.created_at) <= WINDOW_MS);
-    const jobs: Job[] = [];
     const all: Job[] = [];
-    for (const r of runs) {
-      const its = await this.jobs(slug, r, as);
-      all.push(...its);
-      // A run under QUEUED_MS old can't have a job waiting too long yet, and an unfinished one has none that died.
-      if (r.status === 'completed' || now - at(r.created_at) >= QUEUED_MS) jobs.push(...its);
-    }
+    for (const r of runs) all.push(...(await this.jobs(slug, r, as)));
     await this.sweepOrphans(p, slug, runs, as, now);
     this.recent.set(p.id, all);
     this.store.setSetting(`ci-health:recent:${p.id}`, all.map(({ steps, ...j }) => j));
-    for (const g of deadGroups(jobs)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
-    out.push(...queuedProblems(jobs, now));
+    for (const g of deadGroups(all)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
+    if (runners) out.push(...stuckProblems(runners, all, saved.offline, now));
+    out.push(...hungProblems(all, now));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';
     const onMain = new Map<number, Run[]>();
     for (const w of workflows) {
       const mainRuns: Run[] = (await this.read(`repos/${slug}/actions/workflows/${w.id}/runs?branch=${encodeURIComponent(branch)}&per_page=${RUNS}`, as))?.workflow_runs ?? [];
       onMain.set(w.id, mainRuns);
-      const v = verdictProblem(w, branch, mainRuns, now);
-      if (v) out.push(v);
-      const pair = verdictPair(mainRuns);
-      if (pair) {
-        const s = skippedProblem(w, branch, pair[0], await this.jobs(slug, pair[0], as), await this.jobs(slug, pair[1], as));
-        if (s) out.push(s);
-      }
     }
-    await this.outsideRuns(p, slug, branch, onMain, as, now);
+    out.push(...(await this.outsideRuns(p, slug, branch, onMain, as, now)));
     return out;
   }
 
@@ -709,94 +776,112 @@ export class CiHealth {
   }
 
   /**
-   * Runs no PR started (#588, #678), each told once, oldest first: a dispatched run on an open minion's branch wakes it
-   * with its result; a failed scheduled run, or dispatched one on `branch`, is held mail for the Taskmaster, and the next
-   * green run of that workflow there, whatever started it (`onMain`: each workflow's runs on `branch`), says it's back to
-   * green. Two conditional lists a poll, whatever the workflows. A red told before #678 kept no red mark, so it gets no
-   * back to green.
+   * Dispatched runs (#678), each told once, oldest first: one on an open minion's branch wakes it with its result. And
+   * reds on `branch` (#774, every workflow since #968 but ci_quiet's, unless ci_watch lists it): a workflow whose newest
+   * verdict there (`onMain`: each workflow's runs on `branch`, any trigger) is red wakes the Taskmaster once for that red
+   * streak, to start a fix minion; the first green run after it says it's back to green. Returns each red's problem: a
+   * quiet item, or an alarm once the fix is late or didn't hold (redProblem).
    */
-  private async outsideRuns(p: Project, slug: string, branch: string, onMain: Map<number, Run[]>, as: GithubEnv, now: number) {
-    if (!this.deps.tell && !this.deps.wake) return;
-    const scheduled = (await this.read(`repos/${slug}/actions/runs?event=schedule&branch=${encodeURIComponent(branch)}&per_page=20`, as))?.workflow_runs;
+  private async outsideRuns(p: Project, slug: string, branch: string, onMain: Map<number, Run[]>, as: GithubEnv, now: number): Promise<Problem[]> {
+    if (!this.deps.tell && !this.deps.wake) return [];
     const dispatched = (await this.read(`repos/${slug}/actions/runs?event=workflow_dispatch&per_page=50`, as))?.workflow_runs;
-    const listed: Run[] = [...(Array.isArray(scheduled) ? scheduled : []), ...(Array.isArray(dispatched) ? dispatched : [])];
+    const listed: Run[] = Array.isArray(dispatched) ? dispatched : [];
     const key = `ci-health:scheduled:${p.id}`;
     const told = new Set(this.store.getSetting<number[]>(key) ?? []);
     const redKey = `ci-health:red:${p.id}`;
     // Workflow → the red run its Taskmaster was told of, until a newer green one.
-    const red = this.store.getSetting<Record<string, { run: number; at: string }>>(redKey) ?? {};
+    const red = this.store.getSetting<Record<string, RedMark>>(redKey) ?? {};
     // Dispatched runs count from the first poll that read them, so a deploy doesn't tell a day of old ones.
     const since = this.store.getSetting<number>(DISPATCH_SINCE) ?? (this.store.setSetting(DISPATCH_SINCE, now), now);
     const quiet = new Set(lines(p.ci_quiet));
     const watch = new Set(lines(p.ci_watch ?? ''));
+    const watched = (r: Run) => watch.has(workflowFile(r)) || !quiet.has(workflowFile(r));
     const save = () => {
-      // Ids GitHub no longer lists are dropped, but only when both lists were read, so a bad answer can't forget them.
-      const keep = Array.isArray(scheduled) && Array.isArray(dispatched) ? [...told].filter((id) => listed.some((r) => r.id === id)) : [...told];
-      this.store.setSetting(key, keep);
+      // Ids GitHub no longer lists are dropped, but only when the list was read, so a bad answer can't forget them.
+      this.store.setSetting(key, Array.isArray(dispatched) ? [...told].filter((id) => listed.some((r) => r.id === id)) : [...told]);
       this.store.setSetting(redKey, red);
     };
     // Aged by when it ended, so a run that sat queued for most of a day still counts.
     const ended = (r: Run) => at(r.updated_at ?? r.created_at);
     const done = listed.filter((r) => r.status === 'completed' && r.conclusion && now - ended(r) <= WINDOW_MS).sort((a, b) => at(a.created_at) - at(b.created_at));
-    let open: Ticket[] | undefined;
-    const pruned = [...told].some((id) => !listed.some((r) => r.id === id));
+    const open = this.deps.wake ? this.store.listTickets(p.id).filter((t) => t.status !== 'closed') : [];
+    const pruned = Array.isArray(dispatched) && [...told].some((id) => !listed.some((r) => r.id === id));
     for (const r of done) {
-      const dispatch = r.event === 'workflow_dispatch';
-      if (told.has(r.id) || (dispatch && ended(r) < since)) continue;
+      if (told.has(r.id) || ended(r) < since || r.head_branch === branch) continue;
       // Branch names repeat across schemes (ticket/12-… in each), so only this scheme's open minions.
-      const minion = dispatch && r.head_branch !== branch ? (open ??= this.store.listTickets(p.id).filter((t) => t.status !== 'closed')).find((t) => t.branch === r.head_branch) : undefined;
-      if (minion) {
-        if (!this.deps.wake) continue;
-        const text = await this.runText(p, slug, r, as, 'minion');
-        told.add(r.id);
-        save(); // before sending, so a restart can't send it twice
-        try {
-          this.deps.wake(minion.id, text, r.conclusion === 'success');
-        } catch (err) {
-          console.error(`Waking #${minion.number} for run ${r.id} failed:`, err);
-        }
-        continue;
+      const minion = open.find((t) => t.branch === r.head_branch);
+      if (!minion || !this.deps.wake) continue;
+      const text = await this.runText(p, slug, r, as, 'minion');
+      told.add(r.id);
+      save(); // before sending, so a restart can't send it twice
+      try {
+        this.deps.wake(minion.id, text, r.conclusion === 'success');
+      } catch (err) {
+        console.error(`Waking #${minion.number} for run ${r.id} failed:`, err);
       }
-      // The Taskmaster hears of the default branch only: scheduled runs, and dispatched ones there. A watched workflow's go through its streak, below.
-      if (!this.deps.tell || r.conclusion !== 'failure' || (dispatch && r.head_branch !== branch) || quiet.has(workflowFile(r)) || watch.has(workflowFile(r))) continue;
-      // Kept while no Taskmaster can take it, so each poll's retry doesn't read its jobs and annotations again.
-      const text = this.texts.get(r.id) ?? (await this.runText(p, slug, r, as, 'taskmaster'));
+    }
+    if (!this.deps.tell) {
+      if (pruned) save();
+      return [];
+    }
+    const newest = (w: string) => (onMain.get(Number(w)) ?? []).filter((x) => x.status === 'completed' && VERDICTS.has(x.conclusion ?? '')).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
+    // A red with no red mark yet starts a streak; a newest verdict over a week old is a retired or manual workflow's.
+    for (const w of onMain.keys()) {
+      const r = newest(String(w));
+      if (!r || r.conclusion !== 'failure' || !watched(r) || red[String(w)] || now - at(r.created_at) > ACTIVE_MS) continue;
+      const text = this.texts.get(r.id) ?? (await this.runText(p, slug, r, as, 'watch'));
       this.texts.set(r.id, text);
       if (this.texts.size > 200) this.texts.delete(this.texts.keys().next().value!);
-      if (!this.say(p, r.id, text)) continue;
-      this.texts.delete(r.id);
-      told.add(r.id);
-      red[String(r.workflow_id)] = { run: r.id, at: r.created_at };
-      save();
-    }
-    // Watched workflows (#774): the newest verdict on the branch, whatever started it, red with no red mark yet starts a streak.
-    if (this.deps.tell && watch.size) {
-      for (const runs of onMain.values()) {
-        const r = runs.filter((x) => x.status === 'completed' && VERDICTS.has(x.conclusion ?? '')).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
-        if (!r || r.conclusion !== 'failure' || !watch.has(workflowFile(r)) || red[String(r.workflow_id)]) continue;
-        const text = this.texts.get(r.id) ?? (await this.runText(p, slug, r, as, 'watch'));
-        this.texts.set(r.id, text);
-        if (this.texts.size > 200) this.texts.delete(this.texts.keys().next().value!);
-        red[String(r.workflow_id)] = { run: r.id, at: r.created_at };
-        save(); // before sending, so a restart can't send it twice
-        if (!this.say(p, r.id, text, true)) {
-          delete red[String(r.workflow_id)]; // no Taskmaster yet: the next poll tries again
-          save();
-          continue;
-        }
-        this.texts.delete(r.id);
+      red[String(w)] = { run: r.id, at: r.created_at, told: now, where: await this.failedAt(slug, r, as) };
+      save(); // before sending, so a restart can't send it twice
+      if (!this.say(p, r.id, text, true)) {
+        delete red[String(w)]; // no Taskmaster yet: the next poll tries again
+        save();
+        continue;
       }
+      this.texts.delete(r.id);
     }
     // Back to green: the first green run on the branch after the red one (or the red one re-run green), a push's or a PR merge's too.
     for (const [w, was] of Object.entries(red)) {
       const green = [...(onMain.get(Number(w)) ?? []), ...listed.filter((r) => String(r.workflow_id) === w && r.head_branch === branch)]
         .filter((r) => r.status === 'completed' && r.conclusion === 'success' && (at(r.created_at) > at(was.at) || r.id === was.run)).sort((a, b) => at(a.created_at) - at(b.created_at))[0];
       if (!green) continue;
-      if ((!quiet.has(workflowFile(green)) || watch.has(workflowFile(green))) && !this.say(p, green.id, `${p.name}'s ${green.name} is back to green on ${branch}: ${runUrl(slug, green)} (${short(green.head_sha)}, ${pacific(ended(green))}), after run ${was.run} failed.`)) continue;
+      if (watched(green) && !this.say(p, green.id, `${p.name}'s ${green.name} is back to green on ${branch}: ${runUrl(slug, green)} (${short(green.head_sha)}, ${pacific(ended(green))}), after run ${was.run} failed.`)) continue;
       delete red[w];
       save();
     }
     if (pruned) save();
+    const out: Problem[] = [];
+    for (const [w, mark] of Object.entries(red)) {
+      const r = newest(w);
+      if (!r) continue;
+      if (mark.told == null) {
+        mark.told = now; // a mark from before #968: its hour starts now
+        save();
+      }
+      const x = redProblem(workflowFile(r), branch, mark, r, this.fixMinion(p, mark), now);
+      if (x) out.push(x);
+    }
+    return out;
+  }
+
+  /** The minion fixing a red: the first of the scheme's made since its Taskmaster heard whose title or brief names the run. */
+  private fixMinion(p: Project, mark: RedMark): Fix | null {
+    const id = String(mark.run);
+    const t = this.store.listTickets(p.id).filter((x) => x.number != null && x.created_at >= (mark.told ?? 0) - 60_000).sort((a, b) => a.created_at - b.created_at)
+      .find((x) => x.title.includes(id) || (this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '').includes(id));
+    return t ? { number: t.number!, closedAt: t.status === 'closed' ? t.updated_at : null } : null;
+  }
+
+  /** Where a failed run failed, "job › step", or undefined. */
+  private async failedAt(slug: string, r: Run, as: GithubEnv): Promise<string | undefined> {
+    try {
+      const j = (await this.jobs(slug, r, as)).find((x) => x.conclusion === 'failure');
+      return j && place(j);
+    } catch (err) {
+      if (err instanceof RateLimited) throw err;
+      return undefined;
+    }
   }
 
   /** Held mail for the Taskmaster about `run`: true once it has it; false (no Taskmaster yet, or the send threw) to try again next poll. */
@@ -810,19 +895,15 @@ export class CiHealth {
   }
 
   /**
-   * What a finished run says to the minion that dispatched it, or (failed) to the Taskmaster, about an outside run or
-   * (`watch`) a watched workflow gone red on main: where it failed, GitHub's error lines, its CI-store files.
+   * What a finished run says to the minion that dispatched it, or (`watch`) to the Taskmaster about a workflow gone red
+   * on main: where it failed, GitHub's error lines, its CI-store files.
    */
-  private async runText(p: Project, slug: string, r: Run, as: GithubEnv, to: 'minion' | 'taskmaster' | 'watch'): Promise<string> {
+  private async runText(p: Project, slug: string, r: Run, as: GithubEnv, to: 'minion' | 'watch'): Promise<string> {
     let where = '';
     let errors: string[] = [];
     let failed: string[] = [];
     if (r.conclusion === 'failure') {
       try {
-        const place = (job: Job) => {
-          const step = (job.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
-          return `${job.name}${step ? ` › ${step}` : ''}`;
-        };
         const jobs = (await this.jobs(slug, r, as)).filter((j) => j.conclusion === 'failure');
         failed = jobs.map(place);
         if (jobs[0]) {
@@ -846,13 +927,9 @@ export class CiHealth {
       return `Your dispatched ${r.name} run on ${r.head_branch} ${how} (${short(r.head_sha)}, ${finished}): ${runUrl(slug, r)}${extra ? `\n${extra}` : ''}${r.conclusion === 'failure' ? `\n${failures}` : ''}`;
     }
     const by = r.triggering_actor?.login ? ` by ${r.triggering_actor.login}` : '';
-    if (to === 'watch') {
-      const file = workflowFile(r);
-      const jobs = failed.length ? `\nFailing jobs: ${failed.slice(0, 8).join('; ')}${failed.length > 8 ? `; ${failed.length - 8} more` : ''}` : '';
-      return `${p.name}'s ${r.head_branch} went red: ${file} (${r.name}) run ${r.id} failed on ${short(r.head_sha)} (${r.event ?? 'a run'}${by}, ${finished}): ${runUrl(slug, r)}${jobs}${extra ? `\n${extra}` : ''}\n${failures} Later red runs of ${file} won't message you again; you'll hear when it's back to green. Start a fix minion now, or ask people if it's CI itself (a runner, GitHub) rather than the code. It's on the scheme's watched CI workflows (set_project_settings watch_workflows).`;
-    }
-    const kind = r.event !== 'workflow_dispatch' ? 'scheduled' : `dispatched${r.triggering_actor?.login ? ` (by ${r.triggering_actor.login})` : ''}`;
-    return `${p.name}'s ${kind} ${r.name} run on ${r.head_branch} failed on ${short(r.head_sha)}${where} (${finished}): ${runUrl(slug, r)}${extra ? `\n${extra}` : ''}\n${failures} No PR started it, so no land saw this break: start a bug minion for it, or ask people if it's CI itself (a runner, GitHub) rather than the code. To stop these for ${workflowFile(r)}, add it to the scheme's quiet CI workflows (set_project_settings quiet_workflows).`;
+    const file = workflowFile(r);
+    const jobs = failed.length ? `\nFailing jobs: ${failed.slice(0, 8).join('; ')}${failed.length > 8 ? `; ${failed.length - 8} more` : ''}` : '';
+    return `${p.name}'s ${r.head_branch} went red: ${file} (${r.name}) run ${r.id} failed on ${short(r.head_sha)} (${r.event ?? 'a run'}${by}, ${finished}): ${runUrl(slug, r)}${jobs}${extra ? `\n${extra}` : ''}\n${failures} Later red runs of ${file} won't message you again; you'll hear when it's back to green. Start a fix minion now and put run ${r.id} in its brief: people get a quiet item naming it, and their phone rings if no minion names the run within an hour or ${r.head_branch} is still red after it closes. If it's CI itself (a runner, GitHub) rather than the code, ask people. To stop these for ${file}, add it to the scheme's quiet CI workflows (set_project_settings quiet_workflows).`;
   }
 
   /** A failed job's error annotations, the generic "Process completed with exit code" left out: at most 5, each cut short. */

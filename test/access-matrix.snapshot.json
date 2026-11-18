@@ -2202,6 +2202,16 @@
   "m1": "409 The minion is not mid-turn",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/commands": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/comments": {
   "anon": "401 Not logged in",
   "person": "404 That file is no longer there",
@@ -2304,8 +2314,8 @@
  },
  "POST /api/tickets/:minion1/fresh-session": {
   "anon": "401 Not logged in",
-  "person": "409 Only a Taskmaster starts fresh sessions",
-  "member": "409 Only a Taskmaster starts fresh sessions",
+  "person": "409 Its session is already fresh",
+  "member": "409 Its session is already fresh",
   "outsider": "404 No such minion",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
@@ -2859,6 +2869,16 @@
   "outsider": "403 A minion may only be dismissed by itself",
   "tmA": "403 A minion may only be dismissed by itself",
   "tmB": "403 A minion may only be dismissed by itself",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/commands": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

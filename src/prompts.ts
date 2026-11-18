@@ -39,6 +39,10 @@ export const handoffPrompt = (why: string) =>
 2. Call fresh_session with your handoff: every open ask and who made it, relays you still owe, cards waiting on people, who is parked on what, and what you promised to do next. Facts, not history: memory and the minions' own records (read_ticket, list_tickets) carry the rest.
 Do nothing else this turn, and reply in one line.`;
 
+/** What a minion's handoff turn is asked (its composer's /fresh, #937): a minion has no fresh_session, so its reply is the handoff. */
+export const minionHandoffPrompt = (why: string) =>
+  `${APP_NAME} is starting you a fresh Claude session (${why}): your next turn begins from a short handoff instead of this whole conversation. People's chat history stays as it is; only your context resets. Before that, commit any work in progress. Then reply with your handoff and nothing else: your whole reply is what your next session starts from. Put in what you were asked and by whom, the decisions made (quoting who made them and when), the branch and what is committed, cards waiting on people, what you are parked on, and what is left to do. Facts, not history. Do nothing else this turn.`;
+
 /** Where a fresh session's first turn starts (#406). */
 export const freshStartText = (handoff: string) =>
   `This is a fresh Claude session: ${APP_NAME} reset your context (people's chat history is unchanged). Your memory loads as usual. Your previous session's handoff:\n\n${handoff}`;

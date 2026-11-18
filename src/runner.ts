@@ -28,7 +28,7 @@ import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
-import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
@@ -233,6 +233,12 @@ export interface FreshState { why: string; summary?: string; compact?: true; aut
 const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 /** The handoff a fresh session's first turn starts from, kept until that session exists. */
 const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
+/** What a fresh start's notes call the chat's agent. */
+const roleWord = (t: Ticket) => (t.kind === 'coordinator' ? 'Taskmaster' : 'minion');
+/** The slash commands a chat's last turn loaded (its init event, #937), and the scheme's newest, for a chat with no turn yet. */
+export interface LoadedCommands { names: string[]; plugins: { name: string; path: string }[]; cwd: string }
+export const commandsKey = (ticketId: number) => `commands:${ticketId}`;
+export const schemeCommandsKey = (projectId: number) => `commands-scheme:${projectId}`;
 /** The note the server last wrote about a failed or stopped turn, which the next turn that ends well clears (#428). */
 const failNoteKey = (ticketId: number) => `failnote:${ticketId}`;
 /** Why a minion's close_self was cancelled at its turn's end, told to its next turn (#619). */
@@ -2114,17 +2120,19 @@ export class Runner {
   }
 
   /**
-   * Start a Taskmaster on a fresh Claude session (#406): a handoff turn on the old session first (once
-   * any running turn ends), then the next turn starts a new session from that handoff. Returns why it
-   * can't, or null.
+   * Start a Taskmaster, or a minion (its composer's /fresh, #937), on a fresh Claude session (#406): a handoff
+   * turn on the old session first (once any running turn ends), then the next turn starts a new session from
+   * that handoff. A Taskmaster hands off with fresh_session; a minion's handoff is that turn's reply. Returns
+   * why it can't, or null.
    */
   requestFresh(ticketId: number, why: string, auto = false): string | null {
     const ticket = this.store.getTicket(ticketId);
-    if (ticket?.kind !== 'coordinator') return 'Only a Taskmaster starts fresh sessions';
+    if (!ticket) return 'No such minion';
+    if (ticket.status === 'closed') return 'A dismissed minion keeps its session: send it a message first';
     if (!ticket.session_id) return 'Its session is already fresh';
     if (this.store.getSetting<FreshState>(freshKey(ticketId))) return 'A fresh start is already under way';
     this.store.setSetting(freshKey(ticketId), { why, ...(auto ? { auto: true as const } : {}) });
-    this.emit(ticketId, 'note', { text: `Starting a fresh session (${why}): the Taskmaster writes its handoff first${this.isRunning(ticketId) ? ', once this turn ends' : ''}.` });
+    this.emit(ticketId, 'note', { text: `Starting a fresh session (${why}): the ${roleWord(ticket)} writes its handoff first${this.isRunning(ticketId) ? ', once this turn ends' : ''}.` });
     if (!this.isRunning(ticketId)) this.next(ticketId);
     this.broadcastTicket(ticketId);
     return null;
@@ -2140,6 +2148,22 @@ export class Runner {
     return null;
   }
 
+  /**
+   * Keep the slash commands a turn loaded (Claude Code's init event lists them), for the composer's menu and its
+   * check of what it sends (#937). Terminal-only ones and internal `__` ones are left out. Written only on a change.
+   */
+  private saveCommands(ticketId: number, ev: any) {
+    const terminal = new Set(Array.isArray(ev.terminal_slash_commands) ? ev.terminal_slash_commands : []);
+    const names = [...new Set<string>(ev.slash_commands.filter((n: unknown) => typeof n === 'string' && n && !n.startsWith('__') && !terminal.has(n)))];
+    const plugins = (Array.isArray(ev.plugins) ? ev.plugins : [])
+      .filter((p: any) => typeof p?.name === 'string' && typeof p.path === 'string' && p.path.startsWith('/'))
+      .map((p: any) => ({ name: p.name, path: p.path }));
+    const loaded: LoadedCommands = { names, plugins, cwd: typeof ev.cwd === 'string' ? ev.cwd : '' };
+    const ticket = this.store.getTicket(ticketId);
+    if (JSON.stringify(this.store.getSetting(commandsKey(ticketId))) !== JSON.stringify(loaded)) this.store.setSetting(commandsKey(ticketId), loaded);
+    if (ticket && JSON.stringify(this.store.getSetting(schemeCommandsKey(ticket.project_id))) !== JSON.stringify(loaded)) this.store.setSetting(schemeCommandsKey(ticket.project_id), loaded);
+  }
+
   /** A fresh start's next step, if it needs a turn of its own: the handoff ask, or the /compact fallback. */
   private freshStep(ticketId: number): QueuedMessage | null {
     const f = this.store.getSetting<FreshState>(freshKey(ticketId));
@@ -2148,7 +2172,8 @@ export class Runner {
     // A message queued for a fresh start Citadel asked for by itself goes first, before its handoff or
     // its /compact fallback; the step follows that turn (#423).
     if (f.auto && this.queued(ticketId)) return null;
-    return f.compact ? { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' } : { author: 'System', text: handoffPrompt(f.why), images: [], fresh: 'handoff' };
+    const minion = this.store.getTicket(ticketId)?.kind !== 'coordinator';
+    return f.compact ? { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' } : { author: 'System', text: (minion ? minionHandoffPrompt : handoffPrompt)(f.why), images: [], fresh: 'handoff' };
   }
 
   /**
@@ -2156,8 +2181,14 @@ export class Runner {
    * falls back on compaction, unless it was stopped; a compaction ends the fresh start either way.
    */
   private endFresh(ticketId: number, turn: TurnState | null, ok: boolean, stopped: boolean) {
-    const f = this.store.getSetting<FreshState>(freshKey(ticketId));
+    let f = this.store.getSetting<FreshState>(freshKey(ticketId));
     if (!f) return;
+    const ticket = this.store.getTicket(ticketId);
+    const who = ticket ? roleWord(ticket) : 'Taskmaster';
+    // A minion has no fresh_session: its handoff turn's reply is its handoff (#937), the status line left out.
+    const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error
+      ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
+    if (!f.summary && reply) f = { ...f, summary: reply.slice(0, HANDOFF_MAX) };
     if (f.summary) {
       this.store.deleteSetting(freshKey(ticketId));
       this.store.setSetting(handoffKey(ticketId), f.summary);
@@ -2166,15 +2197,15 @@ export class Runner {
       this.emit(ticketId, 'fresh', { summary: f.summary, why: f.why });
     } else if (turn?.fresh === 'handoff' && stopped) {
       this.store.deleteSetting(freshKey(ticketId));
-      this.emit(ticketId, 'note', { text: 'The handoff turn was stopped, so the fresh start is off: the Taskmaster keeps its session.' });
+      this.emit(ticketId, 'note', { text: `The handoff turn was stopped, so the fresh start is off: the ${who} keeps its session.` });
     } else if (turn?.fresh === 'handoff') {
       this.store.setSetting(freshKey(ticketId), { ...f, compact: true });
-      this.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the Taskmaster compacts its session instead.` });
+      this.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the ${who} compacts its session instead.` });
     } else if (turn?.fresh === 'compact') {
       this.store.deleteSetting(freshKey(ticketId));
       // Its size is unknown until its next turn, which keeps the idle check from asking again meanwhile.
       this.store.deleteSetting(contextKey(ticketId));
-      this.emit(ticketId, 'note', { text: ok ? 'Compacted the Taskmaster\'s session instead of a fresh start.' : 'Compacting failed too, so the Taskmaster keeps its session as it was.' });
+      this.emit(ticketId, 'note', { text: ok ? `Compacted the ${who}'s session instead of a fresh start.` : `Compacting failed too, so the ${who} keeps its session as it was.` });
     }
   }
 
@@ -3275,6 +3306,7 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.mcp_servers)) this.checkMcp(ticketId, ev.mcp_servers);
+    if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.slash_commands)) this.saveCommands(ticketId, ev);
     if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.claude_code_version === 'string') {
       const hashes = this.store.getSetting<TurnState>(turnKey(ticketId))?.hashes;
       if (hashes) this.saveTurn(ticketId, { hashes: { ...hashes, claude: ev.claude_code_version } });

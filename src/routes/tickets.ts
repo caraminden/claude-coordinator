@@ -37,6 +37,7 @@ import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
 import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '../ultrareview.ts';
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
+import { chatCommands } from '../slash-commands.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
@@ -368,6 +369,13 @@ export const ticketRoutes: Route[] = [
       } catch (err: any) {
         throw new HttpError(409, err.message);
       }
+    },
+  },
+  // The slash commands this chat's turns load, with a line on each (#937): the composer's menu and its check of what it sends.
+  {
+    method: 'GET', path: '/api/tickets/:ticket/commands', who: ['person'],
+    async handler({ res, app, ticket }) {
+      return json(res, 200, chatCommands(app.store, ticket));
     },
   },
   {

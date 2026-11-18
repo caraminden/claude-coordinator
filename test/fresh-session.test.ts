@@ -49,7 +49,7 @@ const waitForRelease = () => { const wait = setInterval(() => {
   clearInterval(wait);
   const outcome = readFileSync(release, 'utf8');
   unlinkSync(release); // one turn's release, never the next turn's too
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: outcome === 'error', result: 'done', session_id: session }));
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: outcome === 'error', result: outcome.startsWith('ok:') ? outcome.slice(3) : 'done', session_id: session }));
   process.exit(0);
 }, 20); };
 `,
@@ -60,10 +60,10 @@ const store = new Store(join(root, 'test.db'));
 const runner = new Runner(store, () => {}, () => ({}), fake);
 
 let n = 0;
-/** A Taskmaster with a session whose transcript is on this login, so its turns resume it. */
-function taskmaster(session = 'old') {
+/** A Taskmaster (or a minion) with a session whose transcript is on this login, so its turns resume it. */
+function taskmaster(session = 'old', kind: 'coordinator' | null = 'coordinator') {
   const project = store.createProject(`P${++n}`, null);
-  const t = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
+  const t = store.createTicket({ project_id: project.id, title: kind ? 'Taskmaster' : 'Minion', permission_mode: 'default', created_by: 'Cara', ...(kind ? { kind } : {}) });
   const cwd = join(root, `tm${n}`);
   mkdirSync(cwd, { recursive: true });
   store.setTicketDir(t.id, cwd, null);
@@ -81,7 +81,7 @@ async function started(id: number) {
 }
 
 /** End the running turn; returns once the server has handled its end, though a queued turn may have started since. */
-async function endTurn(id: number, outcome: 'ok' | 'error') {
+async function endTurn(id: number, outcome: 'ok' | 'error' | `ok:${string}`) {
   const turn = () => store.getSetting<{ startedAt: number }>(`turn:${id}`)?.startedAt;
   const was = turn();
   writeFileSync(join(store.getTicket(id)!.cwd, 'release'), outcome);
@@ -100,10 +100,15 @@ const waitIdle = async (id: number) => {
   await until('the turn to go idle', () => !runner.isRunning(id) && store.getTicket(id)!.status !== 'running');
 };
 
-test('only a Taskmaster with a session can start fresh', () => {
+test('only a chat with a session, and not a dismissed minion, can start fresh', () => {
   const project = store.createProject('Minions', null);
   const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
-  assert.equal(runner.requestFresh(minion.id, 'test'), 'Only a Taskmaster starts fresh sessions');
+  assert.equal(runner.requestFresh(minion.id, 'test'), 'Its session is already fresh');
+  store.updateTicket(minion.id, { session_id: 'old', status: 'closed' });
+  assert.match(runner.requestFresh(minion.id, 'test')!, /^A dismissed minion keeps its session/);
+  // A minion has no fresh_session: its handoff is its reply (#937).
+  store.updateTicket(minion.id, { status: 'idle' });
+  assert.equal(runner.recordHandoff(minion.id, 'x'), 'Only a Taskmaster starts fresh sessions');
   const id = taskmaster();
   store.updateTicket(id, { session_id: null });
   assert.equal(runner.requestFresh(id, 'test'), 'Its session is already fresh');
@@ -172,6 +177,30 @@ test('a message queued when a manual fresh start\'s handoff turn starts is in th
   assert.match(promptText((await lastCall(count + 1)).prompt), /m1 queued/);
   await endTurn(id, 'ok');
   await waitIdle(id);
+});
+
+test("a minion's /fresh (#937): its handoff turn's reply, status line left out, is what its fresh session starts from", async () => {
+  const id = taskmaster('old', null);
+  let count = callCount();
+  assert.equal(runner.requestFresh(id, 'Cara asked for it'), null);
+  await started(id);
+  const handoffTurn = await lastCall(count);
+  assert.ok(handoffTurn.args.includes('--resume'));
+  assert.match(promptText(handoffTurn.prompt), /Cara asked for it[\s\S]*reply with your handoff/);
+  assert.doesNotMatch(promptText(handoffTurn.prompt), /fresh_session/);
+  count = callCount();
+  await endTurn(id, 'ok:Branch ticket/9 has the fix committed; Cara picked tabs.\n\n<!-- status: {"state":null} -->');
+  await waitIdle(id);
+  const fresh = store.listEvents(id).filter((e) => e.kind === 'fresh').map((e) => JSON.parse(e.data));
+  assert.deepEqual(fresh, [{ summary: 'Branch ticket/9 has the fix committed; Cara picked tabs.', why: 'Cara asked for it' }]);
+  assert.equal(store.getTicket(id)!.session_id, null);
+  assert.ok(notes(id).some((t) => /the minion writes its handoff first/.test(t)));
+  runner.send(id, 'Cara', 'carry on');
+  await started(id);
+  const first = await lastCall(count);
+  assert.ok(!first.args.includes('--resume'));
+  assert.match(promptText(first.prompt), /fresh Claude session[\s\S]*Cara picked tabs\.[\s\S]*carry on/);
+  await endTurn(id, 'ok');
 });
 
 test('a Taskmaster that hands off on its own resets when its turn ends', async () => {

@@ -12,6 +12,7 @@ import { optimistic } from './ui/optimistic.js';
 import { pastedFiles } from './paste.js';
 import { sideColdCost } from './payer.js';
 import { looksSecret } from './secret-check.js';
+import { chatCommandList, matchCommands, menuQuery, parseCommand } from './slash-commands.js';
 import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 
 // ---------- drafts ----------
@@ -157,11 +158,18 @@ export function composer(chatId, ticket) {
     canSend: (text) => {
       if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.'), false;
       if (attachments.uploading) return alertNote('Still uploading a file; send once it shows its size.'), false;
+      // Slash commands (#937): Citadel's own run here; one the chat's turns load goes as text; any other is refused.
+      const cmd = parseCommand(text);
       // `/btw <question>` asks on the side (#932), as the button does; it never goes to the minion.
-      const btw = minion && /^\/btw\s+(\S[\s\S]*)$/.exec(text);
-      if (btw) {
+      if (cmd && minion && cmd.name === 'btw') {
+        if (!cmd.rest) return alertNote('Type your question after /btw.'), false;
         if (attachments.items.length) return alertNote('A side question takes text only: remove the attachments, or send it as a message.'), false;
-        return askSide(btw[1].trim()), false;
+        return askSide(cmd.rest), false;
+      }
+      if (cmd?.name === 'help') return (box.value = ''), slash.open(true), false;
+      if (cmd?.name === 'fresh') return startFresh(), false;
+      if (cmd && commands.loaded && !commands.names.has(cmd.name)) {
+        return alertNote(`/${cmd.name} isn't a command here: type / to see the list, or start with // to send it as text.`), false;
       }
       const found = !sendAnyway && looksSecret(text);
       sendAnyway = false;
@@ -183,6 +191,27 @@ export function composer(chatId, ticket) {
     onError: (ex) => alertNote(ex.message),
   });
   const { form, textarea, row, sendButton: sendBtn } = box;
+  // The chat's commands, loaded once per composer; until they come (or if they don't), nothing is refused.
+  const commands = { loaded: false, names: new Set(), list: chatCommandList([], minion) };
+  api(`api/tickets/${chatId}/commands`).then((r) => {
+    if (!r?.loaded) return;
+    commands.list = chatCommandList(r.commands, minion);
+    commands.names = new Set(commands.list.map((c) => c.name));
+    commands.loaded = true;
+    slash.update();
+  }).catch(() => {});
+  const slash = slashMenu(form, textarea, () => commands.list);
+  /** /fresh (#937): a fresh Claude session, Taskmaster or minion, after it writes its handoff. */
+  const startFresh = () => {
+    const who = minion ? 'this minion' : 'the Taskmaster';
+    const how = minion ? 'It replies with a handoff' : 'It saves what lasts to memory and writes a handoff';
+    if (!confirm(`Start ${who} on a fresh session? ${how}, then its context resets and its next turn starts from that. The chat stays as it is.`)) return;
+    box.value = '';
+    api(`api/tickets/${chatId}/fresh-session`, { method: 'POST', body: {} }).catch((ex) => {
+      if (!box.value.trim()) box.value = '/fresh';
+      alertNote(`No fresh session: ${ex.message}`);
+    });
+  };
   form.sendAndUnpark = () => {
     unparkWith = true;
     try {
@@ -370,6 +399,88 @@ export function composer(chatId, ticket) {
   /** More of a taken-back message's attachments, once they have loaded (thread.js). */
   form.attach = (saved) => attachments.restore(saved);
   return form;
+}
+
+// ---------- slash commands ----------
+
+/**
+ * The menu of slash commands above the box (#937): it opens while the box holds one `/word`, filters as you type,
+ * and fills the box with the one picked (arrows and Enter or Tab, or a tap). It floats over the chat, so it moves
+ * nothing (test/no-reflow-browser.test.ts). `open(true)` shows every command (/help).
+ */
+function slashMenu(form, textarea, list) {
+  const menu = h('div', { class: 'slash-menu', role: 'listbox', id: `slash-${Math.random().toString(36).slice(2)}`, hidden: true });
+  form.prepend(menu);
+  textarea.setAttribute('aria-controls', menu.id);
+  let shown = [];
+  let active = 0;
+  let all = false;
+  const close = () => {
+    menu.hidden = true;
+    all = false;
+    textarea.removeAttribute('aria-activedescendant');
+    textarea.setAttribute('aria-expanded', 'false');
+  };
+  const mark = () => {
+    [...menu.children].forEach((el, i) => el.setAttribute('aria-selected', String(i === active)));
+    const el = menu.children[active];
+    if (!el) return;
+    textarea.setAttribute('aria-activedescendant', el.id);
+    el.scrollIntoView({ block: 'nearest' });
+  };
+  const pick = (c) => {
+    textarea.value = `/${c.name} `;
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textarea.dispatchEvent(new Event('input', { bubbles: true })); // saves the draft and fits the box; closes the menu
+    textarea.focus();
+  };
+  const update = () => {
+    const query = all ? '' : menuQuery(textarea.value);
+    shown = query === null ? [] : matchCommands(list(), query);
+    if (!shown.length) return close();
+    active = Math.min(active, shown.length - 1);
+    menu.replaceChildren(...shown.map((c, i) => h('div', { class: 'slash-item', role: 'option', id: `${menu.id}-${i}`, onclick: () => pick(c) },
+      h('span', { class: 'slash-name' }, `/${c.name}`, c.args ? h('span', { class: 'slash-args' }, ` ${c.args}`) : ''),
+      h('span', { class: 'slash-desc' }, c.description || ''))));
+    menu.hidden = false;
+    textarea.setAttribute('aria-expanded', 'true');
+    mark();
+  };
+  // A tap on the menu keeps the box focused (and a phone's keyboard up).
+  menu.addEventListener('pointerdown', (e) => e.preventDefault());
+  textarea.addEventListener('input', () => {
+    all = false;
+    active = 0;
+    update();
+  });
+  textarea.addEventListener('blur', close);
+  // Capture: ahead of the box's own Enter, which would send.
+  form.addEventListener('keydown', (e) => {
+    if (menu.hidden || e.target !== textarea || e.isComposing) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      active = (active + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length;
+      mark();
+    } else if (e.key === 'Escape') {
+      close();
+    } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      // Enter on a name typed out in full sends it; otherwise Enter, like Tab, fills in the one picked.
+      if (e.key === 'Enter' && textarea.value === `/${shown[active].name}`) return close();
+      pick(shown[active]);
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+  return {
+    update: () => !menu.hidden && update(),
+    open: (everything = false) => {
+      all = everything;
+      active = 0;
+      update();
+      textarea.focus();
+    },
+  };
 }
 
 // ---------- pasted images and attached files ----------

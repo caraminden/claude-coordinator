@@ -1188,7 +1188,7 @@ function drawEvent(event, scroll) {
     else if (short != null && data.detail) nodes.push(h('details', { class: 'note detail' }, h('summary', {}, threadRefs(short)), h('pre', {}, data.detail)));
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'fresh') {
-    // A Taskmaster's fresh Claude session (#406), with the handoff it starts from behind the toggle.
+    // A Taskmaster's or a minion's fresh Claude session (#406, #937), with the handoff it starts from behind the toggle.
     nodes.push(h('details', { class: 'note detail fresh', title: data.why ? `Why: ${data.why}` : null }, h('summary', {}, 'Fresh session started; summary'), markdown(data.summary, event.ticket_id)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, threadRefs(data.text)));

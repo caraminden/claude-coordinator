@@ -20,6 +20,7 @@ import { renderModelPicker, uploadsRunning } from './composer.js';
 import { filesUploading } from './files.js';
 import { onJobUpdate } from './jobs.js';
 import { linkifyHtml, markdownElement } from './ui/markdown.js';
+import { lightbox } from './ui/media.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
 import { toast } from './ui/status.js';
@@ -1102,3 +1103,14 @@ export function openHash(hash) {
   if (jump && jump.hash === location.hash && view?.kind === 'project' && view.main === 'chat' && view.ticket && threadHref(view.ticket) === jump.hash) return void jumpToEvent(jump.target);
   if (location.hash !== hash) location.hash = hash;
 }
+
+// A picture in a chat message (a pasted or uploaded image, or a markdown one) opens in the kit's lightbox, a modal over
+// the chat, not a browser tab (#945). Ctrl/⌘/Shift/middle-click still open the tab.
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const img = e.target instanceof Element ? e.target.closest('.msg a > img, .md a > img') : null;
+  const link = img?.parentElement;
+  if (!link?.href) return;
+  e.preventDefault();
+  lightbox([{ src: link.href, alt: img.alt || 'Picture' }]);
+});

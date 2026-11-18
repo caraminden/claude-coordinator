@@ -103,3 +103,13 @@ export function coldLine(t, now = Date.now()) {
   return h('div', { class: 'payer-line cold', title: 'Its prompt cache lasts an hour, so the next turn re-reads its whole context. Held mail rides along with your message.' },
     `Cold, idle ${idleText(idle)}: replying re-reads its ${Math.round(t.context_tokens / 1000)}k context, about ${loadCost(t).replace('~', '')}. Say it all in one message.`);
 }
+
+/**
+ * What a side question (#932) costs to load when its copy can't read the minion's prompt cache: the minion is idle past
+ * the cache's hour, or last ran on someone else's plan (the copy runs on yours). Null when it is warm for you.
+ */
+export function sideColdCost(t, now = Date.now()) {
+  if (!t.session_id || !t.context_tokens) return null;
+  const idle = t.status !== 'running' && t.last_turn_end && now - t.last_turn_end > COLD_MS;
+  return idle || (t.payer && !mine(t)) ? { cost: loadCost(t).replace('~', ''), k: Math.round(t.context_tokens / 1000), idle: !!idle } : null;
+}

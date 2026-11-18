@@ -208,6 +208,7 @@ h2 { font-size: 1.15rem; margin: 0; }
 .icon { display: block; width: 1.1rem; height: 1.1rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 /* Words that only fit on wider screens ("BUG:", "Close ticket", "Add image", "Latest"); phones get the short form. */
 @media (max-width: 800px) { .wide-only { display: none; } }
+@media (min-width: 801px) { .narrow-only { display: none; } }
 
 .update-banner {
   position: sticky;

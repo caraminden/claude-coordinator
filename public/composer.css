@@ -107,6 +107,13 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
   .composer .row > .unpark-slot:not([hidden]) { order: -1; flex: 1 0 100%; }
 }
 
+/* Ask on the side (#932): side-thread blue, outlined while the minion is idle and filled while a turn runs, when it's
+   most useful. The cold confirm above the box uses the payer line's look with a blue Ask anyway. */
+.composer button.side-ask { color: var(--cat-2); border-color: color-mix(in srgb, var(--cat-2) 60%, var(--control-line)); white-space: nowrap; }
+.chat.turn-running .composer button.side-ask { background: var(--cat-2); color: var(--panel); border-color: var(--cat-2); }
+button.side-go { background: var(--cat-2); color: var(--panel); border: 1px solid var(--cat-2); }
+@media (max-width: 800px) { .composer .row > .side-ask { flex: none; } }
+
 /* Send, and while a turn runs a ▾ beside it for "Send after this turn" (Send itself steers the turn). */
 .composer .send-group { position: relative; display: inline-flex; }
 .composer .send-group .more { display: none; padding-left: 0.5rem; padding-right: 0.5rem; border-left: 1px solid color-mix(in srgb, var(--on-accent) 35%, transparent); border-radius: 0 6px 6px 0; }

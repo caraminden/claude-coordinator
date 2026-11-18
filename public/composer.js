@@ -9,6 +9,7 @@ import { openDialog } from './ui/dialog.js';
 import { lightbox } from './ui/media.js';
 import { optimistic } from './ui/optimistic.js';
 import { pastedFiles } from './paste.js';
+import { sideColdCost } from './payer.js';
 import { looksSecret } from './secret-check.js';
 import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 
@@ -117,12 +118,50 @@ export function composer(chatId, ticket) {
   // Set by the secret warning's Send anyway, for the one submit it makes (#838).
   let sendAnyway = false;
   let unparkWith = false;
+  const minion = !isCoordinator(ticket);
+  // Ask on the side (#932): a read-only copy of the minion's session answers in a side thread, even mid-turn, on your
+  // own login. A cold copy (idle past the cache, or last run on another plan) says what it costs first.
+  let sideOk = false;
+  const sideStrip = h('div', { class: 'payer-line cold side-cold', hidden: true });
+  const askSide = (text) => {
+    const t = view?.ticket?.id === chatId ? view.ticket : ticket;
+    const cold = !sideOk && sideColdCost(t);
+    sideOk = false;
+    if (cold) {
+      sideStrip.replaceChildren(
+        h('span', {}, `${cold.idle ? 'Cold' : 'Last ran on another plan'}: a side question re-reads its ${cold.k}k context on your login, about ${cold.cost}. `),
+        h('span', { class: 'row' },
+          h('button', { type: 'button', class: 'small side-go', onclick: () => { sideOk = true; askSide(text); } }, 'Ask anyway'),
+          h('button', { type: 'button', class: 'small secondary', onclick: () => { sideStrip.hidden = true; textarea.focus(); } }, 'Cancel')));
+      sideStrip.hidden = false;
+      return;
+    }
+    sideStrip.hidden = true;
+    box.value = '';
+    api(`api/tickets/${chatId}/side`, { method: 'POST', body: { text } }).catch((ex) => {
+      if (!box.value.trim()) box.value = text;
+      alertNote(`Side question not asked: ${ex.message}`);
+    });
+  };
+  const sideBtn = minion && h('button', { type: 'button', class: 'secondary side-ask', title: 'Ask a read-only copy of this minion; nothing reaches its session (or start with /btw)',
+    onclick: () => {
+      const text = box.value.trim().replace(/^\/btw\s+/, '');
+      if (text) return askSide(text);
+      textarea.placeholder = 'Type a side question, then Ask on the side…';
+      textarea.focus();
+    } }, h('span', { class: 'wide-only' }, 'Ask on the side'), h('span', { class: 'narrow-only' }, 'Aside'));
   const box = mountComposer(document.createDocumentFragment(), {
     placeholder: composerPlaceholder(ticket),
     draftKey: `cc-draft:${chatId}`,
     canSend: (text) => {
       if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.'), false;
       if (attachments.uploading) return alertNote('Still uploading a file; send once it shows its size.'), false;
+      // `/btw <question>` asks on the side (#932), as the button does; it never goes to the minion.
+      const btw = minion && /^\/btw\s+(\S[\s\S]*)$/.exec(text);
+      if (btw) {
+        if (attachments.items.length) return alertNote('A side question takes text only: remove the attachments, or send it as a message.'), false;
+        return askSide(btw[1].trim()), false;
+      }
       const found = !sendAnyway && looksSecret(text);
       sendAnyway = false;
       if (found) return askToSaveSecret(ticket, found, {
@@ -196,11 +235,12 @@ export function composer(chatId, ticket) {
     account && !account.turns ? h('p', { class: 'muted small composer-note' },
       'Your messages don\'t start or steer turns yet: they wait here, unseen by Claude, until you can link your own Claude account.') : '');
   textarea.after(picker);
+  if (minion) textarea.before(sideStrip);
   row.replaceChildren(
     h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
       h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
     h('span', { class: 'spacer' }),
-    modelPicker(chatId), sendGroup);
+    modelPicker(chatId), sideBtn || '', sendGroup);
   const pasteFiles = (e) => {
     const files = pastedFiles(e.clipboardData);
     if (!files.length) return false;

@@ -25,6 +25,7 @@ import { askHeader } from './askcard.js';
 import { firstSentence, GITHUB_NAME, machineAuthor, senderTone, shortDuration, shortNote, ticketActionRef } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerLine } from './payer.js';
+import { sideEvent } from './sidethread.js';
 import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, nowDoing, planEstimate, planTrack, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
@@ -95,6 +96,7 @@ export function chatView(chatId, ticket, merged = null) {
     folds: [], // the running turn's settled words, { text, fate } in order, folded when its answer arrives (#551)
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: chatId ? outbox(chatId) : [], // messages on their way or not sent (composer.js), replaced by the server's copy
+    sideThreads: new Map(), // side thread id -> its row (sidethread.js)
     cards: new Map(), // question card id -> { el, markAnswered }; plan card id -> { el, settle }; approval card id -> { settle }
     heldCards: [], // this turn's question and plan cards, kept below the words that explain them
     branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
@@ -188,7 +190,7 @@ function renderHistory() {
   const recap = document.getElementById('recap');
   Object.assign(view, {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
-    actions: new Map(), turnActions: [], cards: new Map(), lastPlan: null, heldCards: [], gruntStarts: new Map(),
+    actions: new Map(), turnActions: [], cards: new Map(), sideThreads: new Map(), lastPlan: null, heldCards: [], gruntStarts: new Map(),
     // The session started on an earlier page, if there is one.
     sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, folds: [], pendingRequest: [], turnRequest: undefined,
   });
@@ -1148,6 +1150,10 @@ function drawEvent(event, scroll) {
     while (prev && pending.has(prev)) prev = prev.previousElementSibling;
     if (prev?.matches('.mcopies')) addMinionCopy(prev, data, event);
     else nodes.push(addMinionCopy(newMinionCopies(), data, event));
+  } else if (event.kind === 'side' || event.kind === 'side_answer') {
+    // A side question and its answers share one row (#932, sidethread.js).
+    const row = sideEvent(view.sideThreads, event, data, view.ticket, scroll);
+    if (row) nodes.push(row);
   } else if (event.kind === 'loop_paused') {
     nodes.push(loopCard(data));
   } else if (event.kind === 'loop_continued') {

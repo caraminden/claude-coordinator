@@ -160,6 +160,20 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
 .mcopies .mc-row { display: flex; gap: 0.5rem; align-items: baseline; }
 .mcopies .mc-who { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
 .mcopies .mc-text { min-width: 0; overflow-wrap: anywhere; }
+/* Side threads (#932, sidethread.js): a question a read-only copy answered, in side-thread blue, the minion never saw it. */
+.side-thread { border-left: 3px solid var(--cat-2); }
+.side-thread > summary, .side-thread > summary .who { color: var(--cat-2); }
+.side-thread.asking > summary .name { animation: pulse 1.6s ease-in-out infinite; }
+.side-thread > .side-list { padding: 0 0.85rem; display: grid; gap: 0.6rem; }
+.side-thread .side-q { font-weight: 650; white-space: pre-wrap; }
+.side-thread .side-a.waiting, .side-thread .side-a.failed { color: var(--muted); font-style: italic; }
+.side-thread .side-a > :first-child { margin-top: 0.2rem; }
+.side-thread > .side-follow { display: grid; gap: 0.4rem; padding: 0.5rem 0.85rem 0; }
+.side-thread > .side-follow[hidden] { display: none; }
+.side-thread > .side-follow .row { display: flex; gap: 0.5rem; }
+.side-thread > .side-bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 0.75rem; padding: 0.5rem 0.85rem 0.6rem; }
+.side-thread .side-foot { font-size: 0.8em; color: var(--muted); }
+.side-thread .side-actions { display: flex; gap: 0.5rem; }
 /* Grunt reports collapse to a line each (thread.js addGruntText); a fan-out's lines share one block. */
 .msg.grunt > summary .dur { flex: none; font-variant-numeric: tabular-nums; }
 .grunts > .grunt-list { padding: 0 0.6rem 0.5rem; }

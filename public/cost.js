@@ -54,7 +54,7 @@ export async function renderCost() {
     const over = budget && today > budget;
     chip.querySelector('summary').replaceChildren(budget ? 'Day ' : 'Today ', h('b', { class: over ? 'warn' : '' }, budget ? pct(today) : costText(today)));
     const accounts = parts.length > 1 ? ` across ${parts.length} Claude accounts` : '';
-    const made = parts.map((p) => `${p.label || 'the server login'} ${costText(p.limit)}${p.assumed ? ' (assumed, not priced yet)' : ''}`).join(' + ');
+    const made = !budget ? '' : parts.map((p) => `${p.label || 'the server login'} ${costText(p.limit)}${p.assumed ? ' (assumed, not priced yet)' : ''}`).join(' + ');
     chip.querySelector('summary').title = budget
       ? `Today's turns${accounts}: ${costText(today)} at API prices, ${pct(today)} of an even day's share (${costText(budget)}) of the combined weekly limit.\nWeekly limit ${costText(budget * 7)}${parts.length > 1 ? ` = ${made}` : ''}, divided by 7.${over ? '\nOver it: at this pace the week runs out early.' : ''}`
       : `Today's turns${accounts}: ${costText(today)} at API prices. Shown against the weekly limit once its meter reaches 3%.`;

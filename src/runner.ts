@@ -2444,8 +2444,6 @@ export class Runner {
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
     // a turn no one asked for gets none, and a ride-along message doesn't bring its sender's machines.
     const machines = ticket.kind === 'coordinator' ? [] : this.machines(project, askers.length ? [asker!] : []);
-    // Machines a minion may queue jobs on (#857): lent to this scheme with a jobs block; the owner's go card is the gate.
-    const jobMachines = ticket.kind === 'coordinator' ? [] : jobMachinesFor(this.store, project.id);
     // Codex (#337): a Codex pick, or the sender's "Enable Codex override" (which maps a Claude pick by tier),
     // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why. The server
     // login's Codex turns run in its own container, never on the host (#341): only there is Codex's hook.
@@ -2678,6 +2676,8 @@ export class Runner {
       const everyScheme = this.everySchemeFor(project, ticket, asker);
       const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
       // Two halves (#878): system-prompt.md, the same for every minion of the scheme, and the per-minion and volatile lines that open the turn message.
+      // Machines a minion may queue jobs on (#857): lent to this scheme with a jobs block; the owner's go card is the gate.
+      const jobMachines = ticket.kind === 'coordinator' ? [] : jobMachinesFor(this.store, project.id);
       const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines);
       const system = promptText(parts.system);
       writeFileSync(join(dir, 'system-prompt.md'), system);

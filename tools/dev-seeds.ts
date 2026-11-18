@@ -466,6 +466,27 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}`;
     },
   },
+  'side-thread': {
+    about: 'a minion mid-turn with side threads (#932): yours answered with a follow-up, and Josh\'s still looking; and an idle minion whose Ask on the side shows the cold cost first',
+    seed(c) {
+      const t = minion(c, 'Speed up the land queue', { status: 'running', last_activity: 'Running tests… 3/5', session_id: 'seed-side-1' });
+      const w = chat(c, t, 12);
+      w.asked('Make lands stop waiting on each other\'s tests.');
+      w.init();
+      w.said('Running the land tests now; this takes a few minutes.');
+      w.call('Bash', { command: 'citadel-test test/land.test.ts', description: 'Run the land tests' }, null);
+      const q = w.put('side', { thread: null, by: c.who, uid: 0, q: 'Is it stuck, or still running the tests?' });
+      w.put('side_answer', { thread: q, ask: q, ok: true, cost_usd: 0.06, text: 'Still running: `citadel-test` started 4 minutes ago and is on `test/land.test.ts` (pid 81234, 3% CPU). Nothing looks stuck.' });
+      const f = w.put('side', { thread: q, by: c.who, uid: 0, q: 'How long do those usually take?' });
+      w.put('side_answer', { thread: q, ask: f, ok: true, cost_usd: 0.03, text: 'About 6 minutes on perigee; the last three runs took 5:40, 6:10 and 6:05.' });
+      w.put('side', { thread: null, by: 'Josh', uid: 0, q: 'Which branch is this on?' });
+      const cold = minion(c, 'Rename the turn folder', { status: 'idle', session_id: 'seed-side-2' });
+      chat(c, cold, 3).asked('Rename the turn folder to runs/.');
+      c.store.setSetting(`context:${cold.id}`, 180_000);
+      c.store.recordTurn(cold.id, { session_id: 'seed-side-2', ended_at: Date.now() - 3 * 3600_000, session_cost_usd: 1.2 });
+      return route(c, t);
+    },
+  },
   'wco-fixture': {
     about: 'the run-on-windows WCO rig\'s fixture contraption (open, at port $WCO_FIXTURE_PORT) and a minion with an artifact',
     seed(c) {

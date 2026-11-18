@@ -55,9 +55,13 @@ const STUB = `<script>
     Object.assign(schemes[1], { running: true, working: 12, inbox: 23, fresh: true });
     send({ type: 'ticket', ticket: { id: 900, project_id: 2, kind: 'ticket', number: 1, title: 'Elsewhere', status: 'running', updated_at: Date.now() } });
   };
-  // Every layout shift the page makes, from here on.
+  // Every layout shift the page makes, from here on. hadRecentInput is not asked (#963): the test sends no input, yet
+  // a phone-sized page calls every shift of its first half second one, so the check passed only by starting inside
+  // that window and failed whenever the page was older. The working line under the chat is left out: it is the
+  // chat's last row, and lines arriving above it carry it down the page as they do each other.
   window.shifts = [];
-  new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!e.hadRecentInput) window.shifts.push(e.value); }).observe({ type: 'layout-shift' });
+  const working = (e) => e.sources.length > 0 && e.sources.every((s) => s.node?.closest?.('#log ~ .typing'));
+  new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!working(e)) window.shifts.push(e.value); }).observe({ type: 'layout-shift' });
 </script>`;
 
 let app: App;

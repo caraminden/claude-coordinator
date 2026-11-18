@@ -86,7 +86,8 @@ const CSS = `
   /* A fixed dark scrim with a light ring, not theme colours: it sits on pictures, which don't change with the theme. */
   background: rgb(0 0 0 / 0.55); color: white; box-shadow: 0 0 0 1px rgb(255 255 255 / 0.5), 0 2px 8px rgb(0 0 0 / 0.3); }
 :where(.cui-lb-step:hover) { background: rgb(0 0 0 / 0.75); }
-:where(.cui-media-icon) { display: block; width: 16px; height: 16px; }
+/* Never the click's target (#963): a redraw swaps the icon, and a press that began on a node since removed makes no click. */
+:where(.cui-media-icon) { display: block; width: 16px; height: 16px; pointer-events: none; }
 /* The icons take their colour themselves: a host's button { color: inherit } (Tailwind's preflight has one) outranks :where(). */
 :where(.cui-scrub-play > .cui-media-icon) { color: var(--citadel-on-accent); }
 :where(.cui-lb-step > .cui-media-icon) { width: 20px; height: 20px; color: white; }

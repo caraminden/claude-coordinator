@@ -92,8 +92,22 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
     await shoot(page, `${label}-pasted.png`);
 
     // Clicking (tapping) the thumbnail shows it large, ready to draw on (#946); a click off the picture closes it.
-    await click(page, width, '.attachments .thumb .zoom');
-    await waitFor(page, 'the viewer', '!!document.querySelector("dialog.cui-lightbox[open]")');
+    // #963: on a phone in CI this tap has now and then opened nothing (not reproduced in 30+ runs, under load or
+    // not), so a timeout says what was under the finger and whether the tapped thumbnail was still in the page.
+    const at = await page.centre('.attachments .thumb .zoom');
+    await page.eval(`window.tapped = document.querySelector('.attachments .thumb .zoom')`);
+    await press(page, width, at.x, at.y);
+    await waitFor(page, 'the viewer', '!!document.querySelector("dialog.cui-lightbox[open]")').catch(async (err) => {
+      const seen = await page.eval<string>(`(() => {
+        const e = document.elementFromPoint(${at.x}, ${at.y});
+        const b = document.querySelector('.attachments .thumb .zoom')?.getBoundingClientRect();
+        return JSON.stringify({ under: e ? e.tagName + '.' + e.className : null, tappedStillThere: window.tapped.isConnected,
+          sameButton: window.tapped === document.querySelector('.attachments .thumb .zoom'), thumbs: document.querySelectorAll('.attachments .thumb').length,
+          box: b && [b.left, b.top, b.width, b.height].map(Math.round), lightbox: document.querySelector('dialog.cui-lightbox')?.outerHTML.slice(0, 120) ?? null,
+          focus: document.activeElement?.tagName, scrollY: Math.round(scrollY) });
+      })()`);
+      throw new Error(`${err.message}. Tapped at ${at.x},${at.y}: ${seen}`);
+    });
     // Waited for, not read once: the picture loads, then the dialog's opening animation scales it up.
     await waitFor(page, 'the picture larger than the thumbnail', `document.querySelector('dialog.cui-lightbox canvas.annotate-canvas')?.width > 0 && document.querySelector('dialog.cui-lightbox canvas.annotate-canvas').getBoundingClientRect().width > 300`);
     await shoot(page, `${label}-zoom.png`);

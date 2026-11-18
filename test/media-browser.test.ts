@@ -273,6 +273,19 @@ test('scrubber: onUser hears a person\'s play, pause and seek, never the app\'s 
   assert.deepEqual(await page.eval('log'), [['play', null], ['pause', null], ['seek', 5]]);
 });
 
+// #963: the clip's own play and pause events redraw the buttons, swapping their icons. A press that began on an icon
+// swapped before the release made no click at all, so a person's Pause was lost now and then (and this file's
+// two-click test above with it, in CI).
+test('scrubber: a click counts when the button\'s icon is redrawn between the press and the release', { skip }, async () => {
+  const page = await clipPage(`{ onUser: (kind) => log.push(kind) }`);
+  const { x, y } = await page.centre('.cui-scrub-play');
+  assert.equal(await page.eval(`document.elementFromPoint(${x}, ${y}).className`), 'cui-scrub-play', 'the press lands on the button, not its icon');
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+  await page.eval(`(() => { const b = document.querySelector('.cui-scrub-play'); b.replaceChildren(b.firstChild.cloneNode(true)); })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+  assert.deepEqual(await page.eval('log'), ['play']);
+});
+
 test('scrubber: Play after the end goes back to the Start pin when there is no End', { skip }, async () => {
   const page = await clipPage(`{ start: 2000 }`);
   await page.eval(`s.seek(8)`);

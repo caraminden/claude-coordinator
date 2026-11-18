@@ -648,7 +648,11 @@ test('through the server: start_after parks the minion with its brief held; the 
   await idle(leader.id);
   assert.equal((await call(`/api/tickets/${leader.id}/status`, { status: 'closed' })).status, 200);
   for (const end = Date.now() + 5000; (await said(next.data.id)).length < 2; await new Promise((r) => setTimeout(r, 20))) {
-    if (Date.now() > end) throw new Error('The chained minion never started');
+    // #963: this timed out once in CI (not reproduced, a CPU quota of 8% included), so it says how far the start got.
+    if (Date.now() > end) {
+      const row = async (id: number) => (({ status, state, note }) => ({ status, state, note }))((await call(`/api/tickets/${id}`)).data.ticket);
+      throw new Error(`The chained minion never started: ${JSON.stringify({ leader: await row(leader.id), next: await row(next.data.id), said: await said(next.data.id) })}`);
+    }
   }
   assert.deepEqual(await said(next.data.id), ['note for later', 'brief for Next']);
   assert.deepEqual(await briefs(next.data.id), [false, true]);

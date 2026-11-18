@@ -31,3 +31,10 @@ test('a minion names its owner\'s Taskmaster', () => {
   const m = systemPrompt(project, { ...tm, kind: 'ticket', number: 5 }, '/s/1', '/s/p', '/t', '/m');
   assert.match(m, /the session of the person who owns you/);
 });
+
+test('a stalled minion is stepped up a tier: the Taskmaster calls update_ticket, a Sonnet minion asks for it', () => {
+  const minion = { id: 2, number: 2, title: 'M', kind: 'ticket', branch: 'ticket/2-m' } as any;
+  const m = systemPrompt(project, minion, '/s/1', '/s/p', '/t', '/m', [], true, '', null, [], null, true, null, null, false, null);
+  assert.match(prompt(null), /Stalled minions step up: .*update_ticket with the next step from its tier's `then` before relaying/);
+  assert.match(m, /On Sonnet, ask the Taskmaster for the next model or effort step \(`message_coordinator`, need: ask\)/);
+});

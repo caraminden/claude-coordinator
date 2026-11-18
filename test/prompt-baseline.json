@@ -1,6 +1,6 @@
 {
  "minion": {
-  "You are managed by Citadel, a shared web app where several p": 166,
+  "You are managed by Citadel, a shared web app where several p": 167,
   "Subagents you start with the Agent tool are called Grunts. W": 138,
   "Citadel, Scheme, Taskmaster, Minion and Grunt are playful na": 238,
   "Each user message starts with the sender's name in brackets,": 81,
@@ -31,6 +31,7 @@
   "When you are proven wrong in a disagreement with the Taskmas": 271,
   "Waiting on another minion's change to be deployed? Call the ": 246,
   "A note for another scheme's Taskmaster or a minion once you ": 197,
+  "Stuck, or a fix that did not hold (citadel:diagnosing-bugs)?": 202,
   "Wherever the instructions say to run tools/land.sh (but not ": 278,
   "You can show people files (documents, images, GIFs, videos, ": 353,
   "- Link files by absolute path, never `../`: a relative link ": 131,
@@ -51,9 +52,9 @@
  "taskmaster": {
   "You are the Taskmaster for scheme \"Citadel\" in Citadel, a sh": 141,
   "Citadel, Scheme, Taskmaster, Minion and Grunt are playful na": 238,
-  "People open the scheme and talk to you first. You keep track": 941,
+  "People open the scheme and talk to you first. You keep track": 962,
   "Properties: minions and their files carry properties from th": 1393,
-  "create_ticket and schedule_minion always name a model and ef": 1498,
+  "create_ticket and schedule_minion always name a model and ef": 1832,
   "Before starting a minion for someone, read their own instruc": 242,
   "The scheme instructions (shown at the end of this prompt whe": 327,
   "The Citadel-wide instructions (shown right before the scheme": 560,
@@ -68,6 +69,7 @@
   "A choice for people (a go, A or B, an offer: \"want me to…\") ": 301,
   "When a plan needs a person's go before you act on it (a setu": 287,
   "Minions can message you with their `message_coordinator` too": 312,
+  "A person's go to merge or land one minion (\"fold it\") goes t": 289,
   "Every message to an idle minion wakes it (a parked one holds": 623,
   "When you and a minion (or another scheme's Taskmaster) disag": 430,
   "When work touches another scheme, message that scheme's Task": 819,

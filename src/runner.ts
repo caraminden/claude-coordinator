@@ -3375,15 +3375,17 @@ export class Runner {
       const why = typeof e === 'string' ? e : e?.error ?? e?.message ?? JSON.stringify(e);
       return `${name ? `${name} ` : ''}${kind}: ${why}`;
     };
+    const role = this.store.getTicket(ticketId)?.kind === 'coordinator' ? 'coordinator' : 'thread';
+    // The turn's own server already got checkMcp's error.
     const lines = [
       ...(Array.isArray(ev.plugin_errors) ? ev.plugin_errors.map((e: any) => line(e, 'plugin')) : []),
-      ...(Array.isArray(ev.mcp_server_errors) ? ev.mcp_server_errors.map((e: any) => line(e, 'MCP server')) : []),
+      ...(Array.isArray(ev.mcp_server_errors) ? ev.mcp_server_errors.filter((e: any) => e?.name !== role).map((e: any) => line(e, 'MCP server')) : []),
     ];
     if (!lines.length) return;
     const text = `This turn started with load errors, so some of its skills, hooks or tools are missing: ${lines.join('; ')}`.slice(0, 1500);
     console.error(`Ticket ${ticketId}: ${text}`);
     const event = this.emit(ticketId, 'error', { text });
-    this.setFailNote(ticketId, { note: text.slice(0, 200) });
+    this.setFailNote(ticketId, { note: `Load errors: ${lines.length} in this turn's init`.slice(0, 60) });
     this.onTurnError(ticketId, text, event.id);
   }
 

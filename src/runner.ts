@@ -2731,6 +2731,49 @@ export class Runner {
   }
 
   /**
+   * Start a side question's fork (#932, src/side-ask.ts): the minion's own launch (buildLaunch, with the read-only
+   * guard) on the asker's login, resuming `resume` (the minion's session, forked; or the fork, for a follow-up), with
+   * `prompt` as its message. Nothing of the minion's changes: not its session, state or queue. Throws with a reason
+   * people can read when it can't start.
+   */
+  sideLaunch(ticketId: number, asker: number, prompt: string, resume: { id: string; fork: boolean }) {
+    if (this.noTurns) throw new Error('This is a preview: it never runs turns.');
+    const ticket = this.store.getTicket(ticketId);
+    const project = ticket && this.store.getProject(ticket.project_id);
+    if (!ticket || !project || ticket.kind === 'coordinator' || !ticket.cwd) throw new Error('Only a minion with a folder can be asked on the side.');
+    // Sender pays (#213): the asker's own login, never the minion's person's. The minion's warm key, so its warm account wins when it is the asker's.
+    const place = this.placeFor?.(asker, warmKey(ticket)) ?? { host: true as const };
+    if ('refused' in place) throw new Error(place.refused);
+    const { model, effort } = turnSettings(ticket, project);
+    if (isCodexModel(model) || this.store.getSetting<CodexThread>(codexThreadKey(ticket.id))) throw new Error('This minion runs on Codex, so it has no Claude session to ask on the side.');
+    // The tools come from the minion's own turn's people (its person and asker), so the fork's cached prefix is the turn's.
+    const person = ticket.person_id;
+    const turnAsker = this.store.turnAsker(ticket.id) ?? person;
+    const machines = this.machines(project, turnAsker !== null ? [turnAsker] : []);
+    const { plan, dir } = this.buildLaunch(project, ticket, {
+      place, person, asker: turnAsker, machines, model, effort, typedBy: null, secrets: new Map(), name: `side-${ticket.id}-${Date.now()}`,
+      folders: { files: this.filesDir(ticket), shared: this.sharedDir(project), memory: null }, codex: null, github: asker, side: true,
+    });
+    try {
+      for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
+      // The asker's login may lack the minion's session: put back the database's copy, as of its last finished turn.
+      // shortcut: mid-turn on another login, the fork sees the session as its last turn left it; copying the live transcript across would show the turn so far.
+      if (resume.fork) restoreSession(this.store, ticket, project, plan.configDir);
+      if (!existsSync(transcriptPath(plan.configDir, ticket.cwd, resume.id))) throw new Error(resume.fork ? 'This minion has no session to ask yet.' : 'This side thread has ended; ask a new question.');
+      plan.args.push('--resume', resume.id, ...(resume.fork ? ['--fork-session'] : []));
+      writeFileSync(join(dir, 'prompt.jsonl'), prompt);
+      for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
+      writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: plan.command, args: plan.args, cwd: ticket.cwd, env: plan.env }), { mode: 0o600 });
+    } catch (err) {
+      rmSync(dir, { recursive: true, force: true });
+      throw err;
+    }
+    if (plan.spawn.how === 'container') this.spawnInContainer(place as Extract<TurnPlace, { host: false }>, dir, plan.spawn.wrapper, ticket.id);
+    else this.spawnWrapper(plan.spawn.wrapper, dir);
+    return { dir, configDir: plan.configDir, cwd: ticket.cwd, account: place.account ?? 1 };
+  }
+
+  /**
    * Start a turn's wrapper in the person's container, detached. Rootless podman leaves an exec's conmon
    * in the caller's cgroup, so a restart of this server's unit SIGTERMs it (conmon passes that on to the
    * wrapper, which ignores it), waits out the stop timeout and SIGKILLs it (#258). So with units,

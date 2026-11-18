@@ -137,9 +137,10 @@ export interface WhereItWent {
   top: { id: number; project_id: number; kind: string; scheme: string; number: number | null; title: string; usd: number }[];
 }
 
-/** The kind of work a turn was: keepalive pings, Taskmasters, scheduled runs, else the minion's `type`. */
+/** The kind of work a turn was: keepalive pings, side questions (#932), Taskmasters, scheduled runs, else the minion's `type`. */
 function kindOf(r: SpendRowRaw): string {
   if (r.keepalive) return 'Keepalive pings';
+  if (r.side) return 'Side questions';
   if (r.kind === 'coordinator') return 'Taskmasters';
   if (r.created_by === APP_NAME) return 'Scheduled runs';
   return r.type ? r.type[0].toUpperCase() + r.type.slice(1) : 'No type';

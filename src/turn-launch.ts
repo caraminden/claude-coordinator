@@ -35,6 +35,8 @@ export interface TurnPins {
   MACHINE_MCP_SERVER: string;
   /** Pinned too, so a deploy can't change the rules under a running turn. */
   TRIPWIRE: string;
+  /** A side question's read-only guard (#932, src/side-guard.ts). */
+  SIDE_GUARD: string;
   LINK_CHECK: string;
   WORDING: string;
   SCHEME_REFS: string;
@@ -81,6 +83,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const MCP_SERVER = pinnedCopy('mcp.ts');
   const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
   const TRIPWIRE = pinnedCopy('tripwire.ts');
+  const SIDE_GUARD = pinnedCopy('side-guard.ts');
   const LINK_CHECK = pinnedCopy('link-check.ts');
   const WORDING = pinnedCopy('wording.ts');
   const SCHEME_REFS = pinnedCopy('scheme-refs.ts');
@@ -107,7 +110,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
   if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
-  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN });
+  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN });
 }
 
 /** The pinned copies pinTurnFiles made; throws if it was never called, since a turn launched without them would run with no tripwire. */
@@ -139,6 +142,11 @@ export function tripwireHooks(projectId: number, claudeConfig: string, ask = fal
   const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
   // onFailure: a check that times out (or dies outside tripwire.ts's own fail-open catch) blocks the call; without it Claude Code lets it through.
   return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] }] };
+}
+
+/** The PreToolUse hook a side question's fork gets (#932): every tool goes through src/side-guard.ts, which refuses writes. */
+export function sideGuardHook(script = turnPins().SIDE_GUARD) {
+  return { matcher: '.*', hooks: [{ type: 'command', command: [process.execPath, script].map((s) => `'${s}'`).join(' '), timeout: 10, onFailure: 'block' }] };
 }
 
 /**
@@ -430,6 +438,11 @@ export interface TurnFacts {
   /** For the Citadel scheme's Taskmaster on a Citadel member's ask, what it may read in every scheme (#656); else null. */
   everyScheme?: EveryScheme | null;
   claudeBin: string;
+  /**
+   * A side question's fork (#932): the same launch, plus a hook that refuses every write. A hook, not fewer tools,
+   * so the tools and prompt (the cached prefix) stay the minion's own.
+   */
+  side?: boolean;
   /** The systemd unit it runs in, or null for a plain child (and in a container). */
   unit: string | null;
 }
@@ -520,7 +533,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const codexTripwire = join(dir, 'codex-tripwire.json');
   files.push({ name: 'codex-tripwire.json', text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly, envFiles), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), mode: 0o444 });
   const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-    hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(pins.WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(pins.SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+    hooks: { ...linkCheck, PreToolUse: [...(facts.side ? [sideGuardHook(pinned(pins.SIDE_GUARD))] : []), ...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(pins.WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(pins.SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {

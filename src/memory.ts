@@ -181,7 +181,7 @@ export class Memory {
     if (!asked || NOT_ASKS.has(msg.author)) return null;
     // Its turn's result: the first after it, or for a message that waited for the turn before it to end,
     // the first of a turn that started after it was sent (a steer joins the running turn instead).
-    const result = (this.db.prepare(`SELECT MIN(event_id) AS id FROM turns WHERE ticket_id = ? AND event_id > ?
+    const result = (this.db.prepare(`SELECT MIN(event_id) AS id FROM turns WHERE ticket_id = ? AND event_id > ? AND side IS NULL
       ${msg.steered ? '' : 'AND (duration_ms IS NULL OR ended_at - duration_ms >= ?)'}`).get(m.ticket_id, m.id, ...(msg.steered ? [] : [m.created_at])) as { id: number | null }).id;
     let end = result !== null ? result + 1 : Infinity;
     if (end === Infinity) {

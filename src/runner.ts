@@ -2459,54 +2459,6 @@ export class Runner {
       this.emit(ticket.id, 'note', { text: name ? `This minion is set to ${name}, but ${codexWhy}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${codexWhy}, so this turn runs on Claude.` });
     }
     const model = isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, project).model : picked;
-    // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
-    // the tripwire hook must still be there for a turn that outlives it.
-    const dir = join(place.host ? this.turnsDir : place.turnsDir, `${ticket.id}-${Date.now()}`);
-    const pin = join(dir, 'pin');
-    mkdirSync(dir, { recursive: true });
-    const pins = turnPins();
-    cpSync(pins.MCP_DIR, pin, { recursive: true });
-    // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
-    const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
-    // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
-    // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
-    const builds = landsBuilds(project.repo_dir);
-    const build = builds && ticket.kind !== 'coordinator' && ticket.build
-      ? {
-        build: ticket.build, branch: buildBranch(project.repo_dir, ticket.build), owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
-        // Only this server's own scheme has build previews (src/previews.ts).
-        preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
-      }
-      : null;
-    // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
-    const everyScheme = this.everySchemeFor(project, ticket, asker);
-    const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
-    // Two halves (#878): system-prompt.md, the same for every minion of the scheme, and the per-minion and volatile lines that open the turn message.
-    const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null);
-    const system = promptText(parts.system);
-    writeFileSync(join(dir, 'system-prompt.md'), system);
-    const context = promptText(parts.turn);
-    // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
-    // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
-    let tmp: string | null = null;
-    try {
-      tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
-    } catch (err: any) {
-      this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
-    }
-    // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
-    // A file, not an argument: a scheme's minion list outgrows a command line.
-    const refsFile = join(dir, 'scheme-refs.json');
-    this.writeRefs(refsFile, ticket);
-    // A host turn has no Codex hook, so the server login's Codex reviews run in its Codex container (#398): woken
-    // if it stopped (a reboot) without replacing one a review may be running in.
-    const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
-    const reviewAt = codexAt && !codexAt.host ? codexAt : null;
-    if (reviewAt && !keepalive) this.wakeCodex?.(person!);
-    const coordinator = this.coordinatorEnv(ticket);
-    const heavy = this.heavyEnv(ticket, person);
-    // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
-    const github = this.githubFor?.(person, dir) ?? null;
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
     // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a
     // schedule, a wake, a relay or a batch mixing people, which fall back to someone who didn't ask.
@@ -2529,36 +2481,17 @@ export class Runner {
     const digestLine = digest.length ? [{ author: 'System', text: `Since your last turn, this scheme's other ${AGENT_NAME}s:\n${digest.map((l) => `- ${l}`).join('\n')}`, images: [] }] : [];
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
-    const typer = typedBy ? this.store.getUser(typedBy) : undefined;
-    const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
-    const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
-    // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
-    let plan: LaunchPlan;
+    let built: ReturnType<Runner['buildLaunch']>;
     try {
-      plan = launchPlan({
-        project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
-        folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
-          // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
-          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
-        codex: codex ? { thread: same || null } : null,
-        codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
-        env: { server: process.env, coordinator, heavy, github: github?.env ?? null, secrets: secretEnv(secrets) },
-        memory: this.memoryScheme(project.id),
-        media: !!this.mediaFor?.(person),
-        // A Codex turn has image_gen itself; a host turn reaches Codex only through the person's Codex container.
-        codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
-        typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
-        homeContraptions: homeOf,
-        appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
-        everyScheme,
-        claudeBin: this.claudeBin,
+      built = this.buildLaunch(project, ticket, {
+        place, person, asker, machines, model, effort, typedBy, secrets, name: `${ticket.id}-${Date.now()}`,
+        folders: { files: filesDir, shared: sharedDir, memory: memoryDir }, codex: codex ? { thread: same || null } : null,
       });
     } catch (err: any) {
       // A launch that can't be built (a settings file past Claude Code's cap, #661; claude not on the PATH) fails the turn with its reason, in the chat.
       console.error(`Minion ${ticket.id}: its launch could not be built:`, err);
-      rmSync(dir, { recursive: true, force: true });
       const event = this.emit(ticket.id, 'error', { text: `Could not start the turn: ${err.message}` });
       const note = `Could not start: ${err.message}`;
       this.setFailNote(ticket.id, { note: note.length > 60 ? `${note.slice(0, 59)}…` : note });
@@ -2566,6 +2499,8 @@ export class Runner {
       this.onTurnError(ticket.id, err.message, event.id);
       return;
     }
+    const { plan, dir, system, parts, context, pins, github, unit, reviewAt } = built;
+    if (reviewAt && !keepalive) this.wakeCodex?.(person!);
     const { command, args, env, configDir } = plan;
     // What its cached prefix is built from (#862), before --resume joins the arguments: a keepalive runs only while it is the
     // one its last real turn cached. A minion's alone: Taskmasters and Codex get no keepalives.
@@ -2702,6 +2637,97 @@ export class Runner {
       this.spawnWrapper(wrapper, dir);
     });
     return live.ended;
+  }
+
+  /**
+   * A launch from the facts a turn was given (src/turn-launch.ts), in a folder of its own named `name`. A side
+   * question's fork (#932, src/side-ask.ts) builds its own here too, so its tools and prompt, the cached prefix,
+   * are its minion's turn's. Throws, removing the folder, when the launch can't be built.
+   */
+  buildLaunch(project: Project, ticket: Ticket, f: {
+    place: TurnPlace; person: number | null; asker: number | null; machines: ReturnType<Runner['machines']>; model: string | null; effort: string | null;
+    typedBy: number | null; secrets: Map<string, string>; name: string; folders: { files: string | null; shared: string | null; memory: string | null };
+    codex: { thread: string | null } | null; github?: number | null; side?: boolean;
+  }) {
+    const { place, person, asker, machines, model, effort, codex } = f;
+    const { files: filesDir, shared: sharedDir, memory: memoryDir } = f.folders;
+    // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
+    // the tripwire hook must still be there for a turn that outlives it.
+    const dir = join(place.host ? this.turnsDir : place.turnsDir, f.name);
+    const pin = join(dir, 'pin');
+    mkdirSync(dir, { recursive: true });
+    try {
+      const pins = turnPins();
+      cpSync(pins.MCP_DIR, pin, { recursive: true });
+      // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
+      const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
+      // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
+      // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
+      const builds = landsBuilds(project.repo_dir);
+      const build = builds && ticket.kind !== 'coordinator' && ticket.build
+        ? {
+          build: ticket.build, branch: buildBranch(project.repo_dir, ticket.build), owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
+          // Only this server's own scheme has build previews (src/previews.ts).
+          preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
+        }
+        : null;
+      // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
+      const everyScheme = this.everySchemeFor(project, ticket, asker);
+      const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
+      // Two halves (#878): system-prompt.md, the same for every minion of the scheme, and the per-minion and volatile lines that open the turn message.
+      const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null);
+      const system = promptText(parts.system);
+      writeFileSync(join(dir, 'system-prompt.md'), system);
+      const context = promptText(parts.turn);
+      // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
+      // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
+      let tmp: string | null = null;
+      try {
+        tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
+      } catch (err: any) {
+        this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
+      }
+      // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
+      // A file, not an argument: a scheme's minion list outgrows a command line.
+      const refsFile = join(dir, 'scheme-refs.json');
+      this.writeRefs(refsFile, ticket);
+      // A host turn has no Codex hook, so the server login's Codex reviews run in its Codex container (#398): woken
+      // (by the caller) if it stopped (a reboot) without replacing one a review may be running in.
+      const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
+      const reviewAt = codexAt && !codexAt.host ? codexAt : null;
+      const coordinator = this.coordinatorEnv(ticket);
+      const heavy = this.heavyEnv(ticket, person);
+      // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
+      const github = this.githubFor?.(f.github === undefined ? person : f.github, dir) ?? null;
+      const typer = f.typedBy ? this.store.getUser(f.typedBy) : undefined;
+      const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
+      // A side question's fork runs as the server's child: it is short, and a restart loses it anyway.
+      const unit = this.units && place.host && !f.side ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
+      // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
+      const plan = launchPlan({
+        project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
+        folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
+          // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
+          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
+        codex,
+        codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
+        env: { server: process.env, coordinator, heavy, github: github?.env ?? null, secrets: secretEnv(f.secrets) },
+        memory: this.memoryScheme(project.id),
+        media: !!this.mediaFor?.(person),
+        // A Codex turn has image_gen itself; a host turn reaches Codex only through the person's Codex container.
+        codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
+        typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
+        homeContraptions: homeOf,
+        appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
+        everyScheme,
+        claudeBin: this.claudeBin,
+        ...(f.side ? { side: true } : {}),
+      });
+      return { plan, dir, system, parts, context, pins, github, unit, reviewAt };
+    } catch (err) {
+      rmSync(dir, { recursive: true, force: true });
+      throw err;
+    }
   }
 
   /**

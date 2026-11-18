@@ -58,6 +58,12 @@ function inputSide(model: unknown, usage: any): { input: number; outPrice: numbe
   return { input, outPrice: p.output / 1e6 };
 }
 
+/** What one API message cost, from its usage, at the table above; 0 for a model without a price. */
+export function usageCost(model: unknown, usage: any): number {
+  const side = inputSide(model, usage);
+  return side ? side.input + num(usage.output_tokens) * side.outPrice : 0;
+}
+
 /** What a turn's meter keeps across a restart, in its TurnState. */
 export interface SpendState {
   /** The estimate so far, in dollars. */

@@ -42,6 +42,7 @@ import { homedir } from 'node:os';
 import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
+import { readGrunts } from './grunts.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { clockTime, parseResetTime } from './pacific.ts';
@@ -3293,11 +3294,21 @@ export class Runner {
         account: state?.account ?? null, modelUsage: ev.modelUsage,
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
+      this.recordGrunts(ticketId, turn.id, state, ev.session_id);
     }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId);
     }
     this.notePushes(ticketId, ev);
+  }
+
+  /** Keep the turn's Grunts (#948), read from the turn's config dir (a container's home volume as the host sees it); behind the turn, and a failure only logs. */
+  private recordGrunts(ticketId: number, turnId: number, state: TurnState | null | undefined, sessionId: unknown) {
+    const ticket = this.store.getTicket(ticketId);
+    if (!state?.configDir || !ticket?.cwd || !validSessionId(sessionId)) return;
+    readGrunts(state.configDir, ticket.cwd, sessionId, state.startedAt)
+      .then((rows) => rows.length && this.store.recordGrunts(turnId, rows))
+      .catch((e) => console.error(`[grunts] minion ${ticketId}:`, e));
   }
 
   /**

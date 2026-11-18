@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
+import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
 import { Memory } from './memory.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
@@ -799,6 +800,20 @@ CREATE TABLE IF NOT EXISTS turn_models (
   session_cost_usd REAL NOT NULL,
   PRIMARY KEY (turn_id, model)
 );
+-- Each Grunt a turn started (#948), read from the session's subagents/ folder at the turn's end.
+CREATE TABLE IF NOT EXISTS turn_grunts (
+  agent_id TEXT PRIMARY KEY,
+  turn_id INTEGER NOT NULL REFERENCES turns(id),
+  agent_type TEXT,
+  model TEXT,
+  effort TEXT,
+  calls INTEGER NOT NULL,
+  cost_usd REAL NOT NULL,
+  request_shape TEXT,
+  spawn_depth INTEGER,
+  description TEXT
+);
+CREATE INDEX IF NOT EXISTS turn_grunts_turn ON turn_grunts(turn_id);
 CREATE TABLE IF NOT EXISTS instruction_history (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
@@ -1336,6 +1351,7 @@ export const SCHEMA_HISTORY = [
   [64, 'claims (#921)'],
   [65, 'turns.side (#932)'],
   [66, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings (#857)'],
+  [67, 'turn_grunts (#948)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2302,6 +2318,7 @@ export class Store {
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM github_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM turn_models WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
+    this.db.prepare('DELETE FROM turn_grunts WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
     this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
@@ -3133,6 +3150,13 @@ export class Store {
       add.run(row.id, model, unsplit ? (sum ? row.cost_usd * total / sum : 0) : before <= total ? total - before : total, total);
     }
     return row;
+  }
+
+  /** Keep a turn's Grunts (#948). A Grunt already kept (it was still running at an earlier turn's end) has its calls and cost refreshed, and stays under the turn that first saw it. */
+  recordGrunts(turnId: number, rows: GruntRow[]) {
+    const put = this.db.prepare(`INSERT INTO turn_grunts (agent_id, turn_id, agent_type, model, effort, calls, cost_usd, request_shape, spawn_depth, description)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET calls = excluded.calls, cost_usd = excluded.cost_usd, model = excluded.model, effort = excluded.effort`);
+    for (const g of rows) put.run(g.agent_id, turnId, g.agent_type, g.model, g.effort, g.calls, g.cost_usd, g.request_shape, g.spawn_depth, g.description);
   }
 
   /** Minions' turns that ended since `since`, oldest first, for the keepalive readout and its miss check (#862). */

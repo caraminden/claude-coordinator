@@ -146,7 +146,7 @@ systemctl --user disable --now citadel-android-adb.service
 systemctl --user enable --now citadel-android-starter.socket
 ```
 
-perigee's phone is as it was left. To remove the desktop's side for good: `wsl --unregister citadel-android`
+perigee's phone starts clean: its first boot makes the clean snapshot from wiped data (#943). To remove the desktop's side for good: `wsl --unregister citadel-android`
 and `Unregister-ScheduledTask 'Citadel WSL citadel-android'` in PowerShell, and delete the key's line
 (it ends in `citadel-android`) from perigee's `~/.ssh/authorized_keys`.
 

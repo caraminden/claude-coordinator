@@ -222,7 +222,8 @@ avd_dir=${ANDROID_AVD_HOME:-$HOME/.android/avd}/$AVD.avd
 recipe() {
   local img
   img=$(sed -n 's/^image.sysdir.1 *= *//p' "$avd_dir/config.ini" 2>/dev/null)
-  echo "$RECIPE $GPU $(sed -n 's/^Pkg.Revision=//p' "$SDK/emulator/source.properties" 2>/dev/null) $(sed -n 's/^Pkg.Revision=//p' "$SDK/$img/source.properties" 2>/dev/null)"
+  # The emulator refuses a snapshot saved with other RAM or cores and cold-boots instead, so they're part of it.
+  echo "$RECIPE $GPU ${CITADEL_ANDROID_MEMORY:-2048} ${CITADEL_ANDROID_CORES:-2} $(sed -n 's/^Pkg.Revision=//p' "$SDK/emulator/source.properties" 2>/dev/null) $(sed -n 's/^Pkg.Revision=//p' "$SDK/$img/source.properties" 2>/dev/null)"
 }
 make_clean() {
   local port=${CITADEL_ANDROID_CLEAN_PORT:-$((CONSOLE + 100))} log="$dir/android-clean.log" p t0=$SECONDS

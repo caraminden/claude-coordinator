@@ -122,7 +122,7 @@ alike. It runs on Cara's desktop, behind a tunnel to perigee (Citadel's
 perigee are the same as when it ran here:
 
 ```
-citadel-android up                 # boot it (~10s; a few minutes the first boot after an update) and wait until it's ready
+citadel-android up                 # boot it (10-15s; a few minutes the first boot after an update) and wait until it's ready
 citadel-android install app/build/outputs/apk/debug/app-debug.apk
 citadel-android open https://citadel.zip/c/                                   # in Chrome (an app: https://<name>.citadel.zip/, the short link people get)
 citadel-android shot "$TMPDIR/shot.png"                                    # then Read the PNG

@@ -24,7 +24,7 @@ import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
 import { hostCheck } from '../host-check.ts';
-import { landArgs, landConflict, type Handoff } from '../land.ts';
+import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
 import { previewPath } from '../previews.ts';
@@ -1244,7 +1244,7 @@ export const ticketRoutes: Route[] = [
       const clash = await landConflict(ticket.cwd, env, args);
       if (clash) throw new HttpError(409, `Not handed off: ${clash}`);
       if (!app.landings.handOff(ticket.id, ticket.cwd, env, args, h)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
-      app.store.updateTicket(ticket.id, { state: 'outside', note: 'landing: handed to the server' });
+      app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') });
       app.runner.broadcastTicket(ticket.id);
       return json(res, 202, { ok: true });
     },

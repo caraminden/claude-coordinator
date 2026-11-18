@@ -583,7 +583,7 @@ export class Runner {
   /** What it waits on now: the land line, a heavy slot, the restart (src/waits.ts), for its row's badge and bar. */
   wait: (ticketId: number) => Wait | null = () => null;
   /** What the server is doing for it with no turn of its own (#727): today its handed-off land (src/land.ts), set by the server. */
-  serverWork: (ticketId: number) => { kind: string } | null = () => null;
+  serverWork: (ticketId: number, fresh?: boolean) => { kind: string } | null = () => null;
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** What a minion parked on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
@@ -2592,7 +2592,8 @@ export class Runner {
       // A limited minion's note is the server's, about the wait this turn ends; a complete one's says nothing is left (#547).
       // A minion parked on start_after stays parked through a turn that answers a message (#261).
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, { state: ticket.state, note: ticket.note });
-      else if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
+      // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
+      else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'outside' && this.serverWork(ticket.id, true))) this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
       if (ticket.note === NET_NOTE) this.store.updateTicket(ticket.id, { note: null });

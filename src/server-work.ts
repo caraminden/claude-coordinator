@@ -10,7 +10,8 @@ export function serverWorkWatch(handoffs: () => number[], changed: (id: number) 
     return current;
   };
   return {
-    of: (id: number): { kind: 'land' } | null => (read().has(id) ? { kind: 'land' } : null),
+    /** `fresh`: read the folder now, for a decision that can't wait out the second's cache (a turn's start). */
+    of: (id: number, fresh = false): { kind: 'land' } | null => (read(fresh).has(id) ? { kind: 'land' } : null),
     /** Re-reads and re-sends each row whose server work started or ended since the last sync. */
     sync() {
       const next = read(true);

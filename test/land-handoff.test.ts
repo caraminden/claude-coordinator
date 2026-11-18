@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { deployApps, LandHandoffs, landConflict, Landings, landResult, outputTail, type DeployOps, type HandoffDeps } from '../src/land.ts';
+import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
 import { git } from './git.ts';
 
@@ -24,7 +24,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
   const cwd = join(root, name, 'wt');
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   const landings = new Landings(data);
-  const ticket = { number: 7, title: 'Wake the owner', status: 'idle', state: 'outside' as string | null, note: 'landing: handed to the server' as string | null };
+  const ticket = { number: 7, title: 'Wake the owner', status: 'idle', state: 'outside' as string | null, note: 'landing: starting' as string | null };
   const did: string[] = [];
   const sent: string[] = [];
   const light: boolean[] = [];
@@ -495,6 +495,7 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     rmSync(join(cwd, 'conflict'));
     assert.equal((await handOff(body)).status, 202);
     assert.equal(store.getTicket(minion.id)!.state, 'outside');
+    assert.equal(store.getTicket(minion.id)!.note, 'landing: starting', 'the list says it is landing (#962)');
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
     assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes('Shipped abc1234')), 'the shipped line is in its chat');
 
@@ -528,4 +529,82 @@ test("a feeder's merge into a build wakes the build's parked owner with one mess
   await main.land(LIVE);
   await main.handoffs.poll();
   assert.deepEqual([none.owned.length, self.owned.length, main.owned.length], [0, 0, 0]);
+});
+
+// #962: while a handed-off land runs, the minions list shows it landing (state outside), whatever cleared the state
+// meanwhile (the minion's own closing status line, a turn a person started, a restart), with the phase it is in; each
+// way the land ends replaces that with its own end state, so none is left in outside.
+test('landPhase reads the phase from land.sh\'s newest phase line', () => {
+  assert.equal(landPhase(''), 'landing: starting');
+  assert.equal(landPhase('queue: 2nd in line (ahead: #12 "x")\n'), 'landing: in line');
+  assert.equal(landPhase('queue: 2nd in line (ahead: #12)\nqueue: got the deploy lock\nland: rebasing ticket/1-x onto main (abc "y")\n'), 'landing: rebasing');
+  assert.equal(landPhase('land: rebasing a onto main\nland: running test/a.test.ts on abc1234\nok 1\n'), 'landing: running tests');
+  assert.equal(landPhase('land: rebasing a onto main\nland: waiting for CI on abc1234: the full suite on Cara\'s desktop (at most 6 min, then it runs here)\n'), 'landing: waiting on CI');
+  assert.equal(landPhase('land: waiting for CI on abc\nland: only flakes failed (x); running CI once more on abc, the land needs a fully green run\n'), 'landing: waiting on CI');
+  assert.equal(landPhase('land: waiting for CI on abc\nland: CI FALLBACK: no runner. Running the full suite on perigee instead.\n'), 'landing: running tests');
+  assert.equal(landPhase('land: waiting for CI on abc\nqueue: waiting for the restart ahead to have its verdict; main and the live checkout stay as they are until then\n'), 'landing: in line');
+  assert.equal(landPhase('land: waiting for CI on abc\nland: main is now at abc1234 "#9"\ndeploy: restart queued as citadel-restart\n'), 'landing: deploying');
+});
+
+test('while a handed-off land runs, each poll keeps the minion in outside with its phase, across a restart too', async () => {
+  const s = setup('landing-state');
+  writeFileSync(join(s.cwd, 'tools', 'land.sh'), `echo 'queue: 2nd in line (ahead: #12)' >&2\nwhile [ ! -e ci ]; do sleep 0.05; done\necho 'land: waiting for CI on abc1234' >&2\nwhile [ ! -e done ]; do sleep 0.05; done\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
+  await until('land.sh is in line', () => /queue:/.test(s.landings.get(1)?.output ?? ''));
+  // The minion's closing status line, or a person's turn, cleared it.
+  Object.assign(s.ticket, { state: null, note: null });
+  await s.handoffs.poll();
+  assert.deepEqual([s.ticket.state, s.ticket.note], ['outside', 'landing: in line']);
+  writeFileSync(join(s.cwd, 'ci'), '');
+  await until('land.sh waits on CI', () => /waiting for CI/.test(s.landings.get(1)?.output ?? ''));
+  await s.handoffs.poll();
+  assert.deepEqual([s.ticket.state, s.ticket.note], ['outside', 'landing: waiting on CI']);
+  const writes = s.did.length;
+  await s.handoffs.poll();
+  assert.equal(s.did.length, writes, 'nothing is written while the phase stays the same');
+
+  // The next server, on the same data dir, with the state lost meanwhile.
+  Object.assign(s.ticket, { state: null, note: null });
+  const next = new LandHandoffs({ ...s.deps, landings: new Landings(s.data) });
+  await next.poll();
+  assert.deepEqual([s.ticket.state, s.ticket.note], ['outside', 'landing: waiting on CI']);
+
+  writeFileSync(join(s.cwd, 'done'), '');
+  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+  await next.poll();
+  assert.equal(s.ticket.status, 'closed');
+  assert.notEqual(s.ticket.state, 'outside');
+});
+
+test('every way a handed-off land ends replaces its outside state', async () => {
+  const fail = 'land: conflict\n';
+  const unpushed = 'land: master is now at d1a5c2f "#15"\nland: master moved, but the push to origin failed: remote: nope\n';
+  const ends: [string, Parameters<typeof setup>[1], string, number, object, (s: ReturnType<typeof setup>) => void][] = [
+    ['end-live', {}, LIVE, 0, {}, () => {}],
+    ['end-restart', {}, RESTART, 0, {}, () => {}],
+    ['end-restart-live', { liveAlready: true }, RESTART, 0, {}, () => {}],
+    ['end-stay', {}, LIVE, 0, { stayOpen: true }, () => {}],
+    ['end-stay-waiting', {}, LIVE, 0, { stayOpen: true, waitingOn: 'Cara' }, () => {}],
+    ['end-failed', {}, fail, 1, {}, () => {}],
+    ['end-no-ci', {}, 'land: CI gave no verdict\n', 75, {}, () => {}],
+    ['end-no-ci-none', { runners: false }, 'land: CI gave no verdict\n', 75, {}, () => {}],
+    ['end-unpushed', {}, unpushed, 1, {}, () => {}],
+    ['end-kept', { kept: 'a question card is still waiting on people' }, LIVE, 0, {}, () => {}],
+    ['end-busy', { running: true }, LIVE, 0, {}, () => {}],
+    ['end-talked', {}, LIVE, 0, {}, (s) => s.landings.talked(1)],
+    ['end-talked-restart', {}, RESTART, 0, {}, (s) => s.landings.talked(1)],
+  ];
+  for (const [name, opts, out, code, h, before] of ends) {
+    const s = setup(name, opts);
+    await s.land(out, code, { ...H, ...h });
+    before(s);
+    await s.handoffs.poll();
+    assert.notEqual(s.ticket.state, 'outside', `${name}: left in outside (note ${s.ticket.note})`);
+    assert.deepEqual(s.landings.handoffs(), [], `${name}: reported`);
+  }
+  // The one ending that stays outside on purpose (#942): landed, and the waiter wakes it once its restart is live.
+  const waiting = setup('end-stay-waiting-restart');
+  await waiting.land(RESTART, 0, { stayOpen: true, waitingOn: 'the CI run' });
+  await waiting.handoffs.poll();
+  assert.deepEqual([waiting.ticket.state, waiting.ticket.note], ['outside', 'landed, wakes once live; waiting on: the CI run']);
 });

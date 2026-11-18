@@ -258,6 +258,21 @@ export function landResult(output: string, code: number): LandResult {
   return { kind: 'landed', ...commit };
 }
 
+/** land.sh's phase lines, newest first wins: the note a handed-off land shows in the minions list (#962). */
+const PHASES: [RegExp, string][] = [
+  [/^(deploy: |land: main is now at )/, 'deploying'],
+  [/^land: (waiting for CI|only flakes failed.*running CI once more)/, 'waiting on CI'],
+  [/^land: (running |CI FALLBACK)/, 'running tests'],
+  [/^land: (rebasing|merging main)/, 'rebasing'],
+  [/^queue: got the deploy lock/, 'starting'],
+  [/^queue: /, 'in line'],
+];
+
+export function landPhase(output: string): string {
+  for (const line of output.split('\n').reverse()) for (const [re, phase] of PHASES) if (re.test(line)) return `landing: ${phase}`;
+  return 'landing: starting';
+}
+
 /** The end of land.sh's output for a wake message: its last lines, not the whole 64 KB. */
 export function outputTail(output: string, lines = 60, max = 6000): string {
   const tail = output.trimEnd().split('\n').slice(-lines).join('\n');
@@ -343,7 +358,7 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
 
 export interface HandoffDeps {
   landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log'>;
-  store: { getTicket(id: number): { status: string; state: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
+  store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
     send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean; light?: boolean }): void;
@@ -392,6 +407,7 @@ export class LandHandoffs {
       if (this.busy.has(id)) continue;
       const run = this.d.landings.get(id);
       const h = this.d.landings.handoff(id);
+      if (h && run && run.code === null) this.showLanding(id, run);
       if (!h || !run || run.code === null) continue;
       this.busy.add(id);
       try {
@@ -403,6 +419,19 @@ export class LandHandoffs {
         this.busy.delete(id);
       }
     }
+  }
+
+  /**
+   * The server owns a handed-off land's state (#962): outside, its note the phase land.sh is in, until the land ends.
+   * Kept here, not only set at hand-off, so whatever cleared it meanwhile (a turn a person started, set_thread_status,
+   * a server from before the hand-off) is put right within a poll.
+   */
+  private showLanding(id: number, run: Landing) {
+    const t = this.d.store.getTicket(id);
+    const note = landPhase(run.output);
+    if (!t || t.status === 'closed' || (t.state === 'outside' && t.note === note)) return;
+    this.d.store.updateTicket(id, { state: 'outside', note });
+    this.d.runner.broadcastTicket(id);
   }
 
   /**
@@ -520,6 +549,8 @@ export class LandHandoffs {
     }
     const why = r.kind === 'live' ? 'Landed and live' : 'Landed';
     if (runner.isRunning(id) || runner.queued(id)) {
+      store.updateTicket(id, { state: null, note: null });
+      runner.broadcastTicket(id);
       if (!runner.closeAfterTurn(id, `${why}.`)) runner.emit(id, 'note', { text: `${why}; this minion has a turn running or queued, so it stays open.` });
       return;
     }

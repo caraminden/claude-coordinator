@@ -276,7 +276,7 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
         `A note for another scheme's Taskmaster or a minion once you are live: queue it with \`relay_when_live\` (mcp__thread) before hand_off_land, not by asking the Taskmaster; your Taskmaster sees it now.`,
         'Stuck, or a fix that did not hold (citadel:diagnosing-bugs)? On Sonnet, ask the Taskmaster for the next model or effort step (`message_coordinator`, need: ask) rather than carrying on at the same tier.',
-        'Wherever the instructions say to run tools/land.sh (but not a build minion\'s --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, posts the shipped line and dismisses or parks you on a clean land, and wakes you with its output if it fails.',
+        'Wherever the instructions say to run tools/land.sh (but not a build minion\'s --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, shows you as landing meanwhile, posts the shipped line and dismisses or parks you on a clean land, and wakes you with its output if it fails.',
         'A Settings text edit (`edit_instructions`) is an agent-instruction change: self-review it, label it at least medium, ship it like the rest, and keep its dated quotes.',
       ],
       files: showingFiles(ticket, null, sharedDir, !!filesDir),

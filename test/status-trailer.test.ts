@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { Store } from '../src/db.ts';
 import { takeStatus } from '../src/status-trailer.ts';
 import { bootServer, until, type Booted } from './helpers.ts';
 
@@ -117,4 +118,23 @@ test('an over-long note or reply is clipped to its limit, not refused', () => {
   assert.equal((r.status!.note as string).length, 60);
   assert.ok((r.status!.note as string).endsWith('…'));
   assert.equal(((r.status!.replies as string[])[0]).length, 40);
+});
+
+test('while a handed-off land is unreported, a turn start and the closing status line leave its landing state alone (#962)', async () => {
+  // The hand-off as Landings writes it: the landing's folder with its handoff.json.
+  const dir = join(srv.data, 'run', 'landings', String(ticketId));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'handoff.json'), JSON.stringify({ summary: 's', risk: 'low', reason: 'r', args: [] }));
+  const store = new Store(join(srv.data, 'coordinator.db'));
+  try {
+    store.updateTicket(ticketId, { state: 'outside', note: 'landing: waiting on CI' });
+    await turn('Handed off.\n<!-- status: {"state":null,"note":"done","replies":["Thanks"]} -->');
+    const t = await ticket();
+    assert.deepEqual([t.state, t.note], ['outside', 'landing: waiting on CI']);
+    assert.deepEqual(t.replies, ['Thanks'], 'the rest of the line still applies');
+  } finally {
+    rmSync(join(dir, 'handoff.json'));
+  }
+  await turn('Back to it.\n<!-- status: {"state":null} -->');
+  assert.equal((await ticket()).state, null, 'once reported, the state is the minion\'s again');
 });

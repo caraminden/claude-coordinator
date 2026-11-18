@@ -1142,6 +1142,8 @@ const app: App = {
 runner.onStatusTrailer = (id, fields) => {
   const ticket = store.getTicket(id);
   if (!ticket) return;
+  // A handed-off land's state and note are the server's until it is reported (#962): the closing "set no state" line can't clear them.
+  if (landings.handoffs().includes(id)) fields = { replies: fields.replies };
   try {
     setLabels(app, ticket, fields, AGENT_NAME, id);
   } catch (err: any) {

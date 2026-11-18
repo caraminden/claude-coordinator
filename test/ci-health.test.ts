@@ -253,7 +253,7 @@ function world({ delve = false } = {}) {
       return mandateUp.ok;
     },
   };
-  return { store, peek, gh, puts, parts, from, quiet, links, mandateUp, deps, health: new CiHealth(store, deps) };
+  return { store, peek, gh, puts, parts, from, quiet, links, mandateUp, deps, health: new CiHealth(store, deps) as CiHealth };
 }
 
 // Peek's desktop runner, offline, and a job on its label waiting: the stuck-runner rule's world.
@@ -704,22 +704,22 @@ test("the land gate's items: quiet under the live scheme first, then joining CI 
   assert.match(w.puts.at(-1)![2]!, /2 lands in a row: #559 .*#560/);
 });
 
-test("the one alert names its problems for the Taskmaster's wake, the land alarm with each run's link, failed step and runner (#869)", async () => {
+test("the land alarm wakes its Taskmaster once, with each run's link, failed step and runner (#869, #983)", async () => {
   const w = world();
-  let t = NOW;
+  const told: [string, string, boolean][] = [];
+  w.health = new CiHealth(w.store, { ...w.deps, tell: (p, text, wake) => (told.push([p.name, text, !!wake]), true) });
+  let t = NOW + 10 * HOUR; // daytime: the overnight hold is below
   const failed: [string, string | null, number][] = [['rebase', null, 5_000], ['ci', 'failed', 20_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]];
   for (const [seq, name, run] of [[1, '#866', 7001], [2, '#867', 7002], [3, '#868', 7003], [4, '#869', 7004]] as const) {
     w.gh.jobs.set(run, [job({ run_id: run, name: 'tests', conclusion: 'failure', runner_name: 'DESKTOP-G248IJ8-desktop', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: "the runner's clock", conclusion: 'failure' }] })]);
     for (const [phase, ci, ms] of failed) { await w.health.land(w.peek.id, [land(seq, name, phase, ci, ci ? run : null)], t); t += ms; }
     await w.health.land(w.peek.id, [], t);
   }
-  const alerts = w.puts.flatMap(([, k], i) => (k === 'ci.open' ? [i] : []));
-  assert.equal(alerts.length, 1);
-  const [part] = w.parts[alerts[0]]!;
-  assert.equal(part.id, `${w.peek.id}:land:fallback`);
-  assert.match(part.title, /^Peek Auras: the land gate fell back to perigee on 4 lands in a row.*\. Why: .*\. Fix: /);
-  assert.match(part.facts!, /https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/7002: tests › the runner's clock failed on DESKTOP-G248IJ8-desktop/);
-  assert.match(part.facts!, /runs\/7004: tests › the runner's clock/);
+  assert.equal(told.length, 1, 'once');
+  assert.deepEqual([told[0][0], told[0][2]], ['Peek Auras', true]);
+  assert.match(told[0][1], /^Peek Auras: CI: the land gate fell back to perigee on 4 lands in a row.*\. Why: .*\. Fix: /);
+  assert.match(told[0][1], /https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/7002: tests › the runner's clock failed on DESKTOP-G248IJ8-desktop/);
+  assert.match(told[0][1], /runs\/7003: tests › the runner's clock/);
 });
 
 /** A world whose minions and Taskmaster hear of runs no PR started (#678), with what each was sent. */
@@ -953,4 +953,59 @@ test('with no Taskmaster to tell, a ringing problem is tried again next poll (#9
   has = true;
   await health.tick(t0 + WAIT_MS + 5 * MIN);
   assert.equal(told.length, 1);
+});
+
+test('shared problems wake Citadel\'s Taskmaster once for all schemes, not each scheme (#983)', async () => {
+  const w = world({ delve: true });
+  const told: [string, string][] = [];
+  const citadel = w.store.listProjects().find((p) => p.name === 'Notes')!;
+  const health = new CiHealth(w.store, { ...w.deps, home: () => citadel, tell: (p, text) => (told.push([p.name, text]), true) });
+  const t0 = Date.parse('2026-11-11T20:00:00Z');
+  // Billing: every scheme's jobs fail to start with the same account reason.
+  w.gh.runners = [desk('online')];
+  const reason = 'The job was not started because recent account payments have failed or your spending limit needs to be increased.';
+  for (const [i, id] of [5101, 5102].entries()) {
+    w.gh.runs = [runOf({ id, created_at: new Date(t0 - (i + 3) * HOUR).toISOString() }), ...w.gh.runs];
+    w.gh.jobs.set(id, [dead(3 * HOUR, { run_id: id })]);
+    w.gh.notes.set(id * 10, [{ message: reason, annotation_level: 'failure' }]);
+  }
+  await health.tick(t0);
+  assert.ok(told.length >= 1, 'something woke');
+  const billing = told.filter(([, t]) => /spending limit/.test(t));
+  assert.ok(billing.every(([name]) => name === 'Notes'), "Citadel's, not each scheme's");
+  assert.equal(billing.length, 1, 'once');
+  await health.tick(t0 + 5 * MIN);
+  assert.equal(told.filter(([, t]) => /spending limit/.test(t)).length, billing.length, 'not again next poll');
+});
+
+test('a red on main wakes at red and once more when it rings, naming the run; nothing overnight is sent until 9 AM (#983)', async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const told: [string, boolean][] = [];
+  const health = new CiHealth(w.store, { ...w.outside, tell: (_p, text, wake) => (told.push([text, !!wake]), true) });
+  w.gh.jobs.set(9101, [job({ run_id: 9101, name: 'windows', conclusion: 'failure', steps: [{ name: 'Test', conclusion: 'failure' }] })]);
+  w.gh.mainRuns = [runOf({ id: 9101, event: 'push', workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion: 'failure', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  const day = Date.parse('2026-11-05T20:00:00Z'); // noon PST
+  await health.tick(day);
+  assert.equal(told.length, 1, 'the red wakes');
+  await health.tick(day + 5 * MIN);
+  assert.equal(told.length, 1, 'not again while a fix has its hour');
+  await health.tick(day + RED_FIX_MS);
+  assert.equal(told.length, 2, 'it rings: the Taskmaster hears again');
+  assert.deepEqual(told[1][1], true);
+  assert.match(told[1][0], /desktop\.yml failed on main \(run 9101.*no fix minion started.*put run 9101 in its brief/s);
+  await health.tick(day + RED_FIX_MS + 5 * MIN);
+  assert.equal(told.length, 2, 'once');
+
+  // A runner problem opening at 3 AM PST is held to the first poll after 9.
+  const w2 = world();
+  const held: string[] = [];
+  const h2 = new CiHealth(w2.store, { ...w2.deps, tell: (_p, text) => (held.push(text), true) });
+  const night = Date.parse('2026-11-11T11:00:00Z'); // 3 AM PST
+  w2.gh.runners = [desk('offline')];
+  waitingRun(w2, night - HOUR);
+  await h2.tick(night);
+  assert.deepEqual(held, [], 'asleep');
+  await h2.tick(night + 6 * HOUR + MIN);
+  assert.equal(held.length, 1, 'after 9');
 });

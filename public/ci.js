@@ -106,7 +106,7 @@ export function ciPage(projectId) {
     // The toggle (phones only, by CSS) lists the hidden all-clear names, so every scheme stays in view.
     const hidden = schemes.filter((x) => x !== s && stateOf(x, now) === 'ready');
     list.classList.toggle('greens-open', greensOpen);
-    list.replaceChildren(...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); } },
+    list.replaceChildren(...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); list.querySelector('.ci-more')?.focus(); } },
       h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide all clear' : `${hidden.length} all clear`),
       h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '');
     const tabs = [['overview', 'Overview'], ['runs', 'Runs'], ['runners', 'Runners']];

@@ -519,11 +519,13 @@ export async function copyText(text, near = document.body) {
 const copyButton = () => label(Object.assign(document.createElement('button'), { type: 'button', className: 'cui-copy' }), 'Copy code');
 const label = (b, text) => (b.setAttribute('aria-label', text), b);
 const copied = new WeakMap();
+/** What Copy puts on the clipboard: a shell block (#898's tags) ends in exactly one newline so a paste runs without another Enter; other blocks copy as written. */
+export const copyPayload = (text, shell) => (shell ? text.replace(/\n+$/, '') + '\n' : text);
 async function onCopy(e) {
   const b = e.target.closest?.('.cui-copy');
   const code = b?.parentElement.querySelector(':scope > code');
   if (!code) return;
-  const ok = await copyText(code.textContent, b.parentElement);
+  const ok = await copyText(copyPayload(code.textContent, b.parentElement.classList.contains('cui-shell')), b.parentElement);
   b.dataset.copied = ok ? 'yes' : 'no';
   label(b, ok ? 'Copied' : 'Couldn\'t copy');
   clearTimeout(copied.get(b));

@@ -1,6 +1,7 @@
 // The mock kit's Send dock in a real browser (headless Chromium, test/browser.ts), against a stubbed Citadel
 // bridge: pressing Send again for picks that were already sent must not post them again (#420), also after a
-// reload; a changed pick sends again; a failed send rolls back with a toast and Retry.
+// reload; a changed pick sends again; a failed send rolls back with a toast and Retry. A picture drawn on (#946)
+// shows marked and goes with Send.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,16 +23,18 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
     doc: (id) => ({ set: async (d) => { docs.set(id, d); window.snap(); }, delete: async () => { docs.delete(id); window.snap(); } }),
   }) }) };
   window.citadel = {
-    info: async () => ({ person: 'cara' }),
+    info: async () => ({ person: 'cara', draw: true }),
+    // What drawing on a picture gives back: window.drawResult (the stub Citadel's Done), recording each src asked for.
+    draw: async (src) => { (window.drawn ??= []).push(src); return window.drawResult; },
     watchSaves: (cb) => { window.setSave = cb; },
     // labelAtSend: the button's label as the post leaves, read in the page so a loaded box can't let the 120 ms run out first.
-    send: async (text) => { window.labelAtSend = document.querySelector('.mk-dock > button').textContent; await new Promise((r) => setTimeout(r, 120)); if (window.fail) { window.fail = false; throw new Error('boom'); } window.posts.push(text); return { sent: true, to: '#419' }; },
+    send: async (text, opts) => { window.labelAtSend = document.querySelector('.mk-dock > button').textContent; await new Promise((r) => setTimeout(r, 120)); if (window.fail) { window.fail = false; throw new Error('boom'); } window.posts.push(text); window.sentImages = opts?.images; return { sent: true, to: '#419' }; },
   };
 </script>
 <script src="/mockkit.js"></script>
 <body class="mk"><main class="mk-page">
   <section data-pick="a" data-title="Take A"><h2>Take A</h2></section>
-  <section data-pick="b" data-title="Take B"><h2>Take B</h2></section>
+  <section data-pick="b" data-title="Take B"><h2>Take B</h2><img alt="Header shot" src="/shot.png" width="40" height="40"></section>
 </main>
 <script>mock.picks({ options: [{ v: 'pick', label: 'Pick this', done: 'Picked' }] }); mock.ready.then(() => setTimeout(() => (window.ready = true), 50));</script>`;
 
@@ -158,3 +161,24 @@ for (const width of [1200, 700, 390]) {
     }
   });
 }
+
+test('a picture drawn on shows marked, counts in the dock and goes with Send; taking every mark off restores it (#946)', { skip }, async () => {
+  const page = await browser.page(base);
+  await waitFor(page, 'the page', 'window.ready');
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';
+  await page.eval(`window.drawResult = { marked: true, mediaType: 'image/png', data: '${png}' }`);
+  await click(page, 'img[alt="Header shot"]');
+  await waitFor(page, 'the marked copy', 'document.querySelector("img[alt=\\"Header shot\\"]").src.startsWith("data:")');
+  assert.deepEqual(await page.eval('window.drawn'), [new URL("/shot.png", base).href]);
+  assert.match(await page.eval<string>('document.querySelector(".mk-dock-text").textContent'), /1 picture marked/);
+  await send(page);
+  await waitFor(page, 'the post', 'window.posts.length > 0');
+  assert.match((await posts(page))[0], /Marked pictures \(attached\): Header shot/);
+  assert.deepEqual(await page.eval('window.sentImages'), [{ mediaType: 'image/png', data: png }]);
+  // Opened again it asks for the clean picture (Citadel keeps the marks to undo); every mark off puts it back.
+  await page.eval('window.drawResult = { marked: false }');
+  await click(page, 'img[alt="Header shot"]');
+  await waitFor(page, 'the clean picture', 'document.querySelector("img[alt=\\"Header shot\\"]").src.endsWith("/shot.png")');
+  assert.deepEqual(await page.eval('window.drawn'), [new URL("/shot.png", base).href, new URL("/shot.png", base).href]);
+  assert.doesNotMatch(await page.eval<string>('document.querySelector(".mk-dock-text").textContent'), /marked/);
+});

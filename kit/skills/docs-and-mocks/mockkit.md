@@ -85,6 +85,13 @@ Taskmaster. Send also settles that minion's choices card for the page (`ask_ques
 the card that opens it). The dock shows Sent at once; a failure takes it back with a toast and Retry. It sticks to
 the bottom once anything is picked.
 
+In Citadel's viewer, a page with a dock also lets people draw on its pictures (#946): a click on an
+`<img>` (not one inside a link or button) opens it over the viewer with a pen, arrow and box in red or
+yellow, and Done puts the marked copy in its place. Send then carries the marked copies as pictures in
+your chat (at most 6), with a "Marked pictures (attached)" line naming each by its `alt`, else its file
+name. So give screenshots a short `alt`, and keep them in the page's own files (another site's picture
+can't be drawn on).
+
 **The dock is the only answer button.** Never hand-roll one: no `navigator.clipboard`, no
 `execCommand('copy')`, no `citadel.send` of your own. Citadel's link check sends your reply back when
 a page you link has any of them. A question the pick bars can't ask is still a `mock.picks` set

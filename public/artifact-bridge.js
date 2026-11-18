@@ -1,8 +1,8 @@
 // The artifact bridge, page side (#168). The server inlines this function as the first script of every
 // HTML page it serves under a file token, called with what the page saved (`cfg.entries`) and the token
 // path it was served under (`cfg.page`). It gives the page:
-// - `citadel`: storage for this page, and `send(text)`, which sends text to the minion that showed the page,
-//   as the person who clicked (#417);
+// - `citadel`: storage for this page, `send(text, { images })`, which sends text to the minion that showed
+//   the page, as the person who clicked (#417), and `draw(src)`, which opens one of its pictures to draw on (#946);
 // - `window.claude.use('db')`, `window.storage` and a working `localStorage`, the claude.ai APIs Delve's
 //   pages were written for (the sandbox makes the real localStorage throw).
 // It talks only to the viewer that framed it, or the Citadel tab whose Open button opened it
@@ -49,7 +49,7 @@
   let info = null;
   const hello = (tries) => request('hello', {}, 5000).catch((err) => (tries > 1 ? hello(tries - 1) : Promise.reject(err)));
   const ready = host ? hello(2).then((r) => {
-    info = { person: r.person, file: r.file, owner: r.owner };
+    info = { person: r.person, file: r.file, owner: r.owner, draw: !!r.draw };
     replace(r.entries);
     return true;
   }, () => false) : Promise.resolve(false);
@@ -288,17 +288,29 @@
      * Send `text` to the minion that showed this page (a shared page: the one that linked it, else the
      * Taskmaster), as the person, from a click or key press only. Resolves { sent: true, to: '#N' }.
      */
-    send: async (text) => {
+    send: async (text, { images } = {}) => {
       // A click in a tab never reaches the viewer, so the page checks it here too: a page never sends by itself.
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       if (!(await ready)) throw new Error(NO_VIEWER);
-      const r = await request('send', { text: String(text) });
+      // `images`: marked pictures from draw ({ mediaType, data }), at most 6; they take longer to post.
+      const r = images?.length ? await request('send', { text: String(text), images }, 60000) : await request('send', { text: String(text) });
       // Pages made before #417 (kit v1, hand-rolled ones) then say the text waits in the comment box; it was sent.
       setTimeout(() => {
         const walk = document.createTreeWalker(document.body ?? document.documentElement, NodeFilter.SHOW_TEXT);
         for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.nodeValue.trim().startsWith('In the comment box')) n.nodeValue = `Sent to ${r.to}.`;
       });
       return r;
+    },
+    /**
+     * Open one of this page's pictures (`src`, from its own files) in Citadel to draw on, from a click. Resolves
+     * null when closed unchanged, { marked: false } when every mark was taken off, or { marked: true, mediaType,
+     * data } (base64), ready for send's images. Only in Citadel's viewer: info().draw says whether it can.
+     */
+    draw: async (src) => {
+      if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.draw works only from a click or key press');
+      if (!(await ready)) throw new Error(NO_VIEWER);
+      // Drawing takes as long as it takes: an hour before the page gives up on an answer.
+      return request('draw', { src: new URL(String(src), document.baseURI).href }, 3600000);
     },
   };
 

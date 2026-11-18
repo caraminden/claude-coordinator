@@ -140,6 +140,16 @@ test("the viewer answers only its own frames' sandboxed pages, with well-formed 
   assert.equal(msg({ op: 'send', text: 'x'.repeat(10_001) }), null);
   assert.equal(msg({ op: 'send', text: 'Picks: 3' })?.req.text, 'Picks: 3');
   assert.equal(msg({ op: 'typing' })?.req.op, 'typing');
+  // Marked pictures (#946): a list of at most 6 { mediaType, data }, and only those two keys go on.
+  const img = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+  assert.deepEqual(msg({ op: 'send', text: 'x', images: [{ ...img, extra: 1 }] })?.req.images, [img]);
+  assert.equal(msg({ op: 'send', text: 'x', images: [] })?.req.images, undefined);
+  assert.equal(msg({ op: 'send', text: 'x', images: Array(7).fill(img) }), null);
+  assert.equal(msg({ op: 'send', text: 'x', images: [{ mediaType: 'image/png' }] }), null);
+  assert.equal(msg({ op: 'send', text: 'x', images: 'nope' }), null);
+  assert.equal(msg({ op: 'draw', src: 'https://x/a.png' })?.req.src, 'https://x/a.png');
+  assert.equal(msg({ op: 'draw' }), null);
+  assert.equal(msg({ op: 'draw', src: 'x'.repeat(4001) }), null);
   // A frame taken out of the page is forgotten.
   frame.iframe.isConnected = false;
   assert.equal(msg({ op: 'hello' }), null);
@@ -396,6 +406,21 @@ test('a shared page sends to the minion that last linked it, else the Taskmaster
   const again = await sendPage({ open: { project: A.id, path: 'takes.html' }, page, text: 'B' });
   assert.equal(again.data.to.id, linker.id);
   assert.deepEqual(lastMessage(linker.id), { author: 'Cara', text: 'B', comment: { path: join(shared, 'takes.html'), about: join(shared, 'takes.html') } });
+});
+
+test("a page's Send carries its marked pictures into the chat, checked as pasted ones are (#946)", async () => {
+  const page = await pageOf(PICKER.id);
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString('base64');
+  const r = await sendPage({ open: { artifact: PICKER.id }, page, text: 'Marked pictures (attached): shot.png', images: [{ mediaType: 'image/png', data: png }] });
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  const sent = lastMessage(M.id);
+  assert.equal(sent.text, 'Marked pictures (attached): shot.png');
+  assert.equal(sent.images.length, 1);
+  assert.match(sent.images[0], /^[0-9a-f]{24}\.png$/);
+  const before = store.listEvents(M.id).filter((e) => e.kind === 'user_message').length;
+  const html = Buffer.from('<script>alert(1)</script>').toString('base64');
+  assert.equal((await sendPage({ open: { artifact: PICKER.id }, page, text: 'x', images: [{ mediaType: 'image/png', data: html }] })).status, 415);
+  assert.equal(store.listEvents(M.id).filter((e) => e.kind === 'user_message').length, before, 'a refused picture sends nothing');
 });
 
 test("a page's Send is refused for another page, an empty text, and anyone but a person", async () => {

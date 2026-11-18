@@ -1,11 +1,13 @@
 // The artifact bridge, viewer side (#168): answers the pages in HTML frames this viewer made, and in
 // tabs its Open button opened (public/artifact-bridge.js is the page side). A page can read and write its
 // own store, and on a person's click send its answer to the minion that showed it, as that person (#417).
-// It never sends by itself.
+// It never sends by itself. A page can also open one of its own pictures to draw on (#946), and send the
+// marked copies with its text.
 
 export const TAG = 'citadel-bridge-1';
 const MAX_TEXT = 10_000;
 const MAX_ENTRIES = 100;
+const MAX_IMAGES = 6;
 // Writes per frame: a burst of 40, then 20 a second.
 const BURST = 40;
 const PER_SECOND = 20;
@@ -30,8 +32,24 @@ export function readRequest(e, from = frames) {
   if (!Number.isSafeInteger(m.id) || typeof m.page !== 'string' || m.page.length > 4000) return null;
   if (m.op === 'hello' || m.op === 'list' || m.op === 'typing') return { frame, req: { id: m.id, op: m.op, page: m.page } };
   if (m.op === 'write' && Array.isArray(m.entries) && m.entries.length && m.entries.length <= MAX_ENTRIES) return { frame, req: { id: m.id, op: 'write', page: m.page, entries: m.entries } };
-  if (m.op === 'send' && typeof m.text === 'string' && m.text.trim() && m.text.length <= MAX_TEXT) return { frame, req: { id: m.id, op: 'send', page: m.page, text: m.text } };
+  if (m.op === 'send' && typeof m.text === 'string' && m.text.trim() && m.text.length <= MAX_TEXT && validImages(m.images)) {
+    return { frame, req: { id: m.id, op: 'send', page: m.page, text: m.text, ...(m.images?.length ? { images: m.images.map(({ mediaType, data }) => ({ mediaType, data })) } : {}) } };
+  }
+  if (m.op === 'draw' && typeof m.src === 'string' && m.src.length <= 4000) return { frame, req: { id: m.id, op: 'draw', page: m.page, src: m.src } };
   return null;
+}
+
+// Marked pictures a send carries, as a chat message does ({ mediaType, data } in base64); the server checks the bytes.
+const validImages = (v) => v == null || (Array.isArray(v) && v.length <= MAX_IMAGES && v.every((i) => i && typeof i.mediaType === 'string' && typeof i.data === 'string' && i.data));
+
+/** Whether a page's picture is one this server sends: only those can be drawn on (another site's would taint the canvas). */
+function ownPicture(src) {
+  try {
+    const u = new URL(src);
+    return /^https?:$/.test(u.protocol) && u.origin === location.origin;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether the frame may write now, taking one from its allowance. */
@@ -60,11 +78,13 @@ const alive = (f) => (f.iframe ? f.iframe.isConnected : !f.tab.closed);
 /**
  * Answer the page in `iframe`, or in `tab`, a window the viewer opened. `open` says what the viewer opened
  * ({ artifact } | { ticket, path } | { project, path }), `name` and `owner` how people know the file and
- * who made it. `api` makes the person's own API calls.
+ * who made it. `api` makes the person's own API calls. `draw(src, marks)` opens a picture to draw on over the
+ * viewer and resolves null when closed, else { marks, image } (image null when every mark was taken off);
+ * a tab has none, since its page sits in front of Citadel.
  */
-export function attachBridge(iframe, { open, name, owner, api, tab = null }) {
+export function attachBridge(iframe, { open, name, owner, api, draw = null, tab = null }) {
   if (!frames.size) addEventListener('message', onMessage);
-  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, api, store: null, page: null });
+  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, api, draw: tab ? null : draw, marks: new Map(), store: null, page: null });
 }
 
 /** Open `src` (an HTML page) in a new tab that keeps its bridge to this viewer; false if the browser refused. */
@@ -87,12 +107,21 @@ async function onMessage(e) {
   const reply = (body) => e.source.postMessage({ bridge: TAG, re: req.id, ...body }, '*');
   if (req.op === 'typing') return void (typedAt = Date.now());
   try {
+    if (req.op === 'draw') {
+      if (!frame.draw) throw new Error('Drawing on a picture works only in Citadel\'s viewer');
+      if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.draw works only from a click or key press');
+      if (!ownPicture(req.src)) throw new Error('Only a picture from this page\'s own files can be drawn on');
+      // The marks are kept here, so opening a marked picture again can undo back to the clean one.
+      const r = await frame.draw(req.src, frame.marks.get(req.src) ?? []);
+      if (r) frame.marks.set(req.src, r.marks);
+      return reply({ ok: true, result: r && (r.image ? { marked: true, ...r.image } : { marked: false }) });
+    }
     if (req.op === 'send') {
       // Only on a person's click or key: a page never sends as them by itself. A frame's click reaches
       // this window; a tab's doesn't, so a tab only gets a gap between sends.
       if (frame.iframe && navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       if (frame.tab && Date.now() - (frame.sentAt ?? 0) < TAB_SEND_GAP) throw new Error('Sent a moment ago; wait a few seconds before sending again');
-      const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text } });
+      const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images } });
       frame.sentAt = Date.now(); // after it went, so a retry after a failure isn't held back
       return reply({ ok: true, result: { sent: true, to: r.to.label } });
     }
@@ -104,7 +133,7 @@ async function onMessage(e) {
     const r = await storeCall(frame, req.page, req.op === 'write' ? { op: 'write', entries: req.entries } : { op: 'list' });
     // Landed, or a hello from a page that reloaded and so has no write left to send.
     if (req.op !== 'list') frame.unsaved = false;
-    const result = req.op === 'hello' ? { person: r.person, file: frame.name, owner: frame.owner, entries: r.entries } : { entries: r.entries };
+    const result = req.op === 'hello' ? { person: r.person, file: frame.name, owner: frame.owner, entries: r.entries, draw: !!frame.draw } : { entries: r.entries };
     reply({ ok: true, result });
   } catch (err) {
     // A write the page sends again until it lands (artifact-bridge.js) holds a reload here; one refused

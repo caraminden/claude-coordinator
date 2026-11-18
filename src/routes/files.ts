@@ -567,7 +567,8 @@ export const fileRoutes: Route[] = [
     // linked it, else the Taskmaster.
     method: 'POST', path: '/api/artifact-send', who: ['person'],
     async handler({ req, res, app, session }) {
-      const body = await readJson(req);
+      // Up to 6 marked pictures in base64 (#946), as the chat's message route allows.
+      const body = await readJson(req, 45_000_000);
       const { project, file, abs, ticket } = await openedPage(app, body.open);
       if (!app.store.canSee(session, project.id)) throw new HttpError(404, 'That page is no longer there');
       if (await bridgedPage(app, body.page) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
@@ -575,7 +576,7 @@ export const fileRoutes: Route[] = [
       const to = ticket ?? (linker && app.store.getTicket(linker.ticket_id)) ?? app.store.coordinatorFor(project.id, session.uid ?? null);
       if (!to) throw new HttpError(404, 'No minion or Taskmaster to send this to');
       const { about, text } = commentMessage(to.cwd && abs.startsWith(to.cwd + sep) ? abs.slice(to.cwd.length + 1) : abs, str(body.text, 'Answer', 10_000));
-      app.runner.send(to.id, session.name, text, [], { comment: { path: abs, about }, hold: true });
+      app.runner.send(to.id, session.name, text, await saveImages(app, to, body.images), { comment: { path: abs, about }, hold: true });
       // The picks answer the chat's choices cards for this page (#804).
       let answered = false;
       for (const e of app.store.eventsOfKinds(to.id, ['question'])) {

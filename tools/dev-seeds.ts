@@ -141,10 +141,15 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       const t = minion(c, 'Header layout takes', { note: 'needs picks on the takes page' });
       const kit = join(import.meta.dirname, '..', 'kit', 'skills', 'docs-and-mocks', 'starter');
       for (const f of ['mockkit.js', 'mockkit.css']) copyFileSync(join(kit, f), join(t.cwd!, f));
+      // A screenshot on the page, to draw on before Send (#946).
+      writeFileSync(join(t.cwd!, 'header-today.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="120"><rect width="960" height="120" fill="#f5f2ec"/>'
+        + '<circle cx="40" cy="60" r="10" fill="#c2410c"/><text x="64" y="70" font-family="sans-serif" font-size="28" fill="#222">2 FEATURE: Header layout</text>'
+        + '<rect x="620" y="40" width="140" height="40" rx="8" fill="none" stroke="#999"/><rect x="780" y="40" width="140" height="40" rx="8" fill="none" stroke="#999"/></svg>');
       const page = join(t.cwd!, 'header-takes.html');
       writeFileSync(page, `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Header layout takes</title><link rel="stylesheet" href="mockkit.css"></head><body><main>
-<h1>Header layout takes</h1><p>Three ways to lay out the chat header. Pick one, then press Send.</p><div id="takes"></div></main>
+<h1>Header layout takes</h1><p>Three ways to lay out the chat header. Pick one, then press Send.</p>
+<p><img alt="Today's header" src="header-today.svg" width="480" style="max-width:100%;height:auto"></p><div id="takes"></div></main>
 <script src="mockkit.js"></script><script>
 mock.boards('#takes', { boards: [
   { id: 'A', title: 'Title left, chips right', note: 'Today\\'s order with the chips pulled right.', rec: true },

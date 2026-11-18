@@ -3,7 +3,7 @@ import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, formatSize, h
 import { followChat, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending } from './core.js';
 import { addBriefButtons } from './briefstart.js';
 import { attachBridge, openWithBridge } from './bridge-host.js';
-import { attachImage, loadDraft, saveDraft } from './composer.js';
+import { attachImage, loadDraft, saveDraft, sendableImage } from './composer.js';
 import { annotator, canvasBlob } from './annotate.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
@@ -157,6 +157,25 @@ export function renderShelf() {
 }
 
 // What a page's bridge says the viewer opened: a file a chat linked, or a file in the scheme's shared folder.
+/**
+ * A choices page's picture, open over the viewer ready to draw (#946, bridge-host's draw): resolves null when
+ * closed without Done, else { marks, image } with the marked copy as a message carries it (null with no marks).
+ */
+function drawForPage(src, marks) {
+  return new Promise((resolve, reject) => {
+    let done = null;
+    const lb = lightbox([{ src, caption: 'Picture on the page' }], {
+      label: 'Draw on the picture',
+      render: (_, stage) => annotator(stage, src, { marks, onDone: (canvas, kept) => { done = { canvas, marks: kept }; lb.close(); } }),
+      onClose: () => {
+        if (!done) return resolve(null);
+        if (!done.canvas) return resolve({ marks: [], image: null });
+        canvasBlob(done.canvas).then(sendableImage).then((image) => resolve({ marks: done.marks, image }), reject);
+      },
+    });
+  });
+}
+
 const viewerBridge = (ticket, file) => ({ open: { ticket: ticket.id, path: file.path }, owner: threadLabel(ticket) });
 const sharedBridge = (file) => ({ open: { project: view.projectId, path: file.path }, owner: null });
 
@@ -547,7 +566,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
     // Its page reaches the app only through the artifact bridge (bridge-host.js), as the person viewing it.
     const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads', allow: 'clipboard-write *; fullscreen *', allowfullscreen: true, title: name });
-    if (bridge) attachBridge(frame, { ...bridge, name, api });
+    if (bridge) attachBridge(frame, { ...bridge, name, api, draw: drawForPage });
     body.append(frame);
   } else if (kind === 'pdf') {
     body.append(h('iframe', { class: 'artifact-frame', src, title: name }));

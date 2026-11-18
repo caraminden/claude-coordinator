@@ -1,8 +1,9 @@
-// Citadel mock kit (v3): boards of takes, pick bars, a Send dock and contents for documents and mocks.
+// Citadel mock kit (v4): boards of takes, pick bars, a Send dock and contents for documents and mocks.
 // Copy it beside the page with mockkit.css. No dependencies. In Citadel's viewer (or a tab its Open button
 // opened), picks save through the artifact bridge (`window.claude.use('db')`, keys `db/<collection>/<id>`,
 // read by agents with artifact_data) and Send posts them straight to the minion's chat as the person. Only
-// a tab with no way back to Citadel (opened from disk, or from a pasted link) falls back to Copy.
+// a tab with no way back to Citadel (opened from disk, or from a pasted link) falls back to Copy. In the viewer, a
+// click on a picture on a page with a dock opens it to draw on, and Send carries the marked copies (#946).
 //
 //   mock.boards('#takes', { boards, size, state, render, on, pick })   one board per take, each with its own state
 //   mock.picks({ collection, options, one })                          pick bars on every [data-pick] element
@@ -33,7 +34,7 @@
     let db = null;
     try { db = window.claude?.use ? await window.claude.use('db') : null; } catch { db = null; }
     const info = db && window.citadel ? await window.citadel.info().catch(() => null) : null;
-    return { db, person: info?.person ?? null };
+    return { db, person: info?.person ?? null, draw: !!info?.draw };
   })();
   const ready = store.then((s) => ({ saving: !!s.db, person: s.person }));
 
@@ -130,15 +131,15 @@
     return set;
   }
 
-  // A toast for a Send that failed, with Retry. One at a time.
+  // A toast for a Send that failed, with Retry (none when there's nothing to try again). One at a time.
   let toastNode = null;
   function toast(message, retry) {
     toastNode?.remove();
     const again = el('button', { type: 'button', class: 'mk-btn primary' }, 'Retry');
     const close = el('button', { type: 'button', class: 'mk-btn', 'aria-label': 'Dismiss' }, '×');
-    toastNode = el('div', { class: 'mk-toast', role: 'alert' }, el('span', {}, message), again, close);
+    toastNode = el('div', { class: 'mk-toast', role: 'alert' }, el('span', {}, message), retry && again, close);
     const node = toastNode;
-    again.addEventListener('click', () => { node.remove(); retry(); });
+    again.addEventListener('click', () => { node.remove(); retry?.(); });
     close.addEventListener('click', () => node.remove());
     document.body.append(node);
   }
@@ -160,6 +161,11 @@
     let lastSent = null;
     let pending = null;
     try { lastSent = localStorage.getItem(KEY); } catch { /* storage blocked: stays in memory only */ }
+    // Pictures drawn on (#946), by the src they were drawn from: { name, mediaType, data }. They live in this tab
+    // only until Send, which carries them; a message takes at most 6.
+    const marked = new Map();
+    const MAX_MARKED = 6;
+    const images = () => [...marked.values()].map(({ mediaType, data }) => ({ mediaType, data }));
     const remember = (v) => {
       lastSent = v;
       try { localStorage.setItem(KEY, v); } catch { /* as above */ }
@@ -172,7 +178,7 @@
       toastNode?.remove();
       dock.paint();
       try {
-        const r = await window.citadel.send(body);
+        const r = await window.citadel.send(body, marked.size ? { images: images() } : undefined);
         remember(body);
         if (pending === body) sent.textContent = `Sent to ${r?.to ?? 'the minion'} ✓`;
       } catch (e) {
@@ -214,33 +220,70 @@
         });
         ($('.mk-page') ?? document.body).append(node);
         if (saving) window.citadel?.watchSaves?.((st) => { saveState = st; dock.paint(); });
+        if (saving) store.then((s) => s.draw && drawing());
         this.paint();
       },
+      /** A line for the summary naming the marked pictures, or nothing. */
+      markedLine: () => (marked.size ? [`Marked pictures (attached): ${[...marked.values()].map((m) => m.name).join(', ')}`] : []),
       paint() {
         if (!node) return;
         let picked = 0;
         let notes = 0;
         for (const s of sets) for (const d of s.docs.values()) { if (d.v) picked++; if (d.note) notes++; }
+        const drawn = marked.size ? `, <b>${marked.size}</b> picture${marked.size > 1 ? 's' : ''} marked` : '';
         const where = !saving ? 'not saved or sent: open this page from Citadel to send'
           : saveState === 'retrying' ? 'not saved yet: Citadel is restarting, so it keeps trying'
           : saveState === 'saving' ? 'saving…'
           : 'saved for the minion to read';
         node.classList.toggle('mk-unsaved', saving && saveState === 'retrying');
-        node.classList.toggle('stuck', picked + notes > 0);
+        node.classList.toggle('stuck', picked + notes + marked.size > 0);
         const now = summary();
         const done = saving && now !== '' && (now === lastSent || now === pending);
         btn.disabled = done;
         btn.textContent = done ? 'Sent ✓' : saving ? 'Send picks to the minion' : 'Copy picks';
         if (!done && /^Sent/.test(sent.textContent)) sent.textContent = '';
-        text.innerHTML = picked || notes
-          ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''} · ${where}`
+        text.innerHTML = picked || notes || marked.size
+          ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''}${drawn} · ${where}`
           : `Nothing picked yet · ${saving ? 'picks save as you make them' : where}`;
       },
     };
+
+    // A click on a picture (not one inside a link or a control) opens it in Citadel ready to draw; Done puts the
+    // marked copy in its place on the page, and Send carries it. Marks taken off restore the picture.
+    function drawing() {
+      document.documentElement.classList.add('mk-draw');
+      document.addEventListener('click', async (e) => {
+        const img = e.target?.closest?.('img');
+        if (!img || e.defaultPrevented || e.button !== 0 || img.closest('a[href], button, .mk-dock, .mk-pickbar')) return;
+        e.preventDefault();
+        const src = img.dataset.mkSrc ?? img.currentSrc ?? img.src;
+        if (!marked.has(src) && marked.size >= MAX_MARKED) return toast(`At most ${MAX_MARKED} marked pictures go with one Send`);
+        let r;
+        try {
+          r = await window.citadel.draw(src);
+        } catch (err) {
+          return toast(`Couldn't open the picture to draw on: ${err.message}`, () => img.click());
+        }
+        if (!r) return;
+        // Every copy of the picture on the page shows the marks.
+        const copies = [...document.querySelectorAll('img')].filter((i) => (i.dataset.mkSrc ?? i.currentSrc ?? i.src) === src);
+        if (r.marked) {
+          const name = img.alt || decodeURIComponent(new URL(src).pathname.split('/').pop() || 'picture');
+          marked.set(src, { name, mediaType: r.mediaType, data: r.data });
+          for (const i of copies) { i.dataset.mkSrc = src; i.src = `data:${r.mediaType};base64,${r.data}`; i.classList.add('mk-marked'); }
+        } else {
+          marked.delete(src);
+          for (const i of copies) { i.src = src; delete i.dataset.mkSrc; i.classList.remove('mk-marked'); }
+        }
+        // New marks are a new answer, even when the picks read the same.
+        lastSent = null;
+        dock.paint();
+      });
+    }
   })();
 
   function summary() {
-    const parts = sets.map((s) => s.lines()).filter((l) => l.length);
+    const parts = [...sets.map((s) => s.lines()), dock.markedLine()].filter((l) => l.length);
     if (!parts.length) return '';
     return [`Picks on "${document.title}":`, ...parts.flat()].join('\n');
   }

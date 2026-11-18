@@ -602,6 +602,12 @@ async function prepareImage(file) {
   return encodeCanvas(canvas);
 }
 
+/** A marked picture as a message carries it ({ mediaType, data }), shrunk as a pasted one is (#946, choices pages). */
+export async function sendableImage(blob) {
+  const sendable = await prepareImage(blob);
+  return { mediaType: sendable.type, data: await blobBase64(sendable) };
+}
+
 /** A canvas as a sendable image: PNG keeps screenshots sharp; JPEG when that is still too big. */
 async function encodeCanvas(canvas) {
   const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));

@@ -956,6 +956,9 @@ function renderMachineSetup() {
       text: machineSetupWindows(t.url, t.name, t.token), log: agentLog('windows', t.name) },
     { os: 'posix', tab: 'macOS or Linux', label: 'Terminal on macOS or Linux: runs in the background, also after you close the window, and starts at every login. No sudo.',
       text: machineSetupPosix(t.url, t.name, t.token), log: agentLog('posix', t.name) },
+    { os: 'jobs', tab: 'GPU jobs (WSL)', label: 'Shell in the citadel-jobs WSL distro on that PC, as you, not root (wsl -d citadel-jobs; tools/jobs-runner/README.md sets the distro up first): runs GPU jobs from contraptions in podman.',
+      text: machineSetupPosix(t.url, t.name, t.token),
+      note: 'Then add a "jobs" block to ~/coordinator-agent/machine-agent.json in the distro (the README, step 6): the folders jobs may read, the time limit and the disk cap. Without it every job is refused.' },
   ];
   // Picked from this browser; the chips are for adding a computer from another one.
   view.machineSetupOs ??= guessOs();

@@ -73,7 +73,7 @@ test('adding a machine asks its name and nothing about MCP servers or folders, t
   assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll(".machine-add:not(.runners) [name]")].map((i) => i.name)'), ['name', 'always_on', 'mine']);
   await add('pick-box');
   // Headless Chromium here says Linux: that line shows, the other a click away, and nothing else.
-  assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll("#machine-setup .chip")].map((b) => b.textContent)'), ['Windows', 'macOS or Linux']);
+  assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll("#machine-setup .chip")].map((b) => b.textContent)'), ['Windows', 'macOS or Linux', 'GPU jobs (WSL)']);
   assert.equal(await pressed(), 'macOS or Linux');
   let lines = await shown();
   assert.equal(lines.length, 1);
@@ -82,6 +82,11 @@ test('adding a machine asks its name and nothing about MCP servers or folders, t
   lines = await shown();
   assert.equal(lines.length, 1);
   assert.match(lines[0], /conhost\.exe/);
+  // GPU jobs (#858): the same Linux line, pasted in the citadel-jobs distro, and a pointer to its jobs block.
+  await page.eval(`[...document.querySelectorAll('#machine-setup .chip')].find((b) => b.textContent === 'GPU jobs (WSL)').click()`);
+  assert.match((await shown())[0], /--install pick-box$/);
+  assert.match(await page.eval<string>('document.querySelector("#machine-setup .machine-setup-way:not([hidden])").textContent'), /wsl -d citadel-jobs[\s\S]*"jobs" block/);
+  await page.eval(`[...document.querySelectorAll('#machine-setup .chip')].find((b) => b.textContent === 'Windows').click()`);
   for (const s of [...lines, await page.eval<string>('document.querySelector("#machine-setup").textContent')]) assert.doesNotMatch(s, /--claude-mcp|Just try it| -- /);
   assert.match(await page.eval<string>('document.querySelector("#machine-setup .machine-setup-way:not([hidden])").textContent'), /%USERPROFILE%\\coordinator-agent\\machine-agent-pick-box\.log/);
   assert.match(await page.eval<string>('document.querySelector("#machine-setup").textContent'), /open it and tick what to lend/);

@@ -287,7 +287,11 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
       ],
       files: showingFiles(ticket, null, sharedDir, !!filesDir),
       approval: approvalNote(project),
-      close: ['People read replies later: end on what you did, state a blocker, and put a choice in a card (or name the waiting one by its link), never a closing prose question.',],
+      // Finishing work (AG-01, #975): Anthropic's finishing-work and named-early-stop paragraphs for Fable 5.2, Opus 5.5 and Sonnet 5.5, which stop early at medium effort.
+      close: [
+        'Finish the work before you end the turn: a reply with no tool call ends it, and the work waits until someone writes again, often hours later. Keep going until what was asked is done and checked, and landed where the scheme ships. Four endings leave owed work undone, so take the next step instead: a summary that announces the next step, an offer to carry on unless someone objects, a list of decisions none of which blocks the rest, and stopping because the turn is long or a milestone is done. Put progress notes and recommendations in the same message as your next tool call.',
+        'Diagnose an ordinary obstacle (an error, a timeout, a locked file, an empty result, a failing tool) and work through it: wait and retry, fix the call, try another tool or source. End the turn when nothing can move without a person (a card or plan awaiting its answer, a land handed off), or when the block is deliberate (a tripwire, withheld access, a file marked hands-off): say plainly what you found. Every rule that asks first still holds: risky or destructive actions and high-risk merges wait for a person\'s go.',
+        'People read replies later: end on what you did, state a blocker, and put a choice in a card (or name the waiting one by its link), never a closing prose question.',],
       ...layers,
       personal: personalInstructions(personal, project),
     },

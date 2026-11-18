@@ -341,10 +341,9 @@ export function bundleTitle(open: { scheme: string; problem: Problem }[]): strin
   const each = open.map((x) => itemText(x.problem, `${x.scheme}: ${what(x)}`).replace(/\.$/, ''));
   return cap(`CI: ${plural(open.length, 'problem')} in ${schemesText([...new Set(open.map((x) => x.scheme))])}. ${each.join('; ')}.`);
 }
-/** Who the one alert comes from in Mandate: no scheme of its own, so a switch for CI health alone. */
 /** The CI page's address (#968), which every CI item links. */
-
 export const ciPage = (projectId: number) => `/c/#/p/${projectId}/ci`;
+/** Who the one alert comes from in Mandate: no scheme of its own, so a switch for CI health alone. */
 export const CI_SENDER = { id: 0, name: 'CI health' };
 const BUNDLE_ITEM = 'ci.open';
 

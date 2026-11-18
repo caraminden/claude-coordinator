@@ -16,13 +16,22 @@ const READ_MCP = new Set(['read_minion', 'read_ticket', 'list_tickets', 'list_pr
 // Commands that only read, whatever their arguments (a few flags that write are refused in FLAG_WRITES).
 const READERS = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'stat', 'du', 'df', 'ps', 'pgrep', 'ss', 'pwd', 'echo', 'printf',
   'which', 'type', 'file', 'cut', 'tr', 'jq', 'diff', 'cmp', 'comm', 'basename', 'dirname', 'realpath', 'readlink', 'id', 'whoami', 'uptime', 'free', 'nproc',
-  'uname', 'true', 'false', 'test', '[', 'column', 'nl', 'tac', 'rev', 'od', 'tree', 'lsof', 'lsblk', 'findmnt', 'sha256sum', 'sha1sum', 'md5sum', 'cd', 'zcat',
+  'uname', 'true', 'false', 'test', '[', 'column', 'nl', 'tac', 'rev', 'od', 'lsof', 'lsblk', 'findmnt', 'sha256sum', 'sha1sum', 'md5sum', 'cd', 'zcat',
   'journalctl', 'ci-failures', 'sort', 'uniq', 'date', 'find', 'sed', 'git', 'gh', 'sqlite3', 'systemctl', 'curl', 'citadel-wait', 'sleep']);
-// Flags that make an otherwise read-only command write or run something.
+// Flags that make an otherwise read-only command write or run something. GNU tools take a short flag inside a cluster
+// (`-uo`) and a long one cut short (`--out=`), so these match both.
 const FLAG_WRITES: Record<string, RegExp> = {
-  sort: /^(-o|--output)/, tree: /^-o/, date: /^(-s|--set)/, rg: /^--pre/, journalctl: /^--(vacuum|rotate|flush|relinquish|sync|setup-keys)/,
-  find: /^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/, diff: /^--to-file$/,
+  sort: /^-[^-]*o|^--(o|com)/, date: /^-[^-]*s|^--s/, rg: /^--(pre|hostname)/, journalctl: /^--(v|rot|fl|rel|sy|setup)/,
+  find: /^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/, file: /^-[^-]*C|^--comp/, ss: /^-[^-]*K|^--k/,
 };
+// curl prints a GET and nothing else: only these flags, the value ones taking the next word.
+const CURL_FLAGS = /^(-[sSLfiIvk]+|--(silent|show-error|location|fail|include|head|compressed|insecure|verbose|no-progress-meter))$/;
+const CURL_VALUE = /^(-H|--header|-m|--max-time|--connect-timeout|-A|--user-agent)$/;
+// sqlite3 with its SQL as an argument (so it never reads stdin) and only output-format flags; SQL functions that
+// write files or load code, and VACUUM INTO, which writes even on a read-only database, are refused.
+const SQLITE_FLAGS = /^-(readonly|json|header|noheader|column|csv|line|list|box|markdown|table|tabs|quote|bail|batch)$/;
+const SQLITE_WRITES = /\b(writefile|edit|load_extension|vacuum|fts3_tokenizer)\b/i;
+const SYSTEMCTL_FLAGS = /^(--user|--no-pager|--full|-l|--all|-a|--plain|--no-legend|--value|--lines=\d+)$/;
 const GIT_READS = new Set(['log', 'show', 'diff', 'status', 'rev-parse', 'ls-files', 'ls-tree', 'blame', 'grep', 'merge-base', 'cat-file', 'describe', 'shortlog',
   'rev-list', 'show-ref', 'for-each-ref', 'name-rev', 'whatchanged', 'range-diff', 'cherry', 'count-objects', 'check-ignore', 'var', 'help', 'version']);
 const GH_READS: Record<string, Set<string>> = {
@@ -39,7 +48,8 @@ export function sideGuard(input: { tool_name?: unknown; tool_input?: any }): str
   const tool = typeof input?.tool_name === 'string' ? input.tool_name : '';
   if (READ_TOOLS.has(tool)) return null;
   const mcp = /^mcp__(thread|coordinator)__([a-z_]+)$/.exec(tool);
-  if (mcp && READ_MCP.has(mcp[2])) return null;
+  // artifact_data reads, unless it's given entries to set.
+  if (mcp && READ_MCP.has(mcp[2]) && !(mcp[2] === 'artifact_data' && input.tool_input?.entries)) return null;
   if (tool === 'Bash') {
     const command = typeof input.tool_input?.command === 'string' ? input.tool_input.command : '';
     if (input.tool_input?.run_in_background) return `${READ_ONLY}, and it runs nothing in the background.`;
@@ -78,7 +88,9 @@ export function bashWrites(command: string): string | null {
   for (const s of segs) {
     for (const r of s.redirects) {
       if (SAFE_REDIRECT.has(r.op)) continue;
-      if (/^\d*>&?$|^&>$|^>>$/.test(r.op) && (r.target === '/dev/null' || /^\d$/.test(r.target))) continue;
+      if (/^\d*>&?$|^&>$|^>>$/.test(r.op) && r.target === '/dev/null') continue;
+      // One stream into another (`2>&1`); `> 1` is a file named 1.
+      if (/^\d*>&$/.test(r.op) && /^\d$/.test(r.target)) continue;
       if (/^\d*>&\d$/.test(r.op)) continue;
       return `the redirect \`${r.op} ${r.target}\` would write a file.`;
     }
@@ -103,15 +115,23 @@ function commandWrites(words: string[]): string | null {
   if (name === 'gh') return ghWrites(args);
   if (name === 'sqlite3') {
     if (!args.includes('-readonly')) return '`sqlite3` needs `-readonly` here.';
-    if (args.some((a) => /^\s*\./m.test(a))) return 'sqlite3 dot-commands are refused here.';
+    if (args.some((a) => a.startsWith('-') && !SQLITE_FLAGS.test(a))) return 'that sqlite3 flag is refused here (only -readonly and output formats).';
+    if (plain.length !== 2) return '`sqlite3` takes the database and one SQL argument here, never SQL from stdin.';
+    if (/^\s*\./m.test(plain[1])) return 'sqlite3 dot-commands are refused here.';
+    if (SQLITE_WRITES.test(plain[1])) return 'that SQL writes a file or loads code.';
     return null;
   }
   if (name === 'systemctl') {
-    const verb = plain[0];
-    return args.includes('--user') && ['status', 'show', 'list-units', 'list-timers', 'is-active', 'is-failed', 'is-enabled', 'cat'].includes(verb) ? null : 'only `systemctl --user status` and other look-ups are allowed.';
+    // Every flag known, so the verb is the first plain word and not some flag's value.
+    if (args.some((a) => a.startsWith('-') && !SYSTEMCTL_FLAGS.test(a))) return 'that systemctl flag is refused here.';
+    return args.includes('--user') && ['status', 'show', 'list-units', 'list-timers', 'is-active', 'is-failed', 'is-enabled', 'cat'].includes(plain[0]) ? null : 'only `systemctl --user status` and other look-ups are allowed.';
   }
   if (name === 'curl') {
-    return args.some((a) => /^(-X|--request|-d|--data|-F|--form|-T|--upload-file|-o|--output|-O|--remote-name|-K|--config)/.test(a) || /^-[a-zA-Z]*[XdFTOoK]/.test(a)) ? '`curl` may only GET and print here.' : null;
+    for (let i = 0; i < args.length; i++) {
+      if (CURL_VALUE.test(args[i])) i++;
+      else if (args[i].startsWith('-') && !CURL_FLAGS.test(args[i])) return '`curl` may only GET and print here (-s, -S, -L, -f, -i, -H and timeouts).';
+    }
+    return null;
   }
   return null;
 }
@@ -141,7 +161,8 @@ function gitWrites(args: string[]): string | null {
     else return `\`git ${args[i]}\` is refused here.`;
   }
   const [sub, ...rest] = args.slice(i);
-  if (rest.some((a) => /^--(output|ext-diff|exec)/.test(a))) return 'that git flag writes or runs something.';
+  // --output, --ext-diff and --exec cut short too; `git grep -O<cmd>` opens its matches in a command.
+  if (rest.some((a) => /^--(ou|ext|exe|op)|^-O/.test(a))) return 'that git flag writes or runs something.';
   if (GIT_READS.has(sub)) return null;
   const plain = rest.filter((a) => !a.startsWith('-'));
   if (sub === 'branch' && rest.every((a) => /^(-a|-r|-v|-vv|--list|--all|--remotes|--show-current|--contains|--merged|--no-merged|--sort=.*|--format=.*)$/.test(a) || !a.startsWith('-')) && (rest.includes('--list') || rest.some((a) => /^--(contains|merged|no-merged)$/.test(a)) || !plain.length)) return null;

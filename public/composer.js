@@ -143,13 +143,13 @@ export function composer(chatId, ticket) {
       alertNote(`Side question not asked: ${ex.message}`);
     });
   };
-  const sideBtn = minion && h('button', { type: 'button', class: 'secondary side-ask', title: 'Ask a read-only copy of this minion; nothing reaches its session (or start with /btw)',
+  const sideBtn = minion && h('button', { type: 'button', class: 'secondary side-ask', title: 'Ask on the side: a read-only copy of this minion answers, and nothing reaches its session (or start a message with /btw)',
     onclick: () => {
       const text = box.value.trim().replace(/^\/btw\s+/, '');
       if (text) return askSide(text);
-      textarea.placeholder = 'Type a side question, then Ask on the side…';
+      textarea.placeholder = 'Type a side question, then press Aside…';
       textarea.focus();
-    } }, h('span', { class: 'wide-only' }, 'Ask on the side'), h('span', { class: 'narrow-only' }, 'Aside'));
+    } }, 'Aside');
   const box = mountComposer(document.createDocumentFragment(), {
     placeholder: composerPlaceholder(ticket),
     draftKey: `cc-draft:${chatId}`,

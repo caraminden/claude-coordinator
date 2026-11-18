@@ -37,7 +37,7 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 .annotate-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--citadel-space-2); padding: var(--citadel-space-2) var(--citadel-space-3) var(--citadel-space-3); }
 .annotate-bar .annotate-gap { flex: 1; }
 .annotate-bar .swatch { display: block; width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.25); }
-.annotate-bar .cui-choice { min-width: 40px; min-height: 36px; padding: 0 var(--citadel-space-2); font-size: 18px; line-height: 1; }
+.annotate-bar .cui-choice { min-width: var(--citadel-control-h); min-height: var(--citadel-control-h); padding: 0 var(--citadel-space-2); font-size: 18px; line-height: 1; }
 /* A picked colour keeps its own colour, ringed: the accent fill would hide it. */
 .annotate-bar .annotate-colours .cui-choice[aria-pressed="true"] { background: none; border-color: var(--citadel-accent); box-shadow: inset 0 0 0 1px var(--citadel-accent); }
 .annotate-bar .swatch { width: 18px; height: 18px; }

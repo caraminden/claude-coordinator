@@ -147,9 +147,9 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
         + '<rect x="620" y="40" width="140" height="40" rx="8" fill="none" stroke="#999"/><rect x="780" y="40" width="140" height="40" rx="8" fill="none" stroke="#999"/></svg>');
       const page = join(t.cwd!, 'header-takes.html');
       writeFileSync(page, `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Header layout takes</title><link rel="stylesheet" href="mockkit.css"></head><body><main>
+<title>Header layout takes</title><link rel="stylesheet" href="mockkit.css"></head><body class="mk"><main class="mk-page">
 <h1>Header layout takes</h1><p>Three ways to lay out the chat header. Pick one, then press Send.</p>
-<p><img alt="Today's header" src="header-today.svg" width="480" style="max-width:100%;height:auto"></p><div id="takes"></div></main>
+<p><img alt="Today's header" src="header-today.svg" width="480"></p><div id="takes"></div></main>
 <script src="mockkit.js"></script><script>
 mock.boards('#takes', { boards: [
   { id: 'A', title: 'Title left, chips right', note: 'Today\\'s order with the chips pulled right.', rec: true },

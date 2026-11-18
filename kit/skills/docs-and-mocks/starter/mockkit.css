@@ -310,7 +310,7 @@ h2[data-shape="star"] .mk-glyph { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68
 }
 /* In Citadel's viewer a picture opens to draw on (#946); a marked one keeps an accent ring. */
 .mk-draw img:not(a img, button img) { cursor: crosshair; }
-.mk-draw img.mk-marked { outline: 3px solid var(--mk-accent); outline-offset: 2px; }
+.mk-draw img.mk-marked { outline: 3px solid var(--mk-accent); outline-offset: -3px; }
 /* A Send that failed: what went wrong, and Retry. */
 .mk-toast { position: fixed; z-index: 20; left: 50%; bottom: max(1rem, env(safe-area-inset-bottom)); transform: translateX(-50%);
   width: max-content; max-width: calc(100vw - 2rem); box-sizing: border-box; display: flex; align-items: center; gap: 0.75rem;

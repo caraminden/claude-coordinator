@@ -19,7 +19,7 @@ const LIVE = 'land: main is now at abc1234 "#9: usage bar"\ndeploy: live now: th
 const RESTART = 'land: main is now at def5678 "#9: server bit"\ndeploy: restart queued as citadel-restart: running turns carry on through it, and it reports here\ndeploy: not live yet after 75 s; the restart reports here when it is\n';
 
 /** A Landings in a data dir of its own, a minion worktree whose land.sh prints `out` and exits `code`, and fake deps that record what the server did. */
-function setup(name: string, opts: { owner?: number | null; ownerState?: string | null; running?: boolean; kept?: string | null; runners?: boolean; liveAlready?: boolean; apps?: string[]; deployOps?: DeployOps } = {}) {
+function setup(name: string, opts: { owner?: number | null; ownerState?: string | null; running?: boolean; kept?: string | null; runners?: boolean; liveAlready?: boolean; liveAtWait?: boolean; apps?: string[]; deployOps?: DeployOps } = {}) {
   const data = join(root, name, 'data');
   const cwd = join(root, name, 'wt');
   mkdirSync(join(cwd, 'tools'), { recursive: true });
@@ -51,7 +51,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
     buildOwner: () => (opts.owner === undefined ? 2 : opts.owner),
     runnersBack: (_id, reason) => { did.push(`runnersBack: ${reason}`); return opts.runners ?? true; },
     liveAlready: async () => !!opts.liveAlready,
-    wakeWhenLive: async (_id, commit, text) => { waits.push({ commit, text }); return true; },
+    wakeWhenLive: async (_id, commit, text) => { if (opts.liveAtWait) return false; waits.push({ commit, text }); return true; },
     ...(opts.deployOps ? { apps: () => opts.apps ?? [], deployOps: opts.deployOps } : {}),
   };
   const land = async (out: string, code = 0, h: object = H, args: string[] = []) => {
@@ -143,6 +143,14 @@ test('stay_open with waiting_on: a clean land wakes the minion with the shipped 
   assert.equal(early.waits.length, 0);
   assert.match(early.sent[0], /the CI run/);
   assert.notEqual(early.ticket.state, 'parked');
+
+  // Live by the time the waiter is set: the waiter stores nothing, so the land wakes it now.
+  const raced = setup('stay-waiting-raced', { liveAtWait: true });
+  await raced.land(RESTART, 0, { stayOpen: true, waitingOn: 'the CI run' });
+  await raced.handoffs.poll();
+  assert.equal(raced.sent.length, 1);
+  assert.match(raced.sent[0], /live now/);
+  assert.equal(raced.ticket.state, null);
 });
 
 test('stay_open with a restart and a person who wrote in line: the message never says pending-deploy', async () => {

@@ -2,7 +2,7 @@
 // left, the newest of each folder as sections on All, a list with search and kind filters, a preview on the right,
 // and an upload into the shared folder. Cara, 2026-11-14, picking from the takes: "Can we combine A and B? I like the
 // upload option and folder sorting from B, but everything else from A looks nicer" and "One Files view".
-import { ago, fileExt, fileKind, formatSize, h, sharedHref, sharedUrl, threadLabel, view } from './base.js';
+import { ago, fileExt, fileKind, formatSize, h, noAutofill, sharedHref, sharedUrl, threadLabel, view } from './base.js';
 import { pinButton, previewBody } from './artifacts.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
@@ -109,7 +109,7 @@ export function filesView(folder) {
 }
 
 function searchBox() {
-  const input = h('input', { type: 'search', id: 'files-search', placeholder: 'Search names, folders and minions…', 'aria-label': 'Search files', autocomplete: 'off', value: state().q });
+  const input = h('input', { type: 'search', id: 'files-search', placeholder: 'Search names, folders and minions…', 'aria-label': 'Search files', ...noAutofill('files-search'), value: state().q });
   input.addEventListener('input', () => {
     Object.assign(state(), { q: input.value, limit: PAGE });
     renderFiles();

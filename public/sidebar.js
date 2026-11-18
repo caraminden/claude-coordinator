@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, costText, h, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, api, costText, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -208,7 +208,7 @@ const threadSearch = { projectId: null, q: '', meaning: null };
 
 export function threadSearchBox(projectId) {
   if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', meaning: null });
-  const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search titles, numbers and properties…', value: threadSearch.q, autocomplete: 'off' });
+  const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search titles, numbers and properties…', value: threadSearch.q, ...noAutofill('thread-search') });
   input.addEventListener('input', () => {
     threadSearch.q = input.value.trim();
     renderSidebar();

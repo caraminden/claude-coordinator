@@ -933,6 +933,11 @@ const landHandoffs = new LandHandoffs({
     return true;
   },
   liveAlready: async (id) => (await waiters.pendingLive()).includes(id),
+  // A stay_open land with waiting_on wakes its minion once live (#942), through wake_when_live's waiter.
+  wakeWhenLive: async (id, commit, text) => {
+    const full = commit && (await waiters.resolve(commit, store.getProject(store.getTicket(id)?.project_id ?? 0)?.repo_dir ?? null));
+    return waiters.add(id, full || null, text);
+  },
   buildOwner: (id, n) => store.getSetting<number>(buildOwnerKey(store.getTicket(id)?.project_id ?? 0, n)) ?? null,
   // A clean land on main deploys the scheme's home contraptions on main (#712), through auto-deploy's start, which marks the commit tried.
   apps: (id) => {

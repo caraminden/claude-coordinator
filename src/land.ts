@@ -41,7 +41,7 @@ export interface Handoff {
   deploy?: false;
   /** True (#909): the brief has more pieces for this minion, so a clean land leaves it open (ready) instead of dismissing it. */
   stayOpen?: true;
-  /** With stayOpen: what it waits on next; it is then parked, not ready. */
+  /** With stayOpen: what it waits on next. It is never parked (#942): once its work is live it is woken with the shipped line, for its after-land steps. */
   waitingOn?: string;
 }
 
@@ -366,6 +366,8 @@ export interface HandoffDeps {
   runnersBack(id: number, reason: string): boolean;
   /** Whether the server already runs this minion's branch (a restart that went live before land.sh's end was read). */
   liveAlready(id: number): Promise<boolean>;
+  /** Wake the minion with `text` once `commit` (null: the next deploy) is live, the way wake_when_live does; false when it is live already. */
+  wakeWhenLive?(id: number, commit: string | null, text: string): Promise<boolean>;
   /** The minion's scheme's apps a clean land on main deploys (#712): its home contraptions; none where deploys can't run. */
   apps?(id: number): string[];
   deployOps?: DeployOps;
@@ -485,11 +487,21 @@ export class LandHandoffs {
       runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`);
       return;
     }
+    if (h.stayOpen && h.waitingOn) {
+      // #942: never parked, since nothing would wake it. It is woken once its work is in (after the restart, through
+      // wake_when_live's waiter), once, and sets its own state from there.
+      const restart = r.kind === 'restart' && !(await this.d.liveAlready(id));
+      const text = (now: string) => `Your handed-off land went through (${what}, ${now}). You handed it off waiting on: ${h.waitingOn}. Run your after-land steps now, then set your state for that wait: a person's test, card or confirmation leaves it null (or try); another minion's land is wake_when_live on its commit, then parked.`;
+      // true: the waiter wakes it at live; false: live already; undefined: no waiter here, so it hears now.
+      const queued = restart ? await this.d.wakeWhenLive?.(id, r.commit ?? null, text('live now')) : undefined;
+      store.updateTicket(id, { state: queued ? 'outside' : null, note: `${queued ? 'landed, wakes once live' : 'landed'}; waiting on: ${h.waitingOn}`.slice(0, 120) });
+      runner.broadcastTicket(id);
+      if (!queued) runner.send(id, from, text(r.kind !== 'restart' ? where.toLowerCase().replace(/\.$/, '') : queued === undefined && restart ? 'live after the restart' : 'live now'));
+      return;
+    }
     if (h.stayOpen) {
       // More pieces to do in this minion (#909): the shipped line is out, and it stays open, ready for the next one.
-      store.updateTicket(id, h.waitingOn
-        ? { state: 'parked', note: `landed; waiting on: ${h.waitingOn}`.slice(0, 120) }
-        : { state: 'ready', note: r.kind === 'restart' ? 'landed, live after the restart; open for the next piece' : 'landed; open for the next piece' });
+      store.updateTicket(id, { state: 'ready', note: r.kind === 'restart' ? 'landed, live after the restart; open for the next piece' : 'landed; open for the next piece' });
       runner.broadcastTicket(id);
       return;
     }

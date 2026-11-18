@@ -29,6 +29,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
   const sent: string[] = [];
   const notes: string[] = [];
   const owned: any[] = [];
+  const waits: { commit: string | null; text: string }[] = [];
   const deps: HandoffDeps = {
     landings,
     store: { getTicket: (id: number) => (id === 1 ? ticket : { number: 9, title: 'The build', status: 'idle', state: opts.ownerState ?? null }), updateTicket: (_id, f) => { Object.assign(ticket, f); did.push(`state ${f.state}`); } },
@@ -50,6 +51,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
     buildOwner: () => (opts.owner === undefined ? 2 : opts.owner),
     runnersBack: (_id, reason) => { did.push(`runnersBack: ${reason}`); return opts.runners ?? true; },
     liveAlready: async () => !!opts.liveAlready,
+    wakeWhenLive: async (_id, commit, text) => { waits.push({ commit, text }); return true; },
     ...(opts.deployOps ? { apps: () => opts.apps ?? [], deployOps: opts.deployOps } : {}),
   };
   const land = async (out: string, code = 0, h: object = H, args: string[] = []) => {
@@ -57,7 +59,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
     assert.ok(landings.handOff(1, cwd, { PATH: process.env.PATH! }, args, { ...H, ...h }));
     await until('land.sh ends', () => landings.get(1)?.code !== null);
   };
-  return { owned, landings, ticket, did, sent, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
+  return { owned, waits, landings, ticket, did, sent, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
 }
 
 test('a clean land that is live now posts the shipped line and dismisses the minion, with no message to it', async () => {
@@ -99,13 +101,6 @@ test('stay_open: a clean land still posts the shipped line but never dismisses, 
   assert.deepEqual(live.landings.handoffs(), [], 'reported once');
   assert.equal(live.sent.length, 0, 'no model call');
 
-  const waiting = setup('stay-parked');
-  await waiting.land(LIVE, 0, { stayOpen: true, waitingOn: 'the migration piece' });
-  await waiting.handoffs.poll();
-  assert.equal(waiting.ticket.state, 'parked');
-  assert.match(String(waiting.ticket.note), /the migration piece/);
-  assert.ok(!waiting.did.some((d) => d.startsWith('close')));
-
   const restart = setup('stay-restart', { liveAlready: true });
   await restart.land(RESTART, 0, { stayOpen: true });
   await restart.handoffs.poll();
@@ -114,6 +109,40 @@ test('stay_open: a clean land still posts the shipped line but never dismisses, 
   assert.ok(!restart.did.includes('deployLive'));
   assert.notEqual(restart.ticket.state, 'pending-deploy');
   assert.ok(!restart.did.some((d) => d.startsWith('close')));
+});
+
+test('stay_open with waiting_on: a clean land wakes the minion with the shipped line once its work is live, and never parks it (#942)', async () => {
+  const live = setup('stay-waiting-live');
+  await live.land(LIVE, 0, { stayOpen: true, waitingOn: 'Cara confirming on her phone' });
+  await live.handoffs.poll();
+  assert.notEqual(live.ticket.state, 'parked', 'nothing would wake a parked minion: its after-land steps never ran');
+  assert.ok(!live.did.some((d) => d.startsWith('close')));
+  assert.equal(live.sent.length, 1, 'woken once, at live');
+  assert.match(live.sent[0], /abc1234 "#9: usage bar"/);
+  assert.match(live.sent[0], /live now/i);
+  assert.match(live.sent[0], /Cara confirming on her phone/);
+
+  // Waiting for the restart: woken by the live check (wake_when_live's waiter), not before, and not twice.
+  const restart = setup('stay-waiting-restart');
+  await restart.land(RESTART, 0, { stayOpen: true, waitingOn: 'the CI run' });
+  await restart.handoffs.poll();
+  assert.equal(restart.sent.length, 0, 'not live yet: no wake');
+  assert.equal(restart.waits.length, 1);
+  assert.equal(restart.waits[0].commit, 'def5678');
+  assert.match(restart.waits[0].text, /def5678 "#9: server bit"/);
+  assert.match(restart.waits[0].text, /the CI run/);
+  assert.notEqual(restart.ticket.state, 'parked');
+  assert.notEqual(restart.ticket.state, 'pending-deploy');
+  assert.ok(!restart.did.includes('deployPending'));
+
+  // Its restart already live (or the waiter finds it live at once): woken now.
+  const early = setup('stay-waiting-early', { liveAlready: true });
+  await early.land(RESTART, 0, { stayOpen: true, waitingOn: 'the CI run' });
+  await early.handoffs.poll();
+  assert.equal(early.sent.length, 1);
+  assert.equal(early.waits.length, 0);
+  assert.match(early.sent[0], /the CI run/);
+  assert.notEqual(early.ticket.state, 'parked');
 });
 
 test('stay_open with a restart and a person who wrote in line: the message never says pending-deploy', async () => {

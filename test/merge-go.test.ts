@@ -100,13 +100,14 @@ const typed = (text: string, id = 1) => ({ author: 'Cara', text, id, typed: true
 
 function gate(store?: GoStore) {
   const results: any[] = [];
-  const a = new Approvals((_t, kind, data) => kind === 'approval_result' && results.push(data), store);
+  const notes: { ticket: number; text: string }[] = [];
+  const a = new Approvals((t, kind, data: any) => (kind === 'approval_result' ? results.push(data) : kind === 'note' && notes.push({ ticket: t, text: data.text })), store);
   const merge = (ticket = FEEDER.id, target: MergeTarget | null = own, rules = true, scheme = 1) => {
     const r = a.ask(ticket, 'Bash', MERGE, '/w', { ...CFG, project: scheme }, rules, undefined, target);
     return 'id' in r ? a.get(ticket, r.id).state : 'refused';
   };
   const say = (text: string, where: GoPlace = FEEDER, id = 1, scheme = 1) => a.said(scheme, where, typed(text, id));
-  return { a, results, merge, say };
+  return { a, results, notes, merge, say };
 }
 
 test("a typed go lets its minion's own PR merge until it has merged, with the card kept as a record of whose message it was", () => {
@@ -215,6 +216,102 @@ test("nothing but a person's typed message counts: relays, card answers, agents 
   assert.equal(merge(), 'allowed', "a relay neither gives nor takes back a person's go");
 });
 
+// ---------- a go typed to the Taskmaster (#939) ----------
+
+// The Taskmaster's message_ticket relay, as the runner delivers it: untyped, from the Taskmaster's chat.
+const relay = (text: string, from = TASKMASTER.id) => ({ author: 'Taskmaster', text, from });
+const minions = (n: number) => [FEEDER, CATEGORY, BUILD].find((m) => m.number === n) ?? null;
+
+test("a bare go typed to the Taskmaster, quoted in its relay to one minion, lets that minion's PR merge with no card", () => {
+  const { a, results, notes, merge, say } = gate();
+  say('fold it', TASKMASTER, 80);
+  assert.equal(merge(), 'pending', 'not relayed yet: it names no minion');
+  a.said(1, FEEDER, relay('Cara said "Fold it" here: land your PR.'));
+  assert.equal(merge(), 'allowed', 'quoted word for word (any case) in the relay to #50');
+  assert.deepEqual(results[0].via, { message: 80, text: 'fold it', scheme: 1, ticket: null, to: 50 }, 'the card names her message and the minion it went to');
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].ticket, TASKMASTER.id, "the Taskmaster's chat shows where her go went");
+  assert.match(notes[0].text, /Cara's go "fold it" now covers #50's PR/);
+  a.said(1, FEEDER, relay('Again, Cara said “fold it”.'));
+  assert.equal(merge(), 'allowed', 'quoting it again to the same minion changes nothing');
+  assert.equal(merge(BUILD.id, { number: 197, head: 'ticket/51-other', open: true }), 'pending', "no other minion's PR");
+  assert.equal(merge(BUILD.id, { number: 196, head: CATEGORY.branch, open: true }), 'pending', "nor #42's");
+  assert.equal(merge(FEEDER.id, { ...own, open: false }), 'pending', 'merged');
+  assert.equal(merge(), 'pending', 'the go ended with the merge');
+});
+
+test("a relay counts only as a person's typed go quoted from the Taskmaster's chat, to one minion, until her newer word", () => {
+  let g = gate();
+  g.a.said(1, FEEDER, relay('Cara said "fold it"'));
+  assert.equal(g.merge(), 'pending', 'no typed go behind the relay: the Taskmaster cannot make one up');
+  g.say('fold it', TASKMASTER);
+  g.a.said(1, FEEDER, relay('Cara says you can fold it now.'));
+  assert.equal(g.merge(), 'pending', 'paraphrased, not quoted');
+  g.a.said(1, FEEDER, relay('Cara said "merge it"'));
+  assert.equal(g.merge(), 'pending', 'quoting words she did not type');
+  g.a.said(1, FEEDER, relay('Cara said "fold it"', CATEGORY.id));
+  assert.equal(g.merge(), 'pending', "another minion's message_minion quoting it");
+  g.a.said(2, FEEDER, relay('Cara said "fold it"'));
+  assert.equal(g.merge(FEEDER.id, own, true, 2), 'pending', "a relay in another scheme");
+  g.a.said(1, FEEDER, { ...relay('Cara said "fold it"'), typed: true });
+  assert.equal(g.merge(), 'pending', 'a typed message quoting it is not a go either');
+
+  g = gate();
+  g.say('merge it', TASKMASTER);
+  g.a.said(1, FEEDER, relay('Cara: "merge it"'));
+  g.a.said(1, CATEGORY, relay('Cara: "merge it"'));
+  assert.equal(g.merge(), 'pending', 'quoted to two minions: it covers neither');
+  assert.equal(g.merge(BUILD.id, { number: 198, head: CATEGORY.branch, open: true }), 'pending');
+  assert.match(g.notes.at(-1)!.text, /also quoted to #42.*covers neither/);
+  g.a.said(1, FEEDER, relay('Cara: "merge it"'));
+  assert.equal(g.merge(), 'pending', 'and stays gone');
+
+  g = gate();
+  g.say('fold it', TASKMASTER);
+  g.say('hm, wait', TASKMASTER);
+  g.a.said(1, FEEDER, relay('Cara said "fold it"'));
+  assert.equal(g.merge(), 'pending', 'taken back in the Taskmaster chat before the relay');
+  g.say('fold it', TASKMASTER);
+  g.a.said(1, FEEDER, relay('Cara said "fold it"'));
+  g.say('actually CI is red', TASKMASTER);
+  assert.equal(g.merge(), 'pending', 'taken back after it: newest word wins');
+  g.say('fold it', TASKMASTER);
+  g.a.said(1, FEEDER, relay('Cara said "fold it"'));
+  g.say('also fix the typo first', FEEDER);
+  assert.equal(g.merge(), 'pending', "a newer typed word in the minion's own chat takes it back too");
+  g.say('fold it', TASKMASTER);
+  g.a.said(1, FEEDER, relay('Cara said "fold it"'));
+  g.say('thanks', CATEGORY);
+  assert.equal(g.merge(), 'allowed', 'words in a third chat do not');
+});
+
+test('in the Taskmaster chat "#N" names minion N; "PR N" names a PR; a bare number names nothing', () => {
+  const { a, results, merge } = gate();
+  const toTaskmaster = (text: string, id = 1) => a.said(1, TASKMASTER, typed(text, id), minions);
+  toTaskmaster('land #50', 81);
+  assert.equal(merge(), 'allowed', "#50's own PR, with no relay");
+  assert.deepEqual(results[0].via, { message: 81, text: 'land #50', scheme: 1, ticket: null, to: 50 });
+  a.said(1, CATEGORY, relay('Cara said "land #50"'));
+  assert.equal(merge(BUILD.id, { number: 199, head: CATEGORY.branch, open: true }), 'pending', 'a relay never moves a go that names its minion');
+  assert.equal(merge(), 'allowed');
+
+  const g = gate();
+  const tm = (text: string) => g.a.said(1, TASKMASTER, typed(text), minions);
+  tm('ok, fold #42');
+  assert.equal(g.merge(BUILD.id, { number: 199, head: CATEGORY.branch, open: true }), 'allowed', "#42's PR");
+  assert.equal(g.merge(), 'pending', 'not #50s');
+  tm('fold 50');
+  assert.equal(g.merge(), 'pending', 'a bare number: minion or PR is a guess, so the card');
+  assert.equal(g.merge(BUILD.id, { number: 50, head: 'ticket/9-x', open: true }), 'pending', 'and not PR 50 either');
+  tm('merge #77');
+  assert.equal(g.merge(BUILD.id, { number: 77, head: 'ticket/77-x', open: true }), 'pending', 'no minion #77: nothing');
+  tm('merge PR #196');
+  assert.equal(g.merge(), 'allowed', '"PR #196" is the PR');
+  g.say('fold #196', CATEGORY);
+  g.say('hold on', TASKMASTER);
+  assert.equal(g.merge(BUILD.id, own), 'allowed', 'in a minion\'s own chat "#196" is still the PR');
+});
+
 test('a go outlives its turn and a restart, and never passes a tripwire card or a scheme without cards', () => {
   const kept = new Map<number, Go[]>();
   const store: GoStore = { get: (s) => structuredClone(kept.get(s) ?? []), set: (s, g) => kept.set(s, structuredClone(g)) };
@@ -295,6 +392,30 @@ test('a typed go is recorded for the scheme when sent, steered or not; a relay n
   assert.equal(runner.approvals.hasGo(project.id), true, 'the turn ended, the go stands');
   assert.equal(new Runner(store, () => {}, () => ({}), fake).approvals.hasGo(project.id), true, 'kept in settings: a restart keeps it');
   assert.deepEqual(store.getSetting<Go[]>(`merge_goes:${project.id}`)!.map((g) => [g.text, g.ticket, g.number, g.branch]), [['fold it', t.id, t.number, 'ticket/1-t']]);
+  store.close?.();
+});
+
+test("the runner hands a go typed to the Taskmaster to the minion its relay quotes it to, or that it names (#939)", async () => {
+  const store = new Store(join(root, 'relay.db'));
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const project = store.createProject('Delve', null);
+  const coordinator = store.getCoordinator(project.id) ?? store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'bypassPermissions', created_by: 'Cara', kind: 'coordinator' });
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  store.setTicketDir(t.id, join(root, 'wt-relay'), `ticket/${t.number}-t`);
+  const goes = () => store.getSetting<Go[]>(`merge_goes:${project.id}`) ?? [];
+  const tm = { id: coordinator.id, number: coordinator.number, branch: null };
+  runner.approvals.said(project.id, tm, { author: 'Cara', text: 'fold it', id: 1, typed: true });
+  runner.relay(t.id, t.id, 'Taskmaster', 'Cara said "fold it"', false, false);
+  assert.deepEqual(goes().map((g) => [g.text, g.to, g.branch]), [['fold it', t.number, `ticket/${t.number}-t`]], 'a relay left as held mail binds it');
+  // Typed in the Taskmaster's chat, as the messages route sends it: "#N" is looked up as minion N.
+  runner.send(coordinator.id, 'Cara', `merge #${t.number}`, [], { typed: true });
+  assert.equal(goes().at(-1)!.to, t.number);
+  assert.equal(goes().at(-1)!.branch, `ticket/${t.number}-t`);
+  const notes = store.listEvents(coordinator.id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text);
+  assert.ok(notes.some((n) => n.includes(`now covers #${t.number}'s PR`)), notes.join('\n'));
+  writeFileSync(join(root, 'release'), '');
+  await until('the Taskmaster turn ends', () => !runner.isRunning(coordinator.id));
+  rmSync(join(root, 'release'), { force: true });
   store.close?.();
 });
 

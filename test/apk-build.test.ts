@@ -45,13 +45,17 @@ function app(name: string, cap = true) {
 }
 
 /** A builder with every outside step faked; `calls` records what ran, `told` what the Taskmaster was told. */
-function builder(o: { ciRelease?: boolean; fail?: string } = {}) {
+function builder(o: { ciRelease?: boolean; fail?: string; code?: number; oom?: boolean } = {}) {
   const calls: string[][] = [];
   const told: string[] = [];
   const published: [string, number, string][] = [];
+  let ooms = 0;
   const run: Runner = async (argv, cwd) => {
     calls.push(argv);
-    if (o.fail && argv.join(' ').includes(o.fail)) return 1;
+    if (o.fail && argv.join(' ').includes(o.fail)) {
+      if (o.oom) ooms++;
+      return o.code ?? 1;
+    }
     if (argv.includes('assembleRelease')) {
       mkdirSync(join(cwd, 'app/build/outputs/apk/release'), { recursive: true });
       writeFileSync(join(cwd, 'app/build/outputs/apk/release/app-release-unsigned.apk'), 'unsigned');
@@ -67,7 +71,7 @@ function builder(o: { ciRelease?: boolean; fail?: string } = {}) {
     ciRelease: () => !!o.ciRelease,
     published: (row, code, c) => published.push([row.name, code, c]),
     tell: (_row, text) => told.push(text),
-    run, certs: async () => ['k1'],
+    run, certs: async () => ['k1'], oomKills: async () => ooms,
     keytool: async (args) => writeFileSync(args[args.indexOf('-keystore') + 1], 'jks'),
   });
   return { b, calls, told, published };
@@ -183,6 +187,24 @@ test('a failed Gradle build publishes nothing and tells the end of its log; an a
   const ci = app('ci');
   key('ci');
   assert.deepEqual(await builder({ ciRelease: true }).b.check(ci.row, '#1'), { skipped: 'a release workflow signs its APKs' });
+});
+
+test('a build killed by a signal says so; a restart kill is retried at the next check, an out-of-memory kill is not', async () => {
+  const { row, data } = app('killed');
+  key('killed');
+  const term = builder({ fail: 'assembleRelease', code: 128 + 15 });
+  assert.deepEqual(await term.b.check(row, 'auto-deploy'), { failed: 'gradlew assembleRelease was killed by SIGTERM (a Citadel restart stops its builds): the next check builds it again' });
+  assert.deepEqual(term.told, [], 'a restart kill is not the commit\'s fault: nothing to tell');
+  assert.equal((await builder().b.check(row, 'auto-deploy') as { built: number }).built, 1, 'the next check (the restarted server\'s) builds the same commit');
+
+  const big = app('big');
+  key('big');
+  const oom = builder({ fail: 'assembleRelease', code: 128 + 9, oom: true });
+  assert.deepEqual(await oom.b.check(big.row, '#1'), { failed: 'gradlew assembleRelease ran out of memory: the kernel killed it (SIGKILL)' });
+  assert.match(oom.told[0], /ran out of memory/);
+  assert.match(readFileSync(join(root, 'cache/big/build.log'), 'utf8'), /out of memory/);
+  assert.deepEqual(await builder().b.check(big.row, '#1'), { skipped: 'already failed at this commit' });
+  assert.ok(!existsSync(join(big.data, 'android/latest.json')) && !existsSync(join(data, 'android/killed-0.apk')));
 });
 
 test('a published build at or above the commit count is refused, not overwritten', async () => {

@@ -10,6 +10,7 @@ import { execResult, runLogged } from './exec.ts';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { constants } from 'node:os';
 import { androidEnv } from './claude-link.ts';
 import { apksigner, install, OldApk, OtherKey, signers } from './apk-release.ts';
 import type { ContraptionRow } from './db.ts';
@@ -74,9 +75,25 @@ export interface ApkBuildDeps {
   /** Tell the app's home Taskmaster something it has to act on. */
   tell: (row: ContraptionRow, text: string) => void;
   run?: Runner;
+  /** How many processes the OOM killer has killed in Citadel's cgroup so far: a rise over a step that died of SIGKILL is out of memory. */
+  oomKills?: () => Promise<number>;
   certs?: (apk: string) => Promise<string[]>;
   keytool?: Keytool;
 }
+
+/** OOM kills in this process's cgroup (cgroup v2's memory.events, which counts its children's): 0 when it can't be read. */
+async function cgroupOomKills(): Promise<number> {
+  try {
+    const path = (await readFile('/proc/self/cgroup', 'utf8')).match(/^0::(.*)$/m)?.[1];
+    const events = path ? await readFile(join('/sys/fs/cgroup', path, 'memory.events'), 'utf8') : '';
+    return Number(/^oom_kill (\d+)$/m.exec(events)?.[1] ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** A step a signal killed from outside (a Citadel restart stops every build it runs): not the commit's fault, so it isn't marked failed. */
+class Killed extends Error {}
 
 /** What one check came to, for the log and the tests. */
 export type Outcome = { built: number } | { skipped: string } | { failed: string };
@@ -219,10 +236,18 @@ export class ApkBuilds {
     if (!env.ANDROID_HOME) return fail(`the Android toolchain isn't installed on perigee (tools/android/install-sdk.sh)`);
     const run = this.d.run ?? runLogged;
     const deadline = Date.now() + BUILD_MS;
+    const ooms = this.d.oomKills ?? cgroupOomKills;
     const step = async (what: string, argv: string[], cwd: string) => {
       await writeFile(log, `== ${argv.join(' ')}\n`, { flag: 'a' });
+      const before = await ooms();
       const c = await run(argv, cwd, env, log, deadline - Date.now());
       if (c === 124) throw new Error(`the build ran past ${BUILD_MS / 60_000} minutes at: ${what}`);
+      const signal = c > 128 ? Object.entries(constants.signals).find(([, n]) => n === c - 128)?.[0] : undefined;
+      if (signal && (await ooms()) > before) {
+        await writeFile(log, `== out of memory: the kernel's OOM killer killed it (${signal})\n`, { flag: 'a' });
+        throw new Error(`${what} ran out of memory: the kernel killed it (${signal})`);
+      }
+      if (signal) throw new Killed(`${what} was killed by ${signal} (a Citadel restart stops its builds): the next check builds it again`);
       if (c) throw new Error(`${what} failed (exit ${c})`);
     };
     const gradle = gradleVersion(await readFile(join(src, 'android/app/build.gradle'), 'utf8').catch(() => readFile(join(src, 'android/app/build.gradle.kts'), 'utf8')).catch(() => ''));
@@ -238,6 +263,7 @@ export class ApkBuilds {
       await step('apksigner sign', [apksigner(this.d.home, env.ANDROID_HOME), 'sign', '--ks', key, '--ks-pass', `file:${pass}`, '--out', signed, unsigned], dir);
       await step('apksigner verify', [apksigner(this.d.home, env.ANDROID_HOME), 'verify', signed], dir);
     } catch (err: any) {
+      if (err instanceof Killed) return { failed: err.message };
       return fail(err.message, await tail());
     }
     const manifest = join(src, 'android/app/build/intermediates/merged_manifests/release');

@@ -170,15 +170,18 @@ async function mcp(method: string, params: object, machines: string) {
   }
 }
 
-test('the tool is offered only to a turn that got a machine, named in its schema, and its call posts the card', async () => {
+test('the tool is listed for every minion with a free machine name (#878), refused for a machine the turn didn\'t get, and its call posts the card', async () => {
   const before = live();
   // Cara's approve started the last turn, and Josh's own machine goes only to his turns: he asks for this one.
   await call('Josh', `/api/tickets/${ticket.id}/messages`, { method: 'POST', body: { text: 'propose the notes again' } });
   await until('Josh\'s turn', () => turns().length && live() !== before && live());
   await idle();
   const offered = async (machines: string) => (await mcp('tools/list', {}, machines)).tools.find((t: any) => t.name === 'propose_machine_notes');
-  assert.equal(await offered(''), undefined);
-  assert.deepEqual((await offered('josh-box')).inputSchema.properties.machine.enum, ['josh-box']);
+  assert.deepEqual(await offered(''), await offered('josh-box'));
+  assert.equal((await offered('')).inputSchema.properties.machine.enum, undefined);
+  const none = await mcp('tools/call', { name: 'propose_machine_notes', arguments: { machine: 'josh-box', notes: 'Seventh' } }, '');
+  assert.ok(none.isError);
+  assert.match(none.content[0].text, /This turn got no connected machines/);
   const r = await mcp('tools/call', { name: 'propose_machine_notes', arguments: { machine: 'josh-box', notes: 'Seventh' } }, 'josh-box');
   assert.equal(r.isError, undefined, r.content[0].text);
   assert.match(r.content[0].text, /Only Josh \(its owner\) or an admin can approve it/);

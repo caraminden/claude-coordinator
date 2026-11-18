@@ -66,7 +66,7 @@ test('a thread uses a connected machine\'s MCP server, one copy per turn', async
   assert.equal(turn.error, undefined);
   assert.deepEqual(turn.results['test-box'].tools, ['whoami']);
   assert.ok(turn.allow.includes('mcp__test-box'), 'the machine\'s tools are allowed');
-  assert.match(turn.system, /Connected machines: test-box/);
+  assert.match(turn.message, /Connected machines: test-box/);
 
   // A second turn starts a fresh copy of the machine's server.
   await until('the turn to end', async () => (await call(`/api/tickets/${ticket.id}`)).ticket.status !== 'running');
@@ -89,7 +89,7 @@ test('an online machine reaches no scheme until it is on its list, and then its 
   // An admin's new scheme gets nothing by itself, and its minion can't open the machine by id either.
   const without = await turnNow('peek');
   assert.equal(without.results['test-box'], undefined);
-  assert.doesNotMatch(without.system, /test-box/);
+  assert.doesNotMatch(without.system + without.message, /test-box/);
   const refused = await fetch(`${base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${without.token}` } });
   assert.equal(refused.status, 403);
   await refused.body!.cancel();
@@ -97,7 +97,7 @@ test('an online machine reaches no scheme until it is on its list, and then its 
   assert.ok(lent.gets.includes(project.id));
   const turn = await turnNow('peek again');
   assert.deepEqual(turn.results['test-box'].tools, ['whoami']);
-  assert.match(turn.system, /Connected machines: test-box/);
+  assert.match(turn.message, /Connected machines: test-box/);
   const opened = await fetch(`${base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${turn.token}` } });
   assert.equal(opened.status, 200);
   await opened.body!.cancel();
@@ -269,7 +269,7 @@ test('an agent can run a server from Claude Code\'s config, and threads get the 
   await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'play' } });
   const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
   assert.deepEqual(turn.results.desk.tools, ['whoami']);
-  assert.match(turn.system, /Notes on desk from its owner:\nNever restart this PC\./);
+  assert.match(turn.message, /Notes on desk from its owner:\nNever restart this PC\./);
 });
 
 test('workspace tools reach minions only once a person switches them on, and fetch_file lands in the minion\'s files', async () => {
@@ -313,7 +313,7 @@ test('workspace tools reach minions only once a person switches them on, and fet
   assert.deepEqual([...readFileSync(copied)], [0x50, 0x4b, 0, 1, 2, 3]);
   assert.match(ws.ran, /task ran/);
   assert.ok(turn.allow.includes('mcp__wsbox-ws'));
-  assert.match(turn.system, /wsbox \(mcp__wsbox, mcp__wsbox-ws\)[\s\S]*call its workspaces tool first/);
+  assert.match(turn.message, /wsbox \(mcp__wsbox, mcp__wsbox-ws\)[\s\S]*call its workspaces tool first/);
 });
 
 test('a machine reaches only the minions of the schemes on its list, and taking a scheme away ends its sessions (#303, #438)', async () => {
@@ -337,11 +337,11 @@ test('a machine reaches only the minions of the schemes on its list, and taking 
   };
   const inA = await turnIn(a, 'lent');
   assert.deepEqual(inA.results.vault.tools, ['whoami']);
-  assert.match(inA.system, /Notes on vault from its owner:\nJosh's vault\./);
+  assert.match(inA.message, /Notes on vault from its owner:\nJosh's vault\./);
   const inB = await turnIn(b, 'not lent');
   assert.equal(inB.results.vault, undefined);
   assert.ok(!inB.allow.includes('mcp__vault'));
-  assert.doesNotMatch(inB.system, /vault/);
+  assert.doesNotMatch(inB.system + inB.message, /vault/);
 
   // B's minion can't open it by id; A's can, until A is taken off it.
   const refused = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inB.token}` } });
@@ -444,7 +444,7 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
   const asCara = async (path: string, opts: { method?: string; body?: unknown } = {}) => ({ status: 201, data: await call(path, opts) });
   const joshs = await turnIn(josh.as, shared, 'for josh');
   assert.deepEqual(joshs.results['josh-box'].tools, ['whoami']);
-  assert.match(joshs.system, /Josh's box, checked by an admin/);
+  assert.match(joshs.message, /Josh's box, checked by an admin/);
   const danas = await turnIn(dana.as, shared, 'for dana');
   assert.equal(danas.results['josh-box'], undefined);
   assert.ok(!danas.allow.includes('mcp__josh-box'));

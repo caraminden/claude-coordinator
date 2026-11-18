@@ -12,7 +12,7 @@ import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
-export interface Card { questions: unknown[]; kind?: 'merge'; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string } }
+export interface Card { questions: unknown[]; kind?: 'merge'; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string }; asker?: number }
 export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string } }
 
 export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
@@ -21,21 +21,35 @@ const short = (sha: string) => sha.slice(0, 7);
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
 export function postCard(app: App, ticket: Ticket, card: Card): { id: string; href: string } {
   const { runner } = app;
-  const { questions, kind, to, notice, doc, secret, job, recipe } = card;
+  const { questions, kind, to, notice, doc, secret, asker, job, recipe } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
-    id, questions, ...(kind ? { kind } : {}), ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}),
+    id, questions, ...(kind ? { kind } : {}), ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}), ...(asker ? { asker } : {}),
   });
   runner.broadcastTicket(ticket.id);
   app.notify(ticket.id, { kind: 'question', questions: notice ? [{ question: notice }] : doc ? [{ question: `Make your picks on “${doc.title}”` }] : secret ? [{ question: `Save a secret as ${secret.name}` }] : questions, eventId: event.id, ...(to ? { to } : {}) });
   return { id, href: cardHref(ticket, event.id) };
 }
 
+/** The Taskmaster that last wrote to a minion (#919): its next message_coordinator goes there, once. */
+export const replyToKey = (ticketId: number) => `minion_reply_to:${ticketId}`;
+
 /** Send the minion's Taskmaster a message, as message_coordinator does; returns runner.relay's answer. */
 export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urgent: boolean, wake = true, need?: string) {
   const { store, runner } = app;
-  const coordinator = await ensureCoordinator(app, store.getProject(ticket.project_id)!);
-  const held = runner.relay(ticket.id, coordinator.id, `#${ticket.number} ${ticket.title}`, text, urgent, wake, need);
+  await ensureCoordinator(app, store.getProject(ticket.project_id)!);
+  // A reply goes to the Taskmaster that asked, else its owner's gets it as sent (#919); every other touched person's own gets held mail.
+  const asked = store.getTicket(store.getSetting<number>(replyToKey(ticket.id)) ?? 0);
+  store.deleteSetting(replyToKey(ticket.id));
+  const owner = store.ownerCoordinator(ticket)!;
+  const coordinator = asked?.kind === 'coordinator' && asked.project_id === ticket.project_id ? asked : owner;
+  const author = `#${ticket.number} ${ticket.title}`;
+  const held = runner.relay(ticket.id, coordinator.id, author, text, urgent, wake, need);
+  if (held !== true) {
+    for (const tm of new Map([owner, ...store.touchedBy(ticket).map((uid) => store.coordinatorFor(ticket.project_id, uid))].map((t) => [t?.id, t])).values()) {
+      if (tm && (tm.coordinator_of != null || tm.id === owner.id) && tm.id !== coordinator.id) runner.leaveMail(tm.id, author, text);
+    }
+  }
   if (held !== true) runner.emit(ticket.id, 'note', { ...(need ? { need } : {}), text: `${held ? 'Left held mail for' : 'Sent'} the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
   return held;
 }

@@ -1,5 +1,6 @@
 // The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
 // module shares without needing the shell (state, api, h, helpers) is base.js.
+import { inMerged } from './mine.js';
 import { ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, me, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { onAppInstructionsUpdate, onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { costChip, renderCost } from './cost.js';
@@ -416,8 +417,18 @@ export let usage = null;
 export let codex = null;
 let codexHint = '';
 
+// The usage bars link to Settings → Usage (Cara, 2026-11-17). Settings pages take any scheme's id, so the link uses the one last open.
+let usageProject = null;
+const usageHref = () => `#/p/${usageProject ?? view?.projectId ?? ''}/usage`.replace('/p//', '/');
+function syncUsageLinks() {
+  const id = location.hash.match(/^#\/p\/(\d+)/)?.[1];
+  if (id) usageProject = Number(id);
+  for (const a of document.querySelectorAll('a.usage')) a.setAttribute('href', usageHref());
+}
+addEventListener('hashchange', syncUsageLinks);
+
 /** A weekly-limit bar; one lives in the top bar and one in a project's side panel. */
-export const usageMeter = () => h('div', { class: 'usage', hidden: true },
+export const usageMeter = () => h('a', { class: 'usage', href: usageHref(), hidden: true },
   h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), costChip());
 
 /**
@@ -449,6 +460,7 @@ export function pickLine(u, accounts) {
 /** Fill in every usage bar from the latest usage report from Claude turns. */
 export function renderUsage(next = usage) {
   usage = next;
+  syncUsageLinks();
   const accounts = usage?.accounts?.length > 1 ? usage.accounts : null;
   const week = accounts ? combineWindows(accounts, 'weekly') : usage?.weekly;
   const session = accounts ? combineWindows(accounts, 'session') : usage?.session;
@@ -457,6 +469,7 @@ export function renderUsage(next = usage) {
     if (!week) continue;
     const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
     el.querySelector('.label').textContent = `Week ${pct}%`;
+    el.setAttribute('aria-label', `Usage details: week ${pct}%`);
     el.style.setProperty('--pct', `${pct}%`);
     // Several accounts: out only once every one is (turns move to the next by themselves).
     const out = accounts ? accounts.every((a) => high(a.usage)) : week.status && week.status !== 'allowed';
@@ -479,7 +492,7 @@ export function renderUsage(next = usage) {
 }
 
 /** A bar in the Claude bar's look (#342); `.codex` keeps it out of the Claude bars' loops. */
-const codexBar = () => h('div', { class: 'usage codex', hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), h('span', { class: 'which' }));
+const codexBar = () => h('a', { class: 'usage codex', href: usageHref(), 'aria-label': 'Usage details', hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), h('span', { class: 'which' }));
 const setBar = (bar, pct, label) => {
   bar.querySelector('.label').textContent = label;
   bar.style.setProperty('--pct', `${pct}%`);
@@ -645,6 +658,12 @@ function releaseHeld(hold) {
 const eventCache = new Map();
 const EVENT_CACHE_THREADS = 12;
 
+/**
+ * Where a chat's history comes from: a ticket id, or a merged Taskmaster view's URL (Mine and Everyone, #920,
+ * thread.js mergedView) that pages several sessions as one. `query` is added to it.
+ */
+const eventsUrl = (src, query = '') => typeof src === 'number' ? `api/tickets/${src}/events${query && `?${query}`}` : `${src}${query && `&${query}`}`;
+
 function remember(ticketId, page) {
   eventCache.delete(ticketId);
   eventCache.set(ticketId, page);
@@ -656,9 +675,9 @@ export async function loadEvents(ticketId) {
   // A prefetch already on its way is the head start: wait for it, then fetch only what came after.
   await prefetching.get(ticketId);
   const cached = eventCache.get(ticketId);
-  const page = cached ?? await api(`api/tickets/${ticketId}/events`);
+  const page = cached ?? await api(eventsUrl(ticketId));
   if (cached) {
-    const fresh = await api(`api/tickets/${ticketId}/events?after=${page.events.at(-1)?.id ?? 0}`);
+    const fresh = await api(eventsUrl(ticketId, `after=${page.events.at(-1)?.id ?? 0}`));
     // Another load, or live events, may have added some of these while this one was on its way.
     const last = page.events.at(-1)?.id ?? 0;
     page.events = page.events.concat(fresh.filter((e) => e.id > last));
@@ -675,7 +694,7 @@ export function cachedEvents(ticketId) {
   const page = eventCache.get(ticketId);
   if (!page || prefetching.has(ticketId)) return null;
   remember(ticketId, page);
-  const fresh = api(`api/tickets/${ticketId}/events?after=${page.events.at(-1)?.id ?? 0}`).then((events) => {
+  const fresh = api(eventsUrl(ticketId, `after=${page.events.at(-1)?.id ?? 0}`)).then((events) => {
     // Live events may have joined the page while this was on its way, so go by id, not by position.
     const have = new Set(page.events.map((e) => e.id));
     const added = events.filter((e) => !have.has(e.id));
@@ -690,7 +709,7 @@ export function loadEarlier(ticketId, page, from) {
   // One at a time per page (Load earlier and Find can both ask), each going on from where the last got to.
   const load = (earlierLoads.get(page) ?? Promise.resolve()).catch(() => {}).then(async () => {
     const first = page.events[0].id;
-    const older = await api(`api/tickets/${ticketId}/events?before=${first}${from ? `&from=${from}` : ''}`);
+    const older = await api(eventsUrl(ticketId, `before=${first}${from ? `&from=${from}` : ''}`));
     Object.assign(page, { events: older.events.filter((e) => e.id < first).concat(page.events), more: older.more, tasks: older.tasks });
     remember(ticketId, page);
     return page;
@@ -708,7 +727,7 @@ const PREFETCH_ROWS = 2;
 
 function prefetchEvents(ticketId) {
   if (eventCache.has(ticketId) || prefetching.has(ticketId) || eventCache.size >= EVENT_CACHE_THREADS) return prefetching.get(ticketId) ?? Promise.resolve(); // always a promise: prefetchTopRows chains on it
-  const p = api(`api/tickets/${ticketId}/events`)
+  const p = api(eventsUrl(ticketId))
     .then((page) => { if (!eventCache.has(ticketId) && eventCache.size < EVENT_CACHE_THREADS) eventCache.set(ticketId, page); })
     .catch(() => {})
     .finally(() => prefetching.delete(ticketId));
@@ -739,7 +758,7 @@ export function prefetchTopRows() {
 export async function catchUpEvents() {
   const v = view;
   if (!v?.id) return;
-  const events = await api(`api/tickets/${v.id}/events?after=${v.lastEventId}`);
+  const events = await api(eventsUrl(v.merged?.src ?? v.id, `after=${v.lastEventId}`));
   if (view !== v) return; // another view (or chat) opened meanwhile: these aren't its events
   for (const ev of events) if (ev.id > view.lastEventId) appendEvent(ev);
 }
@@ -747,6 +766,14 @@ export async function catchUpEvents() {
 export function onTicketUpdate(ticket) {
   if (view?.kind !== 'project') return;
   if (view.projectId !== ticket.project_id) return inboxOtherTicket(ticket);
+  // Each person has their own Taskmaster (#919): the others' updates only refresh their entry in view.taskmasters.
+  if (ticket.kind === 'coordinator' && view.coordinator && ticket.id !== view.coordinator.id) {
+    // Another person's Taskmaster or the Overlord: its cards still count in Needs you.
+    const tm = view.taskmasters?.find((t) => t.id === ticket.id);
+    const before = tm?.ticket;
+    if (tm) tm.ticket = ticket;
+    return void inboxTicket(before, ticket);
+  }
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);
   if (ticket.kind === 'coordinator') view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);
@@ -804,7 +831,7 @@ addEventListener('pagehide', () => view?.kind === 'project' && leaveSeen(view.id
 document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && view?.kind === 'project' && leaveSeen(view.id));
 
 function onEvent(event) {
-  if (view?.kind !== 'project' || view.id !== event.ticket_id) return;
+  if (view?.kind !== 'project' || (view.id !== event.ticket_id && !inMerged(view.merged, event))) return;
   if (event.id <= view.lastEventId) return;
   if (held?.view === view) return void held.events.push(event);
   appendEvent(event);

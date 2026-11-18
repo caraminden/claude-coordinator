@@ -572,7 +572,7 @@ export const fileRoutes: Route[] = [
       if (!app.store.canSee(session, project.id)) throw new HttpError(404, 'That page is no longer there');
       if (await bridgedPage(app, body.page) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
       const linker = ticket ? null : app.store.latestArtifact(project.id, [abs, file]);
-      const to = ticket ?? (linker && app.store.getTicket(linker.ticket_id)) ?? app.store.getCoordinator(project.id);
+      const to = ticket ?? (linker && app.store.getTicket(linker.ticket_id)) ?? app.store.coordinatorFor(project.id, session.uid ?? null);
       if (!to) throw new HttpError(404, 'No minion or Taskmaster to send this to');
       const { about, text } = commentMessage(to.cwd && abs.startsWith(to.cwd + sep) ? abs.slice(to.cwd.length + 1) : abs, str(body.text, 'Answer', 10_000));
       app.runner.send(to.id, session.name, text, [], { comment: { path: abs, about }, hold: true });

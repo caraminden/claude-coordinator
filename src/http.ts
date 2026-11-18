@@ -34,6 +34,7 @@ import type { Runner } from './runner.ts';
 import type { Schedule } from './schedules.ts';
 import type { Embed } from './memory.ts';
 import type { UltraReviews } from './ultrareview.ts';
+import type { SideAsks } from './side-ask.ts';
 import type { Chain, LiveWaiters, TimedWakes } from './wake.ts';
 import type { ClientErrors, DeployWatch } from './deploy-watch.ts';
 
@@ -271,6 +272,8 @@ export interface App {
   landings: Landings;
   /** Ultra reviews people start on their own Claude login (src/ultrareview.ts, #432). */
   ultrareviews: UltraReviews;
+  /** Side questions to minions, in read-only forks of their sessions (src/side-ask.ts, #932). */
+  sideAsks: SideAsks;
   /** Who has each minion open or wrote in it lately (#695, src/presence.ts). */
   presence: Presence;
   /** Open event streams (GET /api/stream), with whose they are. */

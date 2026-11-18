@@ -2,7 +2,7 @@
 // shared/project/markdown-parity-audit-2026-10.md), plus what chat relies on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { linkify, linkifyHtml, renderMarkdown, slug } from '../public/ui/markdown.js';
+import { copyPayload, linkify, linkifyHtml, renderMarkdown, slug } from '../public/ui/markdown.js';
 import { linkThreadRefs, linkUrls } from '../public/threadrefs.js';
 import { struckSource } from '../public/strike.js';
 
@@ -357,4 +357,18 @@ test('shell aliases share the tone, tags are case-insensitive, one tone each', (
 test('an unknown or missing tag gets no header', () => {
   assert.equal(md('```js\nx\n```'), '<pre><code class="language-js">x</code></pre>');
   assert.equal(md('```\nx\n```'), '<pre><code>x</code></pre>');
+});
+
+test('copying a shell-tagged block ends in exactly one newline; other blocks copy unchanged', () => {
+  for (const tag of ['powershell-admin', 'powershell', 'wsl', 'fish', 'bash', 'cmd']) {
+    const html = md('```' + tag + '\nls\n```');
+    assert.match(html, /<pre class="cui-shell"/, tag);
+    assert.equal(copyPayload('ls', true), 'ls\n');
+  }
+  assert.equal(copyPayload('ls\n', true), 'ls\n');
+  assert.equal(copyPayload('a\nb\n\n', true), 'a\nb\n');
+  assert.doesNotMatch(md('```js\nx\n```'), /cui-shell/);
+  assert.doesNotMatch(md('```\nx\n```'), /cui-shell/);
+  assert.equal(copyPayload('x', false), 'x');
+  assert.equal(copyPayload('x\n', false), 'x\n');
 });

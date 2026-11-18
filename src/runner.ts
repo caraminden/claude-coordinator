@@ -27,7 +27,8 @@ import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
-import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
+import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
@@ -60,6 +61,7 @@ export function schemeRefs(project: Project, projects: Project[], tickets: Ticke
 
 /** The chat event kinds that post or settle a card waiting on people (a person's message answers one). */
 const CARD_KINDS = new Set(['question', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
+const EVERYONES = new Set(['question', 'plan', 'approval', 'note']);
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -163,6 +165,8 @@ interface TurnState {
   account?: number;
   /** Who asked for it (Store.turnAsker), which a non-member's relay keeps apart from `person`. */
   asker?: number | null;
+  /** What it was launched with (#878), its Claude Code version added from the init event; saved with its row in turns. */
+  hashes?: PromptHashes;
   /**
    * The one person whose own typed message it answers (#268): the only person mandate_item may post for.
    * null for a turn no one typed for (GitHub, a relay, a wake, a resume, a contraption's ask), 0 once
@@ -788,6 +792,8 @@ export class Runner {
       // Its cards waiting on people with the links that open them, for read_ticket and list_tickets (#400).
       open_cards: this.cardLinks(ticket, false, cards),
       properties: this.store.props.forTarget('minion', ticket.id),
+      // Who touched it and hasn't left (#919): their Taskmasters hear its updates; the page offers them Leave.
+      touched: ticket.kind === 'ticket' && !closed ? this.store.touchedBy(ticket) : [],
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
       wait: closed ? null : this.wait(ticket.id),
@@ -811,6 +817,16 @@ export class Runner {
     };
   }
 
+  /** A dismissed minion's claims (#921) free themselves; whoever keeps the scheme's claims hears so as held mail. */
+  private freeClaims(ticketId: number) {
+    const freed = this.store.claims.releaseHeldBy(ticketId);
+    const minion = this.store.getTicket(ticketId);
+    const keeper = minion && freed.length ? this.store.getOverlord(minion.project_id) : undefined;
+    if (!keeper) return;
+    for (const c of freed) this.leaveMail(keeper.id, `#${minion!.number} ${minion!.title}`, `(nothing to do unless something waits on it) ${c.name} is free: #${minion!.number}, its holder, was dismissed.`);
+    this.broadcast({ type: 'claims', projectId: minion!.project_id });
+  }
+
   /**
    * Close a ticket that is not running. Its worktree and branch are kept. Its temp folder, preview and
    * build output (#336) go on its lane, after its last turn's save; resolves once they are gone.
@@ -823,6 +839,10 @@ export class Runner {
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
+    this.freeClaims(ticketId);
+    // A split scheme's Taskmasters read it in their next turn's digest (#919's noteDigest).
+    const gone = this.store.getTicket(ticketId);
+    if (gone && gone.kind !== 'coordinator' && this.store.isSplit(gone.project_id)) this.store.noteDigest(gone.project_id, 0, `#${gone.number} ${gone.title} was dismissed`);
     return this.lanes.run(ticketId, 'dismissal cleanup', async () => {
       const ticket = this.store.getTicket(ticketId);
       // Reopened while this waited (the status route): its temp folder is in use again.
@@ -1009,7 +1029,7 @@ export class Runner {
           ...log.kept.map((k) => `- ${k}`),
         ].filter(Boolean).join('\n');
         console.log(`${p.name}: ${text}`);
-        const coordinator = this.store.getCoordinator(p.id);
+        const coordinator = this.store.getOverlord(p.id);
         if (coordinator) this.emit(coordinator.id, 'note', { text });
       }
     } finally {
@@ -1710,9 +1730,9 @@ export class Runner {
    * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
    * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
    */
-  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string): boolean | 'cold' | 'mail' | 'parked' {
+  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string, sender?: number): boolean | 'cold' | 'mail' | 'parked' {
     const minion = this.store.getTicket(minionId)!;
-    const from = to === minionId ? this.store.getCoordinator(minion.project_id)?.id : minionId;
+    const from = to === minionId ? sender ?? this.store.ownerCoordinator(minion)?.id : minionId;
     const { held, cold, parked } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent, need);
     if (!held) return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
@@ -1750,7 +1770,7 @@ export class Runner {
    */
   private copyToTaskmaster(to: number, author: string, text: string, unparked = false, from?: number) {
     const target = this.store.getTicket(to)!;
-    const coordinator = this.store.getCoordinator(target.project_id);
+    const coordinator = this.store.ownerCoordinator(target);
     const line = text.replace(/\s+/g, ' ');
     const sender = from ? this.store.getTicket(from)?.number : Number(/^#(\d+)/.exec(author)?.[1]) || undefined;
     if (coordinator) this.emit(coordinator.id, 'minion_copy', { author, from: sender ?? null, to: target.number, text: line.length > 200 ? line.slice(0, 200) + '…' : line, ...(unparked ? { unparked: true } : {}) });
@@ -1936,7 +1956,7 @@ export class Runner {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return 0;
     const loops: { key: string; chats: number[]; pair?: true }[] = ticket.kind === 'coordinator'
-      ? this.store.listProjects().map((p) => this.store.getCoordinator(p.id)).filter((c) => c && c.id !== ticketId)
+      ? this.store.listProjects().flatMap((p) => this.store.listCoordinators(p.id)).filter((c) => c && c.id !== ticketId)
         .map((c) => ({ key: pairKey(ticketId, c!.id), chats: [ticketId, c!.id] }))
       : [{ key: loopKey(ticketId), chats: this.loopChats(ticket) },
         // Its direct exchanges with the scheme's other minions (#783).
@@ -1967,7 +1987,7 @@ export class Runner {
 
   /** The chats a loop-guard note shows in: the minion's and its Taskmaster's. */
   private loopChats(minion: Ticket): number[] {
-    const coordinator = this.store.getCoordinator(minion.project_id);
+    const coordinator = this.store.ownerCoordinator(minion);
     return coordinator ? [minion.id, coordinator.id] : [minion.id];
   }
 
@@ -2053,7 +2073,7 @@ export class Runner {
   }
 
   /** Signal a turn's claude and, as it runs in its own process group, its tool subprocesses too. */
-  private signal(live: Pick<LiveTurn, 'dir' | 'unit' | 'container'>, sig: NodeJS.Signals) {
+  signal(live: Pick<LiveTurn, 'dir' | 'unit' | 'container'>, sig: NodeJS.Signals) {
     let pid = 0;
     try {
       pid = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8')).claude;
@@ -2216,7 +2236,7 @@ export class Runner {
 
   /** Held mail to the Citadel scheme's Taskmaster about keepalives. */
   private tellCitadel(text: string) {
-    const tm = this.store.getCoordinator(GLOBAL_OWNER);
+    const tm = this.store.getOverlord(GLOBAL_OWNER);
     if (tm) this.leaveMail(tm.id, 'Citadel (keepalives)', text);
   }
 
@@ -2332,15 +2352,49 @@ export class Runner {
    * Who a turn runs for (its GitHub login, and #177's Claude plan): the first person in its messages
    * (a relay counts as its sender's), else the minion's last person, else the scheme's owner. A relay
    * from someone outside this scheme (a non-member's ask to Citadel) runs as the scheme's owner (#211).
+   * A split scheme's Overlord has no last person (Cara's R4, "Starter, else owner", #921): it is nobody's own.
    */
   private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[]): number | null {
+    // A person's own Taskmaster (#919) runs for its person, but never on someone else's request: a turn another person
+    // starts there (a card answer, R5, a plan verdict, a file comment, /backup) runs on their login. Relays and held mail
+    // name no person, so they leave it on the owner's.
+    if (ticket.kind === 'coordinator' && ticket.coordinator_of != null) {
+      const starter = batch.find((m) => !m.from && this.personOf?.(m.author));
+      const p = (starter && this.personOf?.(starter.author)) || ticket.coordinator_of;
+      // #211: someone taken out of the scheme (or deleted) no longer pays for its turns; its owner does.
+      const user = this.store.getUser(p);
+      return user && this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? p : project.owner_id;
+    }
     for (const m of batch) {
       const p = this.personOf?.(m.author, m.from);
       if (!p) continue;
       const user = m.from ? this.store.getUser(p) : null;
       return user && !this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? project.owner_id : p;
     }
-    return ticket.person_id ?? project.owner_id;
+    return (this.isOverlord(ticket) ? null : ticket.person_id) ?? project.owner_id;
+  }
+
+  /** Whether `ticket` is a split scheme's Overlord (#919, #921): the Taskmaster that is nobody's own, beside one per person. */
+  isOverlord(ticket: Ticket | undefined): boolean {
+    return !!ticket && ticket.kind === 'coordinator' && ticket.coordinator_of == null && this.store.isSplit(ticket.project_id);
+  }
+
+  /**
+   * An answer to an Overlord's card wakes only the Taskmaster that acts on it (`actor`: the Overlord, or the person's
+   * Taskmaster that asked for everyone); every other Taskmaster in the scheme hears it as held mail (#921).
+   */
+  echoOverlordAnswer(overlord: Ticket, by: string, text: string, actor = overlord.id) {
+    if (!this.isOverlord(overlord)) return;
+    const line = text.length > 600 ? text.slice(0, 600) + '…' : text;
+    for (const tm of this.store.listCoordinators(overlord.project_id)) {
+      if (tm.id !== actor) this.leaveMail(tm.id, by, `(for your tracking; nothing to do) ${by} answered the Overlord's card:\n${line}`);
+    }
+  }
+
+  /** A card's answer kept in its chat without waking it: a for-everyone card's answer wakes its asker instead (#921). */
+  recordAnswer(ticketId: number, author: string, text: string, extra: object) {
+    this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...extra });
+    this.broadcastTicket(ticketId);
   }
 
   private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0) {
@@ -2408,51 +2462,6 @@ export class Runner {
       this.emit(ticket.id, 'note', { text: name ? `This minion is set to ${name}, but ${codexWhy}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${codexWhy}, so this turn runs on Claude.` });
     }
     const model = isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, project).model : picked;
-    // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
-    // the tripwire hook must still be there for a turn that outlives it.
-    const dir = join(place.host ? this.turnsDir : place.turnsDir, `${ticket.id}-${Date.now()}`);
-    const pin = join(dir, 'pin');
-    mkdirSync(dir, { recursive: true });
-    const pins = turnPins();
-    cpSync(pins.MCP_DIR, pin, { recursive: true });
-    // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
-    const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
-    // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
-    // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
-    const builds = landsBuilds(project.repo_dir);
-    const build = builds && ticket.kind !== 'coordinator' && ticket.build
-      ? {
-        build: ticket.build, branch: buildBranch(project.repo_dir, ticket.build), owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
-        // Only this server's own scheme has build previews (src/previews.ts).
-        preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
-      }
-      : null;
-    // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
-    const everyScheme = this.everySchemeFor(project, ticket, asker);
-    const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
-    const system = systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), jobMachines);
-    writeFileSync(join(dir, 'system-prompt.md'), system);
-    // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
-    // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
-    let tmp: string | null = null;
-    try {
-      tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
-    } catch (err: any) {
-      this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
-    }
-    // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
-    // A file, not an argument: a scheme's minion list outgrows a command line.
-    const refsFile = join(dir, 'scheme-refs.json');
-    this.writeRefs(refsFile, ticket);
-    // A host turn has no Codex hook, so the server login's Codex reviews run in its Codex container (#398): woken
-    // if it stopped (a reboot) without replacing one a review may be running in.
-    const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
-    const reviewAt = codexAt && !codexAt.host ? codexAt : null;
-    if (reviewAt && !keepalive) this.wakeCodex?.(person!);
-    const coordinator = this.coordinatorEnv(ticket);
-    const heavy = this.heavyEnv(ticket, person);
-    // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
-    const github = this.githubFor?.(person, dir) ?? null;
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
     // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a
     // schedule, a wake, a relay or a batch mixing people, which fall back to someone who didn't ask.
@@ -2470,39 +2479,22 @@ export class Runner {
     const cancelled = !step && !keepalive && this.store.getSetting<string>(closeCancelledKey(ticket.id));
     if (cancelled) this.store.deleteSetting(closeCancelledKey(ticket.id));
     const cancelledLine = cancelled ? [{ author: 'System', text: `Your close_self in your last turn was cancelled: ${cancelled}, so this minion is still open. Once nothing is left for people, call close_self again.`, images: [] }] : [];
+    // What this scheme's other Taskmasters did since this one's last turn (#919), written by code, at most ten lines.
+    const digest = ticket.kind === 'coordinator' && !step && !keepalive ? this.store.digestFor(ticket.id) : [];
+    const digestLine = digest.length ? [{ author: 'System', text: `Since your last turn, this scheme's other ${AGENT_NAME}s:\n${digest.map((l) => `- ${l}`).join('\n')}`, images: [] }] : [];
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
-    const typer = typedBy ? this.store.getUser(typedBy) : undefined;
-    const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
-    const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
-    // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
-    let plan: LaunchPlan;
+    let built: ReturnType<Runner['buildLaunch']>;
     try {
-      plan = launchPlan({
-        project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
-        folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
-          // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
-          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
-        codex: codex ? { thread: same || null } : null,
-        codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
-        env: { server: process.env, coordinator, heavy, github: github?.env ?? null, secrets: secretEnv(secrets) },
-        memory: this.memoryScheme(project.id),
-        media: !!this.mediaFor?.(person),
-        // A Codex turn has image_gen itself; a host turn reaches Codex only through the person's Codex container.
-        codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
-        typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
-        homeContraptions: homeOf,
-        jobMachines,
-        appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
-        everyScheme,
-        claudeBin: this.claudeBin,
+      built = this.buildLaunch(project, ticket, {
+        place, person, asker, machines, model, effort, typedBy, secrets, name: `${ticket.id}-${Date.now()}`,
+        folders: { files: filesDir, shared: sharedDir, memory: memoryDir }, codex: codex ? { thread: same || null } : null,
       });
     } catch (err: any) {
       // A launch that can't be built (a settings file past Claude Code's cap, #661; claude not on the PATH) fails the turn with its reason, in the chat.
       console.error(`Minion ${ticket.id}: its launch could not be built:`, err);
-      rmSync(dir, { recursive: true, force: true });
       const event = this.emit(ticket.id, 'error', { text: `Could not start the turn: ${err.message}` });
       const note = `Could not start: ${err.message}`;
       this.setFailNote(ticket.id, { note: note.length > 60 ? `${note.slice(0, 59)}…` : note });
@@ -2510,6 +2502,8 @@ export class Runner {
       this.onTurnError(ticket.id, err.message, event.id);
       return;
     }
+    const { plan, dir, system, parts, context, pins, github, unit, reviewAt } = built;
+    if (reviewAt && !keepalive) this.wakeCodex?.(person!);
     const { command, args, env, configDir } = plan;
     // What its cached prefix is built from (#862), before --resume joins the arguments: a keepalive runs only while it is the
     // one its last real turn cached. A minion's alone: Taskmasters and Codex get no keepalives.
@@ -2529,6 +2523,7 @@ export class Runner {
         return;
       }
     }
+    const hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person));
     // Written before anything of the minion's changes below, so a launch that can't be written leaves who it runs for as it was.
     for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
     // A keepalive changes nothing of the minion's: who it runs for, its state, note and replies stay as the last real turn left them.
@@ -2601,7 +2596,7 @@ export class Runner {
 
     const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
       : keepalive ? promptMessage(batch)
-      : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []), ...handBack, ...cancelledLine, ...batch]);
+      : promptMessage([...(context ? [{ author: 'System', text: context, images: [] }] : []), ...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []), ...handBack, ...cancelledLine, ...digestLine, ...batch]);
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);
     for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
     if (codex) {
@@ -2618,7 +2613,7 @@ export class Runner {
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
       ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
@@ -2645,6 +2640,141 @@ export class Runner {
       this.spawnWrapper(wrapper, dir);
     });
     return live.ended;
+  }
+
+  /**
+   * A launch from the facts a turn was given (src/turn-launch.ts), in a folder of its own named `name`. A side
+   * question's fork (#932, src/side-ask.ts) builds its own here too, so its tools and prompt, the cached prefix,
+   * are its minion's turn's. Throws, removing the folder, when the launch can't be built.
+   */
+  buildLaunch(project: Project, ticket: Ticket, f: {
+    place: TurnPlace; person: number | null; asker: number | null; machines: ReturnType<Runner['machines']>; model: string | null; effort: string | null;
+    typedBy: number | null; secrets: Map<string, string>; name: string; folders: { files: string | null; shared: string | null; memory: string | null };
+    codex: { thread: string | null } | null; github?: number | null; side?: boolean;
+  }) {
+    const { place, person, asker, machines, model, effort, codex } = f;
+    const { files: filesDir, shared: sharedDir, memory: memoryDir } = f.folders;
+    // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
+    // the tripwire hook must still be there for a turn that outlives it.
+    const dir = join(place.host ? this.turnsDir : place.turnsDir, f.name);
+    const pin = join(dir, 'pin');
+    mkdirSync(dir, { recursive: true });
+    try {
+      const pins = turnPins();
+      cpSync(pins.MCP_DIR, pin, { recursive: true });
+      // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
+      const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
+      // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
+      // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
+      const builds = landsBuilds(project.repo_dir);
+      const build = builds && ticket.kind !== 'coordinator' && ticket.build
+        ? {
+          build: ticket.build, branch: buildBranch(project.repo_dir, ticket.build), owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
+          // Only this server's own scheme has build previews (src/previews.ts).
+          preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
+        }
+        : null;
+      // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
+      const everyScheme = this.everySchemeFor(project, ticket, asker);
+      const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
+      // Two halves (#878): system-prompt.md, the same for every minion of the scheme, and the per-minion and volatile lines that open the turn message.
+      const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines);
+      const system = promptText(parts.system);
+      writeFileSync(join(dir, 'system-prompt.md'), system);
+      const context = promptText(parts.turn);
+      // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
+      // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
+      let tmp: string | null = null;
+      try {
+        tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
+      } catch (err: any) {
+        this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
+      }
+      // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
+      // A file, not an argument: a scheme's minion list outgrows a command line.
+      const refsFile = join(dir, 'scheme-refs.json');
+      this.writeRefs(refsFile, ticket);
+      // A host turn has no Codex hook, so the server login's Codex reviews run in its Codex container (#398): woken
+      // (by the caller) if it stopped (a reboot) without replacing one a review may be running in.
+      const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
+      const reviewAt = codexAt && !codexAt.host ? codexAt : null;
+      const coordinator = this.coordinatorEnv(ticket);
+      const heavy = this.heavyEnv(ticket, person);
+      // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
+      const github = this.githubFor?.(f.github === undefined ? person : f.github, dir) ?? null;
+      const typer = f.typedBy ? this.store.getUser(f.typedBy) : undefined;
+      const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
+      // A side question's fork runs as the server's child: it is short, and a restart loses it anyway.
+      const unit = this.units && place.host && !f.side ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
+      // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
+      const plan = launchPlan({
+        project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
+        folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
+          // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
+          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
+        codex,
+        codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
+        env: { server: process.env, coordinator, heavy, github: github?.env ?? null, secrets: secretEnv(f.secrets) },
+        memory: this.memoryScheme(project.id),
+        media: !!this.mediaFor?.(person),
+        // A Codex turn has image_gen itself; a host turn reaches Codex only through the person's Codex container.
+        codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
+        typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
+        homeContraptions: homeOf,
+        jobMachines,
+        appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
+        everyScheme,
+        claudeBin: this.claudeBin,
+        ...(f.side ? { side: true } : {}),
+      });
+      return { plan, dir, system, parts, context, pins, github, unit, reviewAt };
+    } catch (err) {
+      rmSync(dir, { recursive: true, force: true });
+      throw err;
+    }
+  }
+
+  /**
+   * Start a side question's fork (#932, src/side-ask.ts): the minion's own launch (buildLaunch, with the read-only
+   * guard) on the asker's login, resuming `resume` (the minion's session, forked; or the fork, for a follow-up), with
+   * `prompt` as its message. Nothing of the minion's changes: not its session, state or queue. Throws with a reason
+   * people can read when it can't start.
+   */
+  sideLaunch(ticketId: number, asker: number, prompt: string, resume: { id: string; fork: boolean }) {
+    if (this.noTurns) throw new Error('This is a preview: it never runs turns.');
+    const ticket = this.store.getTicket(ticketId);
+    const project = ticket && this.store.getProject(ticket.project_id);
+    if (!ticket || !project || ticket.kind === 'coordinator' || !ticket.cwd) throw new Error('Only a minion with a folder can be asked on the side.');
+    // Sender pays (#213): the asker's own login, never the minion's person's. The minion's warm key, so its warm account wins when it is the asker's.
+    const place = this.placeFor?.(asker, warmKey(ticket)) ?? { host: true as const };
+    if ('refused' in place) throw new Error(place.refused);
+    const { model, effort } = turnSettings(ticket, project);
+    if (isCodexModel(model) || this.store.getSetting<CodexThread>(codexThreadKey(ticket.id))) throw new Error('This minion runs on Codex, so it has no Claude session to ask on the side.');
+    // The tools come from the minion's own turn's people (its person and asker), so the fork's cached prefix is the turn's.
+    const person = ticket.person_id;
+    const turnAsker = this.store.turnAsker(ticket.id) ?? person;
+    const machines = this.machines(project, turnAsker !== null ? [turnAsker] : []);
+    const { plan, dir } = this.buildLaunch(project, ticket, {
+      place, person, asker: turnAsker, machines, model, effort, typedBy: null, secrets: new Map(), name: `side-${ticket.id}-${Date.now()}`,
+      folders: { files: this.filesDir(ticket), shared: this.sharedDir(project), memory: null }, codex: null, github: asker, side: true,
+    });
+    try {
+      for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
+      // The asker's login may lack the minion's session: put back the database's copy, as of its last finished turn.
+      // shortcut: mid-turn on another login, the fork sees the session as its last turn left it; copying the live transcript across would show the turn so far.
+      if (resume.fork) restoreSession(this.store, ticket, project, plan.configDir);
+      if (!existsSync(transcriptPath(plan.configDir, ticket.cwd, resume.id))) throw new Error(resume.fork ? 'This minion has no session to ask yet.' : 'This side thread has ended; ask a new question.');
+      plan.args.push('--resume', resume.id, ...(resume.fork ? ['--fork-session'] : []));
+      writeFileSync(join(dir, 'prompt.jsonl'), prompt);
+      for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
+      writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: plan.command, args: plan.args, cwd: ticket.cwd, env: plan.env }), { mode: 0o600 });
+    } catch (err) {
+      rmSync(dir, { recursive: true, force: true });
+      throw err;
+    }
+    if (plan.spawn.how === 'container') this.spawnInContainer(place as Extract<TurnPlace, { host: false }>, dir, plan.spawn.wrapper, ticket.id);
+    else this.spawnWrapper(plan.spawn.wrapper, dir);
+    return { dir, configDir: plan.configDir, cwd: ticket.cwd, account: place.account ?? 1, container: place.host ? null : place.container };
   }
 
   /**
@@ -3126,6 +3256,10 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.mcp_servers)) this.checkMcp(ticketId, ev.mcp_servers);
+    if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.claude_code_version === 'string') {
+      const hashes = this.store.getSetting<TurnState>(turnKey(ticketId))?.hashes;
+      if (hashes) this.saveTurn(ticketId, { hashes: { ...hashes, claude: ev.claude_code_version } });
+    }
     const slim = slimEvent(ev);
     if (!slim) return;
     const progress = this.progressFor(ticketId);
@@ -3144,11 +3278,12 @@ export class Runner {
     // shortcut: a turn stopped, or the server restarted, before the result keeps both versions; rare, so left.
     if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
+      const state = this.store.getSetting<TurnState>(turnKey(ticketId));
       const turn = this.store.recordTurn(ticketId, {
         event_id: row.id, session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: row.created_at,
         session_cost_usd: ev.total_cost_usd, duration_ms: ev.duration_ms, usage: ev.usage,
-        payer: this.payerOf(this.store.getSetting<TurnState>(turnKey(ticketId))?.person),
-        account: this.store.getSetting<TurnState>(turnKey(ticketId))?.account ?? null, modelUsage: ev.modelUsage,
+        payer: this.payerOf(state?.person), hashes: state?.hashes ?? null,
+        account: state?.account ?? null, modelUsage: ev.modelUsage,
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
     }
@@ -3524,6 +3659,8 @@ export class Runner {
   }
 
   emit(ticketId: number, kind: string, data: unknown): EventRow {
+    // A split scheme's Overlord asks and alerts for everyone (#921): its cards and notes show in every member's chat (#920 reads the flag).
+    if (EVERYONES.has(kind) && this.isOverlord(this.store.getTicket(ticketId))) data = { ...(data as object), everyone: true };
     const row = this.store.addEvent(ticketId, kind, data);
     this.broadcast({ type: 'event', event: row });
     if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId);

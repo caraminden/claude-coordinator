@@ -15,7 +15,7 @@ import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../a
 import { cardHref } from '../card-links.ts';
 import { keyFiles } from '../release-key.ts';
 import { checkNeed } from '../needs.ts';
-import { armForCi, postCard, tellTaskmaster } from '../ci-armed.ts';
+import { armForCi, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS } from '../../public/model-table.js';
@@ -36,15 +36,16 @@ import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
 import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '../ultrareview.ts';
 import { sendIdOf, sendOnce } from '../send-ids.ts';
+import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { homeApp, makeKey } from './app.ts';
 import { machineNotes, patchMachine } from './machines.ts';
-import { MachineJobs } from '../machine-jobs.ts';
-import { ensureCoordinator, LINE_FIELDS, schemeTarget } from './projects.ts';
+import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } from './projects.ts';
 import { pacificTime, parseWakeTime, type Relay } from '../wake.ts';
 import { gitOut } from '../git.ts';
+import { MachineJobs } from '../machine-jobs.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -265,6 +266,8 @@ function personWrote({ app: { store, runner, presence }, caller, session, ticket
   if (caller) return;
   runner.personWrote(ticket.id);
   presence.wroteIn(ticket.id, session.name);
+  // Writing in a minion's chat (or answering its card) touches it: its updates reach their Taskmaster too (#919).
+  if (ticket.kind !== 'coordinator' && session.uid != null) store.touch(ticket.id, session.uid);
   const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id) : [ticket];
   for (const t of minions) runner.continueLoop(t.id, session.name);
 }
@@ -344,6 +347,24 @@ export const ticketRoutes: Route[] = [
       try {
         const ev = await app.ultrareviews.start(ticket.id, session.uid, session.name, spec, size, app.sharedDir(row));
         return json(res, 202, ev);
+      } catch (err: any) {
+        throw new HttpError(409, err.message);
+      }
+    },
+  },
+  {
+    // Ask a minion on the side (#932): a read-only fork of its session answers in a side thread, on the asker's own
+    // login (sender pays), so only a signed-in person reaches it. `thread` follows up the asker's own thread.
+    method: 'POST', path: '/api/tickets/:ticket/side', who: ['person'],
+    async handler({ req, res, app, session, ticket }) {
+      if (!session.uid) throw new HttpError(403, 'Sign in as yourself to ask on the side: it runs on your own Claude login');
+      if (ticket.kind === 'coordinator') throw new HttpError(400, 'Side questions are for minions, not the Taskmaster');
+      const body = await readJson(req);
+      const text = str(body.text, 'text', SIDE_MAX_CHARS);
+      const thread = body.thread === undefined || body.thread === null ? undefined : Number(body.thread);
+      if (thread !== undefined && !Number.isSafeInteger(thread)) throw new HttpError(400, 'thread must be a side thread\'s id');
+      try {
+        return json(res, 202, app.sideAsks.ask(ticket.id, session.uid, session.name, text, thread));
       } catch (err: any) {
         throw new HttpError(409, err.message);
       }
@@ -438,9 +459,18 @@ export const ticketRoutes: Route[] = [
   {
     method: 'POST', path: '/api/tickets/:ticket/messages', who: ['person', 'taskmaster'],
     async handler(ctx) {
-      const { req, res, app, session, caller, ticket } = ctx;
-      const { id } = ticket;
+      const { req, res, app, session, caller } = ctx;
       const { runner } = app;
+      // A person writes to their own Taskmaster (#919): one in another person's chat goes to theirs (R5, "Answer
+      // cards only"), the first from a second member splits the scheme. The Overlord takes the words of anyone who has a
+      // Taskmaster of their own (or no way to get one); a member without one gets theirs made first.
+      const overlord = ctx.ticket.coordinator_of == null && app.store.isSplit(ctx.ticket.project_id);
+      if (!caller && ctx.ticket.kind === 'coordinator' && !(overlord && app.store.coordinatorFor(ctx.ticket.project_id, session.uid)?.coordinator_of === session.uid)) {
+        const own = await ensureCoordinatorFor(app, app.store.getProject(ctx.ticket.project_id)!, session.uid);
+        if (own.id !== ctx.ticket.id) ctx = { ...ctx, ticket: ticketView(app, own.id) };
+      }
+      const { ticket } = ctx;
+      const { id } = ticket;
       // Room for MAX_IMAGES images at 5 MB each, base64-encoded.
       const body = await readJson(req, 45_000_000);
       const attached = (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0);
@@ -457,7 +487,12 @@ export const ticketRoutes: Route[] = [
         if (unparks) await unparkTicket(app, ticket, session.name, APP_NAME, true);
         // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
         if (caller && ticket.kind !== 'coordinator') {
-          held = runner.relay(id, id, session.name, text, body.urgent === true || unparks);
+          held = runner.relay(id, id, session.name, text, body.urgent === true || unparks, true, undefined, caller.id);
+          // Its next message_coordinator answers this Taskmaster (#919), whose person now touches it.
+          if (held !== true) {
+            app.store.setSetting(replyToKey(id), caller.id);
+            if (caller.coordinator_of != null) app.store.touch(id, caller.coordinator_of);
+          }
           // The loop guard held the message meant to wake it: it stays parked, so Unpark still shows.
           if (unparks && held === true && ticket.state === 'parked' && !runner.isRunning(id)) {
             app.store.updateTicket(id, { state: 'parked' });
@@ -536,6 +571,13 @@ export const ticketRoutes: Route[] = [
       // A card asking for the go to merge or land says so, for the minions list's chip (#575).
       const kind = oneOf(body.kind ?? null, ['merge'], 'kind') as 'merge' | null;
       const card = { questions, ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
+      // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
+      // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
+      if (body.for_everyone === true) {
+        if (ticket.kind !== 'coordinator' || !questions.length || to || body.when_ci_passes === true) throw new HttpError(400, 'for_everyone is a Taskmaster\'s question card, with no to or when_ci_passes');
+        const overlord = ticket.coordinator_of != null ? app.store.getOverlord(ticket.project_id) : undefined;
+        if (overlord) return json(res, 201, postCard(app, overlord, { ...card, asker: ticket.id }));
+      }
       // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
       const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
       if (armed) return json(res, 202, { armed });
@@ -629,7 +671,14 @@ export const ticketRoutes: Route[] = [
         const picked = selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
       }).join('\n\n');
-      deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, { answer: { questionId: body.questionId, answers } });
+      const answer = { answer: { questionId: body.questionId, answers } };
+      // A Taskmaster's card for everyone (#921): kept where the card is, acted on by the Taskmaster that asked.
+      const asker = data.asker != null ? store.getTicket(data.asker) : undefined;
+      if (asker && asker.status !== 'closed') {
+        runner.recordAnswer(id, session.name, `My answers to the question card:\n\n${text}`, answer);
+        deliverAnswer(app, asker.id, session.name, `My answers to your question card for everyone (in the Overlord's chat):\n\n${text}`, {});
+      } else deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, answer);
+      runner.echoOverlordAnswer(ticket, session.name, text, asker && asker.status !== 'closed' ? asker.id : id);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },
@@ -748,6 +797,7 @@ export const ticketRoutes: Route[] = [
       const result = { status: body.verdict === 'approve' ? 'approved' : fixed ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });
       runner.emit(id, 'plan_result', { id: card.id, ...result });
+      runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? 'Approved' : `Sent back${notes ? `: ${notes}` : ''}`}`);
       deliverAnswer(app, id, session.name, card.releaseKey
         ? notes === null
           ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
@@ -852,11 +902,30 @@ export const ticketRoutes: Route[] = [
         const text = !agent && after.toLowerCase() === by.toLowerCase() ? `${by} took over #${ticket.number}`
           : after ? `${by} handed #${ticket.number} to ${after}` : `${by} unassigned #${ticket.number}`;
         runner.emit(id, 'note', { text });
-        const coordinator = store.getCoordinator(ticket.project_id);
-        if (coordinator) runner.emit(coordinator.id, 'note', { text });
+        // The old owner stays touched, so its updates still reach their Taskmaster (#919).
+        const was = store.findUser('name', store.props.personName(before) || '')?.id;
+        if (was != null) store.touch(id, was);
+        if (!store.isSplit(ticket.project_id)) {
+          const coordinator = store.getCoordinator(ticket.project_id);
+          if (coordinator) runner.emit(coordinator.id, 'note', { text });
+        } else {
+          // Split: both owners' Taskmasters hear it as held mail.
+          const tms = new Set([was ?? null, store.minionOwner(ticket)].map((uid) => store.coordinatorFor(ticket.project_id, uid)?.id));
+          for (const tm of tms) if (tm != null) runner.leaveMail(tm, by, text);
+          store.noteDigest(ticket.project_id, agent?.kind === 'coordinator' ? agent.id : 0, text);
+        }
       }
       runner.broadcastTicket(id);
       return json(res, 200, r);
+    },
+  },
+  {
+    // Leave a minion (#919): its updates stop reaching your Taskmaster until you write in it again. The menu item is #920's.
+    method: 'POST', path: '/api/tickets/:ticket/leave', who: ['person'], refuse: 'Only a person can leave a minion',
+    async handler({ res, app, session, ticket }) {
+      if (ticket.kind === 'coordinator') throw new HttpError(400, `Only a minion can be left, not a ${AGENT_NAME}`);
+      app.store.leaveTouched(ticket.id, session.uid!);
+      return json(res, 200, { left: ticket.id });
     },
   },
   {
@@ -1221,7 +1290,7 @@ export const ticketRoutes: Route[] = [
       if (body.cancel != null) {
         const r = waiters.cancelRelay(ticket.id, Number(body.cancel));
         if (!r) throw new HttpError(404, `No pending relay ${Number(body.cancel)} of yours`);
-        const taskmaster = store.getCoordinator(ticket.project_id);
+        const taskmaster = store.ownerCoordinator(ticket);
         if (taskmaster) runner.leaveMail(taskmaster.id, `#${ticket.number} ${ticket.title}`, `(for your tracking; nothing to do) #${ticket.number} cancelled its relay to ${'scheme' in r.to ? r.to.scheme : `#${r.to.number}`}.`);
         return json(res, 200, { cancelled: r.id, relays: mine() });
       }
@@ -1237,7 +1306,7 @@ export const ticketRoutes: Route[] = [
         to = { minion: m.id, number: m.number };
       } else {
         const { project } = schemeTarget(app, ticket, target);
-        to = { scheme: project.name, taskmaster: (await ensureCoordinator(app, project)).id };
+        to = { scheme: project.name, taskmaster: (await ensureCoordinatorFor(app, project, null)).id }; // not for a member: the Overlord (#919)
       }
       const commit = body.commit == null || body.commit === ''
         ? (ticket.cwd ? await gitOut(['rev-parse', 'HEAD'], ticket.cwd) : null)
@@ -1245,7 +1314,7 @@ export const ticketRoutes: Route[] = [
       if (!commit) throw new HttpError(400, body.commit ? `No commit ${String(body.commit).slice(0, 40)} in the live checkout or the scheme's repo` : 'No commit to wait for: commit the work first, or give a commit');
       const dest = 'scheme' in to ? to.scheme : `#${to.number}`;
       const { queued, relay } = await waiters.addRelay({ ticket: ticket.id, to, text, commit });
-      const taskmaster = store.getCoordinator(ticket.project_id);
+      const taskmaster = store.ownerCoordinator(ticket);
       if (queued && taskmaster) runner.leaveMail(taskmaster.id, `#${ticket.number} ${ticket.title}`, `(for your tracking; nothing to do) #${ticket.number} will send this to ${dest} once ${commit.slice(0, 7)} is live: ${text}`);
       runner.emit(ticket.id, 'note', { text: `${queued ? `Relay to ${dest} queued until ${commit.slice(0, 7)} is live` : `Relay to ${dest} sent: ${commit.slice(0, 7)} was live already`}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 201, { queued, id: relay.id, commit, to: dest, relays: mine() });

@@ -17,12 +17,13 @@ import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
+import { SideAsks } from './src/side-ask.ts';
 import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
 import { ciFinished, postCard } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
-import { Store, type Artifact, type Project, type User } from './src/db.ts';
+import { buildOwnerKey, Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { MachineJobs } from './src/machine-jobs.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
@@ -415,16 +416,19 @@ const ultrareviews = new UltraReviews({
 });
 // A boot check's or preview's copy names the live reviews' folders: only the live server may clear them.
 if (!BOOT_CHECK) ultrareviews.recover();
+// Side questions (#932): forks of minions' sessions on the asker's login; a restart ends them and deletes the forks.
+const sideAsks = new SideAsks(store, runner, broadcast);
+if (!BOOT_CHECK) sideAsks.recover();
 // Who is in which chat (#695): in memory, swept for late heartbeats and old writes.
 const presence = new Presence({ projectOf: (id) => store.getTicket(id)?.project_id, broadcast });
 setInterval(() => presence.sweep(), 15_000).unref();
-claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container);
+claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container) + sideAsks.inContainer(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
 runner.onMessage = (id) => landings.talked(id);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
 // run in units of their own as landings do; only ones that fell back to a child count.
-runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running();
+runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running() + sideAsks.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);
 runner.mediaFor = (person) => openrouter.connected(person);
@@ -446,7 +450,7 @@ function notify(ticketId: number, trigger: PushTrigger, except: string | null = 
 }
 
 outsideSpend.onCap = (projectId, total, cap) => {
-  const coordinator = store.getCoordinator(projectId);
+  const coordinator = store.getOverlord(projectId);
   if (!coordinator) return;
   const text = `Spend on outside APIs is $${total.toFixed(2)} this month, past the scheme's $${cap.toFixed(2)} cap. Nothing has stopped; raise the cap or cut back.`;
   runner.emit(coordinator.id, 'note', { text });
@@ -469,7 +473,7 @@ waiters.deliver = (r) => {
     const author = `${own.name} #${from.number} (relayed once live)`;
     runner.leaveMail(r.to.taskmaster, author, asData(author, r.text));
   } else runner.leaveMail(r.to.minion, `${who} (relayed once live)`, r.text);
-  const taskmaster = store.getCoordinator(from.project_id);
+  const taskmaster = store.ownerCoordinator(from);
   if (taskmaster) runner.leaveMail(taskmaster.id, who, `(for your tracking; nothing to do) #${from.number}'s relay to ${'scheme' in r.to ? r.to.scheme : `#${r.to.number}`} went out`);
 };
 runner.heldFor = (id) => waiters.heldFor(id);
@@ -487,7 +491,7 @@ waiters.hold = (c, why) => {
   runner.emit(c.ticket, 'note', { text: `${why}, so this minion hasn't started. Start now starts it with its brief; or dismiss it.` });
   runner.broadcastTicket(c.ticket);
   notify(c.ticket, { kind: 'state', state: 'blocked', note: `${why}, so this one is held` });
-  const coordinator = store.getCoordinator(t.project_id);
+  const coordinator = store.ownerCoordinator(t);
   if (coordinator) runner.send(coordinator.id, APP_NAME, `${why}, so #${t.number} ${t.title}, chained on it, is held and hasn't started. Ask people whether to start it (message_ticket with start_now starts it with its brief) or dismiss it.`);
 };
 if (!BOOT_CHECK) {
@@ -645,9 +649,10 @@ services.onDeploy = (view) => {
   if (shipped?.home_scheme != null && meant && view.to && meant !== view.to) tellHome(shipped.home_scheme, `Auto-deploy of ${shipped.title} (${shipped.name}) went live at ${view.to.slice(0, 9)}, but your clone's ${view.branch} is at ${meant.slice(0, 9)}: GitHub didn't have it yet. Push ${view.branch}, then press Deploy on its card on the Releases page (or call deploy_contraption).`);
 };
 /** A message from Citadel to a scheme's Taskmaster, if it has one. */
+// Scheme-wide news (auto-deploys, alerts) is nobody's in particular: the Overlord's (#921), the only Taskmaster before a split.
 const tellHome = (projectId: number, text: string) => {
-  const tm = store.getCoordinator(projectId);
-  if (tm) runner.send(tm.id, APP_NAME, text);
+  const tm = store.getOverlord(projectId);
+  if (tm) runner.send(tm.id, APP_NAME, text, [], runner.isOverlord(tm) ? { everyone: true } : {});
 };
 // The workflow readers go through CI health's etag-cached reads (defined below; first called after startup's scan).
 const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r), runArtifacts: (p: Project, r: Run) => ciHealth.runArtifacts(p, r) };
@@ -873,7 +878,7 @@ const alertScheme = (from: number) => from || store.listProjects().find((p) => l
 const alertWakes = new AlertWakes(store, {
   wake: (from, text) => {
     const scheme = alertScheme(from);
-    if (!scheme || !store.getCoordinator(scheme)) return false;
+    if (!scheme || !store.getOverlord(scheme)) return false;
     tellHome(scheme, text);
     return true;
   },
@@ -886,7 +891,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
   if (!c || !identity) return false;
   const wakes = title !== null && !quiet;
   const scheme = wakes ? alertScheme(project.id) : 0;
-  if (scheme && store.getCoordinator(scheme)) link = `/c/#/p/${scheme}`;
+  if (scheme && store.getOverlord(scheme)) link = `/c/#/p/${scheme}`;
   try {
     const { status, answer } = await callMandate(c, identity, key, title === null ? undefined : { title, alert: !quiet, link });
     if (status === 200 && wakes) alertWakes.raise({ from: project, key, title, link, person: person.name, parts });
@@ -909,9 +914,9 @@ const ciHealth = new CiHealth(store, {
   // A failed scheduled run (#588), or a dispatched one on main, is held mail for the scheme's Taskmaster (#678), to start a bug minion;
   // a watched workflow gone red on main wakes it (#774).
   tell: (project, text, wake) => {
-    const coordinator = store.getCoordinator(project.id);
+    const coordinator = store.getOverlord(project.id);
     if (coordinator) {
-      if (wake) runner.send(coordinator.id, APP_NAME, text);
+      if (wake) runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
       else runner.leaveMail(coordinator.id, APP_NAME, text);
     }
     return !!coordinator;
@@ -928,6 +933,7 @@ const landHandoffs = new LandHandoffs({
     return true;
   },
   liveAlready: async (id) => (await waiters.pendingLive()).includes(id),
+  buildOwner: (id, n) => store.getSetting<number>(buildOwnerKey(store.getTicket(id)?.project_id ?? 0, n)) ?? null,
   // A clean land on main deploys the scheme's home contraptions on main (#712), through auto-deploy's start, which marks the commit tried.
   apps: (id) => {
     const t = store.getTicket(id);
@@ -1011,14 +1017,14 @@ github.onMerged = (repoDir) => catchUp(repoDir);
 // One fetched by a runner agent job's scripts goes under that job's note instead (#339).
 runnerTokens.onFetched = (project, text, machine) => {
   if (runnerJobs.absorb(project, machine, text)) return;
-  const coordinator = store.getCoordinator(project.id);
+  const coordinator = store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text });
 };
 // So is each runner agent add or remove (#328), once, when it ends, its output collapsed under it (#339); a list isn't.
 // The CI store (#658): a refusal for room is told in the scheme Taskmaster's chat; the rules also run daily (and soon
 // after a start), for schemes that have stopped uploading and for what a restart cut off mid-upload.
 ciStore.onFull = (project, text) => {
-  const coordinator = store.getCoordinator(project.id);
+  const coordinator = store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text });
 };
 if (!BOOT_CHECK && !PREVIEW) {
@@ -1027,7 +1033,7 @@ if (!BOOT_CHECK && !PREVIEW) {
   setInterval(sweepCi, 24 * 60 * 60_000).unref();
 }
 runnerJobs.onNote = (project, text, detail) => {
-  const coordinator = store.getCoordinator(project.id);
+  const coordinator = store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text, detail });
 };
 
@@ -1036,7 +1042,7 @@ mainSync.stuck = (repoDir, why) => {
   if (!why) return;
   console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`);
   const project = store.listProjects().find((p) => p.repo_dir === repoDir);
-  const coordinator = project && store.getCoordinator(project.id);
+  const coordinator = project && store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text: `This scheme's main checkout (${repoDir}) isn't level with GitHub's main, and ${APP_NAME} didn't fast-forward it: ${why}. A person needs to look.` });
 };
 
@@ -1118,7 +1124,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

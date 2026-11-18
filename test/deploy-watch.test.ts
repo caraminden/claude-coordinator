@@ -95,6 +95,25 @@ test('a regression wakes each minion that shipped in the deploy once, by Shipped
   assert.equal(mailed.length, 1);
 });
 
+test("in a split scheme the watch's line goes to the Overlord, not the owner's own Taskmaster (#921)", async () => {
+  const { store, scheme, tm, clock, mailed, w, deploy, errors } = setup();
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  store.db.prepare('UPDATE projects SET owner_id = ? WHERE id = ?').run(cara.id, scheme.id);
+  store.splitScheme(scheme.id, josh.id);
+  const overlord = store.getOverlord(scheme.id)!;
+  assert.notEqual(overlord.id, tm.id);
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  errors(1, clock.now - 10 * MIN);
+  const at = clock.now;
+  deploy(sha('e'), [{ sha: sha('e'), subject: 'Bump something' }]);
+  errors(14, at + 5 * MIN);
+  clock.now = at + 20 * MIN;
+  await w.tick();
+  assert.deepEqual(mailed.map((m) => m.id), [overlord.id]);
+});
+
 test('a doubling under the floor, or a rise short of double, is ignored', async () => {
   const { store, clock, woken, mailed, w, deploy, errors } = setup();
   deploy(sha('0'));

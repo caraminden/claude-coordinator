@@ -6,7 +6,8 @@ import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPag
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
-import { chatSection, chatView, mountChat, renderTicketHead } from './thread.js';
+import { chatSection, chatView, mountChat, renderTicketHead, tmViewMode } from './thread.js';
+import { mergedView } from './mine.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import { usagePage } from './where.js';
@@ -26,9 +27,9 @@ import { toast } from './ui/status.js';
 export async function showReleases(projectId, scope, hl) {
   setReleasesPage(scope, hl);
   if (!(view?.kind === 'project' && view.projectId === projectId && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
-  const { kind, project, coordinator, tickets, dismissedLoad, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
   setView({
-    kind, main: 'releases', projectId, project, coordinator, tickets, dismissedLoad, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects,
+    kind, main: 'releases', projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects,
     artifactId: null, file: null, ...chatView(null, null),
   });
   renderCrumbs({ kind: 'releases' });
@@ -99,7 +100,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const earlyPage = early && !earlyCached ? loadEvents(early).catch(() => null) : null;
   // The scheme list is redrawn behind on a switch (refreshSchemes below); only a first load waits for it, for the shelf.
   const known = view?.projects?.length ? view.projects : null;
-  const [{ project, coordinator, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, projects, machines] = stale
+  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, projects, machines] = stale
     ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, stale.artifacts, stale.shared, known, stale.machines]
     : await Promise.all([
     // The dismissed minions come behind the first paint (loadDismissed): most of a big scheme's payload (#538).
@@ -127,13 +128,17 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   }
   // The minion came with the scheme's list; its history is drawn from the cache when it's there (#527).
   const ticket = !chatId ? null : chatId === coordinator.id ? coordinator : tickets.find((t) => t.id === chatId) ?? (await api(`api/tickets/${chatId}`)).ticket;
-  const guessed = chatId && chatId === early;
-  const cached = guessed ? earlyCached : chatId ? cachedEvents(chatId) : null;
-  const page = cached?.page ?? (guessed ? await earlyPage : null) ?? (chatId ? await loadEvents(chatId) : null);
+  // Your Taskmaster in a scheme with several (#919) opens as Mine or Everyone, merged across them (#920).
+  const merged = chatId === coordinator.id ? mergedView(projectId, chatId, taskmasters, tmViewMode()) : null;
+  const src = merged?.src ?? chatId;
+  const guessed = chatId && chatId === early && !merged;
+  const cached = guessed ? earlyCached : chatId ? cachedEvents(src) : null;
+  const page = cached?.page ?? (guessed ? await earlyPage : null) ?? (chatId ? await loadEvents(src) : null);
   if (seq !== routeSeq) return; // overtaken by another click while loading
   forgetOtherSchemes();
   setView({
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
+    taskmasters: taskmasters ?? [], // every Taskmaster session once the scheme has several (#919): { id, person_id, person_name }
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     personNotes: person_notes ?? {}, // ticket id -> people's note on it { text, by, at } (#146)
     pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
@@ -141,7 +146,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     buildPreviews: !!build_previews, // this server runs the scheme's code, so each build branch has a preview (src/previews.ts)
     artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects: projects ?? view?.projects ?? [],
     file: main.file ?? null,
-    ...chatView(chatId, ticket),
+    ...chatView(chatId, ticket, merged),
   });
   renderCrumbs(main);
   try { localStorage.setItem(LAST_SCHEME, String(projectId)); } catch {}
@@ -236,9 +241,9 @@ const SCHEME_CACHE = 6;
 
 function rememberScheme() {
   if (view?.kind !== 'project' || !view.tickets) return;
-  const { projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, machines } = view;
+  const { projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, artifacts, shared, machines } = view;
   schemeCache.delete(projectId);
-  schemeCache.set(projectId, { project, coordinator, tickets: [...tickets.values()], seen, personNotes, pins, artifacts, shared, machines });
+  schemeCache.set(projectId, { project, coordinator, taskmasters, tickets: [...tickets.values()], seen, personNotes, pins, artifacts, shared, machines });
   if (schemeCache.size > SCHEME_CACHE) schemeCache.delete(schemeCache.keys().next().value);
 }
 
@@ -275,13 +280,13 @@ async function refreshScheme(projectId) {
     if (!got) await new Promise((r) => setTimeout(r, wait));
   }
   panel?.removeAttribute('aria-busy');
-  const [{ project, coordinator, tickets: open, seen, person_notes, pins, builds, build_previews }, artifacts, shared, machines] = got;
+  const [{ project, coordinator, taskmasters, tickets: open, seen, person_notes, pins, builds, build_previews }, artifacts, shared, machines] = got;
   const now = new Set(open.map((t) => t.id));
   // Dismissed since you left: gone until the dismissed list below brings it back as it is now.
   for (const [id, t] of list) if (t.status !== 'closed' && !now.has(id) && before.get(id) === t) list.delete(id);
   for (const t of open) if (!(list.get(t.id)?.updated_at > t.updated_at)) list.set(t.id, t);
   if (!(view.coordinator.updated_at > coordinator.updated_at)) view.coordinator = coordinator;
-  Object.assign(view, { project, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, builds: builds ?? view.builds, buildPreviews: build_previews ?? view.buildPreviews, machines });
+  Object.assign(view, { project, taskmasters: taskmasters ?? view.taskmasters, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, builds: builds ?? view.builds, buildPreviews: build_previews ?? view.buildPreviews, machines });
   headUp();
   renderSidebar();
   setArtifacts(artifacts, shared);
@@ -319,14 +324,15 @@ async function switchChat(main, seq) {
   // cached history when there is one, and fetch behind it (#527). Only a history not yet downloaded waits.
   const ticket = chatId === view.coordinator.id ? view.coordinator : view.tickets.get(chatId);
   if (!ticket) return false; // a dismissed one before the dismissed list has come (#538): the full load finds it
-  const cached = cachedEvents(chatId);
-  const page = cached?.page ?? await loadEvents(chatId);
+  const merged = chatId === view.coordinator.id ? mergedView(view.projectId, chatId, view.taskmasters, tmViewMode()) : null;
+  const cached = cachedEvents(merged?.src ?? chatId);
+  const page = cached?.page ?? await loadEvents(merged?.src ?? chatId);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, projectId, project, coordinator, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
   setView({
-    kind, main: 'chat', projectId, project, coordinator, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
+    kind, main: 'chat', projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
     artifactId: null, file: null,
-    ...chatView(chatId, ticket),
+    ...chatView(chatId, ticket, merged),
   });
   if (isCoordinator(ticket)) view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);

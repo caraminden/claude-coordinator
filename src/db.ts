@@ -3,7 +3,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
+import { Claims } from './claims.ts';
 import { Memory } from './memory.ts';
+import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
 
 /** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
@@ -23,6 +25,9 @@ export const TYPED_HANDLES_UP_TO = 696493;
  * Not a relay from another chat (`from`: a minion, this or another scheme's Taskmaster), held mail, a
  * brief, Mandate's hook news, nor a name that isn't a person's (#610).
  */
+/** The Overlord's events every person's Mine shows (#920; public/mine.js inMine says the same): items marked for everyone, and its cards' answers and results so they settle there. */
+const MINE_EVENTS = `(json_extract(data, '$.everyone') = 1 OR kind IN ('question_result', 'plan_result', 'approval_result')
+  OR (kind = 'user_message' AND (json_extract(data, '$.answer') IS NOT NULL OR json_extract(data, '$.plan') IS NOT NULL)))`;
 const PERSON_WROTE = `json_extract(a.data, '$.from') IS NULL AND json_extract(a.data, '$.mail') IS NULL AND json_extract(a.data, '$.brief') IS NULL
   AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${[...NOT_PEOPLE, 'Mandate'].map((n) => `'${n.toLowerCase().replace(/'/g, "''")}'`).join(', ')})
   AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'`;
@@ -239,6 +244,8 @@ export interface Ticket {
   last_activity: string | null;
   /** Whose turn it last ran (users.id; src/access.ts turnPerson): set when a minion is made, then at each turn's start. */
   person_id: number | null;
+  /** A Taskmaster's person (#919): users.id of whose own it is; NULL for the Overlord, which before a scheme's split is its only Taskmaster. */
+  coordinator_of: number | null;
   created_by: string;
   created_at: number;
   updated_at: number;
@@ -382,10 +389,14 @@ export interface Turn {
   cache_write_tokens: number | null;
   /** Whose plan paid (Runner.payerOf): null for the server login's, else that person's id. */
   payer: number | null;
+  /** Its hash log as JSON (#878): Store.promptHashes parses it. Not "hashes": host_check masks columns named like a secret. */
+  prompt_digest: string | null;
   /** 1 for a hidden keepalive turn (#862), costed apart; null for a real turn. */
   keepalive: number | null;
   /** Which of the payer's Claude accounts ran it (#779); null for turns from before #905 and Codex turns. */
   account: number | null;
+  /** 1 for a side question's fork (#932), paid by its asker and kept out of the minion's own turn readouts; null for a turn. */
+  side: number | null;
 }
 
 /** Store.spendRows: a turn's spend on one model, with its minion's facts (#905). */
@@ -394,6 +405,7 @@ export interface SpendRowRaw {
   ticket_id: number;
   account: number | null;
   keepalive: number | null;
+  side: number | null;
   project_id: number;
   number: number | null;
   title: string;
@@ -416,7 +428,11 @@ export interface TurnResult {
   duration_ms?: number | null;
   usage?: any;
   payer?: number | null;
+  /** What it was launched with (#878, src/prompt-hashes.ts). */
+  hashes?: PromptHashes | null;
   keepalive?: boolean;
+  /** A side question's fork (#932): its cost is the session's total less the fork's own previous total, never a turn's. */
+  side?: boolean;
   account?: number | null;
   /** The result's `modelUsage`: each model's running session cost, Grunts' models included (#905). */
   modelUsage?: any;
@@ -771,6 +787,7 @@ CREATE TABLE IF NOT EXISTS turns (
   cache_read_tokens INTEGER,
   cache_write_tokens INTEGER,
   payer INTEGER,
+  prompt_digest TEXT,
   keepalive INTEGER
 );
 CREATE INDEX IF NOT EXISTS turns_ticket ON turns(ticket_id, id);
@@ -1118,6 +1135,24 @@ CREATE TABLE IF NOT EXISTS health_events (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS health_events_kind ON health_events(kind, at);
+-- Who touched a minion (#919): requested, assigned, wrote in its chat or answered its card. It only grows;
+-- left_at is set when the person leaves it, and a later touch rejoins. Updates reach each touched person's Taskmaster.
+CREATE TABLE IF NOT EXISTS ticket_touches (
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  left_at INTEGER,
+  PRIMARY KEY (ticket_id, user_id)
+);
+-- One line per thing a scheme's Taskmaster did (#919), read by its other Taskmasters at their next turn's start.
+CREATE TABLE IF NOT EXISTS taskmaster_digest (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  by_ticket INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS taskmaster_digest_project ON taskmaster_digest(project_id, id);
 `;
 
 /**
@@ -1206,6 +1241,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'ci_watch', "ALTER TABLE projects ADD COLUMN ci_watch TEXT NOT NULL DEFAULT ''"],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
+  // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
+  ['tickets', 'coordinator_of', 'ALTER TABLE tickets ADD COLUMN coordinator_of INTEGER'],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
   ['machines', 'scoped', 'ALTER TABLE machines ADD COLUMN scoped INTEGER NOT NULL DEFAULT 0'],
@@ -1216,8 +1253,10 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'last_check', 'ALTER TABLE machines ADD COLUMN last_check TEXT'],
   ['machines', 'lend', 'ALTER TABLE machines ADD COLUMN lend TEXT'],
   ['turns', 'payer', 'ALTER TABLE turns ADD COLUMN payer INTEGER'],
+  ['turns', 'prompt_digest', 'ALTER TABLE turns ADD COLUMN prompt_digest TEXT'],
   ['turns', 'keepalive', 'ALTER TABLE turns ADD COLUMN keepalive INTEGER'],
   ['turns', 'account', 'ALTER TABLE turns ADD COLUMN account INTEGER'],
+  ['turns', 'side', 'ALTER TABLE turns ADD COLUMN side INTEGER'],
   ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
   ['contraptions', 'repo', 'ALTER TABLE contraptions ADD COLUMN repo TEXT'],
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
@@ -1292,7 +1331,11 @@ export const SCHEMA_HISTORY = [
   [59, 'contraption_turn_audit (#844)'],
   [60, 'stored_secrets (#838)'],
   [61, 'turns.keepalive (#862)'],
-  [62, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings, cara-desktop-* owners (#857)'],
+  [62, 'turns.prompt_digest (#878)'],
+  [63, 'tickets.coordinator_of, one_coordinator per person, ticket_touches, taskmaster_digest (#919)'],
+  [64, 'claims (#921)'],
+  [65, 'turns.side (#932)'],
+  [66, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings, cara-desktop-* owners (#857)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1325,6 +1368,8 @@ export class Store {
   props: Registry;
   /** Scheduled minions (src/schedules.ts). */
   schedules: Schedules;
+  /** Single-holder duties such as the pipeline lane (src/claims.ts, #921). */
+  claims: Claims;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
   /** The database file; the runner keeps its turn folders beside it. */
@@ -1348,6 +1393,7 @@ export class Store {
       this.db.exec('PRAGMA state.synchronous = NORMAL; PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
       this.props = new Registry(this.db);
       this.schedules = new Schedules(this.db);
+      this.claims = new Claims(this.db);
       this.memory = new Memory(this);
       return;
     }
@@ -1361,7 +1407,10 @@ export class Store {
       const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
       if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
     }
-    this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS one_coordinator ON tickets(project_id) WHERE kind = 'coordinator'");
+    // One Taskmaster per person and one Overlord per scheme (#919). The name stays, so an older release's IF NOT EXISTS skips it.
+    const idx = this.db.prepare("SELECT sql FROM sqlite_master WHERE name = 'one_coordinator'").get() as { sql: string } | undefined;
+    if (idx && !idx.sql.includes('coordinator_of')) this.db.exec('DROP INDEX one_coordinator');
+    this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS one_coordinator ON tickets(project_id, coalesce(coordinator_of, 0)) WHERE kind = 'coordinator'");
     this.db.exec('COMMIT');
     this.numberTickets();
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ticket_number ON tickets(project_id, number)');
@@ -1369,6 +1418,7 @@ export class Store {
     this.props.seed();
     this.settleBuilds();
     this.schedules = new Schedules(this.db);
+    this.claims = new Claims(this.db);
     this.memory = new Memory(this);
     this.serverLoginOwnerOnly();
     this.groupByType();
@@ -2075,10 +2125,134 @@ export class Store {
     return this.db.prepare("SELECT * FROM tickets WHERE state = 'limited' AND status != 'closed'").all() as unknown as Ticket[];
   }
 
+  /** The scheme owner's Taskmaster: its only one until a split (#919), the owner's own after. */
   getCoordinator(projectId: number): Ticket | undefined {
     return this.db
-      .prepare("SELECT * FROM tickets WHERE project_id = ? AND kind = 'coordinator'")
+      .prepare(`SELECT t.* FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.project_id = ? AND t.kind = 'coordinator'
+        ORDER BY t.coordinator_of IS p.owner_id DESC, t.coordinator_of IS NULL DESC, t.id LIMIT 1`)
       .get(projectId) as unknown as Ticket | undefined;
+  }
+
+  /** The scheme's Overlord (#919): the Taskmaster that is no one's own; before a split, its only one. */
+  getOverlord(projectId: number): Ticket | undefined {
+    return this.db.prepare("SELECT * FROM tickets WHERE project_id = ? AND kind = 'coordinator' AND coordinator_of IS NULL").get(projectId) as unknown as Ticket | undefined;
+  }
+
+  /** A person's own Taskmaster in a scheme, else the Overlord (#919). */
+  coordinatorFor(projectId: number, userId: number | null): Ticket | undefined {
+    return this.db.prepare("SELECT * FROM tickets WHERE project_id = ? AND kind = 'coordinator' AND (coordinator_of = ? OR coordinator_of IS NULL) ORDER BY coordinator_of IS NULL LIMIT 1")
+      .get(projectId, userId) as unknown as Ticket | undefined;
+  }
+
+  /** Every Taskmaster of a scheme: the owner's, the Overlord, then the others by age. */
+  listCoordinators(projectId: number): Ticket[] {
+    return this.db.prepare(`SELECT t.* FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.project_id = ? AND t.kind = 'coordinator'
+      ORDER BY t.coordinator_of IS p.owner_id DESC, t.coordinator_of IS NULL DESC, t.id`).all(projectId) as unknown as Ticket[];
+  }
+
+  /** Whether a second person has written to the scheme's Taskmaster (#919, R3): it has one per person since. */
+  isSplit(projectId: number): boolean {
+    return !!this.db.prepare("SELECT 1 FROM tickets WHERE project_id = ? AND kind = 'coordinator' AND coordinator_of IS NOT NULL").get(projectId);
+  }
+
+  /**
+   * A person's own Taskmaster in a scheme, made if missing (#919). The first one splits the scheme: today's
+   * Taskmaster becomes the owner's, keeping its session (R2), and a fresh Overlord takes its place. All share the
+   * scheme's Taskmaster folder. The caller decides who may have one (routes/projects.ts ensureCoordinatorFor).
+   */
+  splitScheme(projectId: number, userId: number): Ticket {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const own = this.db.prepare("SELECT * FROM tickets WHERE project_id = ? AND kind = 'coordinator' AND coordinator_of = ?").get(projectId, userId) as unknown as Ticket | undefined;
+      if (own) {
+        this.db.exec('COMMIT');
+        return own;
+      }
+      const first = this.getOverlord(projectId);
+      if (!first) throw new Error(`scheme ${projectId} has no Taskmaster to split`);
+      const insert = (title: string, of: number | null) => {
+        const now = Date.now();
+        const r = this.db.prepare(`INSERT INTO tickets (project_id, kind, number, title, status, cwd, permission_mode, created_by, created_at, updated_at, coordinator_of, person_id)
+          VALUES (?, 'coordinator', NULL, ?, 'new', ?, ?, ?, ?, ?, ?, ?)`).run(projectId, title, first.cwd, first.permission_mode, first.created_by, now, now, of, of);
+        return Number(r.lastInsertRowid);
+      };
+      if (!this.isSplit(projectId)) {
+        const owner = this.getProject(projectId)!.owner_id;
+        if (owner == null || owner === userId) throw new Error(`scheme ${projectId} splits only for a second person`);
+        this.db.prepare('UPDATE tickets SET coordinator_of = ? WHERE id = ?').run(owner, first.id);
+        insert('Overlord', null);
+      }
+      const id = insert(first.title, userId);
+      this.db.exec('COMMIT');
+      return this.getTicket(id)!;
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  /** The person a minion reports to (#919): `assigned`, else `requestedBy`, else nobody (the Overlord). */
+  minionOwner(ticket: Pick<Ticket, 'id'>): number | null {
+    const props = this.props.forTarget('minion', ticket.id);
+    for (const key of ['assigned', 'requestedBy']) {
+      const id = this.personId(props[key]);
+      if (id != null) return id;
+    }
+    return null;
+  }
+
+  /** The Taskmaster a minion reports to: its owner's own, else the Overlord; a build's own minion, the Overlord (builds are shared, #921). */
+  ownerCoordinator(ticket: Pick<Ticket, 'id' | 'project_id'>): Ticket | undefined {
+    const build = this.getTicket(ticket.id)?.build;
+    if (build != null && this.getSetting<number>(buildOwnerKey(ticket.project_id, build)) === ticket.id) return this.getOverlord(ticket.project_id);
+    return this.coordinatorFor(ticket.project_id, this.minionOwner(ticket));
+  }
+
+  private personId(value: unknown): number | null {
+    const raw = String(value ?? '').trim();
+    const name = raw && this.props.personName(raw);
+    return (name && this.findUser('name', name)?.id) || null;
+  }
+
+  /** A person touched a minion (#919): wrote in it, answered its card, asked for it or took it. Rejoins one they left. */
+  touch(ticketId: number, userId: number) {
+    this.db.prepare('INSERT INTO ticket_touches (ticket_id, user_id, at) VALUES (?, ?, ?) ON CONFLICT (ticket_id, user_id) DO UPDATE SET left_at = NULL')
+      .run(ticketId, userId, Date.now());
+  }
+
+  /** A person leaves a minion: its updates stop reaching their Taskmaster until they touch it again. */
+  leaveTouched(ticketId: number, userId: number) {
+    this.db.prepare('INSERT INTO ticket_touches (ticket_id, user_id, at, left_at) VALUES (?, ?, ?, ?) ON CONFLICT (ticket_id, user_id) DO UPDATE SET left_at = excluded.left_at')
+      .run(ticketId, userId, Date.now(), Date.now());
+  }
+
+  /** Everyone touching a minion: the recorded ones plus its requester and assignee, less those who left. */
+  touchedBy(ticket: Pick<Ticket, 'id'>): number[] {
+    const rows = this.db.prepare('SELECT user_id, left_at FROM ticket_touches WHERE ticket_id = ?').all(ticket.id) as { user_id: number; left_at: number | null }[];
+    const left = new Set(rows.filter((r) => r.left_at != null).map((r) => r.user_id));
+    const props = this.props.forTarget('minion', ticket.id);
+    const ids = [...rows.map((r) => r.user_id), this.personId(props.requestedBy), this.personId(props.assigned)];
+    return [...new Set(ids)].filter((id): id is number => id != null && !left.has(id));
+  }
+
+  /** A line for the scheme's other Taskmasters' digests (#919). Lines older than a week go. */
+  noteDigest(projectId: number, byTicket: number, text: string) {
+    const now = Date.now();
+    this.db.prepare('DELETE FROM taskmaster_digest WHERE at < ?').run(now - 7 * 86_400_000);
+    this.db.prepare('INSERT INTO taskmaster_digest (project_id, by_ticket, at, text) VALUES (?, ?, ?, ?)').run(projectId, byTicket, now, text);
+  }
+
+  /** The newest ten lines other Taskmasters of its scheme logged since this one last read, oldest first; marks them read. */
+  digestFor(coordinatorId: number): string[] {
+    const t = this.getTicket(coordinatorId);
+    if (!t) return [];
+    const key = `digest_read:${coordinatorId}`;
+    const since = this.getSetting<number>(key) ?? 0;
+    const rows = this.db.prepare('SELECT id, text FROM taskmaster_digest WHERE project_id = ? AND id > ? AND by_ticket != ? ORDER BY id DESC LIMIT 10')
+      .all(t.project_id, since, coordinatorId) as { id: number; text: string }[];
+    const last = (this.db.prepare('SELECT max(id) AS id FROM taskmaster_digest WHERE project_id = ?').get(t.project_id) as { id: number | null }).id;
+    if (last != null && last > since) this.setSetting(key, last);
+    return rows.reverse().map((r) => r.text);
   }
 
   getTicket(id: number): Ticket | undefined {
@@ -2134,6 +2308,7 @@ export class Store {
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
     this.memory.deleteTicket(id);
+    this.claims.releaseHeldBy(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -2540,6 +2715,18 @@ export class Store {
       ORDER BY id DESC LIMIT ?`).all(ticketId, afterId, limit) as unknown as EventRow[]).reverse();
   }
 
+  /** A chat's events in [from, before), oldest first; `mine` keeps only what Mine shows from the Overlord (MINE_EVENTS). */
+  eventsBetween(ticketId: number, from: number, before: number, mine = false): EventRow[] {
+    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id`)
+      .all(ticketId, from, before) as unknown as EventRow[];
+  }
+
+  /** A chat's newest `limit` events before `before`, newest first; `mine` as in eventsBetween. */
+  eventsBefore(ticketId: number, before: number, limit: number, mine = false): EventRow[] {
+    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id DESC LIMIT ?`)
+      .all(ticketId, before, limit) as unknown as EventRow[];
+  }
+
   listEvents(ticketId: number, afterId = 0): EventRow[] {
     return this.db
       .prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id')
@@ -2918,18 +3105,18 @@ export class Store {
    */
   recordTurn(ticketId: number, r: TurnResult): Turn {
     const prev = this.db
-      .prepare('SELECT id, session_id, session_cost_usd FROM turns WHERE ticket_id = ? ORDER BY id DESC LIMIT 1')
-      .get(ticketId) as { id: number; session_id: string | null; session_cost_usd: number } | undefined;
+      .prepare('SELECT id, session_id, session_cost_usd FROM turns WHERE ticket_id = ? AND side IS ? ORDER BY id DESC LIMIT 1')
+      .get(ticketId, r.side ? 1 : null) as { id: number; session_id: string | null; session_cost_usd: number } | undefined;
     const sameSession = prev && (prev.session_id ?? null) === (r.session_id ?? null);
     const base = sameSession && prev.session_cost_usd <= r.session_cost_usd ? prev.session_cost_usd : 0;
     const u = r.usage ?? null;
     const n = (v: unknown) => (typeof v === 'number' ? v : null);
     const row = this.db
       .prepare(`INSERT INTO turns (ticket_id, event_id, session_id, ended_at, cost_usd, session_cost_usd, duration_ms,
-          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer, keepalive, account) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
+          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer, keepalive, account, prompt_digest, side) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
       .get(ticketId, r.event_id ?? null, r.session_id ?? null, r.ended_at, r.session_cost_usd - base, r.session_cost_usd,
         n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens), r.payer ?? null, r.keepalive ? 1 : null,
-        n(r.account)) as unknown as Turn;
+        n(r.account), r.hashes ? JSON.stringify(r.hashes) : null, r.side ? 1 : null) as unknown as Turn;
     // Each model's running total, less its total at the session's previous turn, as the whole turn's cost is (#905).
     const models = r.modelUsage && typeof r.modelUsage === 'object' ? Object.entries(r.modelUsage) : [];
     const was = this.db.prepare('SELECT session_cost_usd FROM turn_models WHERE turn_id = ? AND model = ?');
@@ -2953,8 +3140,15 @@ export class Store {
     return this.db
       .prepare(`SELECT t.ticket_id, t.ended_at, t.duration_ms, t.cost_usd, t.input_tokens, t.output_tokens,
           t.cache_read_tokens, t.cache_write_tokens, t.keepalive FROM turns t JOIN tickets k ON k.id = t.ticket_id
-          WHERE t.ended_at >= ? AND k.kind != 'coordinator' ORDER BY t.ended_at, t.id`)
+          WHERE t.ended_at >= ? AND k.kind != 'coordinator' AND t.side IS NULL ORDER BY t.ended_at, t.id`)
       .all(since) as unknown as KeepaliveRow[];
+  }
+
+  /** A minion's latest turns' hash logs (#878), newest first, with how much of each turn's prompt came from the cache. */
+  promptHashes(ticketId: number, limit = 1): { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; hashes: PromptHashes }[] {
+    const rows = this.db.prepare(`SELECT ended_at, cache_read_tokens, cache_write_tokens, prompt_digest FROM turns
+        WHERE ticket_id = ? AND prompt_digest IS NOT NULL ORDER BY id DESC LIMIT ?`).all(ticketId, limit) as any[];
+    return rows.map(({ prompt_digest, ...r }) => ({ ...r, hashes: JSON.parse(prompt_digest) }));
   }
 
   /**
@@ -3029,7 +3223,8 @@ export class Store {
 
   /** When a ticket's last finished turn ended (ms), or null before its first. */
   lastTurnEnd(ticketId: number): number | null {
-    const r = this.db.prepare('SELECT ended_at FROM turns WHERE ticket_id = ? ORDER BY id DESC LIMIT 1').get(ticketId) as { ended_at: number } | undefined;
+    // A side question's fork (#932) isn't the minion's turn: its prefix may sit on another login, and the minion's own is no warmer for it.
+    const r = this.db.prepare('SELECT ended_at FROM turns WHERE ticket_id = ? AND side IS NULL ORDER BY id DESC LIMIT 1').get(ticketId) as { ended_at: number } | undefined;
     return r?.ended_at ?? null;
   }
 
@@ -3067,7 +3262,7 @@ export class Store {
    */
   spendRows(payer: number | null, since: number, until: number): SpendRowRaw[] {
     return this.db
-      .prepare(`SELECT u.id AS turn_id, u.ticket_id, u.account, u.keepalive, k.project_id, k.number, k.title, k.kind, k.created_by,
+      .prepare(`SELECT u.id AS turn_id, u.ticket_id, u.account, u.keepalive, u.side, k.project_id, k.number, k.title, k.kind, k.created_by,
           coalesce(k.last_model, k.model) AS minion_model, m.model, coalesce(m.cost_usd, u.cost_usd) AS cost,
           (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
             WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type
@@ -3117,7 +3312,7 @@ export class Store {
    */
   turnOutcomes(from: number, to: number): { turns: number; failed: number; first: number | null } {
     const ok = this.db.prepare(`SELECT COUNT(*) AS n, SUM(e.data LIKE '%"is_error":true%') AS bad, MIN(CASE WHEN e.data LIKE '%"is_error":true%' THEN t.ended_at END) AS first
-        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND NOT COALESCE(e.data LIKE '%"is_error":true%' AND e.data LIKE '%hit your %limit%', 0)`).get(from, to) as { n: number; bad: number | null; first: number | null };
+        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND t.side IS NULL AND NOT COALESCE(e.data LIKE '%"is_error":true%' AND e.data LIKE '%hit your %limit%', 0)`).get(from, to) as { n: number; bad: number | null; first: number | null };
     const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE id >= ? AND id < ? AND kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%'")
       .get(this.eventIdAt(from), this.eventIdAt(to), from, to) as { n: number; first: number | null };
     const firsts = [ok.first, errs.first].filter((f): f is number => f != null);

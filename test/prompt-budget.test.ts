@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { systemPrompt } from '../src/prompts.ts';
+import { systemPrompt, turnContext } from '../src/prompts.ts';
 
 // The starting prompt's size budget (#415): every API call re-reads it, so it only grows by decision.
-// Budgets are characters (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760). Raising one is a
+// Budgets are characters (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760; Build 2, 2026-11-17). Raising one is a
 // one-line edit here with the reason in the commit message; then refresh the baseline with
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
-const BUDGET = { minion: 39_400, taskmaster: 39_400 };
+const BUDGET = { minion: 35_000, taskmaster: 39_000 };
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).
 const app = 'x'.repeat(11_664);
@@ -107,8 +107,10 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
 // #760: a minion hears about ci-failures and dispatched-workflow watching only while its branch has an open PR.
 test('the PR line says more only with an open PR', () => {
   const args = ['/shared/929', '/shared/project', '/tickets', '/memory', [], true, app] as const;
-  const without = systemPrompt(project, minion, ...args);
-  const withPr = systemPrompt(project, minion, ...args, null, [], null, false, null, null, true);
+  // In the turn message since #878, so opening a PR no longer changes system-prompt.md.
+  const without = turnContext(project, minion, ...args);
+  const withPr = turnContext(project, minion, ...args, null, [], null, false, null, null, true);
+  assert.equal(systemPrompt(project, minion, ...args), systemPrompt(project, minion, ...args, null, [], null, false, null, null, true));
   // One PR line either way; only its open-PR form carries ci-failures.
   for (const p of [without, withPr]) assert.equal(p.split('"[GitHub]: ..."').length, 2);
   assert.doesNotMatch(without, /ci-failures/);

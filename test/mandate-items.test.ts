@@ -199,6 +199,20 @@ test("only Mandate's hook, for a person on the scheme, reaches a minion; a close
   store.updateTicket(minion.id, { status: 'idle' });
 });
 
+test("in a split scheme a tick on a Taskmaster's item reaches the ticker's own Taskmaster (#921)", async () => {
+  const shared = (await srv.call('/api/projects', { name: 'Shared' })).data;
+  await srv.call(`/api/projects/${shared.id}`); // makes its Taskmaster
+  const store = new Store(join(srv.data, 'coordinator.db'));
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  store.addMember(shared.id, josh.id);
+  const own = store.splitScheme(shared.id, josh.id);
+  store.db.close();
+  assert.equal((await srv.call(`/api/contraptions/mandate/people/${josh.id}`, { enabled: true }, 'PUT')).status, 200);
+  const res = await hook(`scheme-${shared.id}`, { key: '0.lane', event: 'ticked', at: '2026-11-17T08:14:00Z' }, mandateKey, josh.id);
+  assert.deepEqual([res.status, await res.json()], [200, { delivered: true }]);
+  assert.equal((await said(own.id)).length, 1, "Josh's own Taskmaster hears his tick");
+});
+
 test('scheme-<number> names are kept for schemes', async () => {
   const r = await srv.call('/api/contraptions', { name: 'scheme-12', title: 'Sneaky', port: await freePort() });
   assert.equal(r.status, 400);

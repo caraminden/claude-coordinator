@@ -1403,6 +1403,36 @@
   "m1": "400 op must be add, list or remove",
   "m2": "400 op must be add, list or remove"
  },
+ "GET /api/projects/:p/claims": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "200"
+ },
+ "POST /api/projects/:p/claims": {
+  "anon": "401 Not logged in",
+  "person": "400 A claim name is lowercase words joined by hyphens, at most 40 characters, e.g. pipeline-lane",
+  "member": "400 A claim name is lowercase words joined by hyphens, at most 40 characters, e.g. pipeline-lane",
+  "outsider": "404 No such scheme",
+  "tmA": "400 A claim name is lowercase words joined by hyphens, at most 40 characters, e.g. pipeline-lane",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/projects/:p/claims/nope": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/contraption-turns": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1807,6 +1837,16 @@
   "anon": "401 Not logged in",
   "person": "400 cap_usd is a number, or null for none",
   "member": "400 cap_usd is a number, or null for none",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/taskmaster-events": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
   "outsider": "404 No such scheme",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
@@ -2342,6 +2382,16 @@
   "m1": "404 This worktree has no tools/land.sh: land the way the scheme instructions say",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/leave": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can leave a minion",
+  "tmB": "403 Only a person can leave a minion",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/machine-notes": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can propose a machine's notes in its chat",
@@ -2520,6 +2570,16 @@
   "tmA": "403 Only the minion itself can settle its question cards",
   "tmB": "403 Only the minion itself can settle its question cards",
   "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/side": {
+  "anon": "401 Not logged in",
+  "person": "400 text is required",
+  "member": "400 text is required",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/spend": {
@@ -2982,6 +3042,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:taskmasterA/leave": {
+  "anon": "401 Not logged in",
+  "person": "400 Only a minion can be left, not a Taskmaster",
+  "member": "400 Only a minion can be left, not a Taskmaster",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can leave a minion",
+  "tmB": "403 Only a person can leave a minion",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:taskmasterA/machine-notes": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can propose a machine's notes in its chat",
@@ -3159,6 +3229,16 @@
   "outsider": "403 Only the minion itself can settle its question cards",
   "tmA": "200",
   "tmB": "403 Only the minion itself can settle its question cards",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/side": {
+  "anon": "401 Not logged in",
+  "person": "400 Side questions are for minions, not the Taskmaster",
+  "member": "400 Side questions are for minions, not the Taskmaster",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

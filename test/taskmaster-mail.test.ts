@@ -10,7 +10,7 @@ import { TASKMASTER_LOOP_LIMIT } from '../src/prompts.ts';
 import { RELAY_FILE_MAX, relayFile } from '../src/taskmaster-files.ts';
 import { HttpError } from '../src/http.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { agentToken, bootServer, jsonLines, stopProcs, stopTurns, until, testPins } from './helpers.ts';
+import { agentToken, bootServer, jsonLines, withoutTurnNote, stopProcs, stopTurns, until, testPins } from './helpers.ts';
 testPins();
 
 // Taskmaster mail and relay files (#405): message_taskmaster's wake: false leaves held mail for the other
@@ -37,7 +37,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
 chmodSync(fake, 0o755);
 
 const userMessages = (store: Store, id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
-const promptTexts = () => jsonLines(prompts).map((l) => l.message.content.map((c: any) => c.text));
+const promptTexts = () => jsonLines(prompts).map((l) => withoutTurnNote(l.message.content).map((c: any) => c.text));
 
 test('held mail shows at once, starts no turn, and rides along on the next turn after what woke it', async () => {
   const store = new Store(join(root, 'mail.db'));

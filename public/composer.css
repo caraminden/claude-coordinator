@@ -95,10 +95,34 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 /* Attach, the pickers and Send (with its ▾) share one height, content centred; taller on phones to stay tappable. */
 .composer { --control-h: 2rem; }
 @media (max-width: 800px) { .composer { --control-h: 2.5rem; } }
-.composer button.add-image, .composer button.to-latest, .composer button.to-card, .composer select.picker, .composer .unpark-slot > button, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
+.composer button.add-image, .composer button.to-latest, .composer button.to-card, .composer select.picker, .composer .unpark-slot > button, .composer .send-group > button, .composer button.side-ask { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
+
+/* A wide composer keeps Attach, Latest, the pickers, Aside and Send on one line (#932): when Latest or Card appears
+   in a tight row, the pickers narrow instead of Send wrapping to a line of its own (no reflow without input). */
+.composer { container-type: inline-size; }
+@container (min-width: 36rem) {
+  .composer .row { flex-wrap: nowrap; }
+  .composer .row > button, .composer .send-group, .composer .unpark-slot { flex-shrink: 0; white-space: nowrap; }
+  .composer .pickers { min-width: 0; }
+  .composer select.picker { min-width: 4rem; }
+}
 
 /* A parked minion's Unpark, just left of Send (#726). */
+.composer .unpark-slot { display: inline-flex; align-items: center; gap: 0.5rem; }
 .composer .unpark-slot[hidden] { display: none; }
+.composer .unpark-slot > button { white-space: nowrap; }
+/* Phones: five buttons don't fit one line, so a parked minion's two take a line of their own above, with full padding and labels. */
+@media (max-width: 800px) {
+  .composer .row:has(.unpark-slot:not([hidden])) { flex-wrap: wrap; row-gap: 0.5rem; }
+  .composer .row > .unpark-slot:not([hidden]) { order: -1; flex: 1 0 100%; }
+}
+
+/* Ask on the side (#932): side-thread blue, outlined while the minion is idle and filled while a turn runs, when it's
+   most useful. The cold confirm above the box uses the payer line's look with a blue Ask anyway. */
+.composer button.side-ask { color: var(--cat-2); border-color: color-mix(in srgb, var(--cat-2) 60%, var(--control-line)); white-space: nowrap; }
+.chat.turn-running .composer button.side-ask { background: var(--cat-2); color: var(--panel); border-color: var(--cat-2); }
+button.side-go { background: var(--cat-2); color: var(--panel); border: 1px solid var(--cat-2); }
+@media (max-width: 800px) { .composer .row > .side-ask { flex: none; } }
 
 /* Send, and while a turn runs a ▾ beside it for "Send after this turn" (Send itself steers the turn). */
 .composer .send-group { position: relative; display: inline-flex; }

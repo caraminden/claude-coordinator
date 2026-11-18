@@ -25,7 +25,7 @@ const IN_CONTAINER = process.env.COORDINATOR_CONTAINER === '1';
 const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 // The contraptions whose home is this scheme (#266): it may deploy them.
 const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean);
-// The machines this minion's turn got (#617): it may propose new notes for them.
+// The machines this minion's turn got (#617): it may propose new notes for them (checked at call time, #878).
 const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean);
 const JOB_MACHINES = (process.env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
@@ -33,7 +33,7 @@ const MAX_TEXT = 4000;
 const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
 import { NEEDS, NEED_LINES } from './needs.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
-const URGENT = { type: 'boolean', description: 'true: wake it even when it is cold (idle over 55 minutes). Only when you are blocked waiting on its reply, or it is a person\'s go, pick or run-back to pass on. Anything else to a cold one stays held mail, read on its next turn (a person\'s message, or within 3 hours)' };
+const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idle over 55 minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
 
@@ -71,7 +71,7 @@ const REPLIES = {
   items: { type: 'string', maxLength: 40 },
   maxItems: 3,
   description:
-    'Up to 3 one-tap replies, each at most 40 characters, e.g. ["Merge it", "Make it live"]: buttons people tap to send that text as their own message, for when the obvious next step only needs their go. Not for a choice between options: ask_question does that. They go away once anyone writes or the next turn starts; [] or null takes them away now.',
+    'Up to 3 one-tap replies, e.g. ["Merge it"], that send that text as the person\'s own message, for when the next step only needs their go (a choice between options is ask_question). They go away once anyone writes or the next turn starts; [] or null clears them.',
 };
 
 const BUILD = {
@@ -83,12 +83,12 @@ const BUILD = {
 // Cara, 2026-11-14: "we should ALWAYS make an intentional choice about model"): the table is in the Taskmaster's prompt.
 const MODEL_IDS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5+opus-advisor', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'];
 /** The advisor trial's brief to the Taskmaster (#817; handoff from #813): whom it starts on the advisor. Here, not in public/model-table.js, as turns run a pinned copy of this file that carries only ./ imports. */
-const ADVISOR_TRIAL = 'claude-sonnet-5-5+opus-advisor is the advisor trial (#817): Sonnet runs the turn and consults Opus at hard points (~$0.35 a consult at an 85k context). Until its report ends it, start about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high on it at medium, and move a stalled Sonnet-medium minion to it before Opus medium. Never a Taskmaster. `node tools/advisor-trial.ts` reads its numbers.';
+const ADVISOR_TRIAL = 'claude-sonnet-5-5+opus-advisor: Sonnet runs the turn and consults Opus at hard points; the model table says when. Never a Taskmaster.';
 const EFFORT_IDS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODEL = {
   type: 'string',
   enum: MODEL_IDS,
-  description: `The model for the minion's turns, as in its composer. Required: pick it on purpose from the model table in your prompt, by the kind of work (mostly its type). The gpt-6 ones are Codex, only for a person who asked for it. ${ADVISOR_TRIAL}`,
+  description: `The model for the minion's turns, from the model table in your prompt. Required. gpt-6-* are Codex, only on a person's ask. ${ADVISOR_TRIAL}`,
 };
 const EFFORT = {
   type: 'string',
@@ -121,13 +121,13 @@ const SCHEDULE_GATE = {
 };
 const WORKFLOW = {
   type: ['boolean', 'null'],
-  description: "true lets the minion's turns call Claude Code's Workflow tool (scripted fan-out of agents), as in its composer; off by default, since it adds about 2k tokens to every API call. Set it when creating the minion: flipping it later breaks its prompt cache once.",
+  description: "true lets the minion's turns call Claude Code's Workflow tool (about 2k tokens on every call). Set it at creation: changing it later breaks the prompt cache once.",
 };
 
 const PLUGIN_FOLDERS = {
   type: ['array', 'null'],
   items: { type: 'string' },
-  description: "Extra plugin folders this minion loads on top of its scheme's, picked from the scheme's optional plugin folders (get_project_settings lists them), e.g. Chrome DevTools for UI work. Each costs tokens and memory on every turn, so pick one only when the work needs it. Set it when creating the minion: changing it later breaks its prompt cache once. [] or null clears them.",
+  description: "Extra optional plugin folders from get_project_settings (e.g. DevTools for UI work); each costs tokens every turn. Set at creation: changing it later breaks the prompt cache once. [] or null clears.",
 };
 
 const PROPERTIES = {
@@ -177,7 +177,7 @@ const WHEN_CI_PASSES = {
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for any choice you would otherwise put in prose: a go (merge, land, start, close; a lone go may be a reply button instead), A or B, or an offer of work not done yet ("want me to…"). Tuning details are yours to pick. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. When the choice is visual or has several parts, make a choices page instead (citadel:docs-and-mocks, mock.picks or mock.boards) and ask with `doc` set to its path and no questions: the card opens the page, people pick there, and the page\'s Send settles the card. Every choices page you link comes with this card. To get a password, API key or token from a person, never ask them to type it into the chat: ask with `secret` and no questions, and the card takes it in a masked field and saves it. You get back only its name, and your turns read it from the env var $CITADEL_SECRET_<NAME>; use it in commands without printing it. After calling it, finish your turn with a short reply and wait: the card shows below your reply, even when you asked early in a long turn (say "the card below", never "above"), and the answers arrive as the next message. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below". The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345).',
+    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type). Use it for any choice you would otherwise put in prose: a go (a lone go may be a reply button instead), A or B, or an offer of work not done yet ("want me to…"); tuning details are yours. Each question marks the option you would pick with `recommended: true` (exactly one; any number on multiSelect), first; a question without one is refused. Options may carry an image, shown as a gallery. A visual or multi-part choice goes on a choices page (citadel:docs-and-mocks): pass `doc` with its path and no questions, and its Send settles the card. For a password, API key or token, pass `secret` and no questions: a masked field; you get only the name, read from $CITADEL_SECRET_<NAME>, used in commands without printing it. After calling it, end your turn with a short reply; the answers arrive as the next message. The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345) ("below" this turn, "above" later).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -188,8 +188,8 @@ const ASK_QUESTION = {
         items: {
           type: 'object',
           properties: {
-            question: { type: 'string', maxLength: 500, description: 'The full question, ending in "?", at most 500 characters' },
-            header: { type: 'string', maxLength: 24, description: 'A very short label for the card, at most 24 characters, e.g. "Layout"' },
+            question: { type: 'string', maxLength: 500, description: 'The full question, ending in "?"' },
+            header: { type: 'string', maxLength: 24, description: 'A very short label for the card, e.g. "Layout"' },
             multiSelect: { type: 'boolean', description: 'true if several options can be picked (default false)' },
             options: {
               type: 'array',
@@ -198,13 +198,13 @@ const ASK_QUESTION = {
               items: {
                 type: 'object',
                 properties: {
-                  label: { type: 'string', maxLength: 80, description: 'The choice, 1 to 5 words (at most 80 characters)' },
-                  description: { type: 'string', maxLength: 300, description: 'What picking it means, or its trade-off, at most 300 characters' },
+                  label: { type: 'string', maxLength: 80, description: 'The choice, 1 to 5 words' },
+                  description: { type: 'string', maxLength: 300, description: 'What picking it means, or its trade-off' },
                   image: {
                     type: 'string',
                     maxLength: 1000,
                     description:
-                      'Optional picture of this option: path to an image, GIF or video (png, jpg, gif, webp, avif, svg, mp4, webm, mov) you made in your working directory or shared folder, absolute or relative to your working directory. Shown as a thumbnail people can open full size.',
+                      'Optional picture: a path in your working directory or shared folder to a png, jpg, gif, webp, avif, svg, mp4, webm or mov, shown as a thumbnail.',
                   },
                   recommended: { type: 'boolean', description: 'true on the option you recommend; the card labels it "(Recommended)". Leave the words out of the label.' },
                 },
@@ -272,7 +272,8 @@ const PROPOSE_MACHINE_NOTES = {
   inputSchema: {
     type: 'object',
     properties: {
-      machine: { type: 'string', enum: MACHINES, description: 'The machine' },
+      // A free string, checked by the server (#878): an enum of this turn's machines would change the tool list with the sender.
+      machine: { type: 'string', description: 'The machine, one this turn got' },
       notes: { type: 'string', maxLength: 2000, description: 'The whole new notes, at most 2,000 characters' },
     },
     required: ['machine', 'notes'],
@@ -439,7 +440,7 @@ const TOOLS = [
   LIST_TICKETS,
   {
     name: 'usage_split',
-    description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings) and the 10 costliest minions, each as a share of the person's weekly limit, all their Claude accounts together, with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
+    description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings, side questions) and the 10 costliest minions, each as a share of the person's weekly limit, all their Claude accounts together, with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -467,12 +468,12 @@ const TOOLS = [
         message: { type: 'string', maxLength: 100000, description: 'First message to the new minion, at most 100,000 characters' },
         start_after: {
           type: 'integer',
-          description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. Messages to it are held until it starts, then read with its brief; message_ticket with unpark starts it early.",
+          description: "A minion number (#N) to chain after: this one is created parked with its message held (messages to it too, read with its brief), and starts by itself on a branch caught up to main once #N is live (or merged, see start_when). If #N is dismissed unmerged it stays parked and you are told; message_ticket with unpark starts it early.",
         },
         start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
         parent: {
           type: ['integer', 'null'],
-          description: "The minion number (#N, in this scheme) this one is started for: pass it whenever a minion asked for it, in its message or a handoff it wrote. The new minion shows as from #N and gets #N's build unless build is given. Left out, it is the minion whose message you are answering, if any; null for none.",
+          description: "The #N this minion is started for: it shows as from #N and inherits its build unless build is given. Default: the minion whose message you are answering; null for none.",
         },
         build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, else the start_after minion's, if any. A build whose branch build/<n> exists sets its base and target: the minion starts from build/<n> and merges into it, never main.` },
         build_owner: { type: 'boolean', description: 'true for the build minion of a new build: it makes build/<n>, keeps the list of what is in, takes main in daily and lands the build with one go card. Needs build.' },
@@ -504,11 +505,12 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. For long text, write a file in your scheme's shared folder and send it with file and a one-line summary. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
         scheme: { type: 'string', description: 'The other scheme, by name or id; a wrong one lists them' },
+        person: { type: 'string', description: "For a scheme with a Taskmaster per person: whose to reach (a member's name); one with none of their own, or none named, reaches its Overlord. Leave it out to answer: a reply goes back to the one that wrote to you" },
         text: { type: 'string', maxLength: 10000, description: 'Self-contained: it cannot see your scheme, so say which scheme\'s minion #N is. Short: anything longer than a paragraph goes in file. At most 10,000 characters (`message` is accepted too)' },
         need: NEED,
         wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent). A need of fyi is always held mail' },
@@ -536,6 +538,29 @@ const TOOLS = [
     name: 'fresh_session',
     description: `Hand off to a fresh Claude session of yours: when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt and memory) instead of this whole conversation. People's chat history stays as it is. Use it when ${APP_NAME} asks for a handoff, or on your own when your context is long and mostly stale. First save to your memory files anything durable that lives only in this chat. Then pass every open ask and who made it, relays you still owe, cards waiting on people, who is parked on what, and what you promised next: facts, not history.`,
     inputSchema: { type: 'object', properties: { summary: { type: 'string', maxLength: 20000, description: 'The handoff your next session starts from, at most 20,000 characters' } }, required: ['summary'] },
+  },
+  {
+    name: 'claim',
+    description: "Take a single-holder duty for a minion, e.g. the pipeline lane (`pipeline-lane`): a row every Taskmaster in the scheme sees, not a note in memory. Refused while another holds it (the answer names the holder). It frees itself when its minion is dismissed. Without `minion` you hold it yourself.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Lowercase words joined by hyphens, e.g. pipeline-lane' },
+        minion: { type: 'integer', description: 'The minion that holds it (#N as a number); leave out to hold it yourself' },
+        note: { type: 'string', maxLength: 300, description: 'Optional: what it is held for' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'release',
+    description: 'Free a claim, whoever holds it, e.g. once the pipeline lane\'s minion has landed or a fix for a broken land must jump the lane.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'The claim, e.g. pipeline-lane' } }, required: ['name'] },
+  },
+  {
+    name: 'list_claims',
+    description: 'List the scheme\'s claims: each duty, its holder and since when. list_tickets shows them too.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'list_schedules',
@@ -614,7 +639,11 @@ const TOOLS = [
     description: "Interrupt a minion's running turn and drop its queued messages.",
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
-  ASK_QUESTION,
+  // A Taskmaster's ask_question also asks for everyone (#921).
+  { ...ASK_QUESTION, inputSchema: { ...ASK_QUESTION.inputSchema, properties: { ...ASK_QUESTION.inputSchema.properties, for_everyone: {
+    type: 'boolean',
+    description: "true: a question for the whole scheme, not just your person (the pipeline lane, a Citadel-wide rule, a build). The card goes to the Overlord's chat, which every member sees, and the first answer settles it for everyone; the answer still comes back to you, and you act on it. Questions only: no to, doc, notice, secret or when_ci_passes. Ignored before the scheme has per-person Taskmasters.",
+  } } } },
   SETTLE_QUESTION,
   PROPOSE_PLAN,
   {
@@ -950,10 +979,10 @@ const SEARCH_MEMORY = {
   },
 };
 
-/** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): offered only when they've connected one on their account page. */
+/** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): listed for every minion, refused on a turn whose person hasn't connected one (#878). */
 const MEDIA = process.env.COORDINATOR_MEDIA === '1';
-const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. Spend like it is the person\'s own money, because it is: one take at the default first, more takes or a dearer model only when asked or when the first misses.';
-const IMAGE_MODELS = ' Models: leave model out for black-forest-labs/flux-3-image-klein (about $0.01 an image at 1K), or recraft/recraft-v4.1-vector when out ends in .svg (about $0.08). For readable text in the image or careful edits, google/gemini-nano-banana-2.1 or openai/gpt-image-2, which cost several times more.';
+const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. One take at the default first; more takes or a dearer model only when asked or when the first misses.';
+const IMAGE_MODELS = ' Models: leave model out for black-forest-labs/flux-3-image-klein, or recraft/recraft-v4.1-vector when out ends in .svg. For readable text in the image or careful edits, google/gemini-nano-banana-2.1 or openai/gpt-image-2, which cost several times more.';
 const MEDIA_OUT = 'Where to write it, inside your worktree or a shared folder (relative paths start in your worktree). With n over 1 the files are numbered: art-1.png, art-2.png';
 const MEDIA_MODEL = { type: 'string', description: 'Optional: an OpenRouter model id. Leave it out for the cheap default' };
 const MEDIA_OVERWRITE = { type: 'boolean', description: 'Replace a file that already exists (default false: refused)' };
@@ -973,10 +1002,10 @@ const IMAGE_PROPS = {
  * unless using a system (like I described for making spell alerts) or explicitly asking for a generative model").
  * test/media-tools.test.ts pins it.
  */
-export const NOT_DEFAULT = 'Not the default: images are drawn with code (SVG, canvas, a script). Call this only when a person explicitly asks for a generative model, or a scheme system calls for one.';
-const NOT_DEFAULT_AUDIO = 'Not the default: sound is made with code (Web Audio, a synth script), as images are. Call this only when a person explicitly asks for a generative model, or a scheme system calls for one.';
+export const NOT_DEFAULT = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise draw with code.';
+const NOT_DEFAULT_AUDIO = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise make sound with code.';
 /** Which generative tool makes what (Cara, 2026-11-14, "Codex for raster images"). */
-const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan, when it is offered; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex isn\'t offered or refused because a Codex limit is near.';
+const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex refuses (no Codex login, or a Codex limit is near).';
 const MEDIA_TOOL_LIST = [
   { name: 'generate_image', description: `${NOT_DEFAULT} Then: make an image from a prompt through OpenRouter. ${IMAGE_ROUTING} ${MEDIA_COMMON}${IMAGE_MODELS}`, inputSchema: { type: 'object', properties: IMAGE_PROPS, required: ['prompt', 'out'] } },
   {
@@ -986,7 +1015,7 @@ const MEDIA_TOOL_LIST = [
   },
   {
     name: 'generate_audio',
-    description: `${NOT_DEFAULT_AUDIO} Then: make a sound effect or a short music clip from a prompt through OpenRouter. ${MEDIA_COMMON} Models: effects default to bytedance-seed/seed-audio-1-0 (priced by the second), music to google/lyria-3-clip-preview (about $0.04 a clip).`,
+    description: `${NOT_DEFAULT_AUDIO} Then: make a sound effect or a short music clip from a prompt through OpenRouter. ${MEDIA_COMMON} Models: effects default to bytedance-seed/seed-audio-1-0 (priced by the second), music to google/lyria-3-clip-preview.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1024,7 +1053,7 @@ const MEDIA_TOOL_LIST = [
   },
 ];
 
-/** A PNG through Codex's built-in image_gen on the person's own ChatGPT login (#733): offered only when they have a Codex login a turn can reach. */
+/** A PNG through Codex's built-in image_gen on the person's own ChatGPT login (#733): listed for every minion, refused on a turn whose person has no Codex login it can reach (#878). */
 const CODEX_IMAGES = process.env.COORDINATOR_CODEX_IMAGES === '1';
 const CODEX_IMAGE_TOOL = {
   name: 'generate_image_codex',
@@ -1063,7 +1092,7 @@ async function codexImage(args: any): Promise<string> {
   const usage = /^Codex usage: .*$/m.exec(r.err)?.[0];
   const why = r.err.replace(/^Codex usage: .*$/m, '').replace(/^citadel-codex-review: /gm, '').trim();
   if (r.code === 0) return `${r.out.trim()} with Codex on this person's ChatGPT plan.${usage ? ` ${usage}.` : ''}`;
-  if (r.code === 4) throw new Error(`${why} Use generate_image (OpenRouter) for this one if it is offered.`);
+  if (r.code === 4) throw new Error(`${why} Use generate_image (OpenRouter) for this one; it refuses too when the person has no OpenRouter key.`);
   throw new Error(`Codex couldn't make the image${r.code === null ? '' : ` (exit ${r.code})`}: ${why || 'no reason given'}`);
 }
 
@@ -1396,13 +1425,13 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this scheme's Taskmaster, waking it by default: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
+      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
   },
   {
     name: 'message_minion',
     description:
-      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over 55 minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After 6 messages either way between two minions in 10 minutes, the next is held until a person continues. Find who owns a file or a piece of work with list_tickets and read_minion.",
+      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over 55 minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After 6 messages either way between two minions in 10 minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1502,7 +1531,7 @@ const THREAD_TOOLS = [
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile (a GitHub notice that needs no action, like its PR merging, doesn't count); its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open in state complete, and the server closes them once a member has opened them after your final reply. close_self on a complete minion refuses and says so. It refuses while a question or plan card is open or the state is try or complete; a state ready is cleared. Setting state complete, try or ready after it cancels the dismissal, and so does the state in your final reply's status line, which is applied after this call. Never announce a close in prose ("closing this minion"): call this tool, and if it refuses or the minion stays open, say plainly why you are staying open.`,
+      `Dismiss this minion when the turn ends, once its work is merged and nothing needs deploying${DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Never announce a close in prose: call this, and if it refuses or the minion stays open, say why.`,
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Merged abc1234; live after the restart"' } },
@@ -1597,7 +1626,20 @@ async function runTool(name: string, args: any): Promise<string> {
       const head = at === PROJECT ? [] : [otherScheme(scheme)];
       // The morning count (#835): yesterday's contraption errors and the shared-folder file that lists them.
       if (errors) head.push(`Contraption errors yesterday (${errors.day}): ${errors.total}, ${errors.apps.map((a: any) => `${a.title} ${a.count}`).join(', ')}. Grouped with a sample each in the shared folder's ${errors.file}.`);
-      return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.'].join('\n');
+      const claims = at === PROJECT ? (await call('GET', `/api/projects/${at}/claims`)).claims : [];
+      return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.', ...(claims.length ? ['Claims:', ...claims.map(claimLine)] : [])].join('\n');
+    }
+    case 'claim': {
+      const r = await call('POST', `/api/projects/${PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null });
+      return `Claimed: ${claimLine(r.claim)}`;
+    }
+    case 'release': {
+      const r = await call('DELETE', `/api/projects/${PROJECT}/claims/${encodeURIComponent(String(args.name ?? ''))}`);
+      return r.released ? `Released: ${claimLine(r.released)}` : `Nobody held ${args.name}.`;
+    }
+    case 'list_claims': {
+      const { claims } = await call('GET', `/api/projects/${PROJECT}/claims`);
+      return claims.length ? claims.map(claimLine).join('\n') : 'No claims: every duty is free.';
     }
     case 'read_ticket': {
       const at = schemeOf(args);
@@ -1750,11 +1792,14 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'edit_image':
     case 'generate_audio':
     case 'generate_speech': {
+      // Offered to every minion so the tool list doesn't follow the sender (#878); refused here when this turn's person has no key.
+      if (!MEDIA) throw new Error("Not on this turn: the person it runs for hasn't connected OpenRouter on their account page. Make it with code instead, or ask them to connect it.");
       const r = await call('POST', `/api/tickets/${TICKET}/openrouter`, { tool: name, args });
       if (r.model === 'azure-speech') return `Wrote ${r.paths.join(', ')} with Azure Speech for about $${Number(r.cost_usd).toFixed(4)} (booked to the scheme: $${Number(r.month_usd).toFixed(2)} outside spend this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? ', over it' : ''}`}).`;
       return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.${r.warnings ? `\n${r.warnings.join('\n')}` : ''}`;
     }
     case 'generate_image_codex':
+      if (!CODEX_IMAGES) throw new Error('Not on this turn: the person it runs for has no Codex login a turn can reach. Use generate_image (OpenRouter) for this one if it is on this turn.');
       return codexImage(args);
     case 'usage_split':
       return usageSplitText(await call('GET', '/api/costs/mine'));
@@ -1827,7 +1872,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
-      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
+      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
       if (r.held) return `Held, not delivered: you and the Taskmaster of ${r.scheme} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it.${copied} ${ask}`;
@@ -1856,9 +1901,10 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice), ask on a choices page (doc) or ask for a secret (secret)');
       const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
-      const { id: questionId, href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci });
+      const everyone = args.for_everyone === true ? { for_everyone: true } : {};
+      const { id: questionId, href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci, ...everyone });
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
-      return `The question card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the card below](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
+      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'settle_question': {
       const { settled } = await call('POST', `/api/tickets/${TICKET}/settle`, { questionId: args.question_id ?? null });
@@ -1928,6 +1974,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Job #${j.id} is ${j.state === 'stopped' ? 'stopped' : 'being stopped on the machine; you are woken when it ends'}.`;
     }
     case 'propose_machine_notes': {
+      if (!MACHINES.includes(String(args.machine ?? '').toLowerCase())) throw new Error(MACHINES.length ? `No machine called ${args.machine} that this turn got: it has ${MACHINES.join(', ')}` : 'This turn got no connected machines, so there are no notes to propose');
       const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
@@ -2116,6 +2163,11 @@ function scheduleLine(s: any): string {
   return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
+/** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */
+function claimLine(c: any) {
+  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}`;
+}
+
 /** list_tickets and read_ticket with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */
 const SCHEME_ARG = { scheme: { type: 'integer', description: "Another scheme's number (as your instructions list them), to read its minions instead of this scheme's. Read-only, and only on a turn a Citadel member or admin asked for; leave it out for this scheme." } };
 const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ticket' ? { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, ...SCHEME_ARG } } } : t);
@@ -2144,7 +2196,7 @@ function toolListAll() {
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), ...(MACHINES.length ? [PROPOSE_MACHINE_NOTES] : []), ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...(MEDIA ? MEDIA_TOOL_LIST : []), ...(CODEX_IMAGES ? [CODEX_IMAGE_TOOL] : []), ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

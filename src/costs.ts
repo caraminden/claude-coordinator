@@ -85,24 +85,25 @@ export function spendSplit(store: Store, now = Date.now()): { people: SpendRow[]
 /** Below this the weekly meter, read to two decimals, is too coarse to price a week by. */
 const MIN_UTILIZATION = 0.03;
 
-/** The last estimate a meter could price, kept for the start of the next window. */
+/** The server login's last priced estimate from before accounts were split (now each account keeps week_usd:host…). */
 const LAST_BUDGET = 'day_budget';
 
+type Meter = { weekly: { utilization: number; resetsAt: number | null } | null };
+export interface WeekPart { n: number; label: string; limit: number | null; /** no estimate of its own yet: counted like the priced accounts' average */ assumed: boolean }
+
 /**
- * An even day's share of the plan's weekly limit (a seventh of it) at API prices: what turns cost since the
- * weekly window opened, scaled up by how full the meter is. Early in a window, while the meter is too coarse,
- * the last window's estimate stands in, so shares don't drop back to dollars every reset; null before any.
+ * The server login's weekly limit at API prices, every Claude account together (Cara, 2026-11-17: the Day chip ignored the
+ * second account): the sum of each account's weekLimit. An account with no estimate yet counts as the average of the priced
+ * ones, `assumed`; null before any is priced. `usage` is runner.usageOf's (an `accounts` list when there are several).
  */
-export function dayBudget(store: Store, weekly: { utilization: number; resetsAt: number | null } | null | undefined, now = Date.now()): number | null {
-  const last = store.getSetting<number>(LAST_BUDGET);
-  // A reset time already past: the meter is last week's, and its window's turns are gone from view.
-  if (!weekly?.resetsAt || weekly.resetsAt <= now || weekly.utilization < MIN_UTILIZATION) return last;
-  // The meter is the server login's plan: only its turns priced it (#468 S05-3).
-  const spent = store.dailyCosts(weekly.resetsAt - 7 * 86400_000, true).reduce((sum, r) => sum + r.cost, 0);
-  if (!(spent > 0)) return last;
-  const budget = spent / weekly.utilization / 7;
-  if (budget !== last) store.setSetting(LAST_BUDGET, budget);
-  return budget;
+export function hostWeek(store: Store, usage: (Meter & { accounts?: { n: number; label: string; usage: Meter | null }[] }) | null | undefined, now = Date.now()): { limit: number | null; parts: WeekPart[] } {
+  const list = usage?.accounts ?? [{ n: 1, label: '', usage }];
+  const parts = list.map((a): WeekPart => ({ n: a.n, label: a.label, limit: weekLimit(store, null, { weekly: a.usage?.weekly ?? null, account: a.n }, now), assumed: false }));
+  const priced = parts.filter((p) => p.limit !== null);
+  if (!priced.length) return { limit: null, parts };
+  const avg = priced.reduce((x, p) => x + p.limit!, 0) / priced.length;
+  for (const p of parts) if (p.limit === null) { p.limit = avg; p.assumed = true; }
+  return { limit: parts.reduce((x, p) => x + p.limit!, 0), parts };
 }
 
 /** "Opus 5.5" for claude-opus-5-5 (a dated or "+advisor" id too), "Opus" for the bare alias, anything else as it is. */
@@ -136,9 +137,10 @@ export interface WhereItWent {
   top: { id: number; project_id: number; kind: string; scheme: string; number: number | null; title: string; usd: number }[];
 }
 
-/** The kind of work a turn was: keepalive pings, Taskmasters, scheduled runs, else the minion's `type`. */
+/** The kind of work a turn was: keepalive pings, side questions (#932), Taskmasters, scheduled runs, else the minion's `type`. */
 function kindOf(r: SpendRowRaw): string {
   if (r.keepalive) return 'Keepalive pings';
+  if (r.side) return 'Side questions';
   if (r.kind === 'coordinator') return 'Taskmasters';
   if (r.created_by === APP_NAME) return 'Scheduled runs';
   return r.type ? r.type[0].toUpperCase() + r.type.slice(1) : 'No type';
@@ -186,14 +188,16 @@ export function whereItWent(store: Store, payer: number | null, weekUsd: number 
 /**
  * One account's weekly limit at API prices for a payer (#905): what their turns on the account in use cost since its week
  * opened, scaled up by how full its meter is. While the meter is too coarse, the payer's last estimate stands in (the
- * server login's falls back to dayBudget's); null before any.
+ * server login's falls back to the pre-split estimate); null before any.
  */
 export function weekLimit(store: Store, payer: number | null, usage: { weekly: { utilization: number; resetsAt: number | null } | null; account?: number } | null | undefined, now = Date.now()): number | null {
-  const key = `week_usd:${payer ?? 'host'}`;
-  const last = store.getSetting<number>(key) ?? (payer === null ? (store.getSetting<number>(LAST_BUDGET) ?? 0) * 7 || null : null);
+  // Each account keeps its own estimate (account 1's key is the one from before accounts were split).
+  const account = usage?.account ?? 1;
+  const key = `week_usd:${payer ?? 'host'}${account > 1 ? `:account:${account}` : ''}`;
+  const last = store.getSetting<number>(key) ?? (payer === null && account === 1 ? (store.getSetting<number>(LAST_BUDGET) ?? 0) * 7 || null : null);
   const w = usage?.weekly;
   if (!w?.resetsAt || w.resetsAt <= now || w.utilization < MIN_UTILIZATION) return last;
-  const spent = store.accountSpend(payer, usage?.account ?? 1, w.resetsAt - 7 * 86400_000);
+  const spent = store.accountSpend(payer, account, w.resetsAt - 7 * 86400_000);
   if (!spent) return last; // null: the window reaches back before turns kept their account
   const usd = spent / w.utilization;
   if (usd !== last) store.setSetting(key, usd);

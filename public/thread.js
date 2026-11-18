@@ -1,7 +1,9 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { presenceHead } from './presence.js';
-import { ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight, icon, isCoordinator, jumpHref, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
-import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
+import { account, ago, api, baseName, clearHighlights, fileHref, formatSize, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
+import { mergedView } from './mine.js';
+import { toast } from './ui/status.js';
+import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
@@ -24,15 +26,67 @@ import { askHeader } from './askcard.js';
 import { firstSentence, GITHUB_NAME, machineAuthor, senderTone, shortDuration, shortNote, ticketActionRef } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerLine } from './payer.js';
+import { sideEvent } from './sidethread.js';
 import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, nowDoing, planEstimate, planTrack, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, spendCard } from './cards.js';
 
+// Mine or Everyone (#920): how this device opens your Taskmaster in a scheme with several.
+const TM_VIEW = 'cc-tm-view';
+export function tmViewMode() {
+  try { return localStorage.getItem(TM_VIEW) === 'everyone' ? 'everyone' : 'mine'; } catch { return 'mine'; }
+}
+
+/** Mine and Everyone, in your Taskmaster's title row: the pick shows at once and the history follows. */
+function tmViewSwitch() {
+  const now = view.merged.mode;
+  const pick = (mode, label, title) => h('button', { type: 'button', class: `chip${mode === now ? ' on' : ''}`, 'aria-pressed': String(mode === now), title, onclick: () => mode !== now && setTmView(mode) }, label);
+  return h('span', { class: 'tm-views', role: 'group', 'aria-label': 'Which Taskmaster chats' },
+    pick('mine', 'Mine', 'Your Taskmaster, with the Overlord\'s cards and alerts for everyone'),
+    pick('everyone', 'Everyone', 'Every Taskmaster in this scheme and the Overlord, in time order'));
+}
+
+/** Mine's line under the title (board C): whose chats it leaves out, and a way there. */
+function tmBanner() {
+  const rest = (view.taskmasters ?? []).filter((t) => t.id !== view.id);
+  const names = rest.filter((t) => t.person_id != null).map((t) => `${t.person_name ?? 'Someone'}'s`);
+  const whose = names.length ? `${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} Taskmasters` : `${names[0]} Taskmaster`}` : '';
+  const said = [whose, rest.some((t) => t.person_id == null) ? 'the Overlord' : ''].filter(Boolean).join(' and ');
+  return said && h('div', { class: 'tm-banner' }, `${said} ${rest.length > 1 ? 'are' : 'is'} in `,
+    h('button', { type: 'button', class: 'link', onclick: () => setTmView('everyone') }, 'Everyone'), '.');
+}
+
+async function setTmView(mode) {
+  const v = view;
+  const before = v.merged.mode;
+  try { localStorage.setItem(TM_VIEW, mode); } catch {}
+  v.merged = mergedView(v.projectId, v.id, v.taskmasters, mode);
+  renderTicketHead();
+  const { src } = v.merged;
+  try {
+    const cached = cachedEvents(src);
+    const page = cached?.page ?? await loadEvents(src);
+    if (view !== v || v.merged.src !== src) return; // another view, or another flip, overtook this one
+    v.page = page;
+    renderHistory();
+    scrollToBottom();
+    if (cached && await cached.fresh && view === v && v.page === page) renderHistory();
+    await catchUpEvents();
+  } catch {
+    if (view !== v || v.merged.src !== src) return;
+    try { localStorage.setItem(TM_VIEW, before); } catch {}
+    v.merged = mergedView(v.projectId, v.id, v.taskmasters, before);
+    renderTicketHead();
+    toast(`Couldn't load ${mode === 'everyone' ? 'Everyone' : 'Mine'}. Try again in a moment.`, { tone: 'warn' });
+  }
+}
+
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
-export function chatView(chatId, ticket) {
+export function chatView(chatId, ticket, merged = null) {
   return {
     id: chatId, ticket, lastEventId: 0,
+    merged, // your Taskmaster's chat as Mine or Everyone, several sessions in one log (#920, mine.js mergedView)
     progress: createProgress(),
     progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
     findEl: chatId ? chatFindBox() : null, // lives in the thread bar too, so it survives re-renders
@@ -43,6 +97,7 @@ export function chatView(chatId, ticket) {
     folds: [], // the running turn's settled words, { text, fate } in order, folded when its answer arrives (#551)
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: chatId ? outbox(chatId) : [], // messages on their way or not sent (composer.js), replaced by the server's copy
+    sideThreads: new Map(), // side thread id -> its row (sidethread.js)
     cards: new Map(), // question card id -> { el, markAnswered }; plan card id -> { el, settle }; approval card id -> { settle }
     heldCards: [], // this turn's question and plan cards, kept below the words that explain them
     branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
@@ -136,10 +191,11 @@ function renderHistory() {
   const recap = document.getElementById('recap');
   Object.assign(view, {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
-    actions: new Map(), turnActions: [], cards: new Map(), lastPlan: null, heldCards: [], gruntStarts: new Map(),
+    actions: new Map(), turnActions: [], cards: new Map(), sideThreads: new Map(), lastPlan: null, heldCards: [], gruntStarts: new Map(),
     // The session started on an earlier page, if there is one.
     sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, folds: [], pendingRequest: [], turnRequest: undefined,
   });
+  if (view.merged) Object.assign(view.merged, { states: new Map(), last: view.id });
   const earlier = page.more && h('button', { type: 'button', class: 'small secondary', onclick: (e) => showEarlier(e.currentTarget) }, 'Load earlier');
   log.replaceChildren(...(earlier ? [h('div', { class: 'load-earlier' }, earlier)] : []));
   if (earlier) loadWhenReached(earlier);
@@ -198,6 +254,7 @@ export async function jumpToEvent(target) {
 /** Load the page before what's shown (or back to event `from`) and redraw, keeping your place. */
 export async function showEarlier(button, from) {
   const { id, page } = view;
+  const src = view.merged?.src ?? id;
   const label = button?.textContent;
   // A spinner in place of the button until the older messages are in (#288); the redraw replaces it.
   if (button) {
@@ -207,7 +264,7 @@ export async function showEarlier(button, from) {
   }
   try {
     // Held a moment, so a quick load shows the spinner rather than a flash.
-    await Promise.all([loadEarlier(id, page, from), button && new Promise((r) => setTimeout(r, 300))]);
+    await Promise.all([loadEarlier(src, page, from), button && new Promise((r) => setTimeout(r, 300))]);
   } catch (err) {
     if (button) {
       button.disabled = false;
@@ -274,7 +331,7 @@ export function chatSection(chatId, ticket) {
 
 /** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
 function chatFindBox() {
-  const input = h('input', { type: 'search', class: 'chat-find', placeholder: matchMedia('(max-width: 800px)').matches ? '🔍 Find' : 'Find in chat', 'aria-label': 'Find in chat', autocomplete: 'off' });
+  const input = h('input', { type: 'search', class: 'chat-find', placeholder: matchMedia('(max-width: 800px)').matches ? '🔍 Find' : 'Find in chat', 'aria-label': 'Find in chat', ...noAutofill('chat-find') });
   const count = h('span', { class: 'find-count muted' });
   const state = { marks: [], at: -1 };
   const show = (i) => {
@@ -421,8 +478,8 @@ export function renderTicketHead() {
       const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while parked';
       unparkSlot.hidden = !parked;
       unparkSlot.replaceChildren(...(parked ? [
-        h('button', { type: 'button', class: 'secondary small act-unpark', title, onclick: () => unpark(t) }, 'Unpark'),
-        h('button', { type: 'button', class: 'secondary small act-send-unpark', title: 'Send your message and unpark it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unpark'),
+        h('button', { type: 'button', class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unpark'),
+        h('button', { type: 'button', class: 'secondary act-send-unpark', title: 'Send your message and unpark it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unpark'),
       ] : []));
     }
     const hint = form.querySelector('.parked-hint');
@@ -453,6 +510,8 @@ export function renderTicketHead() {
       location.hash = `#/p/${t.project_id}`;
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
+  // Out of a minion's touched set (#919): your Taskmaster stops hearing from it until you touch it again.
+  if (!coord && account?.id != null && t.touched?.includes(account.id)) actions.unshift(leaveButton(t));
   actions.unshift(ultraButton(t));
   const state = headState(t);
   // Titled too, since a narrow line may cut it short. While it works (its turn or the server, #727),
@@ -491,10 +550,12 @@ export function renderTicketHead() {
       h('span', { class: `dot ${working ? 'running' : t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       presenceHead(t),
+      coord && view.merged ? tmViewSwitch() : '',
       phone ? h('span', { class: 'spacer' }) : '',
       phone ? more : '',
       phone ? close : ''),
     coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
+    coord && view.merged?.mode === 'mine' ? tmBanner() : '',
     phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
     sub,
     phone ? '' : view.progressEl);
@@ -518,9 +579,26 @@ function headState(t) {
 /** Take the ticket the server returned after a send or a card's answer, if that chat is still open. */
 export function adoptTicket(ticketId, ticket) {
   if (view?.id !== ticketId) return;
+  // Your message went to your own Taskmaster instead (#919 makes it, splitting the scheme, on a member's first write):
+  // open the scheme again, which now opens yours. shortcut: a whole reload, once per person per scheme; fine at that rate.
+  if (ticket.id !== ticketId && isCoordinator(ticket)) return void location.reload();
   view.ticket = ticket;
   renderTicketHead();
   catchUpEvents().catch(() => {});
+}
+
+function leaveButton(t) {
+  const mark = (inIt) => {
+    const now = view.tickets?.get(t.id) ?? t;
+    now.touched = inIt ? [...new Set([...(now.touched ?? []), account.id])] : (now.touched ?? []).filter((id) => id !== account.id);
+    if (view.ticket?.id === t.id) renderTicketHead();
+  };
+  return h('button', { type: 'button', class: 'secondary act-leave', title: 'Stop hearing from this minion in your Taskmaster. Messaging it or answering its cards brings you back.', onclick: () => optimistic({
+    label: 'leave this minion',
+    apply: () => mark(false),
+    send: () => api(`api/tickets/${t.id}/leave`, { method: 'POST', body: {} }),
+    undo: () => mark(true),
+  }) }, 'Leave');
 }
 
 /** Ask for a Taskmaster's fresh session (#406): the button goes at once, and comes back if the server refuses. */
@@ -897,7 +975,48 @@ function renderProgress() {
   progressEl.hidden = false;
 }
 
+// Mine and Everyone (#920): each other Taskmaster session's drawing state, swapped into `view` while one of
+// its events is drawn, so its turns fold, hold cards and count actions on their own. Yours stays in `view`.
+const SESSION_STATE = ['ticket', 'part', 'progress', 'actions', 'turnActions', 'lastPlan', 'heldCards', 'gruntStarts', 'sawInit', 'latestReply', 'turnNote', 'turnInitAt', 'narration', 'narrationEl', 'folds', 'pendingRequest', 'turnRequest'];
+const sessionState = (o) => Object.fromEntries(SESSION_STATE.map((k) => [k, o[k]]));
+
+function newSessionState(part) {
+  const ticket = view.taskmasters?.find((t) => t.id === part.id)?.ticket ?? { id: part.id, kind: 'coordinator', project_id: view.projectId, status: 'idle' };
+  return {
+    ticket, part, progress: createProgress(), actions: new Map(), turnActions: [], lastPlan: null, heldCards: [], gruntStarts: new Map(),
+    sawInit: true, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, folds: [], pendingRequest: [], turnRequest: undefined,
+  };
+}
+
 export function appendEvent(event, scroll = true) {
+  const m = view.merged;
+  if (!m) return drawEvent(event, scroll);
+  const id = event.ticket_id;
+  const part = m.parts.find((p) => p.id === id);
+  if (!part) return;
+  if (m.last !== id) {
+    // Another session's items start here, so the last one's words don't run on or collapse across them.
+    const left = m.last === view.id ? view : m.states.get(m.last);
+    if (left?.folds.length) left.folds.push({ fate: 'break' });
+    else if (left) left.narrationEl = null;
+    if (left) left.heldCards = [];
+    m.last = id;
+  }
+  if (id === view.id) return drawEvent(event, scroll);
+  const own = sessionState(view);
+  Object.assign(view, m.states.get(id) ?? newSessionState(part));
+  try {
+    drawEvent(event, false);
+  } finally {
+    m.states.set(id, sessionState(view));
+    Object.assign(view, own);
+  }
+  renderTyping(); // the typing line is your own Taskmaster's
+  if (scroll && followChat) scrollToBottom();
+  if (scroll) renderCardJump();
+}
+
+function drawEvent(event, scroll) {
   // Live events join the loaded history, so a redraw (Load earlier) and the cache keep them.
   if (view.page && event.id > (view.page.events.at(-1)?.id ?? 0)) view.page.events.push(event);
   view.lastEventId = Math.max(view.lastEventId, event.id);
@@ -1042,6 +1161,10 @@ export function appendEvent(event, scroll = true) {
     while (prev && pending.has(prev)) prev = prev.previousElementSibling;
     if (prev?.matches('.mcopies')) addMinionCopy(prev, data, event);
     else nodes.push(addMinionCopy(newMinionCopies(), data, event));
+  } else if (event.kind === 'side' || event.kind === 'side_answer') {
+    // A side question and its answers share one row (#932, sidethread.js).
+    const row = sideEvent(view.sideThreads, event, data, view.ticket, scroll);
+    if (row) nodes.push(row);
   } else if (event.kind === 'loop_paused') {
     nodes.push(loopCard(data));
   } else if (event.kind === 'loop_continued') {
@@ -1123,6 +1246,15 @@ export function appendEvent(event, scroll = true) {
   if (!(event.kind === 'user_message' && data.author === me)) for (const n of nodes) n.dataset.at = event.created_at;
   // What a jump link (#236) finds it by.
   for (const n of nodes) n.dataset.eid = event.id;
+  // Another session's items in Mine or Everyone (#920): the Overlord's on a purple band, each named by whose it is.
+  if (view.part) for (const n of nodes) {
+    n.classList.toggle('ovl', !!view.part.overlord);
+    n.dataset.session = view.part.label;
+    if (n.matches('.msg.user')) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `to ${view.part.label}`));
+  }
+  // A for-everyone card a person's Taskmaster asked through the Overlord (#921) says whose it was.
+  const asker = data.asker && view.taskmasters?.find((t) => t.id === data.asker);
+  if (asker?.person_name && (event.kind === 'question' || event.kind === 'plan')) for (const n of nodes) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `asked by ${asker.person_name}'s Taskmaster`));
   // A minion explains its card in the reply it writes after asking, so the card stays below that
   // turn's words until someone answers or the turn ends.
   const held = view.heldCards.find((el) => el.isConnected);

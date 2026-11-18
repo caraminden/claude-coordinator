@@ -8,7 +8,7 @@ test("a deploy's to-dos go to the home Taskmaster once per list, after a home sc
   let fail = false;
   const app = {
     dataDir: '/nonexistent',
-    store: { getProject: (id: number) => (id === 5 ? { id: 5, name: 'Transdata' } : undefined), getCoordinator: () => ({ id: 50 }) },
+    store: { getProject: (id: number) => (id === 5 ? { id: 5, name: 'Transdata' } : undefined), getCoordinator: () => ({ id: 50 }), coordinatorFor: () => undefined },
     runner: { send: (to: number, author: string, text: string, _i: unknown, extra: any) => { if (fail) throw new Error('down'); sent.push({ to, author, text, asker: extra.asker }); } },
   } as any;
   const c = (home: number | null) => ({ name: 'td', title: 'Transdata', home_scheme: home }) as any;

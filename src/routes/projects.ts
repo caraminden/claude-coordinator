@@ -17,6 +17,9 @@ import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
+import { claimName, type Claim } from '../claims.ts';
+import { postCard } from '../ci-armed.ts';
+import { pacific } from '../pacific.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -24,6 +27,7 @@ import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
+import { mergedAfter, mergedPage } from '../history.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
@@ -119,6 +123,56 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
   return store.getCoordinator(project.id)!;
 }
 
+/**
+ * The Taskmaster a person's message goes to (#919): their own, made the first time a member who isn't the owner
+ * writes (that splits the scheme, R3: "From the second person"). The owner before a split, a non-member and
+ * nobody get the scheme's only one or, after the split, the Overlord.
+ */
+export async function ensureCoordinatorFor(app: App, project: Project, personId: number | null | undefined): Promise<Ticket> {
+  const { store, runner } = app;
+  const only = await ensureCoordinator(app, project);
+  if (personId == null) return store.getOverlord(project.id) ?? only;
+  const own = store.coordinatorFor(project.id, personId) ?? only;
+  if (own.coordinator_of === personId) return own;
+  const split = store.isSplit(project.id);
+  if (!split && (project.owner_id == null || project.owner_id === personId)) return own;
+  if (!store.listMembers(project.id).some((m) => m.id === personId)) return own;
+  const before = new Set(store.listCoordinators(project.id).map((t) => t.id));
+  const mine = store.splitScheme(project.id, personId);
+  if (!split) runner.emit(only.id, 'note', { text: `${store.getUser(personId)?.name ?? 'Someone'} wrote to the ${AGENT_NAME}, so each person in this scheme now has their own; this one is ${store.getUser(project.owner_id!)?.name ?? "the owner"}'s, and a new Overlord does the scheme-wide jobs.` });
+  for (const t of store.listCoordinators(project.id)) if (!before.has(t.id) || t.id === only.id) runner.broadcastTicket(t.id);
+  return mine;
+}
+
+/** Which Taskmaster of scheme `project` last wrote to Taskmaster `to`: where `to`'s next message there goes, once (#919). */
+const replyKey = (to: number, project: number) => `taskmaster_reply:${to}:${project}`;
+
+/**
+ * The Taskmaster of `project` a message_taskmaster from `from` reaches (#919): with `person`, that member's own,
+ * else the Overlord; without, the one of `project` that last wrote to `from` (a reply, once), else the sender's
+ * person's own, else the Overlord. An unsplit scheme has just the one.
+ */
+async function taskmasterTo(app: App, from: Ticket, own: Project, project: Project, person: unknown): Promise<Ticket> {
+  const { store } = app;
+  const only = await ensureCoordinator(app, project);
+  if (person != null && person !== '') {
+    const raw = str(person, 'person', 200);
+    const user = store.findUser('name', store.props.personName(raw) || raw);
+    if (!user) throw new HttpError(400, `No person called "${raw}"; leave person out for the scheme's Overlord`);
+    return store.coordinatorFor(project.id, user.id) ?? only;
+  }
+  const back = store.getTicket(store.getSetting<number>(replyKey(from.id, project.id)) ?? 0);
+  store.deleteSetting(replyKey(from.id, project.id));
+  if (back?.kind === 'coordinator' && back.project_id === project.id) return back;
+  return store.coordinatorFor(project.id, from.coordinator_of) ?? only;
+}
+
+/** " (Josh's)" or " (the Overlord)" after a split scheme's Taskmaster's name, so the receiver knows who wrote. */
+function senderLabel(app: App, from: Ticket): string {
+  if (!app.store.isSplit(from.project_id)) return '';
+  return from.coordinator_of == null ? ' (the Overlord)' : ` (${app.store.getUser(from.coordinator_of)?.name ?? 'someone'}'s)`;
+}
+
 /** Where a new scheme's code came from, for the kickoff message. */
 function codeLine(p: Project, source: Source, folder: string | null): string {
   if (source === 'none') return 'no code';
@@ -138,13 +192,39 @@ function minionHits(app: App, hits: MemoryHit[]): (MemoryHit & { owner: string |
   return hits.map((h) => ({ ...h, owner: String(app.store.props.forTarget('minion', h.ticket_id).assigned ?? '') || null, twin: h.score >= TWIN_SCORE }));
 }
 
-/** After a person starts a minion: a note in its chat naming open minions that read like the same work. Never blocks the start; a failed search says nothing. */
-async function twinNote(app: App, projectId: number, id: number, text: string) {
+/**
+ * After a start: a person's gets a quiet note in its chat naming open minions that read like the same work (#689);
+ * in a split scheme the Overlord hears of every start but its own as held mail, and gets a card when one reads like
+ * another person's open minion (#921). Never blocks the start; a failed search says nothing.
+ */
+async function startChecks(app: App, projectId: number, id: number, startedBy: string, caller: Ticket | undefined, text: string) {
+  const { store } = app;
+  const minion = store.getTicket(id);
+  const overlord = store.isSplit(projectId) ? store.getOverlord(projectId) : undefined;
+  const watching = overlord && overlord.id !== caller?.id ? overlord : undefined;
+  if (!minion) return;
+  if (watching) app.runner.leaveMail(watching.id, 'Citadel', `${startedBy} started #${minion.number} ${minion.title}`);
+  if ((caller && !watching) || !app.memory.indexed(projectId)) return;
   try {
     const hits = await app.store.memory.search(projectId, text.slice(0, 1000), app.memory.embed, app.memory.model, { limit: 3, openMinions: true });
     const twins = minionHits(app, hits).filter((h) => h.twin && h.ticket_id !== id);
-    if (!twins.length || !app.store.getTicket(id)) return;
-    app.runner.emit(id, 'note', { text: `Similar and open: ${twins.map((h) => `#${h.number} '${h.title}'${h.owner ? `, ${h.owner}'s` : ''}`).join('; ')}` });
+    if (!twins.length || !store.getTicket(id)) return;
+    if (!caller) app.runner.emit(id, 'note', { text: `Similar and open: ${twins.map((h) => `#${h.number} '${h.title}'${h.owner ? `, ${h.owner}'s` : ''}`).join('; ')}` });
+    // The Overlord only flags another person's: a person's own look-alikes are theirs and their Taskmaster's to see.
+    const mine = store.minionOwner(minion) ?? (caller ? caller.coordinator_of : null);
+    const theirs = twins.map((h) => ({ ...h, by: store.minionOwner({ id: h.ticket_id }) })).find((h) => h.by != null && h.by !== mine);
+    if (!watching || !theirs) return;
+    const who = store.getUser(theirs.by!)?.name ?? 'someone';
+    postCard(app, watching, { questions: [{
+      header: 'Duplicate start?',
+      question: `${startedBy} started #${minion.number} '${minion.title}', which reads like ${who}'s #${theirs.number} '${theirs.title}' (match ${theirs.score.toFixed(2)}). Same work?`,
+      multiSelect: false,
+      options: [
+        { label: 'Both stay', description: 'Different work after all; nothing to do.', recommended: true },
+        { label: `Dismiss #${minion.number}`, description: `#${theirs.number} carries on; #${minion.number} is dismissed and its starter told why.` },
+        { label: 'Merge into one', description: `Both owners' Taskmasters are told to agree which minion carries on with both briefs.` },
+      ],
+    }] });
   } catch {}
 }
 
@@ -293,6 +373,16 @@ function searchProject(app: App, projectId: number, q: string, ticketId?: number
   return [...hits.values()].slice(0, 100);
 }
 
+/** A claim as the tools and the page show it: its holder's number and title and a Pacific time beside the ids. */
+export function claimView(app: App, c: Claim) {
+  const { store } = app;
+  const t = store.getTicket(c.holder);
+  // A Taskmaster that took a claim for itself has no number: name it (#921).
+  const holder_name = t?.kind !== 'coordinator' ? `#${t?.number ?? c.holder} ${t?.title ?? ''}`.trim()
+    : t.coordinator_of != null ? `${store.getUser(t.coordinator_of)?.name ?? 'a person'}'s Taskmaster` : store.isSplit(t.project_id) ? 'the Overlord' : 'the Taskmaster';
+  return { ...c, holder_number: t?.number ?? null, holder_title: t?.title ?? '', holder_name, since_text: `since ${pacific(c.since)}` };
+}
+
 const PEOPLE_AND_TASKMASTER = ['person', 'taskmaster'] as const;
 
 /** The schemes a person is in (all of them for an admin). */
@@ -338,8 +428,8 @@ export const projectRoutes: Route[] = [
           running: !hidden.has(p.id) && tickets.some(busy),
           working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
           icon: await iconVersion(p.repo_dir, { store, projectId: p.id }),
-          // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538).
-          coordinator_id: tickets.find((t) => t.kind === 'coordinator')?.id ?? null,
+          // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538): the person's own once split (#919).
+          coordinator_id: store.coordinatorFor(p.id, session.uid ?? null)?.id ?? null,
         };
       })));
     },
@@ -517,7 +607,9 @@ export const projectRoutes: Route[] = [
     // ?tickets=open leaves the dismissed minions out (`dismissed` counts them), and ?tickets=closed sends only them: the page
     // draws the scheme from the open ones and fetches the dismissed behind it, 80% of Citadel's payload (#538).
     async handler({ res, url, app, session, caller, project }) {
-      const coordinator = await ensureCoordinator(app, project);
+      // A person gets their own Taskmaster once the scheme is split (#919), as the scheme list's coordinator_id does.
+      const only = await ensureCoordinator(app, project);
+      const coordinator = caller ? only : (app.store.coordinatorFor(project.id, session.uid ?? null) ?? only);
       const which = url.searchParams.get('tickets');
       // ?number=N sends only that minion: the Taskmaster's tools turn a number into an id this way, on each call (#609).
       const number = url.searchParams.has('number') ? Number(url.searchParams.get('number')) : null;
@@ -537,7 +629,32 @@ export const projectRoutes: Route[] = [
       const builds = app.builds?.get(project.id) ?? [];
       // Builds' previews are of this server's own code, so only its own scheme's headers link one (src/previews.ts).
       const build_previews = !!app.previews && app.previews.buildScheme()?.id === project.id;
-      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, dismissed, seen, person_notes, pins, builds, build_previews });
+      // Per-person Taskmasters (#919): a person's page opens their own, and `taskmasters` lists every session for
+      // Mine and Everyone (#920): person_id null is the Overlord. Empty until the scheme splits.
+      const all_tms = app.store.listCoordinators(project.id);
+      const own = !caller && all_tms.length > 1 ? app.store.coordinatorFor(project.id, session.uid) ?? coordinator : coordinator;
+      const taskmasters = all_tms.length > 1
+        ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : app.store.getUser(t.coordinator_of)?.name ?? null }))
+        : [];
+      return json(res, 200, { project, coordinator: ticketView(app, own.id), taskmasters, tickets, dismissed, seen, person_notes, pins, builds, build_previews });
+    },
+  },
+  {
+    method: 'GET', path: '/api/projects/:project/taskmaster-events', who: ['person'], everyScheme: true,
+    // Mine and Everyone (#920): your Taskmaster's chat with the others', paged as one by event id (history.ts).
+    // Mine adds only the Overlord's for-everyone items and card answers; Everyone adds every session whole.
+    async handler({ res, url, app, session, project }) {
+      const { store } = app;
+      const list = store.listCoordinators(project.id);
+      const own = store.coordinatorFor(project.id, session.uid) ?? list[0];
+      const everyone = url.searchParams.get('view') === 'everyone';
+      // Someone who hasn't written yet has no Taskmaster of their own, so theirs is the Overlord: Mine filters it too.
+      const parts = !own ? [] : [{ id: own.id, mine: !everyone && own.coordinator_of == null && list.length > 1 }, ...list
+        .filter((t) => t.id !== own.id && (everyone || t.coordinator_of == null))
+        .map((t) => ({ id: t.id, mine: !everyone }))];
+      const num = (k: string) => Number(url.searchParams.get(k)) || undefined;
+      if (url.searchParams.has('after')) return json(res, 200, mergedAfter(store, parts, num('after') ?? 0));
+      return json(res, 200, mergedPage(store, parts, { before: num('before'), limit: num('limit'), from: num('from') }));
     },
   },
   {
@@ -621,12 +738,12 @@ export const projectRoutes: Route[] = [
         } catch (err: any) {
           throw new HttpError(409, err.message);
         }
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.getOverlord(project.id);
         if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} renamed the scheme from "${project.name}" to "${name}".` });
       }
       if (repoUrl) {
         store.setProjectUpstream(project.id, repoUrl, null);
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.getOverlord(project.id);
         if (coordinator) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
         }
@@ -635,7 +752,7 @@ export const projectRoutes: Route[] = [
       if (Object.keys(settings).length) {
         store.setProjectSettings(project.id, settings);
         // Who changed what gets a permanent line in the coordinator's chat, since rules decide what needs a person's OK.
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.getOverlord(project.id);
         const shown = (text: string) => (text ? lines(text).join(', ') : 'none');
         if (coordinator && settings.approval_rules !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each minion's next turn.` });
@@ -661,7 +778,7 @@ export const projectRoutes: Route[] = [
       }
       if (instructions !== project.instructions) {
         store.setProjectInstructions(project.id, instructions, session.name);
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.getOverlord(project.id);
         if (coordinator) {
           runner.emit(coordinator.id, 'note', {
             text: `${session.name} ${instructions ? 'updated' : 'cleared'} the scheme instructions; they apply from each minion's next turn.`,
@@ -679,7 +796,7 @@ export const projectRoutes: Route[] = [
     async handler({ res, app, session, project }) {
       if (onboardingOpen(project)) throw new HttpError(409, `${project.onboarding_mode === 'tune-up' ? 'A tune-up' : 'Setup'} is under way already`);
       // The Taskmaster first, so a failure there can't leave onboarding open with nobody told.
-      const coordinator = await ensureCoordinator(app, project);
+      const coordinator = await ensureCoordinatorFor(app, project, session.uid);
       if (onboardingOpen(app.store.getProject(project.id)!)) throw new HttpError(409, 'A tune-up is under way already');
       app.store.setProjectSettings(project.id, { onboarding: 'interview', onboarding_mode: 'tune-up' });
       app.runner.send(coordinator.id, session.name, 'Tune up this scheme: onboarding is on again, in tune-up mode.');
@@ -755,7 +872,7 @@ export const projectRoutes: Route[] = [
         store.setAppInstructions(text, session.name);
         // Every Taskmaster gets the line, since the text reaches every scheme.
         for (const p of store.listProjects()) {
-          const coordinator = store.getCoordinator(p.id);
+          const coordinator = store.getOverlord(p.id);
           if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} ${text ? 'updated' : 'cleared'} the ${APP_NAME}-wide instructions; they apply from each minion's next turn in every scheme.` });
         }
         app.broadcast({ type: 'app-instructions', instructions: store.appInstructions() });
@@ -847,8 +964,14 @@ export const projectRoutes: Route[] = [
       if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);
       if (brief) {
         store.settleBrief(project.id, brief.path, brief.heading, id);
-        const coordinator = store.getCoordinator(project.id);
+        const coordinator = store.ownerCoordinator(store.getTicket(id)!);
         if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} started #${store.getTicket(id)!.number} from ${brief.heading || 'the handoff'} in ${basename(brief.path)}` });
+      }
+      // A split scheme's other Taskmasters read it in their next turn's digest (#919).
+      if (store.isSplit(project.id)) {
+        const by = caller?.kind === 'coordinator' ? caller : null;
+        const who = !by ? session.name : by.coordinator_of == null ? 'The Overlord' : `${store.getUser(by.coordinator_of)?.name ?? 'Someone'}'s ${AGENT_NAME}`;
+        store.noteDigest(project.id, by?.id ?? 0, `${who} started #${store.getTicket(id)!.number} ${title}`);
       }
       if (follow) {
         const { leader, when } = follow;
@@ -860,8 +983,8 @@ export const projectRoutes: Route[] = [
       } else {
         runner.send(id, session.name, message, [], { brief: true });
       }
-      // A person's start gets a quiet note on look-alike open minions (#689); the Taskmaster's create_ticket checks before it creates (#488).
-      if (!caller && app.memory.indexed(project.id)) void twinNote(app, project.id, id, `${title}\n${message}`);
+      // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
+      void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);
       return json(res, 201, { ...ticketView(app, id), notes });
     },
   },
@@ -895,7 +1018,7 @@ export const projectRoutes: Route[] = [
       const r = app.store.props.registerValues(project.id, body.key, body.values, actor, !!body.force);
       if (r.added.length || r.updated.length) app.registryChanged(project.id, app.store.props.isGlobal(project.id, body.key));
       if (r.unreviewed.length) {
-        const coordinator = app.store.getCoordinator(project.id);
+        const coordinator = app.store.getOverlord(project.id);
         if (coordinator) app.runner.emit(coordinator.id, 'note', { text: `${actor.name} added ${r.unreviewed.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
       }
       return json(ctx.res, 200, r);
@@ -923,7 +1046,7 @@ export const projectRoutes: Route[] = [
       if (r.proposed) {
         app.registryChanged(project.id, false);
         const what = body.value === undefined ? `a new key \`${body.key}\`` : `\`${body.key}: ${body.value}\``;
-        const coordinator = await ensureCoordinator(app, project);
+        const coordinator = await ensureCoordinatorFor(app, project, null); // the registry is the Overlord's (#919)
         app.runner.send(coordinator.id, actor.name, `Property proposal: ${what}. Reason: ${body.reason}\n\nApprove or reject it with review_property (new keys need a person: ask them).`, []);
       }
       return json(ctx.res, 200, r);
@@ -1002,6 +1125,47 @@ export const projectRoutes: Route[] = [
       return json(res, 201, scheduleView(app, s));
     },
   },
+  // Claims (#921): the pipeline lane and other single-holder duties. Everyone in the scheme reads them; people and
+  // Taskmasters take and free them (every member decides alike, so any of them frees one whoever holds it).
+  {
+    method: 'GET', path: '/api/projects/:project/claims', who: ['person', 'taskmaster', 'minion'],
+    handler: ({ res, app, project }) => json(res, 200, { claims: app.store.claims.list(project.id).map((c) => claimView(app, c)) }),
+  },
+  {
+    method: 'POST', path: '/api/projects/:project/claims', who: PEOPLE_AND_TASKMASTER, refuse: 'Only people and Taskmasters take claims; ask your Taskmaster',
+    async handler({ req, res, app, session, caller, project }) {
+      const body = await readJson(req);
+      const name = claimName(body.name);
+      const note = body.note == null ? '' : str(body.note, 'Note', 300);
+      let holder = caller;
+      if (body.minion != null) {
+        holder = app.store.getTicketByNumber(project.id, Number(body.minion));
+        if (!holder || holder.kind === 'coordinator' || holder.status === 'closed') throw new HttpError(400, `No open minion #${Number(body.minion)} in this scheme`);
+      }
+      if (!holder) throw new HttpError(400, 'Name the minion that holds it (minion: its number)');
+      const { claim, held } = app.store.claims.take(project.id, name, holder.id, session.name, note);
+      if (held) {
+        const v = claimView(app, held);
+        throw new HttpError(409, `${name} is held by ${v.holder_name}, taken by ${v.taken_by} ${v.since_text}${held.note ? ` (${held.note})` : ''}. Release it first if it should move.`);
+      }
+      app.broadcast({ type: 'claims', projectId: project.id });
+      const view = claimView(app, claim);
+      if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? holder.id, `${session.name} claimed ${name} for ${view.holder_name}${note ? ` (${note})` : ''}`);
+      return json(res, 201, { claim: view });
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/projects/:project/claims/:name', who: PEOPLE_AND_TASKMASTER,
+    handler({ res, app, session, caller, project, params }) {
+      const released = app.store.claims.release(project.id, claimName(decodeURIComponent(params.name)));
+      const view = released && claimView(app, released);
+      if (view) {
+        app.broadcast({ type: 'claims', projectId: project.id });
+        if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? view.holder, `${session.name} released ${view.name} (held by ${view.holder_name})`);
+      }
+      return json(res, 200, { released: view || null });
+    },
+  },
   // Edit, pause or resume, or delete a schedule; runs it already started stay.
   {
     method: 'PATCH', path: '/api/schedules/:schedule', who: PEOPLE_AND_TASKMASTER,
@@ -1042,18 +1206,20 @@ export const projectRoutes: Route[] = [
       const { need } = checked;
       const wake = body.wake !== false && need !== 'fyi';
       const { own, person, who, project } = schemeTarget(app, from, body.scheme);
-      const to = await ensureCoordinator(app, project);
+      const to = await taskmasterTo(app, from, own, project, body.person);
       const toCitadel = project.id === GLOBAL_OWNER;
       // Citadel's Taskmaster weighs a non-member's ask differently (its prompt). Names that could fake
       // the membership clause (a scheme called "X, for Cara, a Citadel member") come quoted.
       const name = (s: string) => (/[,"[\]\n]/.test(s) ? JSON.stringify(s) : s);
       const author = toCitadel
         ? `${AGENT_NAME} of ${name(own.name)}, for ${person ? name(person.name) : 'no one'}, ${store.canSee(who, project.id) ? 'a' : 'not a'} ${project.name} member`
-        : `${AGENT_NAME} of ${own.name}`;
+        : `${AGENT_NAME} of ${own.name}${senderLabel(app, from)}`;
       // A file (#405) is copied into the receiver's shared inbox/ before anything is sent, so a bad path sends nothing.
       const file = body.file == null || body.file === '' ? null : relayFile(projectSharedDir(app.dataDir, own.id), projectSharedDir(app.dataDir, project.id), own.name, str(body.file, 'File', 1000));
       const attached = file ? `\n${APP_NAME} copied a file it attached into your scheme's shared folder, where your minions can read it too: ${file.path} (${byteSize(file.size)})` : '';
       const { held, left, cold } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true, need);
+      // A reply from that scheme comes back to this Taskmaster, not to whichever of its scheme's is default (#919).
+      if (!held) store.setSetting(replyKey(to.id, own.id), from.id);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
       if (!held) runner.emit(from.id, 'note', { need, text: `${wake && !cold ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });

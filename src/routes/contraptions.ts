@@ -150,7 +150,8 @@ export async function deployTodo(app: Pick<App, 'store' | 'runner' | 'dataDir'>,
   if (!todo.length) return void lastTodo.delete(at);
   if (lastTodo.get(at) === key || (caller?.kind === 'coordinator' && caller.project_id === scheme.id)) return;
   const text = `To do for ${c.title} (${c.name}): it deployed, but it still lacks what every contraption ships with, a rail icon and a web manifest that installs it as its own app:\n${todo.map((t) => `- ${t}`).join('\n')}\n\nIf no minion is on it yet, start one: the citadel:contraption-ui skill's references/installing.md and its starter's icon files say how. Then deploy again, which checks.`;
-  const taskmaster = await ensureCoordinator(app as App, scheme);
+  // The deployer's own Taskmaster there once split (#919), else the Overlord.
+  const taskmaster = app.store.coordinatorFor(scheme.id, asker) ?? await ensureCoordinator(app as App, scheme);
   app.runner.send(taskmaster.id, APP_NAME, text, [], { asker });
   lastTodo.set(at, key);
 }
@@ -624,7 +625,8 @@ export const contraptionRoutes: Route[] = [
         app.runner.send(t.id, person.name, ask.text, [], { asker: person.id, hold: true, ask: { kind, contraption: c.title, person: person.name, member, summary, ...(item ? { item } : {}) } });
         return json(res, 202, { scheme: scheme.name, minion: t.number, member, proposal: false, files: paths });
       }
-      const taskmaster = await ensureCoordinator(app, scheme);
+      // The asker's own Taskmaster there once split (#919), else the Overlord: an ask never splits a scheme.
+      const taskmaster = app.store.coordinatorFor(scheme.id, person.id) ?? await ensureCoordinator(app, scheme);
       askTimes.set(key, [...recent, Date.now()]);
       const paths = saveAskFiles(shared, c.name, person.login, files);
       const ask = askMessage(c, scheme, person, member, kind, text!, paths, item);

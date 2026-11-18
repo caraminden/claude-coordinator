@@ -44,7 +44,7 @@ skill step is skipped or uses its default.
 - **High risk by file (self-review):** auth (`src/auth.ts`); deploy and restart code
   (`tools/deploy.sh`, `tools/land.sh`, `tools/boot-check.ts`, `deploy/`); the tripwire
   (`src/tripwire.ts`, `tools/guard.sh`, `.githooks/`); who sees what and whose turns run
-  (`src/access.ts`); the kit's scheme-setup templates, which other schemes copy
+  (`src/access.ts`, and `turnPerson` in `src/runner.ts`: whose Claude login a turn runs on); the kit's scheme-setup templates, which other schemes copy
   (`kit/skills/scheme-setup/templates/`). `src/db.ts` holds every query: judge an
   edit there by what it does.
 - **How a change ships:** the scheme instructions, "Shipping fixes" (`tools/land.sh`).

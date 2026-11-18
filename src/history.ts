@@ -73,3 +73,44 @@ function planBefore(store: Store, ticketId: number, eventId: number) {
   }
   return structuredClone(tasks);
 }
+
+/** A Taskmaster session in a merged chat (#920): `mine` keeps only what Mine shows from the Overlord (public/mine.js). */
+export type Part = { id: number; mine?: boolean };
+
+/**
+ * Several Taskmaster sessions as one chat, a page before `before` (Mine and Everyone, #920). Event ids are
+ * global, so one id cursor pages them all: the page starts where the session with more history behind it
+ * starts latest, and everything from there on comes from every session, so paging back never skips or
+ * repeats an event. The first part is the viewer's own session: its task list rides along as in historyPage.
+ */
+export function mergedPage(store: Store, parts: Part[], opts: { before?: number; limit?: number; from?: number } = {}) {
+  const before = opts.before ?? Number.MAX_SAFE_INTEGER;
+  const limit = Math.min(Math.max(1, opts.limit ?? PAGE_EVENTS), MAX_PAGE_EVENTS);
+  const pages = parts.map((p) => {
+    if (!p.mine) return store.eventsPage(p.id, before, limit);
+    // A filtered session pages by what shows, so a run of hidden work costs no page.
+    const rows = store.eventsBefore(p.id, before, limit + 1, true);
+    return { events: rows.slice(0, limit).reverse(), more: rows.length > limit };
+  });
+  const behind = pages.filter((p) => p.more).map((p) => p.events[0].id);
+  let start = behind.length ? Math.max(...behind) : 0;
+  // The newest page reaches back to a card still waiting in any session, as historyPage does.
+  const open = opts.before == null ? parts.map((p) => store.openCardEventId(p.id, MAX_PAGE_EVENTS)).filter((id) => id != null) : [];
+  start = Math.min(start, ...open, opts.from ?? start);
+  const events = parts.flatMap((p, i) => {
+    const page = pages[i];
+    const first = page.events[0]?.id ?? before;
+    const reach = page.more && start < first ? store.eventsBetween(p.id, start, first, p.mine) : [];
+    return reach.concat(page.events.filter((e) => e.id >= start));
+  }).sort((a, b) => a.id - b.id);
+  const more = parts.some((p) => store.eventsBefore(p.id, start, 1, p.mine).length > 0);
+  const own = parts[0];
+  const firstOwn = events.find((e) => e.ticket_id === own?.id)?.id;
+  const tasks = own && !own.mine && firstOwn != null && store.eventsBefore(own.id, firstOwn, 1).length ? planBefore(store, own.id, firstOwn) : [];
+  return { events, more, tasks };
+}
+
+/** Every session's events after `after`, as one list in order (the merged chat's catch-up). */
+export function mergedAfter(store: Store, parts: Part[], after: number) {
+  return parts.flatMap((p) => store.eventsBetween(p.id, after + 1, Number.MAX_SAFE_INTEGER, p.mine)).sort((a, b) => a.id - b.id);
+}

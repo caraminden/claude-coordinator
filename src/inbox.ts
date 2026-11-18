@@ -35,7 +35,9 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     return (a && store.props.personName(a) || a).toLowerCase();
   };
   const all = store.listTickets(projectId).filter((t) => t.status !== 'closed');
-  const tickets = all.filter((t) => ['', person.toLowerCase()].includes(assignee(t.id)));
+  // In a split scheme (#919) a person's own Taskmaster is theirs alone; the Overlord's (coordinator_of null) is everyone's.
+  const me = store.findUser('name', person)?.id;
+  const tickets = all.filter((t) => ['', person.toLowerCase()].includes(assignee(t.id)) && (t.coordinator_of == null || t.coordinator_of === me));
   // Who asked for a minion (#906): its requestedBy, else who created it.
   const requester = (t: { id: number; created_by: string | null }) => {
     const r = String(store.props.forTarget('minion', t.id).requestedBy ?? '') || t.created_by || '';

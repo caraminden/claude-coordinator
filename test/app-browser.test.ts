@@ -5,6 +5,8 @@
 //   Continue, and stops at the click, not when the server's event lands.
 // - A list row's card badge (sidebar.js threadRow, #575) opens its minion's oldest open card; the rest of the row opens the chat.
 // - The Taskmaster's waiting strip (waiting.js, #608) links each of its own open cards and is gone with none.
+// - Everyone (#920) draws other Taskmaster sessions with their own state: the Overlord's on its band, each named,
+//   and your card held below your Taskmaster's words isn't jumped by another session's.
 // - The Codex line under the Claude bar reads a window past its reset as 0%, as Codex's own bar and Settings do.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -25,12 +27,20 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <script type="module">
   window.fetch = () => new Promise(() => {}); // every request stays on its way
   const { renderUsage, setCodex } = await import('/core.js');
-  const { setView } = await import('/base.js');
+  const base = await import('/base.js');
+  const { setView } = base;
+  window.tmv = () => base.view;
   Object.assign(window, { renderUsage, setCodex });
   const { appendEvent, chatView, renderCardJump } = await import('/thread.js');
   setView({ ...chatView(1, { id: 1, title: 'T' }), kind: 'ticket' });
   let id = 0;
-  window.add = (kind, data) => appendEvent({ id: ++id, ticket_id: 1, kind, data: JSON.stringify(data), created_at: new Date().toISOString() });
+  window.add = (kind, data, ticketId = 1) => appendEvent({ id: ++id, ticket_id: ticketId, kind, data: JSON.stringify(data), created_at: new Date().toISOString() });
+  // Your Taskmaster (1) as Everyone, with Alex's (2) and the Overlord (3) drawn into it (#920).
+  const { mergedView } = await import('/mine.js');
+  window.everyone = () => {
+    const taskmasters = [{ id: 1, person_id: 7, person_name: 'Cara' }, { id: 2, person_id: 8, person_name: 'Alex' }, { id: 3, person_id: null, person_name: null }];
+    setView({ ...chatView(1, { id: 1, kind: 'coordinator', project_id: 9, status: 'idle' }, mergedView(9, 1, taskmasters, 'everyone')), kind: 'project', projectId: 9, taskmasters });
+  };
   // Scroll the cards out of sight and ask the button: does it show?
   window.showsCard = () => { scrollTo(0, document.body.scrollHeight); renderCardJump(); return !document.querySelector('.to-card').hidden; };
   window.ready = true;
@@ -96,6 +106,29 @@ test('a loop card shows the Card button until Continue is clicked', { skip }, as
   await page.eval(`add('loop_continued', { minion: 5, by: 'Josh' })`);
   assert.equal(await page.eval(`document.querySelector('.lcard [role=status]').textContent`), 'Continued by Josh', 'the server\'s event still names who');
   assert.equal(await page.eval('showsCard()'), false);
+});
+
+test('Everyone draws each Taskmaster session with its own state: the Overlord on its band, named, and your held card stays put', { skip }, async () => {
+  const page = await open();
+  await page.eval('everyone()');
+  await page.eval(`add('question', { id: 'q1', questions: [{ question: 'Tabs or list?', header: 'Pick', options: [{ label: 'Tabs' }, { label: 'List' }] }] })`);
+  await page.eval(`add('claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'CI is red on main.' }] } }, 3)`);
+  await page.eval(`add('user_message', { author: 'Alex', text: 'start the export minion' }, 2)`);
+  const got = await page.eval(`(() => {
+    const log = [...document.querySelectorAll('#log > *')];
+    const ovl = document.querySelector('#log .ovl');
+    const alex = [...document.querySelectorAll('#log .msg.user')].find((m) => m.textContent.includes('export'));
+    return {
+      order: log.map((n) => n.classList.contains('ovl') ? 'ovl' : n.dataset.session ? 'alex' : 'mine'),
+      ovlWho: ovl?.querySelector('.who')?.firstChild?.textContent, ovlSession: ovl?.dataset.session, alexSession: alex?.dataset.session,
+      own: [tmv().ticket.id, tmv().part === undefined, tmv().heldCards.length],
+    };
+  })()`);
+  assert.deepEqual(got.order, ['mine', 'ovl', 'alex'], 'in time order: the Overlord\'s words go below your card, not above it');
+  assert.equal(got.ovlWho, 'Overlord');
+  assert.equal(got.ovlSession, 'Overlord');
+  assert.equal(got.alexSession, 'Alex\'s Taskmaster');
+  assert.deepEqual(got.own, [1, true, 0], 'your own session\'s state is back in view; the held card let go once another session spoke');
 });
 
 test('the Codex line under the Claude bar reads a 5-hour window past its reset as 0%, not its last 99%', { skip }, async () => {
@@ -178,7 +211,9 @@ async function inboxPage(status: 'ok' | 'fail' | 'hold', closed = false): Promis
   await page.eval(`(async () => {
     document.body.insertAdjacentHTML('afterbegin', '<span data-scheme-inbox="2"></span><div id="ticket-head"></div><div id="threads"></div>');
     localStorage.setItem('cc-inbox-open', '1');
-    const { setView } = await import('/base.js');
+    const base = await import('/base.js');
+  const { setView } = base;
+  window.tmv = () => base.view;
     const { inboxStrip, refreshInbox } = await import('/inbox.js');
     const { onTicketUpdate } = await import('/core.js');
     const { renderTicketHead } = await import('/thread.js');

@@ -22,6 +22,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   const later = window.setTimeout;
   window.setTimeout = (fn, ms, ...a) => later(fn, ms >= 15000 ? 50 : ms, ...a);
   const media = window.matchMedia.bind(window);
+  if (location.search === '?native') window.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android' };
   if (location.search === '?installed') window.matchMedia = (q) => (q.includes('display-mode') ? { matches: true, addEventListener() {} } : media(q));
 </script>
 <script type="module">
@@ -183,6 +184,14 @@ test("in an installed app's window, another app opens in Citadel's layer over it
   assert.equal(await untilLayer(page, 'hidden'), 'hidden', 'this app picked in the layer: back to its own page');
   await page.eval(`document.querySelector('.citadel-rail a[data-app=""]').click()`);
   assert.equal(await untilLayer(page, 'shown #/ inert'), 'shown #/ inert', "Citadel's entry: the same layer, at Citadel's own view");
+});
+
+test("in an app's native shell (a Capacitor WebView), the page gets no rail, handle or switcher", { skip }, async () => {
+  const page = await browser.page(`${base}?native`, { width: 400 });
+  await waitFor(page, 'the page loaded', 'window.ready === true');
+  await wait(300);
+  assert.equal(await page.eval(`document.querySelectorAll('.citadel-rail, .citadel-rail-handle, [class*="citadel-rail"]').length`), 0, 'nothing of the rail');
+  assert.equal(await page.eval(`document.documentElement.classList.contains('has-citadel-rail')`), false);
 });
 
 test("in a tab, the rail's entries stay plain links into Citadel", { skip }, async () => {

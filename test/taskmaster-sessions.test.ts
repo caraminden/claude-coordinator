@@ -188,7 +188,7 @@ test("a personal Taskmaster's turns run for its person; a card answer from someo
   // Never one person's request on another's login: Cara's typed words (/backup), plan verdict or file comment run on hers.
   assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'hi', images: [], typed: true, own: true }]), Cara.id, "Cara's typing runs on her login");
   assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'Plan approved', images: [] }]), Cara.id, 'a plan verdict or comment too');
-  assert.equal(turnPerson(josh, [{ author: 'Held mail from Cara, sent 2026-11-17 22:00 UTC', text: 'fyi', images: [] }]), Josh.id, 'held mail names no person');
+  assert.equal(turnPerson(josh, [{ author: 'Held mail from Cara, sent Nov 17, 14:00 PST', text: 'fyi', images: [] }]), Josh.id, 'held mail names no person');
   assert.equal(turnPerson(josh, [{ author: '#4 Work', text: 'done', images: [], from: 12 }]), Josh.id);
   assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'My answers', images: [], own: true }]), Cara.id);
   // #211: taken out of the scheme, Josh no longer pays for his old Taskmaster's turns; the owner does.

@@ -739,7 +739,7 @@ export const projectRoutes: Route[] = [
           throw new HttpError(409, err.message);
         }
         const coordinator = store.getOverlord(project.id);
-        if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} renamed the scheme from "${project.name}" to "${name}".` });
+        if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} renamed the scheme from "${project.name}" to "${name}".` });
       }
       if (repoUrl) {
         store.setProjectUpstream(project.id, repoUrl, null);
@@ -755,7 +755,7 @@ export const projectRoutes: Route[] = [
         const coordinator = store.getOverlord(project.id);
         const shown = (text: string) => (text ? lines(text).join(', ') : 'none');
         if (coordinator && settings.approval_rules !== undefined) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each minion's next turn.` });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each minion's next turn.` });
         }
         if (coordinator && settings.plugin_dirs !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each minion's next turn.` });
@@ -780,7 +780,7 @@ export const projectRoutes: Route[] = [
         store.setProjectInstructions(project.id, instructions, session.name);
         const coordinator = store.getOverlord(project.id);
         if (coordinator) {
-          runner.emit(coordinator.id, 'note', {
+          runner.emit(coordinator.id, 'note', { everyone: true,
             text: `${session.name} ${instructions ? 'updated' : 'cleared'} the scheme instructions; they apply from each minion's next turn.`,
           });
         }
@@ -873,7 +873,7 @@ export const projectRoutes: Route[] = [
         // Every Taskmaster gets the line, since the text reaches every scheme.
         for (const p of store.listProjects()) {
           const coordinator = store.getOverlord(p.id);
-          if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} ${text ? 'updated' : 'cleared'} the ${APP_NAME}-wide instructions; they apply from each minion's next turn in every scheme.` });
+          if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} ${text ? 'updated' : 'cleared'} the ${APP_NAME}-wide instructions; they apply from each minion's next turn in every scheme.` });
         }
         app.broadcast({ type: 'app-instructions', instructions: store.appInstructions() });
       }
@@ -930,12 +930,12 @@ export const projectRoutes: Route[] = [
       if (citadel) {
         for (const p of store.listProjects()) {
           const c = store.getOverlord(p.id);
-          if (c) runner.emit(c.id, 'note', { text: note });
+          if (c) runner.emit(c.id, 'note', { everyone: true, text: note });
         }
         app.broadcast({ type: 'app-instructions', instructions: store.appInstructions() });
       } else {
         const c = store.getOverlord(project.id);
-        if (c) runner.emit(c.id, 'note', { text: note });
+        if (c) runner.emit(c.id, 'note', { everyone: true, text: note });
         app.broadcast({ type: 'project', project: store.getProject(project.id)! });
       }
       return json(res, 200, { saved: where, edits: edits.length, length: text.length });
@@ -1073,7 +1073,7 @@ export const projectRoutes: Route[] = [
       if (r.added.length || r.updated.length) app.registryChanged(project.id, app.store.props.isGlobal(project.id, body.key));
       if (r.unreviewed.length) {
         const coordinator = app.store.getOverlord(project.id);
-        if (coordinator) app.runner.emit(coordinator.id, 'note', { text: `${actor.name} added ${r.unreviewed.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
+        if (coordinator) app.runner.emit(coordinator.id, 'note', { everyone: true, text: `${actor.name} added ${r.unreviewed.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
       }
       return json(ctx.res, 200, r);
     },

@@ -80,7 +80,7 @@ test("a minion's message to a cold Taskmaster is held as mail and rides along wi
   const before = promptCount();
   runner.send(tm.id, 'Cara', 'anything new?');
   await until('the turn', async () => promptCount() > before);
-  assert.deepEqual(lastPrompt(), ['[Cara]: anything new?', `[Held mail from #${minion.number} M, sent 2026-11-08 14:05 UTC]: please start #9 from its handoff`]);
+  assert.deepEqual(lastPrompt(), ['[Cara]: anything new?', `[Held mail from #${minion.number} M, sent Nov 8, 06:05 PST]: please start #9 from its handoff`]);
   await idle(tm.id);
   assert.equal(store.getSetting(`cold:${tm.id}`), null, 'delivered: the cap has nothing left to wake');
 });
@@ -97,7 +97,7 @@ test("a minion's wake: false message to a warm Taskmaster starts no turn and rid
   const before = promptCount();
   runner.send(tm.id, 'Cara', 'anything new?');
   await until('the turn', async () => promptCount() > before);
-  assert.deepEqual(lastPrompt(), ['[Cara]: anything new?', `[Held mail from #${minion.number} M, sent 2026-11-08 14:05 UTC]: #9 landed, nothing for you`]);
+  assert.deepEqual(lastPrompt(), ['[Cara]: anything new?', `[Held mail from #${minion.number} M, sent Nov 8, 06:05 PST]: #9 landed, nothing for you`]);
   await idle(tm.id);
 });
 
@@ -110,7 +110,7 @@ test("the Taskmaster's message to a cold minion is held; urgent wakes it, the he
   const before = promptCount();
   assert.equal(runner.relay(minion.id, minion.id, 'Taskmaster', 'Cara says merge it', true), false);
   await until('the turn', async () => promptCount() > before);
-  assert.deepEqual(lastPrompt(), ['[Taskmaster]: Cara says merge it', '[Held mail from Taskmaster, sent 2026-11-08 14:05 UTC]: #12 shipped, FYI']);
+  assert.deepEqual(lastPrompt(), ['[Taskmaster]: Cara says merge it', '[Held mail from Taskmaster, sent Nov 8, 06:05 PST]: #12 shipped, FYI']);
   await idle(minion.id);
 });
 
@@ -170,7 +170,7 @@ test('the sweep wakes a cold session once its held mail has waited COLD_HOLD_MAX
 
   runner.coldSweep(NOW + COLD_HOLD_MAX_MS);
   await until('the turn', async () => promptCount() > before);
-  assert.deepEqual(lastPrompt(), [`[Held mail from #${minion.number} M, sent 2026-11-08 14:05 UTC]: my PR is up`]);
+  assert.deepEqual(lastPrompt(), [`[Held mail from #${minion.number} M, sent Nov 8, 06:05 PST]: my PR is up`]);
   assert.ok(store.listEvents(tm.id).some((e) => e.kind === 'note' && JSON.parse(e.data).text.includes('waited 3 hours')));
   await idle(tm.id);
   assert.equal(store.getSetting(`cold:${tm.id}`), null);
@@ -242,7 +242,7 @@ test("held mail outlives a turn whose Claude can't start, and rides along with t
   }
   runner.send(tm.id, 'Cara', 'second try');
   await until('the turn', async () => promptCount() > before);
-  assert.deepEqual(lastPrompt(), ['[Cara]: second try', `[Held mail from #${minion.number} M, sent 2026-11-08 14:05 UTC]: please start #9`]);
+  assert.deepEqual(lastPrompt(), ['[Cara]: second try', `[Held mail from #${minion.number} M, sent Nov 8, 06:05 PST]: please start #9`]);
   await idle(tm.id);
 });
 
@@ -258,7 +258,7 @@ test("a minion's message to a cold minion is held as mail; an urgent one wakes i
   const before = promptCount();
   assert.equal(runner.relayMinion(sender.id, cold.id, `#${sender.number} M`, 'Blocked: which port does your server use?', true), false);
   await until('the turn', async () => promptCount() > before);
-  assert.deepEqual(lastPrompt(), [`[#${sender.number} M]: Blocked: which port does your server use?`, `[Held mail from #${sender.number} M, sent 2026-11-08 14:05 UTC]: FYI: I renamed foo()`]);
+  assert.deepEqual(lastPrompt(), [`[#${sender.number} M]: Blocked: which port does your server use?`, `[Held mail from #${sender.number} M, sent Nov 8, 06:05 PST]: FYI: I renamed foo()`]);
   await idle(cold.id);
   assert.equal(store.getSetting(`loop:${cold.id}`), null, "not counted on the receiver's loop with its Taskmaster");
 });

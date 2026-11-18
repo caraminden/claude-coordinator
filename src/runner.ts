@@ -45,7 +45,7 @@ import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
-import { clockTime, parseResetTime } from './pacific.ts';
+import { clockTime, pacific, parseResetTime } from './pacific.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -62,7 +62,7 @@ export function schemeRefs(project: Project, projects: Project[], tickets: Ticke
 
 /** The chat event kinds that post or settle a card waiting on people (a person's message answers one). */
 const CARD_KINDS = new Set(['question', 'question_more', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
-const EVERYONES = new Set(['question', 'plan', 'approval', 'note']);
+const EVERYONES = new Set(['question', 'plan', 'approval']);
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -1040,7 +1040,7 @@ export class Runner {
         ].filter(Boolean).join('\n');
         console.log(`${p.name}: ${text}`);
         const coordinator = this.store.getOverlord(p.id);
-        if (coordinator) this.emit(coordinator.id, 'note', { text });
+        if (coordinator) this.emit(coordinator.id, 'note', { text, everyone: true });
       }
     } finally {
       this.sweepingWorktrees = false;
@@ -1824,10 +1824,10 @@ export class Runner {
   private mail(to: number, author: string, text: string, from?: number, cold = false, need?: string) {
     const row = this.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(need ? { need } : {}), ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
     if (cold && !this.store.getSetting<number>(coldKey(to))) this.store.setSetting(coldKey(to), this.now());
-    const sent = new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ');
+    const sent = pacific(this.now());
     const list = this.store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];
     // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
-    list.push({ author: `Held mail from ${author}, sent ${sent} UTC`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: cold ? this.personOf?.(author, from) ?? null : null });
+    list.push({ author: `Held mail from ${author}, sent ${sent}`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: cold ? this.personOf?.(author, from) ?? null : null });
     this.store.setSetting(mailKey(to), list);
     // A Taskmaster's relay that quotes a person's go hands it over when sent, as held mail too (#939).
     const ticket = this.store.getTicket(to);
@@ -2430,7 +2430,7 @@ export class Runner {
     if (!this.isOverlord(overlord)) return;
     const line = text.length > 600 ? text.slice(0, 600) + '…' : text;
     for (const tm of this.store.listCoordinators(overlord.project_id)) {
-      if (tm.id !== actor) this.leaveMail(tm.id, by, `(for your tracking; nothing to do) ${by} answered the Overlord's card:\n${line}`);
+      if (tm.id !== actor && tm.id !== overlord.id) this.leaveMail(tm.id, by, `(for your tracking; nothing to do) ${by} answered the Overlord's card:\n${line}`);
     }
   }
 
@@ -3723,8 +3723,11 @@ export class Runner {
   }
 
   emit(ticketId: number, kind: string, data: unknown): EventRow {
-    // A split scheme's Overlord asks and alerts for everyone (#921): its cards and notes show in every member's chat (#920 reads the flag).
-    if (EVERYONES.has(kind) && this.isOverlord(this.store.getTicket(ticketId))) data = { ...(data as object), everyone: true };
+    // A split scheme's Overlord asks for everyone (#921): its cards show in every member's chat (#920 reads the flag). A note is for
+    // everyone only when its emitter says so (`everyone: true`, and only on the Overlord): most are one person's.
+    const lord = (EVERYONES.has(kind) || (data as { everyone?: unknown } | null)?.everyone === true) && this.isOverlord(this.store.getTicket(ticketId));
+    if (lord) data = { ...(data as object), everyone: true };
+    else if (data && typeof data === 'object' && 'everyone' in data) { const { everyone: _, ...rest } = data as Record<string, unknown>; data = rest; }
     const row = this.store.addEvent(ticketId, kind, data);
     this.broadcast({ type: 'event', event: row });
     if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId);

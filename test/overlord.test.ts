@@ -130,6 +130,7 @@ test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't;
     const got = await until(() => mail(tm.id), (m) => m.some((t) => t.includes('Who takes the pipeline lane next?')));
     assert.ok(got.some((t) => /Cara answered the Overlord's card[\s\S]*→ Josh/.test(t)), got.join('\n'));
   }
+  assert.ok(!mail(overlord.id).some((t) => t.includes('for your tracking')), 'the Overlord, the card\'s own chat, gets no tracking mail');
 });
 
 test("a person's Taskmaster asks for everyone: the card sits with the Overlord, and its answer wakes the asker (Cara: \"Asker acts on it\")", async () => {
@@ -183,7 +184,7 @@ test("an Overlord turn runs for whoever started it, else the scheme's owner, nev
   s.db.close();
 });
 
-test("the Overlord's alert notes are for everyone; a person's own Taskmaster's aren't", () => {
+test("a plain note on the Overlord is one person's; one emitted for everyone is flagged; a third member's Taskmaster isn't titled Overlord", () => {
   const s = new Store(join(root, 'notes.db'));
   const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
   const josh = s.createUser({ name: 'Josh', login: 'josh' });
@@ -193,8 +194,16 @@ test("the Overlord's alert notes are for everyone; a person's own Taskmaster's a
   const note = (id: number) => JSON.parse(runner.emit(id, 'note', { text: 'CI store is full' }).data);
   assert.equal(note(first.id).everyone, undefined, 'before a split its only Taskmaster is everyone\'s anyway');
   s.splitScheme(p.id, josh.id);
-  assert.equal(note(s.getOverlord(p.id)!.id).everyone, true);
+  assert.equal(note(s.getOverlord(p.id)!.id).everyone, undefined, 'a one-person note on the Overlord stays out of everyone\'s Mine');
+  const lord = s.getOverlord(p.id)!.id;
+  assert.equal(JSON.parse(runner.emit(lord, 'note', { text: 'CI store is full', everyone: true }).data).everyone, true);
   assert.equal(note(s.coordinatorFor(p.id, josh.id)!.id).everyone, undefined);
+  assert.equal(JSON.parse(runner.emit(s.coordinatorFor(p.id, josh.id)!.id, 'note', { text: 'x', everyone: true }).data).everyone, undefined, 'only the Overlord can speak for everyone');
+  const zed = s.createUser({ name: 'Zed', login: 'zed' });
+  s.addMember(p.id, zed.id);
+  const zedTm = s.splitScheme(p.id, zed.id);
+  assert.equal(zedTm.title, 'Coordinator');
+  assert.equal(s.getOverlord(p.id)!.title, 'Overlord');
   s.db.close();
 });
 

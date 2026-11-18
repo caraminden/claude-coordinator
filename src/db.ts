@@ -2196,7 +2196,9 @@ export class Store {
         this.db.prepare('UPDATE tickets SET coordinator_of = ? WHERE id = ?').run(owner, first.id);
         insert('Overlord', null);
       }
-      const id = insert(first.title, userId);
+      // After the first split `first` is the Overlord: a later member's Taskmaster takes the title of an owner's own, never "Overlord".
+      const named = this.db.prepare("SELECT title FROM tickets WHERE project_id = ? AND kind = 'coordinator' AND coordinator_of IS NOT NULL ORDER BY id LIMIT 1").get(projectId) as { title: string } | undefined;
+      const id = insert(named?.title ?? 'Coordinator', userId);
       this.db.exec('COMMIT');
       return this.getTicket(id)!;
     } catch (e) {

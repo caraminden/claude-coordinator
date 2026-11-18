@@ -453,7 +453,7 @@ outsideSpend.onCap = (projectId, total, cap) => {
   const coordinator = store.getOverlord(projectId);
   if (!coordinator) return;
   const text = `Spend on outside APIs is $${total.toFixed(2)} this month, past the scheme's $${cap.toFixed(2)} cap. Nothing has stopped; raise the cap or cut back.`;
-  runner.emit(coordinator.id, 'note', { text });
+  runner.emit(coordinator.id, 'note', { everyone: true, text });
   runner.broadcastTicket(coordinator.id);
   notify(coordinator.id, { kind: 'state', state: 'blocked', note: text });
 };
@@ -1024,14 +1024,14 @@ github.onMerged = (repoDir) => catchUp(repoDir);
 runnerTokens.onFetched = (project, text, machine) => {
   if (runnerJobs.absorb(project, machine, text)) return;
   const coordinator = store.getOverlord(project.id);
-  if (coordinator) runner.emit(coordinator.id, 'note', { text });
+  if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text });
 };
 // So is each runner agent add or remove (#328), once, when it ends, its output collapsed under it (#339); a list isn't.
 // The CI store (#658): a refusal for room is told in the scheme Taskmaster's chat; the rules also run daily (and soon
 // after a start), for schemes that have stopped uploading and for what a restart cut off mid-upload.
 ciStore.onFull = (project, text) => {
   const coordinator = store.getOverlord(project.id);
-  if (coordinator) runner.emit(coordinator.id, 'note', { text });
+  if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text });
 };
 if (!BOOT_CHECK && !PREVIEW) {
   const sweepCi = () => void safely('ci store sweep', () => ciStore.sweep(true));
@@ -1040,7 +1040,7 @@ if (!BOOT_CHECK && !PREVIEW) {
 }
 runnerJobs.onNote = (project, text, detail) => {
   const coordinator = store.getOverlord(project.id);
-  if (coordinator) runner.emit(coordinator.id, 'note', { text, detail });
+  if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text, detail });
 };
 
 // A scheme's main that can't follow origin's (#208) is told in its Taskmaster's chat, once per reason.
@@ -1049,7 +1049,7 @@ mainSync.stuck = (repoDir, why) => {
   console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`);
   const project = store.listProjects().find((p) => p.repo_dir === repoDir);
   const coordinator = project && store.getOverlord(project.id);
-  if (coordinator) runner.emit(coordinator.id, 'note', { text: `This scheme's main checkout (${repoDir}) isn't level with GitHub's main, and ${APP_NAME} didn't fast-forward it: ${why}. A person needs to look.` });
+  if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text: `This scheme's main checkout (${repoDir}) isn't level with GitHub's main, and ${APP_NAME} didn't fast-forward it: ${why}. A person needs to look.` });
 };
 
 /** Rewrite each scheme's property-vocabulary.md from the registry; a hand-written one is kept aside once. */

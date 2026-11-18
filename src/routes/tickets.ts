@@ -36,6 +36,7 @@ import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
 import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '../ultrareview.ts';
 import { sendIdOf, sendOnce } from '../send-ids.ts';
+import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
@@ -345,6 +346,24 @@ export const ticketRoutes: Route[] = [
       try {
         const ev = await app.ultrareviews.start(ticket.id, session.uid, session.name, spec, size, app.sharedDir(row));
         return json(res, 202, ev);
+      } catch (err: any) {
+        throw new HttpError(409, err.message);
+      }
+    },
+  },
+  {
+    // Ask a minion on the side (#932): a read-only fork of its session answers in a side thread, on the asker's own
+    // login (sender pays), so only a signed-in person reaches it. `thread` follows up the asker's own thread.
+    method: 'POST', path: '/api/tickets/:ticket/side', who: ['person'],
+    async handler({ req, res, app, session, ticket }) {
+      if (!session.uid) throw new HttpError(403, 'Sign in as yourself to ask on the side: it runs on your own Claude login');
+      if (ticket.kind === 'coordinator') throw new HttpError(400, 'Side questions are for minions, not the Taskmaster');
+      const body = await readJson(req);
+      const text = str(body.text, 'text', SIDE_MAX_CHARS);
+      const thread = body.thread === undefined || body.thread === null ? undefined : Number(body.thread);
+      if (thread !== undefined && !Number.isSafeInteger(thread)) throw new HttpError(400, 'thread must be a side thread\'s id');
+      try {
+        return json(res, 202, app.sideAsks.ask(ticket.id, session.uid, session.name, text, thread));
       } catch (err: any) {
         throw new HttpError(409, err.message);
       }

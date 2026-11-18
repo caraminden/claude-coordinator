@@ -101,12 +101,12 @@ test("a side question leaves the minion's session, history and next turn untouch
   const [a] = answers(m.id);
   assert.equal(a.ok, true, a.text);
   assert.equal(a.thread, ev.thread);
+  assert.equal(readFileSync(main, 'utf8'), before, "the minion's transcript is byte for byte as it was");
   const fork = runs().at(-1);
   assert.equal(fork.resume, m.session);
   assert.equal(fork.fork, true, 'the minion\'s session is forked, never resumed');
   assert.match(fork.prompt, /\[Josh\]: .*side question.*what is going on\?/s);
 
-  assert.equal(readFileSync(main, 'utf8'), before, "the minion's transcript is byte for byte as it was");
   assert.equal(store.getTicket(m.id)!.session_id, m.session);
   assert.equal(store.listEvents(m.id).filter((e) => !e.kind.startsWith('side')).length, events, 'no chat entry but the side thread\'s own');
 

@@ -384,7 +384,8 @@ test("a deploy build holds one heavy slot for all its steps and goes ahead of mi
   r.push({ 'citadel-app.json': appManifest([`echo step1 >> '${order}'`, `sleep 0.3; echo step2 >> '${order}'`]) });
   writeFileSync(join(heavyDir, 'slots'), '1\n');
   const heavyJob = (who: string, script: string) => {
-    const child = spawn(opts().heavy, ['sh', '-c', script], { env: { ...process.env, CITADEL_HEAVY_WHO: who }, stdio: ['ignore', 'ignore', 'pipe'] });
+    // Not CITADEL_HEAVY_HELD: a suite run under citadel-heavy has it set, and a job with it runs at once, never in line.
+    const child = spawn(opts().heavy, ['sh', '-c', script], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_WHO: who }, stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     child.stderr!.on('data', (b) => (err += b));
     return { err: () => err, done: new Promise((ok) => child.on('close', ok)) };

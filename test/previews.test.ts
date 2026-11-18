@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Previews } from '../src/previews.ts';
 import { agentToken, listeningPort, PASSWORD, SECRET, stopProcs, stopTurns } from './helpers.ts';
+import { until } from './wait.ts';
 
 // Previews (src/previews.ts): the live server runs a minion's worktree in preview mode on a copy of
 // its database and proxies /preview/<id>/ to it, for signed-in people only.
@@ -238,22 +239,36 @@ test('a preview whose health check hangs is asked again, not waited on for minut
   const t = s5.createTicket({ project_id: s5.createProject('Five', null).id, title: 'Hung', permission_mode: 'default', created_by: 'Cara' });
   const wt = join(root, 'hung');
   mkdirSync(wt);
-  // Accepts the first request and never answers it; answers the ones after.
-  writeFileSync(join(wt, 'server.ts'), `import { createServer } from 'node:http';
+  // Accepts the first request and never answers it; answers the ones after. It notes when each one came.
+  const hits = join(wt, 'hits');
+  writeFileSync(join(wt, 'server.ts'), `import { appendFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+writeFileSync(${JSON.stringify(join(wt, 'pid'))}, String(process.pid));
 let n = 0;
-createServer((req, res) => { if (n++) res.end(JSON.stringify({ ok: true, preview: true })); }).listen(Number(process.env.PORT), '127.0.0.1');
+createServer((req, res) => {
+  appendFileSync(${JSON.stringify(hits)}, Date.now() + '\\n');
+  if (n++) res.end(JSON.stringify({ ok: true, preview: true }));
+}).listen(Number(process.env.PORT), '127.0.0.1');
 `);
   s5.setTicketDir(t.id, wt, 'ticket/5-hung');
   const previews = new Previews(s5, d5);
-  let timer!: NodeJS.Timeout;
+  const t0 = Date.now();
+  let booted = 0;
+  let failed: unknown;
+  const boot = previews.start(s5.getTicket(t.id)!).then(() => void (booted = Date.now()), (e) => void (failed = e ?? new Error('failed')));
+  const seen = () => (existsSync(hits) ? readFileSync(hits, 'utf8').trim().split('\n').map((x) => `+${Number(x) - t0} ms`) : []);
+  const what = () => `requests at ${seen().join(', ') || 'none'} after start; ${booted ? `booted at +${booted - t0} ms` : 'not booted'}`;
   try {
-    const outcome = await Promise.race([
-      previews.start(s5.getTicket(t.id)!).then(() => 'booted'),
-      new Promise((r) => (timer = setTimeout(() => r('still waiting on the first health check'), 10_000))),
-    ]);
-    assert.equal(outcome, 'booted');
+    // Timed from the hung request, not from start(): copying the data and starting the server aren't what this checks (#973).
+    await until('the first health check to reach the preview', () => seen().length || failed, 30_000, what);
+    // The 3 s abort and one more ask: well under 10 s. Without the abort fetch waits 5 minutes.
+    await until('the preview to boot after its first health check hung', () => booted || failed, 10_000, what);
+    if (failed) throw failed;
+    assert.ok(seen().length >= 2, what());
   } finally {
-    clearTimeout(timer);
+    // A boot still going (this test failed) would outlive it with its server running: end the server, and the boot with it.
+    if (!booted && !failed && existsSync(join(wt, 'pid'))) process.kill(Number(readFileSync(join(wt, 'pid'), 'utf8')));
+    await boot;
     await previews.stop(t.id, true);
   }
 });

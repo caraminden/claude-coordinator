@@ -301,16 +301,23 @@ function showMedia(ticket, file) {
     kind: fileKind(p), alt: baseName(p),
   }));
   viewer.stage.className = 'viewer-stage k-media';
+  const kept = new Map();
   const lb = lightbox(items, { at: paths.indexOf(file.path), into: viewer.stage, autoplay: true, label: 'Pictures and clips in this message',
     onChange: (at) => replaceHash(fileHref(ticket.id, paths[at])),
     // A picture is ready to draw on (#946): Done puts the marked copy in the chat's message box and goes back to it.
-    render: (item, stage, _, show) => item.kind !== 'image' ? show() : annotator(stage, item.src, {
-      doneLabel: 'Add to message',
-      onDone: async (canvas) => {
-        if (canvas) attachImage(ticket.id, await canvasBlob(canvas));
-        leaveViewer();
-      },
-    }) });
+    // Each picture's marks outlive stepping to another one, while the viewer stays open.
+    render: (item, stage, _, show) => {
+      if (item.kind !== 'image') return show();
+      const a = annotator(stage, item.src, {
+        marks: kept.get(item.src),
+        doneLabel: 'Add to message',
+        onDone: async (canvas) => {
+          if (canvas) attachImage(ticket.id, await canvasBlob(canvas));
+          leaveViewer();
+        },
+      });
+      return { destroy: () => { kept.set(item.src, a.marks); a.destroy(); } };
+    } });
   viewer.media = { ticketId: ticket.id, paths, lb };
   return true;
 }

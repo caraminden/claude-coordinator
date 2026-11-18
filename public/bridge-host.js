@@ -42,11 +42,15 @@ export function readRequest(e, from = frames) {
 // Marked pictures a send carries, as a chat message does ({ mediaType, data } in base64); the server checks the bytes.
 const validImages = (v) => v == null || (Array.isArray(v) && v.length <= MAX_IMAGES && v.every((i) => i && typeof i.mediaType === 'string' && typeof i.data === 'string' && i.data));
 
-/** Whether a page's picture is one this server sends: only those can be drawn on (another site's would taint the canvas). */
-function ownPicture(src) {
+/**
+ * Whether a page's picture may be drawn on: only one behind a file token (api/files/<token>/…), which the page
+ * could fetch itself. A cookie-backed route (another minion's files, the API) would hand the page pixels the
+ * person can see but it can't, and another site's picture would taint the canvas.
+ */
+export function ownPicture(src, base = document.baseURI) {
   try {
     const u = new URL(src);
-    return /^https?:$/.test(u.protocol) && u.origin === location.origin;
+    return /^https?:$/.test(u.protocol) && !u.username && !u.password && u.href.startsWith(new URL('api/files/', base).href);
   } catch {
     return false;
   }
@@ -110,7 +114,7 @@ async function onMessage(e) {
     if (req.op === 'draw') {
       if (!frame.draw) throw new Error('Drawing on a picture works only in Citadel\'s viewer');
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.draw works only from a click or key press');
-      if (!ownPicture(req.src)) throw new Error('Only a picture from this page\'s own files can be drawn on');
+      if (!ownPicture(req.src)) throw new Error('Only a picture from this page\'s own folder can be drawn on');
       // The marks are kept here, so opening a marked picture again can undo back to the clean one.
       const r = await frame.draw(req.src, frame.marks.get(req.src) ?? []);
       if (r) frame.marks.set(req.src, r.marks);

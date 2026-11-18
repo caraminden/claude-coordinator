@@ -12,7 +12,7 @@ import { cleanEntries, injectBridge, linkPageText, LIMITS, writeStore } from '..
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { attachBridge, bridgeTypedAt, bridgeUnsaved, onArtifactData, readRequest, takeWrite, TAG } from '../public/bridge-host.js';
+import { attachBridge, bridgeTypedAt, bridgeUnsaved, onArtifactData, ownPicture, readRequest, takeWrite, TAG } from '../public/bridge-host.js';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'artifact-bridge-'));
@@ -150,6 +150,14 @@ test("the viewer answers only its own frames' sandboxed pages, with well-formed 
   assert.equal(msg({ op: 'draw', src: 'https://x/a.png' })?.req.src, 'https://x/a.png');
   assert.equal(msg({ op: 'draw' }), null);
   assert.equal(msg({ op: 'draw', src: 'x'.repeat(4001) }), null);
+  // Only a picture behind a file token can be drawn on (the page could fetch it anyway), never a cookie-backed route.
+  const base = 'https://citadel.test/';
+  assert.equal(ownPicture('https://citadel.test/api/files/tok/shot.png', base), true);
+  assert.equal(ownPicture('https://citadel.test/api/tickets/9/file?path=a.png', base), false);
+  assert.equal(ownPicture('https://citadel.test/api/files/../tickets/9/file?path=a.png', base), false);
+  assert.equal(ownPicture('https://citadel.test/api/files/%2e%2e/tickets/9/file?path=a.png', base), false);
+  assert.equal(ownPicture('https://elsewhere.test/api/files/tok/shot.png', base), false);
+  assert.equal(ownPicture('data:image/png;base64,AA', base), false);
   // A frame taken out of the page is forgotten.
   frame.iframe.isConnected = false;
   assert.equal(msg({ op: 'hello' }), null);

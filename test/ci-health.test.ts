@@ -912,3 +912,45 @@ test('the poll cancels an orphan land run once and logs it, and leaves a landing
   await health.tick(NOW + 20 * MIN);
   assert.deepEqual(posts, ['repos/caraminden/peek-auras/actions/runs/4001/cancel']);
 });
+
+test('a ringing problem wakes its scheme\'s Taskmaster once, at once, and again only after it clears (#983)', async () => {
+  const w = world();
+  const told: [string, string, boolean][] = [];
+  const deps = { ...w.deps, tell: (p: { name: string }, text: string, wake?: boolean) => (told.push([p.name, text, !!wake]), true) };
+  const health = new CiHealth(w.store, deps);
+  const t0 = Date.parse('2026-11-11T20:00:00Z');
+  w.gh.runners = [desk('offline')];
+  waitingRun(w, t0);
+  await health.tick(t0);
+  assert.deepEqual(told, [], 'under the wait it says nothing');
+  await health.tick(t0 + WAIT_MS);
+  assert.equal(told.length, 1);
+  assert.equal(told[0][0], 'Peek Auras', "the scheme's own Taskmaster");
+  assert.equal(told[0][2], true, 'a wake, not held mail, so a cold Taskmaster runs');
+  assert.match(told[0][1], /waited for a runner.*Why: .*Fix: /s, 'what, why and the fix');
+  assert.match(told[0][1], /start a fix minion/i);
+  // The same outage on the next polls, and after a restart, is not news.
+  await health.tick(t0 + WAIT_MS + 5 * MIN);
+  await new CiHealth(w.store, deps).tick(t0 + WAIT_MS + 10 * MIN);
+  assert.equal(told.length, 1, 'once per outage');
+  // Back online, then out again: that's a new problem.
+  w.gh.runners = [desk('online')];
+  await health.tick(t0 + HOUR);
+  w.gh.runners = [desk('offline')];
+  await health.tick(t0 + HOUR + 5 * MIN);
+  assert.equal(told.length, 2, 'it came back');
+});
+
+test('with no Taskmaster to tell, a ringing problem is tried again next poll (#983)', async () => {
+  const w = world();
+  let has = false;
+  const told: string[] = [];
+  const health = new CiHealth(w.store, { ...w.deps, tell: (_p, text) => (has && told.push(text), has) });
+  const t0 = Date.parse('2026-11-11T20:00:00Z');
+  w.gh.runners = [desk('offline')];
+  waitingRun(w, t0);
+  await health.tick(t0 + WAIT_MS);
+  has = true;
+  await health.tick(t0 + WAIT_MS + 5 * MIN);
+  assert.equal(told.length, 1);
+});

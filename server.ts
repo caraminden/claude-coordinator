@@ -890,7 +890,8 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
   const c = store.getContraption('mandate');
   const identity = c && contraptions.signIdentity(c.name, person, { name: `scheme-${project.id}`, title: project.name });
   if (!c || !identity) return false;
-  const wakes = title !== null && !quiet;
+  // CI health wakes each problem's own Taskmaster itself, once, as it opens (#983), so its bundled item doesn't wake Citadel's too.
+  const wakes = title !== null && !quiet && what !== 'CI health';
   const scheme = wakes ? alertScheme(project.id) : 0;
   // A wake's item opens the Taskmaster's chat, but CI's keep their CI page (#968: what, why and the fix are there).
   if (scheme && store.getOverlord(scheme) && !link.endsWith('/ci')) link = `/c/#/p/${scheme}`;

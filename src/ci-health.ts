@@ -34,6 +34,9 @@
 //   - no verdict for hours ("Drop it") and green with jobs skipped ("Page only"): the CI page shows them, no item;
 //   - the land gate ("Quiet, ring after 1 h"): a quiet item at the old thresholds, ringing at LAND_RING_MS or LAND_RING_STREAK.
 // Jobs that never started (a billing block) still ring.
+// #983 (Cara, 2026-11-18: "CI alerts need to wake their respective taskmasters to fix the issue"): every problem that rings
+// also wakes its scheme's Taskmaster once as it opens (wakeFor; the land gate wakes the live checkout's scheme), so a ring
+// is never the first anyone hears of it. The person ring stays the backup, and the #869 wake no longer sends CI's bundle to Citadel's.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AlertPart } from './alert-wakes.ts';
@@ -139,6 +142,10 @@ export interface Problem {
   /** Informational: a plain item, never an alarm. */
   quiet?: boolean;
 }
+
+/** A ringing problem as its Taskmaster's wake: what, why and the fix, then what to do about it. */
+const wakeText = (p: Project, x: Problem) =>
+  `${p.name}: ${itemText(x)}\nPeople's phones ring for this. Start a fix minion now and name this problem in its brief; if it needs a person (billing, a machine that's off, a runner), ask them with a card. If it's expected, add the workflow to the scheme's quiet CI workflows (set_project_settings quiet_workflows). The CI page: ${ciPage(p.id)}`;
 
 const cap = (s: string, n = 500) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 /** A problem's words for an item: what, then why and the fix (Mandate keeps 500 characters). */
@@ -638,8 +645,23 @@ export class CiHealth {
   async check(p: Project, slug: string, now: number) {
     const saved: Saved = { offline: {}, sent: {}, ...this.store.getSetting<Saved>(`ci-health:${p.id}`) };
     saved.problems = await this.problems(p, slug, saved, now);
+    this.wakeFor(p, saved.problems, `ci-health:woke:${p.id}`);
     await this.deliver(p, saved.problems.filter((x) => x.quiet), saved);
     this.store.setSetting(`ci-health:${p.id}`, saved);
+  }
+
+  /**
+   * #983 (Cara, 2026-11-18: "CI alerts need to wake their respective taskmasters to fix the issue"): each problem that
+   * rings a person wakes the scheme's Taskmaster once, as it opens (a wake, so a cold one runs too), and again only
+   * after it clears and comes back. A problem is recorded as woken once the send went through, so no Taskmaster waits untold.
+   */
+  private wakeFor(p: Project, problems: Problem[], key: string) {
+    if (!this.deps.tell) return;
+    const ringing = problems.filter((x) => !x.quiet);
+    const woke = (this.store.getSetting<string[]>(key) ?? []).filter((k) => ringing.some((x) => x.key === k));
+    const fresh = ringing.filter((x) => !woke.includes(x.key));
+    for (const x of fresh) if (this.say(p, 0, wakeText(p, x), true)) woke.push(x.key);
+    this.store.setSetting(key, woke);
   }
 
   private admins() {
@@ -667,7 +689,10 @@ export class CiHealth {
     const changed = JSON.stringify([kept?.project, kept?.problems ?? []]) !== JSON.stringify([w.project, w.problems]);
     // Every call, not only on a change: a put Mandate refused is tried again on the next (sent entries make it a no-op).
     const p = this.store.getProject(projectId);
-    if (p) await this.deliver(p, w.problems.filter((x) => x.quiet), w as Required<LandWatch>);
+    if (p) {
+      await this.deliver(p, w.problems.filter((x) => x.quiet), w as Required<LandWatch>);
+      this.wakeFor(p, w.problems, 'ci-health:woke:land');
+    }
     if (changed || before !== JSON.stringify([w.state, w.sent])) this.store.setSetting(LAND_WATCH, w);
     if (changed) await this.alert();
   }

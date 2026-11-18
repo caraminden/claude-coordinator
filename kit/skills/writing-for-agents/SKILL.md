@@ -5,6 +5,8 @@ description: Writing, testing and vetting documents for agents. Use before addin
 
 Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / `CLAUDE.md`, a doc reached by a pointer. The packaging differs; the writing does not: the same levers make each one predictable, since the agent takes the same _process_ every run rather than producing the same output.
 
+Before you write or change a prompt, tool description, skill, rule or instruction, skim [`anthropic-guidance.md`](anthropic-guidance.md): Anthropic's current guidance on it, dated and linked (a minute's read; self-review checks such diffs against it).
+
 When the document you're writing is a skill, read [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md) for frontmatter, invocation choice, and router skills. Every document gets tested before it ships, and a skill from outside gets vetted first: the last two sections.
 
 ## Context pointers

@@ -35,7 +35,7 @@ export function readRequest(e, from = frames) {
   if (m.op === 'hello' || m.op === 'list' || m.op === 'typing') return { frame, req: { id: m.id, op: m.op, page: m.page } };
   if (m.op === 'write' && Array.isArray(m.entries) && m.entries.length && m.entries.length <= MAX_ENTRIES) return { frame, req: { id: m.id, op: 'write', page: m.page, entries: m.entries } };
   if (m.op === 'send' && typeof m.text === 'string' && m.text.trim() && m.text.length <= MAX_TEXT && validImages(m.images)) {
-    return { frame, req: { id: m.id, op: 'send', page: m.page, text: m.text, ...(m.images?.length ? { images: m.images.map(({ mediaType, data }) => ({ mediaType, data })) } : {}) } };
+    return { frame, req: { id: m.id, op: 'send', page: m.page, text: m.text, ...(m.keepOpen === true ? { keepOpen: true } : {}), ...(m.images?.length ? { images: m.images.map(({ mediaType, data }) => ({ mediaType, data })) } : {}) } };
   }
   if (m.op === 'link' && typeof m.url === 'string' && m.url.length <= 4000) return { frame, req: { id: m.id, op: 'link', page: m.page, url: m.url } };
   if (m.op === 'draw' && typeof m.src === 'string' && m.src.length <= 4000) return { frame, req: { id: m.id, op: 'draw', page: m.page, src: m.src } };
@@ -89,9 +89,9 @@ const alive = (f) => (f.iframe ? f.iframe.isConnected : !f.tab.closed);
  * viewer and resolves null when closed, else { marks, image } (image null when every mark was taken off);
  * a tab has none, since its page sits in front of Citadel.
  */
-export function attachBridge(iframe, { open, name, owner, api, draw = null, tab = null }) {
+export function attachBridge(iframe, { open, name, owner, api, draw = null, tab = null, afterSend = null }) {
   if (!frames.size) addEventListener('message', onMessage);
-  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, api, draw: tab ? null : draw, marks: new Map(), store: null, page: null });
+  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, api, draw: tab ? null : draw, marks: new Map(), store: null, page: null, afterSend: tab ? null : afterSend });
 }
 
 /** Open `src` (an HTML page) in a new tab that keeps its bridge to this viewer; false if the browser refused. */
@@ -137,7 +137,10 @@ async function onMessage(e) {
       if (frame.tab && Date.now() - (frame.sentAt ?? 0) < TAB_SEND_GAP) throw new Error('Sent a moment ago; wait a few seconds before sending again');
       const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images } });
       frame.sentAt = Date.now(); // after it went, so a retry after a failure isn't held back
-      return reply({ ok: true, result: { sent: true, to: r.to.label } });
+      reply({ ok: true, result: { sent: true, to: r.to.label } });
+      // Sent: the viewer goes away and the chat shows the message, unless the page keeps it open (send's keepOpen).
+      if (!req.keepOpen) frame.afterSend?.();
+      return;
     }
     if (req.op === 'write') {
       // The page sends a refused write again after its gap, so a burst of picks isn't lost.

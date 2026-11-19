@@ -278,7 +278,8 @@ function openViewer(ticket, file, inPlace) {
   if (file.missing) viewer.stage.append(h('p', { class: 'muted' }, `${file.missing}.`));
   else {
     // A page's Send goes to the chat beside it.
-    const bridge = viewerBridge(ticket, file);
+    // After a send the viewer closes on the chat it went to (a page can opt out: send's keepOpen).
+    const bridge = { ...viewerBridge(ticket, file), afterSend: () => { if (viewer?.file === file) leaveViewer(); } };
     if (!showMedia(ticket, file)) renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name }, bridge, onMissing: (message) => { file.missing = message; renderViewerBar(); } });
   }
   renderViewerBar();

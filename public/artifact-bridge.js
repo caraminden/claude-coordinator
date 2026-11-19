@@ -287,13 +287,15 @@
     /**
      * Send `text` to the minion that showed this page (a shared page: the one that linked it, else the
      * Taskmaster), as the person, from a click or key press only. Resolves { sent: true, to: '#N' }.
+     * In Citadel's viewer a sent page closes, showing the chat; `keepOpen: true` leaves it open (a page that sends
+     * several times on purpose).
      */
-    send: async (text, { images } = {}) => {
+    send: async (text, { images, keepOpen } = {}) => {
       // A click in a tab never reaches the viewer, so the page checks it here too: a page never sends by itself.
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       if (!(await ready)) throw new Error(NO_VIEWER);
       // `images`: marked pictures from draw ({ mediaType, data }), at most 6; they take longer to post.
-      const r = images?.length ? await request('send', { text: String(text), images }, 60000) : await request('send', { text: String(text) });
+      const r = images?.length ? await request('send', { text: String(text), images, ...(keepOpen ? { keepOpen: true } : {}) }, 60000) : await request('send', { text: String(text), ...(keepOpen ? { keepOpen: true } : {}) });
       // Pages made before #417 (kit v1, hand-rolled ones) then say the text waits in the comment box; it was sent.
       setTimeout(() => {
         const walk = document.createTreeWalker(document.body ?? document.documentElement, NodeFilter.SHOW_TEXT);

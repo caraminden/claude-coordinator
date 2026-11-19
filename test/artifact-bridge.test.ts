@@ -139,6 +139,8 @@ test("the viewer answers only its own frames' sandboxed pages, with well-formed 
   assert.equal(msg({ op: 'send', text: ' ' }), null);
   assert.equal(msg({ op: 'send', text: 'x'.repeat(10_001) }), null);
   assert.equal(msg({ op: 'send', text: 'Picks: 3' })?.req.text, 'Picks: 3');
+  assert.equal(msg({ op: 'send', text: 'x', keepOpen: true })?.req.keepOpen, true);
+  assert.equal(msg({ op: 'send', text: 'x', keepOpen: 'yes' })?.req.keepOpen, undefined, 'only a real true keeps it open');
   assert.equal(msg({ op: 'typing' })?.req.op, 'typing');
   // Marked pictures (#946): a list of at most 6 { mediaType, data }, and only those two keys go on.
   const img = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };

@@ -82,7 +82,7 @@ Comes with the first picks set: counts picks and notes, and **Send picks** posts
 line per pick straight into your chat as the person who pressed it, which wakes you (`citadel.send`,
 only from a click). A shared-folder page's Send goes to the minion that last linked it, else the
 Taskmaster. Send also settles that minion's choices card for the page (`ask_question` with `doc`:
-the card that opens it). The dock shows Sent at once; a failure takes it back with a toast and Retry. It sticks to
+the card that opens it). The dock shows Sent at once; a failure takes it back with a toast and Retry. It sticks to In Citadel's viewer a successful Send closes the viewer on the chat (`citadel.send(text, { keepOpen: true })` keeps it open).
 the bottom once anything is picked.
 
 In Citadel's viewer, a page with a dock also lets people draw on its pictures (#946): a click on an

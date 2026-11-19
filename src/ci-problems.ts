@@ -184,6 +184,25 @@ export interface RedMark {
   at: string;
   told?: number;
   where?: string;
+  /** The re-run of the workflow on main after its fix minion's fix went live (#1074), once Citadel has one. */
+  rerun?: Rerun;
+}
+/**
+ * The run that tests a red's fix (#1074): `sha`, the default branch's tip holding the fix minion's work (its branch at
+ * `tip`), seen at `at`; `run` once GitHub lists it. `dispatched`: Citadel started it (else a run already there, a push's).
+ * `hosted`: the workflow runs on GitHub's own runners, so Citadel left it for a person (Actions minutes). `error`: the
+ * dispatch GitHub refused. `failed`: it went red and the fix minion was woken.
+ */
+export interface Rerun {
+  ticket: number;
+  sha: string;
+  tip: string;
+  at: number;
+  run?: number;
+  dispatched?: boolean;
+  hosted?: boolean;
+  error?: string;
+  failed?: boolean;
 }
 /** The minion fixing a red, and when it closed (null while open). */
 export interface Fix {
@@ -196,15 +215,34 @@ export interface Fix {
  * started within RED_FIX_MS of the Taskmaster hearing, or the newest verdict, made after the fix minion closed, is still
  * red, or that minion closed RED_FIX_MS ago with no newer run. `newest` is the workflow's newest verdict there; green, and there is nothing to say.
  */
-export function redProblem(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number): Problem | null {
-  const x = redProblemOf(file, branch, mark, newest, fix, now);
+export function redProblem(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number, slug?: string): Problem | null {
+  const x = redProblemOf(file, branch, mark, newest, fix, now, slug);
   return x && fix ? { ...x, fixMinion: { number: fix.number, closed: fix.closedAt != null } } : x;
 }
-export function redProblemOf(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number): Problem | null {
+export function redProblemOf(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number, slug?: string): Problem | null {
   if (newest.conclusion !== 'failure') return null;
   const told = mark.told ?? now;
   const key = `red:${newest.workflow_id}`;
   const what = `CI: ${file} failed on ${branch} (run ${mark.run}${mark.where ? `, at ${mark.where}` : ''})`;
+  const re = mark.rerun;
+  // #1074: the fix minion's fix is live and held open on the re-run of the workflow on the branch.
+  if (fix && fix.closedAt == null && re?.ticket != null) {
+    const n = `#${fix.number}`;
+    const url = re.run && slug ? `: ${runUrl(slug, { id: re.run } as Run)}` : '';
+    if (re.failed) {
+      return { key, quiet: true, title: `${what}, and re-run ${re.run} on ${short(re.sha)} failed too`,
+        why: `run ${re.run} on ${short(re.sha)}, which has fix minion ${n}'s fix, failed${url}`,
+        fix: `${n} was woken to fix it again; Citadel re-runs ${file} on ${branch} once its next fix is live` };
+    }
+    if (re.hosted || re.error) {
+      return { key, quiet: true, title: `${what}: fix minion ${n} shipped; re-run ${file} on ${branch} by hand`,
+        why: re.hosted ? `${file} runs on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start it` : `GitHub refused Citadel's re-run: ${re.error}`,
+        fix: `a person re-runs ${file} on ${branch}${re.hosted ? ' (it costs Actions minutes)' : ''}; this clears when it's green, and ${n} closes then` };
+    }
+    return { key, quiet: true, title: `${what}: fix minion ${n} shipped; re-running on ${short(re.sha)}`,
+      why: `${n}'s fix is on ${branch}, so ${re.dispatched ? `Citadel started ${file} there at ${clock(re.at)}` : `${file} runs on it`}${url || ' (the run shows here once GitHub lists it)'}`,
+      fix: `this clears when that run is green, and ${n} closes then; if it's red, ${n} is woken` };
+  }
   if (fix?.closedAt != null && at(newest.created_at) > fix.closedAt) {
     return { key, title: `${what}, and is still red after fix minion #${fix.number} closed`,
       why: `run ${newest.id} on ${short(newest.head_sha)}, made after #${fix.number} closed at ${clock(fix.closedAt)}, failed too, so the fix didn't hold`,

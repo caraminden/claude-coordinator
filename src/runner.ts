@@ -1157,6 +1157,13 @@ export class Runner {
       this.emit(ticketId, 'note', { text: 'The deploy is live, but a question card is still open, so this minion stays open.' });
       return false;
     }
+    const held = this.ciHold?.(ticketId);
+    if (held) {
+      this.store.updateTicket(ticketId, { state: 'outside', note: 'live; waiting on the CI re-run on main' });
+      this.broadcastTicket(ticketId);
+      this.emit(ticketId, 'note', { text: `The deploy is live, but ${held}, so this minion stays open.` });
+      return false;
+    }
     this.store.updateTicket(ticketId, { state: null });
     this.close(ticketId, 'The deploy is live, so it dismissed this minion.');
     return true;
@@ -1189,7 +1196,35 @@ export class Runner {
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
     // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.
     if (state === 'complete') return 'its state is complete: it closes once a member has seen it';
-    return null;
+    return this.ciHold?.(ticketId) ?? null;
+  }
+
+  /**
+   * #1074: why CI health keeps this minion open (a red's fix minion, until its workflow is green on the default branch
+   * again), or null. Set by the server; CI health's ciGreen lets it go.
+   */
+  ciHold?: (ticketId: number) => string | null;
+
+  /**
+   * #1074: the red this minion fixed is green again, so dismiss it as its live deploy would have: after a running
+   * turn, and not past a card or a state that keeps it open for people.
+   */
+  ciGreen(ticketId: number, text: string) {
+    const t = this.store.getTicket(ticketId);
+    if (!t || t.status === 'closed') return;
+    if (this.isRunning(ticketId) || this.queued(ticketId)) {
+      if (!this.closeAfterTurn(ticketId, text)) this.emit(ticketId, 'note', { text: `${text.replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open for the work still under way.` });
+      return;
+    }
+    const kept = this.keptOpen(ticketId);
+    if (kept) {
+      if (t.state === 'outside') this.store.updateTicket(ticketId, { state: null, note: null });
+      this.broadcastTicket(ticketId);
+      this.emit(ticketId, 'note', { text: `${text.replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open: ${kept}.` });
+      return;
+    }
+    this.store.updateTicket(ticketId, { state: null });
+    void this.close(ticketId, text);
   }
 
   /**

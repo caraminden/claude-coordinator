@@ -34,9 +34,9 @@ export async function ghGet(path: string, etag: string | null, as: GithubEnv): P
 }
 
 /** One REST POST through the gh CLI; the status of the answer, 0 when gh printed none. */
-export async function ghPost(path: string, as: GithubEnv): Promise<{ status: number }> {
+export async function ghPost(path: string, as: GithubEnv, fields: Record<string, string> = {}): Promise<{ status: number }> {
   try {
-    const { stdout } = await run('gh', ['api', '-i', '-X', 'POST', path], { env: asEnv(as), timeout: 30_000 });
+    const { stdout } = await run('gh', ['api', '-i', '-X', 'POST', path, ...Object.entries(fields).flatMap(([k, v]) => ['-f', `${k}=${v}`])], { env: asEnv(as), timeout: 30_000 });
     return { status: Number(/^HTTP\/\S+ (\d+)/.exec(stdout)?.[1] ?? 0) };
   } catch (err: any) {
     const out = typeof err?.stdout === 'string' ? err.stdout : '';

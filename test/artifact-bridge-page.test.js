@@ -37,7 +37,7 @@ function page(entries = []) {
   return {
     ctx, posted, bars, deliver,
     /** The page's own events (a key press, typing in a field). */
-    fire: (type) => { for (const fn of others[type] ?? []) fn({ type }); },
+    fire: (type, e = { type }) => { for (const fn of others[type] ?? []) fn(e); },
     /** Answer the oldest unanswered request of kind `op`. */
     answer(op, result, ok = true) {
       const m = posted.find((p) => p.op === op && !p.answered);
@@ -156,4 +156,26 @@ test('typing on the page tells the viewer, at most once a second, so a new front
   p.fire('keydown');
   p.fire('input');
   assert.equal(p.posted.filter((m) => m.op === 'typing').length, 1);
+});
+
+test('a link to another site asks the viewer: Firefox when the device says so, else the page opens a tab (#988)', async () => {
+  const p = page();
+  const opened = [];
+  Object.assign(p.ctx, { URL, location: { origin: 'null' }, open: (...a) => opened.push(a) });
+  p.ctx.document.baseURI = 'https://citadel.example/files/p.html';
+  const click = () => {
+    const a = { getAttribute: (k) => (k === 'href' ? 'https://example.org/x' : null) };
+    const e = { button: 0, defaultPrevented: false, target: { closest: () => a }, preventDefault() { this.defaultPrevented = true; } };
+    p.fire('click', e);
+    return e;
+  };
+  assert.equal(click().defaultPrevented, true);
+  assert.equal(p.waiting('link')[0].url, 'https://example.org/x');
+  p.answer('link', { opened: true });
+  await wait(5);
+  assert.equal(opened.length, 0, 'the viewer took it');
+  click();
+  p.answer('link', { opened: false });
+  await wait(5);
+  assert.deepEqual(opened, [['https://example.org/x', '_blank', 'noopener']], 'not for Firefox: a tab as before');
 });

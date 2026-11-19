@@ -326,6 +326,8 @@
     }
     if (!/^https?:$/.test(url.protocol) || url.origin === location.origin) return;
     e.preventDefault();
-    window.open(url.href, '_blank', 'noopener');
+    const tab = () => window.open(url.href, '_blank', 'noopener');
+    // The viewer opens it in Firefox when the person's device is set to (#988); else, or if it doesn't answer, a tab.
+    (host ? request('link', { url: url.href }, 3000) : Promise.reject()).then((r) => r.opened || tab(), tab);
   });
 })

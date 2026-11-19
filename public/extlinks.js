@@ -6,7 +6,7 @@
 // The switch lives on the device (localStorage), off until someone turns it on, and is offered on Windows desktops only.
 // Citadel's own pages use mountLinkHandler directly. A framed contraption's click can't be seen from here, so rail.js
 // (every app loads it) catches its external links when Citadel's state message says the switch is on, and posts the
-// address up; frames.js launches it through launchFirefox, which checks the address again.
+// address up; rail.js launches it through launchFirefox, which checks the address again.
 
 export const SCHEME = 'citadel-firefox:';
 const KEY = 'citadel-open-in-firefox';
@@ -84,3 +84,5 @@ export function mountLinkHandler({ on, own, open, base = () => location.href }) 
   addEventListener('click', handle, true);
   addEventListener('auxclick', handle, true);
 }
+// Another tab of Citadel flipping the switch.
+addEventListener('storage', (e) => { if (e.key === KEY) for (const f of listeners) f(firefoxOn()); });

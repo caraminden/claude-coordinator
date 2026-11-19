@@ -87,10 +87,17 @@ before(async () => {
   const res = await fetch(`${srv.base}/api/invite/${invited.data.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
   olive = { id: invited.data.person.id, cookie: res.headers.get('set-cookie')!.split(';')[0] };
   assert.equal((await enable(cara, true)).status, 200);
-  // The server's read of the stub's install files (#987) ends on its 512 px icon. Under load the first read can come
-  // before the stub exists or anyone is enabled, so it repeats: wait for it here, so its requests never land inside a
-  // test that counts what the stub saw (they did at CI load 15-16).
-  await until('the boot-time install-files read', () => seen.some((x) => x.path === '/apps/stub/web/i512.png'));
+  // The server's read of the stub's install files (#987) repeats until it has recorded them. Under load the first read can
+  // come before the stub exists or anyone is enabled, or a request of it can be cut off after the stub saw it: wait for the
+  // recorded paths, not for the last request, so no read lands inside a test that counts what the stub saw.
+  await until('the boot-time install-files read', () => {
+    const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
+    try {
+      return db.prepare("SELECT static_paths FROM contraptions WHERE name = 'stub'").get()?.static_paths != null;
+    } finally {
+      db.close();
+    }
+  });
 });
 after(async () => {
   await srv?.stop();

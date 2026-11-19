@@ -404,6 +404,7 @@ test("a minion's turn past 150k never hands off", async () => {
     await started(t.id);
     await endTurn(t.id, 'ok');
     await waitIdle(t.id);
+    await until('its save', () => store.getSetting(`saving:${t.id}`) == null); // after which a fresh start would run
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(runner.isRunning(t.id), false);
     assert.equal(store.getSetting(`fresh:${t.id}`), null);
@@ -489,7 +490,8 @@ test('a handoff and compaction that leave it big do not loop; the next real turn
     await started(id);
     await endTurn(id, 'ok');
     await waitIdle(id);
-    await new Promise((r) => setTimeout(r, 150)); // its save, after which another fresh start would run
+    await until('its save', () => store.getSetting(`saving:${id}`) == null); // after which another fresh start would run
+    await new Promise((r) => setTimeout(r, 100));
     assert.equal(runner.isRunning(id), false);
     assert.equal(callCount(), count + 3, 'the turn, the handoff and the compaction, and nothing after');
     assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);

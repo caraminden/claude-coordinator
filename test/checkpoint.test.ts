@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { checkpointOffThread, walFrames } from '../src/checkpoint.ts';
 import { Store } from '../src/db.ts';
+import { until } from './wait.ts';
 
 // #680: a checkpoint fsyncs, and run on the event loop by whichever commit crossed 1000 pages it held the server
 // for seconds when the disk stalled. The server's connection leaves them to a worker thread.
@@ -48,9 +49,8 @@ test('the worker checkpoints, and the store goes back to checkpointing itself wh
   assert.equal((s.db.prepare('PRAGMA wal_autocheckpoint').get() as any).wal_autocheckpoint, 0);
   const before = size(s.path);
   fill(s);
-  await once(worker, 'message');
-  await once(worker, 'message'); // a whole round after the writes
-  assert.ok(size(s.path) > before + 5_000_000, 'the worker copied the WAL into the database');
+  // Rounds that ran during fill() are queued, stale: wait for the copy itself.
+  await until('the worker copying the WAL into the database', () => size(s.path) > before + 5_000_000);
   await worker.terminate();
   assert.equal((s.db.prepare('PRAGMA wal_autocheckpoint').get() as any).wal_autocheckpoint, 1000);
   s.db.close();
@@ -75,15 +75,14 @@ test('the worker leaves a short WAL alone, so writes do not start it over, until
   assert.equal(salt(), gen, 'and no write started the WAL over');
   assert.ok(walFrames(s.path)! > frames, 'the WAL just grew');
   fill(s);
-  await round(worker);
-  assert.ok(size(s.path) > before + 3_000_000, 'a long WAL is checkpointed');
+  await until('a long WAL checkpointed', () => size(s.path) > before + 3_000_000);
   await worker.terminate();
   // A short WAL that has waited long enough goes too.
   worker = checkpointOffThread(s, 20, 2000, 1)!;
   s.setSetting('b', 2);
-  await round(worker);
-  s.setSetting('c', 3);
-  assert.notEqual(salt(), gen);
+  // The write after a finished checkpoint starts the WAL over; queued rounds say nothing of whether one has run.
+  let c = 0;
+  await until('a write starting the WAL over', () => { s.setSetting(`c${c++}`, c); return salt() !== gen; });
   assert.ok(walFrames(s.path)! < 10, 'the write after it started the WAL over');
   await worker.terminate();
   s.db.close();

@@ -29,6 +29,48 @@ export function firefoxLink(href, base, own = []) {
   return SCHEME + url.href;
 }
 
+const NAME = /^\/apps\/([a-z0-9][a-z0-9-]{0,31})(?=\/|$)/;
+
+/**
+ * `{ name, to }` for a link to one of our apps, else null: `to` is the path (with query and hash) the app view loads,
+ * always `/apps/<name>/…` on Citadel's own host. A link counts by `/apps/<name>/…` on a host in `own` (Citadel's), or by
+ * the app's own host in `apps` (host -> name, lower case), where `/` is the app's front page. Anything else (a path
+ * outside the app, credentials, `_citadel`) is not an app link and falls through to the Firefox rule.
+ */
+export function appLink(href, base, own = [], apps = {}) {
+  let url;
+  try {
+    url = new URL(href, base);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return null;
+  const tail = url.pathname + url.search + url.hash;
+  const appName = Object.hasOwn(apps, url.hostname) ? apps[url.hostname] : null;
+  if (appName) {
+    const to = url.pathname === '/' ? `/apps/${appName}/${url.search}${url.hash}` : tail;
+    return NAME.exec(to)?.[1] === appName ? { name: appName, to } : null;
+  }
+  if (!own.some((h) => h.toLowerCase() === url.hostname)) return null;
+  const name = NAME.exec(url.pathname)?.[1];
+  return name ? { name, to: tail } : null;
+}
+
+/** The hash route that opens `{ name, to }` in the app view (core.js route). */
+export const appHash = ({ name, to }) => `#/apps/${name}?to=${encodeURIComponent(to)}`;
+
+/** The address the app view loads for `to` inside app `name`, or null unless it resolves to that app on `origin`. */
+export function appSrc(name, to, origin) {
+  let url;
+  try {
+    url = new URL(to, origin);
+  } catch {
+    return null;
+  }
+  if (url.origin !== origin || NAME.exec(url.pathname)?.[1] !== name) return null;
+  return url.pathname + url.search + url.hash;
+}
+
 /** Whether this browser can use the switch: a Windows desktop (the one-time setup is a Windows script). */
 export function firefoxAvailable(nav = typeof navigator === 'object' ? navigator : {}) {
   const data = nav.userAgentData;
@@ -66,16 +108,24 @@ export function launchFirefox(address) {
 
 /**
  * Catch clicks (and middle clicks) on external links before anything else sees them. `on()` says whether the switch is
- * on, `own()` lists the hosts that count as Citadel's own, `open(address)` takes the address. A modifier key, a
+ * on, `own()` lists Citadel's own hosts, `apps()` maps each app's own host to its name, `openApp({ name, to }, address)` shows an app, `open(address)` takes the address. A modifier key, a
  * `download` link or a click something already handled is left to the browser.
  */
-export function mountLinkHandler({ on, own, open, base = () => location.href }) {
+export function mountLinkHandler({ on, own, open, apps = () => ({}), openApp, base = () => location.href }) {
   const handle = (e) => {
     if (e.defaultPrevented || (e.type === 'click' ? e.button !== 0 : e.button !== 1)) return;
-    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || !on()) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
     const a = e.target?.closest?.('a[href]');
     if (!a || a.hasAttribute('download')) return;
-    const link = firefoxLink(a.getAttribute('href'), base(), own());
+    const href = a.getAttribute('href');
+    // A link to one of our apps opens in Citadel's app view, switch on or off; a middle click can't, so it's Firefox's.
+    const app = openApp && e.type === 'click' ? appLink(href, base(), own(), apps()) : null;
+    if (app) {
+      e.preventDefault();
+      e.stopPropagation();
+      return openApp(app, new URL(href, base()).href);
+    }
+    const link = on() && firefoxLink(href, base(), own());
     if (!link) return;
     e.preventDefault();
     e.stopPropagation();

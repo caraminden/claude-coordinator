@@ -26,6 +26,7 @@ import { annotator, canvasBlob, drawable } from './annotate.js';
 import { parseMarks } from './ui/marks.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
+import { appSrc } from './extlinks.js';
 import { toast } from './ui/status.js';
 import { initAppSwitch } from './appswitch.js';
 import { onPresenceMsg, presenceHello, reportPresence } from './presence.js';
@@ -846,7 +847,16 @@ async function route() {
   if (view?.kind === 'project' && view.id && !/^#\/(f|apps|share)\b/.test(hash) && !new RegExp(`/t/${view.ticket?.number}(?!\\d)`).test(hash)) leaveSeen(view.id);
   let m;
   // A contraption in Citadel's window (frames.js): Citadel's page stays as it was underneath.
-  if ((m = hash.match(/^#\/apps\/([a-z0-9][a-z0-9-]{0,31})$/))) return showFrame(m[1]);
+  if ((m = hash.match(/^#\/apps\/([a-z0-9][a-z0-9-]{0,31})(?:\?to=([^#]*))?$/))) {
+    // A link into an app (extlinks.js appHash): the page it names, checked to be inside that app on Citadel's origin.
+    let src = null;
+    if (m[2] != null) {
+      try { src = appSrc(m[1], decodeURIComponent(m[2]), location.origin); } catch {}
+    }
+    showFrame(m[1], src ?? undefined);
+    if (m[2] != null) replaceHash(`#/apps/${m[1]}`);
+    return;
+  }
   if ((m = hash.match(/^#\/share(\?.*)?$/))) return takeShare(m[1] ?? '', seq);
   hideFrames();
   // A jump left by a route that never opened its chat mustn't fire on a later, ordinary visit.

@@ -86,6 +86,17 @@ export function setFirefoxOn(on) {
   try { on ? localStorage.setItem(KEY, '1') : localStorage.removeItem(KEY); } catch {}
   for (const f of listeners) f(on);
 }
+/**
+ * An app's own window (its host, no Citadel around it) can't read Citadel's localStorage, so the framed visit copies the
+ * switch into a cookie on the app's host and the standalone window reads it back. shortcut: it takes one framed visit
+ * per app host, and a browser that blocks third-party cookies never gets the copy; upgrade to a handoff from Citadel.
+ */
+export function mirrorFirefox(on) {
+  try { document.cookie = `${KEY}=${on ? 1 : ''}; Path=/; Max-Age=${on ? 31536000 : 0}; SameSite=None; Secure`; } catch {}
+}
+export const mirroredOn = () => {
+  try { return firefoxAvailable() && document.cookie.split('; ').includes(`${KEY}=1`); } catch { return false; }
+};
 const listeners = new Set();
 /** Hear about the switch changing (a frame's page needs telling). */
 export const onFirefoxChange = (fn) => void listeners.add(fn);

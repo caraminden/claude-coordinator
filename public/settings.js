@@ -1,6 +1,7 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { account, ago, api, h, icon, listGroupsOf, me, schemeIcon, view } from './base.js';
 import { openHash } from './core.js';
+import { firefoxAvailable, firefoxOn, setFirefoxOn } from './extlinks.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { renderSidebar } from './sidebar.js';
 import { copyText } from './ui/markdown.js';
@@ -52,6 +53,21 @@ export async function pushOff() {
 
 // What this browser last said of its push state, drawn at once on the next scheme so the box keeps its height while it asks again.
 let pushState = { subscribed: false, muted: [] };
+
+/**
+ * "Open links in Firefox" (#988): this device sends external links to Firefox through Windows (extlinks.js), for an
+ * installed Chrome or Edge app that would open them in its own browser. Off until turned on; null where it can't work
+ * (anything but a Windows desktop).
+ */
+export function firefoxControls() {
+  if (!firefoxAvailable()) return null;
+  const on = h('input', { type: 'checkbox', checked: firefoxOn() });
+  on.addEventListener('change', () => { setFirefoxOn(on.checked); hint.hidden = !on.checked; });
+  const hint = h('span', { class: 'hint', hidden: !on.checked }, 'Needs a one-time setup on this PC: ',
+    h('a', { href: 'citadel-firefox-link.ps1', download: '' }, 'download the setup script'), ', run it in PowerShell, and tick "Always allow" when the browser asks.');
+  return h('div', { class: 'push' },
+    h('label', { class: 'toggle', title: 'Send links to other websites to Firefox, not this browser. Needs a one-time setup on this PC' }, on, 'Open links in Firefox'), hint);
+}
 
 /** "Notify me on this device", and once on, pinned-only and a mute for this project; in the account box. */
 export function pushControls(project) {

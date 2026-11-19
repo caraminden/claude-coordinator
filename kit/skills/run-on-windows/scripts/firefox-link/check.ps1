@@ -10,10 +10,9 @@ $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
 $uri = ([Uri](Resolve-Path -LiteralPath $Page).Path).AbsoluteUri
 Start-Process -FilePath $edge -ArgumentList "--app=$uri"
 Start-Sleep -Seconds 6
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -Namespace Win -Name Mouse -MemberDefinition '[DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e);'
+Add-Type -Namespace Win -Name Mouse -MemberDefinition '[DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);'
 # A real click on the button (the app window opens at the screen's top left, the button 97,93 into it), so the page has a user gesture.
-[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($ClickX, $ClickY)
+[void][Win.Mouse]::SetCursorPos($ClickX, $ClickY)
 Start-Sleep -Milliseconds 300
 [Win.Mouse]::mouse_event(2, 0, 0, 0, 0)
 [Win.Mouse]::mouse_event(4, 0, 0, 0, 0)

@@ -13,6 +13,7 @@
 
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { optimistic } from './ui/optimistic.js';
+import { firefoxLink, firefoxOn, launchFirefox, mountLinkHandler, onFirefoxChange } from './extlinks.js';
 
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
@@ -25,7 +26,9 @@ let root = new URL(inContraption ? '../../c/' : './', import.meta.url);
  * Citadel and a contraption's page may be on different origins (src/apps.ts, APPS_DOMAIN), so they talk only by
  * postMessage, each checking the other window is the one it framed or was framed by. Contraption → Citadel: hello
  * { installed }, rail { open }, bar (its .cui-topbar, frames.js), key and blur (Alt+`, appswitch.js). Citadel →
- * contraption: state { hasRail, narrow }, strip { vars }. A contraption's installed window → Citadel's page in its
+ * contraption: state { hasRail, narrow, firefox, own }, strip { vars }. A contraption's click on an external link, once `firefox` says
+ * the switch "Open links in Firefox" is on (extlinks.js, #988): ext { url }, which `own` (hosts that are Citadel's) kept
+ * it from sending for a link into Citadel. A contraption's installed window → Citadel's page in its
  * layer: layer { app }, go { app }; and back: layer-close. Nothing secret goes in one, so the target is '*'.
  */
 export const FRAME = 'citadel-frame-1';
@@ -34,7 +37,7 @@ const post = (win, type, data = {}) => win?.postMessage({ protocol: FRAME, type,
 const framedIn = typeof window === 'object' && window.parent !== window ? window.parent : null;
 
 // Inside Citadel's frame (frames.js): Citadel's rail is the rail, and this page's switcher opens it. Its state comes from Citadel.
-let hostState = { hasRail: false };
+let hostState = { hasRail: false, firefox: false, own: [] };
 const host = inContraption && framedIn ? {
   openRail: () => post(framedIn, 'rail', { open: true }),
   closeRail: () => post(framedIn, 'rail', { open: false }),
@@ -144,8 +147,11 @@ export const hasRail = () => (host ? host.hasRail() && narrow.matches : !!nav);
 const frameWindows = () => [...document.querySelectorAll('#frames iframe')].map((f) => f.contentWindow);
 function tellFrames(to = frameWindows()) {
   if (inContraption) return;
-  for (const w of to) post(w, 'state', { hasRail: !!nav, narrow: !!narrow?.matches });
+  for (const w of to) post(w, 'state', { hasRail: !!nav, narrow: !!narrow?.matches, firefox: firefoxOn(), own: ownHosts() });
 }
+
+/** The hosts that are Citadel's own: its page, and each contraption's own host (#827). Links to them are never sent to Firefox. */
+const ownHosts = () => [location.hostname, root.hostname, ...[...shortUrls.values()].map((u) => new URL(u).hostname)];
 
 /** drawers.js: a swipe from the left edge pulls out its left drawer, and only past that the switcher (false: not any more). */
 export function leaveEdge(taken = true) {
@@ -608,6 +614,7 @@ if (typeof document !== 'undefined') {
           if (name && typeof d.installed === 'boolean' && d.installed !== knownInstalled(name)) { markInstalled(name, d.installed); syncInstall(); }
           tellFrames([e.source]);
         } else if (d.type === 'rail') d.open ? openRail() : closeRail();
+        else if (d.type === 'ext' && typeof d.url === 'string' && firefoxOn() && firefoxLink(d.url, location.href, ownHosts())) launchFirefox(d.url);
       } else if (inLayer && isMessage(e, framedIn)) {
         // Citadel's page in a contraption's installed window: which contraption is under it, and where to go.
         const app = d.app === null || (typeof d.app === 'string' && /^[a-z0-9-]+$/.test(d.app)) ? d.app : undefined;
@@ -617,7 +624,7 @@ if (typeof document !== 'undefined') {
       }
     } else if (host && isMessage(e, framedIn) && d.type === 'state') {
       // A framed contraption: Citadel's rail and window, as Citadel says.
-      hostState = { hasRail: !!d.hasRail };
+      hostState = { hasRail: !!d.hasRail, firefox: d.firefox === true, own: Array.isArray(d.own) ? d.own.filter((x) => typeof x === 'string') : [] };
       if (narrow.matches !== !!d.narrow) {
         narrow.matches = !!d.narrow;
         narrow.dispatchEvent(new Event('change'));
@@ -765,6 +772,13 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 @media (prefers-reduced-motion: reduce) { .citadel-rail { transition: none; } }`);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 }
+
+// "Open links in Firefox" (#988): Citadel's own pages act on a click; a framed contraption sends the address up to Citadel.
+if (typeof document !== 'undefined' && !inContraption) {
+  mountLinkHandler({ on: firefoxOn, own: ownHosts, open: launchFirefox });
+  onFirefoxChange(() => tellFrames());
+}
+if (typeof document !== 'undefined' && host) mountLinkHandler({ on: () => hostState.firefox, own: () => hostState.own, open: (url) => post(framedIn, 'ext', { url }) });
 
 // A framed contraption reports its bar and passes Alt+` on from the start.
 if (typeof document !== 'undefined' && host) {

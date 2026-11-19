@@ -569,6 +569,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "PUT /api/costs/fable-cap": {
+  "anon": "401 Not logged in",
+  "person": "400 pct is the cap as a percent of the weekly plan, 0 to 100",
+  "member": "400 pct is the cap as a percent of the weekly plan, 0 to 100",
+  "outsider": "400 pct is the cap as a percent of the weekly plan, 0 to 100",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/costs/mine": {
   "anon": "401 Not logged in",
   "person": "200",

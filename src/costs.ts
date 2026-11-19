@@ -205,3 +205,37 @@ export function weekLimit(store: Store, payer: number | null, usage: { weekly: {
   if (usd !== last) store.setSetting(key, usd);
   return usd;
 }
+
+/** Settings key of the weekly Fable cap: a share of the weekly plan, in percent (#1061). */
+export const FABLE_CAP_KEY = 'fable_cap_pct';
+/** Josh, 2026-11-19: "the starting cap would be like 20%". */
+export const FABLE_CAP_DEFAULT = 20;
+
+export interface FableMeter {
+  /** The cap, as a percent of the weekly plan: each person's own, and the sum of everyone's for the whole Citadel. */
+  capPct: number;
+  /** Fable dollars at API prices over the last 7 days, every payer together. */
+  usd: number;
+  /** The weekly plan limits of every account on the server, at API prices; null before any is priced. */
+  weekUsd: number | null;
+  /** capPct of weekUsd, the Citadel-wide cap in dollars. */
+  capUsd: number | null;
+  /** Fable spend has reached the cap: the Taskmaster starts Fable tiers on Opus high until it drops below. */
+  over: boolean;
+}
+
+export function fableCapPct(store: Store): number {
+  const v = store.getSetting<number>(FABLE_CAP_KEY);
+  return typeof v === 'number' && v >= 0 && v <= 100 ? v : FABLE_CAP_DEFAULT;
+}
+
+/** The Fable meter for the whole Citadel (#1061; Josh, 2026-11-19: overall in API dollars, past the cap Fable tiers start on Opus high). */
+export function fableMeter(store: Store, now = Date.now()): FableMeter {
+  const capPct = fableCapPct(store);
+  const usd = store.fableSpend(now - COST_DAYS * 86400_000);
+  // Each account's estimated weekly limit is kept as week_usd:<payer or host>[:account:N] (weekLimit).
+  const limits = store.settingsWithPrefix<number>('week_usd:').map((r) => r.value).filter((v) => typeof v === 'number' && v > 0);
+  const weekUsd = limits.length ? limits.reduce((a, b) => a + b, 0) : null;
+  const capUsd = weekUsd === null ? null : (weekUsd * capPct) / 100;
+  return { capPct, usd, weekUsd, capUsd, over: capUsd !== null && usd >= capUsd };
+}

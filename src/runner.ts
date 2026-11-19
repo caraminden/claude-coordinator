@@ -10,6 +10,7 @@ import { AGENT_NAME } from './auth.ts';
 import { Relay, clip, coldKey, loopKey, mailKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
 import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
+import { fableMeter } from './costs.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
 import { KEEP, SENT_BACK } from './link-check.ts';
@@ -2681,7 +2682,7 @@ export class Runner {
       // Two halves (#878): system-prompt.md, the same for every minion of the scheme, and the per-minion and volatile lines that open the turn message.
       // Machines a minion may queue jobs on (#857): lent to this scheme with a jobs block; the owner's go card is the gate.
       const jobMachines = ticket.kind === 'coordinator' ? [] : jobMachinesFor(this.store, project.id);
-      const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines);
+      const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines, ticket.kind === 'coordinator' && fableMeter(this.store).over);
       const system = promptText(parts.system);
       writeFileSync(join(dir, 'system-prompt.md'), system);
       const context = promptText(parts.turn);

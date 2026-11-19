@@ -12,7 +12,7 @@ import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_M
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { directCards, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
-import { pickFor } from '../../public/model-table.js';
+import { pickFor, pickReason } from '../../public/model-table.js';
 import { inOrder } from '../../public/reorder.js';
 import { GO_FROM, label, SHIP_PATHS, shippingGate, TRY_FIRST, values } from '../../public/shipping.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
@@ -1040,8 +1040,11 @@ export const projectRoutes: Route[] = [
         throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
       }
       const table = pickFor(planned.type?.[0]);
+      // Why it runs on this model (#1061): the table's pick for its type (the Taskmaster picks from the table), or a person's own choice.
+      const byHand = !caller && (model !== null || effort !== null);
       model ??= table.model;
       effort ??= table.effort;
+      const because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort);
       // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
       let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
       let leader: Ticket | undefined;
@@ -1064,7 +1067,7 @@ export const projectRoutes: Route[] = [
       const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
-      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
+      store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
       const ownBuild = owner ? store.getTicket(id)?.build ?? null : null;
       if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.

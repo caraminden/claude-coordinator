@@ -75,9 +75,37 @@ export function guessType(text) {
   return CLUES.find(([, re]) => re.test(text ?? ''))?.[0] ?? null;
 }
 
+/** "Sonnet 5.5 medium" for a model and effort: the table's tier as people read it. */
+export function tierLabel(model, effort) {
+  const name = CLAUDE_MODELS.find(([id]) => id === model)?.[1] ?? model ?? 'default model';
+  return effort ? `${name} ${effort}` : name;
+}
+
+/**
+ * The "Picked because" line on a minion (#1061). `by` says who chose: 'table' (the table's pick for its type, from the Taskmaster's
+ * call or a start with none), a person's name (they set it by hand), or 'step-up' (the Taskmaster moved it after a stall).
+ */
+export function pickReason(by, type, model, effort) {
+  const tier = tierLabel(model, effort);
+  if (by === 'step-up') return `stepped up after a stall: ${tier}`;
+  if (by !== 'table') return `set by ${by}: ${tier}`;
+  return type ? `${type} → ${tier}` : tier;
+}
+
 /** The table as one line of prose, for the Taskmaster's prompt. */
 export function tableText(fable = true) {
   const tiers = TIERS.filter((t) => fable || !/fable/.test(t.model)).map((t) => `${t.work} ${t.model} at ${t.effort}${t.then ? `, ${t.then}` : ''}`).join('; ');
   // xhigh and max are in create_ticket's effort description, which every Taskmaster reads with the tool.
   return `${tiers}.${fable ? '' : ' Fable is off in this scheme: never pick it for a minion, a Grunt or a review; the nearest tier below it is Opus 5.5 at high.'}`;
+}
+
+/** The table as rows for the Models section (#1061): what a person reads of each tier, straight from TIERS. */
+export function tierRows() {
+  return TIERS.map((t) => ({ work: t.work, tier: tierLabel(t.model, t.effort), model: t.model, effort: t.effort, then: t.then ?? null }));
+}
+
+/** When the advisor trial ends, read from its TIERS row ("until 2026-11-30"), or null once the row is gone. */
+export function advisorTrialEnd() {
+  const row = TIERS.find((t) => /advisor/.test(t.model));
+  return row ? /until (\d{4}-\d{2}-\d{2})/.exec(row.work)?.[1] ?? null : null;
 }

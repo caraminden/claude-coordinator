@@ -18,7 +18,7 @@ import { checkNeed } from '../needs.ts';
 import { armForCi, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
-import { CLAUDE_MODELS } from '../../public/model-table.js';
+import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { needsGo } from '../../public/shipping.js';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
@@ -59,7 +59,7 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   const { id } = ticket;
   const { store, runner } = app;
   // Any of title, state, note, replies, build, model, effort, workflow and plugin_dirs; null (or "") clears all but the title.
-  const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs'>> = {};
+  const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'picked_because'>> = {};
   if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
   if (body.workflow !== undefined) fields.workflow = workflowSwitch(body.workflow, ticket);
   if (body.plugin_dirs !== undefined) fields.plugin_dirs = pluginPicks(store, ticket, body.plugin_dirs);
@@ -82,6 +82,10 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   if (unparks) delete fields.state;
   let closeCancelled: string | null = null;
   if (Object.keys(fields).length) {
+    // A new model or effort changes why it runs where it does (#1061): a Taskmaster's change is a step-up after a stall, a person's is theirs.
+    if ('model' in fields || 'effort' in fields) {
+      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort);
+    }
     store.updateTicket(id, fields);
     if (fields.state === 'pending-deploy') runner.deployPending(id);
     if (fields.state) closeCancelled = runner.closeCancelled(id, caller !== id);

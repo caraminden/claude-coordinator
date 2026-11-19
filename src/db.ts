@@ -278,6 +278,8 @@ export interface Ticket {
   /** What Claude Code's defaults came out as on this thread's latest turn without a choice. */
   last_model: string | null;
   last_effort: string | null;
+  /** Why it runs on its model and effort (#1061), a line like "bug → Sonnet 5.5 medium"; null for a minion from before. */
+  picked_because: string | null;
   /** 1: its turns may call Claude Code's Workflow tool (#359), off by default as it costs ~2k tokens a call. */
   workflow: number;
   /** Its picks from the scheme's optional plugin folders (#361), one per line; '' for none. */
@@ -1272,6 +1274,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'model', 'ALTER TABLE tickets ADD COLUMN model TEXT'],
   ['tickets', 'effort', 'ALTER TABLE tickets ADD COLUMN effort TEXT'],
   ['tickets', 'last_model', 'ALTER TABLE tickets ADD COLUMN last_model TEXT'],
+  ['tickets', 'picked_because', 'ALTER TABLE tickets ADD COLUMN picked_because TEXT'],
   ['tickets', 'last_effort', 'ALTER TABLE tickets ADD COLUMN last_effort TEXT'],
   ['tickets', 'workflow', 'ALTER TABLE tickets ADD COLUMN workflow INTEGER NOT NULL DEFAULT 0'],
   ['tickets', 'plugin_dirs', "ALTER TABLE tickets ADD COLUMN plugin_dirs TEXT NOT NULL DEFAULT ''"],
@@ -1412,6 +1415,7 @@ export const SCHEMA_HISTORY = [
   [71, 'projects.fable_ok, builds, grill, gh_runners (#1045)'],
   [72, 'projects.shot_widths, shot_themes, shots_required, shot_note (#1044)'],
   [73, 'projects.ship_path, go_from, try_first; schemes whose merges wait for a person start on pr-person (#1043)'],
+  [74, 'tickets.picked_because (#1061)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2422,7 +2426,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id'>>) {
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');
@@ -3446,6 +3450,17 @@ export class Store {
   getSetting<T>(key: string): T | null {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
     return row ? JSON.parse(row.value) : null;
+  }
+
+  /** Every setting whose key starts with `prefix`, as key and value (the keys hold no LIKE wildcards). */
+  settingsWithPrefix<T>(prefix: string): { key: string; value: T }[] {
+    return (this.db.prepare("SELECT key, value FROM settings WHERE key LIKE ? ESCAPE '\\'").all(`${prefix.replace(/[\\%_]/g, '\\$&')}%`) as { key: string; value: string }[])
+      .map((r) => ({ key: r.key, value: JSON.parse(r.value) as T }));
+  }
+
+  /** What every payer's Fable turns cost since `since` (#1061), from the per-model split, so turns before it was kept count for nothing. */
+  fableSpend(since: number): number {
+    return (this.db.prepare("SELECT COALESCE(SUM(m.cost_usd), 0) AS c FROM turn_models m JOIN turns u ON u.id = m.turn_id WHERE u.ended_at >= ? AND m.model LIKE '%fable%'").get(since) as { c: number }).c;
   }
 
   setSetting(key: string, value: unknown) {

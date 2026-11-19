@@ -25,6 +25,7 @@ import { claimName, type Claim } from '../claims.ts';
 import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
+import { FLAKE_WINDOW_MS, flakeBrief } from '../flakes.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -1164,6 +1165,30 @@ export const projectRoutes: Route[] = [
       return json(res, 200, { folders: folders.map((f) => readFolder(f, closed)) });
     },
   },
+  // The CI page's Test health tab (#1063): fast mode's state and known reds, and the flakiest test files of the last 14 days, each with the open minion on it.
+  {
+    method: 'GET', path: '/api/projects/:project/test-health', who: ['person'],
+    handler({ res, app, project }) {
+      const { store } = app;
+      const open = store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed');
+      const flakes = store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS).map((f) => {
+        const title = flakeBrief(f.file, 0, []).title;
+        return { ...f, minion: open.find((t) => t.title === title)?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
+      });
+      json(res, 200, { fast: project.land_mode === 'fast' ? app.fastMode?.view(project.id) ?? null : null, flakes, now: Date.now() });
+    },
+  },
+  // The first message "Start a minion to fix it" shows for a flaky file, for the person to read and confirm (#1063).
+  {
+    method: 'GET', path: '/api/projects/:project/flake-brief', who: ['person'],
+    handler({ res, url, app, project }) {
+      const file = url.searchParams.get('file') ?? '';
+      const row = app.store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS, 1000).find((f) => f.file === file);
+      if (!row) throw new HttpError(404, 'No flake of that file in the last 14 days');
+      json(res, 200, flakeBrief(file, row.count, app.store.flakeDetails(project.id, file)));
+    },
+  },
+
   // The plugin folders in the scheme's repo, for the Minion rules page's picker (#1041). Saving them stays admin-only (PATCH).
   {
     method: 'GET', path: '/api/projects/:project/plugins', who: ['person'],

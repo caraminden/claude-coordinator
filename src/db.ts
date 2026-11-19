@@ -1200,6 +1200,18 @@ CREATE TABLE IF NOT EXISTS health_events (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS health_events_kind ON health_events(kind, at);
+-- One row per test file that failed in a land's or fast mode's run and passed alone (#1063): the CI page's Test health tab counts them.
+CREATE TABLE IF NOT EXISTS flake_events (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL,
+  file TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  commit_sha TEXT,
+  ticket_id INTEGER,
+  source TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS flake_events_scheme ON flake_events(project_id, at);
 -- Who touched a minion (#919): requested, assigned, wrote in its chat or answered its card. It only grows;
 -- left_at is set when the person leaves it, and a later touch rejoins. Updates reach each touched person's Taskmaster.
 CREATE TABLE IF NOT EXISTS ticket_touches (
@@ -1431,12 +1443,15 @@ export const SCHEMA_HISTORY = [
   [74, 'tickets.picked_because (#1061)'],
   [75, 'projects.msg_loop_limit, msg_loop_min, msg_cold_min, msg_hold_h (#1059)'],
   [76, 'projects.rules_review (#1046)'],
-  [77, 'review_entries, review_versions; repo rubric files imported once (#1051)'],
+  [77, 'flake_events (#1063)'],
+  [78, 'review_entries, review_versions; repo rubric files imported once (#1051)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
 /** How long health_events rows are kept (#724): the longest check compares a day before a deploy with the day after. */
 export const HEALTH_KEEP_MS = 3 * 24 * 60 * 60_000;
+/** How long flake_events rows are kept (#1063): the tab counts 14 days, and the brief quotes older failures. */
+export const FLAKE_KEEP_MS = 90 * 24 * 60 * 60_000;
 /** The most health_events rows kept, oldest dropped first, so a page that throws in a loop can't grow the database. */
 export const HEALTH_MAX_ROWS = 5000;
 
@@ -3420,6 +3435,25 @@ export class Store {
       this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
       this.db.prepare('DELETE FROM health_events WHERE id <= ?').run(Number(id) - HEALTH_MAX_ROWS);
     }
+  }
+
+  /** Record the flakes of one run (#1063); rows older than FLAKE_KEEP_MS go with each write. */
+  addFlakeEvents(projectId: number, ticketId: number | null, commit: string | null, at: number, flakes: { file: string; source: string; detail: string }[]) {
+    const add = this.db.prepare('INSERT INTO flake_events (project_id, file, at, commit_sha, ticket_id, source, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    for (const f of flakes) add.run(projectId, f.file.slice(0, 200), at, commit, ticketId, f.source.slice(0, 40), f.detail.slice(0, 1500));
+    if (flakes.length) this.db.prepare('DELETE FROM flake_events WHERE at < ?').run(at - FLAKE_KEEP_MS);
+  }
+
+  /** A scheme's flakiest test files since `since`: how often, when last, and the minion whose land saw the last one. */
+  flakeCounts(projectId: number, since: number, limit = 10): { file: string; count: number; last: number; ticketId: number | null }[] {
+    return this.db.prepare(`SELECT file, COUNT(*) AS count, MAX(at) AS last,
+        (SELECT e2.ticket_id FROM flake_events e2 WHERE e2.project_id = e.project_id AND e2.file = e.file ORDER BY e2.at DESC, e2.id DESC LIMIT 1) AS ticketId
+      FROM flake_events e WHERE project_id = ? AND at >= ? GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`).all(projectId, since, limit) as any;
+  }
+
+  /** The newest `n` failing outputs kept for a file. */
+  flakeDetails(projectId: number, file: string, n = 3): { at: number; detail: string }[] {
+    return this.db.prepare("SELECT at, detail FROM flake_events WHERE project_id = ? AND file = ? AND detail != '' ORDER BY at DESC, id DESC LIMIT ?").all(projectId, file, n) as any;
   }
 
   /** How many `kind` readings fell in [from, to), the first one's time, and the commonest details with their counts. */

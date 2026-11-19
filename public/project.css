@@ -505,6 +505,10 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-block-head { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .ci-queues { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Running now: a runner's name is what people read, so it gets a fixed column wide enough for a PC's runner name. */
+.ci-run.ci-health-run { grid-template-columns: 0.6rem 5.5rem minmax(0, 1fr) auto; row-gap: 0.15rem; }
+.ci-health-run .ci-run-who { grid-column: 3 / -1; grid-row: 2; white-space: normal; }
+.ci-health-run .ci-run-act { grid-column: 4; grid-row: 1; text-align: right; overflow: visible; }
+.ci-health-run .ci-run-age { grid-column: 4; grid-row: 1; }
 .ci-run.ci-now { grid-template-columns: 0.6rem 4.5rem 12rem minmax(0, 1fr) 3.5rem; }
 .ci-run.ci-load-line { grid-template-columns: 0.6rem minmax(0, 1fr) auto 1.5rem; }
 .ci-load-bars { display: flex; gap: var(--space-2, 0.5rem); align-items: center; }
@@ -534,6 +538,7 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
   .ci-list:not(.greens-open) .ci-li[data-state="ready"]:not(.on) { display: none; }
   .ci-run { grid-template-columns: 0.6rem 4.5rem minmax(0, 1fr) 4rem; }
   .ci-run-who { grid-column: 3 / -1; grid-row: 2; }
+  .ci-health-run .ci-run-act { grid-column: 3 / -1; grid-row: 3; text-align: left; margin-top: 0.2rem; }
   .ci-run.ci-now { grid-template-columns: 0.6rem 4rem minmax(0, 1fr) 3.5rem; }
   .ci-run.ci-load-line { grid-template-columns: 0.6rem minmax(0, 1fr) 1.5rem; }
   .ci-load-line .ci-run-who { grid-row: auto; grid-column: auto; }

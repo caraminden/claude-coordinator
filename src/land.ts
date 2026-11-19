@@ -410,6 +410,8 @@ export interface HandoffDeps {
   };
   /** Who the server's messages are from. */
   from: string;
+  /** A finished land's output, for the flakes it names (#1063). */
+  flakes?(id: number, output: string): void;
   /** The minion that owns build/<n> for this minion's scheme, if one is set. */
   buildOwner?(id: number, build: number): number | null;
   /** Park the minion until its scheme's CI runners are back; false when it has none to watch. */
@@ -491,6 +493,7 @@ export class LandHandoffs {
   private async settle(id: number, run: Landing, h: Handoff & { args: string[] }) {
     const { store, runner, from } = this.d;
     const r = landResult(run.output, run.code!);
+    try { this.d.flakes?.(id, run.output); } catch (err: any) { console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`); }
     const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
     if (r.kind === 'failed' || (r.kind === 'no-ci' && !this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))) {
       store.updateTicket(id, { state: null, note: null });

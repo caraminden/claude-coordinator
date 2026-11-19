@@ -708,6 +708,13 @@ mock.boards('#takes', { boards: [
       const iso = (min: number) => new Date(now - min * 60_000).toISOString();
       const url = (id: number) => `https://github.com/caraminden/seeded/actions/runs/${id}`;
       // The minions the runs test (#1019): one in review on its branch, one landing, one whose land is main's verdict.
+      // #1063: the Test health tab: fast mode with a red pinned on one minion, and flaky files (one already has a minion on it).
+      c.store.setProjectSettings(c.project.id, { land_mode: 'fast' });
+      c.store.setSetting(`fast-mode:${c.project.id}`, { verified: 'a1b2c3d4e5f6a7b8', reds: [{ ids: ['test/aura-outline.test.ts'], sha: '9f8e7d6c5b4a3210', ticket: null, n: 12, at: now - 11 * 60_000 }], landed: {} });
+      const onIt = minion(c, 'Flaky test: test/previews.test.ts');
+      const seen = minion(c, 'Port the overlay', { status: 'closed' });
+      for (const [file, n, src] of [['test/apps.test.ts', 17, 'in CI'], ['test/previews.test.ts', 12, 'smoke'], ['test/machines.test.ts', 9, 'run-tests'], ['test/checkpoint.test.ts', 4, 'in CI']] as const)
+        for (let i = 0; i < n; i++) c.store.addFlakeEvents(c.project.id, i === 0 ? seen.id : null, 'a1b2c3d', now - (i * 20 + 3) * 3_600_000 / 2, [{ file, source: src, detail: `✖ ${file} › case ${i} (timed out after 5000ms)` }]);
       const [review, landing, landed] = [minion(c, 'Sound tab in settings'), minion(c, 'Drag panels between monitors', { status: 'closed' }), minion(c, 'Aura vanishes when its outline is removed', { status: 'closed' }, 'bug')];
       const run = (id: number, name: string, branch: string, min: number, status: string, conclusion: string | null, event = 'push', who: Ticket | null = null) => ({ id, name, branch, event, status, conclusion, at: iso(min), url: url(id), minion: who?.number ?? null });
       c.store.setSetting(`ci-health:view:${c.project.id}`, {

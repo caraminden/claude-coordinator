@@ -24,13 +24,18 @@ test('boot-check copy: a SQLite lock is not the change', () => {
   assert.equal(kind(`deploy: boot check: the new code\nReferenceError: foo is not defined\ndeploy: boot check failed; nothing deployed`), null);
 });
 
-test('CI or runner trouble with no failing test', () => {
+test('CI or runner trouble with no failing test, but not once tests ran red after the fallback', () => {
+  assert.equal(kind(`land: runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran (https://x/1)`), 'ci');
+  assert.equal(kind(`land: CI FALLBACK: the CI run failed in its setup step "Set up job"\nland: tests failed on the rebased branch (full log: /x), so main is untouched`), null);
   assert.equal(kind(`land: the CI run failed in its setup step "Set up job", before any test ran (https://x/1): the runner needs fixing`), 'ci');
 });
 
 test('a flake: the second red whose files all passed alone', () => {
-  const out = `run-tests: test/fresh-session.test.ts: failed in the full run, passed alone (load 9.1)\n✖ test/fresh-session.test.ts › starts › ok (30ms)\nland: tests failed on the rebased branch in CI again (https://x/2), on the one fresh run after a red of flakes only (test/fresh-session.test.ts), so main is untouched`;
+  const out = `run-tests: test/fresh-session.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 9.1)\nland: tests failed on the rebased branch in CI (https://x/2), so main is untouched`;
   assert.equal(kind(out), 'flake');
+  // CI's failed log carries a job/step prefix on every line, and one real red among the flakes is not a flake
+  const mixed = `build\ttests\t2026-11-18T10:00:00Z run-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nbuild\ttests\t2026-11-18T10:00:01Z run-tests: test/b.test.ts: failed again alone: a real failure\nland: tests failed on the rebased branch in CI (https://x/3), so main is untouched`;
+  assert.equal(kind(mixed), null);
 });
 
 test('a repo-wide snapshot or budget test, and the change\'s own test', () => {

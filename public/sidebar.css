@@ -124,6 +124,7 @@
 .why a:hover { text-decoration: underline; }
 .thread-row .note { text-align: left; color: var(--ink); grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; }
 .thread-row .note.t { color: var(--muted); }
+.thread-row .closed-at { display: inline-block; min-width: 21ch; font-variant-numeric: tabular-nums; }
 .thread-row .pnote { grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; color: color-mix(in srgb, var(--waiting) 80%, var(--ink)); }
 .thread-row.s-closed .name { color: var(--muted); }
 /* Deploying rows are in flight, not finished (Josh, 2026-11-19: "deploying minions shouldnt be greyed out, in fact that should

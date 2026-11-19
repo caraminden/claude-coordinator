@@ -1,6 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { presenceHead } from './presence.js';
-import { account, ago, api, baseName, clearHighlights, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
+import { account, ago, api, baseName, clearHighlights, dismissedWhen, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { mergedView } from './mine.js';
 import { toast } from './ui/status.js';
 import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
@@ -517,7 +517,7 @@ export function renderTicketHead() {
   // Titled too, since a narrow line may cut it short. While it works (its turn or the server, #727),
   // a cut-short state shows dots that count up instead of "Thi…".
   const working = !!workingBy(t);
-  const stateLabel = h('span', { class: 'muted head-state', title: state }, h('span', { class: 'state-text' }, state),
+  const stateLabel = h('span', { class: 'muted head-state', title: t.status === 'closed' && t.closed_at ? `Dismissed ${dismissedWhen(t.closed_at).full}` : state }, h('span', { class: 'state-text' }, state),
     working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
   stateFit?.disconnect();
   if (working) stateFit?.observe(stateLabel);

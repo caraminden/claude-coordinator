@@ -294,6 +294,8 @@ export interface Ticket {
   /** Its picks from the scheme's optional plugin folders (#361), one per line; '' for none. */
   plugin_dirs: string;
   last_activity: string | null;
+  /** When it was dismissed (ms), set on dismiss and cleared on reopen (#1072); null while open, and for one dismissed before this was kept whose close note can't be found. */
+  closed_at: number | null;
   /** Whose turn it last ran (users.id; src/access.ts turnPerson): set when a minion is made, then at each turn's start. */
   person_id: number | null;
   /** A Taskmaster's person (#919): users.id of whose own it is; NULL for the Overlord, which before a scheme's split is its only Taskmaster. */
@@ -1284,6 +1286,7 @@ export class StateDb {
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['contraptions', 'static_paths', 'ALTER TABLE contraptions ADD COLUMN static_paths TEXT'],
+  ['tickets', 'closed_at', 'ALTER TABLE tickets ADD COLUMN closed_at INTEGER'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
   // shortcut: tag is retired (#254) and nothing writes it; the column stays so a rollback still boots, drop it in a later release.
@@ -1447,6 +1450,7 @@ export const SCHEMA_HISTORY = [
   [76, 'projects.rules_review (#1046)'],
   [77, 'flake_events (#1063)'],
   [78, 'projects.skills_off (#1062)'],
+  [79, 'tickets.closed_at, backfilled from the close notes (#1072)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1542,6 +1546,7 @@ export class Store {
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.dropEarlyPeekAurasBuilds();
+    this.closedAtFromNotes();
     this.shippingFromRules();
     this.lendingLists();
     this.noteSchemaVersion();
@@ -1604,6 +1609,18 @@ export class Store {
    * Peek Auras' Windows Builds 1277-1291 were recorded live when windows.yml passed, before desktop.yml let PCs take them (#1019;
    * Cara, 2026-11-18: "Remove them"). Once, before 69, and only rows that are exactly those builds.
    */
+  /**
+   * closed_at for minions dismissed before it was kept (#1072): the time of the last note a dismissal wrote
+   * (runner.close's texts). One with no such note stays empty. Once, before 79.
+   */
+  private closedAtFromNotes() {
+    if ((this.getSetting<number>('schema_version') ?? 0) >= 79) return;
+    this.db.exec(`UPDATE tickets SET closed_at = (
+        SELECT max(e.created_at) FROM events e WHERE e.ticket_id = tickets.id AND e.kind = 'note'
+          AND (e.data LIKE '%dismissed this minion%' OR e.data LIKE '%so it dismissed this minion%' OR e.data LIKE '%Closed: % saw its result%'))
+      WHERE status = 'closed' AND closed_at IS NULL`);
+  }
+
   private dropEarlyPeekAurasBuilds() {
     if ((this.getSetting<number>('schema_version') ?? 0) >= 69) return;
     this.db.prepare(`DELETE FROM releases WHERE target = 'ci:windows:release' AND outcome = 'live'
@@ -2474,7 +2491,10 @@ export class Store {
     const sets = keys.map((k) => `${k} = ?`).join(', ');
     const values = keys.map((k) => fields[k] ?? null);
     const before = fields.status ? this.getTicket(id)?.status : undefined;
-    this.db.prepare(`UPDATE tickets SET ${sets}, updated_at = ? WHERE id = ?`).run(...values, Date.now(), id);
+    const now = Date.now();
+    // The dismissal's time (#1072): stamped when it goes closed, cleared when it opens again.
+    const closing = fields.status === 'closed' ? (before === 'closed' ? '' : ', closed_at = ?') : fields.status ? ', closed_at = NULL' : '';
+    this.db.prepare(`UPDATE tickets SET ${sets}${closing}, updated_at = ? WHERE id = ?`).run(...values, ...(closing === ', closed_at = ?' ? [now] : []), now, id);
     // Dismissing moves the stage to done, reopening back to in-progress.
     if (before && fields.status) this.props.statusChanged(id, before, fields.status);
   }

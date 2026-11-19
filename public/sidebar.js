@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, costText, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -292,13 +292,15 @@ export function threadRow(t, href = threadHref(t)) {
   // The state cell already shows steps done, so the activity line drops its own count.
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
   // A minion setting up its first turn has no activity yet: a word holds the subtitle's line, so the row doesn't grow (#696).
+  // A dismissed minion's row says when, in Pacific (#1072); its full date and time is the hover.
+  const gone = !coord && st.label === 'Dismissed' ? dismissedWhen(t.closed_at) : null;
   const note = (t.status === 'running' ? activity : t.note || activity) || (st.rank !== 1 ? '' : st.server ? st.label : t.status === 'new' ? 'Starting…' : 'Working…');
   const share = t.host_cost && weekShare(t.host_cost); // the meter is the server login's plan
   // People's own note (#146), on a line of its own so the minion's note keeps its place.
   const pnote = !coord && view.personNotes?.[t.id];
   const details = [
     threadFullName(t),
-    [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, !coord && t.parent ? `from #${t.parent}` : '', `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the server login's weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
+    [gone ? `Dismissed ${gone.full}` : st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, !coord && t.parent ? `from #${t.parent}` : '', `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the server login's weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
     note,
     !coord && t.status !== 'closed' && t.wait ? waitWords(t.wait) : '',
     !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
@@ -331,7 +333,7 @@ export function threadRow(t, href = threadHref(t)) {
     ownerChip(t, coord),
     wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
       : rel ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, `${rel.target}: ${rel.text || rel.stage}`, rel.since ? [' · ', waitClock({ since: rel.since })] : '')
-      : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
+      : note || ship || gone ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, gone ? h('span', { class: 'closed-at', title: gone.full }, `Dismissed ${gone.short}`) : '', gone && note ? ' · ' : '', note) : '',
     t.cost && !(share && share.startsWith('<')) ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
     bar);

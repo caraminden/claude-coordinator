@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { hostLoad, parseHistory, readPressure, schemeOfWho } from '../src/host-load.ts';
+import { hostLoad, jobOfWho, parseHistory, readPressure, schemeOfWho } from '../src/host-load.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'host-load-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -14,6 +14,34 @@ test('who strings become schemes', () => {
   assert.equal(schemeOfWho('Citadel #544 (cara)'), 'Citadel');
   assert.equal(schemeOfWho('peek-auras deploy'), 'peek-auras');
   assert.equal(schemeOfWho('Delve'), 'Delve');
+});
+
+test('an app\'s jobs count under its home scheme, and say which kind they were', () => {
+  const owners = new Map([['twireader', 'TWIReader'], ['twi reader', 'TWIReader'], ['peek-auras', 'Peek Auras']]);
+  assert.deepEqual(jobOfWho('twireader deploy', owners), { scheme: 'TWIReader', label: 'twireader', kind: 'deploy' });
+  assert.deepEqual(jobOfWho('TWI Reader APK build', owners), { scheme: 'TWIReader', label: 'TWI Reader', kind: 'apk' });
+  assert.deepEqual(jobOfWho('peek-auras (app)', owners), { scheme: 'Peek Auras', label: 'peek-auras', kind: 'app' });
+  assert.deepEqual(jobOfWho('TWIReader #12 (josh)', owners), { scheme: 'TWIReader', label: 'TWIReader', kind: 'turn' });
+  // No home scheme: the app keeps its own name, still marked as an app's job.
+  assert.deepEqual(jobOfWho('voice deploy', owners), { scheme: 'voice', label: 'voice', kind: 'deploy' });
+});
+
+test('history: one row per scheme with its turns and each app job split out', () => {
+  const now = Date.parse('2026-11-19T12:00:00-0800');
+  const owners = new Map([['twireader', 'TWIReader']]);
+  const text = [
+    line('2026-11-19T11:00:00-0800', 'TWIReader #1 (josh)', 10),
+    line('2026-11-19T11:00:00-0800', 'TWIReader #2 (josh)', 50),
+    line('2026-11-19T10:00:00-0800', 'twireader deploy', 70),
+    line('2026-11-19T10:00:00-0800', 'Citadel #3 (cara)', 5),
+  ].join('\n');
+  assert.deepEqual(parseHistory(text, now - 7 * 24 * 3600_000, owners), [
+    { scheme: 'TWIReader', jobs: 3, medianS: 50, longestS: 70, parts: [
+      { label: 'TWIReader', kind: 'turn', jobs: 2, medianS: 30, longestS: 50 },
+      { label: 'twireader', kind: 'deploy', jobs: 1, medianS: 70, longestS: 70 },
+    ] },
+    { scheme: 'Citadel', jobs: 1, medianS: 5, longestS: 5 },
+  ]);
 });
 
 test('history: a week of waits per scheme, median and longest, bad lines and old lines skipped', () => {

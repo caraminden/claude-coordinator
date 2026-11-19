@@ -1,6 +1,6 @@
 // Machines: people list and manage them; a machine's agent connects with its own token; a minion's
 // turn opens sessions to one and sends them messages.
-import { hostLoad } from '../host-load.ts';
+import { hostLoad, type AppOwners } from '../host-load.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
@@ -246,9 +246,18 @@ export const machineRoutes: Route[] = [
     handler: ({ res, app, session }) => json(res, 200, { schemes: app.ciHealth?.snapshot((id) => app.store.canSee(session, id)) ?? [], pcs: app.ciLoad.views(), now: Date.now() }),
   },
   // Host load (#1060): citadel-heavy's slots, line and pressure gate, and a week's waits per scheme. Everyone signed in sees it, like the CI desktop's.
+  // An app's jobs count under its home scheme (#1068: TWIReader and twireader were two rows).
   {
     method: 'GET', path: '/api/host-load', ...people,
-    handler: ({ res, app }) => json(res, 200, app.heavyDir ? hostLoad(app.heavyDir) : null),
+    handler: ({ res, app }) => {
+      if (!app.heavyDir) return json(res, 200, null);
+      const owners: AppOwners = new Map();
+      for (const c of app.store.listContraptions()) {
+        const home = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme)?.name;
+        if (home) for (const k of [c.name, c.title]) owners.set(k.toLowerCase(), home);
+      }
+      json(res, 200, hostLoad(app.heavyDir, Date.now(), undefined, owners));
+    },
   },
   { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app, session }) => json(res, 200, machinesFor(session, app.machines.list())) },
   {

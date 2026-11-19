@@ -11,6 +11,8 @@ tools/deploy-queue.sh
 tools/kit-land-drift.sh
 tools/run-tests.sh
 tools/parse-check.ts
+tools/citadel-test
+tools/always-tests.txt
 tools/lanes
 tools/lane.sh
 tools/kit-tests.ts

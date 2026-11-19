@@ -8,6 +8,9 @@
 # The restart the landing before it queued may still be running: steps 1 and 2 go on beside it, and steps 3 and 4
 # wait for its verdict (the restart lock, #566). If that restart was rolled back and its commit came off main,
 # steps 1 and 2 are done again without it.
+# 0. The smoke check (#1012), before it gets in line, so what fails in seconds never holds the line: a trial rebase
+#    (git merge-tree), tools/parse-check.ts, and through tools/citadel-test the always-tests plus the test files the
+#    branch changes. A fail says "smoke: …", logs a smoke line to the retro log and no timing line. See smoke() below.
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 #    Then refuses a branch that removes what a recent landing added without naming it (a stale squash: undo_guard).
@@ -216,6 +219,46 @@ if [ -n "$check" ]; then
   esac
   exit 0 # --full: no rebase, so nothing to check
 fi
+
+# The smoke check (#1012): before the line, the checks that fail in seconds, so a land they refuse never waits in line
+# or for CI (#1006: about 40 of 86 refusals at the lock were these). It reads the branch's own tools (a repo without
+# one skips that check). Tests that run past LAND_SMOKE_TIMEOUT (300 s) don't decide: CI still runs everything.
+# shortcut: the tests run on the branch as it is, not on its rebase onto main; a break only the two together make
+# still meets CI in line. Run them on a merge-tree commit if those show up. Off: LAND_SMOKE=0.
+smoke() {
+  local t0=$SECONDS out rc=0 tests=()
+  smoke_fail() {
+    retro_log "smoke · $label · $1 · $((SECONDS - t0))s"
+    refuse "smoke: $1, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again"
+  }
+  say "smoke: checking $branch before it queues"
+  if [ "$mode" != full ]; then
+    under=$(under_of)
+    early_check main "before the line" || smoke_fail "it conflicts with main"
+  fi
+  if [ -f tools/parse-check.ts ]; then
+    out=$("$tools/citadel-node" --no-warnings tools/parse-check.ts 2>/dev/null) || true
+    [ -z "$out" ] || { sed 's/^/land: smoke: /' <<<"$out" >&2; smoke_fail "a .ts file does not parse"; }
+  fi
+  if [ -x tools/citadel-test ] && [ -f tools/always-tests.txt ]; then
+    # The always-tests, and in a plain land the test files the branch adds or changes; citadel-test drops repeats.
+    mapfile -t tests < <(grep -vE '^[[:space:]]*(#|$)' tools/always-tests.txt; [ "$mode" != land ] || git diff --name-only --diff-filter=d "$(git merge-base main HEAD)" HEAD -- 'test/*.test.ts')
+    if [ ${#tests[@]} -gt 0 ]; then
+      say "smoke: running ${#tests[@]} test files"
+      out=$(tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?
+      if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+        say "smoke: the tests ran past ${LAND_SMOKE_TIMEOUT:-300} s, so they don't decide: getting in line, and CI runs them all"
+      elif [ "$rc" = 2 ]; then # citadel-test couldn't start them (its usage and setup errors), which says nothing about the branch
+        say "smoke: citadel-test couldn't run the tests ($(grep -m1 '^citadel-test: ' <<<"$out" || echo exit 2)), so they don't decide: getting in line"
+      elif [ "$rc" != 0 ]; then
+        grep -v '^full output: ' <<<"$out" | tail -n 60 | sed 's/^/land: smoke: /' >&2
+        smoke_fail "tests failed (exit $rc)"
+      fi
+    fi
+  fi
+  say "smoke: passed in $((SECONDS - t0)) s"
+}
+[ -n "$resumed" ] || [ "$mode" = into ] || [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 quiet=$resumed
 [ "$redo" != 1 ] || quiet=
 times=$state/times-$$ # the same in the rebased copy, which is this process

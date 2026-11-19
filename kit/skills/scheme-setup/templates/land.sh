@@ -11,6 +11,9 @@
 #   tools/land.sh --check   only says whether the rebase onto main would conflict (exit 3, naming the files), changing
 #       nothing; Citadel's hand_off_land runs it first. While others are ahead in line, each move of main is checked
 #       the same way, and a conflict leaves the line at once.
+# 0. The smoke check, before it gets in line, so what fails in seconds never holds the line: whether the rebase onto
+#    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one. A fail says
+#    "smoke: …" and exits 1. LAND_SMOKE=0 skips it.
 # 1. Rebases the branch onto the local main. A conflict stops here.
 # 2. Refuses when the branch takes a number main already has (a migration, a version, a ledger id),
 #    as the "Numbered things" line in Project facts names them. No line, or "none": no check.
@@ -44,6 +47,11 @@ set -euo pipefail
 # The check command, exactly as Project facts names it under "Check commands" ('true' while it has none).
 # With the CI gate on it is what runs here before anything is pushed: keep it light.
 CHECK='npm test'
+# The smoke check (#1012): the scheme's quick check, run on the branch as it is, before it gets in line, so a land it
+# refuses never waits in line or for CI. Seconds, not minutes: a parse or lint step, the tests a change anywhere can
+# break. '' none (the conflict check still runs). Past SMOKE_TIMEOUT seconds it doesn't decide, and the land goes on.
+SMOKE_CMD=''
+SMOKE_TIMEOUT=${LAND_SMOKE_TIMEOUT:-300}
 # The scheme's main branch.
 BRANCH=main
 # The file whose Project facts may have a "Numbered things" line.
@@ -1104,6 +1112,23 @@ leave() {
   exit "$rc"
 }
 
+# The smoke check (step 0): before the line, so what fails in seconds never waits in it.
+smoke() {
+  local t0=$SECONDS out rc=0
+  say "smoke: checking $branch before it queues"
+  early_conflict "$pre" "before the line" || refuse "smoke: it conflicts with $BRANCH, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
+  if [ -n "$SMOKE_CMD" ]; then
+    out=$(timeout -k 10 "$SMOKE_TIMEOUT" bash -c "$SMOKE_CMD" 2>&1) || rc=$?
+    if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+      say "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, so it doesn't decide: getting in line"
+    elif [ "$rc" != 0 ]; then
+      tail -n 60 <<<"$out" | sed 's/^/land: smoke: /' >&2
+      refuse "smoke: SMOKE_CMD failed (exit $rc), before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
+    fi
+  fi
+  say "smoke: passed in $((SECONDS - t0)) s"
+}
+[ "${LAND_SMOKE:-1}" = 0 ] || smoke
 queue_join "$state" "$branch"
 trap leave EXIT
 seen_main='' looked='' checked_main=''

@@ -194,9 +194,12 @@ test('--build refuses a merge conflict, and a branch not at a build tip, with ma
   r.commit(r.source, 'a.txt', 'theirs on main\n');
   const main = tipOf(r, 'main');
   const before = tipOf(r, 'build/3');
-  let res = r.run({}, ['--build'], bwt);
+  let res = r.run({ LAND_SMOKE: '0' }, ['--build'], bwt); // the merge under the lock, which the smoke check would beat
   assert.equal(res.status, 1);
   assert.match(res.stderr, /merging main into build\/3 failed.*conflicted files: a\.txt/s);
+  const early = r.run({}, ['--build'], bwt);
+  assert.equal(early.status, 1);
+  assert.match(early.stderr, /won't merge main in .*by git merge-tree before the line.*conflicted files: a\.txt[^]*^land: smoke: it conflicts with main, before the line/m);
   assert.equal(tipOf(r, 'main'), main);
   assert.equal(tipOf(r, 'build/3'), before);
   assert.equal(git(bwt, 'rev-parse', 'HEAD'), before, 'the branch is as it was');

@@ -1,7 +1,7 @@
 // tools/land.sh itself: the rebase, its test run or CI gate, conflicts and refusals.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { land, env, git, setup, landAsync, tickets, issued, ci } from './land-fixture.ts';
@@ -578,7 +578,7 @@ test('a conflict aborts the rebase and lands nothing', () => {
   r.commit(r.source, 'a.txt', 'theirs\n');
   const tip = git(r.wt, 'rev-parse', 'HEAD');
   const main = git(r.source, 'rev-parse', 'main');
-  const res = r.run();
+  const res = r.run({ LAND_SMOKE: '0' }); // the rebase under the lock, which smoke's check before the line would beat
   assert.equal(res.status, 1);
   assert.match(res.stderr, /rebase onto main failed/);
   assert.equal(git(r.wt, 'rev-parse', 'HEAD'), tip, 'the branch is as it was');
@@ -595,7 +595,7 @@ test('a conflict is logged to the retro-log with its files, and the refusal name
   r.commit(r.source, 'a.txt', 'theirs\n');
   const main = git(r.source, 'rev-parse', 'main');
   const shared = join(r.dir, 'shared');
-  const res = r.run({ COORDINATOR_SHARED_DIR: shared });
+  const res = r.run({ COORDINATOR_SHARED_DIR: shared, LAND_SMOKE: '0' }); // the rebase under the lock, as above
   assert.equal(res.status, 1);
   assert.match(res.stderr, /rebase onto main failed.*conflicted files: a\.txt\./);
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
@@ -627,12 +627,113 @@ test('a conflict still refuses the same when there is no shared dir or it cannot
   const blocker = join(r.dir, 'blocker');
   writeFileSync(blocker, 'a file, not a folder\n');
   for (const shared of ['', blocker]) {
-    const res = r.run({ COORDINATOR_SHARED_DIR: shared });
+    const res = r.run({ COORDINATOR_SHARED_DIR: shared, LAND_SMOKE: '0' }); // the rebase under the lock, as above
     assert.equal(res.status, 1);
     assert.match(res.stderr, /rebase onto main failed/);
     assert.equal(git(r.source, 'rev-parse', 'main'), main);
     assert.equal(git(r.wt, 'status', '--porcelain'), '');
   }
+});
+
+// The smoke check (#1012): before the line, so its refusals never wait in it. Its tests run through the branch's own
+// tools/citadel-test, a stand-in here that notes its arguments and answers as told.
+function smokeSetup() {
+  const r = setup();
+  writeFileSync(join(r.source, 'tools', 'always-tests.txt'), '# repo-wide\n\ntest/always.test.ts\n');
+  writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash
+printf '%s\\n' "$@" >>"$SMOKE_ARGS"
+sleep "\${SMOKE_SLEEP:-0}"
+[ -z "\${SMOKE_EXIT:-}" ] || { echo "✖ test/always.test.ts:3 › a snapshot"; echo "full output: /somewhere/citadel-test.log"; exit "$SMOKE_EXIT"; }
+`);
+  chmodSync(join(r.source, 'tools', 'citadel-test'), 0o755);
+  writeFileSync(join(r.source, 'test', 'always.test.ts'), '');
+  writeFileSync(join(r.source, 'test', 'gone.test.ts'), '');
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'smoke tools');
+  git(r.wt, 'rebase', '-q', 'main');
+  writeFileSync(join(r.wt, 'test', 'mine.test.ts'), '');
+  git(r.wt, 'rm', '-q', 'test/gone.test.ts');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const args = join(r.dir, 'smoke-args');
+  const shared = join(r.dir, 'shared');
+  const smoke = (extra: Record<string, string> = {}) => r.run({ SMOKE_ARGS: args, COORDINATOR_SHARED_DIR: shared, ...extra });
+  const ran = () => (existsSync(args) ? readFileSync(args, 'utf8').trim().split('\n') : []);
+  return { ...r, smoke, ran, shared };
+}
+
+test('the smoke check refuses a conflict before the line: a smoke line in the retro log, no timing line, the lock never taken (#1012)', () => {
+  const r = setup();
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  r.commit(r.source, 'a.txt', 'theirs\n');
+  const tip = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.source, 'rev-parse', 'main');
+  const shared = join(r.dir, 'shared');
+  const res = r.run({ COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /by git merge-tree before the line, so nothing landed; conflicted files: a\.txt\./);
+  assert.match(res.stderr, /^land: smoke: it conflicts with main, before the line \(\d+ s\), so nothing landed and nobody waited on it\./m);
+  assert.doesNotMatch(res.stderr, /^queue: /m, 'it never got in line');
+  assert.equal(r.note(), null, 'no deploy ran');
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), tip);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.deepEqual(timings(shared), []);
+  assert.match(landLog(shared), /^- \S+ · smoke · ticket\/1-x · it conflicts with main · \d+s$/m);
+  assert.match(landLog(shared), /· land conflict · ticket\/1-x onto \w+: a\.txt · before the line$/m, 'the conflict line the architecture check counts');
+});
+
+test("the smoke check runs the always-tests and the branch's changed test files, and refuses a red one before the line (#1012)", () => {
+  const r = smokeSetup();
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = r.smoke({ SMOKE_EXIT: '1' });
+  assert.equal(res.status, 1, res.stderr);
+  assert.deepEqual(r.ran(), ['--timeout', '300', 'test/always.test.ts', 'test/mine.test.ts'], 'not the deleted test, not the comment or blank line');
+  assert.match(res.stderr, /^land: smoke: ✖ test\/always\.test\.ts:3 › a snapshot$/m);
+  assert.doesNotMatch(res.stderr, /full output/, "citadel-test's log is the land's runner's, not the minion's");
+  assert.match(res.stderr, /^land: smoke: tests failed \(exit 1\), before the line \(\d+ s\), so nothing landed/m);
+  assert.doesNotMatch(res.stderr, /^queue: /m);
+  assert.equal(r.note(), null);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.deepEqual(timings(r.shared), []);
+  assert.match(landLog(r.shared), /· smoke · ticket\/1-x · tests failed \(exit 1\) · \d+s$/m);
+});
+
+test("a clean smoke check lands as before, its time outside the timing line; tests past the limit don't decide; LAND_SMOKE=0 skips it (#1012)", () => {
+  const r = smokeSetup();
+  const res = r.smoke({ SMOKE_SLEEP: '2' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /^land: smoke: passed in \d+ s$/m);
+  assert.equal(r.ran().length, 4);
+  assert.equal(timings(r.shared).length, 1, landLog(r.shared));
+  // The same line as before the smoke check, and its 2 s are not in the line's time.
+  assert.match(timings(r.shared)[0], /· timing · ticket\/1-x · line [01] · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live \d+ · landed$/);
+  assert.doesNotMatch(landLog(r.shared), / · smoke · /, 'a pass logs nothing');
+
+  const slow = smokeSetup();
+  const late = slow.smoke({ SMOKE_EXIT: '124', LAND_SMOKE_TIMEOUT: '7' });
+  assert.equal(late.status, 0, late.stderr);
+  assert.equal(slow.ran()[1], '7');
+  assert.match(late.stderr, /smoke: the tests ran past 7 s, so they don't decide: getting in line, and CI runs them all/);
+
+  const broken = smokeSetup();
+  const setupError = broken.smoke({ SMOKE_EXIT: '2' });
+  assert.equal(setupError.status, 0, setupError.stderr);
+  assert.match(setupError.stderr, /smoke: citadel-test couldn't run the tests \(exit 2\), so they don't decide: getting in line/);
+
+  const off = smokeSetup();
+  assert.equal(off.smoke({ SMOKE_EXIT: '1', LAND_SMOKE: '0' }).status, 0);
+  assert.deepEqual(off.ran(), []);
+});
+
+test("the smoke check refuses a .ts file that doesn't parse, by the branch's tools/parse-check.ts (#1012)", () => {
+  const r = setup();
+  writeFileSync(join(r.wt, 'tools', 'parse-check.ts'), "console.log('src/x.ts does not parse (Expected a semicolon)'); process.exit(1);\n");
+  git(r.wt, 'add', '-A');
+  git(r.wt, 'commit', '-qm', 'a parse check that finds one');
+  const res = r.run();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /^land: smoke: src\/x\.ts does not parse \(Expected a semicolon\)$/m);
+  assert.match(res.stderr, /^land: smoke: a \.ts file does not parse, before the line/m);
+  assert.equal(r.note(), null);
 });
 
 test('--check (#770) says whether the rebase onto main would conflict, naming the files, and changes nothing', () => {

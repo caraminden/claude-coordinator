@@ -71,13 +71,50 @@ test("refuses in a person's container, before it takes a place in line", () => {
   assert.equal(git(r.main, 'log', '-1', '--format=%s'), 'base');
 });
 
-test('a rebase conflict aborts and leaves main untouched', () => {
+// The smoke check (#1012): before the line, so its refusals never wait in it.
+test('the smoke check refuses a conflict before the line, with main and the branch untouched (#1012)', () => {
   const r = setup();
   r.commit(r.wt, 'a.txt', 'mine\n');
   r.commit(r.main, 'a.txt', 'theirs\n');
   const mine = git(r.wt, 'rev-parse', 'HEAD');
   const main = git(r.main, 'rev-parse', 'main');
   const res = r.run();
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /by git merge-tree before the line, so nothing landed; conflicted files: a\.txt\./);
+  assert.match(res.stderr, /^land: smoke: it conflicts with main, before the line \(\d+ s\), so nothing landed and nobody waited on it\./m);
+  assert.doesNotMatch(res.stderr, /^queue: /m, 'it never got in line');
+  assert.equal(git(r.main, 'rev-parse', 'main'), main);
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), mine);
+  assert.equal(git(r.wt, 'branch', '--show-current'), 'ticket/1-x');
+});
+
+test("SMOKE_CMD, the scheme's quick check, runs in the worktree before the line: red refuses there, past SMOKE_TIMEOUT it doesn't decide (#1012)", () => {
+  const cmd = 'echo "smoke in $PWD" >>"$SMOKE_LOG"; sleep "${SMOKE_SLEEP:-0}"; [ -z "$SMOKE_RED" ] || { echo "lint: b.txt is wrong"; exit 3; }';
+  const r = setup('test ! -e red', { SMOKE_CMD: cmd, SMOKE_TIMEOUT: '2' });
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const log = join(r.dir, 'smoke-log');
+  const main = git(r.main, 'rev-parse', 'main');
+  const red = r.run({ SMOKE_LOG: log, SMOKE_RED: '1' });
+  assert.equal(red.status, 1, red.stderr);
+  assert.match(red.stderr, /^land: smoke: lint: b\.txt is wrong$/m);
+  assert.match(red.stderr, /^land: smoke: SMOKE_CMD failed \(exit 3\), before the line \(\d+ s\), so nothing landed/m);
+  assert.doesNotMatch(red.stderr, /^queue: /m);
+  assert.equal(git(r.main, 'rev-parse', 'main'), main);
+  assert.equal(readFileSync(log, 'utf8'), `smoke in ${r.wt}\n`);
+
+  const slow = r.run({ SMOKE_LOG: log, SMOKE_RED: '1', SMOKE_SLEEP: '5' });
+  assert.match(slow.stderr, /smoke: SMOKE_CMD ran past 2 s, so it doesn't decide: getting in line/);
+  assert.equal(slow.status, 0, slow.stderr);
+  assert.equal(git(r.main, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'), 'it landed');
+});
+
+test('a rebase conflict aborts and leaves main untouched', () => {
+  const r = setup();
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  r.commit(r.main, 'a.txt', 'theirs\n');
+  const mine = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.main, 'rev-parse', 'main');
+  const res = r.run({ LAND_SMOKE: '0' }); // the rebase at the head of the line, which the smoke check before it would beat
   assert.equal(res.status, 1);
   assert.match(res.stderr, /rebase onto main failed/);
   assert.equal(git(r.main, 'rev-parse', 'main'), main);

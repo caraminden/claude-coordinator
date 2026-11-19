@@ -9,6 +9,11 @@
 # With the CI gate on it is what runs here before anything is pushed: keep it light.
 # CHECK='npm test'
 
+# The smoke check: the scheme's quick check (seconds: a parse or lint step, the tests a change anywhere can break),
+# run before a land gets in line, so what it refuses never waits in line or for CI. '' none.
+# SMOKE_CMD='npm run lint'
+# SMOKE_TIMEOUT=${LAND_SMOKE_TIMEOUT:-300}
+
 # The scheme's main branch.
 # BRANCH=main
 

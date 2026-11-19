@@ -236,6 +236,8 @@ export interface LandResult {
   /** With unpushed: the branch that moved, and what git said. */
   branch?: string;
   error?: string;
+  /** With failed: the smoke check refused it before it got in line (#1012), so it never held the line or waited on CI. */
+  smoke?: boolean;
 }
 
 export function landResult(output: string, code: number): LandResult {
@@ -247,7 +249,8 @@ export function landResult(output: string, code: number): LandResult {
     const at = [...output.matchAll(/^land: (\S+) is now at ([0-9a-f]{7,40}) "(.*)"$/gm)].filter((m) => m[1] === branch).pop();
     return { kind: 'unpushed', branch, error: unpushed[2].trim(), ...(at ? { commit: at[2], subject: at[3] } : {}) };
   }
-  if (code !== 0) return { kind: 'failed' };
+  // land.sh's smoke refusal (#1012), or the kit template's: "land: smoke: <what>, before the line (<n> s), so nothing landed".
+  if (code !== 0) return /^land: smoke: .*, before the line \(\d+ s\), so nothing landed/m.test(output) ? { kind: 'failed', smoke: true } : { kind: 'failed' };
   const at = [...output.matchAll(/main is now at ([0-9a-f]{7,40}) "(.*)"/g)].pop();
   const commit = at ? { commit: at[1], subject: at[2] } : {};
   // deploy.sh's lines: "live now:" (front end reloaded, or the restart went live), "nothing to deploy: the server
@@ -264,6 +267,7 @@ const PHASES: [RegExp, string][] = [
   [/^land: (waiting for CI|only flakes failed.*running CI once more)/, 'waiting on CI'],
   [/^land: (running |CI FALLBACK)/, 'running tests'],
   [/^land: (rebasing|merging main)/, 'rebasing'],
+  [/^land: smoke: /, 'smoke check'],
   [/^queue: got the deploy lock/, 'starting'],
   [/^queue: /, 'in line'],
 ];
@@ -458,7 +462,8 @@ export class LandHandoffs {
     if (r.kind === 'failed' || (r.kind === 'no-ci' && !this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
-      runner.send(id, from, `Your handed-off land didn't go through: tools/land.sh exited ${run.code} (main only moved if its output says so). Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`);
+      const why = r.smoke ? `its smoke check refused it before it got in line, in seconds (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
+      runner.send(id, from, `Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`);
       return;
     }
     if (r.kind === 'unpushed') {

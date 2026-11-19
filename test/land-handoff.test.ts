@@ -543,7 +543,21 @@ test('landPhase reads the phase from land.sh\'s newest phase line', () => {
   assert.equal(landPhase('land: waiting for CI on abc\nland: only flakes failed (x); running CI once more on abc, the land needs a fully green run\n'), 'landing: waiting on CI');
   assert.equal(landPhase('land: waiting for CI on abc\nland: CI FALLBACK: no runner. Running the full suite on perigee instead.\n'), 'landing: running tests');
   assert.equal(landPhase('land: waiting for CI on abc\nqueue: waiting for the restart ahead to have its verdict; main and the live checkout stay as they are until then\n'), 'landing: in line');
-  assert.equal(landPhase('land: waiting for CI on abc\nland: main is now at abc1234 "#9"\ndeploy: restart queued as citadel-restart\n'), 'landing: deploying');
+  assert.equal(landPhase('land: waiting for CI on abc\nland: main is now at abc1234 "#9"\ndeploy: restart queued as citadel-restart\n'), 'landing: deploying');  assert.equal(landPhase('land: smoke: checking ticket/1-x before it queues\nland: smoke: running 5 test files\n'), 'landing: smoke check');
+  assert.equal(landPhase('land: smoke: passed in 19 s\nqueue: 2nd in line (ahead: #12)\n'), 'landing: in line');
+});
+
+const SMOKE_RED = 'land: smoke: checking ticket/1-x before it queues\nland: smoke: ✖ test/prompt-budget.test.ts › budget\nland: smoke: tests failed (exit 1), before the line (21 s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again\n';
+
+test('a smoke refusal (#1012) is a failed land that says it never got in line', async () => {
+  assert.deepEqual(landResult(SMOKE_RED, 1), { kind: 'failed', smoke: true });
+  assert.deepEqual(landResult('land: smoke: passed in 3 s\nland: the rebase onto main failed (see above), so nothing landed\n', 1), { kind: 'failed' }, 'a refusal after a passed smoke is a plain failure');
+  const s = setup('smoke-red');
+  await s.land(SMOKE_RED, 1);
+  await s.handoffs.poll();
+  assert.equal(s.sent.length, 1);
+  assert.match(s.sent[0], /didn't go through: its smoke check refused it before it got in line, in seconds \(nothing landed, and it never waited on the line or CI\)\. Fix the cause/);
+  assert.match(s.sent[0], /prompt-budget\.test\.ts › budget/);
 });
 
 test('while a handed-off land runs, each poll keeps the minion in outside with its phase, across a restart too', async () => {

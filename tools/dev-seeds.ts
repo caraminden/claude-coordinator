@@ -669,6 +669,15 @@ mock.boards('#takes', { boards: [
           { name: 'DESKTOP-G248IJ8-desktop', status: 'offline', busy: false, labels: ['self-hosted', 'Windows', 'seeded-ci'], job: null, offlineSince: now - 42 * 60_000 },
           { name: 'DESKTOP-G248IJ8-linux', status: 'online', busy: true, labels: ['self-hosted', 'Linux', 'seeded-ci-linux'], job: 'tests (linux)', offlineSince: null },
         ],
+        // #1019's Running now: the linux runner busy with the landing minion's tests, a hosted lint, nine jobs behind the one runner.
+        running: [
+          { name: 'tests (linux)', runner: 'DESKTOP-G248IJ8-linux', since: iso(12), run: 9103, branch: `land/${landing.branch}`, event: 'push', minion: landing.number },
+          { name: 'lint', runner: 'GitHub Actions 3', since: iso(3), run: 9103, branch: `land/${landing.branch}`, event: 'push', minion: landing.number },
+        ],
+        queues: [
+          { labels: ['seeded-ci-linux', 'self-hosted'], jobs: 9, runners: 1 },
+          { labels: ['seeded-ci', 'self-hosted'], jobs: 1, runners: 0 },
+        ],
         waiting: [{ name: 'windows build', labels: ['self-hosted', 'seeded-ci'], since: iso(31), run: 9104, branch: review.branch!, event: 'pull_request', minion: review.number }],
         workflows: [
           { name: 'tests', file: 'tests.yml', verdict: run(9101, 'tests', 'main', 55, 'completed', 'success', 'push', landed), skipped: ['windows build'] },

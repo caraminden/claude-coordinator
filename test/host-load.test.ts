@@ -46,3 +46,10 @@ test('pressure and the whole read from a folder', () => {
   assert.equal(l.week[0].longestS, 40);
   assert.deepEqual(l.holders, []);
 });
+
+test('slot count follows citadel-heavy: no number is 2, a 0 is 1', () => {
+  writeFileSync(join(root, 'slots'), '# none\n');
+  assert.equal(hostLoad(root).slots, 2);
+  writeFileSync(join(root, 'slots'), '0\n');
+  assert.equal(hostLoad(root).slots, 1);
+});

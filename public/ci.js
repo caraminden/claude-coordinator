@@ -201,7 +201,7 @@ export function ciPage(projectId, startTab = 'overview') {
     const schemes = data.schemes;
     if (!schemes.length) {
       list.replaceChildren();
-      detail.replaceChildren(h('p', { class: 'muted' }, 'No scheme you can see has CI on GitHub yet.'));
+      detail.replaceChildren(h('p', { class: 'muted' }, 'No scheme you can see has CI on GitHub yet.'), hostLoadBlock(host));
       return;
     }
     const s = schemes.find((x) => x.id === picked) ?? schemes[0];

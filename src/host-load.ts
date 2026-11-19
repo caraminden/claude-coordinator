@@ -32,8 +32,9 @@ export function parseHistory(text: string, since: number): SchemeWaits[] {
 
 const slotCount = (dir: string): number => {
   try {
-    const n = Number(readFileSync(join(dir, 'slots'), 'utf8').replace(/#.*/g, '').match(/\d+/)?.[0]);
-    return n >= 1 ? Math.min(n, 64) : 2;
+    // citadel-heavy's rule: the first number, else 2; a 0 is one slot, and 64 is the most.
+    const m = readFileSync(join(dir, 'slots'), 'utf8').replace(/#.*/g, '').match(/\d+/)?.[0];
+    return m === undefined ? 2 : Math.min(Math.max(Number(m), 1), 64);
   } catch { return 2; }
 };
 

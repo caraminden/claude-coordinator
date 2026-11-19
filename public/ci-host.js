@@ -20,7 +20,7 @@ export function hostLoadBlock(l) {
     ...slotRows,
     l.waiters.length ? h('div', {}, h('h5', {}, `Waiting (${l.waiters.length})`), ...l.waiters.map((w, i) =>
       h('div', { class: 'ci-host-slot' }, h('b', {}, `${i + 1}.`), h('span', {}, `${w.who}: ${w.what}`),
-        h('span', { class: 'muted' }, `${w.reason === 'load' ? 'free slot, box busy' : w.reason === 'first' ? 'a deploy goes first' : 'all slots busy'} · waiting ${held(w, l.now)}`)))) : h('p', { class: 'muted' }, 'Nobody is waiting.'),
+        h('span', { class: 'muted' }, `${w.reason === 'load' ? 'free slot, box busy' : w.reason === 'first' ? 'a deploy goes first' : w.reason === 'line' ? 'in line behind another job' : 'all slots busy'} · waiting ${held(w, l.now)}`)))) : h('p', { class: 'muted' }, 'Nobody is waiting.'),
     h('h5', {}, 'Waits this week'),
     l.week.length ? h('table', { class: 'ci-host-table' }, h('thead', {}, h('tr', {}, ...['Scheme', 'Jobs', 'Median wait', 'Longest wait'].map((t) => h('th', {}, t)))),
       h('tbody', {}, ...l.week.map((w) => h('tr', {}, h('td', {}, w.scheme), h('td', {}, String(w.jobs)), h('td', {}, span(w.medianS)), h('td', {}, span(w.longestS))))))

@@ -34,20 +34,27 @@ export async function loadReleases() {
   for (const s of schemes.values()) settleDeploys(s);
   member = new Set(got[1].schemes.map((s) => s.projectId));
   loaded = true;
-  for (const id of schemes.keys()) loadClaims(id, redraw);
-  loadWatch(redraw);
+  refreshExtras();
   redraw();
   return rowsChanged();
 }
 
-/** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
+/** Claims for every scheme the page can show (a scheme with only a claim has no releases entry), and the watch. */
+function refreshExtras() {
+  for (const id of new Set([...schemes.keys(), ...(view?.projects ?? []).map((p) => p.id)])) loadClaims(id, redraw);
+  loadWatch(redraw);
+}
+
+/** A `claims` event: that scheme's claims changed. */
 export function onClaims(msg) { loadClaims(msg.projectId, redraw); }
 
+/** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
 export function onReleases(msg) {
   if (!loaded) return;
   const s = msg.releases;
   const had = schemes.has(msg.projectId);
   settleDeploys(s);
+  if (s.targets.some((t) => t.target.id === CITADEL_TARGET_ID)) loadWatch(redraw);
   if (s.targets.length || s.testCopies.length) schemes.set(msg.projectId, s);
   else schemes.delete(msg.projectId);
   if (!had && schemes.has(msg.projectId)) return loadReleases();
@@ -204,6 +211,7 @@ export function setReleasesPage(scope, hl) {
 
 /** The Releases page over the chat column (on a phone, the whole screen with a back arrow). */
 export function releasesPage() {
+  if (loaded) refreshExtras();
   pageEl = h('section', { class: 'releases-main', onkeydown: (e) => { if (e.key === 'Escape') closePage(); } });
   fillPage();
   return pageEl;
@@ -273,10 +281,10 @@ function openPicker(scope, ids) {
     body: h('nav', { class: 'rel-opts', 'aria-label': 'Schemes' }, row('all'), ids.map(row)) });
 }
 
-/** A scheme's cards (take D): one per target, then its test copies of no target. */
 /** The server's own deploy: the post-deploy watch is this server's, so only Citadel's card shows it. */
 const CITADEL_TARGET_ID = 'citadel-server';
 
+/** A scheme's cards (take D): one per target, then its test copies of no target. */
 function schemeCards(projectId, alone) {
   const s = schemes.get(projectId);
   if (!s) return alone ? [claimsBlock(projectId, redraw), h('p', { class: 'muted rel-empty' }, `Nothing ships from ${schemeName(projectId)} yet: no release, preview or test copy.`)] : [claimsBlock(projectId, redraw)];

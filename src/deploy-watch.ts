@@ -56,6 +56,8 @@ export interface Watched {
 export interface WatchState { live: string | null; deploys: Watched[] }
 
 export interface Finding { name: string; before: string; after: string; first: number | null; top: { detail: string; n: number }[] }
+/** A reading with its verdict: what the page may show. `first` and `top` are for alerts, not for everyone signed in. */
+export type Reading = Finding & { worse: boolean };
 export interface Suspect { ticketId: number; number: number | null; commits: { sha: string; subject: string }[] }
 
 export interface WatchDeps {
@@ -194,9 +196,9 @@ export class DeployWatch {
   }
 
   /** Every reading in [at, at + len) against [at - len, at), each with whether it got worse. */
-  readings(at: number, len: number): (Finding & { worse: boolean })[] {
+  readings(at: number, len: number): Reading[] {
     const { store } = this.d;
-    const out: (Finding & { worse: boolean })[] = [];
+    const out: Reading[] = [];
     for (const sig of SIGNALS) {
       const b = store.healthCount(sig.key, at - len, at);
       const a = store.healthCount(sig.key, at, at + len);
@@ -219,7 +221,7 @@ export class DeployWatch {
    * What the Releases page shows (#1060): each watched deploy, newest first, with its checks as far as they have come
    * due: the readings over the same window the watch itself used, so the page and an alert never disagree.
    */
-  report(): { commit: string; prev: string; at: number; alerted: boolean; checks: { offset: number; len: number | null; readings: (Finding & { worse: boolean })[] }[] }[] {
+  report(): { commit: string; prev: string; at: number; alerted: boolean; checks: { offset: number; len: number | null; readings: Reading[] }[] }[] {
     const now = this.now();
     const deploys = this.state().deploys;
     return deploys.map((w) => {
@@ -227,7 +229,9 @@ export class DeployWatch {
       const checks = CHECKS.map((offset) => {
         if (w.at + offset > now && next === Infinity) return { offset, len: null, readings: [] };
         const len = Math.min(w.at + offset, next, now) - w.at;
-        return len < MIN_WINDOW ? { offset, len, readings: [] } : { offset, len, readings: this.readings(w.at, len) };
+        // An alert ends the watch: checks past the one that raised it never ran.
+        if (w.alerted && len > w.len) return { offset, len: null, readings: [] };
+        return len < MIN_WINDOW ? { offset, len, readings: [] } : { offset, len, readings: this.readings(w.at, len).map((r) => ({ ...r, first: null, top: [] })) };
       });
       return { commit: w.commit, prev: w.prev, at: w.at, alerted: !!w.alerted, checks };
     }).sort((a, b) => b.at - a.at);

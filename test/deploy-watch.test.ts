@@ -402,3 +402,22 @@ test('report: each deploy lists its checks as they come due, with the same verdi
   assert.equal(d.checks[0].readings.find((r) => r.name === 'front-end errors')?.worse, true);
   assert.equal(d.checks[1].len, null, '+1 h not due yet');
 });
+
+test('report: an alert ends the watch, later checks show as not run, and no error detail is in it', async () => {
+  const { store, clock, w, deploy, errors } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  errors(1, clock.now - 10 * MIN);
+  const at = clock.now;
+  deploy(sha('1'));
+  errors(14, at + 5 * MIN);
+  clock.now = at + 21 * MIN;
+  await w.tick();
+  clock.now = at + 61 * MIN;
+  const d = w.report().find((x) => x.commit === sha('1'))!;
+  assert.equal(d.alerted, true);
+  assert.equal(d.checks[0].readings.find((r) => r.name === 'front-end errors')?.worse, true);
+  assert.equal(d.checks[1].len, null, 'the +1 h check never ran');
+  assert.ok(d.checks.every((c) => c.readings.every((r) => r.first === null && r.top.length === 0)));
+  void store;
+});

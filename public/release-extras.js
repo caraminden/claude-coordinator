@@ -49,7 +49,7 @@ export function watchBlock() {
       h('summary', {}, h('code', {}, d.commit.slice(0, 8)), ` live ${ago(d.at)}`, d.alerted ? h('b', { class: 'rel-watch-bad' }, ' · it raised an alert') : ''),
       ...d.checks.map((c) => h('div', { class: 'rel-watch-check' },
         h('b', {}, OFFSETS[c.offset] ?? `+${c.offset / 60000} min`),
-        c.len === null ? h('span', { class: 'muted' }, 'not due yet')
+        c.len === null ? h('span', { class: 'muted' }, d.alerted ? 'not run: an earlier check raised the alert' : 'not due yet')
           : !c.readings.length ? h('span', { class: 'muted' }, 'window too short to compare (the next deploy cut it)')
             : h('ul', {}, ...c.readings.map((r) => h('li', { class: `rel-watch-${verdict(r)}` }, `${r.name}: ${r.before} → ${r.after} · ${verdict(r)}`))))))));
 }

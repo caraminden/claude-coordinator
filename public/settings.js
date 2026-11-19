@@ -1,5 +1,6 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs (the Machines page is settings-machines.js).
 import { account, ago, api, h, icon, me, schemeIcon, view } from './base.js';
+import { onSkillsChanged } from './skills.js';
 import { openHash } from './core.js';
 import { firefoxAvailable, firefoxOn, setFirefoxOn } from './extlinks.js';
 import { renderSidebar } from './sidebar.js';
@@ -254,6 +255,7 @@ export function onProjectUpdate(project) {
   for (const el of document.querySelectorAll('[data-rules-row]')) el.dispatchEvent(new Event('settings-refresh'));
   document.getElementById('land-mode')?.dispatchEvent(new Event('settings-refresh'));
   for (const el of document.querySelectorAll('[data-rules-review]')) el.dispatchEvent(new Event('settings-refresh'));
+  onSkillsChanged();
   renderSidebar(); // its promoted groups may have changed
   const text = document.getElementById('instructions-text');
   // Someone else saved: show their text unless this tab has edits of its own.
@@ -375,7 +377,7 @@ export function projectTitle(project) {
 // (settingsHome), and each page's bar has a back link to it and the page's own name (Cara picked "A list of pages,
 // each opens full screen").
 const SETTINGS_GROUPS = [
-  ['Scheme', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'],
+  ['Scheme', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'], ['skills', 'Skills', 'spark', 'What minions know how to do, and when'],
     ['properties', 'Properties', 'tag', 'Type, stage and your own keys'], ['members', 'Members', 'users', 'Who works in this scheme'],
     ['memory', 'Memory', 'doc', 'What the Taskmaster and minions remember']]],
   ['You', 'held', [['my-instructions', 'My instructions', 'pen', 'Yours, in every scheme'], ['account', 'Your account', 'user', 'Password, Claude and GitHub logins'],

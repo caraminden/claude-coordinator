@@ -10,6 +10,8 @@ import type { Project, SkillTimeline, Store } from './db.ts';
 
 /** The kit's plugin name (kit/.claude-plugin/plugin.json): its skills and agents are `citadel:<name>` in a turn. */
 export const KIT_PLUGIN = 'citadel';
+/** The kit in this checkout (what turns pin a copy of). */
+export const KIT_DIR = join(import.meta.dirname, '..', 'kit');
 /** How far back the page counts. */
 export const USAGE_DAYS = 14;
 /** How long a scheme's counts are reused: the walk reads two weeks of events. */

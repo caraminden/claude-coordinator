@@ -12,6 +12,7 @@ import { GLOBAL_OWNER } from './properties.ts';
 import { claudeConfigDir } from './sessions.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import { SCHEME_REFS_MATCHER } from './scheme-refs.ts';
+import { offSkills, skillDenies } from './skills.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
 import { advisedModel } from '../public/model-table.js';
 
@@ -506,7 +507,8 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // Claude Code asks before `cd <dir> && rm <glob>` outside the working directories, even in bypassPermissions.
   const addDirs = [filesDir, sharedDir, tmp].filter((d): d is string => !!d);
   // One --settings per turn: the tripwire hook and the shared settings, plus approval rules or the Taskmaster's access rules.
-  const deny = credentialDenies(homedir(), claudeConfigDir(facts.env.server), facts.folders.data);
+  // A scheme's off kit skills (#1062) are also pruned from the turn's kit copy; the deny stops one named anyway.
+  const deny = [...credentialDenies(homedir(), claudeConfigDir(facts.env.server), facts.folders.data), ...skillDenies(offSkills(project))];
   // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
   // A file, not an argument: a scheme's minion list outgrows a command line.
   const refsFile = join(dir, 'scheme-refs.json');

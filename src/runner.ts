@@ -34,6 +34,7 @@ import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKe
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
+import { offSkills, pruneKit } from './skills.ts';
 import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { hideSecrets, hideSecretsIn, secretEnv } from './secrets.ts';
@@ -2705,6 +2706,8 @@ export class Runner {
     try {
       const pins = turnPins();
       cpSync(pins.MCP_DIR, pin, { recursive: true });
+      // Kit skills the scheme turned off on its Skills page (#1062) aren't in this turn's copy at all.
+      pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
       // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
       const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
       // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.

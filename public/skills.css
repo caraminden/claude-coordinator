@@ -1,0 +1,27 @@
+/* The Skills page (#1062, public/skills.js). */
+.skills-main .sk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.75rem 0; }
+.skills-main .sk-count { margin-left: 0.35rem; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.skills-main .sk-intro { margin: 0 0 0.75rem; }
+.skills-main .sk-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.sk-row { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.7rem 0.85rem; margin-bottom: 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.sk-row.off { border-style: dashed; }
+.sk-row p { margin: 0; }
+.sk-top { display: flex; align-items: center; gap: 0.5rem; min-height: 1.6rem; }
+.sk-name { font-weight: 600; font-family: var(--mono, ui-monospace, monospace); font-size: 0.92rem; overflow-wrap: anywhere; }
+.sk-when, .sk-what { font-size: 0.9rem; line-height: 1.4; }
+.sk-stats { font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.sk-detail { font-size: 0.85rem; }
+.sk-detail summary { cursor: pointer; padding: 0.2rem 0; color: var(--accent); }
+.sk-detail p { margin: 0.25rem 0 0; }
+.sk-last { margin: 0.2rem 0 0; padding-left: 1.2rem; }
+.sk-last li { margin: 0.1rem 0; }
+.sk-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem; }
+.sk-new .sk-field { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.6rem; font-size: 0.88rem; }
+.sk-new .sk-field > span { font-weight: 600; }
+.sk-new .sk-brief { font-family: var(--mono, ui-monospace, monospace); font-size: 0.82rem; }
+.sk-new, .sk-confirm { width: min(36rem, calc(100vw - 2rem)); }
+
+@media (max-width: 600px) {
+  .skills-main .sk-bar .spacer { display: none; }
+  .skills-main .sk-tabs { width: 100%; }
+}

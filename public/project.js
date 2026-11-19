@@ -12,6 +12,7 @@ import { mergedView } from './mine.js';
 import { preparePropFilter, propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import { usagePage } from './where.js';
+import { skillsPage } from './skills.js';
 import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { schedulesButton, showSchedules } from './schedules.js';
@@ -76,6 +77,7 @@ function renderCrumbs(main) {
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
       : main.kind === 'notifications' ? [projectLink, ' / ', settingsLink, ' / ', 'Notifications']
       : main.kind === 'usage' ? [projectLink, ' / ', settingsLink, ' / ', 'Usage']
+      : main.kind === 'skills' ? [projectLink, ' / ', settingsLink, ' / ', 'Skills']
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
       : main.kind === 'ci' ? [projectLink, ' / ', 'CI']
@@ -216,6 +218,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'notifications' ? notificationsPage()
     : main.kind === 'usage' ? usagePage()
+    : main.kind === 'skills' ? skillsPage()
     : main.kind === 'releases' ? releasesPage()
     : main.kind === 'ci' ? ciPage(projectId, main.tab)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)

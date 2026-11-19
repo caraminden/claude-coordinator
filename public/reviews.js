@@ -123,32 +123,44 @@ function whenLine(e) {
 
 /** Its on/off switch: Minion rules' switch (settings.css .rules-switch). */
 function onSwitch(e) {
-  return h('button', { type: 'button', class: 'rules-switch', role: 'switch', 'aria-checked': String(e.enabled), 'aria-label': `${e.name}: ${e.enabled ? 'on' : 'off'}`,
+  return h('button', { type: 'button', class: 'rules-switch', 'data-slug': e.slug, role: 'switch', 'aria-checked': String(e.enabled), 'aria-label': `${e.name}: ${e.enabled ? 'on' : 'off'}`,
     onclick: (ev) => { ev.stopPropagation(); setSwitch(e.slug, { enabled: !e.enabled }); } });
 }
 
 /** A switch saves at once and rolls back with a toast if the save fails (Cara 2026-11-08). */
 function setSwitch(slug, patch) {
+  // Bound to the scheme it started in: a Retry after moving to another scheme still saves this one's entry.
+  const s = state;
+  const path = url(slug);
+  const mine = () => state === s;
+  // An open edit or New form keeps what was typed: only the switch itself redraws then (the next draw shows the rest).
+  const redraw = () => {
+    if (!mine()) return;
+    if (s.mode !== 'edit' && s.mode !== 'new') return draw();
+    const e = s.entries.find((x) => x.slug === slug);
+    for (const b of pageEl.querySelectorAll(`.rules-switch[data-slug="${CSS.escape(slug)}"]`)) b.setAttribute('aria-checked', String(!!e?.enabled));
+  };
   let was;
   optimistic({
-    key: `reviews:${state.projectId}:${slug}`,
+    key: `reviews:${s.projectId}:${slug}`,
     apply: () => {
-      const e = entry(slug);
+      const e = s.entries.find((x) => x.slug === slug);
+      if (!e) return;
       was = { enabled: e.enabled, trial: e.trial };
       Object.assign(e, patch);
-      draw();
+      redraw();
     },
-    send: () => api(url(slug), { method: 'PATCH', body: patch }),
+    send: () => api(path, { method: 'PATCH', body: patch }),
     undo: () => {
-      const e = entry(slug);
-      if (e) Object.assign(e, was);
-      draw();
+      const e = s.entries.find((x) => x.slug === slug);
+      if (e && was) Object.assign(e, was);
+      redraw();
     },
     label: patch.enabled === undefined ? 'change its trial' : `turn ${patch.enabled ? 'on' : 'off'} ${entry(slug)?.name ?? slug}`,
   }).then((saved) => {
-    const i = state.entries.findIndex((x) => x.slug === slug);
-    if (i >= 0 && saved?.slug) state.entries[i] = saved;
-    if (state.mode !== 'edit') draw();
+    const i = s.entries.findIndex((x) => x.slug === slug);
+    if (i >= 0 && saved?.slug) s.entries[i] = saved;
+    redraw();
   }, () => {});
 }
 
@@ -237,7 +249,7 @@ function editForm(e) {
     save.disabled = true;
     err.hidden = true;
     try {
-      const saved = await api(url(e.slug), { method: 'PATCH', body: { name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value, version: e.version } });
+      const saved = await api(url(e.slug), { method: 'PATCH', body: { name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value, version: entry(e.slug)?.version ?? e.version } });
       state.entries[state.entries.findIndex((x) => x.slug === e.slug)] = saved;
       toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
       state.mode = 'view';
@@ -252,7 +264,7 @@ function editForm(e) {
     h('h3', {}, `Edit ${e.name}`),
     field('Name', name),
     h('div', { class: 'rv-pair' }, field('Kind', kind), field('Column', stage)),
-    field('When it runs', when, 'Like diff: public/**, schedule: monthly, or ask. Parts join with ;'),
+    field('When it runs', when, 'Like diff: public/**, schedule: monthly, or ask. Parts join with |'),
     h('div', { class: 'rv-pair' }, field('Model', model), field('Effort', effort)),
     field(e.extends ? `Its own lines, under the kit's ${e.extends}` : 'The rubric', body, 'Markdown with ## sections: what it checks, what passes, what fails.'),
     field('What changed', note),

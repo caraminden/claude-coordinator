@@ -1,11 +1,11 @@
-// A scheme's review set (Build 4, docs/adr/0014-review-set.md): every critic, reviewer and audit that judges its work,
+// A scheme's review set (Build 4, docs/adr/0013-review-set.md): every critic, reviewer and audit that judges its work,
 // stored here rather than as repo files (Cara, 2026-11-19, Q2: "Citadel stores them"). Each entry is the rubric format
 // (kit/skills/critique/references/rubric-format.md): the keys the page switches on are columns, the rest of the
 // rubric (its other frontmatter keys and its sections) is the body. Every save is a version; History restores one.
 // Turns read the enabled entries as rendered rubric files (renderSet), so critics read them the way they read repo files.
 import type { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 
 export const REVIEW_SCHEMA = `
 CREATE TABLE IF NOT EXISTS review_entries (
@@ -151,6 +151,7 @@ const quote = (v: string) => (/: |^[\s"'[{>|*&!%@`#-]|:$|\s$/.test(v) ? JSON.str
 
 /** The keys the columns own, as they appear in a rubric file's frontmatter. */
 const LIFTED = ['name', 'extends', 'when', 'model', 'effort'];
+const OWNED = /^(name|extends|when|model|effort|trial)\s*:/;
 
 /**
  * A whole rubric file's text to the fields it sets and the body that stays: frontmatter keys the columns own move into
@@ -192,7 +193,8 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
     e.effort ? `effort: ${e.effort}` : '',
     // On trial (Q12) it only advises, whatever its own gate says.
     e.trial ? 'trial: true' : '',
-    own ? own[1].trim() : '',
+    // The columns own these keys: a body that writes them too (a minion's save may) can't override a person's switches.
+    own ? own[1].split('\n').filter((l) => !OWNED.test(l)).join('\n').trim() : '',
   ].filter(Boolean);
   const c = e.context;
   const ctx = [
@@ -232,7 +234,14 @@ function check(f: Partial<EntryFields>): void {
   if (f.position !== undefined && !Number.isInteger(f.position)) throw new ReviewError('position is a whole number');
   if (f.triggers !== undefined && (typeof f.triggers !== 'object' || f.triggers === null || Array.isArray(f.triggers))) throw new ReviewError('triggers is an object');
   if (f.context !== undefined && (typeof f.context !== 'object' || f.context === null || Array.isArray(f.context))) throw new ReviewError('context is an object');
+  const strings = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((s) => typeof s === 'string'));
+  const text = (v: unknown) => v === undefined || typeof v === 'string';
+  const flag = (v: unknown) => v === undefined || typeof v === 'boolean';
+  const c = f.context as Record<string, unknown> | undefined;
+  if (c && (!(c.guides === undefined || Array.isArray(c.guides)) || !strings(c.paths) || !flag(c.verdicts) || !flag(c.requester))) throw new ReviewError('context is {guides: [{label, href}], paths: [text], verdicts: true or false, requester: true or false}');
   for (const g of f.context?.guides ?? []) if (typeof g?.label !== 'string' || typeof g?.href !== 'string') throw new ReviewError('Each guide has a label and an href');
+  const t = f.triggers as Record<string, unknown> | undefined;
+  if (t && (!strings(t.diff) || !strings(t.types) || !text(t.creative) || !text(t.schedule) || !text(t.in_app) || !flag(t.ask))) throw new ReviewError('triggers is {diff: [globs], types: [minion types], creative, schedule, in_app: text, ask: true or false}');
 }
 
 export class ReviewSet {
@@ -354,7 +363,8 @@ export function repoRubrics(repoDir: string): [string, string][] {
   const out: [string, string][] = [];
   for (const p of rubricsLine(readFileSync(md, 'utf8'))) {
     const abs = join(repoDir, p);
-    if (!abs.startsWith(repoDir) || !existsSync(abs)) continue;
+    const rel = relative(repoDir, abs);
+    if (rel.startsWith('..') || isAbsolute(rel) || !existsSync(abs)) continue;
     const files = p.endsWith('.md') ? [p] : readdirSync(abs).filter((f) => f.endsWith('.md')).sort().map((f) => join(p, f).replace(/\/+/g, '/'));
     for (const f of files) {
       const text = readFileSync(join(repoDir, f), 'utf8');
@@ -369,24 +379,39 @@ export function repoRubrics(repoDir: string): [string, string][] {
  * The one-off move of a scheme's repo rubric files into its set (Q2): each file's text, its extends, when, calibration
  * and people's notes kept as written. A file whose slug the set has already is skipped, so running it twice adds nothing.
  */
-export function importRubrics(set: ReviewSet, projectId: number, files: [string, string][], by: string): { added: string[]; skipped: string[] } {
+export function importRubrics(set: ReviewSet, projectId: number, files: [string, string][], by: string): { added: string[]; skipped: string[]; failed: string[] } {
   const added: string[] = [];
   const skipped: string[] = [];
+  const failed: string[] = [];
   for (const [path, text] of files) {
-    const { fields, body } = splitRubric(text);
-    const slug = fields.slug ?? path.split('/').pop()!.replace(/\.md$/, '');
+    const fileSlug = path.split('/').pop()!.replace(/\.md$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'rubric';
+    let split: ReturnType<typeof splitRubric> | null = null;
+    let why = '';
+    try {
+      split = splitRubric(text);
+    } catch (err: any) {
+      why = err.message;
+    }
+    const slug = split?.fields.slug ?? fileSlug;
     if (set.get(projectId, slug)) {
       skipped.push(`${path} (already in the set as ${slug})`);
       continue;
     }
     try {
-      set.create(projectId, { ...fields, slug, name: nameFor(slug), body, source: path }, by, `Imported from ${path}`);
+      if (!split) throw new ReviewError(why);
+      set.create(projectId, { ...split.fields, slug, name: nameFor(slug), body: split.body, source: path }, by, `Imported from ${path}`);
       added.push(path);
     } catch (err: any) {
-      skipped.push(`${path} (${err.message})`);
+      // A file the store refuses still comes in whole, switched off, so nothing is lost and a person fixes it on the page.
+      try {
+        set.create(projectId, { slug: set.get(projectId, fileSlug) ? `${fileSlug}-imported` : fileSlug, name: nameFor(fileSlug), body: text.replace(/\r\n/g, '\n').trim(), source: path, enabled: false }, by, `Imported from ${path}, off: ${err.message}`);
+        added.push(`${path} (off: ${err.message})`);
+      } catch (err2: any) {
+        failed.push(`${path} (${err2.message})`);
+      }
     }
   }
-  return { added, skipped };
+  return { added, skipped, failed };
 }
 
 /** The setting that says the one-off import ran (#1051), so an entry someone deletes or renames is never brought back. */
@@ -399,12 +424,15 @@ export const IMPORT_KEY = 'review_set_import';
 export function importAllRubrics(store: { getSetting<T>(k: string): T | null; setSetting(k: string, v: unknown): void; listProjects(): { id: number; name: string; repo_dir: string | null }[]; reviews: ReviewSet }, now = Date.now()): string[] {
   if (store.getSetting(IMPORT_KEY)) return [];
   const done: string[] = [];
+  let retry = false;
   for (const p of store.listProjects()) {
     if (!p.repo_dir) continue;
-    const { added, skipped } = importRubrics(store.reviews, p.id, repoRubrics(p.repo_dir), 'Citadel');
-    if (added.length || skipped.length) done.push(`${p.name}: ${added.length ? `imported ${added.join(', ')}` : 'nothing new'}${skipped.length ? `; skipped ${skipped.join(', ')}` : ''}`);
+    const { added, skipped, failed } = importRubrics(store.reviews, p.id, repoRubrics(p.repo_dir), 'Citadel');
+    if (failed.length) retry = true;
+    if (added.length || skipped.length || failed.length) done.push(`${p.name}: ${added.length ? `imported ${added.join(', ')}` : 'nothing new'}${skipped.length ? `; skipped ${skipped.join(', ')}` : ''}${failed.length ? `; FAILED ${failed.join(', ')} (tries again next start)` : ''}`);
   }
-  store.setSetting(IMPORT_KEY, now);
+  // A file that failed outright tries again on the next start; the ones already in are skipped by slug then.
+  if (!retry) store.setSetting(IMPORT_KEY, now);
   return done;
 }
 

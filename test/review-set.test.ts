@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { importAllRubrics, IMPORT_KEY, loadStarters, nameFor, parseWhen, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
+import { importAllRubrics, importRubrics, IMPORT_KEY, loadStarters, nameFor, parseWhen, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -125,4 +125,48 @@ test("the one-off import moves each scheme's Rubrics line files in once, keeping
   // Once per database: a second start imports nothing, even after an entry is deleted by hand.
   assert.equal(settings.get(IMPORT_KEY), 1);
   assert.deepEqual(importAllRubrics(store), []);
+});
+
+test("a body's own frontmatter can't override the keys a person sets (trial, when): a minion saves only the body", () => {
+  const { set } = fresh();
+  set.create(9, { slug: 'x', name: 'X', triggers: { diff: ['public/**'] }, trial: true }, 'Cara');
+  const e = set.save(9, 'x', { body: '---\ntrial: false\nwhen: ask\njudges: the page\n---\n\n## Pass\n\n- ok' }, 'minion', 'learned');
+  const head = renderEntry(e).split('\n---\n')[0];
+  assert.deepEqual(head.split('\n').filter((l) => /^(trial|when):/.test(l)), ['when: "diff: public/**"', 'trial: true']);
+  assert.match(head, /^judges: the page$/m);
+});
+
+test('context and triggers of the wrong shape are refused, so a bad save never breaks rendering', () => {
+  const { set } = fresh();
+  set.create(9, { slug: 'x', name: 'X' }, 'Cara');
+  assert.throws(() => set.save(9, 'x', { context: { paths: 'src/x' } as any }, 'Cara', ''), /context is/);
+  assert.throws(() => set.save(9, 'x', { triggers: { diff: 'public/**' } as any }, 'Cara', ''), /triggers is/);
+  assert.equal(set.get(9, 'x')!.version, 1);
+  assert.doesNotThrow(() => renderEntry(set.get(9, 'x')!));
+});
+
+test("the import reads only inside the repo, brings a file the store refuses in switched off, and retries a failure", () => {
+  const { set } = fresh();
+  const repo = join(root, 'repo');
+  mkdirSync(join(repo, 'r'), { recursive: true });
+  mkdirSync(join(root, 'repo-other'), { recursive: true });
+  writeFileSync(join(root, 'repo-other', 'leak.md'), '---\nname: leak\n---\n');
+  writeFileSync(join(repo, 'CLAUDE.md'), '- **Rubrics:** r/; ../repo-other/\n');
+  writeFileSync(join(repo, 'r', 'bad-model.md'), '---\nname: bad-model\nmodel: gpt\n---\n\n## Pass\n');
+  writeFileSync(join(repo, 'r', 'bad-when.md'), '---\nname: bad-when\nwhen: bogus\n---\n\n## Pass\n');
+  assert.deepEqual(repoRubrics(repo).map(([p]) => p), ['r/bad-model.md', 'r/bad-when.md']);
+  const { added, failed } = importRubrics(set, 9, repoRubrics(repo), 'Citadel');
+  assert.equal(added.length, 2);
+  assert.deepEqual(failed, []);
+  for (const slug of ['bad-model', 'bad-when']) {
+    const e = set.get(9, slug)!;
+    assert.equal(e.enabled, false);
+    assert.match(e.body, /## Pass/);
+    assert.match(set.versions(9, slug)[0].note, /, off: /);
+  }
+  // Nothing marked done while a file failed outright, so the next start tries it again.
+  const settings = new Map<string, unknown>();
+  const store = { getSetting: <T>(k: string) => (settings.get(k) ?? null) as T | null, setSetting: (k: string, v: unknown) => void settings.set(k, v), listProjects: () => [{ id: 9, name: 'G', repo_dir: repo }], reviews: { get: () => null, create: () => { throw new Error('disk full'); } } as any };
+  assert.match(importAllRubrics(store)[0], /FAILED r\/bad-model\.md \(disk full\)/);
+  assert.equal(settings.get(IMPORT_KEY), undefined);
 });

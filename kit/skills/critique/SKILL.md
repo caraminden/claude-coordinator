@@ -154,7 +154,8 @@ The result goes to people as one line per rubric, in the ready note when it fits
 
 With `gate: advisory` (the default), open blockers are handled like reviewer findings: fixed, or
 listed under "Not fixed: <why>". With `gate: blocks-ready`, the work isn't ready while an item has
-open blockers and no person's decision. On a review page, each take shows its critic line and the
+open blockers and no person's decision, unless the rubric has `trial: true`: a rubric on trial runs as
+`gate: advisory` whatever its `gate` says. On a review page, each take shows its critic line and the
 takes sort by verdict (`citadel:docs-and-mocks`, its `kinds.md`, "Critic lines").
 
 *Done when* every item passed, went to the person, or is listed as not fixed with a reason, and the

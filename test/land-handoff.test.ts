@@ -175,6 +175,18 @@ test('stay_open does not change a failed land: it wakes the minion with the outp
   assert.ok(!s.did.some((d) => d.startsWith('close')));
 });
 
+test('a failed land leads its wake with the kind of red (#1013), and an unknown one keeps the plain text', async () => {
+  const a = setup('kind-parse');
+  await a.land("land: smoke: a .ts file does not parse, before the line (2 s), so nothing landed\n", 1);
+  await a.handoffs.poll();
+  assert.match(a.sent[0], /^Kind: parse error/);
+  assert.match(a.sent[0], /Your handed-off land didn't go through/);
+  const b = setup('kind-unknown');
+  await b.land('land: something odd\n', 1);
+  await b.handoffs.poll();
+  assert.match(b.sent[0], /^Your handed-off land didn't go through/);
+});
+
 test('a high-risk land carries its go in the shipped line', async () => {
   const s = setup('high');
   await s.land(LIVE, 0, { risk: 'high', reason: 'touches the land pipeline', go: 'Cara, 3:05 PM PST' });

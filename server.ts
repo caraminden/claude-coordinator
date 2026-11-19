@@ -918,11 +918,11 @@ const ciHealth = new CiHealth(store, {
   // Wakes (a red on main, any trigger, #774/#968; a problem that rings, #983) or held mail (back to green) for the scheme's Taskmaster.
   tell: (project, text, wake) => {
     const coordinator = store.getOverlord(project.id);
-    if (coordinator) {
-      if (wake) runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
-      else runner.leaveMail(coordinator.id, APP_NAME, text);
-    }
-    return !!coordinator;
+    if (!coordinator) return false;
+    if (!wake) return runner.leaveMail(coordinator.id, APP_NAME, text), true;
+    runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
+    // The chat entry the wake became (the CI page links to it, #992); true if it can't be found.
+    return store.eventsOfKinds(coordinator.id, ['user_message']).at(-1)?.id ?? true;
   },
 });
 if (!BOOT_CHECK) ciHealth.start();

@@ -499,6 +499,7 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-problem { display: grid; gap: 0.3rem; padding: 0.6rem 0.8rem; border: 1px solid var(--line); border-left: 3px solid var(--waiting-tint); border-radius: var(--radius-sm); background: var(--panel); }
 .ci-problem.rings { border-left-color: var(--error); }
 .ci-problem p { margin: 0; font-size: 0.9em; }
+.ci-problem-link { min-height: 1.4em; overflow-wrap: anywhere; }
 .ci-problem-head { display: flex; align-items: baseline; gap: 0.5rem; }
 .ci-problem-head .dot { flex: none; transform: translateY(-0.05rem); }
 .ci-problem-head strong { flex: 1; min-width: 0; }

@@ -29,7 +29,16 @@ function problemCard(x) {
       h('strong', {}, x.title.replace(/^CI(, [^:]+)?: /, '')),
       h('span', { class: 'ci-tag' }, x.quiet ? 'quiet' : 'rings')),
     x.why ? h('p', {}, h('span', { class: 'muted' }, 'Why: '), x.why) : '',
-    x.fix ? h('p', {}, h('span', { class: 'muted' }, 'Fix: '), x.fix) : '');
+    x.fix ? h('p', {}, h('span', { class: 'muted' }, 'Fix: '), x.fix) : '',
+    problemLink(x.link));
+}
+
+/** Who is on it (#992): the fix minion's chat, else the Taskmaster's at its wake. The row is always there, so a link arriving moves nothing. */
+function problemLink(l) {
+  return h('p', { class: 'ci-problem-link' }, l ? [
+    h('span', { class: 'muted' }, l.kind === 'minion' ? 'Fix minion: ' : 'Heard by: '),
+    h('a', { href: l.href }, l.label),
+    l.closed ? h('span', { class: 'muted' }, ' (closed)') : ''] : '');
 }
 
 const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down' : c ? 'asleep' : 'running');

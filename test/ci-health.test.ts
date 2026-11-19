@@ -1054,3 +1054,39 @@ test('one PC offline for two schemes wakes Citadel once; for one scheme alone, t
   await alone.health.tick(t0 + WAIT_MS + 5 * MIN);
   assert.deepEqual(told.map(([n]) => n), ['Peek Auras'], 'a PC only one scheme uses is that scheme\'s');
 });
+
+test('every open problem links to its fix minion, else to the Taskmaster entry that heard of it (#992)', async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  // tell hands back the chat entry the wake became; false-ish means nobody heard.
+  let entry: number | boolean = 777;
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => entry });
+  const red = (id: number, msAgo: number) => runOf({ id, event: 'push', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: `${id}abcdef`, conclusion: 'failure', created_at: iso(msAgo), updated_at: iso(msAgo - MIN) });
+  w.gh.jobs.set(9001, [job({ run_id: 9001, name: 'windows', conclusion: 'failure', steps: [{ name: 'Test', conclusion: 'failure' }] })]);
+  w.gh.mainRuns = [red(9001, 20 * MIN)];
+  const link = () => health.snapshot(() => true).find((s) => s.id === w.peek.id)!.problems.find((x) => x.key === 'red:7')?.link;
+  await health.tick(NOW);
+  assert.deepEqual(link(), { kind: 'taskmaster', href: `#/p/${w.peek.id}?e=777`, label: "the Taskmaster's wake" }, 'no fix yet: the entry its Taskmaster was woken at');
+
+  const fix = w.minion(w.peek.id, 'ticket/1-fix');
+  w.store.updateTicket(fix.id, { title: 'Fix the red desktop run' });
+  w.store.addEvent(fix.id, 'user_message', { text: 'Fix the red desktop run 9001 on main' });
+  await health.tick(NOW + 5 * MIN);
+  const n = w.store.getTicket(fix.id)!.number;
+  assert.deepEqual(link(), { kind: 'minion', href: `#/p/${w.peek.id}/t/${n}`, label: `#${n} Fix the red desktop run`, closed: false }, 'a fix minion wins over the Taskmaster');
+
+  w.store.updateTicket(fix.id, { status: 'closed' });
+  await health.tick(NOW + 10 * MIN);
+  assert.deepEqual(link(), { kind: 'minion', href: `#/p/${w.peek.id}/t/${n}`, label: `#${n} Fix the red desktop run`, closed: true }, 'closed, the red still open: linked, and says so');
+});
+
+test('with no wake entry recorded, a problem falls back to the Taskmaster chat without an anchor (#992)', async () => {
+  const w = world();
+  const health = new CiHealth(w.store, { ...w.deps, tell: () => true });
+  const t0 = Date.parse('2026-11-11T20:00:00Z');
+  w.gh.runners = [desk('offline')];
+  waitingRun(w, t0);
+  await health.tick(t0 + WAIT_MS);
+  const x = health.snapshot(() => true).find((s) => s.id === w.peek.id)!.problems[0];
+  assert.deepEqual(x.link, { kind: 'taskmaster', href: `#/p/${w.peek.id}`, label: 'the Taskmaster' });
+});

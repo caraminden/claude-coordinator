@@ -663,11 +663,15 @@ mock.boards('#takes', { boards: [
           run(9090, 'drift', 'main', 190, 'completed', 'failure', 'schedule'),
         ],
       });
+      // #992: the red has a fix minion; the stuck one links to the Taskmaster's wake entry.
+      const fix = minion(c, 'Fix the red drift run 9090', {}, 'bug');
+      const heard = c.store.addEvent(taskmaster(c).id, 'user_message', { author: 'Citadel', text: 'Seeded: CI: 1 job on self-hosted, seeded-ci has waited for a runner. Start a fix minion now.' });
+      c.store.setSetting('ci-health:wake-at', { [`${c.project.id}:stuck:self-hosted,seeded-ci`]: { project: c.project.id, entry: heard.id } });
       c.store.setSetting(`ci-health:${c.project.id}`, {
         offline: {}, sent: {},
         problems: [
           { key: 'stuck:self-hosted,seeded-ci', title: 'CI, Seeded: 1 job on self-hosted, seeded-ci has waited for a runner since 31 min ago.', why: 'every runner that serves self-hosted, seeded-ci (DESKTOP-G248IJ8-desktop) is offline, since 42 min ago', fix: 'turn on or wake DESKTOP-G248IJ8, or start its runner service' },
-          { key: 'red:drift.yml', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: 'the Taskmaster starts a fix minion naming run 9090; fix minion #12 started', quiet: true },
+          { key: 'red:drift.yml', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`, quiet: true, fixMinion: { number: fix.number!, closed: false } },
         ],
       });
       return `#/p/${c.project.id}/ci`;

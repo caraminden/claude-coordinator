@@ -143,6 +143,33 @@ export interface Problem {
   quiet?: boolean;
   /** What it's shared by (`host:<computer>`, or `billing`): a problem touching several schemes wakes Citadel's Taskmaster once; one scheme's alone wakes that scheme's (#983). */
   shared?: string;
+  /** The fix minion on it, once one names the run (#992). */
+  fixMinion?: { number: number; closed: boolean };
+  /** Where a person goes for it (#992): the fix minion's chat, else the Taskmaster's, at the wake. Set by `snapshot`, never kept. */
+  link?: ProblemLink;
+}
+export interface ProblemLink {
+  kind: 'minion' | 'taskmaster';
+  href: string;
+  label: string;
+  closed?: boolean;
+}
+/** Where each woken problem's wake landed: the Taskmaster's scheme and chat entry, by `<scheme>:<key>` (or the shared key). */
+export type WakeAt = Record<string, { project: number; entry: number }>;
+
+const WAKE_AT = 'ci-health:wake-at';
+/**
+ * Where a person goes for an open problem (#992, Cara 2026-11-18): the minion fixing it (its chat, the number and title, and whether it has
+ * closed with the red still open); else its Taskmaster's chat at the entry the wake became, or at the chat alone when none was recorded.
+ * A shared problem's wake is under its shared key (`<key>#<scheme>` when one scheme's alone).
+ */
+export function problemLink(x: Problem, scheme: number, wakes: WakeAt, titleOf: (n: number) => string | undefined): ProblemLink {
+  if (x.fixMinion) {
+    const { number: n, closed } = x.fixMinion;
+    return { kind: 'minion', href: `#/p/${scheme}/t/${n}`, label: `#${n} ${titleOf(n) ?? ''}`.trim(), closed };
+  }
+  const at = x.shared ? wakes[`${x.shared}#${scheme}`] ?? wakes[x.shared] : wakes[`${scheme}:${x.key}`];
+  return at ? { kind: 'taskmaster', href: `#/p/${at.project}?e=${at.entry}`, label: "the Taskmaster's wake" } : { kind: 'taskmaster', href: `#/p/${scheme}`, label: 'the Taskmaster' };
 }
 
 const WAKE_STEPS = "People's phones ring for this. Start a fix minion now and name this problem in its brief; if it needs a person (billing, a machine that's off, a runner), ask them with a card instead. If it's expected, add the workflow to the scheme's quiet CI workflows (set_project_settings quiet_workflows).";
@@ -285,6 +312,10 @@ export interface Fix {
  * red, or that minion closed RED_FIX_MS ago with no newer run. `newest` is the workflow's newest verdict there; green, and there is nothing to say.
  */
 export function redProblem(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number): Problem | null {
+  const x = redProblemOf(file, branch, mark, newest, fix, now);
+  return x && fix ? { ...x, fixMinion: { number: fix.number, closed: fix.closedAt != null } } : x;
+}
+function redProblemOf(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number): Problem | null {
   if (newest.conclusion !== 'failure') return null;
   const told = mark.told ?? now;
   const key = `red:${newest.workflow_id}`;
@@ -582,7 +613,7 @@ export interface CiHealthDeps {
   /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing: a dispatched run that passed, which also runs at low effort (#951). No message, no wakes. */
   wake?: (ticketId: number, text: string, fyi?: boolean) => void;
   /** Held mail for a scheme's Taskmaster (a failed scheduled run), or a message that wakes it (`wake`: a watched workflow gone red); false (no Taskmaster) or none at all, and those wait untold. */
-  tell?: (project: Project, text: string, wake?: boolean) => boolean;
+  tell?: (project: Project, text: string, wake?: boolean) => boolean | number;
   /** The scheme whose Taskmaster hears problems that aren't one scheme's (#983): the live checkout's. */
   home?: () => Project | undefined;
 }
@@ -669,7 +700,7 @@ export class CiHealth {
     const ringing = problems.filter((x) => !x.quiet && !x.shared);
     const woke = (this.store.getSetting<string[]>(key) ?? []).filter((k) => ringing.some((x) => x.key === k));
     if (quietUntil(now) === null) {
-      for (const x of ringing.filter((x) => !woke.includes(x.key))) if (this.say(p, x.key, await this.wakeText(p, x), true)) woke.push(x.key);
+      for (const x of ringing.filter((x) => !woke.includes(x.key))) if (this.say(p, x.key, await this.wakeText(p, x), true, (e) => this.wokeAt(`${p.id}:${x.key}`, p.id, e))) woke.push(x.key);
     }
     this.store.setSetting(key, woke);
   }
@@ -698,10 +729,17 @@ export class CiHealth {
       for (const [k, { to, schemes, problem }] of open) {
         if (woke.includes(k) || !to) continue;
         const touches = schemes.length > 1 || !k.includes('#') ? `\nIt touches ${schemes.join(', ')}.` : '';
-        if (this.say(to, k, `${to.name}: ${itemText(problem)}${touches}\n${WAKE_STEPS}`, true)) woke.push(k);
+        if (this.say(to, k, `${to.name}: ${itemText(problem)}${touches}\n${WAKE_STEPS}`, true, (e) => this.wokeAt(k, to.id, e))) woke.push(k);
       }
     }
     this.store.setSetting(key, woke);
+  }
+
+  /** Keep the chat entry a wake became, for the CI page's link (#992). */
+  private wokeAt(key: string, project: number, entry: number) {
+    const all = this.store.getSetting<WakeAt>(WAKE_AT) ?? {};
+    all[key] = { project, entry };
+    this.store.setSetting(WAKE_AT, all);
   }
 
   /** A ringing problem as its Taskmaster's wake: what, why and the fix, then what to do about it; the land gate adds its fallen-back runs' facts. */
@@ -858,7 +896,9 @@ export class CiHealth {
     return this.store.listProjects().flatMap((p) => {
       const view = repoSlug(p.repo_url) && canSee(p.id) ? this.store.getSetting<CiView>(`ci-health:view:${p.id}`) : undefined;
       if (!view) return [];
-      const problems = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])];
+      const wakes = this.store.getSetting<WakeAt>(WAKE_AT) ?? {};
+      const problems = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])]
+        .map((x) => ({ ...x, link: problemLink(x, p.id, wakes, (n) => this.store.getTicketByNumber(p.id, n)?.title) }));
       return [{ id: p.id, name: p.name, view, problems }];
     });
   }
@@ -982,7 +1022,7 @@ export class CiHealth {
       if (this.texts.size > 200) this.texts.delete(this.texts.keys().next().value!);
       red[String(w)] = { run: r.id, at: r.created_at, told: now, where: await this.failedAt(slug, r, as) };
       save(); // before sending, so a restart can't send it twice
-      if (!this.say(p, r.id, text, true)) {
+      if (!this.say(p, r.id, text, true, (e) => this.wokeAt(`${p.id}:red:${w}`, p.id, e))) {
         delete red[String(w)]; // no Taskmaster yet: the next poll tries again
         save();
         continue;
@@ -1039,9 +1079,11 @@ export class CiHealth {
   }
 
   /** Held mail for the Taskmaster about `run`: true once it has it; false (no Taskmaster yet, or the send threw) to try again next poll. */
-  private say(p: Project, run: number | string, text: string, wake = false): boolean {
+  private say(p: Project, run: number | string, text: string, wake = false, entry?: (id: number) => void): boolean {
     try {
-      return this.deps.tell!(p, text, wake);
+      const told = this.deps.tell!(p, text, wake);
+      if (typeof told === 'number' && told > 0) entry?.(told);
+      return !!told;
     } catch (err) {
       console.error(`Telling ${p.name}'s Taskmaster of run ${run} failed:`, err);
       return false;

@@ -78,7 +78,8 @@ test('the macOS/Linux line installs a systemd user unit that keeps running, with
   assert.equal(calls, '--user daemon-reload\n--user enable coordinator-agent-pc.service\n--user restart coordinator-agent-pc.service\n');
   assert.equal(statSync(unit).mode & 0o777, 0o600, 'the unit holds the token');
   const text = readFileSync(unit, 'utf8');
-  assert.match(text, new RegExp(`^ExecStart="${realpathSync(process.execPath)}" "${dir}/machine-agent\\.mjs" "https://app\\.example" "ccm_1_x" "--config" "${dir}/machine-agent\\.json" "--log" "${dir}/machine-agent-pc\\.log"$`, 'm'));
+  const seen = `execPath=${process.execPath} PATH=${process.env.PATH}\n${text}`; // #1073: main's CI run saw a cut-off node path here
+  assert.match(seen, new RegExp(`^ExecStart="${realpathSync(process.execPath)}" "${dir}/machine-agent\\.mjs" "https://app\\.example" "ccm_1_x" "--config" "${dir}/machine-agent\\.json" "--log" "${dir}/machine-agent-pc\\.log"$`, 'm'));
   assert.match(text, /^Restart=always$/m);
   assert.match(text, /^WantedBy=default\.target$/m);
   assert.ok(text.includes(`Environment="PATH=${home}/bin:`), 'the service finds what the shell that set it up found');

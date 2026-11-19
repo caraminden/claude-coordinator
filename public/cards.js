@@ -144,7 +144,7 @@ function mergeHead(m, desc, call) {
   });
   const checks = { passed: ['ok', '✓ checks passed'], failed: ['bad', '✗ checks failed'], pending: ['', '○ checks running'] }[pr?.checks];
   const warn = [
-    m.auto && '--auto: GitHub lands it by itself once its checks pass, not straight away.',
+    m.auto && `--auto: GitHub ${intoBuild(m) ? 'merges it into the build' : 'lands it'} by itself once its checks pass, not straight away.`,
     m.admin && "--admin: skips the branch's protection rules.",
     pr && pr.state && pr.state !== 'OPEN' && `This PR is already ${pr.state.toLowerCase()}.`,
     pr?.draft && 'This PR is still a draft.',

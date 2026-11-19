@@ -207,7 +207,7 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
 
 // Build branches (#592): a feeder merges into build/<n> and closes. That is merged as far as it goes alone,
 // so a merged chain starts, and a live one waits for the build to land rather than being held as unshipped.
-test('a feeder merged into its build and dismissed has landed for a chain, and live once the build lands', async () => {
+test('a feeder merged into its build and dismissed is merged for a chain, and live once the build lands', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   live.git('branch', 'build/7', 'main');
@@ -226,6 +226,7 @@ test('a feeder merged into its build and dismissed has landed for a chain, and l
   }
   assert.equal(await w.check(), 1);
   assert.deepEqual([started.map((s) => s.c.ticket), held.length], [[afterMerged], 0], 'merged starts, live waits, nothing held');
+  assert.match(started[0].why, /work is merged into Build 7$/, 'in its build, not landed');
   live.git('merge', '-q', '--ff-only', 'build/7'); // the build lands
   assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
   assert.deepEqual(started.map((s) => s.c.ticket), [afterMerged, afterLive]);

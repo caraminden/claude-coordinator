@@ -18,6 +18,8 @@ export interface Reserved {
   match: RegExp;
   /** A word that, in the same sentence or within WINDOW words, makes the use fine; none for a retired word. */
   allow?: RegExp;
+  /** A match this also matches is wrong whatever is near ("merge it into main" beside "the build is green"). */
+  always?: RegExp;
   /** What to write instead. */
   suggest: string;
 }
@@ -49,6 +51,7 @@ export const RESERVED: Reserved[] = [
       String.raw`\bmerge\s+(?:card|chip|go|button)s?\b`,
     ].join('|'), 'gi'),
     allow: /^(?:builds?|feeders?|git)$/i,
+    always: /\bmain\b/i,
     suggest: '"land it", "landed on main", "ready to land", "landed PRs" or "the land card"; "merge into Build <n>" for a feeder',
   },
 ];
@@ -112,7 +115,7 @@ export function misusedWords(text: string, html = false): Misuse[] {
         const at = start + m.index;
         // Quoted, it's about the word itself ('"fold" means merging').
         if (/["'“‘]$/.test(p.slice(0, at)) && /^["'”’]/.test(p.slice(at + m[0].length))) continue;
-        if (!r.allow) {
+        if (!r.allow || r.always?.test(m[0])) {
           found.push({ term: r.term, word: m[0], sentence: quote(sentence, m.index) });
           break;
         }

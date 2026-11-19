@@ -70,8 +70,8 @@ export interface Waiter {
   light?: true;
 }
 
-/** How people read a chain's `when` (Cara, 2026-11-19: "Land"): "#3's work has landed" or "... is live". */
-export const chainIs = (when: Chain['when']) => (when === 'merged' ? 'has landed' : 'is live');
+/** How people read a chain's `when` (Cara, 2026-11-19: "Land"): "#3's work has landed", "... is merged into Build 4" for a feeder (whose merged means in its build), or "... is live". */
+export const chainIs = (when: Chain['when'], build?: number | null) => (when !== 'merged' ? 'is live' : build ? `is merged into Build ${build}` : 'has landed');
 
 /** A minion created parked, whose brief is held until minion `after`'s work is live or merged. */
 export interface Chain {
@@ -356,7 +356,7 @@ export class LiveWaiters {
     const leader = c && this.store.getTicket(c.after);
     if (!c) return null;
     const who = `#${leader?.number ?? c.after} ${leader?.title ?? ''}`;
-    return c.held ? `${who}'s work ${chainIs(c.when)}, and ${who} was dismissed without it, so only Unpark starts you` : `${who}'s work ${chainIs(c.when)}`;
+    return c.held ? `${who}'s work ${chainIs(c.when, leader?.build)}, and ${who} was dismissed without it, so only Unpark starts you` : `${who}'s work ${chainIs(c.when, leader?.build)}`;
   }
 
   /** The brief `ticket` holds until its leader's work is in, for its chat to show read-only; null once it is sent (release) or when there is none. */
@@ -411,7 +411,7 @@ export class LiveWaiters {
     this.store.setSetting(CHAINS, keep);
     const n = (id: number) => `#${this.store.getTicket(id)?.number ?? id}`;
     for (const c of go) this.starting.add(c.ticket);
-    for (const c of go) this.start(c, `${n(c.after)}'s work ${chainIs(c.when)}`);
+    for (const c of go) this.start(c, `${n(c.after)}'s work ${chainIs(c.when, this.store.getTicket(c.after)?.build)}`);
     for (const c of hold) this.hold(c, `${n(c.after)} was dismissed without its work landing`);
     return go.length;
   }

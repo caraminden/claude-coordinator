@@ -407,8 +407,8 @@ export async function refreshBranch(ticketId) {
 export function renderBranch(status) {
   const el = view.branchEl;
   const parts = [];
-  // Onto main it lands; into a major build's branch it merges (Cara, 2026-11-19: "Land").
-  const done = /^build\//.test(status?.base ?? '') ? 'merged' : 'landed';
+  // Onto main it lands; a minion in a build merges into it (Cara, 2026-11-19: "Land"). status.base is always main's.
+  const done = status?.build ? 'merged' : 'landed';
   if (status?.pr) {
     const { pr } = status;
     const state = pr.state === 'MERGED' ? done : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : 'open';
@@ -416,12 +416,12 @@ export function renderBranch(status) {
       // data-github: this chip is the way to the PR on GitHub, so pointPrLink leaves it be (as the merge card's).
       h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, 'data-github': '', onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
       h('span', { class: `state ${state === done ? 'merged' : state}` }, state));
-    if (pr.state === 'OPEN' && status.merged) parts.push(h('span', { title: `${done === 'merged' ? 'Merged into' : 'Landed on'} ${status.base}` }, '✓ in main'));
+    if (pr.state === 'OPEN' && status.merged) parts.push(h('span', { title: `Landed on ${status.base}` }, '✓ in main'));
   } else if (status && !status.empty) {
     parts.push(h('span', { class: 'branch', title: status.branch }, status.branch));
     parts.push(status.merged
-      ? h('span', { class: 'state merged', title: `${done === 'merged' ? 'Merged into' : 'Landed on'} ${status.base}` }, done)
-      : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} not ${done}`));
+      ? h('span', { class: 'state merged', title: `Landed on ${status.base}` }, 'landed')
+      : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} not landed`));
   }
   // Where its change is on the way to release (#626, take F); releases.js redraws the slot as that moves.
   const chip = releaseChip(view.ticket);

@@ -56,6 +56,8 @@ test('leaves merge alone for a build, git, and every shape that can\'t be told f
 test('nearby means the same sentence or within 8 words, not further', () => {
   assert.deepEqual(flagged('The build is green. Merge it.'), []);
   assert.deepEqual(flagged('The build is green and everything else looks fine to me now. Merge it.'), ['Merge it']);
+  // Said to be main, nothing near makes it fine.
+  assert.deepEqual(flagged('The build is green, so merge the fix into main.'), ['merge the fix into main']);
 });
 
 test('HTML: tags, scripts and code are not prose', () => {

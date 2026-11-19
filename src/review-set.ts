@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS review_entries (
   gives_label INTEGER NOT NULL DEFAULT 0,
   -- Its last calibration as JSON (Q12): {at, by, model, hits, notes, false_alarms, controls}, or {at, by, good: true} when a person marked it good.
   calibration TEXT,
+  -- A panel's name (Q7, phase 3): entries of a column with the same panel judge the same work at once, and its referee entry merges their verdicts.
+  panel TEXT,
+  -- Hand off on a fail (Q7) as JSON: [{after: 2, to: "professor"}, {after: 3, to: "person"}]; "to" is professor, person or another entry's slug. NULL: the kind's default.
+  on_fail TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   updated_by TEXT NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -58,6 +62,34 @@ CREATE TABLE IF NOT EXISTS review_versions (
   snapshot TEXT NOT NULL,
   UNIQUE (entry_id, version)
 );
+-- The run record (Q4, phase 3): one row per critic or reviewer run a minion records, for the page's dots and pass rate.
+CREATE TABLE IF NOT EXISTS review_runs (
+  id INTEGER PRIMARY KEY,
+  entry_id INTEGER NOT NULL REFERENCES review_entries(id) ON DELETE CASCADE,
+  -- The minion that ran it (no foreign key: the record outlives a deleted minion), and its #N as people read it.
+  ticket_id INTEGER,
+  minion TEXT NOT NULL,
+  round INTEGER NOT NULL,
+  -- pass, fail or ask (the item went to a person).
+  verdict TEXT NOT NULL,
+  -- A person disagreed with this run's verdict (record_verdict): an amber dot.
+  disagreed INTEGER NOT NULL DEFAULT 0,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS review_runs_entry ON review_runs(entry_id, id);
+-- People's disagreements with an entry's verdicts (Q13, Josh: "Only the minion records it"), read by its later runs when its
+-- context has verdicts on. Only a minion adds one; a person removes one on the page.
+CREATE TABLE IF NOT EXISTS review_verdicts (
+  id INTEGER PRIMARY KEY,
+  entry_id INTEGER NOT NULL REFERENCES review_entries(id) ON DELETE CASCADE,
+  person TEXT NOT NULL,
+  -- The person's own words, quoted.
+  words TEXT NOT NULL,
+  ticket_id INTEGER,
+  minion TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS review_verdicts_entry ON review_verdicts(entry_id, id);
 `;
 
 export const KINDS = ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'] as const;
@@ -69,6 +101,13 @@ export const STARTER_DIR = join(import.meta.dirname, '..', 'kit', 'skills', 'cri
 
 export interface Triggers { diff?: string[]; creative?: string; schedule?: string; in_app?: string; types?: string[]; ask?: boolean }
 export interface Context { guides?: { label: string; href: string }[]; paths?: string[]; verdicts?: boolean; requester?: boolean }
+/** One hand-off step (Q7): after `after` failed rounds the item goes `to` the professor, a person, or another entry by slug. */
+export interface OnFail { after: number; to: string }
+/** A critic's hand-offs when its row sets none: today's loop (citadel:critique), the professor on the second fail and a person on the third. */
+export const CRITIC_ON_FAIL: OnFail[] = [{ after: 2, to: 'professor' }, { after: 3, to: 'person' }];
+export const VERDICTS = ['pass', 'fail', 'ask'] as const;
+export interface Run { id: number; minion: string; round: number; verdict: string; disagreed: boolean; at: number }
+export interface Verdict { id: number; person: string; words: string; minion: string; at: number }
 
 export interface ReviewEntry {
   id: number;
@@ -90,14 +129,16 @@ export interface ReviewEntry {
   source: string | null;
   gives_label: boolean;
   calibration: Calibration | null;
+  panel: string | null;
+  on_fail: OnFail[] | null;
   version: number;
   updated_by: string;
   updated_at: number;
 }
 
 /** The fields a save may set: everything but the row's identity and bookkeeping. */
-export type EntryFields = Pick<ReviewEntry, 'slug' | 'name' | 'kind' | 'extends' | 'body' | 'triggers' | 'context' | 'enabled' | 'trial' | 'model' | 'effort' | 'stage' | 'position' | 'gate' | 'source' | 'gives_label' | 'calibration'>;
-const FIELDS = ['slug', 'name', 'kind', 'extends', 'body', 'triggers', 'context', 'enabled', 'trial', 'model', 'effort', 'stage', 'position', 'gate', 'source', 'gives_label', 'calibration'] as const;
+export type EntryFields = Pick<ReviewEntry, 'slug' | 'name' | 'kind' | 'extends' | 'body' | 'triggers' | 'context' | 'enabled' | 'trial' | 'model' | 'effort' | 'stage' | 'position' | 'gate' | 'source' | 'gives_label' | 'calibration' | 'panel' | 'on_fail'>;
+const FIELDS = ['slug', 'name', 'kind', 'extends', 'body', 'triggers', 'context', 'enabled', 'trial', 'model', 'effort', 'stage', 'position', 'gate', 'source', 'gives_label', 'calibration', 'panel', 'on_fail'] as const;
 
 /** A calibration run's counts (citadel:critique, references/calibrate.md), or a person's "mark it good". */
 export interface Calibration { at: number; by: string; model?: string; hits?: number; notes?: number; false_alarms?: number; controls?: number; good?: boolean }
@@ -125,7 +166,7 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
 ];
 export const isKit = (e: Pick<ReviewEntry, 'source'>) => !!e.source?.startsWith('kit:');
 /** A kit entry's fields that are the kit's, not the scheme's: a save may change only its switch and its additions (body). */
-const KIT_FIXED = ['slug', 'name', 'kind', 'extends', 'triggers', 'context', 'model', 'effort', 'stage', 'source', 'trial', 'gate', 'gives_label', 'calibration'] as const;
+const KIT_FIXED = ['slug', 'name', 'kind', 'extends', 'triggers', 'context', 'model', 'effort', 'stage', 'source', 'trial', 'gate', 'gives_label', 'calibration', 'panel', 'on_fail'] as const;
 
 export interface ReviewVersion { version: number; by: string; at: number; note: string; snapshot: EntryFields }
 
@@ -217,10 +258,13 @@ export function splitRubric(text: string): { fields: Partial<EntryFields>; body:
  * section from its context. `extends:` keeps naming the kit starter, which the critic reads first from the kit as it is
  * that turn (citadel:critic, rubric-format.md "Extending a starter"), so a kit fix reaches every scheme's next run (Q9).
  */
-export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers' | 'model' | 'effort' | 'body' | 'context' | 'trial'> & Partial<Pick<ReviewEntry, 'gate' | 'calibration'>>): string {
+export interface Extra { verdicts?: Verdict[]; requester?: { author: string; text: string } | null }
+/** Past verdicts are in an entry's context unless a person switched them off: a disagreement only helps if the next run reads it. */
+export const readsVerdicts = (c: Context) => c.verdicts !== false;
+export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers' | 'model' | 'effort' | 'body' | 'context' | 'trial'> & Partial<Pick<ReviewEntry, 'gate' | 'calibration' | 'panel' | 'on_fail' | 'kind'>>, extra: Extra = {}): string {
   const cal = e.calibration ? calibratedText(e.calibration) : '';
   // The columns' keys win over the body's own: the gate when the page set one, the calibration once one is recorded.
-  const owned = (l: string) => OWNED.test(l) || (!!e.gate && /^gate\s*:/.test(l)) || (!!cal && /^calibrated\s*:/.test(l));
+  const owned = (l: string) => OWNED.test(l) || (!!e.panel && /^panel\s*:/.test(l)) || (!!e.on_fail?.length && /^on_fail\s*:/.test(l)) || (!!e.gate && /^gate\s*:/.test(l)) || (!!cal && /^calibrated\s*:/.test(l));
   const own = e.body.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   const head = [
     `name: ${e.slug}`,
@@ -232,6 +276,8 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
     e.trial ? 'trial: true' : '',
     e.gate ? `gate: ${e.gate === 'block' ? 'blocks-ready' : 'advisory'}` : '',
     cal ? `calibrated: ${JSON.stringify(cal)}` : '',
+    e.panel ? `panel: ${quote(e.panel)}` : '',
+    e.on_fail?.length ? `on_fail: ${onFailText(e.on_fail)}` : '',
     // The columns own these keys: a body that writes them too (a minion's save may) can't override a person's switches.
     own ? own[1].split('\n').filter((l) => !owned(l)).join('\n').trim() : '',
   ].filter(Boolean);
@@ -242,7 +288,22 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
     c.requester ? "- The requester's words: the brief may quote them." : '',
   ].filter(Boolean);
   const sections = (own ? own[2] : e.body).trim();
-  return `---\n${head.join('\n')}\n---\n\n${sections}${ctx.length ? `${sections ? '\n\n' : ''}## Context\n\n${ctx.join('\n')}` : ''}\n`;
+  const tail: string[] = [];
+  if (ctx.length) tail.push(`## Context\n\n${ctx.join('\n')}`);
+  // Q13: people's disagreements with this entry's verdicts, newest first, for every later run and for calibration.
+  if (readsVerdicts(c) && extra.verdicts?.length) {
+    tail.push(`## Verdicts\n\nPeople disagreed with this entry's verdicts. Judge the way they did:\n\n${extra.verdicts.map((v) => `- ${v.person}, ${day(v.at)}, on ${v.minion}: "${v.words.replace(/\s+/g, ' ').trim()}"`).join('\n')}`);
+  }
+  if (c.requester && extra.requester?.text.trim()) {
+    tail.push(`## The requester's words\n\nWhat ${extra.requester.author} asked this minion for, in their own words (the brief may quote them):\n\n${extra.requester.text.trim().slice(0, 4000).split('\n').map((l) => `> ${l}`).join('\n')}`);
+  }
+  return `---\n${head.join('\n')}\n---\n\n${[sections, ...tail].filter(Boolean).join('\n\n')}\n`;
+}
+
+const day = (at: number) => new Date(at).toISOString().slice(0, 10);
+/** Hand-offs as one line: "professor after 2 fails, person after 3". */
+export function onFailText(steps: OnFail[]): string {
+  return steps.map((s) => `${s.to} after ${s.after} fail${s.after === 1 ? '' : 's'}`).join(', ');
 }
 
 /** A calibration as the rubric format's `calibrated:` key writes it: "2026-11-19, sonnet: 4/5 hits, 0/2 false alarms". */
@@ -262,7 +323,7 @@ export function loadStarters(dir = STARTER_DIR): { slug: string; judges: string;
 }
 
 type Row = Record<string, any>;
-const fromRow = (r: Row): ReviewEntry => ({ ...r, triggers: JSON.parse(r.triggers), context: JSON.parse(r.context), enabled: !!r.enabled, trial: !!r.trial, gives_label: !!r.gives_label, calibration: r.calibration ? JSON.parse(r.calibration) : null }) as ReviewEntry;
+const fromRow = (r: Row): ReviewEntry => ({ ...r, triggers: JSON.parse(r.triggers), context: JSON.parse(r.context), enabled: !!r.enabled, trial: !!r.trial, gives_label: !!r.gives_label, calibration: r.calibration ? JSON.parse(r.calibration) : null, on_fail: r.on_fail ? JSON.parse(r.on_fail) : null }) as ReviewEntry;
 const snapshotOf = (e: EntryFields): EntryFields => Object.fromEntries(FIELDS.map((k) => [k, e[k]])) as EntryFields;
 
 /** On trial an entry only advises (Q12): it can't block a ship or give the risk label until it is calibrated or marked good. */
@@ -293,6 +354,11 @@ function check(f: Partial<EntryFields>): void {
   if (c && (!(c.guides === undefined || Array.isArray(c.guides)) || !strings(c.paths) || !flag(c.verdicts) || !flag(c.requester))) throw new ReviewError('context is {guides: [{label, href}], paths: [text], verdicts: true or false, requester: true or false}');
   if (f.gives_label !== undefined && typeof f.gives_label !== 'boolean') throw new ReviewError('gives_label is true or false');
   for (const g of f.context?.guides ?? []) if (typeof g?.label !== 'string' || typeof g?.href !== 'string') throw new ReviewError('Each guide has a label and an href');
+  if (f.panel != null && (typeof f.panel !== 'string' || f.panel.trim().length > 40)) throw new ReviewError('A panel is named in 1 to 40 characters, or empty for none');
+  if (f.on_fail != null) {
+    const ok = Array.isArray(f.on_fail) && f.on_fail.length <= 4 && f.on_fail.every((s, i, a) => s && Number.isInteger(s.after) && s.after >= 1 && s.after <= 10 && typeof s.to === 'string' && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(s.to) && (i === 0 || s.after > a[i - 1].after));
+    if (!ok) throw new ReviewError('on_fail is up to 4 steps [{after: failed rounds 1 to 10, rising, to: professor, person or an entry\'s slug}]');
+  }
   const t = f.triggers as Record<string, unknown> | undefined;
   if (t && (!strings(t.diff) || !strings(t.types) || !text(t.creative) || !text(t.schedule) || !text(t.in_app) || !flag(t.ask))) throw new ReviewError('triggers is {diff: [globs], types: [minion types], creative, schedule, in_app: text, ask: true or false}');
 }
@@ -310,6 +376,8 @@ export class ReviewSet {
       const has = new Set((db.prepare('PRAGMA table_info(review_entries)').all() as Row[]).map((c) => c.name));
       if (!has.has('gives_label')) db.exec('ALTER TABLE review_entries ADD COLUMN gives_label INTEGER NOT NULL DEFAULT 0');
       if (!has.has('calibration')) db.exec('ALTER TABLE review_entries ADD COLUMN calibration TEXT');
+      if (!has.has('panel')) db.exec('ALTER TABLE review_entries ADD COLUMN panel TEXT');
+      if (!has.has('on_fail')) db.exec('ALTER TABLE review_entries ADD COLUMN on_fail TEXT');
       db.exec('COMMIT');
     } catch (err) {
       db.exec('ROLLBACK');
@@ -338,14 +406,17 @@ export class ReviewSet {
       model: fields.model ?? null, effort: fields.effort ?? null, stage: fields.stage ?? stageFor(triggers),
       position: fields.position ?? this.nextPosition(projectId), gate: fields.gate ?? null, source: fields.source ?? null,
       gives_label: fields.gives_label ?? false, calibration: fields.calibration ?? null,
+      panel: fields.panel?.trim() || null, on_fail: fields.on_fail ?? null,
     };
     onlyCalibratedJudge(row);
+    this.handOffsExist(projectId, row);
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const { lastInsertRowid } = this.db.prepare(`INSERT INTO review_entries (project_id, slug, name, kind, extends, body, triggers, context, enabled, trial, model, effort, stage, position, gate, source, gives_label, calibration, version, updated_by, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
+      const { lastInsertRowid } = this.db.prepare(`INSERT INTO review_entries (project_id, slug, name, kind, extends, body, triggers, context, enabled, trial, model, effort, stage, position, gate, source, gives_label, calibration, panel, on_fail, version, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
         projectId, row.slug, row.name, row.kind, row.extends, row.body, JSON.stringify(row.triggers), JSON.stringify(row.context),
-        row.enabled ? 1 : 0, row.trial ? 1 : 0, row.model, row.effort, row.stage, row.position, row.gate, row.source, row.gives_label ? 1 : 0, row.calibration ? JSON.stringify(row.calibration) : null, by, at);
+        row.enabled ? 1 : 0, row.trial ? 1 : 0, row.model, row.effort, row.stage, row.position, row.gate, row.source, row.gives_label ? 1 : 0, row.calibration ? JSON.stringify(row.calibration) : null,
+        row.panel, row.on_fail ? JSON.stringify(row.on_fail) : null, by, at);
       this.db.prepare('INSERT INTO review_versions (entry_id, version, by, at, note, snapshot) VALUES (?, 1, ?, ?, ?, ?)').run(Number(lastInsertRowid), by, at, note, JSON.stringify(row));
       this.db.exec('COMMIT');
     } catch (err) {
@@ -366,6 +437,8 @@ export class ReviewSet {
     if (expect !== undefined && expect !== was.version) throw new ReviewError(`stale: ${slug} is at version ${was.version} now (${was.updated_by} saved it); reload it and make your change again`);
     if (patch.slug !== undefined && patch.slug !== slug && this.get(projectId, patch.slug)) throw new ReviewError(`This scheme already has an entry named ${patch.slug}`);
     const next = snapshotOf({ ...was, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as EntryFields);
+    next.panel = next.panel?.trim() || null;
+    if (next.on_fail && !next.on_fail.length) next.on_fail = null;
     // Back on trial, it only advises (Q12): a person putting a blocker back on trial means that, not "switch it to Advise first".
     if (next.trial && !was.trial && !isKit(was)) Object.assign(next, { gate: next.gate === 'block' ? 'advise' : next.gate, gives_label: false });
     if (JSON.stringify(next) === JSON.stringify(snapshotOf(was))) return was;
@@ -374,13 +447,15 @@ export class ReviewSet {
       if (changed.length) throw new ReviewError(`${was.name} is the kit's: a scheme switches it on or off and adds to its text, but can't change its ${changed.join(', ')}`);
     }
     onlyCalibratedJudge(next);
+    this.handOffsExist(projectId, next);
     const version = was.version + 1;
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.db.prepare(`UPDATE review_entries SET slug = ?, name = ?, kind = ?, extends = ?, body = ?, triggers = ?, context = ?, enabled = ?, trial = ?, model = ?, effort = ?,
-        stage = ?, position = ?, gate = ?, source = ?, gives_label = ?, calibration = ?, version = ?, updated_by = ?, updated_at = ? WHERE id = ?`).run(
+        stage = ?, position = ?, gate = ?, source = ?, gives_label = ?, calibration = ?, panel = ?, on_fail = ?, version = ?, updated_by = ?, updated_at = ? WHERE id = ?`).run(
         next.slug, next.name, next.kind, next.extends, next.body, JSON.stringify(next.triggers), JSON.stringify(next.context), next.enabled ? 1 : 0, next.trial ? 1 : 0,
-        next.model, next.effort, next.stage, next.position, next.gate, next.source, next.gives_label ? 1 : 0, next.calibration ? JSON.stringify(next.calibration) : null, version, by, at, was.id);
+        next.model, next.effort, next.stage, next.position, next.gate, next.source, next.gives_label ? 1 : 0, next.calibration ? JSON.stringify(next.calibration) : null,
+        next.panel, next.on_fail ? JSON.stringify(next.on_fail) : null, version, by, at, was.id);
       this.db.prepare('INSERT INTO review_versions (entry_id, version, by, at, note, snapshot) VALUES (?, ?, ?, ?, ?, ?)').run(was.id, version, by, at, note, JSON.stringify(next));
       this.db.exec('COMMIT');
     } catch (err) {
@@ -453,6 +528,120 @@ export class ReviewSet {
     return this.save(projectId, slug, { calibration, trial }, by, `Calibrated: ${r.hits}/${r.notes} hits, ${r.false_alarms}/${r.controls} false alarms${was.trial ? (passes ? ', off trial' : ', stays on trial') : ''}`, undefined, at);
   }
 
+  /** An on_fail step that names another entry needs one in this scheme, and not the entry itself. */
+  private handOffsExist(projectId: number, e: EntryFields): void {
+    for (const s of e.on_fail ?? []) {
+      if (s.to === 'professor' || s.to === 'person') continue;
+      if (s.to === e.slug) throw new ReviewError(`${e.name} can't hand its fails to itself`);
+      if (!this.get(projectId, s.to)) throw new ReviewError(`on_fail names ${s.to}, which isn't in this scheme's review set`);
+    }
+  }
+
+  /** Move an entry one place up or down among the entries of its column (Q7, Order): later ones see earlier verdicts. */
+  move(projectId: number, slug: string, dir: 'up' | 'down', by: string): ReviewEntry {
+    const e = this.get(projectId, slug);
+    if (!e) throw new ReviewError(`No entry named ${slug}`);
+    const col = this.list(projectId).filter((x) => x.stage === e.stage);
+    const i = col.findIndex((x) => x.id === e.id);
+    const other = col[dir === 'up' ? i - 1 : i + 1];
+    if (!other) throw new ReviewError(`${e.name} is already ${dir === 'up' ? 'first' : 'last'} in its column`);
+    // Equal positions (two entries made at once) would swap to the same order, so step past the neighbour.
+    const [a, b] = e.position === other.position ? [other.position + (dir === 'up' ? -1 : 1), other.position] : [other.position, e.position];
+    this.save(projectId, other.slug, { position: b }, by, `Run order: ${dir === 'up' ? 'after' : 'before'} ${e.name}`);
+    return this.save(projectId, slug, { position: a }, by, `Run order: ${dir === 'up' ? 'before' : 'after'} ${other.name}`);
+  }
+
+  /** Record one run of an entry (Q4): which minion, which round, and its verdict. */
+  recordRun(projectId: number, slug: string, r: { ticketId: number | null; minion: string; round: number; verdict: string }, at = Date.now()): Run {
+    const e = this.get(projectId, slug);
+    if (!e) throw new ReviewError(`No entry named ${slug} in this scheme's review set`);
+    if (!(VERDICTS as readonly string[]).includes(r.verdict)) throw new ReviewError(`verdict is ${VERDICTS.join(', ')}`);
+    if (!Number.isInteger(r.round) || r.round < 1 || r.round > 50) throw new ReviewError('round is a whole number from 1');
+    const { lastInsertRowid } = this.db.prepare('INSERT INTO review_runs (entry_id, ticket_id, minion, round, verdict, at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(e.id, r.ticketId, r.minion, r.round, r.verdict, at);
+    return { id: Number(lastInsertRowid), minion: r.minion, round: r.round, verdict: r.verdict, disagreed: false, at };
+  }
+
+  /**
+   * Record a person's disagreement with an entry's verdict (Q13: only the minion records it): their words quoted, who and
+   * when. That minion's latest run of the entry turns amber on the page.
+   */
+  recordVerdict(projectId: number, slug: string, v: { person: string; words: string; ticketId: number | null; minion: string }, at = Date.now()): Verdict {
+    const e = this.get(projectId, slug);
+    if (!e) throw new ReviewError(`No entry named ${slug} in this scheme's review set`);
+    if (typeof v.person !== 'string' || !v.person.trim() || v.person.length > 80) throw new ReviewError('person is who disagreed, 1 to 80 characters');
+    if (typeof v.words !== 'string' || !v.words.trim() || v.words.length > 4000) throw new ReviewError("words are the person's own words, quoted, 1 to 4,000 characters");
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const { lastInsertRowid } = this.db.prepare('INSERT INTO review_verdicts (entry_id, person, words, ticket_id, minion, at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(e.id, v.person.trim(), v.words.trim(), v.ticketId, v.minion, at);
+      if (v.ticketId != null) {
+        this.db.prepare('UPDATE review_runs SET disagreed = 1 WHERE id = (SELECT max(id) FROM review_runs WHERE entry_id = ? AND ticket_id = ?)').run(e.id, v.ticketId);
+      }
+      this.db.exec('COMMIT');
+      return { id: Number(lastInsertRowid), person: v.person.trim(), words: v.words.trim(), minion: v.minion, at };
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /** Remove a recorded verdict (a person's Edit on the page). */
+  removeVerdict(projectId: number, slug: string, id: number): void {
+    const e = this.get(projectId, slug);
+    if (!e) throw new ReviewError(`No entry named ${slug}`);
+    if (!this.db.prepare('DELETE FROM review_verdicts WHERE id = ? AND entry_id = ?').run(id, e.id).changes) throw new ReviewError(`No verdict ${id} on ${e.name}`);
+  }
+
+  /** Every entry's recorded verdicts in a scheme, newest first, by entry id. */
+  verdicts(projectId: number): Map<number, Verdict[]> {
+    const out = new Map<number, Verdict[]>();
+    const rows = this.db.prepare(`SELECT v.* FROM review_verdicts v JOIN review_entries e ON e.id = v.entry_id WHERE e.project_id = ? ORDER BY v.id DESC`).all(projectId) as Row[];
+    for (const r of rows) {
+      const list = out.get(r.entry_id) ?? [];
+      if (!out.has(r.entry_id)) out.set(r.entry_id, list);
+      list.push({ id: r.id, person: r.person, words: r.words, minion: r.minion, at: r.at });
+    }
+    return out;
+  }
+
+  /**
+   * The page's record by entry id (Q4): the last 10 runs oldest first, the first-round pass rate over the last 20 first
+   * rounds, and whether it always passes or always fails (5 first rounds or more, all the same).
+   */
+  record(projectId: number): Map<number, { runs: Run[]; rate: number | null; firsts: number; stuck: 'pass' | 'fail' | null }> {
+    const out = new Map<number, { runs: Run[]; rate: number | null; firsts: number; stuck: 'pass' | 'fail' | null }>();
+    const rows = this.db.prepare(`SELECT * FROM (SELECT r.*, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.id DESC) AS n FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ?) WHERE n <= 10 ORDER BY id`).all(projectId) as Row[];
+    for (const r of rows) {
+      if (!out.has(r.entry_id)) out.set(r.entry_id, { runs: [], rate: null, firsts: 0, stuck: null });
+      out.get(r.entry_id)!.runs.push({ id: r.id, minion: r.minion, round: r.round, verdict: r.verdict, disagreed: !!r.disagreed, at: r.at });
+    }
+    const firsts = this.db.prepare(`SELECT entry_id, count(*) AS n, sum(verdict = 'pass') AS pass FROM (SELECT r.entry_id, r.verdict, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.id DESC) AS k FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND r.round = 1) WHERE k <= 20 GROUP BY entry_id`).all(projectId) as Row[];
+    for (const f of firsts) {
+      const rec = out.get(f.entry_id)!;
+      rec.firsts = f.n;
+      rec.rate = Math.round((100 * f.pass) / f.n);
+      rec.stuck = f.n >= 5 && (f.pass === f.n || f.pass === 0) ? (f.pass ? 'pass' : 'fail') : null;
+    }
+    return out;
+  }
+
+  /**
+   * The entries holding a minion's ship (Q7, Block or advise): on, off trial, set to block, with a last verdict on this
+   * minion of fail or ask. A pass in a later round lifts it.
+   */
+  holds(projectId: number, ticketId: number): { slug: string; name: string; verdict: string }[] {
+    return (this.db.prepare(`SELECT e.slug, e.name, r.verdict FROM review_entries e JOIN review_runs r ON r.id = (SELECT max(id) FROM review_runs WHERE entry_id = e.id AND ticket_id = ?)
+      WHERE e.project_id = ? AND e.enabled = 1 AND e.trial = 0 AND e.gate = 'block' AND r.verdict != 'pass' ORDER BY e.position, e.name`).all(ticketId, projectId) as Row[])
+      .map((r) => ({ slug: r.slug, name: r.name, verdict: r.verdict }));
+  }
+
+  /** The minion's ask (Q8, the requester's words): its first chat message and who wrote it, or null. */
+  requesterWords(ticketId: number): Extra['requester'] {
+    const r = this.db.prepare("SELECT json_extract(data, '$.author') AS author, json_extract(data, '$.text') AS text FROM events WHERE ticket_id = ? AND kind = 'user_message' ORDER BY id LIMIT 1").get(ticketId) as Row | undefined;
+    return r && typeof r.text === 'string' ? { author: String(r.author ?? 'the requester'), text: r.text } : null;
+  }
+
   private nextPosition(projectId: number): number {
     return ((this.db.prepare('SELECT max(position) AS p FROM review_entries WHERE project_id = ?').get(projectId) as { p: number | null }).p ?? -1) + 1;
   }
@@ -462,13 +651,13 @@ export class ReviewSet {
  * Write the scheme's enabled entries into `dir` as `<slug>.md` rubric files, replacing what was there, for a turn's
  * critics to read. Returns how many it wrote.
  */
-export function renderSet(entries: ReviewEntry[], dir: string): number {
+export function renderSet(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), requester: Extra['requester'] = null): number {
   rmSync(dir, { recursive: true, force: true });
   // The kit's built-ins aren't rubrics: kitLine tells the turn which are off and where the scheme's additions are.
   const on = entries.filter((e) => e.enabled && !isKit(e));
   if (!on.length) return 0;
   mkdirSync(dir, { recursive: true });
-  for (const e of on) writeFileSync(join(dir, `${e.slug}.md`), renderEntry(e));
+  for (const e of on) writeFileSync(join(dir, `${e.slug}.md`), renderEntry(e, { verdicts: verdicts.get(e.id), requester }));
   return on.length;
 }
 
@@ -560,10 +749,36 @@ export function importAllRubrics(store: { getSetting<T>(k: string): T | null; se
 }
 
 /** The turn's line naming its review set (Build 4): the folder renderSet wrote, or that the scheme has none on. */
-export function reviewSetLine(dir: string, on: number): string {
-  return on
-    ? `Review set: this scheme's reviewers and critics are on its Reviewers and critics page, and the ${on} that are on are rendered for this turn as rubric files in \`${dir}/\`: that folder is the scheme's rubric set wherever a skill says rubrics (citadel:critique). Read them there; change one only with the \`review_set\` tool, never by editing those files or adding rubric files to the repo.`
-    : "Review set: this scheme has no reviewers or critics on (its Reviewers and critics page), so no rubric's `when:` matches; a person adds one there, or a Taskmaster with `review_set`.";
+export function reviewSetLine(dir: string, on: number, entries: ReviewEntry[] = []): string {
+  if (!on) return "Review set: this scheme has no reviewers or critics on (its Reviewers and critics page), so no rubric's `when:` matches; a person adds one there, or a Taskmaster with `review_set`.";
+  const order = orderLine(entries);
+  return `Review set: this scheme's reviewers and critics are on its Reviewers and critics page, and the ${on} that are on are rendered for this turn as rubric files in \`${dir}/\`: that folder is the scheme's rubric set wherever a skill says rubrics (citadel:critique). Read them there; change one only with the \`review_set\` tool, never by editing those files or adding rubric files to the repo.${order ? ` Run order, as the page sets it (citadel:critique, "Order, panels and hand-offs"): ${order}.` : ''}`;
+}
+
+/**
+ * Each column's run order, with panels grouped: "work: a → [panel Taste: b, c; referee d] → e". Only columns with two
+ * or more entries on, or a panel, need saying; one entry on its own runs as before.
+ */
+export function orderLine(entries: ReviewEntry[]): string {
+  const on = entries.filter((e) => e.enabled && !isKit(e));
+  const cols: string[] = [];
+  for (const stage of STAGES) {
+    const col = on.filter((e) => e.stage === stage);
+    if (col.length < 2 && !col.some((e) => e.panel)) continue;
+    const steps: string[] = [];
+    const done = new Set<string>();
+    for (const e of col) {
+      if (!e.panel) { steps.push(`\`${e.slug}\``); continue; }
+      if (done.has(e.panel)) continue;
+      done.add(e.panel);
+      const members = col.filter((x) => x.panel === e.panel);
+      const ref = members.filter((x) => x.kind === 'referee');
+      const judges = members.filter((x) => x.kind !== 'referee');
+      steps.push(`[panel ${e.panel}: ${judges.map((x) => `\`${x.slug}\``).join(', ')} judge at once; ${ref.length ? `referee \`${ref[0].slug}\` merges` : 'no referee, so each verdict stands on its own'}]`);
+    }
+    cols.push(`${stage}: ${steps.join(' → ')}`);
+  }
+  return cols.join('; ');
 }
 
 /**

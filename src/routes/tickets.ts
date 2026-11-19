@@ -1244,6 +1244,12 @@ export const ticketRoutes: Route[] = [
         if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, unlabelled ? `Not handed off: ${unlabelled}, so this ship waits for a person's go. Ask with a ship card (kind ship), then hand it off again with go naming who gave it and when` : `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first`);
         h.go = str(body.go, 'Go', 200);
       }
+      // A blocking reviewer or critic whose last verdict on this minion failed holds the ship (Q7, Block or advise), a feeder's merge too, until it passes or a person gives the go.
+      const holds = app.store.reviews.holds(ticket.project_id, ticket.id);
+      if (holds.length && !h.go) {
+        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, `Not handed off: ${holds.map((x) => `${x.name} (\`${x.slug}\`, last verdict ${x.verdict})`).join(', ')} ${holds.length > 1 ? 'block' : 'blocks'} this ship. Fix what it found and run it again until it passes (record each round with review_set run), or ask a person with a ship card (kind ship) and hand it off again with go naming who gave it and when`);
+        h.go = str(body.go, 'Go', 200);
+      }
       if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');
       if (body.deploy === false) h.deploy = false;
       if (body.stay_open !== undefined && typeof body.stay_open !== 'boolean') throw new HttpError(400, 'stay_open must be true or false');

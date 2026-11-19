@@ -34,8 +34,7 @@ import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { madeCommits } from './src/branch.ts';
-import { type Chain, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes, within } from './src/wake.ts';
+import { type Chain, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
@@ -1044,12 +1043,7 @@ const ciHealth = new CiHealth(store, {
   },
   // A red's fix minion (#1074): its branch tip once its own commits (since it started) are in `sha`, GitHub's main.
   // shortcut: reads the scheme's clone, so a PR-merging scheme whose clone lacks GitHub's tip starts no re-run until it fetches; add a fetch if one does.
-  shipped: async (p, t, sha) => {
-    if (!p.repo_dir || !t.branch || !(await madeCommits(p.repo_dir, t.branch, Math.floor(t.created_at / 1000)))) return null;
-    const tip = await new Promise<string | null>((done) =>
-      execFile('git', ['rev-parse', '-q', '--verify', `refs/heads/${t.branch}^{commit}`], { cwd: p.repo_dir! }, (err, out) => done(err ? null : out.trim() || null)));
-    return tip && (await within(p.repo_dir, sha, tip)) ? tip : null;
-  },
+  shipped: (p, t, sha) => (p.repo_dir && t.branch ? fixShipped(p.repo_dir, t.branch, Math.floor(t.created_at / 1000), sha) : Promise.resolve(null)),
   held: (id, note) => {
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;

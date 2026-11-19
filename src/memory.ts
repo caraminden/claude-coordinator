@@ -239,7 +239,7 @@ export class Memory {
     // Every row of the project index comes back, matching or not (vec null when not), so a page is 256 rows scanned and a
     // selective filter can't walk the whole scheme in one call (it held the loop up to 2.8 s, #1034).
     const page = this.db.prepare(`SELECT m.id, CASE WHEN t.project_id = ?1 AND m.ts >= t.created_at
-        ${opts.personId !== undefined ? "AND m.person_id = ?3 AND m.source_kind = 'turn'" : ''}
+        ${opts.ticketId === undefined && opts.personId !== undefined ? "AND m.person_id = ?3 AND m.source_kind = 'turn'" : ''}
         ${opts.openMinions ? "AND m.source_kind = 'ticket' AND t.status != 'closed'" : ''}
         THEN m.vec END AS vec
       FROM memory_chunks m LEFT JOIN tickets t ON t.id = m.ticket_id

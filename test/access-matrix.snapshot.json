@@ -1493,6 +1493,16 @@
   "m1": "403 Only the scheme's Taskmaster and its app turns check read the turn audit",
   "m2": "403 Only the scheme's Taskmaster and its app turns check read the turn audit"
  },
+ "GET /api/projects/:p/flake-brief": {
+  "anon": "401 Not logged in",
+  "person": "404 No flake of that file in the last 14 days",
+  "member": "404 No flake of that file in the last 14 days",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/projects/:p/github": {
   "anon": "401 Not logged in",
   "person": "409 This scheme has no GitHub repo waiting to be made",
@@ -1964,6 +1974,16 @@
   "m2": "403 A minion may only update itself"
  },
  "GET /api/projects/:p/taskmaster-events": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/test-health": {
   "anon": "401 Not logged in",
   "person": "200",
   "member": "200",

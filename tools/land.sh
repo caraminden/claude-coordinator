@@ -259,7 +259,7 @@ smoke() {
           CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
         done
         if [ ${#failed[@]} -gt 0 ] && [ ${#still[@]} -eq 0 ]; then
-          for f in "${failed[@]}"; do retro_log "flake · $f · smoke · $label"; done
+          for f in "${failed[@]}"; do retro_log "flake · $f · smoke · $label"; say "flake: $f · smoke"; done
           say "smoke: ${failed[*]} failed, then passed alone: likely load, not your change, so it doesn't decide: getting in line"
         else
           grep -v '^full output: ' <<<"$out" | tail -n 60 | sed 's/^/land: smoke: /' >&2
@@ -644,6 +644,7 @@ ci_failed() {
   tail -n 40 <<<"$failed" >&2
   while read -r f load; do
     retro_log "flake · $f · load $load · $branch · in CI"
+    say "flake: $f · in CI" # the server counts these (src/flakes.ts)
   done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
 }
 # The failed files, comma-separated, when $failed says every one of them passed alone (#769); fails otherwise. It

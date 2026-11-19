@@ -72,6 +72,8 @@ export interface FastModeDeps {
   taskmaster: (projectId: number, text: string) => void;
   /** Main's head went green: last green for the roll back (src/last-green.ts). */
   green: (projectId: number, sha: string) => void;
+  /** A verify run's output, for the flakes it names (#1063). */
+  flakes?: (projectId: number, sha: string, output: string) => void;
   now?: () => number;
   git?: (cwd: string, ...args: string[]) => Promise<string>;
 }
@@ -121,6 +123,17 @@ export class FastMode {
       ...s.reds.flatMap((e) => e.ids.map((id) => `${id}\t${who(e)}`)),
       ...(s.pin?.ids ?? []).map((id) => `${id}\tCitadel is finding whose change broke it`),
     ].join('\n');
+  }
+
+  /** What the Test health tab shows (#1063): the run's state, what is known red and when each red reaches the Taskmaster. */
+  view(projectId: number) {
+    const s = this.state(projectId);
+    return {
+      state: s.running ? 'running' : s.pin ? 'pinning' : s.stuck && s.stuck !== s.verified ? 'stuck' : s.verified ? 'verified' : 'idle',
+      verified: s.verified ?? null, stuck: s.stuck ?? null, running: s.running ? { sha: s.running.sha, at: s.running.at } : null,
+      pin: s.pin ? { ids: s.pin.ids, at: s.pin.at ?? null } : null,
+      reds: s.reds.map((e) => ({ ids: e.ids, sha: e.sha, n: e.n ?? null, at: e.at, escalated: !!e.escalated, escalateAt: e.at + ESCALATE_MS })),
+    };
   }
 
   /** Fast mode was turned on: start from main's head as it is now, with no ledger from an earlier spell. A run still
@@ -176,6 +189,7 @@ export class FastMode {
       }
       const { sha, stale } = s.running;
       delete s.running;
+      if (!stale && job) this.d.flakes?.(projectId, sha, job.output);
       if (!stale) await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '');
     }
     this.escalate(projectId, s);

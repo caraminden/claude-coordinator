@@ -85,6 +85,7 @@ import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
 import { HostJobs } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
+import { parseFlakes } from './src/flakes.ts';
 import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
@@ -1042,7 +1043,12 @@ const ciHealth = new CiHealth(store, {
 if (!BOOT_CHECK) ciHealth.start();
 // Handed-off lands (#706): the server reports each once its land.sh ends, with no turn on a clean land (src/land.ts).
 // Fast mode's testing behind (#1017, src/fast-mode.ts): the full suite on main after fast lands, in each fast scheme.
+const recordFlakes = (projectId: number, ticketId: number | null, commit: string | null, output: string) => {
+  const found = parseFlakes(output);
+  if (found.length) store.addFlakeEvents(projectId, ticketId, commit, Date.now(), found);
+};
 const fastMode = new FastMode({
+  flakes: (id, sha, output) => recordFlakes(id, null, sha, output),
   schemes: () => store.listProjects().filter((p) => p.land_mode === 'fast' && p.repo_dir).map((p) => ({ id: p.id, repo: p.repo_dir! })),
   get: (k) => store.getSetting<FastState>(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
   jobs: new HostJobs(() => runner.units), dir: (id) => join(DATA_DIR, 'run', 'fast-mode', String(id)),
@@ -1062,6 +1068,7 @@ const fastMode = new FastMode({
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fast mode', () => fastMode.tick()), 30_000).unref();
 const landHandoffs = new LandHandoffs({
   landings, store, runner, from: APP_NAME,
+  flakes: (id, output) => { const t = store.getTicket(id); if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output); },
   landed: (id, commit) => {
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);

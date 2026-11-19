@@ -6,6 +6,7 @@
 import { ago, api, h, view } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
 import { pcCard, pcLine, trouble } from './ci-desktop.js';
+import { readHealth, testHealth } from './ci-health.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
 
@@ -186,7 +187,9 @@ function overview(s, pcs, now, ui) {
 export function ciPage(projectId, startTab = 'overview') {
   let picked = projectId;
   // Runs is History and Runners joined Overview (#1019), so their old links land where those now are.
-  let tab = startTab === 'runs' || startTab === 'history' ? 'history' : 'overview';
+  let tab = startTab === 'runs' || startTab === 'history' ? 'history' : startTab === 'health' ? 'health' : 'overview';
+  const health = new Map(); // scheme id -> its Test health read, kept so the tab doesn't blank on a redraw
+  const readTab = async (id) => { try { health.set(id, await readHealth(id)); draw(); } catch { /* the next read tries again */ } };
   let loadOpen = localStorage.getItem(LOAD_OPEN) === '1';
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
@@ -218,18 +221,19 @@ export function ciPage(projectId, startTab = 'overview') {
     list.replaceChildren(...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); list.querySelector('.ci-more')?.focus(); } },
       h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide all clear' : `${hidden.length} all clear`),
       h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '');
-    const tabs = [['overview', 'Overview'], ['history', 'History']];
+    const tabs = [['overview', 'Overview'], ['history', 'History'], ['health', 'Test health']];
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, s.name), ext(`https://github.com/${s.view.slug}/actions`, `${s.view.slug} on GitHub`),
         h('span', { class: 'muted small' }, `read ${ago(s.view.at)}`)),
       h('div', { class: 'ci-tabs', role: 'tablist' }, ...tabs.map(([k, label]) =>
-        h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), class: tab === k ? 'on' : '', onclick: () => { tab = k; draw(); } }, label))),
+        h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), class: tab === k ? 'on' : '', onclick: () => { tab = k; draw(); if (k === 'health') readTab(s.id); } }, label))),
       ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
         host: host,
         queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.ci-group-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
         hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); },
         loadOpen, toggleLoad: () => { loadOpen = !loadOpen; localStorage.setItem(LOAD_OPEN, loadOpen ? '1' : '0'); draw(); detail.querySelector('.ci-load-line')?.focus(); },
       })
+        : tab === 'health' ? testHealth(s, health.get(s.id) ?? null, () => readTab(s.id))
         : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));
   };
   let tried = false;
@@ -240,6 +244,7 @@ export function ciPage(projectId, startTab = 'overview') {
       data = await api('api/ci');
       host = await api('api/host-load').catch(() => host);
       draw();
+      if (tab === 'health') readTab((data.schemes.find((x) => x.id === picked) ?? data.schemes[0])?.id);
     } catch (err) {
       if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${err.message}`));
     }

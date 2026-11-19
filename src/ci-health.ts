@@ -140,7 +140,8 @@ export interface CiView {
   running?: { name: string; runner: string; since: string; run: number; branch?: string; event?: string; minion?: number | null }[];
   /** The queue per set of runner labels, with how many online runners serve it (null when they can't be listed). */
   queues?: { labels: string[]; jobs: number; runners: number | null }[];
-  workflows: { name: string; file: string; verdict: ViewRun | null; skipped: string[] }[];
+  /** `quiet`: in the scheme's ci_quiet and not its ci_watch, so its red rings no one (TWIReader #990); set by snapshot from the settings now. */
+  workflows: { name: string; file: string; verdict: ViewRun | null; skipped: string[]; quiet?: boolean }[];
   runs: ViewRun[];
 }
 const viewRun = (slug: string, r: Run, minion: (r: Run) => number | null = () => null): ViewRun => ({ id: r.id, name: r.name, branch: r.head_branch, event: r.event, status: r.status, conclusion: r.conclusion, at: r.created_at, url: r.html_url ?? runUrl(slug, r), minion: minion(r) });
@@ -981,11 +982,12 @@ export class CiHealth {
       const who = (r: { minion?: number | null; branch?: string; event?: string }) => r.minion
         ? { href: `#/p/${p.id}/t/${r.minion}`, label: `#${r.minion} ${this.store.getTicketByNumber(p.id, r.minion)?.title ?? ''}`.trim() }
         : { label: runKind(r, view.branch) };
+      const quiet = new Set(lines(p.ci_quiet)), watch = new Set(lines(p.ci_watch ?? ''));
       const shown = {
         ...view,
         waiting: view.waiting.map((j) => ({ ...j, who: who(j) })),
         running: (view.running ?? []).map((j) => ({ ...j, who: who(j) })),
-        workflows: view.workflows.map((w) => ({ ...w, verdict: w.verdict && { ...w.verdict, who: who(w.verdict) } })),
+        workflows: view.workflows.map((w) => ({ ...w, quiet: quiet.has(w.file) && !watch.has(w.file), verdict: w.verdict && { ...w.verdict, who: who(w.verdict) } })),
         runs: view.runs.map((r) => ({ ...r, who: who(r) })),
       };
       return [{ id: p.id, name: p.name, view: shown, problems }];

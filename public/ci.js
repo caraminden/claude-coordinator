@@ -48,13 +48,14 @@ const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down
 const whoCell = (x) => x.who?.href ? h('a', { class: 'ci-run-who', href: x.who.href, title: x.who.label }, x.who.label)
   : h('span', { class: 'ci-run-who muted' }, x.who?.label ?? x.branch ?? '');
 
-function runRow(r) {
+/** A run's row; `quiet` (a workflow in the scheme's quiet list, TWIReader #990) greys it and tags it, its result kept. */
+function runRow(r, quiet = false) {
   const word = r.status === 'completed' ? r.conclusion ?? 'done' : r.status.replace('_', ' ');
-  return h('div', { class: 'ci-run', title: `${r.name} on ${r.branch}: ${word}, ${when(r.at)}` },
-    h('span', { class: `dot ${verdictClass(r.status === 'completed' ? r.conclusion : null)}` }),
-    h('span', { class: 'ci-run-word' }, word),
+  return h('div', { class: `ci-run${quiet ? ' ci-quiet' : ''}`, title: `${r.name} on ${r.branch}: ${word}, ${when(r.at)}${quiet ? ". Quiet: in the scheme's quiet CI workflows, so its red rings no one" : ''}` },
+    h('span', { class: `dot ${quiet ? 'asleep' : verdictClass(r.status === 'completed' ? r.conclusion : null)}` }),
+    h('span', { class: `ci-run-word${quiet ? ' muted' : ''}` }, word),
     ext(r.url, r.name),
-    whoCell(r),
+    quiet ? h('span', { class: 'ci-run-who' }, h('span', { class: 'ci-tag' }, 'quiet'), ' ', whoCell(r)) : whoCell(r),
     h('span', { class: 'ci-run-age muted' }, ago(Date.parse(r.at))));
 }
 
@@ -122,12 +123,43 @@ function desktopLoad(pcs, ui) {
   if (!pcs.length) return '';
   const open = ui.loadOpen;
   return h('section', { class: 'ci-block ci-desktops' }, h('h4', {}, 'CI desktop load'),
-    h('div', { class: 'ci-runs' }, h('button', { type: 'button', class: 'ci-run ci-now ci-load-toggle', 'aria-expanded': String(open), onclick: ui.toggleLoad },
-      h('span', { class: 'dot asleep' }), h('span', { class: 'ci-run-word' }, open ? 'hide' : 'details'),
-      h('span', { class: 'ci-run-name' }, open ? 'Hide the details' : `${pcs.length} desktop${pcs.length === 1 ? '' : 's'}`),
-      h('span', { class: 'ci-run-who muted' }, open ? '' : 'charts, pools and queue'), h('span', { class: 'ci-run-age muted' }, open ? '▴' : '▾')),
-    ...pcs.map((pc) => h('div', { class: 'ci-run ci-now', title: pc.verdict.text }, ...pcLine(pc), h('span', { class: 'ci-run-age' })))),
+    h('div', { class: 'ci-runs' }, ...pcs.map((pc) => h('button', { type: 'button', class: 'ci-run ci-load-line', 'aria-expanded': String(open), onclick: ui.toggleLoad,
+      title: `${pc.verdict.text} ${open ? 'Hide' : 'Show'} the details.` }, ...pcLine(pc), h('span', { class: 'ci-run-age muted' }, open ? '▴' : '▾')))),
     ...(open ? pcs.map(pcCard) : []));
+}
+
+const waitRow = (j, slug) => h('div', { class: 'ci-run', title: `${j.name}, for a runner with ${j.labels.join(', ')}, queued ${when(j.since)}` },
+  h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'), ext(`https://github.com/${slug}/actions/runs/${j.run}`, j.name),
+  whoCell(j), h('span', { class: 'ci-run-age muted' }, ago(Date.parse(j.since))));
+
+/** The queue in its order, adjacent jobs for one minion (or, with none, one kind of run) as one group (#1019, Cara: "sequential queued jobs for the same minion could be grouped"). */
+function queueGroups(waiting) {
+  const groups = [];
+  for (const j of waiting) {
+    const key = j.who?.href ?? j.who?.label ?? j.branch ?? '';
+    if (groups.at(-1)?.key === key) groups.at(-1).jobs.push(j);
+    else groups.push({ key, jobs: [j] });
+  }
+  return groups;
+}
+
+/** A group's rows: one job as it is; several as one row (count, names, minion, labels, oldest wait) that opens to each job on a click. */
+function queueRows(g, slug, ui) {
+  const [first] = g.jobs;
+  if (g.jobs.length === 1) return [waitRow(first, slug)];
+  const id = `${g.key}:${first.run}:${first.name}`, open = ui.queueOpen.has(id);
+  const labels = [...new Set(g.jobs.flatMap((j) => j.labels))].join(', ');
+  const oldest = Math.min(...g.jobs.map((j) => Date.parse(j.since)));
+  const names = g.jobs.map((j) => j.name).join(', ');
+  const row = h('div', { class: 'ci-verdict-row ci-queue-group' },
+    h('div', { class: 'ci-run', title: `${g.jobs.length} jobs for a runner with ${labels}, the oldest queued ${when(new Date(oldest).toISOString())}`,
+      onclick: (e) => { if (!e.target.closest('a, button')) ui.toggleQueue(id); } },
+      h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'),
+      h('button', { type: 'button', class: 'ci-group-toggle', 'aria-expanded': String(open), 'data-group': id, onclick: () => ui.toggleQueue(id) },
+        `${g.jobs.length} jobs ${open ? '▴' : '▾'}`),
+      whoCell(first), h('span', { class: 'ci-run-age muted' }, ago(oldest))),
+    h('p', { class: 'muted small ci-skipped' }, `${names} · on ${labels}`));
+  return [row, ...(open ? g.jobs.map((j) => { const r = waitRow(j, slug); r.classList.add('ci-group-job'); return r; }) : [])];
 }
 
 function overview(s, pcs, now, ui) {
@@ -137,14 +169,12 @@ function overview(s, pcs, now, ui) {
       s.problems.length ? h('div', { class: 'ci-problems' }, ...s.problems.map(problemCard)) : h('p', { class: 'muted' }, 'Nothing needs fixing.')),
     h('section', { class: 'ci-block' }, h('h4', {}, `Verdicts on ${v.branch}`),
       h('div', { class: 'ci-runs' }, ...v.workflows.map((w) => w.verdict
-        ? h('div', { class: 'ci-verdict-row' }, runRow({ ...w.verdict, name: w.name }),
+        ? h('div', { class: 'ci-verdict-row' }, runRow({ ...w.verdict, name: w.name }, w.quiet),
           w.skipped.length ? h('p', { class: 'muted small ci-skipped' }, `Green, but skipped ${w.skipped.join(', ')}, which ran in the verdict before it.`) : '')
         : h('div', { class: 'ci-run' }, h('span', { class: 'dot asleep' }), h('span', { class: 'ci-run-word muted' }, 'no verdict'), h('span', { class: 'ci-run-name' }, w.name))))),
     runningNow(s, now, ui),
     h('section', { class: 'ci-block' }, h('h4', {}, 'Waiting for a runner'),
-      v.waiting.length ? h('div', { class: 'ci-runs' }, ...v.waiting.map((j) => h('div', { class: 'ci-run', title: `${j.name}, for a runner with ${j.labels.join(', ')}, queued ${when(j.since)}` },
-        h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'), ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name),
-        whoCell(j), h('span', { class: 'ci-run-age muted' }, ago(Date.parse(j.since))))))
+      v.waiting.length ? h('div', { class: 'ci-runs' }, ...queueGroups(v.waiting).flatMap((g) => queueRows(g, v.slug, ui)))
         : h('p', { class: 'muted' }, 'No job is waiting.')),
     desktopLoad(pcs, ui),
   ];
@@ -159,6 +189,7 @@ export function ciPage(projectId, startTab = 'overview') {
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
   let hostedOpen = false; // Running now's row for GitHub's runners opens to a row per job, on a click only
+  const queueOpen = new Set(); // the queue's groups opened by a click
   const list = h('nav', { class: 'ci-list', 'aria-label': 'Schemes with CI' });
   const detail = h('div', { class: 'ci-detail' }, h('p', { class: 'muted' }, 'Reading CI…'));
   const el = h('section', { class: 'ci-page' }, h('div', { class: 'ci-split' }, list, detail));
@@ -191,8 +222,9 @@ export function ciPage(projectId, startTab = 'overview') {
       h('div', { class: 'ci-tabs', role: 'tablist' }, ...tabs.map(([k, label]) =>
         h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), class: tab === k ? 'on' : '', onclick: () => { tab = k; draw(); } }, label))),
       ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
+        queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.ci-group-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
         hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); },
-        loadOpen, toggleLoad: () => { loadOpen = !loadOpen; localStorage.setItem(LOAD_OPEN, loadOpen ? '1' : '0'); draw(); detail.querySelector('.ci-load-toggle')?.focus(); },
+        loadOpen, toggleLoad: () => { loadOpen = !loadOpen; localStorage.setItem(LOAD_OPEN, loadOpen ? '1' : '0'); draw(); detail.querySelector('.ci-load-line')?.focus(); },
       })
         : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map(runRow)) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));
   };

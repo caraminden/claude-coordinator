@@ -654,9 +654,10 @@ mock.boards('#takes', { boards: [
     },
   },
   ci: {
-    about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), a queue, runs and runners, each run linking its minion (#1019); the CI chip turns red',
+    about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), a queue, runs and runners with what they run, desktop load, each run linking its minion (#1019), a quieted workflow with a red verdict, greyed (#990), the queued jobs of the landing minion as one row (#1019); the CI chip turns red',
     seed(c) {
       c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
+      c.store.setProjectSettings(c.project.id, { ci_quiet: 'pilot.yml' });
       const now = Date.now();
       const iso = (min: number) => new Date(now - min * 60_000).toISOString();
       const url = (id: number) => `https://github.com/caraminden/seeded/actions/runs/${id}`;
@@ -676,13 +677,20 @@ mock.boards('#takes', { boards: [
         ],
         queues: [
           { labels: ['seeded-ci-linux', 'self-hosted'], jobs: 9, runners: 1 },
-          { labels: ['seeded-ci', 'self-hosted'], jobs: 1, runners: 0 },
+          { labels: ['seeded-ci', 'self-hosted'], jobs: 8, runners: 0 },
         ],
-        waiting: [{ name: 'windows build', labels: ['self-hosted', 'seeded-ci'], since: iso(31), run: 9104, branch: review.branch!, event: 'pull_request', minion: review.number }],
+        // Tonight's Peek Auras-shaped queue (#1019): the landing minion's five jobs in a row, one for the minion in review, two scheduled.
+        waiting: [
+          ...['screen', 'e2e', 'capture', 'windows', 'bench'].map((name, i) => ({ name, labels: ['self-hosted', 'seeded-ci'], since: iso(40 - i), run: 9103, branch: `land/${landing.branch}`, event: 'push', minion: landing.number })),
+          { name: 'windows build', labels: ['self-hosted', 'seeded-ci'], since: iso(31), run: 9104, branch: review.branch!, event: 'pull_request', minion: review.number },
+          ...['drift', 'drift (windows)'].map((name, i) => ({ name, labels: ['self-hosted', 'seeded-ci'], since: iso(20 - i), run: 9105, branch: 'main', event: 'schedule', minion: null })),
+        ],
         workflows: [
           { name: 'tests', file: 'tests.yml', verdict: run(9101, 'tests', 'main', 55, 'completed', 'success', 'push', landed), skipped: ['windows build'] },
           { name: 'drift', file: 'drift.yml', verdict: run(9090, 'drift', 'main', 190, 'completed', 'failure', 'schedule'), skipped: [] },
           { name: 'release', file: 'release.yml', verdict: null, skipped: [] },
+          // Quieted (TWIReader #990): its last run failed, drawn grey and tagged quiet.
+          { name: 'audiobook pilot', file: 'pilot.yml', verdict: run(9080, 'audiobook pilot', 'main', 600, 'completed', 'failure', 'workflow_dispatch'), skipped: [] },
         ],
         runs: [
           run(9104, 'tests', review.branch!, 31, 'queued', null, 'pull_request', review),
@@ -693,6 +701,13 @@ mock.boards('#takes', { boards: [
           run(9090, 'drift', 'main', 190, 'completed', 'failure', 'schedule'),
         ],
       });
+      // #1019: CI desktop load on Overview, collapsed to a line of CPU and memory: the PC's agent sampled every 30 s for 20 min.
+      const pc = c.store.createMachine(`seeded-ci-pc-${hex().slice(0, 4)}`, hex(), c.who);
+      c.store.addRunnerLoads(Array.from({ length: 40 }, (_, i) => ({ machine: pc.id, at: now - (39 - i) * 30_000, data: JSON.stringify({
+        at: now - (39 - i) * 30_000, host: 'DESKTOP-G248IJ8', os: 'windows', cores: 32, cpu: 40 + (i % 7) * 5, mem_total: 64 * 2 ** 30, mem_free: 22 * 2 ** 30,
+        disk_total: 2e12, disk_free: 6e11, queue: 1, pressure: null, idle_sec: 900, temp: null, hv: null, restarts: [],
+        runners: [{ name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/seeded', dir: 'C:\\actions-runner-seeded-linux', cpu: 20, mem: 3 * 2 ** 30 }],
+      }) })));
       // #992: the red has a fix minion; the stuck one links to the Taskmaster's wake entry.
       const fix = minion(c, 'Fix the red drift run 9090', {}, 'bug');
       const heard = c.store.addEvent(taskmaster(c).id, 'user_message', { author: 'Citadel', text: 'Seeded: CI: 1 job on self-hosted, seeded-ci has waited for a runner. Start a fix minion now.' });

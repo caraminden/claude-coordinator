@@ -220,7 +220,7 @@ function world({ delve = false } = {}) {
     if (gh.rateLimited) return { status: 403, etag: null, body: { message: 'API rate limit exceeded for user ID 1.' } };
     let body: any;
     if (path.startsWith('repos/caraminden/notes/')) body = { total_count: 0, workflows: [] };
-    else if (path.endsWith('/actions/workflows?per_page=100')) body = { workflows: [{ id: 7, name: 'desktop', state: 'active' }, { id: 8, name: 'old', state: 'disabled_manually' }] };
+    else if (path.endsWith('/actions/workflows?per_page=100')) body = { workflows: [{ id: 7, name: 'desktop', path: '.github/workflows/desktop.yml', state: 'active' }, { id: 8, name: 'old', state: 'disabled_manually' }] };
     else if (path.endsWith('/actions/runners?per_page=100') && gh.runnersDenied) return { status: 403, etag: null, body: { message: 'Resource not accessible by integration' } };
     else if (path === 'repos/caraminden/delve/actions/runners?per_page=100') body = { runners: gh.delveRunners };
     else if (path.endsWith('/actions/runners?per_page=100')) body = { runners: gh.runners };
@@ -293,6 +293,19 @@ test('the CI page reads each scheme it may see: runners with their job, the queu
   assert.ok(peek.problems.every((x) => x.why && x.fix));
   assert.equal(w.links.at(-1), `/c/#/p/${w.peek.id}/ci`, 'the alert opens the CI page');
   assert.deepEqual(w.health.snapshot((id) => id !== w.peek.id), [], "a scheme they can't see isn't listed");
+});
+
+test('a quieted workflow whose last run on main failed keeps its verdict on the page, marked quiet, and makes no problem (TWIReader #990)', async () => {
+  const w = world();
+  w.store.setProjectSettings(w.peek.id, { ci_quiet: 'desktop.yml' });
+  w.gh.mainRuns = [runOf({ id: 5101, conclusion: 'failure', created_at: iso(HOUR) })];
+  await w.health.tick(NOW);
+  const peek = w.health.snapshot(() => true).find((s) => s.id === w.peek.id)!;
+  assert.deepEqual(peek.view.workflows.map((x) => [x.file, x.verdict?.conclusion, x.quiet]), [['desktop.yml', 'failure', true]], 'the red verdict stays, marked quiet');
+  assert.deepEqual(peek.problems, [], 'a quiet workflow never counts toward the scheme\'s red');
+  // ci_watch beats ci_quiet, as it does for the wakes, and the mark follows the settings without a new poll.
+  w.store.setProjectSettings(w.peek.id, { ci_watch: 'desktop.yml' });
+  assert.equal(w.health.snapshot(() => true).find((s) => s.id === w.peek.id)!.view.workflows[0].quiet, false);
 });
 
 test('a problem is one Mandate alert per admin with Mandate, cleared when fixed, and kept across a restart', async () => {

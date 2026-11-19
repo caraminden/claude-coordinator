@@ -33,6 +33,10 @@ compare side by side, a handful of separate picks) is a choices page, a review p
 make those often, people decide fast from them (Cara 2026-11-16, "we should DEFINITELY do a lot of
 when appropriate"). A bug, a status, a one-off list of numbers or anything five lines can say is a reply.
 
+Be ambitious inside the page: give each take its own character, finish it with real polish, and
+include the details that make it feel real (hover and focus states, motion, empty and error states).
+This deepens the page you were asked for; it adds no scope beyond the ask.
+
 ## Pick the kind
 
 | Kind | Starter | Its shape |

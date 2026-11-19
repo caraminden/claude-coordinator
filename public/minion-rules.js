@@ -1,14 +1,16 @@
 // The Minion rules page's pickers (#1041, Cara 2026-11-19: "make as much of it as possible into toggles and buttons and
 // pickers, with manual text entry as a fallback"). Each row reads the same stored text the old text box did and writes it
 // back at once (settings.js's saveProject: optimistic, a toast with Retry on a refusal); typed entry stays as "Add by hand".
+import { toast } from './ui/status.js';
 import { account, h, icon, listGroupsOf, view } from './base.js';
+import { GO_FROM, label, MERGE_RULES, shippingGate, SHIP_PATHS, TRY_FIRST } from './shipping.js';
 
 export const lines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
 const text = (list) => [...new Set(list)].join('\n');
 
 /** Actions a person can tick to be asked first, each the permission rules it stands for (Claude Code's rule syntax). */
 export const APPROVALS = [
-  { id: 'merge', what: 'Merge a pull request', rules: ['Bash(gh pr merge:*)', 'mcp__*__merge_pull_request'] },
+  { id: 'merge', what: 'Merge a pull request', rules: MERGE_RULES },
   { id: 'automerge', what: 'Turn on auto-merge', rules: ['mcp__*__enable_pr_auto_merge'] },
   { id: 'release', what: 'Publish a GitHub release', rules: ['Bash(gh release create:*)'] },
   { id: 'workflow', what: 'Run a CI workflow by hand', rules: ['Bash(gh workflow run:*)'] },
@@ -52,6 +54,12 @@ const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down
  * The rows, built with the page's own parts: settingsRow and settingsHelp (settings.js) and saveProject, which sends a
  * PATCH of `body` behind an optimistic `mine` (what view.project then holds).
  */
+const SHOT_WIDTHS = [[1440, 'Desktop 1440'], [1024, 'Laptop 1024'], [768, 'Tablet 768'], [390, 'Phone 390']];
+/** src/msg-settings.ts's defaults and bounds; test/held-list.test.ts keeps them equal. */
+export const MSG_DEFAULTS = { msg_loop_limit: 6, msg_loop_min: 10, msg_cold_min: 55, msg_hold_h: 3 };
+export const MSG_BOUNDS = { msg_loop_limit: [3, 20], msg_loop_min: [5, 60], msg_cold_min: [10, 55], msg_hold_h: [1, 12] };
+const shotList = (text) => (text ?? '').split(',').map(Number).filter((w) => w > 0);
+
 export function pickers({ settingsRow, settingsHelp, saveProject }) {
   const p = view.project;
   const stored = () => view.project;
@@ -74,13 +82,14 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     if ('list_groups' in fields) body.list_groups = JSON.parse(fields.list_groups);
     return saveProject(p, fields, body, label, refreshAll);
   };
+  /** `disabled` is true, false, or a test of each option's value. */
   const seg = (opts, cur, onPick, disabled = false, label = '') => h('div', { class: 'rules-seg', role: 'group', 'aria-label': label },
-    opts.map(([v, l]) => h('button', { type: 'button', 'aria-pressed': String(cur === v), disabled, onclick: () => cur !== v && onPick(v) }, l)));
+    opts.map(([v, l]) => h('button', { type: 'button', 'aria-pressed': String(cur === v), disabled: typeof disabled === 'function' ? disabled(v) : disabled, onclick: () => cur !== v && onPick(v) }, l)));
   /** "Add by hand": a button that opens one line to type in; Enter or Add sends it. */
-  const handLine = (placeholder, onAdd) => {
-    const input = h('input', { type: 'text', class: 'rules-hand-input', placeholder, spellcheck: 'false', 'aria-label': 'Add by hand', hidden: true });
+  const handLine = (placeholder, onAdd, label = 'Add by hand') => {
+    const input = h('input', { type: 'text', class: 'rules-hand-input', placeholder, spellcheck: 'false', 'aria-label': label, hidden: true });
     const add = h('button', { type: 'button', hidden: true, onclick: () => go() }, 'Add');
-    const open = h('button', { type: 'button', class: 'rules-hand', onclick: () => { input.hidden = add.hidden = false; open.hidden = true; input.focus(); } }, 'Add by hand');
+    const open = h('button', { type: 'button', class: 'rules-hand', onclick: () => { input.hidden = add.hidden = false; open.hidden = true; input.focus(); } }, label);
     const go = () => { const v = input.value.trim(); if (!v) return; onAdd(v); input.value = ''; };
     input.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), go()));
     return h('div', { class: 'rules-pick' }, open, input, add);
@@ -103,9 +112,13 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
         const rules = lines(stored()[key]);
         const on = ticked(rules);
         mount.replaceChildren(h('div', { class: 'rules-checks' },
-          APPROVALS.map((a) => h('label', { class: 'rules-check' },
-            h('input', { type: 'checkbox', checked: on.includes(a), onchange: (e) => save({ [key]: toggleApproval(stored()[key], a.id, e.target.checked) }, `${e.target.checked ? 'ask before' : 'stop asking before'}: ${a.what.toLowerCase()}`) }),
-            h('span', { class: 'rules-what' }, h('span', {}, a.what), h('code', {}, a.rules.join('  '))))),
+          APPROVALS.map((a) => {
+            // On a pull-request path Shipping owns the merge box (shipping.js's gate): ticked exactly when every change needs a go.
+            const byShipping = a.id === 'merge' && stored().ship_path !== 'citadel';
+            return h('label', { class: `rules-check${byShipping ? ' locked' : ''}` },
+              h('input', { type: 'checkbox', checked: on.includes(a), disabled: byShipping, onchange: (e) => save({ [key]: toggleApproval(stored()[key], a.id, e.target.checked) }, `${e.target.checked ? 'ask before' : 'stop asking before'}: ${a.what.toLowerCase()}`) }),
+              h('span', { class: 'rules-what' }, h('span', {}, a.what), h('code', {}, byShipping ? 'set by Shipping: A person\'s go' : a.rules.join('  '))));
+          }),
           h('div', { class: 'rules-check locked' }, h('input', { type: 'checkbox', checked: true, disabled: true }),
             h('span', { class: 'rules-what' }, h('span', {}, 'Push to main, force-push, reset over work'), h('code', {}, 'always blocked by the tripwire, in every scheme')))),
           h('p', { class: 'cui-notice small' }, 'Bash rules match how a command starts: they catch mistakes, not a determined workaround.'));
@@ -218,7 +231,115 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     settingsHelp('CI on GitHub\'s runners (CI_RUNNER=github) costs Actions minutes.', 'Ask makes a minion get a person\'s go first; OK lets it use them; Never keeps CI on this scheme\'s own runners.'),
     'gh_runners', [['ask', 'Ask first'], ['ok', 'OK'], ['never', 'Never']], 'ask', 'GitHub runners');
 
-  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, data, refreshAll };
+  /**
+   * Screenshots (#1044): the widths and themes a UI change is shot at (tools/ui-shot.ts's defaults), whether the ready note
+   * must carry them, and a free-text note, the one typed field, which keeps Save and Discard.
+   */
+  const shots = () => {
+    const note = h('input', { type: 'text', class: 'rules-hand-input', id: 'shot-note', maxlength: 200, spellcheck: 'false', placeholder: '1x in her window (1600×900)', 'aria-label': 'Screenshot note', hidden: true });
+    const saveBtn = h('button', { type: 'button' }, 'Save'), discardBtn = h('button', { type: 'button', class: 'secondary' }, 'Discard');
+    const actions = h('div', { class: 'settings-row-actions', hidden: true }, saveBtn, discardBtn);
+    const open = h('button', { type: 'button', class: 'rules-hand', onclick: () => { note.hidden = false; actions.hidden = false; open.hidden = true; note.focus(); } }, 'Add by hand');
+    const dirty = () => note.value.trim() !== (stored().shot_note ?? '');
+    const sync = () => { note.toggleAttribute('data-draft', dirty()); saveBtn.disabled = discardBtn.disabled = !dirty(); };
+    note.addEventListener('input', sync);
+    saveBtn.onclick = () => save({ shot_note: note.value.trim() }, 'save the screenshot note');
+    discardBtn.onclick = () => { note.value = stored().shot_note ?? ''; sync(); };
+    const custom = handLine('1920', (w) => {
+      if (!/^\d{3,4}$/.test(w) || +w < 200 || +w > 5000) return toast('A width is a number of pixels, like 1920');
+      const cur = shotList(stored().shot_widths);
+      if (!cur.includes(+w)) save({ shot_widths: [...cur, +w].sort((a, b) => b - a).join(',') }, `shoot at ${w}`);
+    }, 'Custom width');
+    return live({ icon: 'monitor', hue: 'teal', title: 'Screenshots' },
+      settingsHelp('The widths and themes a minion shoots a UI change at, and whether its ready note needs them.',
+        'tools/ui-shot.ts uses these when a minion passes no --widths or --themes, and the minion\'s prompt states them. Keep at least one of each.'),
+      (mount) => {
+        const s = stored(), widths = shotList(s.shot_widths), themes = (s.shot_themes ?? '').split(',').filter(Boolean);
+        const all = [...new Set([...SHOT_WIDTHS.map(([w]) => w), ...widths])].sort((a, b) => b - a);
+        const label = (w) => SHOT_WIDTHS.find(([x]) => x === w)?.[1] ?? `${w}`;
+        const chip = (on, text, onclick, disabled) => h('button', { type: 'button', class: 'rules-chip', 'aria-pressed': String(on), disabled, onclick }, on ? icon('check') : '+', ' ', text);
+        mount.replaceChildren(
+          h('div', { class: 'rules-chips' }, all.map((w) => { const on = widths.includes(w); return chip(on, label(w), () => save({ shot_widths: (on ? widths.filter((x) => x !== w) : [...widths, w]).sort((a, b) => b - a).join(',') }, `${on ? 'stop shooting' : 'shoot'} at ${w}`), on && widths.length === 1); })),
+          h('div', { class: 'rules-chips' }, [['light', 'Light'], ['dark', 'Dark']].map(([t, l]) => { const on = themes.includes(t); return chip(on, l, () => save({ shot_themes: ['light', 'dark'].filter((x) => (x === t ? !on : themes.includes(x))).join(',') }, `${on ? 'stop shooting' : 'shoot'} in ${t}`), on && themes.length === 1); })),
+          h('div', { class: 'rules-item' }, h('span', { class: 'rules-what' }, h('b', {}, 'Shots in the ready note'), h('span', { class: 'muted small' }, 'a UI change isn\'t ready without them')),
+            h('button', { type: 'button', class: 'rules-switch', role: 'switch', 'aria-checked': String(!!s.shots_required), 'aria-label': 'Screenshots required in the ready note', onclick: () => save({ shots_required: !s.shots_required }, `turn required screenshots ${s.shots_required ? 'off' : 'on'}`) })),
+          h('div', { class: 'rules-pick' }, custom, ''));
+        if (!note.hasAttribute('data-draft')) note.value = s.shot_note ?? '';
+        if (note.value && note.hidden) open.click();
+        sync();
+        return `${widths.join(' and ')}, ${themes.join(' and ')}${s.shots_required ? ', required' : ''}`;
+      }, open, note, actions);
+  };
+
+  /** Save Shipping fields with what the gate makes of them (go_from, the merge approval) shown at once, as the server will store them. */
+  const saveShipping = (fields, what) => {
+    const gate = shippingGate({ ...stored(), ...fields }), mine = { ...fields };
+    for (const k of ['go_from', 'approval_rules']) if (gate[k] !== stored()[k]) mine[k] = gate[k];
+    return saveProject(p, mine, fields, what, refreshAll);
+  };
+  const SHIP_HELP = {
+    citadel: 'The server runs the scheme\'s land script, rebases onto main and the change goes live.',
+    'pr-auto': 'The minion opens a pull request and turns on auto-merge, so it ships once CI is green.',
+    'pr-person': 'The minion opens a pull request and waits: merging it needs a person\'s Approve, so every change needs a go and "Merge a pull request" is ticked under Approvals.',
+  };
+  const ship = () => live({ icon: 'branch', hue: 'accent', title: 'How a change ships' },
+    settingsHelp('What a minion does with a finished, self-reviewed change.', 'Minions get the steps for the path picked in their prompt; these settings win over any shipping paragraph in the scheme instructions.'),
+    (mount) => {
+      const cur = stored().ship_path ?? 'citadel';
+      mount.replaceChildren(seg([['citadel', 'Citadel ships it'], ['pr-auto', 'PR, auto-merge'], ['pr-person', 'PR, a person merges']], cur, (v) => saveShipping({ ship_path: v }, 'set how a change ships'), false, 'How a change ships'),
+        h('p', { class: 'muted small settings-help' }, SHIP_HELP[cur]));
+      return label(SHIP_PATHS, cur);
+    });
+  const go = () => live({ icon: 'users', hue: 'accent', title: 'A person\'s go' },
+    settingsHelp('Self-review labels each change low, medium or high. From this label up, the minion asks with a card and waits for a member\'s go.', 'On a pull-request path, Every change ticks "Merge a pull request" under Approvals; High or Medium leaves it off and the minion asks by label instead.'),
+    (mount) => {
+      const s = stored(), cur = s.go_from ?? 'high', person = s.ship_path === 'pr-person';
+      mount.replaceChildren(seg([['never', 'Never'], ['high', 'High'], ['medium', 'Medium and up'], ['all', 'Every change']], cur, (v) => saveShipping({ go_from: v }, 'set when a person\'s go is needed'), (v) => person && v !== 'all', 'A person\'s go'),
+        person ? h('p', { class: 'muted small settings-help' }, 'A person merges every pull request here, so every change waits for a go.') : '');
+      return label(GO_FROM, cur);
+    });
+  const tryFirst = () => live({ icon: 'eye', hue: 'accent', title: 'Try it first' },
+    settingsHelp('Whether a change waits for someone to try it before it ships.', 'A minion waiting for a try posts a preview link (or screenshots where the scheme has no previews), sets its state to Try and ships on a member\'s go. UI changes are ones touching the front-end files the scheme\'s CLAUDE.md lists.'),
+    (mount) => {
+      const cur = stored().try_first ?? 'never';
+      mount.replaceChildren(seg([['never', 'Ship when green'], ['ui', 'UI waits'], ['features', 'Features wait']], cur, (v) => saveShipping({ try_first: v }, 'set what waits for a try'), false, 'Try it first'));
+      return label(TRY_FIRST, cur);
+    });
+
+
+  /**
+   * Messages (#1059): the loop guard's count and window, when a silent recipient counts as cold and how long cold mail waits.
+   * A number box inside MSG_BOUNDS (the server refuses the rest: src/msg-settings.ts), saved when it changes.
+   */
+  const number = (meta, help, field, label, unit) => {
+    const [min, max] = MSG_BOUNDS[field];
+    return live(meta, help, (mount) => {
+      const cur = stored()[field] ?? MSG_DEFAULTS[field];
+      const input = h('input', { type: 'number', class: 'rules-number', min, max, step: 1, value: cur, 'aria-label': label, onchange: () => {
+        const v = Number(input.value);
+        if (!Number.isInteger(v) || v < min || v > max) { input.value = stored()[field] ?? MSG_DEFAULTS[field]; return toast(`${label} is a whole number from ${min} to ${max}`); }
+        save({ [field]: v }, `set ${label.toLowerCase()}`);
+      } });
+      mount.replaceChildren(h('div', { class: 'rules-pick' }, input, h('span', { class: 'muted small' }, `${unit} (${min} to ${max}, default ${MSG_DEFAULTS[field]})`)));
+      return `${cur} ${unit}`;
+    });
+  };
+  const messages = () => [
+    number({ icon: 'spark', hue: 'running', title: 'Loop guard: messages' },
+      settingsHelp('How many messages a minion and its Taskmaster (or two minions) may swap per window before the next is held for a person.', 'Raise it for chatty work; each message wakes a turn, so a runaway exchange costs more before it stops. Lower it to stop loops sooner.'),
+      'msg_loop_limit', 'Loop guard count', 'messages'),
+    number({ icon: 'spark', hue: 'running', title: 'Loop guard: window' },
+      settingsHelp('How long the loop guard counts messages for.', 'A longer window catches slow loops but also holds steady work; a shorter one forgets sooner.'),
+      'msg_loop_min', 'Loop guard window', 'minutes'),
+    number({ icon: 'spark', hue: 'running', title: 'Cold after' },
+      settingsHelp('How long a Taskmaster or minion sits idle before a message to it is held as mail instead of waking it.', 'Lower it to hold more mail and save re-reading context; it stops at 55 because past an hour the prompt cache has lapsed, so holding saves nothing.'),
+      'msg_cold_min', 'Cold after', 'minutes'),
+    number({ icon: 'spark', hue: 'running', title: 'Hold at most' },
+      settingsHelp('The longest cold mail waits before it wakes its recipient anyway.', 'Longer saves wakes but news arrives later; shorter delivers sooner, each wake re-reading the whole context.'),
+      'msg_hold_h', 'Cold hold', 'hours'),
+  ];
+
+  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, messages, shots, ship, go, tryFirst, data, refreshAll };
 }
 
 /** Link rows to pages that live elsewhere (N9); Schedules opens the sidebar's list. */
@@ -231,7 +352,7 @@ export function elsewhereRows(scheduleCount) {
   return [
     link('rows', 'teal', 'Schedules', scheduleCount == null ? 'Minions that start on a timer' : `${scheduleCount} active`, `#/p/${id}`, () => setTimeout(() => { const b = document.querySelector('.schedules-btn'); if (b && b.getAttribute('aria-pressed') !== 'true') b.click(); }, 300)),
     link('check', 'done', 'Reviewers and critics', 'What judges work: critics, reviewers, audits', `#/p/${id}/reviews`),
-    link('spark', 'running', 'Releases', 'What shipped and what is live', `#/p/${id}/releases/all`),
+    link('spark', 'running', 'Releases', 'What shipped and what is live', `#/p/${id}/releases/${Number(id) === 2 ? 'all' : id}`),
     link('users', 'running', 'Members', 'Who works in this scheme', `#/p/${id}/members`),
     link('bell', 'held', 'Notifications', 'You: push, and what pings you', `#/p/${id}/notifications`),
   ];

@@ -127,6 +127,30 @@ test('PATCH /api/projects/:id saves the watched CI workflows, cleaned like the q
   assert.equal(ok.data.ci_quiet, '', 'the quiet list stays as it was');
 });
 
+test('PATCH Shipping keeps the merge approval and the go threshold agreeing, and refuses a pr-person go below every change (#1043)', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Shipping' } });
+  assert.deepEqual([p.ship_path, p.go_from, p.try_first], ['citadel', 'high', 'never'], "today's behaviour by default");
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ship_path: 'by-hand' } })).status, 400);
+  const all = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ship_path: 'pr-auto', go_from: 'all', approval_rules: 'Edit(CLAUDE.md)' } });
+  assert.equal(all.status, 200);
+  assert.equal(all.data.approval_rules, 'Edit(CLAUDE.md)\nBash(gh pr merge:*)\nmcp__*__merge_pull_request', 'every change on a PR path ticks the merge approval');
+  const high = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { go_from: 'high' } });
+  assert.equal(high.data.approval_rules, 'Edit(CLAUDE.md)', 'a go by label leaves it off');
+  const clash = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ship_path: 'pr-person', go_from: 'medium' } });
+  assert.equal(clash.status, 400);
+  assert.match(clash.data.error, /every change/i);
+  const person = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ship_path: 'pr-person', try_first: 'ui' } });
+  assert.deepEqual([person.data.ship_path, person.data.go_from, person.data.try_first], ['pr-person', 'all', 'ui'], 'a person merging means every change needs a go');
+  assert.match(person.data.approval_rules, /gh pr merge/);
+  // The gate's two rules are checked like typed ones: a list already at the cap can't take them.
+  const { data: full } = await call('/api/projects', { method: 'POST', body: { name: 'Full rules' } });
+  const fifty = Array.from({ length: 50 }, (_, i) => `Bash(tool${i}:*)`).join('\n');
+  assert.equal((await call(`/api/projects/${full.id}`, { method: 'PATCH', body: { approval_rules: fifty } })).status, 200);
+  const over = await call(`/api/projects/${full.id}`, { method: 'PATCH', body: { ship_path: 'pr-person' } });
+  assert.equal(over.status, 400);
+  assert.match(over.data.error, /Merge a pull request.*At most/);
+});
+
 test("PATCH land_mode turns fast mode on only once the scheme's land.sh knows it, and tells the Taskmaster (#1017)", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Fast' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
@@ -149,4 +173,16 @@ test("PATCH land_mode turns fast mode on only once the scheme's land.sh knows it
   assert.equal(off.data.land_mode, 'off');
   const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
   assert.equal(notes.filter((t: string) => /fast mode/i.test(t)).length, 2, notes.join('\n'));
+});
+
+test('PATCH saves a scheme\'s screenshot widths, themes, requirement and note, and defaults to today\'s rule (#1044)', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Shots' } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  assert.deepEqual([page.project.shot_widths, page.project.shot_themes, page.project.shots_required, page.project.shot_note], ['1440,390', 'light', 1, '']);
+  const ok = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { shot_widths: [390, '1024', 390], shot_themes: 'dark,light', shots_required: false, shot_note: '  1x in her   window ' } });
+  assert.equal(ok.status, 200);
+  assert.deepEqual([ok.data.shot_widths, ok.data.shot_themes, ok.data.shots_required, ok.data.shot_note], ['390,1024', 'light,dark', 0, '1x in her window']);
+  for (const body of [{ shot_widths: [] }, { shot_widths: 'wide' }, { shot_widths: [50] }, { shot_themes: 'sepia' }, { shot_themes: [] }, { shots_required: 'yes' }, { shot_note: 5 }, { shot_note: 'x'.repeat(201) }]) {
+    assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body })).status, 400, JSON.stringify(body));
+  }
 });

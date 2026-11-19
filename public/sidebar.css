@@ -213,3 +213,16 @@
 /* A CI run that ended (#546): green or red, full width. */
 .wait-bar.f-done > i { background: var(--done); }
 .wait-bar.f-broken > i { background: var(--error); }
+
+/* What each run found, its history and brief, and the standard-audits check (#1057). */
+.schedule-toggle { display: grid; gap: 0.3rem; justify-items: start; }
+.schedule-toggle button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.schedule-toggle-body { width: 100%; }
+.schedule-brief { margin: 0; max-height: 14rem; overflow: auto; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.5rem; }
+.schedule-runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.schedule-audits { border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; display: grid; gap: 0.25rem; }
+.schedule-audits ul { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.25rem; }
+.schedule-audits button { padding: 0.15rem 0.5rem; margin-left: 0.3rem; }
+.schedule .tnum { font-variant-numeric: tabular-nums; }
+.schedules-pane, .schedule-list > li, .schedule-audits { min-width: 0; box-sizing: border-box; }
+.schedule-runs li, .schedule-audits li { overflow-wrap: anywhere; }

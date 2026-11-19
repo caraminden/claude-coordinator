@@ -68,7 +68,9 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/1/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/1-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light"
    }
   },
   "settings": {
@@ -274,6 +276,8 @@
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/2-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
     "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light",
     "COORDINATOR_MEMORY": "1",
     "GH_TOKEN": "gh-1",
     "GIT_AUTHOR_NAME": "Cara",
@@ -1300,6 +1304,8 @@
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/5-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
     "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light",
     "COORDINATOR_CODEX_IMAGES": "1"
    }
   },
@@ -1503,6 +1509,8 @@
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/6-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
     "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light",
     "COORDINATOR_CODEX_IMAGES": "1"
    }
   },
@@ -1712,7 +1720,9 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/6/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/7-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light"
    }
   },
   "settings": {
@@ -1936,6 +1946,8 @@
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/8-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
     "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light",
     "COORDINATOR_MACHINES": "perigee-godot"
    }
   },
@@ -2163,6 +2175,8 @@
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/9-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
     "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light",
     "COORDINATOR_CODEX_IMAGES": "1"
    }
   },
@@ -2372,7 +2386,9 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/9/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-1/10-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light"
    }
   },
   "settings": {
@@ -2585,6 +2601,8 @@
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/11-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
     "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light",
     "COORDINATOR_CODEX_IMAGES": "1"
    }
   },
@@ -2797,7 +2815,9 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/11/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/12-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light"
    }
   },
   "settings": {
@@ -3001,7 +3021,9 @@
     "COORDINATOR_SHARED_DIR": "<ROOT>/projects/12/shared/project",
     "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/13-<TIME>/codex-tripwire.json",
     "COORDINATOR_APPROVALS": "1",
-    "MCP_TOOL_TIMEOUT": "604800000"
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_SHOT_WIDTHS": "1440,390",
+    "COORDINATOR_SHOT_THEMES": "light"
    }
   },
   "settings": {

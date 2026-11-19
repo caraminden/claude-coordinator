@@ -4,10 +4,10 @@ import { test } from 'node:test';
 import { systemPrompt, turnContext } from '../src/prompts.ts';
 
 // The starting prompt's size budget (#415): every API call re-reads it, so it only grows by decision.
-// Budgets are characters (minion 36,400 on 2026-11-18: #975 added the finishing-work lines, AG-01; Taskmaster 39,500 on 2026-11-19: #1030 added the .env grep habit) (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760; Build 2, 2026-11-17). Raising one is a
+// Budgets are characters (minion 36,400 on 2026-11-18: #975 added the finishing-work lines, AG-01; Taskmaster 39,500 on 2026-11-19: #1030 added the .env grep habit; 39,700 the same day: #1056 added the design-brief ambition line; minion 37,000 and Taskmaster 40,100 the same day: #1043 added the Shipping line both read, path, go threshold and try-first, in place of each scheme's own shipping paragraph) (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760; Build 2, 2026-11-17). Raising one is a
 // one-line edit here with the reason in the commit message; then refresh the baseline with
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
-const BUDGET = { minion: 36_400, taskmaster: 39_500 };
+const BUDGET = { minion: 37_000, taskmaster: 40_100 };
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).
 const app = 'x'.repeat(11_664);

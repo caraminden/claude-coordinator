@@ -569,6 +569,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "PUT /api/costs/fable-cap": {
+  "anon": "401 Not logged in",
+  "person": "400 pct is the cap as a percent of the weekly plan, 0 to 100",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/costs/mine": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -576,6 +586,16 @@
   "outsider": "200",
   "tmA": "409 No person asked for this turn, so there is no one whose spend to show",
   "tmB": "409 No person asked for this turn, so there is no one whose spend to show",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/deploy-watch": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -658,6 +678,16 @@
   "tmB": "400 what must be db, journal, status or units",
   "m1": "400 what must be db, journal, status or units",
   "m2": "400 what must be db, journal, status or units"
+ },
+ "GET /api/host-load": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "GET /api/invite/not-a-token": {
   "anon": "404 This link has expired or was already used. Ask for a new one.",
@@ -1473,6 +1503,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/held": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "PUT /api/projects/:p/hidden": {
   "anon": "401 Not logged in",
   "person": "400 hidden must be true or false",
@@ -1567,6 +1607,36 @@
   "anon": "401 Not logged in",
   "person": "200",
   "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/projects/:p/memory-files": {
+  "anon": "401 Not logged in",
+  "person": "400 Say which folder and note",
+  "member": "400 Say which folder and note",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/memory-files": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/projects/:p/memory-files": {
+  "anon": "401 Not logged in",
+  "person": "400 Say which folder and note",
+  "member": "400 Say which folder and note",
   "outsider": "404 No such scheme",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
@@ -1713,6 +1783,16 @@
   "m1": "400 contraption is required",
   "m2": "400 contraption is required"
  },
+ "GET /api/projects/:p/repo-setup": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/reviews": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1762,6 +1842,16 @@
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "404 No entry named nope",
   "m2": "404 No entry named nope"
+ },
+ "GET /api/projects/:p/schedule-audits": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "GET /api/projects/:p/schedules": {
   "anon": "401 Not logged in",
@@ -2340,6 +2430,16 @@
   "tmA": "403 Only a minion can message its Taskmaster",
   "tmB": "403 Only a minion can message its Taskmaster",
   "m1": "400 Message is required",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/deliver-mail": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people deliver held mail",
+  "tmB": "403 Only people deliver held mail",
+  "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/deploy": {
@@ -3029,6 +3129,16 @@
   "outsider": "403 Only a minion can message its Taskmaster",
   "tmA": "403 Only a minion can message its Taskmaster",
   "tmB": "403 Only a minion can message its Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/deliver-mail": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people deliver held mail",
+  "tmB": "403 Only people deliver held mail",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

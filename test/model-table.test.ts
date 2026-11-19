@@ -43,3 +43,26 @@ test("the Taskmaster's prompt carries the table, with every tier's model and eff
   assert.ok(prompt.includes(tableText()));
   assert.doesNotMatch(prompt, /leave both out/i);
 });
+
+test('the Models section rows are the table itself, and the picked-because line names who chose (#1061)', async () => {
+  const { tierRows, advisorTrialEnd, pickReason, tierLabel } = await import('../public/model-table.js');
+  assert.equal(tierRows().length, TIERS.length);
+  tierRows().forEach((r, i) => {
+    assert.equal(r.work, TIERS[i].work);
+    assert.equal(r.tier, tierLabel(TIERS[i].model, TIERS[i].effort));
+    assert.equal(r.then, TIERS[i].then ?? null);
+  });
+  assert.equal(advisorTrialEnd(), '2026-11-30');
+  assert.equal(pickReason('table', 'bug', 'claude-sonnet-5-5', 'medium'), 'bug → Sonnet 5.5 medium');
+  assert.equal(pickReason('Josh', null, 'claude-opus-5-5', 'high'), 'set by Josh: Opus 5.5 high');
+  assert.match(pickReason('step-up', null, 'claude-opus-5-5', 'medium'), /^changed by the Taskmaster/);
+});
+
+test('the Taskmaster prompt switches to Opus high on its own once Fable is over its cap (#1061)', () => {
+  const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo', fable_ok: 'on' } as any;
+  const t = { id: 1, number: null, title: 'Taskmaster', kind: 'coordinator' } as any;
+  const args = [project, t, '/s', '/p', '/t', '/m', [], true, '', null, [], null, false, null, null, false, null, []] as const;
+  const under = (systemPrompt as any)(...args, false), over = (systemPrompt as any)(...args, true);
+  assert.doesNotMatch(under, /over the weekly cap/);
+  assert.match(over, /Fable use is over the weekly cap[^.]*start Fable-tier minions on Opus high/);
+});

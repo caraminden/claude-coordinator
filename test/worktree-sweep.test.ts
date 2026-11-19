@@ -55,6 +55,7 @@ function minion(s: { id: number; repo: string }, dismissedDaysAgo: number | null
   return { id: t.id, number: t.number, dir, branch };
 }
 
+const dailyNote = (id: number) => JSON.parse(store.listEvents(id).filter((e) => e.kind === 'note' && /today/.test(JSON.parse(e.data).text)).at(-1)!.data) as { text: string; detail: string };
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 
 
@@ -99,8 +100,9 @@ test('dismissed past the grace: removed with its branch kept, saving uncommitted
   assert.match(done.kept.join('\n'), new RegExp(`#${nested.number} .*holds another git checkout, clone`));
   assert.match(notes(dirty.id).at(-1)!, /Removed this dismissed minion's worktree .*a reopen brings the folder back with its uncommitted work/);
   const tm = notes(s.coordinator).at(-1)!;
-  assert.match(tm, /Removed 3 worktrees/);
-  assert.match(tm, new RegExp(`#${clean.number} \\(tickets/${clean.id}\\), \\d+ MiB`));
+  assert.match(tm, /^Cleaned up 3 worktrees today, .* freed · \d+ kept$/);
+  assert.ok(!tm.includes('\n'), 'the line is one line');
+  assert.match(dailyNote(s.coordinator).detail, new RegExp(`#${clean.number} \\(tickets/${clean.id}\\), \\d+ MiB`));
 
   // A second sweep says nothing new about the ones it keeps.
   assert.equal((await runner.sweepWorktrees()).get(s.id), undefined);
@@ -261,4 +263,25 @@ test('a minion whose worktree was never recorded (creation cut off by a restart)
   await runner.reopened(half.id);
   assert.equal(store.getTicket(half.id)!.cwd, '');
   assert.match(notes(half.id).at(-1)!, /could not make one/);
+});
+
+test('one cleanup note per scheme per Pacific day: a second sweep the same day adds to it, the next day starts a new one (#1055)', async () => {
+  const s = scheme('Daily');
+  const day1 = Date.parse('2026-11-19T20:00:00Z');
+  const count = () => store.listEvents(s.coordinator).filter((e) => e.kind === 'note' && /today/.test(JSON.parse(e.data).text)).length;
+  const a = minion(s, null); store.updateTicket(a.id, { status: 'closed' }); store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 - 4 * DAY, a.id);
+  await runner.sweepWorktrees(day1);
+  assert.equal(count(), 1);
+  const b = minion(s, null); store.updateTicket(b.id, { status: 'closed' }); store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 - 4 * DAY, b.id);
+  await runner.sweepWorktrees(day1 + 3_600_000);
+  assert.equal(count(), 1, 'same day: still one note');
+  const note = dailyNote(s.coordinator);
+  assert.match(note.text, /^Cleaned up 2 worktrees today/);
+  assert.equal(store.listEvents(s.coordinator).filter((e) => e.kind === 'note_edit').length, 1, 'open chats get the edit live');
+  assert.match(note.detail, new RegExp(`#${a.number} `));
+  assert.match(note.detail, new RegExp(`#${b.number} `));
+  const c = minion(s, null); store.updateTicket(c.id, { status: 'closed' }); store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 + DAY - 4 * DAY, c.id);
+  await runner.sweepWorktrees(day1 + DAY);
+  assert.equal(count(), 2, 'next day: a new note');
+  assert.match(dailyNote(s.coordinator).text, /^Cleaned up 1 worktree today/);
 });

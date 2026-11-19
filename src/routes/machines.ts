@@ -1,5 +1,6 @@
 // Machines: people list and manage them; a machine's agent connects with its own token; a minion's
 // turn opens sessions to one and sends them messages.
+import { hostLoad } from '../host-load.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
@@ -243,6 +244,11 @@ export const machineRoutes: Route[] = [
   {
     method: 'GET', path: '/api/ci', ...people,
     handler: ({ res, app, session }) => json(res, 200, { schemes: app.ciHealth?.snapshot((id) => app.store.canSee(session, id)) ?? [], pcs: app.ciLoad.views(), now: Date.now() }),
+  },
+  // Host load (#1060): citadel-heavy's slots, line and pressure gate, and a week's waits per scheme. Everyone signed in sees it, like the CI desktop's.
+  {
+    method: 'GET', path: '/api/host-load', ...people,
+    handler: ({ res, app }) => json(res, 200, app.heavyDir ? hostLoad(app.heavyDir) : null),
   },
   { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app, session }) => json(res, 200, machinesFor(session, app.machines.list())) },
   {

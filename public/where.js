@@ -4,6 +4,7 @@ import { account, api, costText, h, icon, threadHref, view } from './base.js';
 import { settingsJump, settingsTabs, settingsTitle } from './settings.js';
 import { costDetail } from './cost.js';
 import { codexWindowsBlock } from './core.js';
+import { modelsSection } from './models.js';
 
 /** A share of the weekly limit (all your accounts together), "4.2%", or null while no meter can price it. */
 function share(usd, weekUsd) {
@@ -99,11 +100,20 @@ export function usagePage() {
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.')),
-    settingsJump(['usage-claude', 'Claude'], ['usage-codex', 'Codex'], ...(account?.admin ? [['usage-server', 'Server login']] : [])),
+    settingsJump(['usage-claude', 'Claude'], ['usage-models', 'Models'], ['usage-codex', 'Codex'], ...(account?.admin ? [['usage-server', 'Server login']] : [])),
     h('h3', { class: 'settings-section settings-anchor', id: 'usage-claude' }, 'Claude spend'),
     pick, slot,
+    h('h3', { class: 'settings-section settings-anchor', id: 'usage-models' }, 'Models and the Fable cap'),
+    modelsSlot(),
     h('h3', { class: 'settings-section settings-anchor', id: 'usage-codex' }, 'Codex'), codexWindowsBlock(),
     account?.admin ? h('div', { id: 'usage-server', class: 'settings-anchor' }, costDetail()) : '');
 }
 
 let pickedRange = 'week';
+
+/** The Models section (#1061), filled once its data arrives; it keeps a reserved height until then. */
+function modelsSlot() {
+  const slot = h('div', { class: 'models-slot loading' }, h('p', { class: 'key' }, 'Loading…'));
+  setTimeout(() => modelsSection(slot));
+  return slot;
+}

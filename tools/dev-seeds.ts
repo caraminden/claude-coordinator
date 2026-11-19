@@ -9,6 +9,8 @@ import { deflateSync } from 'node:zlib';
 import { marksTitle } from '../public/ui/marks.js';
 import type { Project, Store, Ticket } from '../src/db.ts';
 import { projectDir } from '../src/workspace.ts';
+import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
+import { projectSlug } from '../src/sessions.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
@@ -673,6 +675,30 @@ mock.boards('#takes', { boards: [
       return route(c, t, first);
     },
   },
+  memory: {
+    about: "Settings → Memory (#1058): the Seeded scheme with a repo folder and six Claude Code memory notes in the server login's config dir, one naming a closed minion, two with dates (one passed, one soon), and an index",
+    seed(c) {
+      const repo = join(c.dataDir, 'seeded-repo');
+      mkdirSync(repo, { recursive: true });
+      c.store.setProjectRepoDir(c.project.id, repo);
+      const closed = minion(c, 'Old export fix', { status: 'closed' }, 'bug');
+      // The copy's own config dir (previews.ts), so a test or a stray run never writes into the real one.
+      const dir = join(c.dataDir, 'claude', 'projects', projectSlug(repo), 'memory');
+      mkdirSync(dir, { recursive: true });
+      const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+      const notes: [string, string, string, string][] = [
+        ['released-means-released', 'Released means released', 'A target is live only when its people can get that version', 'Cara 2026-11-18: say "released" only once people can get the build.'],
+        ['ship-not-land', 'Ship, not land', 'Cara picked "land", then reversed to "ship" the same day', 'In everything people read, a change going onto main is "shipping".'],
+        ['for-cara-next-time', 'For Cara next time', 'Still owed to Cara', `Owed: the export check from #${closed.number}, and the Android units.`],
+        ['fable-burst', 'Fable burst', 'Hard jobs on Fable the week of Nov 14', `Recheck after ${day(-5)}.`],
+        ['effort-keep-high', 'Taskmaster effort', 'Cara: keep high', `Recheck after ${day(2)}; cut cost via wakes and context, not effort.`],
+        ['perigee-shell', 'Perigee shell is fish', 'Hand people fish syntax or bash -c', 'A bash for-loop just hangs waiting for `end`.'],
+      ];
+      for (const [file, name, description, body] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: feedback\n---\n\n${body}\n`);
+      writeFileSync(join(dir, 'MEMORY.md'), notes.map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
+      return `#/p/${c.project.id}/memory (Settings → Memory in "${c.project.name}")`;
+    },
+  },
   ci: {
     about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), a queue, runs and runners with what they run, desktop load, each run linking its minion (#1019), a quieted workflow with a red verdict, greyed (#990), the queued jobs of the landing minion as one row (#1019); the CI chip turns red',
     seed(c) {
@@ -786,6 +812,41 @@ mock.boards('#takes', { boards: [
       });
       writeFileSync(join(q, '.order'), `# ${c.who} moved #4 to land next\n0000000004\n0000000002\n0000000003\n`);
       return `#/p/${c.project.id}/releases/${c.project.id}`;
+    },
+  },
+  'schedule-runs': {
+    about: 'a scheme with a template row beside a hand-made copy, plus Threadspace (no Test audit), with run history, outcomes and costs (#1057)',
+    seed(c) {
+      const user = c.store.listUsers().find((u) => u.name === c.who);
+      const day = 864e5;
+      const now = Date.now();
+      const scheme = (name: string) => {
+        const p = c.store.listProjects().find((x) => x.name === name) ?? c.store.createProject(name, null, user?.id ?? null);
+        c.store.setProjectSettings(p.id, { onboarding: 'skipped' });
+        if (user) c.store.addMember(p.id, user.id);
+        return p;
+      };
+      // The Seeded scheme gets the Genesis Tree case (a template row beside a hand-made copy); Threadspace is the left-out case.
+      const gt = c.project;
+      scheme('Threadspace');
+      const t = loadTemplates().get('code-health')!;
+      const vars = templateVars(c.store, c.dataDir, gt.id);
+      const row = c.store.schedules.create({ project_id: gt.id, ...templateFields(t, gt, 'Never push.', vars), created_by: c.who });
+      c.store.schedules.create({ project_id: gt.id, name: 'Code health', cron: '0 4 * * 1', brief: 'Hand-made copy.', type: 'chore', created_by: c.who });
+      const runMinions: [string, Parameters<Store['updateTicket']>[1], number][] = [
+        ['Code health run', { status: 'idle', state: 'complete', note: '3 findings, 1 PR opened' }, 2.41],
+        ['Code health run', { status: 'idle', state: 'ready', note: 'needs a go on the split' }, 1.87],
+        ['Code health run', { status: 'error', note: null }, 0.2],
+        ['Code health run', { status: 'running', note: 'reading src/' }, 0.5],
+      ];
+      runMinions.forEach(([title, fields, cost], i) => {
+        const tk = c.store.createTicket({ project_id: gt.id, title, permission_mode: 'bypassPermissions', created_by: c.who });
+        c.store.updateTicket(tk.id, fields);
+        c.store.recordTurn(tk.id, { ended_at: now, session_cost_usd: cost, session_id: `seed-${tk.id}` });
+        c.store.schedules.ran(row.id, { ticketId: tk.id }, now - (28 - i * 7) * day);
+        if (i < 3) c.store.schedules.ran(row.id, { skip: `Skipped: 1 minion since last run (needs 3)` }, now - (27 - i * 7) * day);
+      });
+      return `#/p/${gt.id}`;
     },
   },
   'inbox-full': {

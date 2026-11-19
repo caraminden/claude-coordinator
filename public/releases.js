@@ -10,6 +10,7 @@ import { iconSrc } from './schemes.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
+import { claimsBlock, loadClaims, loadWatch, watchBlock } from './release-extras.js';
 import { segTrack, TRACK } from './wait.js';
 import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
@@ -33,9 +34,19 @@ export async function loadReleases() {
   for (const s of schemes.values()) settleDeploys(s);
   member = new Set(got[1].schemes.map((s) => s.projectId));
   loaded = true;
+  refreshExtras();
   redraw();
   return rowsChanged();
 }
+
+/** Claims for every scheme the page can show (a scheme with only a claim has no releases entry), and the watch. */
+function refreshExtras() {
+  for (const id of new Set([...schemes.keys(), ...(view?.projects ?? []).map((p) => p.id)])) loadClaims(id, redraw);
+  loadWatch(redraw);
+}
+
+/** A `claims` event: that scheme's claims changed. */
+export function onClaims(msg) { loadClaims(msg.projectId, redraw); }
 
 /** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
 export function onReleases(msg) {
@@ -43,6 +54,7 @@ export function onReleases(msg) {
   const s = msg.releases;
   const had = schemes.has(msg.projectId);
   settleDeploys(s);
+  if (s.targets.some((t) => t.target.id === CITADEL_TARGET_ID)) loadWatch(redraw);
   if (s.targets.length || s.testCopies.length) schemes.set(msg.projectId, s);
   else schemes.delete(msg.projectId);
   if (!had && schemes.has(msg.projectId)) return loadReleases();
@@ -79,6 +91,9 @@ const stageName = (key) => {
 };
 const isSha = (v) => /^[0-9a-f]{7,40}$/.test(v);
 const minionHref = (projectId, c) => (c.number != null ? `#/p/${projectId}/t/${c.number}` : `#/t/${c.ticketId}`);
+/** Where Releases opens from scheme `id` with no scope named (Josh, 2026-11-19): that scheme's own, and every scheme's only from Citadel (project 2). */
+export const defaultScope = (id) => (Number(id) === 2 ? 'all' : Number(id));
+
 const pageHref = (scope, hl) => `#/p/${view?.projectId ?? ''}/releases/${scope}${hl ? `/${hl}` : ''}`;
 /** "50s", "3m", "1h 5m": an estimate's size, rounded. */
 const tookText = (r) => (r.started && r.live ? shortSpan(r.live - r.started) : null);
@@ -155,7 +170,7 @@ export function releaseRows(projectId) {
 
 /** The Releases link beside the Schemes heading, styled as Browse beside Artifacts: opens All. */
 export function releasesLink() {
-  return h('a', { class: `browse${view?.main === 'releases' && page?.scope === 'all' ? ' active' : ''}`, href: pageHref('all'), onclick: opening, title: 'Releases of every scheme you\'re a member of' }, 'Releases');
+  return h('a', { class: `browse${view?.main === 'releases' && page?.scope === defaultScope(view.projectId) ? ' active' : ''}`, href: pageHref(defaultScope(view?.projectId)), onclick: opening, title: Number(view?.projectId) === 2 ? 'Releases of every scheme you\'re a member of' : 'This scheme\'s releases' }, 'Releases');
 }
 
 // ---------- tracks ----------
@@ -196,6 +211,7 @@ export function setReleasesPage(scope, hl) {
 
 /** The Releases page over the chat column (on a phone, the whole screen with a back arrow). */
 export function releasesPage() {
+  if (loaded) refreshExtras();
   pageEl = h('section', { class: 'releases-main', onkeydown: (e) => { if (e.key === 'Escape') closePage(); } });
   fillPage();
   return pageEl;
@@ -265,12 +281,16 @@ function openPicker(scope, ids) {
     body: h('nav', { class: 'rel-opts', 'aria-label': 'Schemes' }, row('all'), ids.map(row)) });
 }
 
+/** The server's own deploy: the post-deploy watch is this server's, so only Citadel's card shows it. */
+const CITADEL_TARGET_ID = 'citadel-server';
+
 /** A scheme's cards (take D): one per target, then its test copies of no target. */
 function schemeCards(projectId, alone) {
   const s = schemes.get(projectId);
-  if (!s) return alone ? [h('p', { class: 'muted rel-empty' }, `Nothing ships from ${schemeName(projectId)} yet: no release, preview or test copy.`)] : [];
+  if (!s) return alone ? [claimsBlock(projectId, redraw), h('p', { class: 'muted rel-empty' }, `Nothing ships from ${schemeName(projectId)} yet: no release, preview or test copy.`)] : [claimsBlock(projectId, redraw)];
   return [
-    ...s.targets.map((tv) => targetCard(projectId, tv, alone)),
+    claimsBlock(projectId, redraw),
+    ...s.targets.flatMap((tv) => [targetCard(projectId, tv, alone), tv.target.id === CITADEL_TARGET_ID ? watchBlock() : '']),
     // On its own page the scheme's name is in the heading; among every scheme's cards, it leads each card's title.
     s.testCopies.length ? h('article', { class: 'rel-card' },
       h('header', {}, h('h3', {}, iconOf(projectId), alone ? 'Test copies' : `${schemeName(projectId)} test copies`)), copyList(s.testCopies)) : '',

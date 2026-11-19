@@ -18,7 +18,8 @@ import { checkNeed } from '../needs.ts';
 import { armForCi, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
-import { CLAUDE_MODELS } from '../../public/model-table.js';
+import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
+import { needsGo } from '../../public/shipping.js';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
@@ -58,7 +59,7 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   const { id } = ticket;
   const { store, runner } = app;
   // Any of title, state, note, replies, build, model, effort, workflow and plugin_dirs; null (or "") clears all but the title.
-  const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs'>> = {};
+  const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'picked_because'>> = {};
   if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
   if (body.workflow !== undefined) fields.workflow = workflowSwitch(body.workflow, ticket);
   if (body.plugin_dirs !== undefined) fields.plugin_dirs = pluginPicks(store, ticket, body.plugin_dirs);
@@ -81,6 +82,10 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   if (unparks) delete fields.state;
   let closeCancelled: string | null = null;
   if (Object.keys(fields).length) {
+    // A new model or effort changes why it runs where it does (#1061): a Taskmaster's change is a step-up after a stall, a person's is theirs.
+    if ('model' in fields || 'effort' in fields) {
+      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort);
+    }
     store.updateTicket(id, fields);
     if (fields.state === 'pending-deploy') runner.deployPending(id);
     if (fields.state) closeCancelled = runner.closeCancelled(id, caller !== id);
@@ -542,6 +547,16 @@ export const ticketRoutes: Route[] = [
       const { runner } = app;
       // Continue button on a loop-guard pause: the minion's held messages go through.
       return json(res, 200, { released: runner.continueLoop(id, session.name) });
+    },
+  },
+  {
+    // Deliver now on the Held list (#1059): a ticket's held mail runs as a turn without waiting for the cold hold.
+    method: 'POST', path: '/api/tickets/:ticket/deliver-mail', who: ['person'], refuse: 'Only people deliver held mail',
+    async handler(ctx) {
+      const { res, session, app, ticket } = ctx;
+      if (app.runner.isRunning(ticket.id)) return json(res, 409, { error: 'It is running: its held mail reaches it with its next turn' });
+      const project = app.store.getProject(ticket.project_id)!;
+      return json(res, 200, { delivered: app.runner.releaseMail(ticket, project, session.name) });
     },
   },
   {
@@ -1217,8 +1232,11 @@ export const ticketRoutes: Route[] = [
       if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree lands with tools/land.sh');
       if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
       const h: Handoff = { summary: str(body.summary, 'Summary', 300), risk: oneOf(body.risk || undefined, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300) };
-      if (h.risk === 'high') {
-        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, 'A high-risk change ships only on a person\'s go: name who gave it and when in go, or ask with a ship card (kind ship) first');
+      // The scheme's go threshold (#1043, Shipping in Minion rules): from that label up, a change ships only on a person's go.
+      // A feeder's merge into its build branch is covered by the build's go card (buildLines in prompts.ts).
+      const goFrom = app.store.getProject(ticket.project_id)?.go_from ?? 'high';
+      if (body.into === undefined && needsGo(goFrom, h.risk)) {
+        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first`);
         h.go = str(body.go, 'Go', 200);
       }
       if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');

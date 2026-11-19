@@ -1,7 +1,7 @@
 // The app as a whole: signing in and out, health for tools/deploy.sh, who you are, the event stream,
 // costs and which minion owns each PR.
 import { hashPassword, looksLikeUrl, NOT_PEOPLE, type Session } from '../auth.ts';
-import { costDays, hostWeek, spendSplit, weekLimit, whereItWent } from '../costs.ts';
+import { costDays, FABLE_CAP_KEY, fableMeter, hostWeek, spendSplit, weekLimit, whereItWent } from '../costs.ts';
 import { fallbacks } from '../fallbacks.ts';
 import { prOwners } from '../prlinks.ts';
 import { ServiceError } from '../app-services.ts';
@@ -138,6 +138,13 @@ export const appRoutes: Route[] = [
   } },
   // Every scheme's spend on the server's Claude login, so only for admins.
   { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner, outsideSpend } }) => json(res, 200, { outside: outsideSpend.bill(), days: costDays(store), week: hostWeek(store, runner.usageOf(store.serverLoginOwner())), split: spendSplit(store) }) },
+  // The weekly Fable cap, a percent of the weekly plan (#1061; Josh, 2026-11-19). Admins only, as the cost page's other server-wide numbers are.
+  { method: 'PUT', path: '/api/costs/fable-cap', who: ['person'], access: 'admin', handler: async ({ req, res, app: { store } }) => {
+    const pct = (await readJson(req))?.pct;
+    if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) throw new HttpError(400, 'pct is the cap as a percent of the weekly plan, 0 to 100');
+    store.setSetting(FABLE_CAP_KEY, pct);
+    return json(res, 200, fableMeter(store));
+  } },
   // Where your own spend went this week (#905): yours only, so any person (Cara, 2026-11-17: "Per person only"); a Taskmaster
   // reads its asker's (usage_split).
   { method: 'GET', path: '/api/costs/mine', who: ['person', 'taskmaster'], handler: ({ res, app: { store, runner, claude }, session, caller, url }) => {
@@ -147,7 +154,7 @@ export const appRoutes: Route[] = [
     // 100% is all the person's accounts together (Cara, 2026-11-17: "All accounts combined"), each priced like the one in use.
     const accounts = Math.max(1, claude.accounts(uid)?.accounts.filter((a) => !a.expired).length ?? 1);
     const week = weekLimit(store, payer, runner.usageOf(uid));
-    return json(res, 200, { ...whereItWent(store, payer, week && week * accounts, Date.now(), url.searchParams.get('range') === 'all' ? 'all' : 'week'), accounts });
+    return json(res, 200, { ...whereItWent(store, payer, week && week * accounts, Date.now(), url.searchParams.get('range') === 'all' ? 'all' : 'week'), accounts, fable: fableMeter(store) });
   } },
   // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).
   { method: 'GET', path: '/api/prs', who: ['person'], handler: async ({ res, app: { store }, session }) => {

@@ -29,13 +29,16 @@ const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').spli
 const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean);
 const JOB_MACHINES = (process.env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
+/** The scheme's message settings as this turn launched (#1059): every number in the messaging tool text comes from here. */
+const MSG = msgFromEnv(process.env.COORDINATOR_MSG);
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
-const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
+const COLD = (who: string) => coldToolText(MSG, who);
 import { NEEDS, NEED_LINES } from './needs.ts';
+import { coldToolText, heldToolText, msgFromEnv } from './msg-settings.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
-const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idle over 55 minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' };
+const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idle over ' + MSG.coldMin + ' minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
-const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
+const HELD = heldToolText(MSG, 'the minion and the Taskmaster');
 
 const WAKE_DESCRIPTION =
   `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as shipped: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
@@ -507,7 +510,7 @@ const TOOLS = [
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A parked minion (state parked, or chained on start_after) holds it unread until it is unparked or woken, unless you pass unpark. A minion idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within 3 hours), unless it is urgent. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A parked minion (state parked, or chained on start_after) holds it unread until it is unparked or woken, unless you pass unpark. A minion idle over ' + MSG.coldMin + ' minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within ' + MSG.holdH + ' hours), unless it is urgent. After ' + MSG.loopLimit + ' messages either way with one minion in ' + MSG.loopMin + ' minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -523,7 +526,7 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over " + MSG.coldMin + " minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After " + MSG.loopLimit + " messages either way between you in " + MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -757,7 +760,7 @@ const TOOLS = [
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, fast mode, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
+      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, fast mode, screenshot widths, themes, requirement and note, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it, except screenshot widths and themes, which keep at least one). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -792,6 +795,13 @@ const TOOLS = [
         builds: { type: 'string', enum: ['suggest', 'off'], description: "off: this scheme doesn't use numbered builds, so its Taskmaster never suggests one. Only when a member asks." },
         grill: { type: 'string', enum: ['design', 'all', 'never'], description: "Grilling before code: design (the Citadel-wide rule, design-shaped features only), all (every feature), never. Only when a member asks." },
         gh_runners: { type: 'string', enum: ['ask', 'ok', 'never'], description: "CI on GitHub's own runners costs Actions minutes: ask a person first (default), ok to use, never. Only when a member asks." },
+        screenshot_widths: { type: 'array', items: { type: 'integer', minimum: 200, maximum: 5000 }, description: "Pixel widths a minion shoots a UI change at, like [1440, 390]; tools/ui-shot.ts takes them as its default --widths." },
+        screenshot_themes: { type: 'array', items: { type: 'string', enum: ['light', 'dark'] }, description: "Themes a minion shoots a UI change in; ui-shot's default --themes." },
+        screenshots_required: { type: 'boolean', description: "true (the default): a minion's ready note for a UI change carries its screenshots." },
+        screenshot_note: { type: 'string', maxLength: 200, description: "One line added to the screenshot rule, e.g. \"1x in her window (1600×900)\"; empty clears it." },
+        ship_path: { type: 'string', enum: ['citadel', 'pr-auto', 'pr-person'], description: "Shipping (Minion rules): how a change ships. citadel: hand_off_land runs the scheme's tools/land.sh; pr-auto: a pull request that auto-merges once CI is green; pr-person: a pull request a person merges (its go is from every change). Every minion's prompt states it, and it wins over the scheme instructions. Set at setup from \"How changes ship\", or when a member asks." },
+        go_from: { type: 'string', enum: ['never', 'high', 'medium', 'all'], description: "From which self-review risk label a change waits for a member's go before it ships: never, high, medium (and up) or all. On a pull-request path, all turns the merge approval on and the others turn it off, so the two never disagree; hand_off_land refuses without go at or above it." },
+        try_first: { type: 'string', enum: ['never', 'ui', 'features'], description: 'What waits for a person to try it before it ships: never (ships when green), ui (a change to the front-end files Project facts lists) or features (every type feature).' },
         onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },
         name: { type: 'string', description: "Rename this scheme (never another). Refused if another scheme has the name. Nothing else changes: everything goes by the scheme's id, and your chat gets a note. Old \"<scheme> #N\" text keeps the old name." },
         repo_url: { type: 'string', description: "Record this scheme's repo URL (https:// or git@). Clones nothing and re-points no checkout: a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. Refused when one is set, unless replace_repo is true." },
@@ -1499,13 +1509,13 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
+      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over " + MSG.coldMin + " minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within " + MSG.holdH + " hours), unless it is urgent. After " + MSG.loopLimit + " messages either way in " + MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
   },
   {
     name: 'message_minion',
     description:
-      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over 55 minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After 6 messages either way between two minions in 10 minutes, the next is held until a person continues.",
+      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over " + MSG.coldMin + " minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After " + MSG.loopLimit + " messages either way between two minions in " + MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1577,7 +1587,7 @@ const THREAD_TOOLS = [
         summary: { type: 'string', maxLength: 300, description: 'What ships, in one line, for the shipped line (at most 300 characters)' },
         risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label" },
         risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
-        go: { type: 'string', maxLength: 200, description: 'With risk high, required: who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
+        go: { type: 'string', maxLength: 200, description: 'Required at or above the scheme\'s go threshold (the Shipping lines in your prompt; high when they name none): who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
         stay_open: { type: 'boolean', description: 'true: a clean land still deploys and posts the shipped line, but this minion is not dismissed: it stays open in state ready for the next piece (with waiting_on: woken once live instead). Only when your brief has more pieces to do in this minion; leave it out otherwise (the default dismisses you on land). A failed land is unchanged' },
         waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open, when you have after-land steps or a wait, e.g. "Cara testing on her phone": the server never parks you; once the land is live (after the restart, if it needs one) it wakes you with the shipped line, once. Then run your after-land steps and set your state: null or try for a person, wake_when_live and parked for another minion\'s land' },
         ...LAND_PROPS,
@@ -1804,7 +1814,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
-      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}`;
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nShipping: ship_path ${project.ship_path}; a person's go from: ${project.go_from}; try it first: ${project.try_first}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}\n\nScreenshots: widths ${project.shot_widths}, themes ${project.shot_themes}, ${project.shots_required ? 'required in the ready note' : 'not required'}${project.shot_note ? `, note: ${project.shot_note}` : ''}`;
     }
     case 'set_project_settings': {
       const body: Record<string, unknown> = {};
@@ -1816,6 +1826,11 @@ async function runTool(name: string, args: any): Promise<string> {
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
       if (args.land_mode !== undefined) body.land_mode = args.land_mode;
       for (const k of ['fable_ok', 'builds', 'grill', 'gh_runners'] as const) if (args[k] !== undefined) body[k] = args[k];
+      if (args.screenshot_widths !== undefined) body.shot_widths = args.screenshot_widths;
+      if (args.screenshot_themes !== undefined) body.shot_themes = args.screenshot_themes;
+      if (args.screenshots_required !== undefined) body.shots_required = args.screenshots_required;
+      if (args.screenshot_note !== undefined) body.shot_note = args.screenshot_note;
+      for (const k of ['ship_path', 'go_from', 'try_first'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
       if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
       if (args.name !== undefined) body.name = args.name;
@@ -1823,10 +1838,10 @@ async function runTool(name: string, args: any): Promise<string> {
         body.repo_url = args.repo_url;
         if (args.replace_repo === true) body.replace_repo = true;
       }
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, fable_ok, builds, grill, gh_runners, onboarding, onboarding_mode, name, repo_url or a mix');
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, fable_ok, builds, grill, gh_runners, screenshot_widths, screenshot_themes, screenshots_required, screenshot_note, ship_path, go_from, try_first, onboarding, onboarding_mode, name, repo_url or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, screenshots ${project.shot_widths} px in ${project.shot_themes}, shipping ${project.ship_path} with a go from ${project.go_from} and try first ${project.try_first}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
     }
     case 'approve':
       return approve(args);
@@ -1968,13 +1983,13 @@ async function runTool(name: string, args: any): Promise<string> {
       const unpark = args.unpark === true || args.start_now === true;
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}), ...(unpark ? { unpark: true } : {}) });
       if (t.held === 'parked') return `Held for #${t.number}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken (its deploy wait or chained start). Do not resend it; message_ticket with unpark wakes it now.\n${ticketLine(t)}`;
-      return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
+      return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `${HELD} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
       const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
-      if (r.held) return `Held, not delivered: you and the Taskmaster of ${r.scheme} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it.${copied} ${ask}`;
+      if (r.held) return `${heldToolText(MSG, `you and the Taskmaster of ${r.scheme}`)}${copied} ${ask}`;
       const how = r.cold ? COLD(`the Taskmaster of ${r.scheme}`) : args.wake === false || args.need === 'fyi' ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
@@ -2096,7 +2111,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'message_coordinator': {
       const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
       if (r.armed) return `${r.armed} End your turn with state outside.`;
-      if (r.held) return `Held, not delivered: ${HELD}`;
+      if (r.held) return `${HELD} Finish your turn.`;
       if (r.mail) return 'Left as held mail: the Taskmaster reads it on its next turn, whoever wakes it. Do not resend it.';
       return r.cold ? COLD('the Taskmaster') : 'Sent. The Taskmaster runs it now, or after its current turn.';
     }
@@ -2106,7 +2121,7 @@ async function runTool(name: string, args: any): Promise<string> {
       sharedFilesExist(args.text ?? args.message, 'Send this');
       const r = await call('POST', `/api/tickets/${TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.unpark === true ? { unpark: true } : {}) });
       const who = `#${r.number} ${r.title}`;
-      if (r.held === true) return `Held, not delivered: you and #${r.number} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.`;
+      if (r.held === true) return `${heldToolText(MSG, `you and #${r.number}`)} Finish your turn.`;
       if (r.held === 'parked') return `Held for ${who}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken. Do not resend it; if it is parked on you, resend with unpark: true.`;
       if (r.held === 'cold') return COLD(`#${r.number}`);
       if (r.held === 'mail') return `Left as held mail: ${who} reads it on its next turn, whoever wakes it. Do not resend it.`;

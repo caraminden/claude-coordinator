@@ -72,7 +72,19 @@ CREATE TABLE IF NOT EXISTS schedules (
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+-- One row per slot that started a minion or was skipped by a gate (H1, #1057): the history the schedule's last_* columns can't keep.
+CREATE TABLE IF NOT EXISTS schedule_runs (
+  id INTEGER PRIMARY KEY,
+  schedule_id INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  ticket_id INTEGER,
+  skip TEXT
+);
+CREATE INDEX IF NOT EXISTS schedule_runs_by_schedule ON schedule_runs (schedule_id, at);
 `;
+
+/** One slot in a schedule's history: the minion it started, or why the gate skipped it. */
+export interface ScheduleRun { id: number; schedule_id: number; at: number; ticket_id: number | null; skip: string | null }
 
 const ALIASES: Record<string, string> = { '@hourly': '0 * * * *', '@daily': '0 0 * * *', '@nightly': '0 0 * * *', '@weekly': '0 0 * * 0' };
 // [lowest, highest] per field: minute, hour, day of month, month, day of week (0 and 7 are Sunday).
@@ -325,6 +337,7 @@ export class Schedules {
   }
 
   remove(id: number): boolean {
+    this.db.prepare('DELETE FROM schedule_runs WHERE schedule_id = ?').run(id);
     return this.db.prepare('DELETE FROM schedules WHERE id = ?').run(id).changes > 0;
   }
 
@@ -345,6 +358,9 @@ export class Schedules {
     try {
       next = nextRun(s.cron, now);
     } catch {}
+    if ('ticketId' in outcome || 'skip' in outcome) {
+      this.db.prepare('INSERT INTO schedule_runs (schedule_id, at, ticket_id, skip) VALUES (?, ?, ?, ?)').run(id, now, 'ticketId' in outcome ? outcome.ticketId : null, 'skip' in outcome ? outcome.skip : null);
+    }
     if ('ticketId' in outcome) {
       const done = !!s.once;
       this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : next, id);
@@ -354,6 +370,16 @@ export class Schedules {
     } else {
       this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next, id);
     }
+  }
+
+  /** The newest `limit` slots, newest first. */
+  runs(id: number, limit = 10): ScheduleRun[] {
+    return this.db.prepare('SELECT * FROM schedule_runs WHERE schedule_id = ? ORDER BY at DESC, id DESC LIMIT ?').all(id, limit) as unknown as ScheduleRun[];
+  }
+
+  /** How many slots the gate skipped since `since`. */
+  skipsSince(id: number, since: number): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM schedule_runs WHERE schedule_id = ? AND skip IS NOT NULL AND at >= ?').get(id, since) as { n: number }).n;
   }
 
   /** When the gate's window opens: the last real run, or the schedule's making if it has never run. */

@@ -98,6 +98,27 @@ export interface Project {
   grill: GrillMode;
   /** CI on GitHub's own runners (#1045, they cost Actions minutes): ask a person first, ok to use, or never. */
   gh_runners: GhRunnersMode;
+  /** Screenshot widths in px, comma-separated, for a minion's UI checks (#1044); ui-shot's default. */
+  shot_widths: string;
+  /** Themes shot, comma-separated, light and/or dark (#1044). */
+  shot_themes: string;
+  /** 1 when a UI change's ready note must carry its shots (#1044). */
+  shots_required: number;
+  /** Free text added to the screenshot line of the prompt, e.g. "1x in her window" (#1044). */
+  shot_note: string;
+  /** How a change ships (#1043, public/shipping.js): citadel (hand_off_land runs tools/land.sh), pr-auto or pr-person. */
+  ship_path: ShipPath;
+  /** From which risk label a change waits for a person's go: never, high, medium or all; pr-person is always all. */
+  go_from: GoFrom;
+  /** What waits for a person to try it before it ships: never, ui (front-end changes) or features. */
+  try_first: TryFirst;
+  /** Message settings (#1059, src/msg-settings.ts): loop guard count and window (minutes), cold after (minutes), cold hold at most (hours). */
+  msg_loop_limit: number;
+  msg_loop_min: number;
+  msg_cold_min: number;
+  msg_hold_h: number;
+  /** 1 while the members' pass on Minion rules after setup is open (#1046): onboarding done sets it, "Looks right" clears it. */
+  rules_review: number;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -209,6 +230,10 @@ export const GRILL_MODES = ['design', 'all', 'never'] as const;
 export type GrillMode = (typeof GRILL_MODES)[number];
 export const GH_RUNNERS_MODES = ['ask', 'ok', 'never'] as const;
 export type GhRunnersMode = (typeof GH_RUNNERS_MODES)[number];
+/** A scheme's Shipping settings (#1043): their values and labels are public/shipping.js's, shared with the page. */
+export type ShipPath = 'citadel' | 'pr-auto' | 'pr-person';
+export type GoFrom = 'never' | 'high' | 'medium' | 'all';
+export type TryFirst = 'never' | 'ui' | 'features';
 
 /** Whether a scheme is still being set up, which is what gives its Taskmaster the onboarding section. */
 export const onboardingOpen = (p: Pick<Project, 'onboarding'>) => p.onboarding !== 'done' && p.onboarding !== 'skipped';
@@ -261,6 +286,8 @@ export interface Ticket {
   /** What Claude Code's defaults came out as on this thread's latest turn without a choice. */
   last_model: string | null;
   last_effort: string | null;
+  /** Why it runs on its model and effort (#1061), a line like "bug → Sonnet 5.5 medium"; null for a minion from before. */
+  picked_because: string | null;
   /** 1: its turns may call Claude Code's Workflow tool (#359), off by default as it costs ~2k tokens a call. */
   workflow: number;
   /** Its picks from the scheme's optional plugin folders (#361), one per line; '' for none. */
@@ -1255,6 +1282,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'model', 'ALTER TABLE tickets ADD COLUMN model TEXT'],
   ['tickets', 'effort', 'ALTER TABLE tickets ADD COLUMN effort TEXT'],
   ['tickets', 'last_model', 'ALTER TABLE tickets ADD COLUMN last_model TEXT'],
+  ['tickets', 'picked_because', 'ALTER TABLE tickets ADD COLUMN picked_because TEXT'],
   ['tickets', 'last_effort', 'ALTER TABLE tickets ADD COLUMN last_effort TEXT'],
   ['tickets', 'workflow', 'ALTER TABLE tickets ADD COLUMN workflow INTEGER NOT NULL DEFAULT 0'],
   ['tickets', 'plugin_dirs', "ALTER TABLE tickets ADD COLUMN plugin_dirs TEXT NOT NULL DEFAULT ''"],
@@ -1283,6 +1311,19 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'builds', "ALTER TABLE projects ADD COLUMN builds TEXT NOT NULL DEFAULT 'suggest'"],
   ['projects', 'grill', "ALTER TABLE projects ADD COLUMN grill TEXT NOT NULL DEFAULT 'design'"],
   ['projects', 'gh_runners', "ALTER TABLE projects ADD COLUMN gh_runners TEXT NOT NULL DEFAULT 'ask'"],
+  ['projects', 'shot_widths', "ALTER TABLE projects ADD COLUMN shot_widths TEXT NOT NULL DEFAULT '1440,390'"],
+  ['projects', 'shot_themes', "ALTER TABLE projects ADD COLUMN shot_themes TEXT NOT NULL DEFAULT 'light'"],
+  ['projects', 'shots_required', 'ALTER TABLE projects ADD COLUMN shots_required INTEGER NOT NULL DEFAULT 1'],
+  ['projects', 'msg_loop_limit', 'ALTER TABLE projects ADD COLUMN msg_loop_limit INTEGER NOT NULL DEFAULT 6'],
+  ['projects', 'msg_loop_min', 'ALTER TABLE projects ADD COLUMN msg_loop_min INTEGER NOT NULL DEFAULT 10'],
+  ['projects', 'msg_cold_min', 'ALTER TABLE projects ADD COLUMN msg_cold_min INTEGER NOT NULL DEFAULT 55'],
+  ['projects', 'msg_hold_h', 'ALTER TABLE projects ADD COLUMN msg_hold_h INTEGER NOT NULL DEFAULT 3'],
+  ['projects', 'shot_note', "ALTER TABLE projects ADD COLUMN shot_note TEXT NOT NULL DEFAULT ''"],
+  // Today's behaviour by default (#1043): Citadel ships it, a go from high, no try first. shippingFromRules moves the PR schemes.
+  ['projects', 'ship_path', "ALTER TABLE projects ADD COLUMN ship_path TEXT NOT NULL DEFAULT 'citadel'"],
+  ['projects', 'go_from', "ALTER TABLE projects ADD COLUMN go_from TEXT NOT NULL DEFAULT 'high'"],
+  ['projects', 'try_first', "ALTER TABLE projects ADD COLUMN try_first TEXT NOT NULL DEFAULT 'never'"],
+  ['projects', 'rules_review', 'ALTER TABLE projects ADD COLUMN rules_review INTEGER NOT NULL DEFAULT 0'],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
@@ -1385,7 +1426,12 @@ export const SCHEMA_HISTORY = [
   [69, "drop Peek Auras' Windows Builds 1277-1291 recorded live before PCs could take them (#1019)"],
   [70, 'projects.land_mode (#1017)'],
   [71, 'projects.fable_ok, builds, grill, gh_runners (#1045)'],
-  [72, 'review_entries, review_versions; repo rubric files imported once (#1051)'],
+  [72, 'projects.shot_widths, shot_themes, shots_required, shot_note (#1044)'],
+  [73, 'projects.ship_path, go_from, try_first; schemes whose merges wait for a person start on pr-person (#1043)'],
+  [74, 'tickets.picked_because (#1061)'],
+  [75, 'projects.msg_loop_limit, msg_loop_min, msg_cold_min, msg_hold_h (#1059)'],
+  [76, 'projects.rules_review (#1046)'],
+  [77, 'review_entries, review_versions; repo rubric files imported once (#1051)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1477,6 +1523,7 @@ export class Store {
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.dropEarlyPeekAurasBuilds();
+    this.shippingFromRules();
     this.lendingLists();
     this.noteSchemaVersion();
   }
@@ -1543,6 +1590,18 @@ export class Store {
     this.db.prepare(`DELETE FROM releases WHERE target = 'ci:windows:release' AND outcome = 'live'
       AND project_id IN (SELECT id FROM projects WHERE name = 'Peek Auras')
       AND version IN ('run:1277', 'run:1279', 'run:1282', 'run:1284', 'run:1286', 'run:1289', 'run:1291')`).run();
+  }
+
+  /**
+   * Shipping's starting values (#1043; Josh, 2026-11-19, "Yes, use the table"): a scheme whose merges already wait for a
+   * person's Approve (both merge rules stored: Delve and Threadspace) starts on "Pull request, a person merges", which is
+   * a go on every change; the rest keep the columns' defaults. Once, before 73.
+   */
+  private shippingFromRules() {
+    if ((this.getSetting<number>('schema_version') ?? 0) >= 73) return;
+    this.db.prepare(`UPDATE projects SET ship_path = 'pr-person', go_from = 'all'
+      WHERE instr(char(10) || approval_rules || char(10), char(10) || 'Bash(gh pr merge:*)' || char(10)) > 0
+        AND instr(char(10) || approval_rules || char(10), char(10) || 'mcp__*__merge_pull_request' || char(10)) > 0`).run();
   }
 
   /** Whose subscription the server's own Claude login is: the first admin, the one Citadel made at its first start. */
@@ -1778,7 +1837,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).
@@ -1786,7 +1845,10 @@ export class Store {
     if (fields.onboarding && onboardingOpen(fields as Pick<Project, 'onboarding'>) && (fields.onboarding === 'interview' || (was && !onboardingOpen(was)))) {
       this.setSetting(`onboarding_opened:${id}`, Date.now());
     }
-    this.db.prepare(`UPDATE projects SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? ''), id);
+    // Setup finishing opens the pass on Minion rules, whoever or whatever set it (#1046).
+    if (fields.onboarding === 'done' && was && was.onboarding !== 'done' && fields.rules_review === undefined) fields = { ...fields, rules_review: 1 };
+    const keys2 = Object.keys(fields) as (keyof typeof fields)[];
+    this.db.prepare(`UPDATE projects SET ${keys2.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys2.map((k) => fields[k] ?? ''), id);
   }
 
   /** When this scheme's current setup or tune-up round opened, or 0 for one opened before that was recorded. */
@@ -2387,7 +2449,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id'>>) {
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');
@@ -2430,6 +2492,10 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
 
+
+  getEvent(id: number): EventRow | undefined {
+    return this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined;
+  }
 
   /** Replace an event's data, for cards whose status lives in the card (plans). */
   setEventData(id: number, data: unknown) {
@@ -3407,6 +3473,17 @@ export class Store {
   getSetting<T>(key: string): T | null {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
     return row ? JSON.parse(row.value) : null;
+  }
+
+  /** Every setting whose key starts with `prefix`, as key and value (the keys hold no LIKE wildcards). */
+  settingsWithPrefix<T>(prefix: string): { key: string; value: T }[] {
+    return (this.db.prepare("SELECT key, value FROM settings WHERE key LIKE ? ESCAPE '\\'").all(`${prefix.replace(/[\\%_]/g, '\\$&')}%`) as { key: string; value: string }[])
+      .map((r) => ({ key: r.key, value: JSON.parse(r.value) as T }));
+  }
+
+  /** What every payer's Fable turns cost since `since` (#1061), from the per-model split, so turns before it was kept count for nothing. */
+  fableSpend(since: number): number {
+    return (this.db.prepare("SELECT COALESCE(SUM(m.cost_usd), 0) AS c FROM turn_models m JOIN turns u ON u.id = m.turn_id WHERE u.ended_at >= ? AND m.model LIKE '%fable%'").get(since) as { c: number }).c;
   }
 
   setSetting(key: string, value: unknown) {

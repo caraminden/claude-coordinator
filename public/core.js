@@ -16,7 +16,7 @@ import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, onSeenIt
 import { onSchedulesChanged } from './schedules.js';
 import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
-import { loadReleases, onReleases } from './releases.js';
+import { loadReleases, onClaims, onReleases } from './releases.js';
 import { ciChip } from './ci.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
@@ -338,6 +338,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'reviews') onReviewsChanged(msg.projectId);
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
+    if (msg.type === 'claims') onClaims(msg);
     if (msg.type === 'releases') Promise.resolve(onReleases(msg)).then((rows) => rows && view?.kind === 'project' && renderSidebar());
     if (msg.type === 'presence' && onPresenceMsg(msg)) {
       renderSidebar();
@@ -882,7 +883,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/my-instructions$/))) await showProject(Number(m[1]), { kind: 'my-instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/(members|people|contraptions|account|usage|notifications|reviews)$/))) await showProject(Number(m[1]), { kind: m[2] });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/(members|memory|people|contraptions|account|usage|notifications|reviews)$/))) await showProject(Number(m[1]), { kind: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/ci(?:\/(overview|history|runs|runners))?$/))) await showProject(Number(m[1]), { kind: 'ci', tab: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'files' });

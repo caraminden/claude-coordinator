@@ -80,6 +80,12 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   assert.deepEqual([chore.data.model, chore.data.effort], [BY_TYPE.chore.model, BY_TYPE.chore.effort]);
   const half = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Half', message: 'hi', model: 'claude-fable-5-2' } });
   assert.deepEqual([half.data.model, half.data.effort], ['claude-fable-5-2', FALLBACK.effort], 'a model named keeps it; the effort still comes from the table');
+  // Why it runs there (#1061): the table's pick for its type, or the person's own choice.
+  assert.equal(chore.data.picked_because, 'chore → Sonnet 5.5 medium');
+  assert.equal(set.data.picked_because, 'set by Cara: Sonnet 5.5 low');
+  const stepped = await call(`/api/tickets/${chore.data.id}`, { method: 'PATCH', body: { model: 'claude-opus-5-5' } });
+  assert.equal(stepped.status, 200);
+  assert.equal((await call(`/api/tickets/${chore.data.id}`)).data.ticket.picked_because, 'set by Cara: Opus 5.5 medium');
   assert.equal(plain.data.properties.assigned, 'Cara', 'a new minion is its starter\'s (#197)');
   const nobodys = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Nobody', message: 'hi', properties: { assigned: null } } });
   assert.equal(nobodys.data.properties.assigned, undefined, 'unless it says otherwise');

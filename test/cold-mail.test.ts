@@ -15,6 +15,7 @@ testPins();
 const root = mkdtempSync(join(tmpdir(), 'cold-mail-'));
 after(async () => {
   await stopTurns(root);
+  await until('every session save to end', async () => ![...Array(500).keys()].some((id) => (runner as any).lanes.busy(id)));
   rmSync(root, { recursive: true, force: true });
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
@@ -57,7 +58,8 @@ const lastMessage = (id: number) => JSON.parse(store.listEvents(id).filter((e) =
 const promptCount = () => lines(prompts).length;
 const lastPrompt = () => withoutTurnNote(jsonLines(prompts).at(-1).message.content).map((c: any) => c.text);
 async function idle(id: number) {
-  await until('the turn to end', async () => !runner.isRunning(id));
+  // The lane ends with the turn's session save, whose worker thread writes under root (#758): wait for it too.
+  await until('the turn and its session save to end', async () => !runner.isRunning(id) && !(runner as any).lanes.busy(id));
 }
 
 test('cold: a session past COLD_MS with no turn running; a fresh one or one without a session is not', () => {

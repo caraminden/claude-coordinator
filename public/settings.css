@@ -92,6 +92,7 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .settings-row[open] .settings-row-chev { transform: rotate(90deg); }
 .settings-row-body { display: flex; flex-direction: column; gap: 0.5rem; padding: 0 0.75rem 0.85rem 3.2rem; }
 .settings-row-body > * { margin: 0; }
+.settings-row-actions[hidden] { display: none; }
 .settings-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .settings-row.saved .settings-row-actions [role=status] { color: var(--done); }
 .settings-row.saved .settings-row-actions [role=status]::before { content: '✓ '; font-weight: 700; }
@@ -413,12 +414,13 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .rules-what code { font-size: 0.8em; color: var(--muted); overflow-wrap: anywhere; }
 .rules-item { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0; flex-wrap: wrap; }
 .rules-item + .rules-item { border-top: 1px solid var(--line); }
-.rules-seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--control-line); border-radius: 7px; overflow: hidden; align-self: flex-start; }
-.rules-seg button { font: inherit; font-size: 0.84rem; padding: 0.3rem 0.65rem; line-height: 1.3; border: 0; border-radius: 0; background: var(--panel); color: var(--ink); cursor: pointer; }
-.rules-seg button + button { border-left: 1px solid var(--control-line); }
+/* The 1px gap over the line colour draws the dividers, so a phone's wrapped second line gets one above it too, and its buttons share the width. */
+.rules-seg { display: inline-flex; flex-wrap: wrap; gap: 1px; max-width: 100%; border: 1px solid var(--control-line); border-radius: 7px; overflow: hidden; align-self: flex-start; background: var(--control-line); }
+.rules-seg button { flex: 1 1 auto; font: inherit; font-size: 0.84rem; padding: 0.3rem 0.65rem; line-height: 1.3; border: 0; border-radius: 0; background: var(--panel); color: var(--ink); cursor: pointer; }
 .rules-seg button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.rules-seg button:disabled { cursor: default; opacity: 0.6; }
-.rules-switch { position: relative; width: 2.3rem; height: 1.3rem; padding: 0; border: 0; border-radius: 99px; background: var(--control-line); cursor: pointer; flex: none; }
+.rules-seg button:disabled { cursor: default; }
+.rules-seg button:disabled:not([aria-pressed=true]) { color: var(--muted); }
+.rules-switch { position: relative; width: 2.3rem; height: 1.3rem; min-width: 2.3rem; min-height: 1.3rem; box-sizing: border-box; padding: 0; border: 0; border-radius: 99px; background: var(--control-line); cursor: pointer; flex: none; }
 .rules-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: calc(1.3rem - 4px); height: calc(1.3rem - 4px); border-radius: 50%; background: #fff; transition: transform var(--citadel-motion, 120ms); }
 .rules-switch[aria-checked=true] { background: var(--done); }
 .rules-switch[aria-checked=true]::after { transform: translateX(1rem); }
@@ -435,3 +437,46 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .rules-hand-input { flex: 1; min-width: 10rem; }
 .rules-pick select { width: auto; max-width: 100%; }
 .rules-what .dot { margin-right: 0.4rem; }
+
+/* Host load on the CI page (#1060) */
+.ci-host-slot { display: flex; flex-wrap: wrap; gap: 0.2rem 0.75rem; align-items: baseline; padding: 0.2rem 0; }
+.ci-host-table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.ci-host-table th, .ci-host-table td { padding: 0.3rem 0.9rem 0.3rem 0; text-align: left; }
+
+.rules-number { width: 5rem; }
+/* The pass on Minion rules after setup (#1046). */
+.rules-review { margin-top: 0.75rem; padding: 0.75rem 0.9rem; border: 1px solid var(--line); border-left: 3px solid var(--accent, var(--line)); border-radius: 10px; background: var(--panel); }
+.rules-review h3 { margin: 0 0 0.25rem; font-size: 0.95rem; }
+.rules-review p { margin: 0 0 0.5rem; }
+.rules-review ul { list-style: none; margin: 0 0 0.6rem; padding: 0; }
+.rules-review li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; padding: 0.3rem 0; }
+.rules-review li + li { border-top: 1px solid var(--line); }
+.rules-review .rr-what { min-width: 9rem; color: var(--muted); }
+.rules-review .rr-value { flex: 1 1 10rem; }
+.rules-review .rr-tag { font-size: 0.72rem; color: var(--muted); }
+.rules-review .rr-tag.set { color: var(--accent, var(--text)); font-weight: 600; }
+
+
+/* Settings → Memory (#1058) */
+.memory-main > input[type=search] { align-self: flex-start; width: min(100%, 24rem); margin: 0.75rem 0; }
+.memory-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.memory-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; margin: 0; font-size: 0.85em; padding: 0.5rem 0.65rem; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.memory-edit { width: 100%; font-family: var(--mono, monospace); font-size: 0.85em; }
+.memory-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.chip.warn { border-color: var(--warn, #b7791f); background: color-mix(in srgb, var(--warn, #b7791f) 14%, var(--panel)); }
+
+/* Instructions aids: size meter and outline, and the repo setup card (read-only). */
+.aids-box { margin: 0.4rem 0; }
+.aids-meter { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.aids-bar { flex: 0 0 10rem; height: 0.5rem; border-radius: 0.25rem; background: var(--line); overflow: hidden; }
+.aids-fill { display: block; height: 100%; background: var(--accent); }
+.aids-fill.warn { background: var(--warn, #c77700); }
+.aids-fill.over { background: var(--error); }
+.aids-box summary { cursor: pointer; padding: 0.4rem 0; }
+.aids-outline { margin: 0 0 0.4rem; padding-left: 1.4rem; }
+.aids-outline button.linklike { all: unset; cursor: pointer; color: var(--accent); }
+.aids-outline button.linklike:hover { text-decoration: underline; }
+.repo-facts { display: grid; grid-template-columns: minmax(8rem, 14rem) 1fr; gap: 0.35rem 1rem; margin: 0.4rem 0 0.8rem; }
+.repo-facts dt { font-weight: 600; overflow-wrap: anywhere; }
+.repo-facts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .repo-facts { grid-template-columns: 1fr; gap: 0.1rem; } .repo-facts dd { margin-bottom: 0.5rem; } }

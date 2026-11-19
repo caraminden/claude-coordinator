@@ -1,9 +1,10 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
+import { cleanMsgSettings } from '../msg-settings.ts';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { checkNeed } from '../needs.ts';
 import { basename, join } from 'node:path';
-import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, lines } from '../approvals.ts';
+import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanShotNote, cleanShotThemes, cleanShotWidths, cleanWorkflows, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { findPlugins } from '../plugin-scan.ts';
@@ -12,19 +13,23 @@ import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_M
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { directCards, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
-import { pickFor } from '../../public/model-table.js';
+import { pickFor, pickReason } from '../../public/model-table.js';
 import { inOrder } from '../../public/reorder.js';
+import { GO_FROM, label, SHIP_PATHS, shippingGate, TRY_FIRST, values } from '../../public/shipping.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
+import { repoSetup } from '../repo-setup.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
 import { claimName, type Claim } from '../claims.ts';
 import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
+import { checkAudits } from '../standard-audits.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
+import { deleteNote, memoryFolders, noteFile, readFolder, saveNote, type MemoryLogin } from '../memory-files.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
@@ -288,7 +293,17 @@ function scheduleTemplate(app: App, project: Pick<Project, 'id' | 'name'>, body:
 
 /** A schedule for the API: its cron in words and its last run's minion number. */
 function scheduleView(app: App, s: Schedule) {
-  return { ...s, when: describeCron(s.cron), last_number: s.last_ticket_id ? (app.store.getTicket(s.last_ticket_id)?.number ?? null) : null };
+  // What each run found and cost is read from the minion and the turns by id, never copied (H1, #1057).
+  const run = (id: number | null) => {
+    const t = id ? app.store.getTicket(id) : null;
+    return t ? { number: t.number, state: t.state, status: t.status, note: t.note, cost: app.store.ticketCost(t.id) } : null;
+  };
+  const last = run(s.last_ticket_id);
+  const runs = app.store.schedules.runs(s.id).map((r) => ({ at: r.at, skip: r.skip, ...(run(r.ticket_id) ?? {}) }));
+  return {
+    ...s, when: describeCron(s.cron), last_number: last?.number ?? null, last_state: last?.state ?? null, last_status: last?.status ?? null,
+    last_note: last?.note ?? null, last_cost: last?.cost ?? null, runs, skips14: app.store.schedules.skipsSince(s.id, Date.now() - 14 * 864e5),
+  };
 }
 
 /** A new minion's `parent` (#N in this scheme), or null for none; a number with no minion here is refused. */
@@ -640,6 +655,13 @@ export const projectRoutes: Route[] = [
     },
   },
   {
+    // What the scheme's messaging is holding (#1059): loop-guard holds and held mail, for the Held list.
+    method: 'GET', path: '/api/projects/:project/held', who: ['person'], everyScheme: true,
+    async handler({ res, app, project }) {
+      return json(res, 200, { items: app.runner.heldList(project) });
+    },
+  },
+  {
     method: 'GET', path: '/api/projects/:project/taskmaster-events', who: ['person'], everyScheme: true,
     // Mine and Everyone (#920): your Taskmaster's chat with the others', paged as one by event id (history.ts).
     // Mine adds only the Overlord's for-everyone items and card answers; Everyone adds every session whole.
@@ -680,12 +702,12 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill and gh_runners; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill, gh_runners, the shot_* settings, ship_path, go_from and try_first; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'repo_url'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'rules_review', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'repo_url'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -702,6 +724,34 @@ export const projectRoutes: Route[] = [
       if (settings.land_mode === 'fast' && project.land_mode !== 'fast') {
         const land = project.repo_dir ? await readFile(join(project.repo_dir, 'tools', 'land.sh'), 'utf8').catch(() => '') : '';
         if (!/\bLAND_FAST\b/.test(land) || !/--verify\b/.test(land)) throw new HttpError(409, `This scheme's tools/land.sh ${land ? "doesn't know fast mode yet" : 'is missing'}: re-sync it from the kit's land template (kit/skills/scheme-setup/templates/land.sh) on main first, then turn fast mode on.`);
+      }
+      // Screenshot settings (#1044): widths in px, themes light and/or dark, a switch and one line of free text.
+      try {
+        if (body.shot_widths !== undefined) settings.shot_widths = cleanShotWidths(body.shot_widths);
+        if (body.shot_themes !== undefined) settings.shot_themes = cleanShotThemes(body.shot_themes);
+        if (body.shot_note !== undefined) settings.shot_note = cleanShotNote(body.shot_note);
+        } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      // Message settings (#1059): whole numbers inside src/msg-settings.ts's bounds.
+      try {
+        Object.assign(settings, cleanMsgSettings(body));
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      if (body.shots_required !== undefined) {
+        if (typeof body.shots_required !== 'boolean') throw new HttpError(400, 'shots_required must be true or false');
+        settings.shots_required = body.shots_required ? 1 : 0;
+      }
+      if (body.ship_path !== undefined) settings.ship_path = required(body.ship_path, values(SHIP_PATHS), 'ship_path') as Project['ship_path'];
+      if (body.go_from !== undefined) settings.go_from = required(body.go_from, values(GO_FROM), 'go_from') as Project['go_from'];
+      if (body.rules_review !== undefined) {
+        if (typeof body.rules_review !== 'boolean') throw new HttpError(400, 'rules_review must be true or false');
+        settings.rules_review = body.rules_review ? 1 : 0;
+      }
+      if (body.try_first !== undefined) settings.try_first = required(body.try_first, values(TRY_FIRST), 'try_first') as Project['try_first'];
+      if ((settings.ship_path ?? project.ship_path) === 'pr-person' && settings.go_from !== undefined && settings.go_from !== 'all') {
+        throw new HttpError(400, 'When a person merges every pull request, every change waits for their go: pick another way to ship first');
       }
       // null or "" leaves effort to Claude Code's default.
       if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
@@ -756,6 +806,12 @@ export const projectRoutes: Route[] = [
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
         }
       }
+      // The one gate (#1043): the go threshold and the merge approval can't disagree, whichever of them this save changed.
+      const gate = shippingGate({ ...project, ...settings });
+      if (gate.go_from !== (settings.go_from ?? project.go_from)) settings.go_from = gate.go_from;
+      if (gate.approval_rules !== (settings.approval_rules ?? project.approval_rules)) {
+        try { settings.approval_rules = cleanRules(gate.approval_rules); } catch (e) { throw new HttpError(400, `Shipping ticks "Merge a pull request" under Approvals, which doesn't fit: ${(e as Error).message}`); }
+      }
       for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
       if (Object.keys(settings).length) {
         store.setProjectSettings(project.id, settings);
@@ -782,6 +838,10 @@ export const projectRoutes: Route[] = [
           runner.emit(coordinator.id, 'note', { everyone: true, text: settings.land_mode === 'fast'
             ? `${session.name} turned fast mode on. Low and medium changes now ship live on the smoke check alone, and the full suite runs on main behind them: a red reopens the minion whose change broke it, and comes to you if it isn't fixed in 30 minutes. High-risk changes and pipeline changes keep the full gate.`
             : `${session.name} turned fast mode off. Every change waits for the full check and CI again before it ships.` });
+        }
+        if (coordinator && (['ship_path', 'go_from', 'try_first'] as const).some((k) => settings[k] !== undefined)) {
+          const now = { ...project, ...settings };
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set Shipping to: ${label(SHIP_PATHS, now.ship_path)}; a person's go: ${label(GO_FROM, now.go_from).toLowerCase()}; try it first: ${label(TRY_FIRST, now.try_first).toLowerCase()}. It applies from each minion's next turn and wins over the scheme instructions. If those still describe shipping differently, offer the members a card to bring them in line.` });
         }
         if (coordinator && settings.default_effort !== undefined) {
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
@@ -956,6 +1016,10 @@ export const projectRoutes: Route[] = [
     },
   },
   {
+    method: 'GET', path: '/api/projects/:project/repo-setup', who: ['person'],
+    handler: async ({ res, project }) => json(res, 200, project.repo_dir ? await repoSetup(project.repo_dir) : { facts: null, rules: [], skills: [] }),
+  },
+  {
     method: 'GET', path: '/api/projects/:project/instructions/sources', who: ['person'],
     handler: async ({ res, app, project }) => json(res, 200, { sources: await instructionSources(project, claudeConfigDir(process.env), app.dataDir), max: MAX_INSTRUCTIONS }),
   },
@@ -1000,8 +1064,11 @@ export const projectRoutes: Route[] = [
         throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
       }
       const table = pickFor(planned.type?.[0]);
+      // Why it runs on this model (#1061): the table's pick for its type (the Taskmaster picks from the table), or a person's own choice.
+      const byHand = !caller && (model !== null || effort !== null);
       model ??= table.model;
       effort ??= table.effort;
+      const because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort);
       // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
       let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
       let leader: Ticket | undefined;
@@ -1024,7 +1091,7 @@ export const projectRoutes: Route[] = [
       const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
-      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
+      store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
       const ownBuild = owner ? store.getTicket(id)?.build ?? null : null;
       if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.
@@ -1063,6 +1130,40 @@ export const projectRoutes: Route[] = [
     handler: ({ res, url, app, project }) => json(res, 200, app.store.briefStarts(project.id, url.searchParams.get('path') ?? '')),
   },
 
+  // The scheme's Claude Code memory notes, read and written in place (the Scheme → Memory page). Not /memory, which is search over chats.
+  {
+    method: ['GET', 'PUT', 'DELETE'], path: '/api/projects/:project/memory-files', who: ['person'],
+    async handler({ req, res, url, app, project }) {
+      // Each login's own config dir; a container login mounts the server's copy, so it is the same folder.
+      const logins: MemoryLogin[] = app.store.listUsers().flatMap((u) => (u.server_login ? (app.claude.accounts(u.id)?.accounts ?? []).flatMap((a) => {
+        const configDir = app.claude.configDir(u.id, a.n);
+        return configDir ? [{ label: a.n === 1 ? "The server's own login" : `${u.name}'s account ${a.n}`, configDir }] : [];
+      }) : []));
+      const folders = memoryFolders(project.repo_dir, logins);
+      const closed = (n: number) => { return app.store.getTicketByNumber(project.id, n)?.status === 'closed'; };
+      if (req.method !== 'GET') {
+        const body = req.method === 'PUT' ? await readJson(req) : {};
+        const folder = folders.find((f) => f.id === (req.method === 'PUT' ? body.folder : url.searchParams.get('folder')));
+        const file = noteFile(req.method === 'PUT' ? body.file : url.searchParams.get('file'));
+        if (!folder || !file) throw new HttpError(400, 'Say which folder and note');
+        try {
+          if (req.method === 'DELETE') {
+            deleteNote(folder.dir, file);
+            // The saved copy of it too, or the next turn's restore puts the note back (sessions.ts writeBack).
+            app.store.deleteClaudeState(join(folder.rel, file));
+          }
+          else {
+            if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');
+            saveNote(folder.dir, file, body.text);
+          }
+        } catch (err: any) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(404, err.message);
+        }
+      }
+      return json(res, 200, { folders: folders.map((f) => readFolder(f, closed)) });
+    },
+  },
   // The plugin folders in the scheme's repo, for the Minion rules page's picker (#1041). Saving them stays admin-only (PATCH).
   {
     method: 'GET', path: '/api/projects/:project/plugins', who: ['person'],
@@ -1191,6 +1292,10 @@ export const projectRoutes: Route[] = [
     handler: ({ res, app, project }) => json(res, 200, { schedules: app.store.schedules.list(project.id).map((s) => scheduleView(app, s)) }),
   },
   {
+    method: 'GET', path: '/api/projects/:project/schedule-audits', who: PEOPLE_AND_TASKMASTER,
+    handler: ({ res, app, project }) => json(res, 200, { audits: checkAudits(app.store, project.id) }),
+  },
+  {
     method: 'POST', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { body, extra } = scheduleTemplate(app, project, await readJson(req), null);
@@ -1199,6 +1304,11 @@ export const projectRoutes: Route[] = [
       app.broadcast({ type: 'schedules', projectId: project.id });
       return json(res, 201, scheduleView(app, s));
     },
+  },
+  // The post-deploy watch's checks per deploy (#1060): this server's own deploys, so Citadel's Releases page only.
+  {
+    method: 'GET', path: '/api/deploy-watch', who: ['person'],
+    handler: ({ res, app }) => json(res, 200, { deploys: app.health?.watch?.report() ?? [] }),
   },
   // Claims (#921): the pipeline lane and other single-holder duties. Everyone in the scheme reads them; people and
   // Taskmasters take and free them (every member decides alike, so any of them frees one whoever holds it).

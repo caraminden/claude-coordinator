@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { costDays, hostWeek, localDay, modelName, spendSplit, weekLimit, whereItWent } from '../src/costs.ts';
+import { costDays, FABLE_CAP_KEY, fableMeter, hostWeek, localDay, modelName, spendSplit, weekLimit, whereItWent } from '../src/costs.ts';
 import { Store } from '../src/db.ts';
 import { usageSplitText } from '../src/mcp.ts';
 
@@ -258,4 +258,24 @@ test('where it went: all time covers every turn, summed in the database (#956)',
   close(w.total, 7);
   close(w.models[0].usd, 7);
   assert.equal(w.lastWeek, 0);
+});
+
+test('the Fable meter counts every payer\'s Fable dollars against a share of the weekly plans (#1061)', () => {
+  const { store, t } = setup('fable-meter');
+  const now = Date.now();
+  assert.equal(fableMeter(store, now).capPct, 20);
+  assert.equal(fableMeter(store, now).over, false, 'no plan priced: no cap in dollars, never over');
+  store.setSetting('week_usd:host', 200);
+  store.setSetting('week_usd:999', 5000); // nobody has this id: a removed person's old estimate doesn't count
+  store.recordTurn(t.id, { session_id: 'f', ended_at: now - 1000, session_cost_usd: 30, modelUsage: usage({ 'claude-fable-5-2': 30 }) });
+  store.recordTurn(t.id, { session_id: 'g', ended_at: now - 1000, session_cost_usd: 69, modelUsage: usage({ 'claude-sonnet-5-5': 69 }) });
+  let m = fableMeter(store, now);
+  assert.equal(m.capUsd, 40);
+  close(m.usd, 30);
+  assert.equal(m.over, false);
+  store.setSetting(FABLE_CAP_KEY, 10);
+  m = fableMeter(store, now);
+  assert.equal(m.capUsd, 20);
+  assert.equal(m.over, true);
+  assert.equal(fableMeter(store, now + 8 * 86400_000).over, false, 'a week later it has dropped out');
 });

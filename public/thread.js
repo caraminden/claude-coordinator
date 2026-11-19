@@ -942,6 +942,12 @@ function drawEvent(event, scroll) {
       if (row?.matches('.narration')) narrationSummary(row);
       else row?.querySelector('summary .preview')?.replaceChildren(...previewNodes(el.source, data.strikes));
     }
+  } else if (event.kind === 'note_edit') {
+    // A note rewritten in place (the day's worktree cleanup, #1055): its line and list change, its open state stays.
+    for (const el of log.querySelectorAll(`[data-note="${data.event}"]`)) {
+      el.querySelector('summary')?.replaceChildren(...[].concat(threadRefs(data.text)));
+      el.querySelector('pre')?.replaceChildren(data.detail ?? '');
+    }
   } else if (event.kind === 'replaced') {
     // A reply the link check sent back gives way to its rewrite (#281): the bubble, or its line in the collapsed row.
     for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) {
@@ -992,12 +998,12 @@ function drawEvent(event, scroll) {
     const short = struck ? null : shortNote(data.text);
     if (struck) nodes.push(struck);
     // A note with output under it (a CI runner add or remove, #339) keeps it collapsed, line breaks and all.
-    else if (short != null && data.detail) nodes.push(h('details', { class: 'note detail' }, h('summary', {}, threadRefs(short)), h('pre', {}, data.detail)));
+    else if (short != null && data.detail) nodes.push(h('details', { class: 'note detail', 'data-note': event.id }, h('summary', {}, threadRefs(short)), h('pre', {}, data.detail)));
     else if (short != null && pushNote(data.text)) nodes.push(pushLine(data.text));
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'fresh') {
     // A Taskmaster's or a minion's fresh Claude session (#406, #937), with the handoff it starts from behind the toggle.
-    nodes.push(h('details', { class: 'note detail fresh', title: data.why ? `Why: ${data.why}` : null }, h('summary', {}, 'Fresh session started; summary'), markdown(data.summary, event.ticket_id)));
+    nodes.push(h('details', { class: 'note detail fresh', title: data.why ? `Why: ${data.why}` : null }, h('summary', {}, h('span', { class: 'rule' }), data.why ? `Started fresh: ${data.why}` : 'Started fresh', h('span', { class: 'rule' })), h('div', { class: 'fresh-from' }, 'The handoff it started from:'), markdown(data.summary, event.ticket_id)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, threadRefs(data.text)));
   } else if (grunt && data.type === 'assistant') {

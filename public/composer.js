@@ -769,9 +769,10 @@ function modelPicker(chatId) {
   const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') },
     h('option', { value: '' }, 'Workflow off'), h('option', { value: 'on' }, 'Workflow on'));
   // Each picker in a row with its name, which only phones show; on desktop the rows are display: contents.
+  const because = h('span', { class: 'picker-because', id: 'picker-because' });
   const row = (name, control, id) => h('span', { class: 'picker-row', id }, h('span', { class: 'picker-label', 'aria-hidden': 'true' }, name), control);
   const pickers = h('span', { class: 'pickers', id: 'pickers' },
-    row('Model', model), row('Effort', effort), row('Workflow', workflow, 'workflow-row'), row('Plugins', pluginPicker(chatId), 'plugin-row'));
+    row('Model', model), row('Effort', effort), row('Workflow', workflow, 'workflow-row'), row('Plugins', pluginPicker(chatId), 'plugin-row'), because);
   return settingsMenu(pickers);
 }
 
@@ -897,6 +898,11 @@ export function renderModelPicker() {
   // A model set outside these lists (say, by an older version) still shows as itself.
   if (t.model && ![...MODELS, ...CODEX_MODELS].some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
   model.value = t.model ?? '';
+  // Why it runs on this model (#1061): a tooltip on the picker, and a line under the pickers in the phone menu.
+  const why = t.picked_because ? `Picked because: ${t.picked_because}` : '';
+  model.title = `Model for this minion${why ? `. ${why}` : ''}`;
+  const note = document.getElementById('picker-because');
+  if (note) note.textContent = why;
   const shownDefault = t.default_effort ?? t.last_effort;
   const defEffort = !t.effort && shownDefault ? shownDefault : onPhone ? 'Default' : 'Effort';
   effort.replaceChildren(h('option', { value: '' }, defEffort), ...EFFORTS.map((e) => h('option', { value: e }, e)));

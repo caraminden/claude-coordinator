@@ -4,6 +4,7 @@
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
 import { ago, api, h, view } from './base.js';
+import { hostLoadBlock } from './ci-host.js';
 import { pcCard, pcLine, trouble } from './ci-desktop.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
@@ -177,6 +178,7 @@ function overview(s, pcs, now, ui) {
       v.waiting.length ? h('div', { class: 'ci-runs' }, ...queueGroups(v.waiting).flatMap((g) => queueRows(g, v.slug, ui)))
         : h('p', { class: 'muted' }, 'No job is waiting.')),
     desktopLoad(pcs, ui),
+    hostLoadBlock(ui.host),
   ];
 }
 
@@ -188,6 +190,7 @@ export function ciPage(projectId, startTab = 'overview') {
   let loadOpen = localStorage.getItem(LOAD_OPEN) === '1';
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
+  let host = null; // citadel-heavy's slots and waits (#1060)
   let hostedOpen = false; // Running now's row for GitHub's runners opens to a row per job, on a click only
   const queueOpen = new Set(); // the queue's groups opened by a click
   const list = h('nav', { class: 'ci-list', 'aria-label': 'Schemes with CI' });
@@ -198,7 +201,7 @@ export function ciPage(projectId, startTab = 'overview') {
     const schemes = data.schemes;
     if (!schemes.length) {
       list.replaceChildren();
-      detail.replaceChildren(h('p', { class: 'muted' }, 'No scheme you can see has CI on GitHub yet.'));
+      detail.replaceChildren(h('p', { class: 'muted' }, 'No scheme you can see has CI on GitHub yet.'), hostLoadBlock(host));
       return;
     }
     const s = schemes.find((x) => x.id === picked) ?? schemes[0];
@@ -222,6 +225,7 @@ export function ciPage(projectId, startTab = 'overview') {
       h('div', { class: 'ci-tabs', role: 'tablist' }, ...tabs.map(([k, label]) =>
         h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), class: tab === k ? 'on' : '', onclick: () => { tab = k; draw(); } }, label))),
       ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
+        host: host,
         queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.ci-group-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
         hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); },
         loadOpen, toggleLoad: () => { loadOpen = !loadOpen; localStorage.setItem(LOAD_OPEN, loadOpen ? '1' : '0'); draw(); detail.querySelector('.ci-load-line')?.focus(); },
@@ -234,6 +238,7 @@ export function ciPage(projectId, startTab = 'overview') {
     tried = true;
     try {
       data = await api('api/ci');
+      host = await api('api/host-load').catch(() => host);
       draw();
     } catch (err) {
       if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${err.message}`));

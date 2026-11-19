@@ -6,6 +6,51 @@ import { optimistic } from './ui/optimistic.js';
 
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+const money = (n) => `$${n.toFixed(n < 10 ? 2 : 0)}`;
+
+/** A run's outcome chip: what the minion found (its state), "running" while it works, "error" if it broke. */
+function outcome(status, state) {
+  if (status === 'running') return ['info', 'running', 'Its last run is working now'];
+  if (status === 'error' || state === 'error') return ['danger', 'error', 'Its last run ended in an error'];
+  if (state) return [state === 'complete' ? 'ok' : 'warn', state, `Its last run ended ${state}`];
+  return ['neutral', 'started', 'Its last run started; it has not reported a state'];
+}
+
+/** A collapsed section opened by its button; its body is built when first opened. */
+function toggle(label, body) {
+  const box = h('div', { class: 'schedule-toggle-body', hidden: true });
+  const btn = h('button', { type: 'button', class: 'secondary small', 'aria-expanded': 'false', onclick: () => {
+    const open = box.hidden;
+    if (open && !box.childElementCount) box.append(body());
+    box.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+  } }, label);
+  return h('div', { class: 'schedule-toggle' }, btn, box);
+}
+
+function runLine(s, r) {
+  if (r.skip) return h('li', { class: 'muted' }, ago(r.at), ' · skipped by the gate');
+  const [tone, word] = outcome(r.status, r.state);
+  return h('li', {}, r.number != null ? h('a', { href: `#/p/${s.project_id}/t/${r.number}` }, `#${r.number}`) : 'a deleted minion', ' ', ago(r.at), ' ',
+    h('span', { class: 'cui-chip state-chip', 'data-tone': tone }, word), r.note ? ` ${r.note}` : '', r.cost ? [' · ', h('span', { class: 'tnum' }, money(r.cost))] : '');
+}
+
+/** Each kit template against this scheme's rows: flags a missing one and two for one, and shows a deliberate omission as such. */
+function auditsCheck(audits) {
+  const bad = audits.filter((a) => a.state !== 'ok');
+  if (!bad.length) return '';
+  const line = (a) => {
+    const ids = a.rows.map((r) => `"${r.name}"${r.template ? '' : ' (hand-made)'}`).join(' and ');
+    if (a.state === 'left-out') return h('li', { class: 'muted' }, `${a.name}: left out on purpose`);
+    if (a.state === 'duplicate') return h('li', {}, `${a.name}: two rows, ${ids}. Delete the hand-made one.`);
+    return h('li', {}, `${a.name}: no row. `, h('button', { type: 'button', class: 'secondary small', onclick: async (e) => {
+      e.currentTarget.disabled = true;
+      try { await api(`api/projects/${view.projectId}/schedules`, { method: 'POST', body: { template: a.slug } }); } catch (ex) { e.currentTarget.disabled = false; alert(ex.message); }
+    } }, 'Add from template'));
+  };
+  return h('div', { class: 'schedule-audits small' }, h('strong', {}, 'Standard audits'), h('ul', {}, bad.map(line)));
+}
+
 function scheduleRow(s) {
   const last = s.last_number != null
     ? h('a', { href: `#/p/${s.project_id}/t/${s.last_number}` }, `#${s.last_number}`, ' ', ago(s.last_run_at))
@@ -13,7 +58,7 @@ function scheduleRow(s) {
   // One status chip leads the row (#492); the facts stay as quiet text under the name.
   const [tone, word, tip] = s.paused ? ['warn', 'Paused', 'It starts nothing until resumed']
     : s.last_error ? ['danger', 'Failed', "Its last run didn't start"]
-    : s.last_run_at ? ['ok', 'OK', 'Its last run started']
+    : s.last_run_at ? outcome(s.last_status, s.last_state)
     : ['neutral', 'New', 'It has not run yet'];
   const cron = `${s.when} (server time) · cron: ${s.cron}`;
   return h('li', { class: `schedule${s.paused ? ' paused' : ''}`, 'data-schedule': s.id },
@@ -23,9 +68,13 @@ function scheduleRow(s) {
       h('span', { class: 'cui-chip state-chip', 'data-tone': tone, title: tip }, word)),
     h('div', { class: 'muted small', title: cron }, s.paused ? ['Would run ', s.when] : ['Next ', h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at)), ' · ', s.when]),
     h('div', { class: 'muted small' }, runsAs(s), s.last_run_at || s.last_number != null ? ['last run ', last] : 'not run yet'),
+    s.last_note || s.last_cost ? h('div', { class: 'muted small schedule-found' }, s.last_note ? [`“${s.last_note}”`, ' '] : '', s.last_cost ? h('span', { class: 'tnum', title: 'What its last run cost, at API prices' }, money(s.last_cost)) : '') : '',
+    s.skips14 ? h('div', { class: 'muted small', title: 'Slots the activity gate skipped in the last 14 days' }, `${s.skips14} skipped in 14 days`) : '',
     s.last_skip ? h('div', { class: 'muted small', title: 'The activity gate skipped this slot: no minion was made' }, s.last_skip) : '',
     s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
     gateFields(s),
+    toggle('Brief', () => h('pre', { class: 'schedule-brief small' }, s.brief)),
+    s.runs.length ? toggle(`Last ${s.runs.length} runs`, () => h('ul', { class: 'schedule-runs small' }, s.runs.map((r) => runLine(s, r)))) : '',
     h('div', { class: 'row schedule-actions' },
       h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('li')) }, s.paused ? 'Resume' : 'Pause'),
       h('button', { type: 'button', class: 'secondary small', onclick: (e) => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && remove(s, e.currentTarget.closest('li')) }, 'Delete')));
@@ -135,8 +184,8 @@ export async function showSchedules(sidebar) {
   if (!showing) return pane.replaceChildren();
   if (!pane.childElementCount) pane.replaceChildren(h('p', { class: 'muted small' }, 'Loading…'));
   try {
-    const { schedules } = await api(`api/projects/${view.projectId}/schedules`);
-    pane.replaceChildren(schedules.length
+    const [{ schedules }, { audits }] = await Promise.all([api(`api/projects/${view.projectId}/schedules`), api(`api/projects/${view.projectId}/schedule-audits`)]);
+    pane.replaceChildren(auditsCheck(audits), schedules.length
       ? h('ul', { class: 'schedule-list' }, schedules.map(scheduleRow))
       : h('p', { class: 'muted' }, 'Nothing scheduled in this scheme yet.'));
   } catch (ex) {

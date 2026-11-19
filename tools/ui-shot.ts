@@ -1,7 +1,8 @@
 // Screenshots of this worktree's Citadel, and pages driven by a few steps, in seconds (#639): the one way a
 // minion shoots or tries a UI change, instead of a hand-rolled DevTools script.
 //
-//   node tools/ui-shot.ts [<route>...] [--widths 1440,390] [--themes light,dark] [--steps <file>] [--step <line>]
+//   node tools/ui-shot.ts [<route>...] [--widths 1440,390] [--themes light,dark]
+//                         (no --widths or --themes: the turn's scheme's, from $COORDINATOR_SHOT_WIDTHS and $COORDINATOR_SHOT_THEMES, else 1440,390 and light) [--steps <file>] [--step <line>]
 //                         [--media <name=value>] [--titlebar <l,r,h>] [--safe-area <top,bottom>] [--before <js>]
 //                         [--wait <selector>] [--timeout <s>] [--anon] [--url <url> --cookie <name=value>] [--out <dir>]
 //
@@ -86,7 +87,7 @@ export function parseSteps(src: string): Step[] {
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): Opts {
-  const o: Opts = { routes: [], widths: [1440, 390], themes: ['light'], steps: [], media: [], timeout: TIMEOUT_MS, anon: false, url: env.DEV_URL || undefined, cookie: env.DEV_COOKIE || undefined, out: join(env.TMPDIR || tmpdir(), 'ui-shot') };
+  const o: Opts = { routes: [], widths: env.COORDINATOR_SHOT_WIDTHS?.match(/^\d+(,\d+)*$/) ? env.COORDINATOR_SHOT_WIDTHS.split(',').map(Number) : [1440, 390], themes: env.COORDINATOR_SHOT_THEMES?.match(/^(light|dark)(,(light|dark))*$/) ? env.COORDINATOR_SHOT_THEMES.split(',') : ['light'], steps: [], media: [], timeout: TIMEOUT_MS, anon: false, url: env.DEV_URL || undefined, cookie: env.DEV_COOKIE || undefined, out: join(env.TMPDIR || tmpdir(), 'ui-shot') };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = () => {

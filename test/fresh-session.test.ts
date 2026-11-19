@@ -259,7 +259,7 @@ test('the idle sweep starts fresh only past the idle time and the context size',
   }
   runner.freshSweep(now);
   assert.equal(runner.view(store.getTicket(due)!).fresh_pending, true);
-  assert.match(notes(due).at(-1)!, /idle 55 minutes with 60k tokens of context/);
+  assert.match(notes(due).at(-1)!, /idle 55 m with 60k context/);
   assert.equal(runner.view(store.getTicket(small)!).fresh_pending, false);
   assert.equal(runner.view(store.getTicket(recent)!).fresh_pending, false);
   // Let it run out: no handoff, then the compaction.

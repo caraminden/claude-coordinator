@@ -576,11 +576,10 @@ test('podman wait failing while the container still runs does not end the job', 
   await r.handle(msg);
   await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
   setBox(msg.id, { status: 'running', waitFails: true });
-  // The runner inspects only after a wait has failed, so a wait logged after that inspect is the new attempt. Counting
-  // waits raced the fake: a wait logs its argv before it reads the flag, and one that read it cleared waited for good.
-  const mine = () => podmanCalls().filter((c) => c.at(-1) === `citadel-job-${msg.id}`).map((c) => c[0]);
-  await until('another wait attempt after the failed one', () => mine().indexOf('inspect') >= 0 && mine().lastIndexOf('wait') > mine().indexOf('inspect'), 6000, statesTail);
-  assert.equal(container(msg.id).waitFails, false);
+  // One wait runs at a time and the failing one takes the flag down, so a second wait with the flag down is the new
+  // attempt. Clearing the flag from here raced the fake: a wait logs its argv before it reads the flag.
+  const waits = () => podmanCalls().filter((c) => c.join(' ') === `wait citadel-job-${msg.id}`).length;
+  await until('another wait attempt after the failed one', () => container(msg.id).waitFails === false && waits() >= 2, 6000, statesTail);
   assert.equal(lastState(msg.id)!.state, 'running');
   exitContainer(msg.id, 0);
   await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);

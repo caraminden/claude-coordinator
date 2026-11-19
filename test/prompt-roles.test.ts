@@ -42,7 +42,7 @@ test('a stalled minion is stepped up a tier: the Taskmaster calls update_ticket,
 test('only an advisor-trial model gets the consult lines (#954)', () => {
   const turn = (model: string | null) => turnContext(project, { id: 2, number: 2, title: 'M', kind: 'ticket', branch: 'ticket/2-m', model } as any, '/s/1', '/s/p', '/t', '/m');
   const on = turn('claude-sonnet-5-5+opus-advisor');
-  assert.match(on, /opus advisor tool.*once with your plan before your first code edit, once with your diff summary before you land, and again whenever a fix did not hold/);
+  assert.match(on, /opus advisor tool.*once with your plan before your first code edit, once with your diff summary before you ship, and again whenever a fix did not hold/);
   assert.ok(!turn('claude-sonnet-5-5').includes('advisor'));
   assert.ok(!turn(null).includes('advisor'));
 });

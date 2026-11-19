@@ -98,7 +98,7 @@ test('the final reply is sent back once, naming what the link opens; the second 
   assert.match(v!.reason, /#83 here opens Citadel #83 "Old sidebar spacing" \(closed\)\. Meant Peek Auras's\? Write "Peek Auras #83"\./);
   assert.match(v!.reason, /answer with just KEEP: your first reply then stands as written\.$/);
   assert.equal(await check({ last_assistant_message: peek, prompt_id: 'p1', stop_hook_active: true }, cfg), null);
-  assert.equal(await check({ last_assistant_message: '#320 landed.', prompt_id: 'p2' }, cfg), null);
+  assert.equal(await check({ last_assistant_message: '#320 shipped.', prompt_id: 'p2' }, cfg), null);
   // No snapshot, no check.
   assert.equal(await check({ last_assistant_message: peek }, { cwd: root, roots: [root] }), null);
 });

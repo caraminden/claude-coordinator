@@ -1353,6 +1353,7 @@ export const SCHEMA_HISTORY = [
   [65, 'turns.side (#932)'],
   [66, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings (#857)'],
   [67, 'turn_grunts (#948)'],
+  [68, 'contraptions.static_paths (#987)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

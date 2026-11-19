@@ -137,13 +137,15 @@ test('an open path needs no login and carries no identity, forged or not', async
     const res = await get(path, forged);
     // The stub answers 401 under /link/ (not its device path), which shows the request got there.
     assert.ok(res.status === 200 || res.status === 401, `${path}: ${res.status}`);
-    assert.equal(lastSeen().path, path);
-    assert.equal(lastSeen().headers['x-citadel-identity'], undefined);
-    assert.deepEqual(citadelHeaders(lastSeen().headers), []);
+    // The boot-time read of the stub's install files (#987) can land requests in between: look for this path's.
+    const got = seen.findLast((x) => x.path === path)!;
+    assert.ok(got, path);
+    assert.equal(got.headers['x-citadel-identity'], undefined);
+    assert.deepEqual(citadelHeaders(got.headers), []);
   }
   // An enabled person on an open path gets no identity either.
   await get('/apps/stub/link', asCara(forged));
-  assert.equal(lastSeen().headers['x-citadel-identity'], undefined);
+  assert.equal(seen.findLast((x) => x.path === '/apps/stub/link')!.headers['x-citadel-identity'], undefined);
 });
 
 /** Ask the proxy to upgrade to a websocket: the status line, and on 101 an echo of what we write. */

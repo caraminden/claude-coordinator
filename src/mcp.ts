@@ -1183,9 +1183,9 @@ function memoryText(hits: any[]): string {
 }
 
 /** search_decisions' answer: one block per decision, newest or best first, then what each source holds. */
-function decisionsText(r: { decisions: any[]; counts: { label: string; count: number; files: number }[] }, limit: number): string {
+function decisionsText(r: { decisions: any[]; linked?: any[]; counts: { label: string; count: number; files: number }[] }, limit: number): string {
   const where = (p: any) => `${p.label}${p.file && p.file !== p.label ? ` ${p.file}` : ''}${p.line ? `:${p.line}` : ''}`;
-  const byId = new Map(r.decisions.map((d) => [d.id, d]));
+  const byId = new Map([...(r.linked ?? []), ...r.decisions].map((d) => [d.id, d]));
   const rows = r.decisions.slice(0, limit).map((d) => {
     const head = `${d.date} · ${d.who} · ${d.rule}${d.quote ? `\n  "${d.quote}"` : ''}`;
     const at = d.places.length ? `\n  Written in: ${d.places.map(where).join('; ')}` : '';

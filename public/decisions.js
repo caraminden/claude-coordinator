@@ -10,6 +10,9 @@ const day = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { mont
 const external = (href) => /^https?:/.test(href);
 let scope = 'scheme';
 const openRows = new Set();
+const SCHEME_KINDS = ['scheme', 'repo', 'adr', 'memory'];
+/** In the picked tab: its own scope, or a copy written there (as inScope in src/decisions.ts). */
+const shows = (d) => scope === 'all' || d.scope === scope || d.places.some((p) => (SCHEME_KINDS.includes(p.kind) ? 'scheme' : 'citadel') === scope);
 
 /** Where a decision is written, as a link to the place (a line on GitHub, an instructions or memory page). */
 function placeLink(p) {
@@ -37,7 +40,7 @@ export function decisionsPage() {
     SCOPES.map(([key, label]) => h('button', { type: 'button', 'data-scope': key, 'aria-pressed': String(key === scope), onclick: () => {
       scope = key;
       for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.scope === key));
-      render();
+      filter();
     } }, label)));
   const rows = [];
 
@@ -47,7 +50,7 @@ export function decisionsPage() {
       ev.preventDefault();
       const target = rows.find((r) => r.d.id === id);
       if (!target) return;
-      if (scope !== 'all' && target.d.scope !== scope) { pick.querySelector('[data-scope="all"]').click(); }
+      if (!shows(target.d)) { pick.querySelector('[data-scope="all"]').click(); }
       search.value = '';
       filter();
       const el = rows.find((r) => r.d.id === id).row;
@@ -96,17 +99,18 @@ export function decisionsPage() {
   };
 
   const filter = () => {
+    if (!data) return;
     const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
     let shown = 0;
     for (const { row: el, d } of rows) {
-      const inScope = scope === 'all' || d.scope === scope;
+      const inScope = shows(d);
       const hay = `${d.rule} ${d.quote} ${d.who} ${d.date} ${d.text} ${d.places.map((pl) => `${pl.label} ${pl.file ?? ''}`).join(' ')}`.toLowerCase();
       el.hidden = !inScope || !words.every((w) => hay.includes(w));
       if (!el.hidden) shown++;
     }
     empty.hidden = !words.length || shown > 0;
-    const n = data.decisions.filter((d) => scope === 'all' || d.scope === scope).length;
-    const rev = data.decisions.filter((d) => (scope === 'all' || d.scope === scope) && d.reversed).length;
+    const n = data.decisions.filter(shows).length;
+    const rev = data.decisions.filter((d) => shows(d) && d.reversed).length;
     meta.textContent = `${words.length ? `${shown} of ` : ''}${n} decision${n === 1 ? '' : 's'}${rev ? ` · ${rev} reversed` : ''} · newest first · each links to where it's written`;
   };
 

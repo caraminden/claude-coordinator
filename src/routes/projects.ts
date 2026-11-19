@@ -32,7 +32,7 @@ import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { deleteNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
-import { searchDecisions } from '../decisions.ts';
+import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
@@ -1213,8 +1213,11 @@ export const projectRoutes: Route[] = [
       if (!['scheme', 'citadel', 'all'].includes(scope)) throw new HttpError(400, 'scope must be scheme, citadel or all');
       const q = (url.searchParams.get('q') ?? '').slice(0, 200);
       const { decisions, counts } = await loadDecisions(app, project);
-      const inScope = decisions.filter((d) => scope === 'all' || d.scope === scope);
-      json(res, 200, { decisions: q.trim() ? searchDecisions(inScope, q) : inScope, counts, all: decisions.length });
+      const shown = decisions.filter((d) => inScope(d, scope));
+      const found = q.trim() ? searchDecisions(shown, q) : shown;
+      // The decisions the rows point at (what reversed them, what they reverse), so a reader can name them.
+      const ids = new Set(found.flatMap((d) => [d.reversed?.by ?? '', ...d.reverses]));
+      json(res, 200, { decisions: found, counts, all: decisions.length, linked: decisions.filter((d) => ids.has(d.id)) });
     },
   },
   // The plugin folders in the scheme's repo, for the Minion rules page's picker (#1041). Saving them stays admin-only (PATCH).

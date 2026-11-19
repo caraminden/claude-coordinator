@@ -1,11 +1,11 @@
 import { test } from 'node:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/db.ts';
 import { loadDecisions } from '../src/decisions-load.ts';
 import assert from 'node:assert/strict';
-import { adrDir, assemble, githubHref, parseAdr, parseDecisions, replay, searchDecisions, type Doc } from '../src/decisions.ts';
+import { adrDir, assemble, githubHref, inScope, parseAdr, parseDecisions, replay, searchDecisions, type Doc } from '../src/decisions.ts';
 
 const NAMES = ['Cara Minden', 'Josh', 'Alex'];
 
@@ -113,6 +113,9 @@ Members decide (Cara, 2026-11-04: "anyone who is assigned to a scheme should hav
   // The memory note repeating "who decides" joins that row.
   const who = decisions.find((d) => d.rule === 'Who decides in a scheme')!;
   assert.deepEqual(who.places.map((p) => p.kind), ['citadel', 'memory']);
+  // Written in this scheme's memory too, so it shows under This scheme as well as Citadel-wide.
+  assert.ok(inScope(who, 'scheme') && inScope(who, 'citadel'));
+  assert.ok(!inScope(decisions.find((d) => d.rule === 'Rerun flakes')!, 'citadel'));
   // The ADR's "This reverses Cara's 2026-11-10 …" marks the rule that still says it, and lists it as the copy to clean.
   const ci = decisions.find((d) => d.quote === 'Keep failing, log it')!;
   assert.equal(ci.reversed!.by, decisions.find((d) => d.rule === 'Rerun flakes')!.id);
@@ -153,4 +156,22 @@ test('loadDecisions: the Land then Ship save shows as a reversal, and its Taskma
   store.setProjectInstructions(project.id, '- Say land (Cara, 2026-11-19: "Retire it" and "Land"). Again.', 'Cara');
   await loadDecisions(app, store.getProject(project.id)!);
   assert.equal(mail.length, 1, 'told once per reversal');
+});
+
+test("loadDecisions reads a repo's rules but never through a symlink", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'decisions-'));
+  const store = new Store(join(dir, 'db.sqlite'));
+  store.createUser({ name: 'Cara', login: 'cara' });
+  const project = store.createProject('Linked', null);
+  const repo = join(dir, 'repo');
+  mkdirSync(join(repo, '.claude', 'rules'), { recursive: true });
+  writeFileSync(join(repo, '.claude', 'rules', 'real.md'), '- Real rule (Cara, 2026-11-19: "kept").\n');
+  writeFileSync(join(dir, 'outside.md'), '- Outside rule (Cara, 2026-11-19: "leaked").\n');
+  symlinkSync(join(dir, 'outside.md'), join(repo, '.claude', 'rules', 'link.md'));
+  symlinkSync(dir, join(repo, '.claude', 'rules', 'folder'));
+  store.setProjectRepoDir(project.id, repo);
+  const app = { store, claude: { accounts: () => null, configDir: () => null }, runner: { leaveMail: () => {} } } as any;
+  const { decisions } = await loadDecisions(app, store.getProject(project.id)!);
+  const rules = decisions.filter((d) => d.places.some((p) => p.kind === 'repo')).map((d) => d.rule);
+  assert.deepEqual(rules, ['Real rule']);
 });

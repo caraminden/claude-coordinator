@@ -2,7 +2,7 @@
 // texts to src/decisions.ts. Also the held note to the scheme's Taskmaster when a new reversal leaves copies behind
 // (Josh, 2026-11-19, picked "Tell the Taskmaster").
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { adrDir, assemble, gitEdits, githubHref, memTitle, type Doc, type DecisionList, type Edit, type SourceKind } from './decisions.ts';
 import { gitOut } from './git.ts';
@@ -31,11 +31,12 @@ function mdFiles(repo: string, dir: string, depth = 6): string[] {
   return names.sort().flatMap((n) => {
     const rel = dir ? `${dir}/${n}` : n;
     let st;
-    try { st = statSync(join(repo, rel)); } catch { return []; }
+    // Never through a link: a linked file or folder could pull lines from outside the repo (as src/memory-files.ts refuses).
+    try { st = lstatSync(join(repo, rel)); } catch { return []; }
     return st.isDirectory() ? mdFiles(repo, rel, depth - 1) : /\.md$/i.test(n) ? [rel] : [];
   });
 }
-const read = (path: string): string => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
+const read = (path: string): string => { try { return lstatSync(path).isFile() ? readFileSync(path, 'utf8') : ''; } catch { return ''; } };
 
 /** A repo's files as Docs, with their git history and links to GitHub when the repo is there. */
 async function repoDocs(repo: string, repoUrl: string | null, groups: { kind: SourceKind; files: string[]; paths: string[]; adr?: (f: string) => boolean }[]): Promise<Doc[]> {

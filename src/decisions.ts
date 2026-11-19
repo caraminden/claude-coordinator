@@ -292,6 +292,8 @@ export interface DecisionList { decisions: Decision[]; counts: { kind: SourceKin
 
 const idOf = (scope: string, r: Pick<Raw, 'who' | 'date' | 'quotes' | 'rule'>) => createHash('sha1').update(`${scope}|${rawKey(r)}`).digest('hex').slice(0, 12);
 const scopeOf = (k: SourceKind): Decision['scope'] => (k === 'citadel' || k === 'kit' ? 'citadel' : 'scheme');
+/** In a tab: its own scope, or a copy written there (a scheme rule repeating a Citadel-wide one shows under both). */
+export const inScope = (d: Decision, scope: string): boolean => scope === 'all' || d.scope === scope || d.places.some((p) => scopeOf(p.kind) === scope);
 
 /**
  * Turn the documents into the list: each attribution once (repeats join as more places), reversals from each
@@ -408,8 +410,10 @@ export async function gitEdits(repo: string, paths: string[], href: (file: strin
   const hit = historyCache.get(key);
   if (hit?.head === head) return hit.edits;
   const log = await gitOut(['log', '--format=%x00%H %ct %an', '-G', '20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]', '--name-only', '--no-renames', '--', ...paths], repo, { timeout: 30_000 });
+  // A failed or timed-out log is not cached as "no history": the next load tries again.
+  if (log == null) return new Map();
   const pairs: { sha: string; at: number; by: string; file: string }[] = [];
-  for (const block of (log ?? '').split('\0').filter(Boolean)) {
+  for (const block of log.split('\0').filter(Boolean)) {
     const [first, ...files] = block.trim().split('\n').filter(Boolean);
     const [sha, ct, ...by] = first.split(' ');
     for (const file of files) if (/\.md$/.test(file)) pairs.push({ sha, at: Number(ct) * 1000, by: by.join(' '), file });

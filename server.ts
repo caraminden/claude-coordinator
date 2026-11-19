@@ -1165,8 +1165,11 @@ contraptions.appsDomain = APPS_DOMAIN;
 const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN, { chunked, home: services.opts.home });
 apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
 if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
-// Installers fetch manifests and icons with no login (#987): read each older app's file paths once its service is up.
-setTimeout(() => void safely('static paths', () => apps.backfillStatics()), Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref();
+// Installers fetch manifests and icons with no login (#987): read each older app's file paths once its service is up,
+// then again every so often for one that was down or had nobody enabled at the first read (rows already read are skipped).
+const readStatics = () => void safely('static paths', () => apps.backfillStatics())
+  .finally(() => setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_EVERY_MS ?? 15 * 60_000)).unref());
+setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref();
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
 const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
 

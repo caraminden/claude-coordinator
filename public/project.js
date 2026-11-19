@@ -8,10 +8,10 @@ import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, ren
 import { filesView, renderFiles } from './files.js';
 import { chatSection, chatView, mountChat, renderTicketHead, tmViewMode } from './thread.js';
 import { mergedView } from './mine.js';
-import { propertiesPage, renderSettingsCount } from './properties.js';
+import { preparePropFilter, propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import { usagePage } from './where.js';
-import { forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
+import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
@@ -113,7 +113,11 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     known ?? api('api/projects').catch(() => null),
     // Each person's own machines; an admin's list has every machine (#306).
     api('api/machines').catch(() => []),
+    // The Needs-you strip and the Filters button come with the first paint, not after it: they'd push the list down (#989).
+    fetchInbox(projectId),
+    preparePropFilter(projectId),
   ]);
+  if (stale) preparePropFilter(projectId);
   let tickets = open;
   // A link to a dismissed minion waits for the dismissed list; any other open draws without it.
   const findClosed = main.kind === 'chat' && main.number != null && dismissed && !open.some((t) => t.number === main.number);

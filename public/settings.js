@@ -50,6 +50,9 @@ export async function pushOff() {
   await sub.unsubscribe();
 }
 
+// What this browser last said of its push state, drawn at once on the next scheme so the box keeps its height while it asks again.
+let pushState = { subscribed: false, muted: [] };
+
 /** "Notify me on this device", and once on, pinned-only and a mute for this project; in the account box. */
 export function pushControls(project) {
   if (!pushSupported) return null;
@@ -66,6 +69,7 @@ export function pushControls(project) {
     h('label', { class: 'toggle', title: 'Questions for you, failed turns, and your minions that are ready or blocked' }, on, 'Notify me on this device'),
     allRow, pinnedRow, muteRow, hint);
   const show = (state, err) => {
+    pushState = state;
     on.checked = state.subscribed;
     mute.checked = state.muted.includes(project.id);
     pinned.checked = !!state.onlyPinned;
@@ -112,6 +116,7 @@ export function pushControls(project) {
     const sub = await pushSubscription();
     return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, onlyPinned: pinned.checked } });
   }));
+  show(pushState);
   refresh();
   return el;
 }

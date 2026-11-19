@@ -8,6 +8,8 @@ import { mountTips } from './ui/tip.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
 const inbox = { projectId: null, items: [], timer: 0, countsTimer: 0 };
+// Each scheme's items as last fetched, so a scheme you switch to draws its strip (or none) in its first paint instead of popping it in after.
+const inboxSeen = new Map();
 
 const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
 // A ready/complete/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
@@ -17,10 +19,17 @@ const faded = (item) => (item.kind === 'state' || item.kind === 'replies') && is
 export async function refreshInbox() {
   if (view?.kind !== 'project') return;
   const projectId = view.projectId;
-  const { items } = await api(`api/projects/${projectId}/inbox`).catch(() => ({ items: null }));
+  const items = await fetchInbox(projectId);
   if (!items || view?.projectId !== projectId) return;
   Object.assign(inbox, { projectId, items });
   renderInbox();
+}
+
+/** A scheme's items, kept for its next first paint; null when the fetch failed. Showing a scheme waits on this (project.js). */
+export async function fetchInbox(projectId) {
+  const { items } = await api(`api/projects/${projectId}/inbox`).catch(() => ({ items: null }));
+  if (items) inboxSeen.set(projectId, items);
+  return items;
 }
 
 /** A burst of changes (a card answered, then the turn starting) fetches once. */
@@ -135,7 +144,12 @@ export function onSeenItems(projectId) {
 
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */
 export function renderInbox() {
-  if (view?.kind !== 'project' || inbox.projectId !== view.projectId) return;
+  if (view?.kind !== 'project') return;
+  if (inbox.projectId !== view.projectId) {
+    const seen = inboxSeen.get(view.projectId);
+    if (!seen) return;
+    Object.assign(inbox, { projectId: view.projectId, items: seen });
+  }
   // A dismissed minion is never in your inbox (#589), even while the server's list still has it: your own dismiss shows at once.
   // Cards addressed to you from your other schemes (`from`, #687) show here too, though only their own scheme's pill counts them.
   const items = inbox.items.filter((i) => i.from || (ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed'));

@@ -109,11 +109,27 @@ export const propFilter = { projectId: null, keys: null, picks: new Map(), open:
  * Under the minions search: a Filters button that opens a panel with a collapsible checklist per
  * key, and the ticked values as chips that untick on a click.
  */
+// Each scheme's keys and saved views as last fetched: a scheme you switch to draws its Filters button in the first paint.
+const filterSeen = new Map();
+
+/** Fetch a scheme's filter data before it is shown (project.js waits on it the first time); a scheme seen before shows its last and refreshes behind. */
+export function preparePropFilter(projectId) {
+  const load = Promise.all([api(`api/projects/${projectId}/properties`), api(`api/projects/${projectId}/views`).catch(() => null)]).then(([reg, views]) => {
+    const had = filterSeen.get(projectId);
+    filterSeen.set(projectId, { keys: reg.keys, views });
+    if (propFilter.projectId === projectId && had && JSON.stringify(had) !== JSON.stringify(filterSeen.get(projectId))) {
+      Object.assign(propFilter, { keys: reg.keys, views });
+      renderPropFilter();
+    }
+  }).catch(() => {});
+  return filterSeen.has(projectId) ? undefined : load;
+}
+
 export async function renderPropFilter() {
   const el = document.getElementById('prop-filter');
   if (!el) return;
   const projectId = view.projectId;
-  if (propFilter.projectId !== projectId) Object.assign(propFilter, { projectId, keys: null, picks: new Map(), open: false, openKeys: new Map(), views: null });
+  if (propFilter.projectId !== projectId) Object.assign(propFilter, { projectId, keys: null, picks: new Map(), open: false, openKeys: new Map(), views: null, ...filterSeen.get(projectId) });
   if (!propFilter.keys || !propFilter.views) {
     const [reg, views] = await Promise.all([
       propFilter.keys ? { keys: propFilter.keys } : loadProperties(),
@@ -122,6 +138,7 @@ export async function renderPropFilter() {
     ]).catch(() => []);
     if (!reg || propFilter.projectId !== projectId) return;
     Object.assign(propFilter, { keys: reg.keys, views });
+    filterSeen.set(projectId, { keys: reg.keys, views });
   }
   renderSavedViews();
   if (!el.isConnected) return;

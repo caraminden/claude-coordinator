@@ -64,7 +64,7 @@ type Probe = { method: string; path: string; fresh?: 'schedule' | 'machine'; not
 const FILL: Record<string, string> = {
   ticket: ':t', project: ':p', schedule: ':s', artifact: ':a', machine: ':m', machineId: ':m',
   person: '999', token: 'not-a-token', view: '0', name: 'nope', session: '0123456789abcdef01234567', turn: '1', key: 'k',
-  to: 'nope', rest: 'x', app: 'nope', number: '1', list: 'apps', file: '1', upload: '0123456789abcdef0123456789abcdef', job: '1', hash: 'nohash',
+  slug: 'nope', to: 'nope', rest: 'x', app: 'nope', number: '1', list: 'apps', file: '1', upload: '0123456789abcdef0123456789abcdef', job: '1', hash: 'nohash',
 };
 // Routes probed at other paths than FILL gives: a query the route needs, or more than one case.
 const PATHS: Record<string, string[]> = {

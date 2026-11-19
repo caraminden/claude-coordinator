@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
+import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
 import { Memory } from './memory.ts';
@@ -1384,6 +1385,7 @@ export const SCHEMA_HISTORY = [
   [69, "drop Peek Auras' Windows Builds 1277-1291 recorded live before PCs could take them (#1019)"],
   [70, 'projects.land_mode (#1017)'],
   [71, 'projects.fable_ok, builds, grill, gh_runners (#1045)'],
+  [72, 'review_entries, review_versions; repo rubric files imported once (#1051)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1416,6 +1418,8 @@ export class Store {
   props: Registry;
   /** Scheduled minions (src/schedules.ts). */
   schedules: Schedules;
+  /** Each scheme's reviewers and critics (src/review-set.ts, Build 4). */
+  reviews: ReviewSet;
   /** Single-holder duties such as the pipeline lane (src/claims.ts, #921). */
   claims: Claims;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
@@ -1441,6 +1445,7 @@ export class Store {
       this.db.exec('PRAGMA state.synchronous = NORMAL; PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
       this.props = new Registry(this.db);
       this.schedules = new Schedules(this.db);
+      this.reviews = new ReviewSet(this.db);
       this.claims = new Claims(this.db);
       this.memory = new Memory(this);
       return;
@@ -1466,6 +1471,7 @@ export class Store {
     this.props.seed();
     this.settleBuilds();
     this.schedules = new Schedules(this.db);
+    this.reviews = new ReviewSet(this.db);
     this.claims = new Claims(this.db);
     this.memory = new Memory(this);
     this.serverLoginOwnerOnly();

@@ -31,7 +31,7 @@ export const VALUE_WRITES = [
   'startContraptionTurn', 'createTicket', 'putCiFile', 'syncArtifacts', 'markSeen', 'setPersonNote', 'claimBrief', 'recap',
   'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'addMachineJob', 'deleteView',
   'savePushSubscription', 'pruneArtifacts', 'props.set', 'props.registerKey', 'props.registerValues', 'props.review',
-  'schedules.create', 'schedules.update', 'schedules.remove', 'memory.index',
+  'schedules.create', 'schedules.update', 'schedules.remove', 'memory.index', 'reviews.create', 'reviews.save', 'reviews.restore',
 ];
 
 /** What a write makes the server forget of its own caches: when it is sent, and again when it lands, since a read in

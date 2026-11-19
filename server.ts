@@ -39,6 +39,7 @@ import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
 import { addAppTurnsChecks, backfillStandardAudits } from './src/standard-audits.ts';
+import { importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
@@ -73,6 +74,7 @@ import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { TimerAlerts } from './src/timer-alerts.ts';
 import { ErrorDigest } from './src/contraption-errors.ts';
 import { projectRoutes } from './src/routes/projects.ts';
+import { reviewRoutes } from './src/routes/reviews.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
@@ -552,6 +554,12 @@ try {
   for (const line of addAppTurnsChecks(store, DATA_DIR)) console.log(`App turns check (#844): ${line}`);
 } catch (err) {
   console.error('Standard audits (#799) backfill failed; it tries again at the next start:', err);
+}
+// Once per database (#1051): every scheme's repo rubric files move into its review set (Cara, 2026-11-19, "Citadel stores them").
+try {
+  for (const line of importAllRubrics(store)) console.log(`Review set import (#1051): ${line}`);
+} catch (err) {
+  console.error('Review set import (#1051) failed; it tries again at the next start:', err);
 }
 if (!BOOT_CHECK) setInterval(() => void safely('schedules', () => scheduledRuns.runDue()), 30_000).unref();
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
@@ -1292,7 +1300,7 @@ runner.onStatusTrailer = (id, fields) => {
 };
 // What a minion armed for CI goes out when CI passes, with no turn (#715).
 github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;

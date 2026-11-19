@@ -1713,6 +1713,56 @@
   "m1": "400 contraption is required",
   "m2": "400 contraption is required"
  },
+ "GET /api/projects/:p/reviews": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "200"
+ },
+ "POST /api/projects/:p/reviews": {
+  "anon": "401 Not logged in",
+  "person": "400 Give it a slug, the name its file goes by (kebab-case, like ui-screenshots)",
+  "member": "400 Give it a slug, the name its file goes by (kebab-case, like ui-screenshots)",
+  "outsider": "404 No such scheme",
+  "tmA": "400 Give it a slug, the name its file goes by (kebab-case, like ui-screenshots)",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PATCH /api/projects/:p/reviews/nope": {
+  "anon": "401 Not logged in",
+  "person": "404 No entry named nope",
+  "member": "404 No entry named nope",
+  "outsider": "404 No such scheme",
+  "tmA": "404 No entry named nope",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "404 No entry named nope",
+  "m2": "404 No entry named nope"
+ },
+ "POST /api/projects/:p/reviews/nope/restore": {
+  "anon": "401 Not logged in",
+  "person": "400 Name the version to restore",
+  "member": "400 Name the version to restore",
+  "outsider": "404 No such scheme",
+  "tmA": "400 Name the version to restore",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/reviews/nope/versions": {
+  "anon": "401 Not logged in",
+  "person": "404 No entry named nope",
+  "member": "404 No entry named nope",
+  "outsider": "404 No such scheme",
+  "tmA": "404 No entry named nope",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "404 No entry named nope",
+  "m2": "404 No entry named nope"
+ },
  "GET /api/projects/:p/schedules": {
   "anon": "401 Not logged in",
   "person": "200",

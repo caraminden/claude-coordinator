@@ -2,7 +2,8 @@
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciPage } from './ci.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, notificationsPage, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, myInstructionsEditor, notificationsPage, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
+import { machinesPage } from './settings-machines.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';

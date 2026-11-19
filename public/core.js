@@ -2,7 +2,8 @@
 // module shares without needing the shell (state, api, h, helpers) is base.js.
 import { inMerged } from './mine.js';
 import { ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, me, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
-import { onAppInstructionsUpdate, onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
+import { onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
+import { onMachinesUpdate } from './settings-machines.js';
 import { renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';

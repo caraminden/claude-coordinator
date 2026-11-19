@@ -707,14 +707,14 @@ export const projectRoutes: Route[] = [
       try {
         if (body.shot_widths !== undefined) settings.shot_widths = cleanShotWidths(body.shot_widths);
         if (body.shot_themes !== undefined) settings.shot_themes = cleanShotThemes(body.shot_themes);
-      } catch (err: any) {
+        if (body.shot_note !== undefined) settings.shot_note = cleanShotNote(body.shot_note);
+        } catch (err: any) {
         throw new HttpError(400, err.message);
       }
       if (body.shots_required !== undefined) {
         if (typeof body.shots_required !== 'boolean') throw new HttpError(400, 'shots_required must be true or false');
         settings.shots_required = body.shots_required ? 1 : 0;
       }
-      if (body.shot_note !== undefined) settings.shot_note = cleanShotNote(body.shot_note);
       // null or "" leaves effort to Claude Code's default.
       if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
       try {

@@ -115,6 +115,7 @@ test("--widths and --themes default to the turn's scheme's from the env, and a f
   assert.deepEqual([o.widths, o.themes], [[1024, 390], ['light', 'dark']]);
   assert.deepEqual(parseArgs(['--widths', '768'], env).widths, [768]);
   assert.deepEqual(parseArgs([], { COORDINATOR_SHOT_WIDTHS: 'x' }).widths, [1440, 390]);
+  assert.deepEqual(parseArgs([], {}).themes, ['light']);
 });
 
 test("the prompt's screenshot line states the scheme's widths, themes, requirement and note (#1044)", async () => {

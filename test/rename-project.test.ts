@@ -158,7 +158,7 @@ test('PATCH saves a scheme\'s screenshot widths, themes, requirement and note, a
   const ok = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { shot_widths: [390, '1024', 390], shot_themes: 'dark,light', shots_required: false, shot_note: '  1x in her   window ' } });
   assert.equal(ok.status, 200);
   assert.deepEqual([ok.data.shot_widths, ok.data.shot_themes, ok.data.shots_required, ok.data.shot_note], ['390,1024', 'light,dark', 0, '1x in her window']);
-  for (const body of [{ shot_widths: [] }, { shot_widths: 'wide' }, { shot_widths: [50] }, { shot_themes: 'sepia' }, { shot_themes: [] }, { shots_required: 'yes' }]) {
+  for (const body of [{ shot_widths: [] }, { shot_widths: 'wide' }, { shot_widths: [50] }, { shot_themes: 'sepia' }, { shot_themes: [] }, { shots_required: 'yes' }, { shot_note: 5 }, { shot_note: 'x'.repeat(201) }]) {
     assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body })).status, 400, JSON.stringify(body));
   }
 });

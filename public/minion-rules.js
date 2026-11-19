@@ -237,7 +237,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     saveBtn.onclick = () => save({ shot_note: note.value.trim() }, 'save the screenshot note');
     discardBtn.onclick = () => { note.value = stored().shot_note ?? ''; sync(); };
     const custom = handLine('1920', (w) => {
-      if (!/^\d{3,4}$/.test(w) || +w < 200) return toast('A width is a number of pixels, like 1920');
+      if (!/^\d{3,4}$/.test(w) || +w < 200 || +w > 5000) return toast('A width is a number of pixels, like 1920');
       const cur = shotList(stored().shot_widths);
       if (!cur.includes(+w)) save({ shot_widths: [...cur, +w].sort((a, b) => b - a).join(',') }, `shoot at ${w}`);
     }, 'Custom width');

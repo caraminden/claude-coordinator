@@ -92,6 +92,7 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .settings-row[open] .settings-row-chev { transform: rotate(90deg); }
 .settings-row-body { display: flex; flex-direction: column; gap: 0.5rem; padding: 0 0.75rem 0.85rem 3.2rem; }
 .settings-row-body > * { margin: 0; }
+.settings-row-actions[hidden] { display: none; }
 .settings-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .settings-row.saved .settings-row-actions [role=status] { color: var(--done); }
 .settings-row.saved .settings-row-actions [role=status]::before { content: '✓ '; font-weight: 700; }

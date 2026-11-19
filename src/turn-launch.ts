@@ -592,7 +592,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
   if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
   // The scheme's screenshot widths and themes (#1044): tools/ui-shot.ts's defaults when a minion passes none.
-  if (ticket.kind !== 'coordinator') Object.assign(env, { COORDINATOR_SHOT_WIDTHS: project.shot_widths, COORDINATOR_SHOT_THEMES: project.shot_themes });
+  if (ticket.kind !== 'coordinator' && project.shot_widths && project.shot_themes) Object.assign(env, { COORDINATOR_SHOT_WIDTHS: project.shot_widths, COORDINATOR_SHOT_THEMES: project.shot_themes });
   if (facts.deploys) env.COORDINATOR_DEPLOYS = '1';
   if (facts.memory) env.COORDINATOR_MEMORY = '1';
   if (facts.media && ticket.kind !== 'coordinator') env.COORDINATOR_MEDIA = '1';

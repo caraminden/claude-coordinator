@@ -148,3 +148,11 @@ test('the model and effort it was given are passed on, and left out when there i
   assert.equal(flag(p, '--model'), 'claude-opus-5-5');
   assert.equal(flag(p, '--effort'), 'high');
 });
+
+test("a minion's turn carries its scheme's screenshot widths and themes for tools/ui-shot.ts, a Taskmaster's none (#1044)", () => {
+  const shots = { ...project, shot_widths: '768,390', shot_themes: 'dark' };
+  const p = plan({ project: shots });
+  assert.equal(p.env.COORDINATOR_SHOT_WIDTHS, '768,390');
+  assert.equal(p.env.COORDINATOR_SHOT_THEMES, 'dark');
+  assert.equal(plan({ project: shots, ticket: taskmaster }).env.COORDINATOR_SHOT_WIDTHS, undefined);
+});

@@ -757,7 +757,7 @@ const TOOLS = [
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, fast mode, screenshot widths, themes, requirement and note, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
+      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, fast mode, screenshot widths, themes, requirement and note, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it, except screenshot widths and themes, which keep at least one). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
     inputSchema: {
       type: 'object',
       properties: {

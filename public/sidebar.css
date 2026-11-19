@@ -47,6 +47,9 @@
 .g-ideation > h3 { color: hsl(45 75% 42%); }
 .g-promoted > h3 { color: hsl(150 50% 34%); }
 .g-parked > h3 { color: var(--muted); }
+/* The Deploying group's cyan: no other state, role or chip in this list uses it (#1048). Local here, not in style.css, which every app gets. */
+.sidebar { --deploy: #0e7490; }
+@media (prefers-color-scheme: dark) { .sidebar { --deploy: #22d3ee; } }
 .g-waiting > h3 { color: var(--held); }
 .g-deploying > h3 { color: var(--deploy); }
 .g-pinned > h3 { color: var(--accent); }

@@ -13,7 +13,6 @@
   --code-bg: #f1efe9;
   --done: #15803d;
   --held: #7c3aed;
-  --deploy: #0e7490; /* the Deploying group's cyan: no other state, role or chip in the minions list uses it (#1048) */
   --waiting-tint: #f5b40b; /* --waiting reads brown as a tint on white */
   --on-accent: #fff; /* text and icons on --accent */
   /* Colour roles for apps (#683, Cara 2026-11-14 picked "Moderate"): a second accent for highlights and six
@@ -44,7 +43,6 @@
     --code-bg: #2a2926;
     --done: #4ade80;
     --held: #a78bfa;
-    --deploy: #22d3ee;
     --waiting-tint: #fbbf24;
     --on-accent: #1d1c1a; /* white on this accent is about 2.3:1; near-black about 7.5:1 (Cara, 2026-11-02: "Dark text") */
     --accent-2: #e879f9;

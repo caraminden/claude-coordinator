@@ -1,7 +1,7 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
 import { api, h, icon, me, view } from './base.js';
 import { threadRefs } from './core.js';
-import { settingsTabs, tuneUpButton } from './settings.js';
+import { settingsHelp, settingsRow, settingsTabs, tuneUpButton } from './settings.js';
 import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.js';
 import { otherOwner, takeOver } from './payer.js';
 import { renderSidebar } from './sidebar.js';
@@ -309,6 +309,8 @@ export async function renderSettingsCount() {
   }
 }
 
+const openProps = new Set(); // keys (and the new-key row) left open, across redraws
+
 export function onPropertiesChanged(projectId) {
   if (view?.kind !== 'project' || (projectId !== null && projectId !== view.projectId)) return;
   renderSettingsCount();
@@ -325,7 +327,7 @@ export function propertiesPage() {
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value; nothing else can be set.')),
+      h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value.')),
     h('div', { id: 'props-body', class: 'props-body' }, h('p', { class: 'muted' }, 'Loading…')));
   setTimeout(renderPropertiesPage);
   return section;
@@ -349,6 +351,7 @@ async function renderPropertiesPage() {
     const old = body.querySelector(`form[data-form="${CSS.escape(name)}"]`);
     return old && typing(old) ? old : build();
   };
+  const NEW = '\0new-key';
   // One status line for every render, so a kept form's errors still show.
   const status = body.querySelector(':scope > p.props-status') ?? h('p', { class: 'muted small props-status', role: 'status' });
   const run = async (path, payload, done) => {
@@ -407,16 +410,17 @@ async function renderPropertiesPage() {
     // Approving a key approves every value listed under it too.
     const waiting = values.filter((v) => v.status === 'proposed' || !v.reviewed).length;
     const approveKey = waiting ? `Approve key + ${waiting} value${waiting === 1 ? '' : 's'}` : 'Approve key';
-    return h('div', { class: `prop-key${k.status === 'proposed' ? ' proposed' : ''}` },
-      h('div', { class: 'row' },
-        h('code', { class: 'prop-key-name' }, k.key), h('span', {}, k.label),
-        h('span', { class: 'muted small' }, `${kind}${k.status === 'proposed' ? ` · proposed by ${k.created_by}` : ''}`),
-        h('span', { class: 'spacer' }),
-        edit && k.status === 'proposed' ? [btn(approveKey, waiting ? 'Make it and its values usable; archive or merge single values after' : 'Make it usable', () => review(k, null, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, null, 'reject'))] : ''),
+    // A row that opens (#997); its open state outlives the redraw every registry change causes.
+    const summary = [k.key, kind, k.status === 'proposed' ? `proposed by ${k.created_by}` : values.length ? `${values.length} value${values.length === 1 ? '' : 's'}` : '', waiting && k.status !== 'proposed' ? `${waiting} to review` : ''].filter(Boolean).join(' · ');
+    const [row] = settingsRow({ icon: 'tag', hue: k.status === 'proposed' || waiting ? 'waiting' : k.scope === 'global' ? 'ink' : 'accent', title: k.label || k.key, summary, open: openProps.has(k.key) },
+      edit && k.status === 'proposed' ? h('div', { class: 'row' }, btn(approveKey, waiting ? 'Make it and its values usable; archive or merge single values after' : 'Make it usable', () => review(k, null, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, null, 'reject'))) : '',
       k.description ? h('p', { class: 'muted small prop-desc' }, threadRefs(k.description)) : '',
       values.length ? h('div', { class: 'pv-list' }, values.map(valueChip)) : '',
       archived.length ? h('p', { class: 'muted small' }, 'Archived: ', archived.map((v) => [v.value, ' ', edit ? btn('Restore', `Offer ${v.value} again`, () => review(k, v, 'restore')) : '', ' '])) : '',
       edit && k.value_kind === 'enum' && k.status !== 'archived' ? keep(`values:${k.key}`, addForm) : '');
+    row.classList.add('prop-key');
+    row.addEventListener('toggle', () => openProps[row.open ? 'add' : 'delete'](k.key));
+    return row;
   };
 
   const newKeyForm = () => {
@@ -432,12 +436,17 @@ async function renderPropertiesPage() {
       warn.replaceChildren(...(warnings ? [h('span', {}, warnings.join(' ')), btn('Add anyway', 'It really is different', () => add(true))] : []));
     };
     const form = h('form', { class: 'prop-new-key', 'data-form': 'new-key', onsubmit: (e) => { e.preventDefault(); if (key.value.trim()) add(false); } },
-      h('h3', { class: 'settings-label' }, 'New key'),
       h('div', { class: 'row pv-add' }, key, label, kind, h('label', { class: 'small' }, multi, ' several'),
         reg.globalOwner === view.projectId ? h('label', { class: 'small' }, global, ' every scheme') : ''),
       h('div', { class: 'row pv-add' }, description, h('button', { type: 'submit', class: 'small' }, 'Add key')),
       warn);
     return form;
+  };
+  const newKeyRow = () => {
+    const form = keep('new-key', newKeyForm);
+    const [row] = settingsRow({ icon: 'plugplus', hue: 'done', title: 'New key', summary: 'Add a key for minions to carry', open: openProps.has(NEW) || typing(form) }, form);
+    row.addEventListener('toggle', () => openProps[row.open ? 'add' : 'delete'](NEW));
+    return row;
   };
 
   const live = (k) => k.status !== 'archived';
@@ -445,12 +454,13 @@ async function renderPropertiesPage() {
   const own = reg.keys.filter((k) => k.scope === 'scheme' && live(k));
   body.replaceChildren(...[
     status,
-    h('h3', { class: 'settings-label' }, 'All schemes'),
-    reg.globalOwner === view.projectId ? '' : h('p', { class: 'muted small' }, 'These belong to the whole app; change them from the Citadel scheme.'),
-    ...global.map(keyBlock),
-    h('h3', { class: 'settings-label' }, view.project.name),
-    ...(own.length ? own.map(keyBlock) : [h('p', { class: 'muted small' }, 'No keys of its own yet.')]),
-    keep('new-key', newKeyForm),
+    h('h3', { class: 'settings-section' }, 'All schemes'),
+    reg.globalOwner === view.projectId ? '' : settingsHelp('These belong to the whole app; change them from the Citadel scheme.'),
+    h('div', { class: 'settings-rows' }, ...global.map(keyBlock)),
+    h('h3', { class: 'settings-section' }, view.project.name),
+    h('div', { class: 'settings-rows' }, ...(own.length ? own.map(keyBlock) : [h('p', { class: 'muted small settings-empty' }, 'No keys of its own yet.')])),
+    h('h3', { class: 'settings-section' }, 'Add'),
+    h('div', { class: 'settings-rows' }, newKeyRow()),
   ].filter(Boolean));
   if (focused?.isConnected && !body.contains(document.activeElement) && body.contains(focused)) focused.focus({ preventScroll: true });
 }

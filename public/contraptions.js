@@ -1,7 +1,7 @@
 // Settings → Contraptions, admins only: register personal apps, edit them, choose who each is
 // enabled for, and rotate their keys (src/routes/contraptions.ts).
 import { account, api, h, icon, view } from './base.js';
-import { settingsTabs } from './settings.js';
+import { settingsHelp, settingsRow, settingsTabs } from './settings.js';
 import { showRail } from './rail.js';
 import { optimistic } from './ui/optimistic.js';
 
@@ -15,7 +15,7 @@ const unitState = (u) => (u.load === 'not-found' ? 'not installed' : `${u.active
  * Its systemd user service, which Citadel writes and runs (#266): state, the buttons, and the journal on ask.
  * Fetched once the card is drawn; a boot check or preview answers 409 and the panel says why.
  */
-function servicePanel(c) {
+function servicePanel(c, summary) {
   const line = h('span', { class: 'small' }, 'Service: checking…');
   const notes = h('div', { class: 'small muted' });
   const log = h('pre', { hidden: true });
@@ -23,6 +23,7 @@ function servicePanel(c) {
   const buttons = h('span', { class: 'row service-buttons' });
   const base = `api/contraptions/${c.name}/service`;
   const show = (s) => {
+    summary(s.installed ? s.service.active : 'not installed');
     line.textContent = `Service ${s.unit}: ${s.installed ? unitState(s.service) : 'not installed'}`
       + (s.timers.length ? ` · timers ${s.timers.map((t) => `${t.unit.replace(/^citadel-app-/, '')} ${unitState(t)}`).join(', ')}` : '');
     notes.replaceChildren(
@@ -88,6 +89,7 @@ function servicePanel(c) {
   };
   api(base).then(show).catch((err) => {
     line.textContent = `Service: ${err.message}`;
+    summary('service unknown');
   });
   if (c.repo) api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(() => {});
   return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons, deployBtn), notes, status, log, deployLine, deployTodo, deployLog);
@@ -111,7 +113,7 @@ function diskLine(c) {
 // Split so src/icons.ts doesn't take it for Citadel's own icon and append ?v=<hash>.
 const ICON_HINT = '/icon' + '.svg';
 
-/** One contraption: who it's enabled for, its settings, its service and its keys. */
+/** One contraption as a row that opens (#997): who it's enabled for, its settings, its service and its keys. */
 function card(c, people, replace) {
   const field = (label, name, value, attrs = {}) => h('label', { class: attrs.wide ? 'wide' : '' }, label,
     h('input', { name, value: value ?? '', autocomplete: 'off', spellcheck: 'false', ...attrs, wide: undefined }));
@@ -154,9 +156,9 @@ function card(c, people, replace) {
     const r = await api(`api/contraptions/${c.name}/keys`, { method: 'POST' }).catch(fail);
     if (r) replace(r);
   };
-  return h('div', { class: 'machine-setup contraption' },
-    h('div', { class: 'row' }, h('strong', {}, c.title), h('span', { class: 'muted' }, ` ${c.name} · port ${c.port}`), h('span', { class: 'spacer' }), rotate),
-    h('p', { class: 'small muted' }, `Key files in ${c.keys_dir} (identity.pub, contraption.key), made ${when(c.keys_at)}.`),
+  const base = `${c.name} · port ${c.port}`;
+  const [row, sum] = settingsRow({ icon: 'box', hue: 'teal', title: c.title, summary: base, open: c.wasOpen },
+    h('div', { class: 'row' }, h('span', { class: 'small muted' }, `Key files in ${c.keys_dir} (identity.pub, contraption.key), made ${when(c.keys_at)}.`), h('span', { class: 'spacer' }), rotate),
     h('div', { class: 'contraption-people', role: 'group', 'aria-label': `Who ${c.title} is enabled for` },
       h('span', { class: 'small' }, 'Enabled for'),
       ...people.filter((u) => !u.disabled).map((u) => h('label', { class: 'small turns-toggle' },
@@ -183,13 +185,18 @@ function card(c, people, replace) {
           },
         }), u.name))),
     diskLine(c),
-    servicePanel(c),
-    h('details', {}, h('summary', { class: 'small' }, 'Settings'), form));
+    servicePanel(c, (state) => {
+      sum.textContent = `${base} · ${state}`;
+      row.dataset.hue = state === 'active' ? 'running' : 'muted';
+    }),
+    h('details', { class: 'contraption-settings', open: c.wasSettingsOpen }, h('summary', { class: 'small' }, 'Settings'), form));
+  row.classList.add('contraption');
+  return row;
 }
 
 /** Main panel, admins only: every contraption, with a form to register another. */
 export function contraptionsPage() {
-  const list = h('div', { class: 'contraption-list' });
+  const list = h('div', { class: 'contraption-list settings-rows' });
   let people = [];
   let all = [];
   // A save or a key rotation redraws only its own card (keeping its Settings open), so typing in the others survives.
@@ -197,13 +204,13 @@ export function contraptionsPage() {
     const el = card(c, people, (next) => {
       all = all.map((x) => (x.name === next.name ? next : x));
       if (!el.isConnected) return render();
-      const fresh = cardFor(next);
-      fresh.querySelector(':scope > details').open = el.querySelector(':scope > details').open;
+      // Both the row and its inner Settings stay as they were.
+      const fresh = cardFor({ ...next, wasOpen: el.open, wasSettingsOpen: el.querySelector('.contraption-settings').open });
       el.replaceWith(fresh);
     });
     return el;
   };
-  const render = () => list.replaceChildren(...(all.length ? all.map(cardFor) : [h('p', { class: 'muted' }, 'No contraptions yet.')]));
+  const render = () => list.replaceChildren(...(all.length ? all.map(cardFor) : [h('p', { class: 'muted settings-empty' }, 'No contraptions yet.')]));
   const name = h('input', { name: 'name', placeholder: 'mandate', required: true, maxlength: 32, pattern: '[a-z0-9]([a-z0-9\\-]*[a-z0-9])?', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
   const title = h('input', { name: 'title', placeholder: 'Mandate', required: true, maxlength: 60, autocomplete: 'off' });
   const port = h('input', { name: 'port', type: 'number', min: 1024, max: 65535, placeholder: '9101', required: true });
@@ -236,7 +243,9 @@ export function contraptionsPage() {
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'Contraptions are personal apps with their own service, reached through Citadel. Each opens only for the people it is enabled for here; being in the scheme that builds it grants nothing.')),
-    form, list,
-    h('p', { class: 'muted small' }, 'Registering writes the contraption\'s key files for its own service to read: identity.pub checks who a request is from, and contraption.key lets it run turns. Citadel keeps only the private key, sealed, and a hash of contraption.key.'));
+      h('div', { class: 'meta' }, 'Personal apps with their own service, reached through Citadel. Each opens only for the people it is enabled for here.')),
+    h('div', { class: 'settings-rows register-row' }, settingsRow({ icon: 'plugplus', hue: 'accent', title: 'Register a contraption', summary: 'Name, title, port and icon' },
+      settingsHelp('Registering writes the key files its own service reads: identity.pub checks who a request is from, and contraption.key lets it run turns.',
+        'Citadel keeps only the private key, sealed, and a hash of contraption.key. Being in the scheme that builds an app grants nothing.'), form)[0]),
+    h('h3', { class: 'settings-section' }, 'Registered'), list);
 }

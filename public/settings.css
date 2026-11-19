@@ -68,6 +68,7 @@
 .settings-row.saved .settings-row-actions [role=status] { color: var(--done); }
 .settings-row.saved .settings-row-actions [role=status]::before { content: '✓ '; font-weight: 700; }
 .settings-help { margin: 0; }
+.settings-empty { margin: 0; padding: 0.85rem 0.75rem; }
 /* Jump links (#997): chips under the head; on a phone one row that scrolls sideways, like the menu's chips. */
 .settings-jump { display: flex; gap: 0.35rem; margin: 0.6rem 0 0.2rem; overflow-x: auto; scrollbar-width: none; }
 .settings-jump::-webkit-scrollbar { display: none; }
@@ -229,7 +230,6 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 /* Phones: who it is takes the line, the buttons the next, never squeezed side by side. */
 @media (max-width: 800px) { .person-row .text { flex-basis: 100%; } }
 .people-add { margin-top: 0.5rem; }
-.contraption-list { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
 .contraption .row { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
 .contraption .warn { color: var(--waiting); }
 .contraption-people { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: center; margin: 0.5rem 0; }

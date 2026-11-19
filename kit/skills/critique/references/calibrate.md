@@ -37,9 +37,12 @@ Per flagged note: **hit** when a finding names the same thing in the same place 
 Findings on flagged items that the person never mentioned: read them; a real flaw they missed is
 worth a Watch-list line, noise counts nowhere.
 
-Write the result in the rubric's `calibrated:` key, `"<date>, <model>: <hits>/<notes> hits,
-<false alarms>/<controls> false alarms"`, and each miss as a Known blind spots line in the real
-rubric: its entry in the review set, saved with the `review_set` tool.
+Record the counts with the `review_set` tool: `slug` and `calibration` (`hits`, `notes`,
+`false_alarms`, `controls`, `model`). Citadel writes the rubric's `calibrated:` key from them and
+takes an entry on trial off it when most notes hit and nothing false-alarmed (5's first line);
+anything less keeps it on trial, advising only. Then save each miss as a Known blind spots line in
+the entry's body (`review_set` with `body` and `version`). A rubric file outside a review set
+writes the key by hand: `"<date>, <model>: <hits>/<notes> hits, <false alarms>/<controls> false alarms"`.
 
 ## 5. Read it
 

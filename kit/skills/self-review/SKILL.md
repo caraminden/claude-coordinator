@@ -12,6 +12,17 @@ properly at high. Decisions behind it: Citadel #107 and #122 (Cara, 2026-10-29).
 The repo's CLAUDE.md, "Project facts", names what this skill needs per repo: the front end,
 the files that are high risk by file, and how a change ships.
 
+**The scheme's switches.** A turn's "Kit reviewers" line, when it has one, names the parts of this
+skill the scheme switched off on its Reviewers and critics page, and files of its additions. No
+line: everything is on, as written here.
+
+- **Pre-ship review off:** skip 2 and 4 and give no label (unless the line names another entry that
+  gives it: run that one in 2's place and label from its verdict). Fix what you find yourself, then
+  ship as the line says: a ship card, and `hand_off_land` with no risk and the go.
+- **A lens off:** write `Lenses: by the diff, except <names>` in the reviewer's brief.
+- **Finding checker off:** skip it on deep reviews.
+- **Additions:** add `Also read <file>, this scheme's additions to the review` to the brief.
+
 ## 1. Size the diff
 
 Commit first, then `git diff --stat main...HEAD` (three dots: only what this branch changed).

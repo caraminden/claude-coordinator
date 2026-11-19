@@ -944,7 +944,7 @@ const DEPLOY_CONTRAPTION = {
 /** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
 const REVIEW_SET = {
   name: 'review_set',
-  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. A minion saves only the body; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial.",
+  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. The kit's own reviewers (pre-ship review, its lenses, finding checker, fresh eyes) are entries too, marked kit: a scheme switches them and adds to their text (body), and their own text stays in the kit. After a calibration run (citadel:critique, references/calibrate.md), pass slug and calibration with its counts: it is recorded on the entry, and an entry on trial comes off it when most notes hit and nothing false-alarmed. A minion saves only the body and calibrations; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -954,6 +954,11 @@ const REVIEW_SET = {
       note: { type: 'string', description: 'What changed, a few words for History, e.g. "Calibration board: Josh passed long labels"' },
       enabled: { type: 'boolean', description: 'Taskmaster only: turn it on or off' },
       trial: { type: 'boolean', description: 'Taskmaster only: put it on trial or take it off' },
+      calibration: {
+        type: 'object', description: "A calibration run's counts, sent on their own: hits out of notes (the person's notes the critic caught), false_alarms out of controls (work they passed that it failed), and the model it ran on",
+        properties: { hits: { type: 'integer' }, notes: { type: 'integer' }, false_alarms: { type: 'integer' }, controls: { type: 'integer' }, model: { type: 'string' } },
+        required: ['hits', 'notes', 'false_alarms', 'controls'],
+      },
       add: { type: 'boolean', description: 'Taskmaster only: add a new entry (with extends, or a new slug)' },
       extends: { type: 'string', description: 'With add: the kit starter it builds on, e.g. ui-screenshots' },
       when: { type: 'string', description: 'With add: when it runs, as the rubric format writes it, e.g. "diff: app/web/**"' },
@@ -1585,15 +1590,15 @@ const THREAD_TOOLS = [
       type: 'object',
       properties: {
         summary: { type: 'string', maxLength: 300, description: 'What ships, in one line, for the shipped line (at most 300 characters)' },
-        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label" },
+        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label. Leave it out when the scheme's pre-ship review is off (your turn's Kit reviewers line says so): a ship with no label is high and needs go" },
         risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
-        go: { type: 'string', maxLength: 200, description: 'Required at or above the scheme\'s go threshold (the Shipping lines in your prompt; high when they name none): who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
+        go: { type: 'string', maxLength: 200, description: 'Required at or above the scheme\'s go threshold (the Shipping lines in your prompt; high when they name none), and with no risk label: who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
         stay_open: { type: 'boolean', description: 'true: a clean land still deploys and posts the shipped line, but this minion is not dismissed: it stays open in state ready for the next piece (with waiting_on: woken once live instead). Only when your brief has more pieces to do in this minion; leave it out otherwise (the default dismisses you on land). A failed land is unchanged' },
         waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open, when you have after-land steps or a wait, e.g. "Cara testing on her phone": the server never parks you; once the land is live (after the restart, if it needs one) it wakes you with the shipped line, once. Then run your after-land steps and set your state: null or try for a person, wake_when_live and parked for another minion\'s land' },
         ...LAND_PROPS,
         ...(HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: `false: don't deploy ${HOME_CONTRAPTIONS.join(', ')} after the land, for a change with nothing to serve (a PC-only build, say). Default true` } } : {}),
       },
-      required: ['summary', 'risk', 'risk_reason'],
+      required: ['summary'],
     },
   },
   ...(IN_CONTAINER
@@ -1878,13 +1883,18 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       if (!args.slug) {
         const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
-        return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.trial ? ', trial' : ''}${e.extends ? `, on kit ${e.extends}` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
+        return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.kit ? ', kit' : ''}${e.trial ? ', trial' : ''}${e.extends ? `, on kit ${e.extends}` : ''}${e.calibrated ? `, calibrated ${e.calibrated}` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
       }
       const slug = encodeURIComponent(String(args.slug));
+      if (args.calibration !== undefined) {
+        const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { calibration: args.calibration });
+        return `Recorded on ${e.slug}: ${e.calibrated}.${e.trial ? ' It stays on trial (advises only).' : ''}`;
+      }
       if (args.body === undefined && args.enabled === undefined && args.trial === undefined) {
         const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
         const e = entries.find((x: any) => x.slug === args.slug);
         if (!e) throw new Error(`No entry named ${args.slug}; review_set with no slug lists them`);
+        if (e.kit) return `${e.slug}, version ${e.version}, the kit's ${e.name} (${e.enabled ? 'on' : 'off'} here): ${e.what} Its text is the kit's; this scheme's additions, what a save replaces:\n\n${e.body || '(none)'}`;
         return `${e.slug}, version ${e.version} (${e.updated_by} saved it). As the critic reads it:\n\n${e.text}\n---- Its own body, what a save replaces:\n\n${e.body}`;
       }
       const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { body: args.body, version: args.version, note: args.note, enabled: args.enabled, trial: args.trial });

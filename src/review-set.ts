@@ -35,8 +35,12 @@ CREATE TABLE IF NOT EXISTS review_entries (
   position INTEGER NOT NULL DEFAULT 0,
   -- block or advise once phase 3 wires it; NULL: the rubric's own gate key decides, as today.
   gate TEXT,
-  -- Where it came from: "docs/rubrics/ui.md" for an imported file, NULL for one made on the page.
+  -- Where it came from: "docs/rubrics/ui.md" for an imported file, "kit:<agent or skill>" for a kit built-in (BUILT_INS), NULL for one made on the page.
   source TEXT,
+  -- It gives the risk label that decides whether a ship waits for a go (Q10): the pre-ship review's stand-in when that is off.
+  gives_label INTEGER NOT NULL DEFAULT 0,
+  -- Its last calibration as JSON (Q12): {at, by, model, hits, notes, false_alarms, controls}, or {at, by, good: true} when a person marked it good.
+  calibration TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   updated_by TEXT NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -84,14 +88,44 @@ export interface ReviewEntry {
   position: number;
   gate: string | null;
   source: string | null;
+  gives_label: boolean;
+  calibration: Calibration | null;
   version: number;
   updated_by: string;
   updated_at: number;
 }
 
 /** The fields a save may set: everything but the row's identity and bookkeeping. */
-export type EntryFields = Pick<ReviewEntry, 'slug' | 'name' | 'kind' | 'extends' | 'body' | 'triggers' | 'context' | 'enabled' | 'trial' | 'model' | 'effort' | 'stage' | 'position' | 'gate' | 'source'>;
-const FIELDS = ['slug', 'name', 'kind', 'extends', 'body', 'triggers', 'context', 'enabled', 'trial', 'model', 'effort', 'stage', 'position', 'gate', 'source'] as const;
+export type EntryFields = Pick<ReviewEntry, 'slug' | 'name' | 'kind' | 'extends' | 'body' | 'triggers' | 'context' | 'enabled' | 'trial' | 'model' | 'effort' | 'stage' | 'position' | 'gate' | 'source' | 'gives_label' | 'calibration'>;
+const FIELDS = ['slug', 'name', 'kind', 'extends', 'body', 'triggers', 'context', 'enabled', 'trial', 'model', 'effort', 'stage', 'position', 'gate', 'source', 'gives_label', 'calibration'] as const;
+
+/** A calibration run's counts (citadel:critique, references/calibrate.md), or a person's "mark it good". */
+export interface Calibration { at: number; by: string; model?: string; hits?: number; notes?: number; false_alarms?: number; controls?: number; good?: boolean }
+
+/**
+ * The kit's own reviewers (Q1, Q9): on every scheme's page as entries, each switchable per scheme. Their text stays in
+ * the kit (`source` names where); an entry's body holds only the scheme's additions. The "Always" lenses are part of the
+ * pre-ship review itself and go with it. The lenses' list must match references/lenses.md (test/review-set.test.ts).
+ */
+export const BUILT_INS: { slug: string; name: string; kind: string; source: string; when: string; what: string }[] = [
+  { slug: 'pre-ship-review', name: 'Pre-ship review', kind: 'reviewer', source: 'kit:citadel:self-review', when: 'Every change, before it ships', what: "A reviewer Grunt reads the diff through the lenses below and gives the risk label that decides whether a ship waits for a person's go. Its \"Always\" lenses go with it." },
+  ...([
+    ['error-handling', 'Error handling', 'a try/catch, a default, an HTTP status or error message in the diff'],
+    ['comments', 'Comments', 'a comment or doc that describes code, added or edited'],
+    ['tests', 'Tests', 'logic changed, or tests added or changed'],
+    ['new-types', 'New types', 'a new type, class, table or JSON format'],
+    ['access-and-secrets', 'Access and secrets', 'auth or access-control files, or code that reads a secret'],
+    ['smells', 'Smells', 'a new module, or over about 100 new lines of logic'],
+    ['agent-instructions', 'Agent instructions', 'text an agent reads as instructions: the kit, CLAUDE.md, prompts, tool descriptions'],
+    ['check-claims', 'Check claims', 'a check added or changed: a test, lint, audit or count'],
+    ['ui-findings', 'UI findings', 'a front-end file'],
+  ] as const).map(([slug, name, when]) => ({ slug: `lens-${slug}`, name: `Lens: ${name}`, kind: 'reviewer', source: 'kit:citadel:self-review/references/lenses.md', when, what: `One of the pre-ship review's lenses: the reviewer Grunt reads the diff for ${name.toLowerCase()} when it has ${when}.` })),
+  { slug: 'finding-checker', name: 'Finding checker', kind: 'checker', source: 'kit:citadel:finding-checker', when: 'Deep pre-ship reviews, after the reviewer', what: "Tries to prove each of the reviewer's findings wrong before the author acts on it." },
+  { slug: 'fresh-eyes', name: 'Fresh eyes', kind: 'reviewer', source: 'kit:citadel:fresh-eyes', when: 'Feature PRs, after the retro', what: "Reads the requester's own words against the PR and says what was built that they didn't ask for, and what they asked for that wasn't built." },
+];
+export const isKit = (e: Pick<ReviewEntry, 'source'>) => !!e.source?.startsWith('kit:');
+/** A kit entry's fields that are the kit's, not the scheme's: a save may change only its switch and its additions (body). */
+const KIT_FIXED = ['slug', 'name', 'kind', 'extends', 'triggers', 'stage', 'source', 'trial', 'gate', 'gives_label', 'calibration'] as const;
 
 export interface ReviewVersion { version: number; by: string; at: number; note: string; snapshot: EntryFields }
 
@@ -183,7 +217,10 @@ export function splitRubric(text: string): { fields: Partial<EntryFields>; body:
  * section from its context. `extends:` keeps naming the kit starter, which the critic reads first from the kit as it is
  * that turn (citadel:critic, rubric-format.md "Extending a starter"), so a kit fix reaches every scheme's next run (Q9).
  */
-export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers' | 'model' | 'effort' | 'body' | 'context' | 'trial'>): string {
+export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers' | 'model' | 'effort' | 'body' | 'context' | 'trial'> & Partial<Pick<ReviewEntry, 'gate' | 'calibration'>>): string {
+  const cal = e.calibration ? calibratedText(e.calibration) : '';
+  // The columns' keys win over the body's own: the gate when the page set one, the calibration once one is recorded.
+  const owned = (l: string) => OWNED.test(l) || (!!e.gate && /^gate\s*:/.test(l)) || (!!cal && /^calibrated\s*:/.test(l));
   const own = e.body.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   const head = [
     `name: ${e.slug}`,
@@ -193,8 +230,10 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
     e.effort ? `effort: ${e.effort}` : '',
     // On trial (Q12) it only advises, whatever its own gate says.
     e.trial ? 'trial: true' : '',
+    e.gate ? `gate: ${e.gate === 'block' ? 'blocks-ready' : 'advisory'}` : '',
+    cal ? `calibrated: ${JSON.stringify(cal)}` : '',
     // The columns own these keys: a body that writes them too (a minion's save may) can't override a person's switches.
-    own ? own[1].split('\n').filter((l) => !OWNED.test(l)).join('\n').trim() : '',
+    own ? own[1].split('\n').filter((l) => !owned(l)).join('\n').trim() : '',
   ].filter(Boolean);
   const c = e.context;
   const ctx = [
@@ -204,6 +243,13 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
   ].filter(Boolean);
   const sections = (own ? own[2] : e.body).trim();
   return `---\n${head.join('\n')}\n---\n\n${sections}${ctx.length ? `${sections ? '\n\n' : ''}## Context\n\n${ctx.join('\n')}` : ''}\n`;
+}
+
+/** A calibration as the rubric format's `calibrated:` key writes it: "2026-11-19, sonnet: 4/5 hits, 0/2 false alarms". */
+export function calibratedText(c: Calibration): string {
+  const day = new Date(c.at).toISOString().slice(0, 10);
+  if (c.good) return `${day}, marked good by ${c.by}`;
+  return `${day}, ${c.model ?? 'unknown model'}: ${c.hits}/${c.notes} hits, ${c.false_alarms}/${c.controls} false alarms`;
 }
 
 /** The kit's starters, for New and for the page's "on top of the kit starter" link: slug, what it judges, and its text. */
@@ -216,8 +262,14 @@ export function loadStarters(dir = STARTER_DIR): { slug: string; judges: string;
 }
 
 type Row = Record<string, any>;
-const fromRow = (r: Row): ReviewEntry => ({ ...r, triggers: JSON.parse(r.triggers), context: JSON.parse(r.context), enabled: !!r.enabled, trial: !!r.trial }) as ReviewEntry;
+const fromRow = (r: Row): ReviewEntry => ({ ...r, triggers: JSON.parse(r.triggers), context: JSON.parse(r.context), enabled: !!r.enabled, trial: !!r.trial, gives_label: !!r.gives_label, calibration: r.calibration ? JSON.parse(r.calibration) : null }) as ReviewEntry;
 const snapshotOf = (e: EntryFields): EntryFields => Object.fromEntries(FIELDS.map((k) => [k, e[k]])) as EntryFields;
+
+/** On trial an entry only advises (Q12): it can't block a ship or give the risk label until it is calibrated or marked good. */
+function onlyCalibratedJudge(e: EntryFields): void {
+  if (e.trial && e.gate === 'block') throw new ReviewError(`${e.name} is on trial, so it only advises: calibrate it or mark it good before it can block`);
+  if (e.trial && e.gives_label) throw new ReviewError(`${e.name} is on trial, so it can't give the risk label: calibrate it or mark it good first`);
+}
 
 /** Refuse a field a save can't hold, so a bad request changes nothing. */
 function check(f: Partial<EntryFields>): void {
@@ -239,6 +291,7 @@ function check(f: Partial<EntryFields>): void {
   const flag = (v: unknown) => v === undefined || typeof v === 'boolean';
   const c = f.context as Record<string, unknown> | undefined;
   if (c && (!(c.guides === undefined || Array.isArray(c.guides)) || !strings(c.paths) || !flag(c.verdicts) || !flag(c.requester))) throw new ReviewError('context is {guides: [{label, href}], paths: [text], verdicts: true or false, requester: true or false}');
+  if (f.gives_label !== undefined && typeof f.gives_label !== 'boolean') throw new ReviewError('gives_label is true or false');
   for (const g of f.context?.guides ?? []) if (typeof g?.label !== 'string' || typeof g?.href !== 'string') throw new ReviewError('Each guide has a label and an href');
   const t = f.triggers as Record<string, unknown> | undefined;
   if (t && (!strings(t.diff) || !strings(t.types) || !text(t.creative) || !text(t.schedule) || !text(t.in_app) || !flag(t.ask))) throw new ReviewError('triggers is {diff: [globs], types: [minion types], creative, schedule, in_app: text, ask: true or false}');
@@ -273,13 +326,15 @@ export class ReviewSet {
       triggers, context: fields.context ?? {}, enabled: fields.enabled ?? true, trial: fields.trial ?? false,
       model: fields.model ?? null, effort: fields.effort ?? null, stage: fields.stage ?? stageFor(triggers),
       position: fields.position ?? this.nextPosition(projectId), gate: fields.gate ?? null, source: fields.source ?? null,
+      gives_label: fields.gives_label ?? false, calibration: fields.calibration ?? null,
     };
+    onlyCalibratedJudge(row);
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const { lastInsertRowid } = this.db.prepare(`INSERT INTO review_entries (project_id, slug, name, kind, extends, body, triggers, context, enabled, trial, model, effort, stage, position, gate, source, version, updated_by, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
+      const { lastInsertRowid } = this.db.prepare(`INSERT INTO review_entries (project_id, slug, name, kind, extends, body, triggers, context, enabled, trial, model, effort, stage, position, gate, source, gives_label, calibration, version, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
         projectId, row.slug, row.name, row.kind, row.extends, row.body, JSON.stringify(row.triggers), JSON.stringify(row.context),
-        row.enabled ? 1 : 0, row.trial ? 1 : 0, row.model, row.effort, row.stage, row.position, row.gate, row.source, by, at);
+        row.enabled ? 1 : 0, row.trial ? 1 : 0, row.model, row.effort, row.stage, row.position, row.gate, row.source, row.gives_label ? 1 : 0, row.calibration ? JSON.stringify(row.calibration) : null, by, at);
       this.db.prepare('INSERT INTO review_versions (entry_id, version, by, at, note, snapshot) VALUES (?, 1, ?, ?, ?, ?)').run(Number(lastInsertRowid), by, at, note, JSON.stringify(row));
       this.db.exec('COMMIT');
     } catch (err) {
@@ -301,13 +356,18 @@ export class ReviewSet {
     if (patch.slug !== undefined && patch.slug !== slug && this.get(projectId, patch.slug)) throw new ReviewError(`This scheme already has an entry named ${patch.slug}`);
     const next = snapshotOf({ ...was, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as EntryFields);
     if (JSON.stringify(next) === JSON.stringify(snapshotOf(was))) return was;
+    if (isKit(was)) {
+      const changed = KIT_FIXED.filter((k) => JSON.stringify(next[k]) !== JSON.stringify(was[k]));
+      if (changed.length) throw new ReviewError(`${was.name} is the kit's: a scheme switches it on or off and adds to its text, but can't change its ${changed.join(', ')}`);
+    }
+    onlyCalibratedJudge(next);
     const version = was.version + 1;
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.db.prepare(`UPDATE review_entries SET slug = ?, name = ?, kind = ?, extends = ?, body = ?, triggers = ?, context = ?, enabled = ?, trial = ?, model = ?, effort = ?,
-        stage = ?, position = ?, gate = ?, source = ?, version = ?, updated_by = ?, updated_at = ? WHERE id = ?`).run(
+        stage = ?, position = ?, gate = ?, source = ?, gives_label = ?, calibration = ?, version = ?, updated_by = ?, updated_at = ? WHERE id = ?`).run(
         next.slug, next.name, next.kind, next.extends, next.body, JSON.stringify(next.triggers), JSON.stringify(next.context), next.enabled ? 1 : 0, next.trial ? 1 : 0,
-        next.model, next.effort, next.stage, next.position, next.gate, next.source, version, by, at, was.id);
+        next.model, next.effort, next.stage, next.position, next.gate, next.source, next.gives_label ? 1 : 0, next.calibration ? JSON.stringify(next.calibration) : null, version, by, at, was.id);
       this.db.prepare('INSERT INTO review_versions (entry_id, version, by, at, note, snapshot) VALUES (?, ?, ?, ?, ?, ?)').run(was.id, version, by, at, note, JSON.stringify(next));
       this.db.exec('COMMIT');
     } catch (err) {
@@ -332,6 +392,53 @@ export class ReviewSet {
     return this.save(projectId, slug, { ...v.snapshot, slug }, by, `Restored version ${n}`);
   }
 
+  /**
+   * Add the kit's built-ins (BUILT_INS) a scheme doesn't have yet, on, at the front of the ship column. Idempotent; a
+   * scheme's own entry that already took a built-in's slug keeps it, and that built-in stays at its kit default (on).
+   */
+  ensureBuiltIns(projectId: number, at = Date.now()): void {
+    const have = new Set((this.db.prepare('SELECT slug FROM review_entries WHERE project_id = ?').all(projectId) as Row[]).map((r) => r.slug));
+    BUILT_INS.forEach((b, i) => {
+      if (have.has(b.slug)) return;
+      this.create(projectId, { slug: b.slug, name: b.name, kind: b.kind, source: b.source, stage: 'ship', position: i - BUILT_INS.length - 1000 }, 'Citadel', 'The kit\'s, added to the page', at);
+    });
+  }
+
+  /** The scheme's kit built-in by slug, or null when it has none or its own entry took the slug. */
+  kit(projectId: number, slug: string): ReviewEntry | null {
+    const e = this.get(projectId, slug);
+    return e && isKit(e) ? e : null;
+  }
+
+  /**
+   * Whether this scheme's ships get a risk label (Q10): its pre-ship review is on (a scheme that never opened its page
+   * has it on), or another entry that is on, off trial, gives one. False: every ship waits for a person's go.
+   */
+  labelGiver(projectId: number): string | null {
+    const pre = this.kit(projectId, 'pre-ship-review');
+    if (!pre || pre.enabled) return 'Pre-ship review';
+    return this.list(projectId).find((e) => e.enabled && !e.trial && e.gives_label)?.name ?? null;
+  }
+
+  /**
+   * Record a calibration run (citadel:critique, references/calibrate.md). The calibrate step's own bar takes an entry
+   * off trial: most notes hit and no false alarms ("rely on it"). Anything less keeps it on trial; it never puts a
+   * calibrated entry back on.
+   */
+  calibrate(projectId: number, slug: string, r: { hits: number; notes: number; false_alarms: number; controls: number; model?: string | null }, by: string, at = Date.now()): ReviewEntry {
+    const n = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10_000;
+    if (![r.hits, r.notes, r.false_alarms, r.controls].every(n) || r.hits > r.notes || r.false_alarms > r.controls || !r.notes) {
+      throw new ReviewError('A calibration is whole numbers: hits out of notes (at least 1), and false_alarms out of controls');
+    }
+    if (r.model != null && (typeof r.model !== 'string' || r.model.length > 60)) throw new ReviewError('model names the model the critic ran on');
+    const was = this.get(projectId, slug);
+    if (!was) throw new ReviewError(`No entry named ${slug}`);
+    const passes = r.hits * 2 > r.notes && r.false_alarms === 0;
+    const calibration: Calibration = { at, by, model: r.model ?? undefined, hits: r.hits, notes: r.notes, false_alarms: r.false_alarms, controls: r.controls };
+    const trial = was.trial && !passes;
+    return this.save(projectId, slug, { calibration, trial }, by, `Calibrated: ${r.hits}/${r.notes} hits, ${r.false_alarms}/${r.controls} false alarms${was.trial ? (passes ? ', off trial' : ', stays on trial') : ''}`, undefined, at);
+  }
+
   private nextPosition(projectId: number): number {
     return ((this.db.prepare('SELECT max(position) AS p FROM review_entries WHERE project_id = ?').get(projectId) as { p: number | null }).p ?? -1) + 1;
   }
@@ -343,7 +450,8 @@ export class ReviewSet {
  */
 export function renderSet(entries: ReviewEntry[], dir: string): number {
   rmSync(dir, { recursive: true, force: true });
-  const on = entries.filter((e) => e.enabled);
+  // The kit's built-ins aren't rubrics: kitLine tells the turn which are off and where the scheme's additions are.
+  const on = entries.filter((e) => e.enabled && !isKit(e));
   if (!on.length) return 0;
   mkdirSync(dir, { recursive: true });
   for (const e of on) writeFileSync(join(dir, `${e.slug}.md`), renderEntry(e));
@@ -442,4 +550,30 @@ export function reviewSetLine(dir: string, on: number): string {
   return on
     ? `Review set: this scheme's reviewers and critics are on its Reviewers and critics page, and the ${on} that are on are rendered for this turn as rubric files in \`${dir}/\`: that folder is the scheme's rubric set wherever a skill says rubrics (citadel:critique). Read them there; change one only with the \`review_set\` tool, never by editing those files or adding rubric files to the repo.`
     : "Review set: this scheme has no reviewers or critics on (its Reviewers and critics page), so no rubric's `when:` matches; a person adds one there, or a Taskmaster with `review_set`.";
+}
+
+/**
+ * The turn's line on the kit's built-ins (Q10): which ones this scheme switched off, what that means for the ship, and
+ * the scheme's additions to the ones still on, written into `dir` as `<slug>.md`. Empty when all are on as the kit has them.
+ */
+export function kitLine(entries: ReviewEntry[], dir: string): string {
+  rmSync(dir, { recursive: true, force: true });
+  const kit = entries.filter(isKit);
+  const off = kit.filter((e) => !e.enabled);
+  const added = kit.filter((e) => e.enabled && e.body.trim());
+  const out: string[] = [];
+  if (off.some((e) => e.slug === 'pre-ship-review')) {
+    const giver = entries.find((e) => e.enabled && !e.trial && e.gives_label);
+    out.push(giver
+      ? `This scheme's pre-ship review is off, and its ${giver.name} (\`${giver.slug}\` in the review set) gives the risk label instead: run it where citadel:self-review would run its reviewer, and label the change from its verdict.`
+      : "This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label. Every ship waits for a person's go, whatever the scheme's shipping instructions say: ask with a ship card, then call hand_off_land with no risk and the go.");
+  }
+  const rest = off.filter((e) => e.slug !== 'pre-ship-review');
+  if (rest.length) out.push(`Kit reviewers this scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, and an off fresh eyes means no citadel:fresh-eyes Grunt.`);
+  if (added.length) {
+    mkdirSync(dir, { recursive: true });
+    for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to the kit's text\n\n${e.body.trim()}\n`);
+    out.push(`This scheme's additions to kit reviewers, read with the kit's own text and passed to their Grunts: ${added.map((e) => `\`${dir}/${e.slug}.md\` (${e.name})`).join(', ')}.`);
+  }
+  return out.length ? `Kit reviewers: ${out.join(' ')}` : '';
 }

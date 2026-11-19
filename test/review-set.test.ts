@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { importAllRubrics, importRubrics, IMPORT_KEY, loadStarters, nameFor, parseWhen, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
+import { BUILT_INS, importAllRubrics, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -169,4 +169,73 @@ test("the import reads only inside the repo, brings a file the store refuses in 
   const store = { getSetting: <T>(k: string) => (settings.get(k) ?? null) as T | null, setSetting: (k: string, v: unknown) => void settings.set(k, v), listProjects: () => [{ id: 9, name: 'G', repo_dir: repo }], reviews: { get: () => null, create: () => { throw new Error('disk full'); } } as any };
   assert.match(importAllRubrics(store)[0], /FAILED r\/bad-model\.md \(disk full\)/);
   assert.equal(settings.get(IMPORT_KEY), undefined);
+});
+
+test("the kit's built-ins: on every scheme's page once, switchable, their own text the kit's", () => {
+  const { set } = fresh();
+  set.ensureBuiltIns(3, 1);
+  set.ensureBuiltIns(3, 2);
+  const kit = set.list(3);
+  assert.deepEqual(kit.map((e) => e.slug), BUILT_INS.map((b) => b.slug), 'each once, in the kit order, first on the page');
+  assert.ok(kit.every((e) => e.stage === 'ship' && e.enabled && !e.trial && e.source?.startsWith('kit:')));
+  assert.equal(set.list(9).length, 0, 'per scheme: another scheme gets its own when its page opens');
+  // A scheme switches one and adds to its text; the kit's name, kind and trial are not its to change.
+  set.save(3, 'lens-tests', { enabled: false }, 'Josh', 'Turned off');
+  set.save(3, 'pre-ship-review', { body: 'Also check the save file format.' }, 'Josh', 'Edited by hand');
+  assert.throws(() => set.save(3, 'fresh-eyes', { name: 'Mine' }, 'Josh', 'x'), /kit's.*name/);
+  assert.throws(() => set.save(3, 'fresh-eyes', { trial: true }, 'Josh', 'x'), /kit's.*trial/);
+  // Restoring a kit entry's first version works: its fixed fields never moved.
+  assert.equal(set.restore(3, 'lens-tests', 1, 'Josh').enabled, true);
+});
+
+test("every lens in the self-review's lenses.md has a built-in, and no built-in lens is missing from it", () => {
+  const md = readFileSync(join(import.meta.dirname, '..', 'kit', 'skills', 'self-review', 'references', 'lenses.md'), 'utf8');
+  const table = md.split('### Pick by the diff')[1].split('\n####')[0];
+  const lenses = [...table.matchAll(/^\| ([^|]+?)(?:, in `[^`]+`)? \|/gm)].map((m) => m[1]).filter((l) => l !== 'Lens' && !/^-+$/.test(l));
+  assert.deepEqual(BUILT_INS.filter((b) => b.slug.startsWith('lens-')).map((b) => b.name.replace(/^Lens: /, '')), lenses);
+});
+
+test('who gives the risk label: the pre-ship review, else a calibrated entry marked to; the turn hears which', () => {
+  const { set } = fresh();
+  const dir = join(root, 'kit-line');
+  assert.equal(set.labelGiver(3), 'Pre-ship review', 'a scheme that never opened its page has it on');
+  assert.equal(kitLine(set.list(3), dir), '', 'all on as the kit has them: no line');
+  set.ensureBuiltIns(3);
+  set.save(3, 'pre-ship-review', { enabled: false }, 'Josh', 'Turned off');
+  set.save(3, 'fresh-eyes', { enabled: false }, 'Josh', 'Turned off');
+  set.save(3, 'finding-checker', { body: 'Check the shader findings twice.' }, 'Josh', 'Edited by hand');
+  assert.equal(set.labelGiver(3), null);
+  const line = kitLine(set.list(3), dir);
+  assert.match(line, /pre-ship review is off: don't run .* give no risk label\. Every ship waits for a person's go/);
+  assert.match(line, /switched off: Fresh eyes\./);
+  assert.match(line, new RegExp(`${dir}/finding-checker\\.md\` \\(Finding checker\\)`));
+  assert.match(readFileSync(join(dir, 'finding-checker.md'), 'utf8'), /shader findings/);
+  // On trial it can't give the label; once marked good it can.
+  set.create(3, { slug: 'art-judge', name: 'Art judge', trial: true }, 'Josh');
+  assert.throws(() => set.save(3, 'art-judge', { gives_label: true }, 'Josh', 'x'), /on trial, so it can't give the risk label/);
+  set.save(3, 'art-judge', { trial: false, gives_label: true }, 'Josh', 'Marked good');
+  assert.equal(set.labelGiver(3), 'Art judge');
+  assert.match(kitLine(set.list(3), dir), /its Art judge \(`art-judge` in the review set\) gives the risk label instead/);
+  // Built-ins are no rubrics: the critics' folder holds only the scheme's own entries.
+  const rubrics = join(root, 'kit-rubrics');
+  assert.equal(renderSet(set.list(3), rubrics), 1);
+  assert.deepEqual(readdirSync(rubrics), ['art-judge.md']);
+});
+
+test('trial until calibrated: a run that passes takes it off trial, a weak one keeps it advising, and block waits', () => {
+  const { set } = fresh();
+  set.create(3, { slug: 'ui', name: 'UI', trial: true }, 'Josh');
+  assert.throws(() => set.save(3, 'ui', { gate: 'block' }, 'Josh', 'x'), /on trial, so it only advises/);
+  let e = set.calibrate(3, 'ui', { hits: 2, notes: 5, false_alarms: 0, controls: 2, model: 'sonnet' }, 'minion #12', Date.UTC(2026, 10, 19));
+  assert.equal(e.trial, true, 'under half the notes: stays on trial');
+  e = set.calibrate(3, 'ui', { hits: 4, notes: 5, false_alarms: 1, controls: 2, model: 'sonnet' }, 'minion #12', Date.UTC(2026, 10, 19));
+  assert.equal(e.trial, true, 'a false alarm: stays on trial');
+  e = set.calibrate(3, 'ui', { hits: 4, notes: 5, false_alarms: 0, controls: 2, model: 'opus' }, 'minion #12', Date.UTC(2026, 10, 19));
+  assert.equal(e.trial, false);
+  assert.match(renderEntry(e), /^calibrated: "2026-11-19, opus: 4\/5 hits, 0\/2 false alarms"$/m);
+  assert.equal(set.versions(3, 'ui')[0].note, 'Calibrated: 4/5 hits, 0/2 false alarms, off trial');
+  e = set.save(3, 'ui', { gate: 'block' }, 'Josh', 'Set to block the ship');
+  assert.match(renderEntry(e), /^gate: blocks-ready$/m);
+  assert.throws(() => set.calibrate(3, 'ui', { hits: 6, notes: 5, false_alarms: 0, controls: 2 }, 'x'), /whole numbers/);
+  assert.throws(() => set.calibrate(3, 'ui', { hits: 1, notes: 0, false_alarms: 0, controls: 0 }, 'x'), /whole numbers/);
 });

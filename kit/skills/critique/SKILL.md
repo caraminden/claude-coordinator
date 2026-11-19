@@ -188,7 +188,8 @@ A new rubric is a new entry on the scheme's Reviewers and critics page (people, 
 `review_set`), blank or on top of a starter in `<kit>/skills/critique/rubrics/`; it starts on trial,
 so it only advises until it is calibrated.
 Before a scheme relies on it, and again when the rubric or the critic's model changes, run the blind
-trial in [`references/calibrate.md`](references/calibrate.md) and record the result in `calibrated:`.
+trial in [`references/calibrate.md`](references/calibrate.md) and record its counts with `review_set`
+(`calibration`): that takes it off trial when it passes. A person can also mark it good on the page.
 
 ## Cost
 

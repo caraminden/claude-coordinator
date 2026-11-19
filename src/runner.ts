@@ -49,7 +49,7 @@ import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
-import { renderSet, reviewSetLine } from './review-set.ts';
+import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacific, parseResetTime } from './pacific.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -2729,8 +2729,10 @@ export class Runner {
       writeFileSync(join(dir, 'system-prompt.md'), system);
       // The scheme's review set (Build 4), fresh each turn so a page edit or a kit starter fix reaches the next turn's critics.
       const reviewDir = join(dir, 'review-set');
-      const reviewOn = renderSet(this.store.reviews.list(project.id), reviewDir);
-      parts.turn.reviewSet = reviewOn ? [reviewSetLine(reviewDir, reviewOn)] : []; // a scheme with none gets no line
+      const reviews = this.store.reviews.list(project.id);
+      const reviewOn = renderSet(reviews, reviewDir);
+      // A scheme with no reviewers on gets no review-set line; the kit line says only what it changed from the kit's defaults.
+      parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn) : '', kitLine(reviews, join(dir, 'review-kit'))].filter(Boolean);
       const context = promptText(parts.turn);
       // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
       // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.

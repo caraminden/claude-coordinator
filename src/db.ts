@@ -1475,9 +1475,9 @@ export function titleWithoutBuild(title: string, build: number): string {
 /** How long without an action before the Taskmaster chat shows the recap: AWAY_MS in public/recap.js. */
 export const RECAP_AWAY_MS = 6 * 60 * 60 * 1000;
 
-/** One event of Store.skillTimeline: what it called (space-separated), and 0/1 flags. */
+/** One event of skillTimeline (src/skills.ts): what it called (space-separated), and 0/1 flags. */
 export interface SkillEvent { id: number; ticket_id: number; at: number; skills: string | null; agents: string | null; edit: number; error: number; ship: number; result: number; grunt: number }
-/** A minion in Store.skillTimeline: its type property and the id of its newest "Shipped" note in the window (null if none). */
+/** A minion in skillTimeline (src/skills.ts): its type property and the id of its newest "Shipped" note in the window (null if none). */
 export interface SkillTicket { id: number; project_id: number; number: number | null; title: string; kind: string; type: string | null; shipped: number | null }
 export interface SkillTimeline { events: SkillEvent[]; tickets: SkillTicket[] }
 
@@ -2836,41 +2836,6 @@ export class Store {
       WHERE t.project_id = ? AND e.kind = 'claude' AND e.id > ? AND e.created_at > ? AND json_extract(e.data, '$.type') = 'result'
       GROUP BY e.ticket_id`).all(projectId, before?.event_id ?? 0, since) as { ticket_id: number; n: number }[];
     return { since, turns: Object.fromEntries(rows.map((r) => [r.ticket_id, r.n])) };
-  }
-
-  /**
-   * The events the Skills page (#1062, src/skills.ts) walks, in order: one scheme's (or every scheme's, `projectId` null) Claude
-   * events since `since` that call a skill or a Grunt, edit a file, fail a tool, hand off a ship or end a turn; everything else
-   * is left out in SQL. Its minions (number, title, type) and each one's newest "Shipped" note come with it.
-   */
-  skillTimeline(projectId: number | null, since: number): SkillTimeline {
-    // Event ids grow with time: start after the last turn that ended by `since`, so the rowid range skips everything older.
-    const before = this.db.prepare('SELECT event_id FROM turns WHERE ended_at <= ? AND event_id IS NOT NULL ORDER BY ended_at DESC LIMIT 1').get(since) as { event_id: number } | undefined;
-    const from = before?.event_id ?? 0;
-    const tools = (name: string, field: string, fallback: string) => `CASE WHEN e.data LIKE '%"name":"${name}"%' THEN (SELECT group_concat(coalesce(json_extract(c.value, '$.input.${field}'), '${fallback}'), ' ')
-        FROM json_each(e.data, '$.message.content') c WHERE json_extract(c.value, '$.type') = 'tool_use' AND json_extract(c.value, '$.name') = '${name}') END`;
-    const events = this.db.prepare(`
-      SELECT * FROM (SELECT e.id, e.ticket_id, e.created_at AS at,
-          ${tools('Skill', 'skill', '')} AS skills,
-          ${tools('Agent', 'subagent_type', 'general-purpose')} AS agents,
-          (e.data LIKE '%"name":"Edit"%' OR e.data LIKE '%"name":"Write"%' OR e.data LIKE '%"name":"NotebookEdit"%') AS edit,
-          (e.data LIKE '{"type":"user"%' AND e.data LIKE '%"is_error":true%') AS error,
-          (e.data LIKE '%"name":"mcp__thread__hand_off_land"%' OR e.data LIKE '%"name":"mcp__thread__land"%') AS ship,
-          (e.data LIKE '{"type":"result"%') AS result,
-          (e.data LIKE '%"parent_tool_use_id":"%') AS grunt
-        FROM events e JOIN tickets t ON t.id = e.ticket_id
-        WHERE e.id > ?1 AND e.kind = 'claude' AND e.created_at > ?2 AND (?3 IS NULL OR t.project_id = ?3))
-      WHERE skills IS NOT NULL OR agents IS NOT NULL OR edit OR error OR ship OR result
-      ORDER BY ticket_id, id`).all(from, since, projectId) as unknown as SkillEvent[];
-    const ids = [...new Set(events.map((e) => e.ticket_id))];
-    if (!ids.length) return { events, tickets: [] };
-    const tickets = this.db.prepare(`
-      SELECT k.id, k.project_id, k.number, k.title, k.kind,
-        (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
-          WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
-        (SELECT max(n.id) FROM events n WHERE n.ticket_id = k.id AND n.kind = 'note' AND n.id > ?1 AND n.data LIKE '{"text":"Shipped %') AS shipped
-      FROM tickets k WHERE k.id IN (SELECT value FROM json_each(?2))`).all(from, JSON.stringify(ids)) as unknown as SkillTicket[];
-    return { events, tickets };
   }
 
   /**

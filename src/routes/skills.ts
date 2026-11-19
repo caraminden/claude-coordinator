@@ -8,11 +8,11 @@ export const skillRoutes: Route[] = [
   {
     // ?all=1: usage across every scheme, for the Citadel scheme's members (the kit's own view).
     method: 'GET', path: '/api/projects/:project/skills', who: ['person', 'taskmaster'],
-    handler({ res, url, app, session, project }) {
+    async handler({ res, url, app, session, project }) {
       const citadel = !!session && app.store.canSee(session, GLOBAL_OWNER);
       const all = url.searchParams.get('all') === '1';
       if (all && !citadel) throw new HttpError(403, 'Every scheme\'s counts are for the Citadel scheme\'s members');
-      const usage = skillUsage(app.store, all ? null : project.id);
+      const usage = await skillUsage(app.store, all ? null : project.id);
       return json(res, 200, {
         items: listSkills(KIT_DIR, project.repo_dir),
         off: offSkills(project),

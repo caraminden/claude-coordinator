@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { KIT_DIR, listSkills, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
+import { KIT_DIR, listSkills, skillTimeline, skillUsage, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
 import { bootServer, stopProcs } from './helpers.ts';
 
 // The Skills page (#1062): the list, the usage walk over a scheme's events, and the per-scheme Off switch.
@@ -80,7 +80,7 @@ test('the walk: each run\'s step of the turn, the Grunts it started, its minion 
   assert.deepEqual(r.skills['citadel:diagnosing-bugs'].phases, { 'after an error': 1 });
 });
 
-test('skillTimeline reads Skill and Agent calls, edits, errors, ships and turn ends from the stored stream, one scheme or all', () => {
+test('skillTimeline reads Skill and Agent calls, edits, errors, ships and turn ends from the stored stream, one scheme or all, on a worker thread for a database file', async () => {
   const store = new Store(join(root, 'timeline.db'));
   const a = store.createProject('A', null);
   const b = store.createProject('B', null);
@@ -98,15 +98,19 @@ test('skillTimeline reads Skill and Agent calls, edits, errors, ships and turn e
   store.addEvent(t.id, 'claude', { type: 'result', subtype: 'success' });
   store.addEvent(t.id, 'note', { text: 'Shipped abc' });
   store.addEvent(u.id, 'claude', use('Skill', { skill: 'citadel:self-review' }));
-  const mine = store.skillTimeline(a.id, 0);
+  const mine = skillTimeline(store.db, a.id, 0);
   assert.deepEqual(mine.events.map((e) => [e.skills, e.agents, e.edit, e.error, e.ship, e.result]), [
     ['citadel:grilling', null, 0, 0, 0, 0], [null, 'general-purpose', 0, 0, 0, 0], [null, 'Explore', 0, 0, 0, 0],
     [null, null, 1, 0, 0, 0], [null, null, 0, 1, 0, 0], [null, null, 0, 0, 1, 0], [null, null, 0, 0, 0, 1]]);
   assert.equal(mine.tickets.length, 1);
   assert.equal(mine.tickets[0].type, 'feature');
   assert.ok(mine.tickets[0].shipped! > mine.events.at(-1)!.id);
-  assert.deepEqual(Object.keys(usageFrom(store.skillTimeline(null, 0), 0).skills).sort(), ['citadel:grilling', 'citadel:self-review']);
-  assert.equal(store.skillTimeline(a.id, Date.now() + 1000).events.length, 0, 'only the window');
+  assert.deepEqual(Object.keys(usageFrom(skillTimeline(store.db, null, 0), 0).skills).sort(), ['citadel:grilling', 'citadel:self-review']);
+  assert.equal(skillTimeline(store.db, a.id, Date.now() + 1000).events.length, 0, 'only the window');
+  const [one, two] = await Promise.all([skillUsage(store, a.id), skillUsage(store, a.id)]);
+  assert.equal(one, two, 'one scan for both');
+  assert.deepEqual(Object.keys(one.skills), ['citadel:grilling']);
+  assert.deepEqual(one.agents['Explore'].types, { feature: 1 });
 });
 
 let base = '';

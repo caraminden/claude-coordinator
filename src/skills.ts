@@ -5,8 +5,10 @@
 // the turn's kit copy with a deny rule behind it, Grunt types listed without a switch.
 import { readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { frontmatter } from './catalogue.ts';
-import type { Project, SkillTimeline, Store } from './db.ts';
+import type { Project, SkillEvent, SkillTicket, SkillTimeline, Store } from './db.ts';
 
 /** The kit's plugin name (kit/.claude-plugin/plugin.json): its skills and agents are `citadel:<name>` in a turn. */
 export const KIT_PLUGIN = 'citadel';
@@ -183,17 +185,77 @@ export function usageFrom(t: SkillTimeline, since: number): UsageReport {
   return { since, skills, agents };
 }
 
-const cache = new Map<string, { at: number; report: UsageReport }>();
+/**
+ * The events the Skills page (#1062, src/skills.ts) walks, in order: one scheme's (or every scheme's, `projectId` null) Claude
+ * events since `since` that call a skill or a Grunt, edit a file, fail a tool, hand off a ship or end a turn; everything else
+ * is left out in SQL. Its minions (number, title, type) and each one's newest "Shipped" note come with it.
+ */
+export function skillTimeline(db: DatabaseSync, projectId: number | null, since: number): SkillTimeline {
+  // Event ids grow with time: start after the last turn that ended by `since`, so the rowid range skips everything older.
+  const before = db.prepare('SELECT event_id FROM turns WHERE ended_at <= ? AND event_id IS NOT NULL ORDER BY ended_at DESC LIMIT 1').get(since) as { event_id: number } | undefined;
+  const from = before?.event_id ?? 0;
+  const tools = (name: string, field: string, fallback: string) => `CASE WHEN e.data LIKE '%"name":"${name}"%' THEN (SELECT group_concat(coalesce(json_extract(c.value, '$.input.${field}'), '${fallback}'), ' ')
+      FROM json_each(e.data, '$.message.content') c WHERE json_extract(c.value, '$.type') = 'tool_use' AND json_extract(c.value, '$.name') = '${name}') END`;
+  const events = db.prepare(`
+    SELECT * FROM (SELECT e.id, e.ticket_id, e.created_at AS at,
+        ${tools('Skill', 'skill', '')} AS skills,
+        ${tools('Agent', 'subagent_type', 'general-purpose')} AS agents,
+        (e.data LIKE '%"name":"Edit"%' OR e.data LIKE '%"name":"Write"%' OR e.data LIKE '%"name":"NotebookEdit"%') AS edit,
+        (e.data LIKE '{"type":"user"%' AND e.data LIKE '%"is_error":true%') AS error,
+        (e.data LIKE '%"name":"mcp__thread__hand_off_land"%' OR e.data LIKE '%"name":"mcp__thread__land"%') AS ship,
+        (e.data LIKE '{"type":"result"%') AS result,
+        (e.data LIKE '%"parent_tool_use_id":"%') AS grunt
+      FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE e.id > ?1 AND e.kind = 'claude' AND e.created_at > ?2 AND (?3 IS NULL OR t.project_id = ?3))
+    WHERE skills IS NOT NULL OR agents IS NOT NULL OR edit OR error OR ship OR result
+    ORDER BY ticket_id, id`).all(from, since, projectId) as unknown as SkillEvent[];
+  const ids = [...new Set(events.map((e) => e.ticket_id))];
+  if (!ids.length) return { events, tickets: [] };
+  const tickets = db.prepare(`
+    SELECT k.id, k.project_id, k.number, k.title, k.kind,
+      (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
+        WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
+      (SELECT max(n.id) FROM events n WHERE n.ticket_id = k.id AND n.kind = 'note' AND n.id > ?1 AND n.data LIKE '{"text":"Shipped %') AS shipped
+    FROM tickets k WHERE k.id IN (SELECT value FROM json_each(?2))`).all(from, JSON.stringify(ids)) as unknown as SkillTicket[];
+  return { events, tickets };
+}
 
-/** A scheme's usage over the last USAGE_DAYS (`projectId` null: every scheme's), reused for CACHE_MS. */
-export function skillUsage(store: Store, projectId: number | null, now = Date.now()): UsageReport {
+const cache = new Map<string, { at: number; report: UsageReport }>();
+const running = new Map<string, Promise<UsageReport>>();
+
+/**
+ * A scheme's usage over the last USAGE_DAYS (`projectId` null: every scheme's), reused for CACHE_MS. The scan reads every
+ * Claude event in the window (live: 555k rows, 800 MB of JSON, about a second), so it runs on a worker thread with its own
+ * read-only connection, as the session worker does (#612); an in-memory store (tests) runs it here.
+ */
+export function skillUsage(store: Store, projectId: number | null, now = Date.now()): Promise<UsageReport> {
   const key = String(projectId ?? 'all');
   const hit = cache.get(key);
-  if (hit && now - hit.at < CACHE_MS) return hit.report;
+  if (hit && now - hit.at < CACHE_MS) return Promise.resolve(hit.report);
+  const pending = running.get(key);
+  if (pending) return pending;
   const since = now - USAGE_DAYS * 86_400_000;
-  const report = usageFrom(store.skillTimeline(projectId, since), since);
-  cache.set(key, { at: now, report });
-  return report;
+  const job: Promise<UsageReport> = store.path === ':memory:'
+    ? Promise.resolve(usageFrom(skillTimeline(store.db, projectId, since), since))
+    : new Promise((resolve, reject) => {
+        const worker = new Worker(new URL(import.meta.url), { workerData: { skillUsage: { path: store.path, projectId, since } } });
+        worker.once('message', resolve);
+        worker.once('error', reject);
+        worker.once('exit', (code) => reject(new Error(`the skill usage worker stopped (exit code ${code}) before it finished`)));
+      });
+  const done = job.then((report) => (cache.set(key, { at: now, report }), report)).finally(() => running.delete(key));
+  running.set(key, done);
+  return done;
+}
+
+if (!isMainThread && workerData?.skillUsage) {
+  const { path, projectId, since } = workerData.skillUsage as { path: string; projectId: number | null; since: number };
+  const db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
+  try {
+    parentPort!.postMessage(usageFrom(skillTimeline(db, projectId, since), since));
+  } finally {
+    db.close();
+  }
 }
 
 /**

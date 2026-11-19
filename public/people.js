@@ -1,7 +1,7 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
 import { account, ago, api, h, noAutofill, icon, view } from './base.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
-import { settingsTabs } from './settings.js';
+import { settingsRow, settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -204,6 +204,21 @@ export function peoplePage() {
       'Turns: whether your messages run on this server\'s own Claude login, which is your subscription.'));
 }
 
+/**
+ * One account card as a row that opens (#995): the card's own heading moves into the row's title, its status chip into
+ * the summary, kept in step as the card redraws itself.
+ */
+function accountRow(ic, hue, title, card, fallback = '') {
+  const [row, sum] = settingsRow({ icon: ic, hue, title }, card);
+  const sync = () => {
+    const chip = card.querySelector(':scope > h3 .link-chip');
+    sum.replaceChildren(chip ? chip.cloneNode(true) : fallback);
+  };
+  new MutationObserver(sync).observe(card, { childList: true, subtree: true, characterData: true });
+  sync();
+  return row;
+}
+
 /** Main panel: your own name, login and password. */
 export function accountPage() {
   const current = h('input', { type: 'password', autocomplete: 'current-password', required: true });
@@ -229,7 +244,15 @@ export function accountPage() {
   return page(
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
       account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you link your Claude below.']),
-    form, claudeCard(), codexCard(), githubCard(), openrouterCard(), secretsCard(), replayCard());
+    h('div', { class: 'settings-rows' },
+      accountRow('spark', 'accent', 'Claude', claudeCard()),
+      accountRow('key', 'running', 'Codex', codexCard()),
+      accountRow('branch', 'ink', 'GitHub', githubCard()),
+      accountRow('globe', 'held', 'OpenRouter', openrouterCard()),
+      accountRow('vault', 'done', 'Secrets', secretsCard(), 'Passwords and keys for minions and apps'),
+      accountRow('check', 'teal', 'App chats for replay tests', replayCard(), 'Whether apps may keep your first few turns'),
+      // Last, and closed until asked for (Cara picked "Password behind a button").
+      settingsRow({ icon: 'lock', hue: 'muted', title: 'Password', summary: 'Change the password you sign in with' }, form)[0]));
 }
 
 /** Kept app chats (#836): a person's way to keep their app chats out of replay tests. */

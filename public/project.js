@@ -63,7 +63,7 @@ function renderCrumbs(main) {
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
       : main.kind === 'app-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Citadel-wide instructions']
       : main.kind === 'my-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'My instructions']
-      : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Needs approval']
+      : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Minion rules']
       : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
       : main.kind === 'members' ? [projectLink, ' / ', settingsLink, ' / ', 'Members']
       : main.kind === 'people' ? [projectLink, ' / ', settingsLink, ' / ', 'People']

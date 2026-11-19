@@ -178,6 +178,7 @@ export function onProjectUpdate(project) {
   for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs'], ['optional-plugin-dirs', 'optional_plugin_dirs'], ['list-groups', 'list_groups'], ['ci-quiet', 'ci_quiet'], ['ci-watch', 'ci_watch']]) {
     const el = document.getElementById(id);
     if (el && !el.hasAttribute('data-draft')) el.value = settingText(project, key);
+    el?.dispatchEvent(new Event('settings-refresh'));
   }
   renderSidebar(); // its promoted groups may have changed
   const text = document.getElementById('instructions-text');
@@ -298,18 +299,23 @@ const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filte
 const settingText = (p, key) => (key === 'list_groups' ? listGroupsOf(p).join('\n') : p[key] ?? '');
 
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
+// The side menu (#995, Cara picked "Side menu, rows that open"): three groups, each its own hue, every page with an
+// icon. On a phone it is one row of chips that scrolls sideways, the open page scrolled into view.
+const SETTINGS_GROUPS = [
+  ['Scheme', 'running', [['instructions', 'Instructions', 'doc'], ['approvals', 'Minion rules', 'shield'], ['properties', 'Properties', 'tag'], ['members', 'Members', 'users']]],
+  ['You', 'held', [['my-instructions', 'My instructions', 'pen'], ['account', 'Your account', 'user'], ['machines', 'Machines', 'monitor'], ['usage', 'Usage', 'chart']]],
+  ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe'], ['people', 'People', 'people'], ['contraptions', 'Contraptions', 'box']], true],
+];
+
 export function settingsTabs() {
-  const nav = h('nav', { class: 'settings-tabs' },
-    [['instructions', 'Instructions'], account?.admin && ['app-instructions', 'Citadel-wide'], ['my-instructions', 'My instructions'], ['approvals', 'Needs approval'], ['properties', 'Properties'],
-      ['members', 'Members'], account?.admin && ['people', 'People'], account?.admin && ['contraptions', 'Contraptions'], ['machines', 'Machines'], ['usage', 'Usage'], ['account', 'Your account']].filter(Boolean).map(([kind, label]) =>
-      h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label,
-        // The same waiting-review count as the Settings button (renderSettingsCount fills both).
-        kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '')));
-  // On a phone the strip is wider than the screen: bring the open tab (Machines, Your account) into view.
-  setTimeout(() => {
-    const on = nav.querySelector('a.active');
-    if (on) nav.scrollLeft += on.getBoundingClientRect().right - nav.getBoundingClientRect().right + 16;
-  });
+  const nav = h('nav', { class: 'settings-tabs', 'aria-label': 'Settings' },
+    SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin).map(([label, hue, items]) =>
+      h('div', { class: 'settings-group', 'data-hue': hue }, h('span', { class: 'settings-group-label' }, label),
+        items.map(([kind, text, ic]) =>
+          h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null },
+            icon(ic), h('span', { class: 'label' }, text),
+            kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '')))));
+  setTimeout(() => { const on = nav.querySelector('a.active'); if (on) nav.scrollLeft += on.getBoundingClientRect().right - nav.getBoundingClientRect().right + 16; });
   return nav;
 }
 
@@ -362,105 +368,114 @@ function saveProject(p, mine, body, label, shown) {
   return result;
 }
 
-/** Main panel: the project's approval rules, plugin folders and list groups. */
+/**
+ * A row that opens (#995, Cara picked "Side menu, rows that open"): an icon tile in its own hue, a title, a one-line
+ * summary and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary
+ * line, which its page keeps up to date.
+ */
+export function settingsRow({ icon: ic, hue, title, summary = '', open = false }, ...body) {
+  const sum = h('span', { class: 'settings-row-sum' }, summary);
+  const row = h('details', { class: 'settings-row', 'data-hue': hue, open },
+    h('summary', {}, h('span', { class: 'settings-tile' }, icon(ic)),
+      h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), sum),
+      h('span', { class: 'settings-row-chev' }, icon('forward'))),
+    h('div', { class: 'settings-row-body' }, ...body));
+  return [row, sum];
+}
+
+/** A group of rows under an uppercase heading. */
+export const settingsSection = (title, ...rows) => [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...rows)];
+
+/** Help text cut to its first sentence, the rest behind More (Cara picked "Shorter help text"). */
+export function settingsHelp(first, ...rest) {
+  if (!rest.length) return h('p', { class: 'muted small settings-help' }, first);
+  const more = h('span', { class: 'settings-more', hidden: true }, ' ', ...rest);
+  const btn = h('button', { type: 'button', class: 'settings-more-btn', 'aria-expanded': 'false', onclick: () => {
+    more.hidden = !more.hidden;
+    btn.textContent = more.hidden ? 'More' : 'Less';
+    btn.setAttribute('aria-expanded', String(!more.hidden));
+  } }, 'More');
+  return h('p', { class: 'muted small settings-help' }, first, more, ' ', btn);
+}
+
+/** Main panel: Minion rules, the scheme's approval rules, plugin folders, list groups and CI lists, a row each. */
 export function approvalsEditor() {
   const p = view.project;
-  const field = (id, key, placeholder) => {
-    const t = h('textarea', { id, class: 'instructions-text settings-list', spellcheck: 'false', rows: 5, placeholder });
-    t.value = settingText(p, key);
-    return t;
-  };
-  const rules = field('approval-rules', 'approval_rules', 'Bash(gh pr merge:*)\nmcp__*__merge_pull_request');
-  const dirs = field('plugin-dirs', 'plugin_dirs', 'tools/mods/delve');
-  const optional = field('optional-plugin-dirs', 'optional_plugin_dirs', 'tools/plugins/devtools');
-  optional.rows = 3;
-  optional.setAttribute('aria-label', 'Optional plugin folders');
-  const groups = field('list-groups', 'list_groups', 'area: balance');
-  groups.rows = 3;
-  const quiet = field('ci-quiet', 'ci_quiet', 'drift.yml');
-  quiet.rows = 3;
-  const watch = field('ci-watch', 'ci_watch', 'desktop.yml');
-  watch.rows = 3;
-  // Plugins load code from any folder on the server, so only an admin changes them.
-  dirs.readOnly = optional.readOnly = !account?.admin;
-  const status = h('span', { class: 'muted', role: 'status' });
-  const save = h('button', { type: 'button' }, 'Save');
-  const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
+  const admin = !!account?.admin;
   const same = (a, b) => splitLines(a).join('\n') === splitLines(b).join('\n');
-  const sync = () => {
-    let dirty = false;
-    for (const [t, key] of [[rules, 'approval_rules'], [dirs, 'plugin_dirs'], [optional, 'optional_plugin_dirs'], [groups, 'list_groups'], [quiet, 'ci_quiet'], [watch, 'ci_watch']]) {
-      // Marked as a draft only while it differs, so someone else's save still shows otherwise.
-      const d = !same(t.value, settingText(view.project, key));
-      t.toggleAttribute('data-draft', d);
-      dirty ||= d;
-    }
-    save.disabled = discard.disabled = !dirty;
-  };
-  for (const t of [rules, dirs, optional, groups, quiet, watch]) t.addEventListener('input', () => {
-    status.textContent = '';
+  // One row per setting, with its own Save and Discard: only what that row holds is sent.
+  const setting = ({ id, key, placeholder, rows = 3, title, ic, hue, unit, examples = [], caution = '', readOnly = false, help }) => {
+    const t = h('textarea', { id, class: 'instructions-text settings-list', spellcheck: 'false', rows, placeholder, 'aria-label': title });
+    t.value = settingText(p, key);
+    t.readOnly = readOnly;
+    const status = h('span', { class: 'muted small', role: 'status' });
+    const save = h('button', { type: 'button' }, 'Save');
+    const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
+    const [row, sum] = settingsRow({ icon: ic, hue, title },
+      ...help,
+      t,
+      examples.length && !readOnly ? h('div', { class: 'settings-examples' }, h('span', { class: 'muted small' }, 'Add an example:'),
+        examples.map((x) => h('button', { type: 'button', class: 'chip', title: 'Add this line to the list', onclick: () => {
+          if (splitLines(t.value).includes(x)) return t.focus();
+          t.value = [t.value.trimEnd(), x].filter(Boolean).join('\n');
+          t.dispatchEvent(new Event('input'));
+        } }, '+ ', h('code', {}, x)))) : '',
+      caution ? h('p', { class: 'cui-notice small' }, caution) : '',
+      readOnly ? h('p', { class: 'muted small' }, 'Only an admin changes these.') : h('div', { class: 'settings-row-actions' }, save, discard, status));
+    // The summary says what the row holds, or that it has changed and isn't saved; the field is marked as a draft only
+    // while it differs, so someone else's save still shows otherwise.
+    const sync = () => {
+      const dirty = !same(t.value, settingText(view.project, key));
+      t.toggleAttribute('data-draft', dirty);
+      row.classList.toggle('changed', dirty);
+      const n = splitLines(settingText(view.project, key));
+      sum.textContent = dirty ? 'Changed, not saved yet' : n.length ? `${n.length} ${unit}${n.length > 1 ? 's' : ''}: ${n.join(', ')}` : `No ${unit}s yet`;
+      save.disabled = discard.disabled = !dirty;
+    };
+    t.addEventListener('input', () => { status.textContent = ''; row.classList.remove('saved'); sync(); });
+    t.addEventListener('settings-refresh', sync); // onProjectUpdate: a save, ours or someone else's
+    // Saved at once: the field stops counting as a draft; a refusal turns it back into one (the text stays) with a toast to retry.
+    save.onclick = () => {
+      // list_groups goes as a list; the project keeps it as JSON.
+      const body = { [key]: key === 'list_groups' ? splitLines(t.value) : t.value };
+      const mine = { [key]: key === 'list_groups' ? JSON.stringify(body[key]) : t.value };
+      saveProject(p, mine, body, `save ${title.toLowerCase()}`, (saved) => {
+        status.textContent = saved ? 'Saved. Minions pick this up on their next turn.' : 'Not saved.';
+        row.classList.toggle('saved', saved);
+        sync();
+      });
+    };
+    discard.onclick = () => { t.value = settingText(view.project, key); t.dispatchEvent(new Event('input')); };
     sync();
-  });
-  // Saved at once: the fields stop counting as drafts and the sidebar shows new groups; a refusal turns them
-  // back into drafts (the text stays in the fields) with a toast to retry.
-  save.onclick = () => {
-    const body = { approval_rules: rules.value, plugin_dirs: dirs.value, optional_plugin_dirs: optional.value, ci_quiet: quiet.value, ci_watch: watch.value };
-    // Only when edited: a group whose value was archived since mustn't block saving the rules.
-    if (!same(groups.value, settingText(view.project, 'list_groups'))) body.list_groups = splitLines(groups.value);
-    const mine = { ...body, ...(body.list_groups ? { list_groups: JSON.stringify(body.list_groups) } : {}) };
-    saveProject(p, mine, body, 'save the settings', (saved) => {
-      status.textContent = saved ? 'Saved. Minions pick this up on their next turn.' : 'Not saved.';
-      sync();
-    });
+    return row;
   };
-  discard.onclick = () => {
-    rules.value = view.project.approval_rules ?? '';
-    dirs.value = view.project.plugin_dirs ?? '';
-    optional.value = view.project.optional_plugin_dirs ?? '';
-    groups.value = settingText(view.project, 'list_groups');
-    quiet.value = view.project.ci_quiet ?? '';
-    watch.value = view.project.ci_watch ?? '';
-    status.textContent = '';
-    sync();
-  };
-  const adminOnly = account?.admin ? '' : ' Only an admin changes these.';
-  // Help where it applies (#492): each list is a card with one line on what it is, examples that fill
-  // the field at a click, and a caution beside the field it is about.
-  const card = (title, field, examples, caution, ...about) => h('div', { class: 'settings-card' },
-    h('h3', { class: 'settings-label' }, title),
-    h('p', { class: 'muted small' }, ...about),
-    field,
-    examples.length > 0 && !field.readOnly ? h('div', { class: 'settings-examples' }, h('span', { class: 'muted small' }, 'Add an example:'),
-      examples.map((x) => h('button', { type: 'button', class: 'chip', title: 'Add this line to the list', onclick: () => {
-        if (splitLines(field.value).includes(x)) return field.focus();
-        field.value = [field.value.trimEnd(), x].filter(Boolean).join('\n');
-        field.dispatchEvent(new Event('input'));
-      } }, '+ ', h('code', {}, x)))) : '',
-    caution ? h('p', { class: 'cui-notice small' }, caution) : '');
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
-    card('Needs approval', rules, ['Bash(gh pr merge:*)', 'mcp__*__merge_pull_request'],
-      'Bash rules match how a command starts: they catch mistakes, not a determined workaround.',
-      'Tool calls that wait for Approve or Deny in the minion\'s chat. One Claude Code permission rule per line; everything else runs without asking.'),
-    card('Plugin folders', dirs, ['tools/mods/delve'], '',
-      'Claude Code plugins every minion loads (', h('code', {}, '--plugin-dir'), '). One folder per line, relative to the repo root or absolute; a folder that is not there is skipped.', adminOnly),
-    card('Optional plugin folders', optional, ['tools/plugins/devtools'], '',
-      'Plugins too costly for every minion: one loads them only when picked, by the Taskmaster when it starts the minion or in the Plugins picker beside Send.', adminOnly),
-    card('List groups', groups, [], '',
-      'Values of this scheme\'s own properties, one per line, like ', h('code', {}, 'area: balance'),
-      '. Minions outside a build that carry one get their own group at the top of the minions list; one that matches two sits in the first.'),
-    card('Quiet CI workflows', quiet, [], '',
-      'Every workflow that goes red on the default branch wakes the Taskmaster, puts a quiet item in Mandate and rings if no fix minion starts within an hour. List a workflow file here, one per line, like ',
-      h('code', {}, 'drift.yml'), ', to leave it unwatched. A minion that dispatched a run on its own branch still hears its result.'),
-    card('Watched CI workflows', watch, [], '',
-      'Watched even when it is in the quiet list above: when a workflow listed here goes red on the default branch (a land\'s push included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line, like ',
-      h('code', {}, 'desktop.yml'), '.'),
-    h('div', { class: 'row instructions-actions' }, save, discard, status));
-  sync();
+    settingsSection('Approvals',
+      setting({ id: 'approval-rules', key: 'approval_rules', rows: 5, placeholder: 'Bash(gh pr merge:*)\nmcp__*__merge_pull_request', title: 'Needs approval', ic: 'shield', hue: 'waiting', unit: 'rule',
+        examples: ['Bash(gh pr merge:*)', 'mcp__*__merge_pull_request'], caution: 'Bash rules match how a command starts: they catch mistakes, not a determined workaround.',
+        help: [settingsHelp('Tool calls that wait for Approve or Deny in the minion\'s chat.', 'One Claude Code permission rule per line; everything else runs without asking.')] })),
+    // Plugins load code from any folder on the server, so only an admin changes them.
+    settingsSection('Plugins',
+      setting({ id: 'plugin-dirs', key: 'plugin_dirs', placeholder: 'tools/mods/delve', title: 'Plugin folders', ic: 'plug', hue: 'held', unit: 'folder', examples: ['tools/mods/delve'], readOnly: !admin,
+        help: [settingsHelp('Claude Code plugins every minion loads.', '(', h('code', {}, '--plugin-dir'), ') One folder per line, relative to the repo root or absolute; a folder that is not there is skipped.')] }),
+      setting({ id: 'optional-plugin-dirs', key: 'optional_plugin_dirs', placeholder: 'tools/plugins/devtools', title: 'Optional plugin folders', ic: 'plugplus', hue: 'held', unit: 'folder', examples: ['tools/plugins/devtools'], readOnly: !admin,
+        help: [settingsHelp('Plugins too costly for every minion: one loads them only when picked.', 'The Taskmaster picks them when it starts the minion, or you do in the Plugins picker beside Send.')] })),
+    settingsSection('Minions list',
+      setting({ id: 'list-groups', key: 'list_groups', placeholder: 'area: balance', title: 'List groups', ic: 'rows', hue: 'teal', unit: 'group',
+        help: [settingsHelp(['Values of this scheme\'s own properties, one per line, like ', h('code', {}, 'area: balance'), '.'],
+          'Minions outside a build that carry one get their own group at the top of the minions list; one that matches two sits in the first.')] })),
+    settingsSection('CI',
+      setting({ id: 'ci-quiet', key: 'ci_quiet', placeholder: 'drift.yml', title: 'Quiet CI workflows', ic: 'belloff', hue: 'running', unit: 'workflow',
+        help: [settingsHelp(['Workflows listed here, like ', h('code', {}, 'drift.yml'), ', are left unwatched.'],
+          'Every other workflow that goes red on the default branch wakes the Taskmaster, puts a quiet item in Mandate and rings if no fix minion starts within an hour. One workflow file per line. A minion that dispatched a run on its own branch still hears its result.')] }),
+      setting({ id: 'ci-watch', key: 'ci_watch', placeholder: 'desktop.yml', title: 'Watched CI workflows', ic: 'eye', hue: 'running', unit: 'workflow',
+        help: [settingsHelp(['Watched even when it is in the quiet list above, like ', h('code', {}, 'desktop.yml'), '.'],
+          'When a workflow listed here goes red on the default branch (a land\'s push included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line.')] })));
   return section;
 }
 

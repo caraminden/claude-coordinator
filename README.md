@@ -572,8 +572,8 @@ goes to the `approve` tool (below), which shows a card only for a tripwire ask
 or a scheme's approval rules and denies anything else. The Taskmaster's prompts
 are denied (`--permission-prompts none`).
 
-**Needs approval.** A scheme can list Claude Code permission rules, such as
-`Bash(gh pr merge:*)` or `mcp__*__merge_pull_request`, on the "Needs approval"
+**Needs approval (Minion rules).** A scheme can list Claude Code permission rules, such as
+`Bash(gh pr merge:*)` or `mcp__*__merge_pull_request`, in the "Needs approval" list on the "Minion rules"
 tab of the scheme's Settings page (or the Taskmaster's `set_project_settings` tool). Every
 minion runs with (the `ask` rules only when the scheme has some):
 

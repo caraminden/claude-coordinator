@@ -68,6 +68,8 @@ export interface Change extends Progress {
   canPreview?: boolean;
   /** Not in the release under way (#764): it landed after that build started, so it goes out in the one after. */
   later?: boolean;
+  /** Nothing is running or scheduled for it (an APK change waiting on a version bump): a minion row doesn't call it deploying. */
+  idle?: boolean;
 }
 
 export interface Next extends Progress {

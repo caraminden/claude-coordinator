@@ -662,7 +662,7 @@ export class ApkReader implements Reader {
         const text = `${what} on a version bump: a release needs a higher versionCode`;
         lead = { stage: 'sign', since: Math.min(...ahead.commits.values()), usual: null, waitingOn: text, text };
       }
-      const changes: Change[] = lead ? (ahead?.tickets ?? []).map((x) => ({ ...asChange(x), ...lead })) : [];
+      const changes: Change[] = lead ? (ahead?.tickets ?? []).map((x) => ({ ...asChange(x), ...lead, ...(!bumped ? { idle: true } : {}) })) : [];
       return { target: targetOf(t), current, next: lead ? nextOf(APK_TRACK, usual, lead, changes, bumped ? main!.code : null, tryIt) : null, line: [], recent };
     });
   }

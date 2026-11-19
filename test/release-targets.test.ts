@@ -881,6 +881,7 @@ test('an APK: changes to its folder on main with no version bump wait on one; th
   assert.equal(v.next?.stage, 'sign');
   assert.equal(v.next?.waitingOn, '1 change to the app on main waits on a version bump: a release needs a higher versionCode');
   assert.deepEqual(v.next?.changes.map((c) => c.title), ['Widget']);
+  assert.equal(v.next?.changes[0].idle, true, 'nothing is running or scheduled for it: a minion row must not call it deploying');
   assert.equal(v.next?.number, null, 'its versionCode is not known before the bump');
   assert.equal(reader.pending(t), null, 'nothing for auto-deploy to start');
 });

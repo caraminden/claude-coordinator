@@ -597,7 +597,7 @@ export function pendingRelease(t) {
   if (!t || !loaded) return null;
   for (const tv of schemes.get(t.project_id)?.targets ?? []) {
     const c = tv.next?.changes.find((x) => x.ticketId === t.id);
-    if (!c) continue;
+    if (!c || c.idle) continue;
     // A change past the build under way (`later`) goes out in the one after, which has no number yet.
     const tpl = tv.target.numbering?.name;
     const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';

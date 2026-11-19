@@ -118,6 +118,8 @@ export interface Project {
   msg_hold_h: number;
   /** 1 while the members' pass on Minion rules after setup is open (#1046): onboarding done sets it, "Looks right" clears it. */
   rules_review: number;
+  /** Kit skills this scheme turned off on its Skills page (#1062), space-separated folder names under kit/skills ('' = every kit skill on, the default). */
+  skills_off: string;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -1335,6 +1337,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'go_from', "ALTER TABLE projects ADD COLUMN go_from TEXT NOT NULL DEFAULT 'high'"],
   ['projects', 'try_first', "ALTER TABLE projects ADD COLUMN try_first TEXT NOT NULL DEFAULT 'never'"],
   ['projects', 'rules_review', 'ALTER TABLE projects ADD COLUMN rules_review INTEGER NOT NULL DEFAULT 0'],
+  ['projects', 'skills_off', "ALTER TABLE projects ADD COLUMN skills_off TEXT NOT NULL DEFAULT ''"],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
@@ -1443,6 +1446,7 @@ export const SCHEMA_HISTORY = [
   [75, 'projects.msg_loop_limit, msg_loop_min, msg_cold_min, msg_hold_h (#1059)'],
   [76, 'projects.rules_review (#1046)'],
   [77, 'flake_events (#1063)'],
+  [78, 'projects.skills_off (#1062)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1470,6 +1474,12 @@ export function titleWithoutBuild(title: string, build: number): string {
 
 /** How long without an action before the Taskmaster chat shows the recap: AWAY_MS in public/recap.js. */
 export const RECAP_AWAY_MS = 6 * 60 * 60 * 1000;
+
+/** One event of Store.skillTimeline: what it called (space-separated), and 0/1 flags. */
+export interface SkillEvent { id: number; ticket_id: number; at: number; skills: string | null; agents: string | null; edit: number; error: number; ship: number; result: number; grunt: number }
+/** A minion in Store.skillTimeline: its type property and the id of its newest "Shipped" note in the window (null if none). */
+export interface SkillTicket { id: number; project_id: number; number: number | null; title: string; kind: string; type: string | null; shipped: number | null }
+export interface SkillTimeline { events: SkillEvent[]; tickets: SkillTicket[] }
 
 export class Store {
   db: DatabaseSync;
@@ -1846,7 +1856,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review' | 'skills_off'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).
@@ -2826,6 +2836,41 @@ export class Store {
       WHERE t.project_id = ? AND e.kind = 'claude' AND e.id > ? AND e.created_at > ? AND json_extract(e.data, '$.type') = 'result'
       GROUP BY e.ticket_id`).all(projectId, before?.event_id ?? 0, since) as { ticket_id: number; n: number }[];
     return { since, turns: Object.fromEntries(rows.map((r) => [r.ticket_id, r.n])) };
+  }
+
+  /**
+   * The events the Skills page (#1062, src/skills.ts) walks, in order: one scheme's (or every scheme's, `projectId` null) Claude
+   * events since `since` that call a skill or a Grunt, edit a file, fail a tool, hand off a ship or end a turn; everything else
+   * is left out in SQL. Its minions (number, title, type) and each one's newest "Shipped" note come with it.
+   */
+  skillTimeline(projectId: number | null, since: number): SkillTimeline {
+    // Event ids grow with time: start after the last turn that ended by `since`, so the rowid range skips everything older.
+    const before = this.db.prepare('SELECT event_id FROM turns WHERE ended_at <= ? AND event_id IS NOT NULL ORDER BY ended_at DESC LIMIT 1').get(since) as { event_id: number } | undefined;
+    const from = before?.event_id ?? 0;
+    const tools = (name: string, field: string, fallback: string) => `CASE WHEN e.data LIKE '%"name":"${name}"%' THEN (SELECT group_concat(coalesce(json_extract(c.value, '$.input.${field}'), '${fallback}'), ' ')
+        FROM json_each(e.data, '$.message.content') c WHERE json_extract(c.value, '$.type') = 'tool_use' AND json_extract(c.value, '$.name') = '${name}') END`;
+    const events = this.db.prepare(`
+      SELECT * FROM (SELECT e.id, e.ticket_id, e.created_at AS at,
+          ${tools('Skill', 'skill', '')} AS skills,
+          ${tools('Agent', 'subagent_type', 'general-purpose')} AS agents,
+          (e.data LIKE '%"name":"Edit"%' OR e.data LIKE '%"name":"Write"%' OR e.data LIKE '%"name":"NotebookEdit"%') AS edit,
+          (e.data LIKE '{"type":"user"%' AND e.data LIKE '%"is_error":true%') AS error,
+          (e.data LIKE '%"name":"mcp__thread__hand_off_land"%' OR e.data LIKE '%"name":"mcp__thread__land"%') AS ship,
+          (e.data LIKE '{"type":"result"%') AS result,
+          (e.data LIKE '%"parent_tool_use_id":"%') AS grunt
+        FROM events e JOIN tickets t ON t.id = e.ticket_id
+        WHERE e.id > ?1 AND e.kind = 'claude' AND e.created_at > ?2 AND (?3 IS NULL OR t.project_id = ?3))
+      WHERE skills IS NOT NULL OR agents IS NOT NULL OR edit OR error OR ship OR result
+      ORDER BY ticket_id, id`).all(from, since, projectId) as unknown as SkillEvent[];
+    const ids = [...new Set(events.map((e) => e.ticket_id))];
+    if (!ids.length) return { events, tickets: [] };
+    const tickets = this.db.prepare(`
+      SELECT k.id, k.project_id, k.number, k.title, k.kind,
+        (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
+          WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
+        (SELECT max(n.id) FROM events n WHERE n.ticket_id = k.id AND n.kind = 'note' AND n.id > ?1 AND n.data LIKE '{"text":"Shipped %') AS shipped
+      FROM tickets k WHERE k.id IN (SELECT value FROM json_each(?2))`).all(from, JSON.stringify(ids)) as unknown as SkillTicket[];
+    return { events, tickets };
   }
 
   /**

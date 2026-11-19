@@ -1232,8 +1232,10 @@ function machineLine(m) {
   const word = { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
   const isOpen = view.machineOpen.has(m.id);
   const fix = fixButton(m, open);
-  const [row] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen },
-    fix && h('div', { class: 'settings-row-actions' }, fix), machineBody(m));
+  const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen },
+    machineBody(m));
+  // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
+  if (fix) sum.after(h('span', { class: 'machine-fix' }, fix));
   row.classList.add('machine-row', 'machine-line', m.status);
   row.addEventListener('toggle', () => {
     if (row.open === view.machineOpen.has(m.id)) return;

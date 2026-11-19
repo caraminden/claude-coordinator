@@ -249,7 +249,8 @@ export class ReviewSet {
 
   constructor(db: DatabaseSync) {
     this.db = db;
-    db.exec(REVIEW_SCHEMA);
+    // One transaction: every autocommitted statement is an fsync, and a new database's setup is held to a few commits (test/db-setup).
+    db.exec(`BEGIN;${REVIEW_SCHEMA}COMMIT;`);
   }
 
   /** The scheme's entries in page order: by column, then run order, then name. */

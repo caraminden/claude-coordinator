@@ -42,4 +42,5 @@ test('the audits check flags a missing template, a duplicate, and a deliberate o
   // A scheme the code doesn't list leaves nothing out.
   const other = store.createProject('Brand New', null);
   assert.ok(Object.values(states(other.id)).every((s) => s === 'missing'));
+  assert.ok(!('app-turns' in states(other.id)));
 });

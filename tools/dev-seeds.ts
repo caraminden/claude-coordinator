@@ -9,6 +9,7 @@ import { deflateSync } from 'node:zlib';
 import { marksTitle } from '../public/ui/marks.js';
 import type { Project, Store, Ticket } from '../src/db.ts';
 import { projectDir } from '../src/workspace.ts';
+import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
@@ -786,6 +787,40 @@ mock.boards('#takes', { boards: [
       });
       writeFileSync(join(q, '.order'), `# ${c.who} moved #4 to land next\n0000000004\n0000000002\n0000000003\n`);
       return `#/p/${c.project.id}/releases/${c.project.id}`;
+    },
+  },
+  'schedule-runs': {
+    about: 'Genesis Tree (a template row beside a hand-made copy) and Threadspace (no Test audit), with run history, outcomes and costs (#1057)',
+    seed(c) {
+      const user = c.store.listUsers().find((u) => u.name === c.who);
+      const day = 864e5;
+      const now = Date.now();
+      const scheme = (name: string) => {
+        const p = c.store.listProjects().find((x) => x.name === name) ?? c.store.createProject(name, null, user?.id ?? null);
+        c.store.setProjectSettings(p.id, { onboarding: 'skipped' });
+        if (user) c.store.addMember(p.id, user.id);
+        return p;
+      };
+      const gt = scheme('Genesis Tree');
+      scheme('Threadspace');
+      const t = loadTemplates().get('code-health')!;
+      const vars = templateVars(c.store, c.dataDir, gt.id);
+      const row = c.store.schedules.create({ project_id: gt.id, ...templateFields(t, gt, 'Never push.', vars), created_by: c.who });
+      c.store.schedules.create({ project_id: gt.id, name: 'Code health', cron: '0 4 * * 1', brief: 'Hand-made copy.', type: 'chore', created_by: c.who });
+      const runMinions: [string, Parameters<Store['updateTicket']>[1], number][] = [
+        ['Code health run', { status: 'idle', state: 'complete', note: '3 findings, 1 PR opened' }, 2.41],
+        ['Code health run', { status: 'idle', state: 'ready', note: 'needs a go on the split' }, 1.87],
+        ['Code health run', { status: 'error', note: null }, 0.2],
+        ['Code health run', { status: 'running', note: 'reading src/' }, 0.5],
+      ];
+      runMinions.forEach(([title, fields, cost], i) => {
+        const tk = c.store.createTicket({ project_id: gt.id, title, permission_mode: 'bypassPermissions', created_by: c.who });
+        c.store.updateTicket(tk.id, fields);
+        c.store.recordTurn(tk.id, { ended_at: now, session_cost_usd: cost, session_id: `seed-${tk.id}` });
+        c.store.schedules.ran(row.id, { ticketId: tk.id }, now - (28 - i * 7) * day);
+        if (i < 3) c.store.schedules.ran(row.id, { skip: `Skipped: 1 minion since last run (needs 3)` }, now - (27 - i * 7) * day);
+      });
+      return `#/p/${gt.id}`;
     },
   },
   'inbox-full': {

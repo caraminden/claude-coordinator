@@ -224,3 +224,5 @@
 .schedule-audits ul { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.25rem; }
 .schedule-audits button { padding: 0.15rem 0.5rem; margin-left: 0.3rem; }
 .schedule .tnum { font-variant-numeric: tabular-nums; }
+.schedules-pane, .schedule-list > li, .schedule-audits { min-width: 0; box-sizing: border-box; }
+.schedule-runs li, .schedule-audits li { overflow-wrap: anywhere; }

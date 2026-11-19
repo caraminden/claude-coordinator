@@ -148,9 +148,10 @@ export function checkAudits(store: Store, projectId: number, templates: Map<stri
   const p = store.getProject(projectId);
   const picks = p ? STANDARD_AUDITS[p.name] : undefined;
   const rows = store.schedules.list(projectId);
-  return [...templates.values()].map((t) => {
+  // The app turns check has its own rule (addAppTurnsCheck), so it is not part of this list.
+  return [...templates.values()].filter((t) => t.slug in COPY_NAMES).map((t) => {
     const mine = rows
-      .filter((s) => s.template === t.slug || (!s.template && (COPY_NAMES[t.slug] ?? [t.name]).includes(s.name)))
+      .filter((s) => s.template === t.slug || (!s.template && COPY_NAMES[t.slug].includes(s.name)))
       .map((s) => ({ id: s.id, name: s.name, template: s.template === t.slug }));
     const state = mine.length > 1 ? 'duplicate' : mine.length ? 'ok' : picks && !(t.slug in picks) ? 'left-out' : 'missing';
     return { slug: t.slug, name: t.name, rows: mine, state };

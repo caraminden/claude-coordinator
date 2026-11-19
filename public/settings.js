@@ -500,15 +500,19 @@ function saveProject(p, mine, body, label, shown) {
  * summary and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary
  * line, which its page keeps up to date.
  */
-export function settingsRow({ icon: ic, hue, title, summary = '', open = false }, ...body) {
+export function settingsRow({ icon: ic, hue, title, summary = '', open = false, key }, ...body) {
   const sum = h('span', { class: 'settings-row-sum' }, summary);
-  const row = h('details', { class: 'settings-row', 'data-hue': hue, open },
+  // `key`: a page that redraws (the CI page, every few seconds) keeps a row open that a person opened (#1068).
+  const row = h('details', { class: 'settings-row', 'data-hue': hue, open: key && openRows.has(key) ? openRows.get(key) : open,
+    ontoggle: key ? (e) => openRows.set(key, e.currentTarget.open) : null },
     h('summary', {}, h('span', { class: 'settings-tile' }, icon(ic)),
       h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), sum),
       h('span', { class: 'settings-row-chev' }, icon('forward'))),
     h('div', { class: 'settings-row-body' }, ...body));
   return [row, sum];
 }
+
+const openRows = new Map(); // a keyed row's open state, by key
 
 /** A group of rows under an uppercase heading. */
 export const settingsSection = (title, ...rows) => [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...rows)];

@@ -1823,6 +1823,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/reviews/audits/nope": {
+  "anon": "401 Not logged in",
+  "person": "400 enabled is true or false",
+  "member": "400 enabled is true or false",
+  "outsider": "404 No such scheme",
+  "tmA": "400 enabled is true or false",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/projects/:p/reviews/describe": {
+  "anon": "401 Not logged in",
+  "person": "400 Describe the change in 1 to 2,000 characters",
+  "member": "400 Describe the change in 1 to 2,000 characters",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only a person describes a change here, on their own Claude login",
+  "tmB": "403 Only a person describes a change here, on their own Claude login",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "PATCH /api/projects/:p/reviews/nope": {
   "anon": "401 Not logged in",
   "person": "404 No entry named nope",

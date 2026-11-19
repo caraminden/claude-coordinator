@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -30,7 +30,19 @@ async function call(path: string, opts: { method?: string; body?: unknown; as?: 
 }
 
 before(async () => {
-  const srv = await bootServer({ root, stdout: true });
+  // A stand-in Claude for the describe box: a turn (stream-json) fails as /bin/false would; a describe call proposes
+  // an edit to the finding checker when the ask reaches it on stdin, and answers nonsense otherwise.
+  const claude = join(root, 'fake-claude');
+  writeFileSync(claude, `#!/bin/sh
+case "$*" in *stream-json*) exit 1;; esac
+if grep -q 'twice as picky'; then
+  printf '%s' '{"type":"result","is_error":false,"result":"{\\"edits\\":[{\\"slug\\":\\"finding-checker\\",\\"body\\":\\"Be twice as picky with migrations.\\",\\"why\\":\\"Pickier on migrations\\"},{\\"slug\\":\\"no-such\\",\\"body\\":\\"x\\"}],\\"note\\":\\"One edit\\"}"}'
+else
+  printf '%s' '{"type":"result","is_error":false,"result":"I would rather chat."}'
+fi
+`);
+  chmodSync(claude, 0o755);
+  const srv = await bootServer({ root, stdout: true, env: { CLAUDE_BIN: claude } });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);
@@ -45,8 +57,10 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'hi', properties: { type: 'chore' } } });
   const url = `/api/projects/${p.id}/reviews`;
 
+  // The kit's own reviewers are there from the start (#1052); this test is about the scheme's own entries.
+  const own = (entries: any[]) => entries.filter((e) => !e.kit);
   const empty = await call(url);
-  assert.deepEqual(empty.data.entries, []);
+  assert.deepEqual(own(empty.data.entries), []);
   assert.ok(empty.data.starters.some((s: any) => s.slug === 'ui-screenshots'));
 
   // From a kit starter: its slug, its when, and on trial whatever the request says (Q12).
@@ -82,7 +96,7 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   // Another scheme's Taskmaster can't read or change this one's, and its own set is empty.
   assert.equal((await call(url, { as: otherPage.coordinator.id })).status, 403);
   assert.equal((await call(entry, { method: 'PATCH', body: { enabled: false }, as: otherPage.coordinator.id })).status, 403);
-  assert.deepEqual((await call(`/api/projects/${other.id}/reviews`)).data.entries, []);
+  assert.deepEqual(own((await call(`/api/projects/${other.id}/reviews`)).data.entries), []);
 
   // The minion's tool: list, read one, save what it learned.
   const tool = async (args: Record<string, unknown>) => {
@@ -99,9 +113,88 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
       child.kill();
     }
   };
-  assert.match((await tool({})).text, /^ui-screenshots \(critic, on, trial, on kit ui-screenshots\): diff: public\/\*\*, .*\nclaims \(critic, on, trial\): schedule: monthly$/);
+  assert.match((await tool({})).text, /^pre-ship-review \(reviewer, on, kit\): Every change, before it ships\n[^]*\nui-screenshots \(critic, on, trial, on kit ui-screenshots\): diff: public\/\*\*, .*\nclaims \(critic, on, trial\): schedule: monthly$/);
   assert.match((await tool({ slug: 'claims' })).text, /^claims, version 1 \(.+ saved it\)\. As the critic reads it:\n\n---\nname: claims\nwhen: "schedule: monthly"\ntrial: true\n---\n\n# Claims\n/);
   const saved = await tool({ slug: 'claims', body: '# Claims\n\n## Notes\n\nCara passed the hedged ones.', version: 1, note: 'Calibration' });
   assert.equal(saved.text, 'Saved claims as version 2.');
   assert.ok((await tool({ slug: 'claims', enabled: false })).error);
+});
+
+// Phase 2 (#1052), in a scheme that isn't Citadel: the kit's reviewers switch per scheme, the pre-ship review's switch
+// decides whether a ship needs a go, trial locks blocking until calibrated, and the describe box proposes edits.
+test("kit reviewers switch per scheme, trial locks blocking until calibrated, and the describe box proposes what Apply saves", async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Peek' } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'hi', properties: { type: 'chore' } } });
+  const url = `/api/projects/${p.id}/reviews`;
+
+  const first = await call(url);
+  assert.equal(first.status, 200);
+  const kit = first.data.entries.filter((e: any) => e.kit).map((e: any) => e.slug);
+  assert.deepEqual([kit[0], kit.includes('lens-tests'), kit.includes('finding-checker'), kit.at(-1)], ['pre-ship-review', true, true, 'fresh-eyes']);
+  assert.equal(first.data.label, 'Pre-ship review');
+  assert.ok(first.data.audits.length, 'the standard audits are listed');
+  assert.ok(first.data.entries.every((e: any) => !e.kit || (!e.trial && e.what)), "kit entries are off trial and carry the kit's own words");
+
+  // A person switches a lens, fresh eyes and the pre-ship review off; a kit entry's name stays the kit's.
+  for (const slug of ['lens-tests', 'fresh-eyes', 'pre-ship-review']) {
+    const r = await call(`${url}/${slug}`, { method: 'PATCH', body: { enabled: false } });
+    assert.deepEqual([r.status, r.data.enabled], [200, false], JSON.stringify(r.data));
+  }
+  const renamed = await call(`${url}/fresh-eyes`, { method: 'PATCH', body: { name: 'Mine' } });
+  assert.equal(renamed.status, 400);
+  assert.match(renamed.data.error, /kit's/);
+  assert.equal((await call(url)).data.label, null, 'nothing gives the label now');
+
+  // With the pre-ship review off, a ship with a label is still sent back for a go (before land.sh would run).
+  const { data: { ticket: t } } = await call(`/api/tickets/${minion.id}`);
+  assert.ok(t.cwd);
+  mkdirSync(join(t.cwd, 'tools'), { recursive: true });
+  writeFileSync(join(t.cwd, 'tools', 'land.sh'), 'exit 1\n');
+  const handOff = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end' }) });
+  assert.equal(handOff.status, 400);
+  assert.match((await handOff.json()).error, /pre-ship review is off and nothing else gives the risk label, so this ship waits for a person's go/);
+
+  // A new entry is on trial: it can't block or give the label until it's calibrated.
+  await call(url, { method: 'POST', body: { slug: 'gatekeeper', when: 'ask', body: '# Gate' } });
+  const gk = `${url}/gatekeeper`;
+  const locked = await call(gk, { method: 'PATCH', body: { gate: 'block' } });
+  assert.equal(locked.status, 400);
+  assert.match(locked.data.error, /on trial, so it only advises/);
+  assert.equal((await call(gk, { method: 'PATCH', body: { gives_label: true } })).status, 400);
+  // A minion records a calibration that fails, then one that passes (most notes hit, no false alarms), which takes it off trial.
+  const weak = await call(gk, { method: 'PATCH', body: { calibration: { hits: 1, notes: 4, false_alarms: 0, controls: 2, model: 'sonnet' } }, as: minion.id });
+  assert.deepEqual([weak.status, weak.data.trial], [200, true], JSON.stringify(weak.data));
+  const good = await call(gk, { method: 'PATCH', body: { calibration: { hits: 3, notes: 4, false_alarms: 0, controls: 2, model: 'sonnet' } }, as: minion.id });
+  assert.deepEqual([good.data.trial, good.data.calibrated], [false, `${new Date().toISOString().slice(0, 10)}, sonnet: 3/4 hits, 0/2 false alarms`]);
+  assert.equal((await call(gk, { method: 'PATCH', body: { enabled: false }, as: minion.id })).status, 403, 'a minion still only saves bodies and calibrations');
+  // Now it can block and give the label, and the ship gate names it.
+  assert.equal((await call(gk, { method: 'PATCH', body: { gate: 'block', gives_label: true } })).data.gate, 'block');
+  assert.equal((await call(url)).data.label, 'Gatekeeper');
+  // A person can mark one good instead of calibrating it.
+  await call(url, { method: 'POST', body: { slug: 'trusted', body: '# T' } });
+  const marked = await call(`${url}/trusted`, { method: 'PATCH', body: { trial: false } });
+  assert.match(marked.data.calibrated, /marked good by Cara$/);
+
+  // An audit's switch is its schedule's pause.
+  const audit = first.data.audits[0];
+  const paused = await call(`${url}/audits/${audit.slug}`, { method: 'POST', body: { enabled: !audit.on } });
+  assert.equal(paused.status, 200, JSON.stringify(paused.data));
+  assert.equal((await call(url)).data.audits.find((a: any) => a.slug === audit.slug).on, !audit.on);
+  assert.equal((await call(`${url}/audits/nope`, { method: 'POST', body: { enabled: true } })).status, 404);
+
+  // The describe box: only a person, on their own login; it proposes before and after, and Apply is a save History undoes.
+  assert.equal((await call(`${url}/describe`, { method: 'POST', body: { text: 'x' }, as: page.coordinator.id })).status, 403);
+  const proposed = await call(`${url}/describe`, { method: 'POST', body: { text: 'Make the finding checker twice as picky' } });
+  assert.equal(proposed.status, 200, JSON.stringify(proposed.data));
+  assert.equal(proposed.data.note, 'One edit');
+  assert.deepEqual(proposed.data.proposals.map((x: any) => [x.slug, x.before, x.after, x.why]), [['finding-checker', '', 'Be twice as picky with migrations.', 'Pickier on migrations']], 'an entry not in the set is dropped');
+  const pr = proposed.data.proposals[0];
+  const applied = await call(`${url}/finding-checker`, { method: 'PATCH', body: { body: pr.after, version: pr.version, note: 'Described: Make the finding checker twice as picky' } });
+  assert.deepEqual([applied.status, applied.data.body], [200, 'Be twice as picky with migrations.']);
+  const undone = await call(`${url}/finding-checker/restore`, { method: 'POST', body: { version: pr.version } });
+  assert.equal(undone.data.body, '');
+  const chatty = await call(`${url}/describe`, { method: 'POST', body: { text: 'Something else' } });
+  assert.equal(chatty.status, 502);
+  assert.match(chatty.data.error, /wasn't the proposal/);
 });

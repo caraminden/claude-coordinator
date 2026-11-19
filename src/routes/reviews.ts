@@ -4,6 +4,9 @@
 import { HttpError, json, readJson, type App, type Route } from '../http.ts';
 import { BUILT_INS, calibratedText, isKit, loadStarters, nameFor, parseWhen, renderEntry, ReviewError, stageFor, whenText, type EntryFields, type ReviewEntry } from '../review-set.ts';
 import { describeCron, loadTemplates, templateFields, templateVars } from '../schedules.ts';
+import { describePrompt, readProposals, runDescribe } from '../review-describe.ts';
+import { turnEnv } from '../turn-launch.ts';
+import { join } from 'node:path';
 import type { Project } from '../db.ts';
 
 /** An entry for the page: a kit built-in's `when` and `what` are the kit's, and its text is only the scheme's additions. */
@@ -109,6 +112,25 @@ export const reviewRoutes: Route[] = [
       const e = run(() => app.store.reviews.create(project.id, { ...f, slug, name: f.name ?? nameFor(slug), triggers: triggers ?? {}, stage: f.stage ?? stageFor(triggers ?? {}), trial: true }, session.name));
       broadcast(app, project);
       return json(res, 201, view(e));
+    },
+  },
+  {
+    // Describe a change (Q11): a one-shot agent on the asker's own Claude login proposes edits; Apply is an ordinary save.
+    method: 'POST', path: '/api/projects/:project/reviews/describe', who: ['person'], refuse: 'Only a person describes a change here, on their own Claude login',
+    async handler({ req, res, app, session, project }) {
+      const { text } = (await readJson(req)) ?? {};
+      if (typeof text !== 'string' || !text.trim() || text.length > 2000) throw new HttpError(400, 'Describe the change in 1 to 2,000 characters');
+      const place = app.claude.place(session.uid);
+      if (!place) throw new HttpError(409, "Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run the agent on");
+      app.store.reviews.ensureBuiltIns(project.id);
+      const entries = app.store.reviews.list(project.id);
+      let reply: string;
+      try {
+        reply = await runDescribe(place, describePrompt(text.trim(), entries), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid), 'review-describe') });
+        return json(res, 200, readProposals(reply, entries));
+      } catch (err: any) {
+        throw new HttpError(502, err.message);
+      }
     },
   },
   {

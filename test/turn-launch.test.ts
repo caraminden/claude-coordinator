@@ -242,20 +242,28 @@ test('--advisor is passed only when the minion\'s model carries one, and never t
 
 // Build 4 (#1051): the scheme's review set comes from the store, not its repo, so a scheme with no rubric files gets one too.
 test("a turn gets its scheme's review set as files, named in its turn message, with the off entries left out", async () => {
-  let seen: { files: string[]; ui: string; message: string } | null = null;
+  let seen: { files: string[]; ui: string; message: string; added: string } | null = null;
   await launch({
     before: (_t, project) => {
       store.reviews.create(project, { slug: 'ui', name: 'UI', body: '## Pass\n\nLooks right.\n', triggers: { diff: ['public/**'] }, stage: 'work', trial: true }, 'Cara');
       store.reviews.create(project, { slug: 'old', name: 'Old', body: '## Pass\n\nx\n', triggers: {}, stage: 'ask', enabled: false }, 'Cara');
+      // Phase 2 (#1052): the kit's own reviewers are entries too, switched per scheme; the turn hears which are off.
+      store.reviews.ensureBuiltIns(project);
+      for (const slug of ['pre-ship-review', 'lens-tests', 'fresh-eyes']) store.reviews.save(project, slug, { enabled: false }, 'Cara', 'Turned off');
+      store.reviews.save(project, 'finding-checker', { body: 'Check the migration claims twice.' }, 'Cara', 'Edited by hand');
     },
     peek: (dir) => {
       const set = join(dir, 'review-set');
-      seen = { files: readdirSync(set), ui: readFileSync(join(set, 'ui.md'), 'utf8'), message: readFileSync(join(dir, 'prompt.jsonl'), 'utf8') };
+      seen = { files: readdirSync(set), ui: readFileSync(join(set, 'ui.md'), 'utf8'), message: readFileSync(join(dir, 'prompt.jsonl'), 'utf8'), added: readFileSync(join(dir, 'review-kit', 'finding-checker.md'), 'utf8') };
     },
   });
   assert.ok(seen, 'the turn launched');
-  const { files, ui, message } = seen!;
-  assert.deepEqual(files, ['ui.md']);
+  const { files, ui, message, added } = seen!;
+  assert.deepEqual(files, ['ui.md'], "kit entries aren't rubric files");
   assert.match(ui, /^---\nname: ui\nwhen: "diff: public\/\*\*"\ntrial: true\n---\n\n## Pass/);
   assert.match(message, /Review set: .*review-set/);
+  assert.match(message, /Kit reviewers: This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label\. Every ship waits for a person's go/);
+  assert.match(message, /Kit reviewers this scheme switched off: Lens: Tests, Fresh eyes\./);
+  assert.match(message, /review-kit\/finding-checker\.md` \(Finding checker\)/);
+  assert.match(added, /Check the migration claims twice\./);
 });

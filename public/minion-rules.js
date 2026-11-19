@@ -81,10 +81,10 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
   const seg = (opts, cur, onPick, disabled = false, label = '') => h('div', { class: 'rules-seg', role: 'group', 'aria-label': label },
     opts.map(([v, l]) => h('button', { type: 'button', 'aria-pressed': String(cur === v), disabled, onclick: () => cur !== v && onPick(v) }, l)));
   /** "Add by hand": a button that opens one line to type in; Enter or Add sends it. */
-  const handLine = (placeholder, onAdd) => {
-    const input = h('input', { type: 'text', class: 'rules-hand-input', placeholder, spellcheck: 'false', 'aria-label': 'Add by hand', hidden: true });
+  const handLine = (placeholder, onAdd, label = 'Add by hand') => {
+    const input = h('input', { type: 'text', class: 'rules-hand-input', placeholder, spellcheck: 'false', 'aria-label': label, hidden: true });
     const add = h('button', { type: 'button', hidden: true, onclick: () => go() }, 'Add');
-    const open = h('button', { type: 'button', class: 'rules-hand', onclick: () => { input.hidden = add.hidden = false; open.hidden = true; input.focus(); } }, 'Add by hand');
+    const open = h('button', { type: 'button', class: 'rules-hand', onclick: () => { input.hidden = add.hidden = false; open.hidden = true; input.focus(); } }, label);
     const go = () => { const v = input.value.trim(); if (!v) return; onAdd(v); input.value = ''; };
     input.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), go()));
     return h('div', { class: 'rules-pick' }, open, input, add);
@@ -240,7 +240,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
       if (!/^\d{3,4}$/.test(w) || +w < 200) return toast('A width is a number of pixels, like 1920');
       const cur = shotList(stored().shot_widths);
       if (!cur.includes(+w)) save({ shot_widths: [...cur, +w].sort((a, b) => b - a).join(',') }, `shoot at ${w}`);
-    });
+    }, 'Custom width');
     return live({ icon: 'monitor', hue: 'teal', title: 'Screenshots' },
       settingsHelp('The widths and themes a minion shoots a UI change at, and whether its ready note needs them.',
         'tools/ui-shot.ts uses these when a minion passes no --widths or --themes, and the minion\'s prompt states them. Keep at least one of each.'),

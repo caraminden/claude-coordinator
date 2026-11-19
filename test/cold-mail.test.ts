@@ -15,7 +15,7 @@ testPins();
 const root = mkdtempSync(join(tmpdir(), 'cold-mail-'));
 after(async () => {
   await stopTurns(root);
-  for (let i = 0; i < 200 && [...Array(500).keys()].some((id) => (runner as any).lanes.busy(id)); i++) await new Promise((r) => setTimeout(r, 10));
+  await until('every session save to end', async () => ![...Array(500).keys()].some((id) => (runner as any).lanes.busy(id)));
   rmSync(root, { recursive: true, force: true });
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');

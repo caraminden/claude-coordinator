@@ -757,7 +757,7 @@ const TOOLS = [
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, fast mode, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
+      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, fast mode, screenshot widths, themes, requirement and note, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -792,6 +792,10 @@ const TOOLS = [
         builds: { type: 'string', enum: ['suggest', 'off'], description: "off: this scheme doesn't use numbered builds, so its Taskmaster never suggests one. Only when a member asks." },
         grill: { type: 'string', enum: ['design', 'all', 'never'], description: "Grilling before code: design (the Citadel-wide rule, design-shaped features only), all (every feature), never. Only when a member asks." },
         gh_runners: { type: 'string', enum: ['ask', 'ok', 'never'], description: "CI on GitHub's own runners costs Actions minutes: ask a person first (default), ok to use, never. Only when a member asks." },
+        screenshot_widths: { type: 'array', items: { type: 'integer', minimum: 200, maximum: 5000 }, description: "Pixel widths a minion shoots a UI change at, like [1440, 390]; tools/ui-shot.ts takes them as its default --widths." },
+        screenshot_themes: { type: 'array', items: { type: 'string', enum: ['light', 'dark'] }, description: "Themes a minion shoots a UI change in; ui-shot's default --themes." },
+        screenshots_required: { type: 'boolean', description: "true (the default): a minion's ready note for a UI change carries its screenshots." },
+        screenshot_note: { type: 'string', maxLength: 200, description: "One line added to the screenshot rule, e.g. \"1x in her window (1600×900)\"; empty clears it." },
         onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },
         name: { type: 'string', description: "Rename this scheme (never another). Refused if another scheme has the name. Nothing else changes: everything goes by the scheme's id, and your chat gets a note. Old \"<scheme> #N\" text keeps the old name." },
         repo_url: { type: 'string', description: "Record this scheme's repo URL (https:// or git@). Clones nothing and re-points no checkout: a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. Refused when one is set, unless replace_repo is true." },
@@ -1784,7 +1788,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
-      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}`;
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}\n\nScreenshots: widths ${project.shot_widths}, themes ${project.shot_themes}, ${project.shots_required ? 'required in the ready note' : 'not required'}${project.shot_note ? `, note: ${project.shot_note}` : ''}`;
     }
     case 'set_project_settings': {
       const body: Record<string, unknown> = {};
@@ -1796,6 +1800,10 @@ async function runTool(name: string, args: any): Promise<string> {
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
       if (args.land_mode !== undefined) body.land_mode = args.land_mode;
       for (const k of ['fable_ok', 'builds', 'grill', 'gh_runners'] as const) if (args[k] !== undefined) body[k] = args[k];
+      if (args.screenshot_widths !== undefined) body.shot_widths = args.screenshot_widths;
+      if (args.screenshot_themes !== undefined) body.shot_themes = args.screenshot_themes;
+      if (args.screenshots_required !== undefined) body.shots_required = args.screenshots_required;
+      if (args.screenshot_note !== undefined) body.shot_note = args.screenshot_note;
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
       if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
       if (args.name !== undefined) body.name = args.name;
@@ -1803,10 +1811,10 @@ async function runTool(name: string, args: any): Promise<string> {
         body.repo_url = args.repo_url;
         if (args.replace_repo === true) body.replace_repo = true;
       }
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, fable_ok, builds, grill, gh_runners, onboarding, onboarding_mode, name, repo_url or a mix');
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, fable_ok, builds, grill, gh_runners, screenshot_widths, screenshot_themes, screenshots_required, screenshot_note, onboarding, onboarding_mode, name, repo_url or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, screenshots ${project.shot_widths} px in ${project.shot_themes}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
     }
     case 'approve':
       return approve(args);

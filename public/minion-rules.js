@@ -1,6 +1,7 @@
 // The Minion rules page's pickers (#1041, Cara 2026-11-19: "make as much of it as possible into toggles and buttons and
 // pickers, with manual text entry as a fallback"). Each row reads the same stored text the old text box did and writes it
 // back at once (settings.js's saveProject: optimistic, a toast with Retry on a refusal); typed entry stays as "Add by hand".
+import { toast } from './ui/status.js';
 import { account, h, icon, listGroupsOf, view } from './base.js';
 
 export const lines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -52,6 +53,9 @@ const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down
  * The rows, built with the page's own parts: settingsRow and settingsHelp (settings.js) and saveProject, which sends a
  * PATCH of `body` behind an optimistic `mine` (what view.project then holds).
  */
+const SHOT_WIDTHS = [[1440, 'Desktop 1440'], [1024, 'Laptop 1024'], [768, 'Tablet 768'], [390, 'Phone 390']];
+const shotList = (text) => (text ?? '').split(',').map(Number).filter((w) => w > 0);
+
 export function pickers({ settingsRow, settingsHelp, saveProject }) {
   const p = view.project;
   const stored = () => view.project;
@@ -218,7 +222,47 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     settingsHelp('CI on GitHub\'s runners (CI_RUNNER=github) costs Actions minutes.', 'Ask makes a minion get a person\'s go first; OK lets it use them; Never keeps CI on this scheme\'s own runners.'),
     'gh_runners', [['ask', 'Ask first'], ['ok', 'OK'], ['never', 'Never']], 'ask', 'GitHub runners');
 
-  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, data, refreshAll };
+  /**
+   * Screenshots (#1044): the widths and themes a UI change is shot at (tools/ui-shot.ts's defaults), whether the ready note
+   * must carry them, and a free-text note, the one typed field, which keeps Save and Discard.
+   */
+  const shots = () => {
+    const note = h('input', { type: 'text', class: 'rules-hand-input', id: 'shot-note', maxlength: 200, spellcheck: 'false', placeholder: '1x in her window (1600×900)', 'aria-label': 'Screenshot note', hidden: true });
+    const saveBtn = h('button', { type: 'button' }, 'Save'), discardBtn = h('button', { type: 'button', class: 'secondary' }, 'Discard');
+    const actions = h('div', { class: 'settings-row-actions', hidden: true }, saveBtn, discardBtn);
+    const open = h('button', { type: 'button', class: 'rules-hand', onclick: () => { note.hidden = false; actions.hidden = false; open.hidden = true; note.focus(); } }, 'Add by hand');
+    const dirty = () => note.value.trim() !== (stored().shot_note ?? '');
+    const sync = () => { note.toggleAttribute('data-draft', dirty()); saveBtn.disabled = discardBtn.disabled = !dirty(); };
+    note.addEventListener('input', sync);
+    saveBtn.onclick = () => save({ shot_note: note.value.trim() }, 'save the screenshot note');
+    discardBtn.onclick = () => { note.value = stored().shot_note ?? ''; sync(); };
+    const custom = handLine('1920', (w) => {
+      if (!/^\d{3,4}$/.test(w) || +w < 200) return toast('A width is a number of pixels, like 1920');
+      const cur = shotList(stored().shot_widths);
+      if (!cur.includes(+w)) save({ shot_widths: [...cur, +w].sort((a, b) => b - a).join(',') }, `shoot at ${w}`);
+    });
+    return live({ icon: 'monitor', hue: 'teal', title: 'Screenshots' },
+      settingsHelp('The widths and themes a minion shoots a UI change at, and whether its ready note needs them.',
+        'tools/ui-shot.ts uses these when a minion passes no --widths or --themes, and the minion\'s prompt states them. Keep at least one of each.'),
+      (mount) => {
+        const s = stored(), widths = shotList(s.shot_widths), themes = (s.shot_themes ?? '').split(',').filter(Boolean);
+        const all = [...new Set([...SHOT_WIDTHS.map(([w]) => w), ...widths])].sort((a, b) => b - a);
+        const label = (w) => SHOT_WIDTHS.find(([x]) => x === w)?.[1] ?? `${w}`;
+        const chip = (on, text, onclick, disabled) => h('button', { type: 'button', class: 'rules-chip', 'aria-pressed': String(on), disabled, onclick }, on ? icon('check') : '+', ' ', text);
+        mount.replaceChildren(
+          h('div', { class: 'rules-chips' }, all.map((w) => { const on = widths.includes(w); return chip(on, label(w), () => save({ shot_widths: (on ? widths.filter((x) => x !== w) : [...widths, w]).sort((a, b) => b - a).join(',') }, `${on ? 'stop shooting' : 'shoot'} at ${w}`), on && widths.length === 1); })),
+          h('div', { class: 'rules-chips' }, [['light', 'Light'], ['dark', 'Dark']].map(([t, l]) => { const on = themes.includes(t); return chip(on, l, () => save({ shot_themes: ['light', 'dark'].filter((x) => (x === t ? !on : themes.includes(x))).join(',') }, `${on ? 'stop shooting' : 'shoot'} in ${t}`), on && themes.length === 1); })),
+          h('div', { class: 'rules-item' }, h('span', { class: 'rules-what' }, h('b', {}, 'Shots in the ready note'), h('span', { class: 'muted small' }, 'a UI change isn\'t ready without them')),
+            h('button', { type: 'button', class: 'rules-switch', role: 'switch', 'aria-checked': String(!!s.shots_required), 'aria-label': 'Screenshots required in the ready note', onclick: () => save({ shots_required: !s.shots_required }, `turn required screenshots ${s.shots_required ? 'off' : 'on'}`) })),
+          h('div', { class: 'rules-pick' }, custom, ''));
+        if (!note.hasAttribute('data-draft')) note.value = s.shot_note ?? '';
+        if (note.value && note.hidden) open.click();
+        sync();
+        return `${widths.join(' and ')}, ${themes.join(' and ')}${s.shots_required ? ', required' : ''}`;
+      }, open, note, actions);
+  };
+
+  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, shots, data, refreshAll };
 }
 
 /** Link rows to pages that live elsewhere (N9); Schedules opens the sidebar's list. */

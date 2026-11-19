@@ -150,3 +150,15 @@ test("PATCH land_mode turns fast mode on only once the scheme's land.sh knows it
   const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
   assert.equal(notes.filter((t: string) => /fast mode/i.test(t)).length, 2, notes.join('\n'));
 });
+
+test('PATCH saves a scheme\'s screenshot widths, themes, requirement and note, and defaults to today\'s rule (#1044)', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Shots' } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  assert.deepEqual([page.project.shot_widths, page.project.shot_themes, page.project.shots_required, page.project.shot_note], ['1440,390', 'light', 1, '']);
+  const ok = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { shot_widths: [390, '1024', 390], shot_themes: 'dark,light', shots_required: false, shot_note: '  1x in her   window ' } });
+  assert.equal(ok.status, 200);
+  assert.deepEqual([ok.data.shot_widths, ok.data.shot_themes, ok.data.shots_required, ok.data.shot_note], ['390,1024', 'light,dark', 0, '1x in her window']);
+  for (const body of [{ shot_widths: [] }, { shot_widths: 'wide' }, { shot_widths: [50] }, { shot_themes: 'sepia' }, { shot_themes: [] }, { shots_required: 'yes' }]) {
+    assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body })).status, 400, JSON.stringify(body));
+  }
+});

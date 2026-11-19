@@ -3,7 +3,7 @@
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { checkNeed } from '../needs.ts';
 import { basename, join } from 'node:path';
-import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, lines } from '../approvals.ts';
+import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanShotNote, cleanShotThemes, cleanShotWidths, cleanWorkflows, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { findPlugins } from '../plugin-scan.ts';
@@ -682,10 +682,10 @@ export const projectRoutes: Route[] = [
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill and gh_runners; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'repo_url'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'repo_url'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -703,6 +703,18 @@ export const projectRoutes: Route[] = [
         const land = project.repo_dir ? await readFile(join(project.repo_dir, 'tools', 'land.sh'), 'utf8').catch(() => '') : '';
         if (!/\bLAND_FAST\b/.test(land) || !/--verify\b/.test(land)) throw new HttpError(409, `This scheme's tools/land.sh ${land ? "doesn't know fast mode yet" : 'is missing'}: re-sync it from the kit's land template (kit/skills/scheme-setup/templates/land.sh) on main first, then turn fast mode on.`);
       }
+      // Screenshot settings (#1044): widths in px, themes light and/or dark, a switch and one line of free text.
+      try {
+        if (body.shot_widths !== undefined) settings.shot_widths = cleanShotWidths(body.shot_widths);
+        if (body.shot_themes !== undefined) settings.shot_themes = cleanShotThemes(body.shot_themes);
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      if (body.shots_required !== undefined) {
+        if (typeof body.shots_required !== 'boolean') throw new HttpError(400, 'shots_required must be true or false');
+        settings.shots_required = body.shots_required ? 1 : 0;
+      }
+      if (body.shot_note !== undefined) settings.shot_note = cleanShotNote(body.shot_note);
       // null or "" leaves effort to Claude Code's default.
       if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
       try {

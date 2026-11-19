@@ -253,6 +253,13 @@ export const turnContext = (...args: Parameters<typeof promptParts>): string => 
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
+/** The UI-checks line (#1044): this scheme's screenshot widths and themes, whether the ready note carries them, and its own note. tools/ui-shot.ts takes the same widths and themes from the turn's env. */
+export function shotLine(project: Partial<Pick<Project, 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note'>>): string {
+  const widths = (project.shot_widths ?? '1440,390').split(',').join(', '), themes = (project.shot_themes ?? 'light').split(',').join(' and ');
+  const required = project.shots_required ?? 1;
+  return `UI change shots: ${widths} px, ${themes} theme (\`tools/ui-shot.ts\` defaults to these). ${required ? 'Put them in your ready note.' : 'Ready-note shots optional.'}${project.shot_note ? ` ${project.shot_note.replace(/[.\s]*$/, '')}.` : ''}`;
+}
+
 export function promptParts(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false, split: TaskmasterRole | null = null, jobMachines: string[] = []): { system: PromptSections; turn: PromptSections } {
   const layers = { app: appInstructions(appText), rules: minionRulesLines(project), scheme: projectInstructions(project, !!appText.trim()) };
   if (ticket.kind === 'coordinator') {
@@ -287,6 +294,7 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         'Scratch files go in $TMPDIR (your own temp folder, also a working directory) or your worktree. Give `rm` and `mv` absolute paths in a call with no `cd` (`rm -rf "$TMPDIR/out"`, `"${d:?}"/*` for a variable); one whose target it can\'t pin down is stopped.',
         'The tripwire refuses these habits, so skip them: `git checkout`/`restore`/`stash` on a path or work in progress (make a WIP commit; `git show HEAD:path` to look, `git show HEAD:./path > path` to put one file back); bare `env` or `printenv` (`env | cut -d= -f1` lists names, `[ -n "$NAME" ] && echo set` checks one); SQL piped into sqlite3 on the live database (pass it as an argument).',
         `${deploys ? 'For a dev copy of Citadel, use `citadel-dev-copy start|seed|env|stop` (`--help`; new seed states go in tools/dev-seeds.ts) rather than server.ts by hand, which opens the live database, and drive a page with `node tools/ui-shot.ts <#route> --step \'<verb> <selector>\'` (its header lists the steps). ' : ''}Stop your ${deploys ? 'other ' : ''}processes by pid (\`$!\`, or \`ss -ltnp 'sport = :<port>'\`): every turn, ${APP_NAME} and its apps run as one account, so a kill by name reaches theirs too.`,
+        ...(ticket.kind === 'coordinator' ? [] : [shotLine(project)]),
         'Wait for your own background job inside the turn with `citadel-wait pid <pid>` (or `port <n>`, `file <path>`, `cmd \'<test>\'`) and a Bash timeout of 600000, repeated on exit 124. A Grunt runs in the foreground unless its Agent call passes `run_in_background: true`.',
         'When each lookup only names the next, do every hop in one script that prints only the answer (capped). A Grunt starts fresh at 30 to 50k tokens and hands back its conclusion; each file you read stays in your context, re-read on every later call. So a sweep you need only the conclusion of goes to an `Explore` Grunt on Sonnet; a few targeted reads, or reads you will act on, stay inline (citadel:subagents).',
         HEAVY_LINE,

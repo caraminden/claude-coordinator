@@ -61,6 +61,32 @@ export function cleanWorkflows(raw: unknown, what = 'Quiet CI workflows'): strin
   return names.join('\n');
 }
 
+/** Screenshot widths (#1044) from the API: a comma list or an array of pixel widths, 1 to 8 of them, as stored ('1440,390'). */
+export function cleanShotWidths(raw: unknown): string {
+  const parts = (Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(',') : null)?.map((w) => String(w).trim()).filter(Boolean);
+  if (!parts?.length) throw new Error('Screenshot widths are a list of pixel widths, like 1440,390');
+  const widths = [...new Set(parts.map((w) => (/^\d{1,5}$/.test(w) ? Number(w) : NaN)))];
+  if (widths.some((w) => !(w >= 200 && w <= 5000))) throw new Error('Each screenshot width is a number of pixels from 200 to 5000');
+  if (widths.length > 8) throw new Error('At most 8 screenshot widths');
+  return widths.join(',');
+}
+
+/** Screenshot themes (#1044): light, dark or both, as stored ('light', 'light,dark'). */
+export function cleanShotThemes(raw: unknown): string {
+  const parts = (Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(',') : null)?.map((t) => String(t).trim());
+  if (!parts?.length || parts.some((t) => t !== 'light' && t !== 'dark')) throw new Error('Screenshot themes are light, dark or light,dark');
+  return ['light', 'dark'].filter((t) => parts.includes(t)).join(',');
+}
+
+/** The free-text screenshot note (#1044): one line, at most 200 characters; '' clears it. */
+export function cleanShotNote(raw: unknown): string {
+  if (raw == null) return '';
+  if (typeof raw !== 'string') throw new Error('The screenshot note must be text');
+  const note = raw.replace(/\s+/g, ' ').trim();
+  if (note.length > 200) throw new Error(`The screenshot note is ${note.length} characters; the limit is 200`);
+  return note;
+}
+
 /**
  * Validate a minion's plugin picks (#361): folders from its scheme's optional list, as stored ('' for none).
  * Registering a folder there is admin-only (src/routes/projects.ts), so a pick never names a new path.

@@ -108,3 +108,20 @@ test('env(titlebar-area-*) becomes the strip, fallbacks and all', () => {
   window.__uiShotEmulate();
   assert.deepEqual(r.values, { 'min-height': '28px', 'padding-right': 'calc(1rem + 100vw - 80px - 920px)', '--top-inset': '28px', color: 'red' });
 });
+
+test("--widths and --themes default to the turn's scheme's from the env, and a flag still wins (#1044)", () => {
+  const env = { COORDINATOR_SHOT_WIDTHS: '1024,390', COORDINATOR_SHOT_THEMES: 'light,dark' };
+  const o = parseArgs([], env);
+  assert.deepEqual([o.widths, o.themes], [[1024, 390], ['light', 'dark']]);
+  assert.deepEqual(parseArgs(['--widths', '768'], env).widths, [768]);
+  assert.deepEqual(parseArgs([], { COORDINATOR_SHOT_WIDTHS: 'x' }).widths, [1440, 390]);
+});
+
+test("the prompt's screenshot line states the scheme's widths, themes, requirement and note (#1044)", async () => {
+  const { shotLine } = await import('../src/prompts.ts');
+  const base = { shot_widths: '1440,390', shot_themes: 'light', shots_required: 1, shot_note: '' };
+  assert.match(shotLine(base), /1440, 390 px, light theme.*in your ready note\.$/);
+  const l = shotLine({ ...base, shot_widths: '390', shot_themes: 'light,dark', shots_required: 0, shot_note: '1x in her window.' });
+  assert.match(l, /390 px, light and dark theme/);
+  assert.match(l, /optional\. 1x in her window\.$/);
+});

@@ -97,6 +97,14 @@ export interface Project {
   grill: GrillMode;
   /** CI on GitHub's own runners (#1045, they cost Actions minutes): ask a person first, ok to use, or never. */
   gh_runners: GhRunnersMode;
+  /** Screenshot widths in px, comma-separated, for a minion's UI checks (#1044); ui-shot's default. */
+  shot_widths: string;
+  /** Themes shot, comma-separated, light and/or dark (#1044). */
+  shot_themes: string;
+  /** 1 when a UI change's ready note must carry its shots (#1044). */
+  shots_required: number;
+  /** Free text added to the screenshot line of the prompt, e.g. "1x in her window" (#1044). */
+  shot_note: string;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -1282,6 +1290,10 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'builds', "ALTER TABLE projects ADD COLUMN builds TEXT NOT NULL DEFAULT 'suggest'"],
   ['projects', 'grill', "ALTER TABLE projects ADD COLUMN grill TEXT NOT NULL DEFAULT 'design'"],
   ['projects', 'gh_runners', "ALTER TABLE projects ADD COLUMN gh_runners TEXT NOT NULL DEFAULT 'ask'"],
+  ['projects', 'shot_widths', "ALTER TABLE projects ADD COLUMN shot_widths TEXT NOT NULL DEFAULT '1440,390'"],
+  ['projects', 'shot_themes', "ALTER TABLE projects ADD COLUMN shot_themes TEXT NOT NULL DEFAULT 'light'"],
+  ['projects', 'shots_required', 'ALTER TABLE projects ADD COLUMN shots_required INTEGER NOT NULL DEFAULT 1'],
+  ['projects', 'shot_note', "ALTER TABLE projects ADD COLUMN shot_note TEXT NOT NULL DEFAULT ''"],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
@@ -1384,6 +1396,7 @@ export const SCHEMA_HISTORY = [
   [69, "drop Peek Auras' Windows Builds 1277-1291 recorded live before PCs could take them (#1019)"],
   [70, 'projects.land_mode (#1017)'],
   [71, 'projects.fable_ok, builds, grill, gh_runners (#1045)'],
+  [72, 'projects.shot_widths, shot_themes, shots_required, shot_note (#1044)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1772,7 +1785,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).

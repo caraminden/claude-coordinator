@@ -414,11 +414,12 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .rules-what code { font-size: 0.8em; color: var(--muted); overflow-wrap: anywhere; }
 .rules-item { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0; flex-wrap: wrap; }
 .rules-item + .rules-item { border-top: 1px solid var(--line); }
-.rules-seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--control-line); border-radius: 7px; overflow: hidden; align-self: flex-start; }
-.rules-seg button { font: inherit; font-size: 0.84rem; padding: 0.3rem 0.65rem; line-height: 1.3; border: 0; border-radius: 0; background: var(--panel); color: var(--ink); cursor: pointer; }
-.rules-seg button + button { border-left: 1px solid var(--control-line); }
+/* The 1px gap over the line colour draws the dividers, so a phone's wrapped second line gets one above it too, and its buttons share the width. */
+.rules-seg { display: inline-flex; flex-wrap: wrap; gap: 1px; max-width: 100%; border: 1px solid var(--control-line); border-radius: 7px; overflow: hidden; align-self: flex-start; background: var(--control-line); }
+.rules-seg button { flex: 1 1 auto; font: inherit; font-size: 0.84rem; padding: 0.3rem 0.65rem; line-height: 1.3; border: 0; border-radius: 0; background: var(--panel); color: var(--ink); cursor: pointer; }
 .rules-seg button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.rules-seg button:disabled { cursor: default; opacity: 0.6; }
+.rules-seg button:disabled { cursor: default; }
+.rules-seg button:disabled:not([aria-pressed=true]) { color: var(--muted); }
 .rules-switch { position: relative; width: 2.3rem; height: 1.3rem; min-width: 2.3rem; min-height: 1.3rem; box-sizing: border-box; padding: 0; border: 0; border-radius: 99px; background: var(--control-line); cursor: pointer; flex: none; }
 .rules-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: calc(1.3rem - 4px); height: calc(1.3rem - 4px); border-radius: 50%; background: #fff; transition: transform var(--citadel-motion, 120ms); }
 .rules-switch[aria-checked=true] { background: var(--done); }

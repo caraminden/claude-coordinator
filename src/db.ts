@@ -105,6 +105,12 @@ export interface Project {
   shots_required: number;
   /** Free text added to the screenshot line of the prompt, e.g. "1x in her window" (#1044). */
   shot_note: string;
+  /** How a change ships (#1043, public/shipping.js): citadel (hand_off_land runs tools/land.sh), pr-auto or pr-person. */
+  ship_path: ShipPath;
+  /** From which risk label a change waits for a person's go: never, high, medium or all; pr-person is always all. */
+  go_from: GoFrom;
+  /** What waits for a person to try it before it ships: never, ui (front-end changes) or features. */
+  try_first: TryFirst;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -216,6 +222,10 @@ export const GRILL_MODES = ['design', 'all', 'never'] as const;
 export type GrillMode = (typeof GRILL_MODES)[number];
 export const GH_RUNNERS_MODES = ['ask', 'ok', 'never'] as const;
 export type GhRunnersMode = (typeof GH_RUNNERS_MODES)[number];
+/** A scheme's Shipping settings (#1043): their values and labels are public/shipping.js's, shared with the page. */
+export type ShipPath = 'citadel' | 'pr-auto' | 'pr-person';
+export type GoFrom = 'never' | 'high' | 'medium' | 'all';
+export type TryFirst = 'never' | 'ui' | 'features';
 
 /** Whether a scheme is still being set up, which is what gives its Taskmaster the onboarding section. */
 export const onboardingOpen = (p: Pick<Project, 'onboarding'>) => p.onboarding !== 'done' && p.onboarding !== 'skipped';
@@ -1294,6 +1304,10 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'shot_themes', "ALTER TABLE projects ADD COLUMN shot_themes TEXT NOT NULL DEFAULT 'light'"],
   ['projects', 'shots_required', 'ALTER TABLE projects ADD COLUMN shots_required INTEGER NOT NULL DEFAULT 1'],
   ['projects', 'shot_note', "ALTER TABLE projects ADD COLUMN shot_note TEXT NOT NULL DEFAULT ''"],
+  // Today's behaviour by default (#1043): Citadel ships it, a go from high, no try first. shippingFromRules moves the PR schemes.
+  ['projects', 'ship_path', "ALTER TABLE projects ADD COLUMN ship_path TEXT NOT NULL DEFAULT 'citadel'"],
+  ['projects', 'go_from', "ALTER TABLE projects ADD COLUMN go_from TEXT NOT NULL DEFAULT 'high'"],
+  ['projects', 'try_first', "ALTER TABLE projects ADD COLUMN try_first TEXT NOT NULL DEFAULT 'never'"],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
@@ -1397,6 +1411,7 @@ export const SCHEMA_HISTORY = [
   [70, 'projects.land_mode (#1017)'],
   [71, 'projects.fable_ok, builds, grill, gh_runners (#1045)'],
   [72, 'projects.shot_widths, shot_themes, shots_required, shot_note (#1044)'],
+  [73, 'projects.ship_path, go_from, try_first; schemes whose merges wait for a person start on pr-person (#1043)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1484,6 +1499,7 @@ export class Store {
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.dropEarlyPeekAurasBuilds();
+    this.shippingFromRules();
     this.lendingLists();
     this.noteSchemaVersion();
   }
@@ -1550,6 +1566,18 @@ export class Store {
     this.db.prepare(`DELETE FROM releases WHERE target = 'ci:windows:release' AND outcome = 'live'
       AND project_id IN (SELECT id FROM projects WHERE name = 'Peek Auras')
       AND version IN ('run:1277', 'run:1279', 'run:1282', 'run:1284', 'run:1286', 'run:1289', 'run:1291')`).run();
+  }
+
+  /**
+   * Shipping's starting values (#1043; Josh, 2026-11-19, "Yes, use the table"): a scheme whose merges already wait for a
+   * person's Approve (both merge rules stored: Delve and Threadspace) starts on "Pull request, a person merges", which is
+   * a go on every change; the rest keep the columns' defaults. Once, before 73.
+   */
+  private shippingFromRules() {
+    if ((this.getSetting<number>('schema_version') ?? 0) >= 73) return;
+    this.db.prepare(`UPDATE projects SET ship_path = 'pr-person', go_from = 'all'
+      WHERE instr(char(10) || approval_rules || char(10), char(10) || 'Bash(gh pr merge:*)' || char(10)) > 0
+        AND instr(char(10) || approval_rules || char(10), char(10) || 'mcp__*__merge_pull_request' || char(10)) > 0`).run();
   }
 
   /** Whose subscription the server's own Claude login is: the first admin, the one Citadel made at its first start. */
@@ -1785,7 +1813,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).

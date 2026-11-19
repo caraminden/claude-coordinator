@@ -31,7 +31,7 @@ CLAUDE.md and glossary for the scrub. The tripwire refuses some of these; the re
 
 | Part | Used in |
 |---|---|
-| Shipping answer: PR per change, auto-ship after self-review, or straight to main; and the pusher of main (`tools/land.sh`, or "main stays local") | steps 3, 4, 8 |
+| Shipping answer: the scheme's Shipping settings (Minion rules; `get_project_settings` shows them): Citadel ships it (`citadel`), pull request with auto-merge (`pr-auto`) or pull request a person merges (`pr-person`), and from which risk label a person's go is needed; and the pusher of main (`tools/land.sh`, or "main stays local") | steps 3, 4, 8 |
 | Project facts draft, or the interview answers behind it (stack, tests, high-risk areas) | step 3 |
 | Adapt list: name, kind (skill, agent, rule), source scheme and path, new name, why | step 5 |
 | Write-new list: name, kind, one-line job | step 6 |
@@ -341,9 +341,11 @@ rate high by themselves; the approved plan already listed them, so that alone is
 stop. A high label for any other reason: stop and ask with a card. Then ship by the plan's
 shipping answer:
 
-- **PR per change:** push your branch, `gh pr create`, and ship it with `gh pr merge` (the
-  scheme's approval rules turn that into a card for a person). Wait for it to ship.
-- **Auto-ship after self-review** or **straight to main**, pusher `tools/land.sh`: commit it
+- **Pull request, a person merges** (`pr-person`): push your branch, `gh pr create`, and ship it
+  with `gh pr merge` (the merge approval turns that into a card for a person). Wait for it to ship.
+- **Pull request, auto-merge when green** (`pr-auto`): push your branch, `gh pr create`, and
+  `gh pr merge --auto --squash`. Wait for CI and the merge.
+- **Citadel ships it** (`citadel`), pusher `tools/land.sh`: commit it
   with the rest, then run `tools/land.sh` from your worktree. It ships and pushes your own
   setup, and every minion after you ships through it.
 - **Main stays local:** check the main checkout (the first entry of `git worktree list`) is on

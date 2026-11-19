@@ -264,7 +264,7 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
   const layers = { app: appInstructions(appText), rules: minionRulesLines(project), scheme: projectInstructions(project, !!appText.trim()) };
   if (ticket.kind === 'coordinator') {
     return {
-      system: { taskmaster: [coordinatorPrompt(project, ticketsDir, memoryDir, builds, split)], onboarding: [onboardingPrompt(project, sharedDir, surveys)], files: showingFiles(ticket, filesDir, sharedDir), ...layers },
+      system: { taskmaster: [coordinatorPrompt(project, ticketsDir, memoryDir, builds, split), shippingLine(project, deploys)], onboarding: [onboardingPrompt(project, sharedDir, surveys)], files: showingFiles(ticket, filesDir, sharedDir), ...layers },
       // It flips with whether the asker is a member (#656), so it rides the turn message (#878).
       turn: { everyScheme: project.id === GLOBAL_OWNER ? [everySchemeLine(everyScheme)] : [] },
     };
@@ -309,11 +309,11 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         'A Settings text edit (`edit_instructions`) is an agent-instruction change: self-review it, label it at least medium, ship it like the rest, and keep its dated quotes.',
       ],
       files: showingFiles(ticket, null, sharedDir, !!filesDir),
-      approval: approvalNote(project),
+      approval: [shippingLine(project, deploys), ...approvalNote(project)],
       // Finishing work (AG-01, #975): Anthropic's finishing-work and named-early-stop paragraphs for Fable 5.2, Opus 5.5 and Sonnet 5.5, which stop early at medium effort.
       close: [
         'Finish the work before you end the turn: a reply with no tool call ends it, and the work waits until someone writes again, often hours later. Keep going until what was asked is done and checked, and shipped if there is anything to ship. Four endings leave owed work undone, so take the next step instead: a summary that announces the next step, an offer to carry on unless someone objects, a list of decisions none of which blocks the rest, and stopping because the turn is long or a milestone is done. Put progress notes and recommendations in the same message as your next tool call.',
-        'Diagnose an ordinary obstacle (an error, a timeout, a locked file, an empty result, a failing tool) and work through it: wait and retry, fix the call, try another tool or source. End the turn when nothing can move without a person (a card or plan awaiting its answer, a ship handed off, a park on another minion), or when the block is deliberate (a tripwire, withheld access, a file marked hands-off): say plainly what you found. Every rule that asks first still holds: risky or destructive actions and high-risk ships wait for a person\'s go.',
+        'Diagnose an ordinary obstacle (an error, a timeout, a locked file, an empty result, a failing tool) and work through it: wait and retry, fix the call, try another tool or source. End the turn when nothing can move without a person (a card or plan awaiting its answer, a ship handed off, a park on another minion), or when the block is deliberate (a tripwire, withheld access, a file marked hands-off): say plainly what you found. Every rule that asks first still holds: risky or destructive actions, and ships at the Shipping line\'s go threshold, wait for a person\'s go.',
         'People read replies later: end on what you did, state a blocker, and put a choice in a card (or name the waiting one by its link) rather than a closing question.',],
       ...layers,
       personal: personalInstructions(personal, project),
@@ -340,6 +340,29 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
       jobs: jobMachines.length ? [jobsLine(jobMachines)] : [],
     },
   };
+}
+
+/**
+ * A scheme's Shipping settings (#1043, public/shipping.js) as one line for its minions and Taskmaster. They win over the
+ * scheme instructions (Josh, 2026-11-19, "The settings win"), so a scheme needs no "Shipping fixes" paragraph of its own.
+ */
+export function shippingLine(p: Pick<Project, 'ship_path' | 'go_from' | 'try_first'>, deploys: boolean): string {
+  const path = {
+    citadel: 'once tested and self-reviewed, hand it off with `hand_off_land` (the server runs tools/land.sh)',
+    'pr-auto': 'once tested and self-reviewed, push your branch, open a pull request and turn on auto-merge (`gh pr merge --auto --squash`), so it ships once CI is green',
+    'pr-person': 'once tested and self-reviewed, push your branch and open a pull request; merging it waits for a person\'s Approve',
+  }[p.ship_path ?? 'citadel'] ?? p.ship_path;
+  const go = (p.go_from ?? 'high') === 'never'
+    ? 'No change waits for a person\'s go, whatever its risk label.'
+    : p.go_from === 'all' && p.ship_path !== 'citadel' && p.ship_path
+      // The gate ticks the merge approval here, so the merge's own Approve is the go: a card first would ask twice.
+      ? 'Every change waits for a member\'s go, and the merge\'s own Approve is that go: open the pull request and run the merge, with no card first.'
+      : `${{ high: 'A high-risk change waits', medium: 'A medium or high-risk change waits', all: 'Every change waits' }[p.go_from] ?? 'A high-risk change waits'} for a member's go: stop before shipping, ask with an \`ask_question\` card (kind ship), and ship only on their go${(p.ship_path ?? 'citadel') === 'citadel' ? " (hand_off_land's `go` names who and when)" : ''}.`;
+  const wait = deploys
+    ? 'start a preview (`start_preview`), post its link, set state try, and ship only on a member\'s go.'
+    : 'post screenshots (and a build or link if the scheme has one), set state try, and ship only on a member\'s go.';
+  const tryFirst = { ui: ` A change whose diff touches the front-end paths in Project facts (with none listed: one people would see) waits for a try first: ${wait}`, features: ` Every feature (type feature) waits for a try first: ${wait}` }[p.try_first] ?? '';
+  return `Shipping in this scheme (its settings; they win over any shipping rule in the scheme instructions): ${path}. ${go}${tryFirst}`;
 }
 
 /** Which tool calls wait for a person's OK in this project. */
@@ -498,7 +521,9 @@ export function onboardingPrompt(project: Project, sharedDir: string | null, sur
     '- What kind of project: web app · native app (desktop or phone) · game · library/CLI · content (docs, research, art) · other. Drives which other scheme\'s specialised skills to adapt. A native app, or a game built for desktops or phones, makes this a **native-app scheme**, which gets the plan\'s Real hardware part.',
     '- Stack: 2 or 3 likely ones. Drives check commands and rules.',
     '- Who works on it: just the person who created it · them and named people. Drives the requestedBy and assigned values.',
-    '- How changes ship: PR per change shipped on a person\'s Allow · auto-ship after self-review · straight to main.',
+    '- How changes ship: Citadel ships it (a scheme-local tools/land.sh) · pull request, auto-merge when green · pull request a person merges. Sets ship_path.',
+    '- From which risk label a change waits for a person\'s go: never · high · medium and up · every change (a person merging means every change). Sets go_from.',
+    '- What waits for someone to try it before it ships: nothing · UI changes · every feature. Sets try_first.',
     '- Does it run anywhere: nothing to run · on perigee as a service · its own CI/CD · someone\'s own machines. For perigee, a first minion writes a deploy script and a unit in `deploy/` for a person to install by hand.',
     '- How do we know it works: tests exist (show the command) · set up tests as a first minion · no tests.',
     '- Group work into numbered builds: no · yes.',
@@ -512,7 +537,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null, sur
     '- **Instructions:** the full draft of the scheme instructions, scheme-specific only.',
     '- **Settings:** default effort, approval rules, plugin folders.',
     '- **Properties:** new keys and values.',
-    '- **Shipping:** the answer to how changes land. For auto-land or straight to main, also who pushes main to GitHub: the recommended route is a scheme-local `tools/land.sh` the setup minion writes (rebase onto local main, run the check command, fast-forward main, push it to origin, never forced); without one named, main stays local.',
+    '- **Shipping:** the ship path and go threshold from those answers, set with set_project_settings (ship_path, go_from, try_first), never as prose in the instructions: every minion\'s prompt states them. For Citadel ships it, also who pushes main to GitHub: the recommended route is a scheme-local `tools/land.sh` the setup minion writes (rebase onto local main, run the check command, fast-forward main, push it to origin, never forced); without one named, main stays local.',
     '- **Repo:** CLAUDE.md with its **Project facts** section drafted (check commands, front end, high-risk files, how a change ships, UI rules, glossary, decisions log, retros, rubrics), `.claude/settings.json`, guard and pre-push hooks, rules to copy.',
     '- **Critic rubrics:** the starters in citadel:critique\'s `rubrics/` (every file there but `example.md`) that fit this scheme\'s work (each a repo file that `extends:` one, named in the Rubrics line), or "none fit yet". People pick; with none, no critic runs.',
     '- **First minions:** their titles and kinds, started once setup ships.',

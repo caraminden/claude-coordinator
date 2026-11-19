@@ -127,6 +127,30 @@ test('PATCH /api/projects/:id saves the watched CI workflows, cleaned like the q
   assert.equal(ok.data.ci_quiet, '', 'the quiet list stays as it was');
 });
 
+test('PATCH Shipping keeps the merge approval and the go threshold agreeing, and refuses a pr-person go below every change (#1043)', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Shipping' } });
+  assert.deepEqual([p.ship_path, p.go_from, p.try_first], ['citadel', 'high', 'never'], "today's behaviour by default");
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ship_path: 'by-hand' } })).status, 400);
+  const all = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ship_path: 'pr-auto', go_from: 'all', approval_rules: 'Edit(CLAUDE.md)' } });
+  assert.equal(all.status, 200);
+  assert.equal(all.data.approval_rules, 'Edit(CLAUDE.md)\nBash(gh pr merge:*)\nmcp__*__merge_pull_request', 'every change on a PR path ticks the merge approval');
+  const high = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { go_from: 'high' } });
+  assert.equal(high.data.approval_rules, 'Edit(CLAUDE.md)', 'a go by label leaves it off');
+  const clash = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ship_path: 'pr-person', go_from: 'medium' } });
+  assert.equal(clash.status, 400);
+  assert.match(clash.data.error, /every change/i);
+  const person = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { ship_path: 'pr-person', try_first: 'ui' } });
+  assert.deepEqual([person.data.ship_path, person.data.go_from, person.data.try_first], ['pr-person', 'all', 'ui'], 'a person merging means every change needs a go');
+  assert.match(person.data.approval_rules, /gh pr merge/);
+  // The gate's two rules are checked like typed ones: a list already at the cap can't take them.
+  const { data: full } = await call('/api/projects', { method: 'POST', body: { name: 'Full rules' } });
+  const fifty = Array.from({ length: 50 }, (_, i) => `Bash(tool${i}:*)`).join('\n');
+  assert.equal((await call(`/api/projects/${full.id}`, { method: 'PATCH', body: { approval_rules: fifty } })).status, 200);
+  const over = await call(`/api/projects/${full.id}`, { method: 'PATCH', body: { ship_path: 'pr-person' } });
+  assert.equal(over.status, 400);
+  assert.match(over.data.error, /Merge a pull request.*At most/);
+});
+
 test("PATCH land_mode turns fast mode on only once the scheme's land.sh knows it, and tells the Taskmaster (#1017)", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Fast' } });
   const { data: page } = await call(`/api/projects/${p.id}`);

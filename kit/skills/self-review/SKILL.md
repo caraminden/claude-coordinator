@@ -24,7 +24,8 @@ Commit first, then `git diff --stat main...HEAD` (three dots: only what this bra
 - **Light** for everything else.
 
 **Alongside the ship.** A change qualifies when how it ships is `hand_off_land` (the server runs
-the ship and the call returns at once), the sizing is Light, and the file list alone says low.
+the ship and the call returns at once), the Shipping line in your prompt lets a low change ship
+with no go and no try first, the sizing is Light, and the file list alone says low.
 `git diff --name-only main...HEAD` shows only front-end files, `README.md`, docs outside
 `docs/rubrics/` and `docs/design-system/`, and test files that exercise no high-risk file, and it
 shows none of: a file on Project facts' high-risk-by-file or medium-at-least lists, a file under
@@ -147,8 +148,12 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   4. Something real fixed: commit and `hand_off_land` again with the same `risk` and `risk_reason` and the summary `follow-up: <what the review found>`. It waits for the first ship if that still runs, so a slow return is the line, not a hang.
   5. The first ship fails while the review runs: its wake arrives after your turn ends. Fix the failure on top of the review's commits and hand off again.
   A qualifying change that the review shows is medium or high is a defect in the file-list test: say so in the Risk line, and the follow-up takes that label's route.
-- **Low or medium:** carry on with how a change ships, as the scheme instructions say (Project
-  facts points at them; with none, open the PR and stop there). The ready note leads
+- **The go threshold:** the Shipping line in your prompt says which labels wait for a person's go
+  (with no Shipping line: high only; "No change waits": none). Below it, the label ships by itself;
+  at or above it, it takes the High route below, whatever the label, unless the line says the
+  merge's own Approve is the go: then open the pull request and merge it, with no card.
+- **Below the threshold:** carry on with how a change ships, as the Shipping line says (with none,
+  the scheme instructions; with neither, open the PR and stop there). The ready note leads
   with the label in a few words, within its 60 characters (`risk medium: runner retries`), and
   the final reply has one line:
   `Risk: medium: <reason>. Door: two-way · Blast radius: server. Not fixed: <finding: why>` (or
@@ -159,9 +164,9 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
-- **High:** stop before shipping. Post the same line, the findings you fixed in one line each,
-  and an `ask_question` card with `kind: "merge"` and header "Ship It" (the minions list's chip reads "Ship It"), "Ship this high-risk change?" (Ship It /
-  Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,
+- **At or above the threshold (High):** stop before shipping. Post the same line, the findings you fixed in one line each,
+  and an `ask_question` card with `kind: "merge"` and header "Ship It" (the minions list's chip reads "Ship It"), "Ship this <label>-risk change?" (Ship It /
+  Hold, with your pick marked recommended). Set state null, note `risk <label>: waiting for a go`,
   and end the turn. Ship only on a go.
 
 ## UI findings

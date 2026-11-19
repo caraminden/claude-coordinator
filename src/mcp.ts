@@ -8,6 +8,7 @@ import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
 import { liveState } from './live-state.ts';
 import { instructionCost } from './prompt-cost.ts';
+import { GO_FROM, label, SHIP_PATHS, TRY_FIRST, values } from '../public/shipping.js';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
 const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
@@ -796,6 +797,9 @@ const TOOLS = [
         screenshot_themes: { type: 'array', items: { type: 'string', enum: ['light', 'dark'] }, description: "Themes a minion shoots a UI change in; ui-shot's default --themes." },
         screenshots_required: { type: 'boolean', description: "true (the default): a minion's ready note for a UI change carries its screenshots." },
         screenshot_note: { type: 'string', maxLength: 200, description: "One line added to the screenshot rule, e.g. \"1x in her window (1600×900)\"; empty clears it." },
+        ship_path: { type: 'string', enum: values(SHIP_PATHS), description: "Shipping (Minion rules): how a change ships. citadel: hand_off_land runs the scheme's tools/land.sh; pr-auto: a pull request that auto-merges once CI is green; pr-person: a pull request a person merges (its go is from every change). Every minion's prompt states it, and it wins over the scheme instructions. Set at setup from \"How changes ship\", or when a member asks." },
+        go_from: { type: 'string', enum: values(GO_FROM), description: "From which self-review risk label a change waits for a member's go before it ships: never, high, medium (and up) or all. On a pull-request path, all turns the merge approval on and the others turn it off, so the two never disagree; hand_off_land refuses without go at or above it." },
+        try_first: { type: 'string', enum: values(TRY_FIRST), description: 'What waits for a person to try it before it ships: never (ships when green), ui (a change to the front-end files Project facts lists) or features (every type feature).' },
         onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },
         name: { type: 'string', description: "Rename this scheme (never another). Refused if another scheme has the name. Nothing else changes: everything goes by the scheme's id, and your chat gets a note. Old \"<scheme> #N\" text keeps the old name." },
         repo_url: { type: 'string', description: "Record this scheme's repo URL (https:// or git@). Clones nothing and re-points no checkout: a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. Refused when one is set, unless replace_repo is true." },
@@ -1561,7 +1565,7 @@ const THREAD_TOOLS = [
         summary: { type: 'string', maxLength: 300, description: 'What ships, in one line, for the shipped line (at most 300 characters)' },
         risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label" },
         risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
-        go: { type: 'string', maxLength: 200, description: 'With risk high, required: who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
+        go: { type: 'string', maxLength: 200, description: 'Required at or above the scheme\'s go threshold (the Shipping lines in your prompt; high when they name none): who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
         stay_open: { type: 'boolean', description: 'true: a clean land still deploys and posts the shipped line, but this minion is not dismissed: it stays open in state ready for the next piece (with waiting_on: woken once live instead). Only when your brief has more pieces to do in this minion; leave it out otherwise (the default dismisses you on land). A failed land is unchanged' },
         waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open, when you have after-land steps or a wait, e.g. "Cara testing on her phone": the server never parks you; once the land is live (after the restart, if it needs one) it wakes you with the shipped line, once. Then run your after-land steps and set your state: null or try for a person, wake_when_live and parked for another minion\'s land' },
         ...LAND_PROPS,
@@ -1788,7 +1792,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
-      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}\n\nScreenshots: widths ${project.shot_widths}, themes ${project.shot_themes}, ${project.shots_required ? 'required in the ready note' : 'not required'}${project.shot_note ? `, note: ${project.shot_note}` : ''}`;
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nShipping: ${label(SHIP_PATHS, project.ship_path)} (ship_path ${project.ship_path}); a person's go: ${label(GO_FROM, project.go_from)} (go_from ${project.go_from}); try it first: ${label(TRY_FIRST, project.try_first)} (try_first ${project.try_first})\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}\n\nScreenshots: widths ${project.shot_widths}, themes ${project.shot_themes}, ${project.shots_required ? 'required in the ready note' : 'not required'}${project.shot_note ? `, note: ${project.shot_note}` : ''}`;
     }
     case 'set_project_settings': {
       const body: Record<string, unknown> = {};
@@ -1804,6 +1808,7 @@ async function runTool(name: string, args: any): Promise<string> {
       if (args.screenshot_themes !== undefined) body.shot_themes = args.screenshot_themes;
       if (args.screenshots_required !== undefined) body.shots_required = args.screenshots_required;
       if (args.screenshot_note !== undefined) body.shot_note = args.screenshot_note;
+      for (const k of ['ship_path', 'go_from', 'try_first'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
       if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
       if (args.name !== undefined) body.name = args.name;
@@ -1811,10 +1816,10 @@ async function runTool(name: string, args: any): Promise<string> {
         body.repo_url = args.repo_url;
         if (args.replace_repo === true) body.replace_repo = true;
       }
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, fable_ok, builds, grill, gh_runners, screenshot_widths, screenshot_themes, screenshots_required, screenshot_note, onboarding, onboarding_mode, name, repo_url or a mix');
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, fable_ok, builds, grill, gh_runners, screenshot_widths, screenshot_themes, screenshots_required, screenshot_note, ship_path, go_from, try_first, onboarding, onboarding_mode, name, repo_url or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, screenshots ${project.shot_widths} px in ${project.shot_themes}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, screenshots ${project.shot_widths} px in ${project.shot_themes}, shipping ${project.ship_path} with a go from ${project.go_from} and try first ${project.try_first}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
     }
     case 'approve':
       return approve(args);

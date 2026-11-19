@@ -3,13 +3,14 @@
 // back at once (settings.js's saveProject: optimistic, a toast with Retry on a refusal); typed entry stays as "Add by hand".
 import { toast } from './ui/status.js';
 import { account, h, icon, listGroupsOf, view } from './base.js';
+import { GO_FROM, label, MERGE_RULES, shippingGate, SHIP_PATHS, TRY_FIRST } from './shipping.js';
 
 export const lines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
 const text = (list) => [...new Set(list)].join('\n');
 
 /** Actions a person can tick to be asked first, each the permission rules it stands for (Claude Code's rule syntax). */
 export const APPROVALS = [
-  { id: 'merge', what: 'Merge a pull request', rules: ['Bash(gh pr merge:*)', 'mcp__*__merge_pull_request'] },
+  { id: 'merge', what: 'Merge a pull request', rules: MERGE_RULES },
   { id: 'automerge', what: 'Turn on auto-merge', rules: ['mcp__*__enable_pr_auto_merge'] },
   { id: 'release', what: 'Publish a GitHub release', rules: ['Bash(gh release create:*)'] },
   { id: 'workflow', what: 'Run a CI workflow by hand', rules: ['Bash(gh workflow run:*)'] },
@@ -78,8 +79,9 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     if ('list_groups' in fields) body.list_groups = JSON.parse(fields.list_groups);
     return saveProject(p, fields, body, label, refreshAll);
   };
+  /** `disabled` is true, false, or a test of each option's value. */
   const seg = (opts, cur, onPick, disabled = false, label = '') => h('div', { class: 'rules-seg', role: 'group', 'aria-label': label },
-    opts.map(([v, l]) => h('button', { type: 'button', 'aria-pressed': String(cur === v), disabled, onclick: () => cur !== v && onPick(v) }, l)));
+    opts.map(([v, l]) => h('button', { type: 'button', 'aria-pressed': String(cur === v), disabled: typeof disabled === 'function' ? disabled(v) : disabled, onclick: () => cur !== v && onPick(v) }, l)));
   /** "Add by hand": a button that opens one line to type in; Enter or Add sends it. */
   const handLine = (placeholder, onAdd, label = 'Add by hand') => {
     const input = h('input', { type: 'text', class: 'rules-hand-input', placeholder, spellcheck: 'false', 'aria-label': label, hidden: true });
@@ -107,9 +109,13 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
         const rules = lines(stored()[key]);
         const on = ticked(rules);
         mount.replaceChildren(h('div', { class: 'rules-checks' },
-          APPROVALS.map((a) => h('label', { class: 'rules-check' },
-            h('input', { type: 'checkbox', checked: on.includes(a), onchange: (e) => save({ [key]: toggleApproval(stored()[key], a.id, e.target.checked) }, `${e.target.checked ? 'ask before' : 'stop asking before'}: ${a.what.toLowerCase()}`) }),
-            h('span', { class: 'rules-what' }, h('span', {}, a.what), h('code', {}, a.rules.join('  '))))),
+          APPROVALS.map((a) => {
+            // On a pull-request path Shipping owns the merge box (shipping.js's gate): ticked exactly when every change needs a go.
+            const byShipping = a.id === 'merge' && stored().ship_path !== 'citadel';
+            return h('label', { class: `rules-check${byShipping ? ' locked' : ''}` },
+              h('input', { type: 'checkbox', checked: on.includes(a), disabled: byShipping, onchange: (e) => save({ [key]: toggleApproval(stored()[key], a.id, e.target.checked) }, `${e.target.checked ? 'ask before' : 'stop asking before'}: ${a.what.toLowerCase()}`) }),
+              h('span', { class: 'rules-what' }, h('span', {}, a.what), h('code', {}, byShipping ? 'set by Shipping: A person\'s go' : a.rules.join('  '))));
+          }),
           h('div', { class: 'rules-check locked' }, h('input', { type: 'checkbox', checked: true, disabled: true }),
             h('span', { class: 'rules-what' }, h('span', {}, 'Push to main, force-push, reset over work'), h('code', {}, 'always blocked by the tripwire, in every scheme')))),
           h('p', { class: 'cui-notice small' }, 'Bash rules match how a command starts: they catch mistakes, not a determined workaround.'));
@@ -262,7 +268,42 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
       }, open, note, actions);
   };
 
-  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, shots, data, refreshAll };
+  /** Save Shipping fields with what the gate makes of them (go_from, the merge approval) shown at once, as the server will store them. */
+  const saveShipping = (fields, what) => {
+    const gate = shippingGate({ ...stored(), ...fields }), mine = { ...fields };
+    for (const k of ['go_from', 'approval_rules']) if (gate[k] !== stored()[k]) mine[k] = gate[k];
+    return saveProject(p, mine, fields, what, refreshAll);
+  };
+  const SHIP_HELP = {
+    citadel: 'The server runs the scheme\'s land script, rebases onto main and the change goes live.',
+    'pr-auto': 'The minion opens a pull request and turns on auto-merge, so it ships once CI is green.',
+    'pr-person': 'The minion opens a pull request and waits: merging it needs a person\'s Approve, so every change needs a go and "Merge a pull request" is ticked under Approvals.',
+  };
+  const ship = () => live({ icon: 'branch', hue: 'accent', title: 'How a change ships' },
+    settingsHelp('What a minion does with a finished, self-reviewed change.', 'Minions get the steps for the path picked in their prompt; these settings win over any shipping paragraph in the scheme instructions.'),
+    (mount) => {
+      const cur = stored().ship_path ?? 'citadel';
+      mount.replaceChildren(seg([['citadel', 'Citadel ships it'], ['pr-auto', 'PR, auto-merge'], ['pr-person', 'PR, a person merges']], cur, (v) => saveShipping({ ship_path: v }, 'set how a change ships'), false, 'How a change ships'),
+        h('p', { class: 'muted small settings-help' }, SHIP_HELP[cur]));
+      return label(SHIP_PATHS, cur);
+    });
+  const go = () => live({ icon: 'users', hue: 'accent', title: 'A person\'s go' },
+    settingsHelp('Self-review labels each change low, medium or high. From this label up, the minion asks with a card and waits for a member\'s go.', 'On a pull-request path, Every change ticks "Merge a pull request" under Approvals; High or Medium leaves it off and the minion asks by label instead.'),
+    (mount) => {
+      const s = stored(), cur = s.go_from ?? 'high', person = s.ship_path === 'pr-person';
+      mount.replaceChildren(seg([['never', 'Never'], ['high', 'High'], ['medium', 'Medium and up'], ['all', 'Every change']], cur, (v) => saveShipping({ go_from: v }, 'set when a person\'s go is needed'), (v) => person && v !== 'all', 'A person\'s go'),
+        person ? h('p', { class: 'muted small settings-help' }, 'A person merges every pull request here, so every change waits for a go.') : '');
+      return label(GO_FROM, cur);
+    });
+  const tryFirst = () => live({ icon: 'eye', hue: 'accent', title: 'Try it first' },
+    settingsHelp('Whether a change waits for someone to try it before it ships.', 'A minion waiting for a try posts a preview link (or screenshots where the scheme has no previews), sets its state to Try and ships on a member\'s go. UI changes are ones touching the front-end files the scheme\'s CLAUDE.md lists.'),
+    (mount) => {
+      const cur = stored().try_first ?? 'never';
+      mount.replaceChildren(seg([['never', 'Ship when green'], ['ui', 'UI waits'], ['features', 'Features wait']], cur, (v) => saveShipping({ try_first: v }, 'set what waits for a try'), false, 'Try it first'));
+      return label(TRY_FIRST, cur);
+    });
+
+  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, shots, ship, go, tryFirst, data, refreshAll };
 }
 
 /** Link rows to pages that live elsewhere (N9); Schedules opens the sidebar's list. */

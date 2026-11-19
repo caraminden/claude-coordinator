@@ -19,6 +19,7 @@ import { armForCi, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS } from '../../public/model-table.js';
+import { needsGo } from '../../public/shipping.js';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
@@ -1217,8 +1218,11 @@ export const ticketRoutes: Route[] = [
       if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree lands with tools/land.sh');
       if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
       const h: Handoff = { summary: str(body.summary, 'Summary', 300), risk: oneOf(body.risk || undefined, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300) };
-      if (h.risk === 'high') {
-        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, 'A high-risk change ships only on a person\'s go: name who gave it and when in go, or ask with a ship card (kind ship) first');
+      // The scheme's go threshold (#1043, Shipping in Minion rules): from that label up, a change ships only on a person's go.
+      // A feeder's merge into its build branch is covered by the build's go card (buildLines in prompts.ts).
+      const goFrom = app.store.getProject(ticket.project_id)?.go_from ?? 'high';
+      if (body.into === undefined && needsGo(goFrom, h.risk)) {
+        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first`);
         h.go = str(body.go, 'Go', 200);
       }
       if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');

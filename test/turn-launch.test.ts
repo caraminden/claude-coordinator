@@ -76,7 +76,7 @@ function scrub(value: unknown): any {
   return JSON.parse(text.replace(/-\d{13}\b/g, '-<TIME>').replace(/citadel-turn-[0-9a-f]{8}-/g, 'citadel-turn-<TAG>-'));
 }
 
-interface Case { kind?: 'ticket' | 'coordinator'; project?: number; author?: string; set?: Record<string, unknown>; before?: (ticket: number, project: number) => void; units?: boolean }
+interface Case { kind?: 'ticket' | 'coordinator'; project?: number; author?: string; set?: Record<string, unknown>; before?: (ticket: number, project: number) => void; units?: boolean; peek?: (dir: string) => void }
 /** Start one turn and return everything it was launched with, then end it. */
 async function launch(c: Case) {
   const project = c.project ? store.getProject(c.project)! : store.createProject(`P${store.listProjects().length + 1}`, null);
@@ -99,6 +99,7 @@ async function launch(c: Case) {
   const files = readdirSync(dir).filter((f) => f !== 'pin').sort().map((f) => `${f} ${(statSync(join(dir, f)).mode & 0o777).toString(8)}`);
   const got = { launched: true, notes, spec: read('spec.json'), settings: read('settings.json'), mcp: read('mcp.json'), codexTripwire: read('codex-tripwire.json'), files, pinned: readdirSync(join(dir, 'pin')).length > 0,
     spawned: spawned.map(({ how, wrapper }) => ({ how, wrapper })), unit: existsSync(units) ? jsonLines(units) : null };
+  c.peek?.(dir);
   // End it: the wrapper that would have run it never started.
   writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
   // Its lane ends with the session save, whose worker thread opens state.db under root: wait for that too.
@@ -237,4 +238,24 @@ test('--advisor is passed only when the minion\'s model carries one, and never t
   assert.deepEqual(await flags({ set: { model: 'claude-sonnet-5-5' } }), { model: 'claude-sonnet-5-5', advisor: null });
   assert.deepEqual(await flags({}), { model: null, advisor: null });
   assert.deepEqual(await flags({ kind: 'coordinator', set: { model: 'claude-sonnet-5-5+opus-advisor' } }), { model: 'claude-sonnet-5-5', advisor: null });
+});
+
+// Build 4 (#1051): the scheme's review set comes from the store, not its repo, so a scheme with no rubric files gets one too.
+test("a turn gets its scheme's review set as files, named in its turn message, with the off entries left out", async () => {
+  let seen: { files: string[]; ui: string; message: string } | null = null;
+  await launch({
+    before: (_t, project) => {
+      store.reviews.create(project, { slug: 'ui', name: 'UI', body: '## Pass\n\nLooks right.\n', triggers: { diff: ['public/**'] }, stage: 'work', trial: true }, 'Cara');
+      store.reviews.create(project, { slug: 'old', name: 'Old', body: '## Pass\n\nx\n', triggers: {}, stage: 'ask', enabled: false }, 'Cara');
+    },
+    peek: (dir) => {
+      const set = join(dir, 'review-set');
+      seen = { files: readdirSync(set), ui: readFileSync(join(set, 'ui.md'), 'utf8'), message: readFileSync(join(dir, 'prompt.jsonl'), 'utf8') };
+    },
+  });
+  assert.ok(seen, 'the turn launched');
+  const { files, ui, message } = seen!;
+  assert.deepEqual(files, ['ui.md']);
+  assert.match(ui, /^---\nname: ui\nwhen: "diff: public\/\*\*"\ntrial: true\n---\n\n## Pass/);
+  assert.match(message, /Review set: .*review-set/);
 });

@@ -21,7 +21,7 @@ const SHIP = LAND.replace(/Land, not merge \(Cara[^\n]*/, `Ship, not land or mer
 test('parseDecisions reads parenthetical attributions with the rule they back', () => {
   const got = parseDecisions(SHIP, NAMES);
   assert.equal(got.length, 2);
-  assert.deepEqual([got[0].who, got[0].date, got[0].rule, got[0].quote, got[0].own], ['Cara', '2026-11-19', 'Ship, not land or merge', 'Land', true]);
+  assert.deepEqual([got[0].who, got[0].date, got[0].rule, got[0].quote, got[0].own], ['Cara', '2026-11-19', 'Ship, not land or merge', 'Ship', true]);
   assert.ok(got[0].quotes.includes('Ship'));
   assert.deepEqual([got[1].rule, got[1].quote, got[1].own], ['Who decides in a scheme', 'anyone who is assigned to a scheme should have the same authority to make decisions', false]);
   assert.equal(got[1].line, 5);
@@ -44,6 +44,9 @@ Cara 2026-11-18 — "Released" should mean actually released.`;
   ]);
   assert.equal(got[0].rule, 'Links are clickable');
   assert.equal(got[1].rule, 'Links are clickable');
+  // A decision in a list reads as its own item.
+  const items = parseDecisions('- Say land (Cara, 2026-11-19: "Land").\n- Old CI rule (Cara, 2026-11-10: "Keep failing").', NAMES);
+  assert.deepEqual(items.map((d) => d.text), ['- Say land (Cara, 2026-11-19: "Land").', '- Old CI rule (Cara, 2026-11-10: "Keep failing").']);
 });
 
 test('replay: the Land then Ship edit reverses Land; a rewording or a cut does not', () => {

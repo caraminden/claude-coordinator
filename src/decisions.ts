@@ -116,7 +116,12 @@ export function parseDecisions(text: string, names: string[], opts: { title?: st
     const next = matches[k + 1]?.start ?? text.length;
     const end = clauseEnd(text, m.end, paren, Math.min(next, paraEnd));
     const clause = text.slice(m.end, end);
+    // "she first picked "Land", then … picked `Ship`": the decision is what came after.
+    const then = clause.search(/\b(then|later|instead)\b/);
     const quotes = quotesIn(clause);
+    const after = then < 0 ? [] : quotesIn(clause.slice(then));
+    const at = after.length ? quotes.indexOf(after[0]) : -1;
+    if (at > 0) quotes.unshift(...quotes.splice(at, 1));
     if (!paren) {
       // A bare mention needs its quote within reach: "Cara, 2026-11-15, on #767's card: "…"".
       const first = clause.search(/["“`]/);
@@ -136,13 +141,20 @@ export function parseDecisions(text: string, names: string[], opts: { title?: st
     }
     rule = rule.replace(/\*\*/g, '').replace(/[:,(—-]\s*$/, '').trim();
     rule = rule.replace(new RegExp(`^(${who}),?\\s+${DATE}[:,]?\\s*`, 'u'), '').replace(/^\p{Ll}/u, (c) => c.toUpperCase());
-    const para = text.slice(paraStart, paraEnd);
+    // In a list, the decision's text is its own item, not the whole list.
+    const item = /^\s*([-*]|\d+\.)\s/;
+    let blockStart = paraStart, blockEnd = paraEnd;
+    for (let l = line; l >= 0 && lineStarts[l] >= paraStart; l--) if (item.test(lines[l])) { blockStart = lineStarts[l]; break; }
+    if (blockStart !== paraStart || item.test(lines[lineOf(paraStart)] ?? '')) {
+      for (let l = line + 1; l < lines.length && lineStarts[l] < paraEnd; l++) if (item.test(lines[l])) { blockEnd = lineStarts[l] - 1; break; }
+    }
+    const para = text.slice(blockStart, blockEnd);
     const key = `${m.who}|${m.date}|${quotes.map(norm).join('|') || norm(rule)}`;
     if (seen.has(key)) return;
     seen.add(key);
     out.push({
       who: m.who, date: m.date, quote: quotes[0] ?? '', quotes, rule: rule.slice(0, 160), section: heading(line), line: line + 1,
-      text: snippet(para, m.start - paraStart), own: OWN.test(clause) || OWN.test(sentenceAround(para, m.start - paraStart)),
+      text: snippet(para, m.start - blockStart), own: OWN.test(clause) || OWN.test(sentenceAround(para, m.start - blockStart)),
       refs: refsIn(para, who),
     });
   });

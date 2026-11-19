@@ -413,3 +413,15 @@ test('an installer with no login gets the manifest and its icons, and nothing el
   }
   assert.equal((await get('/apps/stub/web/i192.png', {}, { method: 'POST' })).status, 401);
 });
+
+test('a signed-in person fetching a static file still carries their identity to the app (#987)', async () => {
+  await until('its files are read', async () => (await get('/apps/stub/web/i192.png')).status === 200);
+  const res = await get('/apps/stub/web/i192.png', asCara());
+  assert.equal(res.status, 200);
+  const got = seen.findLast((x) => x.path === '/apps/stub/web/i192.png')!;
+  assert.ok(got.identity, 'identity header present');
+  // Signed in but not enabled: still served, anonymously, like an installer.
+  const other = await get('/apps/stub/web/i192.png', { Cookie: olive.cookie });
+  assert.equal(other.status, 200);
+  assert.equal(seen.findLast((x) => x.path === '/apps/stub/web/i192.png')!.identity, null);
+});

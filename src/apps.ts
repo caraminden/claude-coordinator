@@ -292,7 +292,8 @@ export class AppProxy {
     }
     if (!m[2]) return redirect(`/apps/${row.name}/${url.search}`, {});
     const path = url.pathname + url.search;
-    const open = isOpenPath(JSON.parse(row.open_paths) as string[], m[2]) || staticOpen(row, req.method, m[2]);
+    const listed = isOpenPath(JSON.parse(row.open_paths) as string[], m[2]);
+    const open = listed || staticOpen(row, req.method, m[2]);
     // Citadel's host still passes an open path's websockets and fetches (Peek Auras' PC link dials /apps/peek-auras/link
     // there): they carry no login or identity, and no page of the contraption's opens on Citadel's origin.
     if (host === null && this.domain && !(open && !isPage(req))) return this.moved(req, row, path, open);
@@ -303,7 +304,10 @@ export class AppProxy {
     if (cookies.length) headers.cookie = cookies.join('; ');
     else delete headers.cookie;
 
-    if (open) return { row, path, headers, uid: null, sandboxed: host === null && !!this.domain };
+    // A static file (#987) is anonymous only for someone with no login: a signed-in, enabled person's request carries
+    // their identity as before, since an app may refuse any request without one (Peek Auras' icon did).
+    const signedIn = open && !listed ? this.who(req, host) : null;
+    if (open && !(signedIn && this.contraptions.enabled(row.name, signedIn.uid!))) return { row, path, headers, uid: null, sandboxed: host === null && !!this.domain };
 
     const session = this.who(req, host);
     if (!session) {

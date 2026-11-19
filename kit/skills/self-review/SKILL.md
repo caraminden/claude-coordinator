@@ -23,6 +23,15 @@ Commit first, then `git diff --stat main...HEAD` (three dots: only what this bra
 - **Deep** when the change is high in 4, or the diff is over about 300 lines.
 - **Light** for everything else.
 
+**Alongside the land.** A change qualifies when how it ships is `hand_off_land` (the server runs the
+land and returns the call at once), the sizing is Light, and the file list alone says low:
+`git diff --name-only main...HEAD` shows only front end, docs or tests as Project facts names them,
+and no file on its high-risk-by-file or medium-at-least lists, and none in `CLAUDE.md`, `.claude/`,
+the kit or agent-instruction text. Decide this from the file list before any review; a doubt about
+one file means it doesn't qualify. A qualifying change hands off its land as soon as its own tests
+(and, for a UI change, its screenshots) are green, and the review in 2 to 4 runs in the same turn
+while the land runs. Everything else reviews first.
+
 ## 2. Review in a Grunt
 
 Start a `citadel:reviewer` Grunt with `run_in_background: false` on the Agent call. The Agent tool
@@ -129,6 +138,13 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 
 ## 5. Report and ship
 
+- **Alongside the land:** the sequence, in one turn:
+  1. `hand_off_land` with risk `low` and the reason `low by file list; review runs alongside`.
+  2. Do not end the turn: run 2 (reviewer, base check and Codex in one message, `run_in_background: false`), then 3 and 4. The land runs on the server meanwhile, and the turn stays open so the Grunt isn't cut off.
+  3. Nothing real found: end the turn with the report line below; the server dismisses you once the land is clean.
+  4. Something real fixed: commit, then `hand_off_land` again, summary `follow-up: <what the review found>`. Its failure wakes you like any land.
+  5. The review makes it medium or high: the land already went, so say so in the Risk line and put the follow-up through the normal route for that label (high: the card first, then the follow-up land).
+  If the first land fails, you are woken with its output after the turn ends: fix it, put the review's fixes in the same commit and hand off again.
 - **Low or medium:** carry on with how a change ships, as the scheme instructions say (Project
   facts points at them; with none, open the PR and stop there). The ready note leads
   with the label in a few words, within its 60 characters (`risk medium: runner retries`), and

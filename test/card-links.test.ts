@@ -310,8 +310,8 @@ test('a later snapshot sees replies and results that came after the last one, an
 });
 
 test('cardWhat: a merge go, a tripwire approval, or the card\'s own kind (#575)', () => {
-  assert.equal(cardWhat('question', { questions: [], kind: 'merge' }), 'merge');
-  assert.equal(cardWhat('approval', { tool: 'Bash', merge: { repo: 'o/r' } }), 'merge');
+  assert.equal(cardWhat('question', { questions: [], kind: 'merge' }), 'land');
+  assert.equal(cardWhat('approval', { tool: 'Bash', merge: { repo: 'o/r' } }), 'land');
   assert.equal(cardWhat('approval', { tool: 'Bash', tripwire: { reason: 'x' } }), 'tripwire');
   assert.equal(cardWhat('approval', { tool: 'Bash' }), 'approval');
   assert.equal(cardWhat('question', { questions: [] }), 'question');

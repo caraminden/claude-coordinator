@@ -116,7 +116,8 @@ export type Decision =
   | { state: 'allowed' | 'denied'; by: string; via?: { message?: number; text: string; scheme: number; ticket: number | null; to?: number } }
   | { state: 'expired'; reason: string };
 
-// A message that is only a go to merge (#201): "merge it", "ok, fold it", "yes merge PR #191", "ship it", "you can fold 196".
+// A message that is only a go to land (#201): "land it", "yes land PR #191", "ship it", and the older "merge it" and
+// "ok, fold it" (Cara, 2026-11-19: fold is retired, but a person's old go still counts).
 const GO = /^(?:(?:ok|okay|yes|yep|great|lgtm|looks good|go ahead|go|please|pls|plz),? )?(?:and )?(?:you can )?(?:merge|fold|land|squash|ship)(?: (?:it|this|the pr|pr #?(\d{1,7})|#(\d{1,7})|(\d{1,7})))?(?: in)?(?: (?:please|pls|plz|now))?$/;
 
 const words = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!]+$/, '').trimEnd();
@@ -170,7 +171,7 @@ export interface GoPlace {
 
 /**
  * Whether a go covers a merge's PR: the one named or, with none named, its minion's branch's PR, and
- * only while it is open. Bound to the number, not the head: a fold that re-merges its build tip and
+ * only while it is open. Bound to the number, not the head: a build that re-merges its tip and
  * pushes a new head is still what they meant; a merge GitHub refused left it open for the retry.
  */
 const covers = (go: Go, target: MergeTarget) =>
@@ -311,7 +312,7 @@ export class Approvals {
       const found = target && this.goFor(scheme, target);
       const go = found?.go;
       if (found && go!.pr === null) {
-        // "fold it" means the PR its branch had then: a later PR from the same branch needs a new go.
+        // "land it" means the PR its branch had then: a later PR from the same branch needs a new go.
         go!.pr = target!.number;
         this.goes.set(scheme, found.goes);
       }
@@ -349,7 +350,7 @@ export class Approvals {
     else if (go) {
       const target = go.named === 'hash' ? minion?.(go.pr!) : null;
       if (target?.branch && target.number !== null) goes.push({ ...said, pr: null, branch: target.branch, to: target.number });
-      else this.emit(where.id, 'note', { text: `${m.author}'s "${said.text}" names no minion with a branch, so it covers nothing: "fold #N" names minion N, "fold PR N" a PR.` });
+      else this.emit(where.id, 'note', { text: `${m.author}'s "${said.text}" names no minion with a branch, so it covers nothing: "land #N" names minion N, "land PR N" a PR.` });
     }
     this.goes.set(scheme, goes.slice(-MAX_GOES));
   }
@@ -372,7 +373,7 @@ export class Approvals {
       this.emit(free.ticket, 'note', { text: `${free.by}'s go "${free.text}" now covers #${where.number}'s PR: the Taskmaster quoted it to #${where.number}.` });
       return this.goes.set(scheme, goes);
     }
-    for (const g of quoted) this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" was quoted to #${g.to}, then also quoted to #${where.number}, so it covers neither. Give the go again naming the minion ("fold #N"), or in its own chat.` });
+    for (const g of quoted) this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" was quoted to #${g.to}, then also quoted to #${where.number}, so it covers neither. Give the go again naming the minion ("land #N"), or in its own chat.` });
     this.goes.set(scheme, goes.filter((g) => !quoted.includes(g)));
   }
 

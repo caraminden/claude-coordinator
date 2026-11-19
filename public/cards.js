@@ -73,7 +73,7 @@ export function approvalCard(ticketId, card) {
   const rest = lead ? Object.fromEntries(Object.entries(input).filter(([k]) => k !== lead && k !== 'description')) : {};
   const status = h('span', { class: 'muted', role: 'status' });
   const m = card.merge;
-  const approve = h('button', { type: 'button', class: m ? 'go' : 'small' }, m ? MERGE_GO[m.method] ?? 'Approve merge' : 'Approve');
+  const approve = h('button', { type: 'button', class: m ? 'go' : 'small' }, m ? (intoBuild(m) ? 'Merge into the build' : 'Land it') : 'Approve');
   const deny = h('button', { type: 'button', class: 'small secondary' }, 'Deny');
   const desc = typeof input.description === 'string' ? h('div', { class: 'desc' }, card.tripwire ? `Why: ${input.description}` : input.description) : '';
   const call = [
@@ -124,7 +124,8 @@ export function approvalCard(ticketId, card) {
 }
 
 const MERGE_METHOD = { squash: 'Squash', merge: 'Merge commit', rebase: 'Rebase' };
-const MERGE_GO = { squash: 'Squash and merge', merge: 'Merge', rebase: 'Rebase and merge' };
+// A PR into a major build's branch merges into the build; any other lands (Cara, 2026-11-19: "Land").
+const intoBuild = (m) => /^build\//.test(m.pr?.base ?? '');
 
 /**
  * The top of a `gh pr merge` card (#200, src/merge-card.ts): the PR's title, branches, method, size and
@@ -143,20 +144,20 @@ function mergeHead(m, desc, call) {
   });
   const checks = { passed: ['ok', '✓ checks passed'], failed: ['bad', '✗ checks failed'], pending: ['', '○ checks running'] }[pr?.checks];
   const warn = [
-    m.auto && '--auto: GitHub merges it by itself once its checks pass, not straight away.',
+    m.auto && '--auto: GitHub lands it by itself once its checks pass, not straight away.',
     m.admin && "--admin: skips the branch's protection rules.",
     pr && pr.state && pr.state !== 'OPEN' && `This PR is already ${pr.state.toLowerCase()}.`,
     pr?.draft && 'This PR is still a draft.',
     !pr && (m.moved && !m.repo ? "The command changes folder first, so the PR wasn't looked up." : "Couldn't look the PR up on GitHub; this is what the command says."),
   ].filter(Boolean);
   return [
-    h('div', { class: 'who' }, speaker('asks to merge')),
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Merge'),
+    h('div', { class: 'who' }, speaker(intoBuild(m) ? 'asks to merge into the build' : 'asks to land')),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, intoBuild(m) ? 'Merge' : 'Land'),
       pr?.url ? h('a', { class: 'mnum', href: pr.url, target: '_blank', rel: 'noopener', 'data-github': '' }, name) : h('span', { class: 'mnum' }, name),
       pr ? ` ${pr.title}` : m.repo ? h('span', { class: 'muted' }, ` in ${m.repo}`) : ''),
     pr?.head ? h('div', { class: 'mbranch' }, h('code', {}, pr.head), ' → ', h('code', {}, pr.base)) : '',
     h('div', { class: 'mmeta' },
-      h('span', { class: 'mmethod' }, MERGE_METHOD[m.method] ?? 'Merge method not set'),
+      h('span', { class: 'mmethod' }, MERGE_METHOD[m.method] ?? 'Method not set'),
       pr ? [
         h('span', {}, h('span', { class: 'ok' }, `+${pr.additions}`), ' ', h('span', { class: 'bad' }, `−${pr.deletions}`)),
         h('span', {}, `${pr.files} ${pr.files === 1 ? 'file' : 'files'}`),

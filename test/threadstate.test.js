@@ -225,10 +225,10 @@ test('rowUnread: an unseen row is unread only when it has something for a person
 });
 
 test('cardChip: names the kind of card, counts one kind, and gives the oldest kind plus how many more when they differ (#575)', () => {
-  const c = (what) => ({ kind: what === 'merge' || what === 'tripwire' ? 'approval' : what, what });
-  for (const what of ['question', 'plan', 'merge', 'approval', 'tripwire']) assert.equal(cardChip([c(what)]), what);
+  const c = (what) => ({ kind: what === 'land' || what === 'tripwire' ? 'approval' : what, what });
+  for (const what of ['question', 'plan', 'land', 'approval', 'tripwire']) assert.equal(cardChip([c(what)]), what);
   assert.equal(cardChip([c('question'), c('question')]), '2 questions');
-  assert.equal(cardChip([c('plan'), c('question'), c('merge')]), 'plan +2', 'mixed: the oldest, which the chip opens');
+  assert.equal(cardChip([c('plan'), c('question'), c('land')]), 'plan +2', 'mixed: the oldest, which the chip opens');
   assert.equal(cardChip([{ kind: 'plan' }]), 'plan', 'a card from before `what` falls back to its kind');
 });
 

@@ -24,7 +24,7 @@ import { describeCron, loadTemplates, renderTemplate, templateFields, templateVa
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
-import type { Chain } from '../wake.ts';
+import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
 import { mergedAfter, mergedPage } from '../history.ts';
@@ -1008,7 +1008,7 @@ export const projectRoutes: Route[] = [
         leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
         if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
         const f = await waiters.follow(leader.id, when);
-        if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work being merged, so nothing can start after it`);
+        if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work landing, so nothing can start after it`);
         if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
       }
       // Its build: the one the create sets (null: none), as `build` or the build property; else its parent's, else its start_after leader's.
@@ -1042,10 +1042,10 @@ export const projectRoutes: Route[] = [
       if (follow) {
         const { leader, when } = follow;
         waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base, since: follow.since });
-        store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} is ${when}` });
-        runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work is ${when}. Messages to it wait for that start; Unpark starts it now.` });
+        store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when)}` });
+        runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when)}. Messages to it wait for that start; Unpark starts it now.` });
         runner.broadcastTicket(id);
-        notes.push(`Parked: it starts by itself once #${leader.number}'s work is ${when}. Messages to it are held for that start; message_ticket with unpark starts it now.`);
+        notes.push(`Parked: it starts by itself once #${leader.number}'s work ${chainIs(when)}. Messages to it are held for that start; message_ticket with unpark starts it now.`);
       } else {
         runner.send(id, session.name, message, [], { brief: true });
       }

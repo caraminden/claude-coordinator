@@ -741,7 +741,7 @@ export class ApkReader implements Reader {
 }
 
 export const MAIN_TRACK = ['checks', 'merge', 'live'];
-/** The stages a change goes through before it is on main: an open PR's checks, then a person's go to merge. */
+/** The stages a change goes through before it is on main: an open PR's checks, then a person's go to land (the stage key stays merge; the page says Land). */
 const PR_STAGES = ['checks', 'merge'];
 /** Each kind's own stages, after a PR's, for a target whose next release is only PRs. */
 const TRACKS: Record<string, string[]> = { contraption: CONTRAPTION_TRACK, ci: CI_TRACK, apk: APK_TRACK };
@@ -780,7 +780,7 @@ export class PrsInFlight {
     return this.seen.get(key)!;
   }
 
-  /** Where one open PR is: its checks running or failed, or waiting for a go to merge. */
+  /** Where one open PR is: its checks running or failed, or waiting for a go to land. */
   private progress(id: number, pr: PrSnapshot, now: number): Progress {
     const v = verdict(pr.checks);
     if (v === 'pending') {
@@ -793,7 +793,7 @@ export class PrsInFlight {
       const text = 'its checks failed: the minion fixes them';
       return { stage: 'checks', since: this.since(id, 'failed', now), usual: null, waitingOn: text, text };
     }
-    const text = `PR #${pr.number} waits for a go to merge`;
+    const text = `PR #${pr.number} waits for a go to land`;
     return { stage: 'merge', since: this.since(id, 'merge', now), usual: null, waitingOn: text, text };
   }
 

@@ -498,7 +498,7 @@ test('the Main reader: each head of main is a release with the minions it took i
   ci.set(a.id, { since: now - 60_000, usual: 300, text: 'test step 3 of 8' });
   [v] = reader.read();
   assert.deepEqual(v.next?.changes.map((c) => [c.title, c.stage]), [['Torches', 'merge'], ['Fog of war', 'checks']], 'the one furthest along leads');
-  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta, v.next?.number], ['merge', 'PR #12 waits for a go to merge', null, 2]);
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta, v.next?.number], ['merge', 'PR #12 waits for a go to land', null, 2]);
   assert.deepEqual(v.next?.stages.map((s) => [s.name, s.usual]), [['checks', null], ['merge', null], ['live', 0]]);
 
   // Torches merges: main moves, and its row takes in the minion whose tip is on it.
@@ -548,7 +548,7 @@ test('a scheme with a contraption and an APK shows its open PRs on its contrapti
 
   let app = target(mandate.id, 'app:mandate');
   assert.deepEqual(app.next?.changes.map((c) => [c.title, c.stage]), [['Widget alert', 'merge'], ['Stale Today page', 'checks']], 'its open PRs, the furthest along first, no draft');
-  assert.deepEqual([app.next?.stage, app.next?.waitingOn, app.next?.number, app.next?.eta], ['merge', 'PR #84 waits for a go to merge', 4, null]);
+  assert.deepEqual([app.next?.stage, app.next?.waitingOn, app.next?.number, app.next?.eta], ['merge', 'PR #84 waits for a go to land', 4, null]);
   assert.deepEqual(app.next?.stages.map((s) => s.name), ['checks', 'merge', 'call', 'build', 'drain', 'restart', 'live'], "the PR's stages come before the contraption's own");
   assert.equal(target(mandate.id, 'apk:android-release').next, null, 'one target takes them, so All shows each PR once');
   assert.equal(target(delve.id, 'main').next, null, 'Main reads its own PRs (MainReader), so none are added twice');

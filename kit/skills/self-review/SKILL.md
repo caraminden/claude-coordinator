@@ -1,12 +1,12 @@
 ---
 name: self-review
 description: >
-  Before merging your own branch: a Grunt reviews the diff against main, real findings get fixed,
+  Before landing your own branch: a Grunt reviews the diff against main, real findings get fixed,
   and the change gets a risk label (low / medium / high) that decides whether it ships by itself.
   Also for "how risky is this".
 ---
 
-Faster review for the people who merge, not another gate: they wave low through and look
+Faster review for the people who land changes, not another gate: they wave low through and look
 properly at high. Decisions behind it: Citadel #107 and #122 (Cara, 2026-10-29).
 
 The repo's CLAUDE.md, "Project facts", names what this skill needs per repo: the front end,
@@ -132,7 +132,7 @@ stay high whatever the edit, since a slip there can stop the service or open it 
 | medium | adds a table, or a nullable or defaulted column, leaving existing rows as they are; changes queries; adds a delete a person triggers for one record of their own; other server, engine or tool logic; agent instructions (`CLAUDE.md`, `.claude/`, the kit); anything not in another row |
 | low | front end only (as Project facts names it), docs (`docs/`, `README.md`), tests |
 
-Beside the label, set two words for the people who merge, taking the Grunt's as a start:
+Beside the label, set two words for the people who land changes, taking the Grunt's as a start:
 **Door** is one-way when reverting the commit can't undo it (rows rewritten or deleted, a
 message sent, something published or pushed to another repo), two-way otherwise. **Blast
 radius** is a word or two for how far a slip reaches (`page`, `route`, `server`, `scheme`,
@@ -159,10 +159,10 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
-- **High:** stop before merging. Post the same line, the findings you fixed in one line each,
-  and an `ask_question` card with `kind: "merge"`, "Merge and ship this high-risk change?" (Merge and ship /
+- **High:** stop before landing. Post the same line, the findings you fixed in one line each,
+  and an `ask_question` card with `kind: "merge"` (its chip reads "land"), "Land this high-risk change?" (Land it /
   Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,
-  and end the turn. Merge only on a go.
+  and end the turn. Land only on a go.
 
 ## UI findings
 

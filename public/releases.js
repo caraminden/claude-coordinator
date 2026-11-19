@@ -68,8 +68,8 @@ const schemeOf = (id) => view?.projects?.find((p) => p.id === id) ?? (view?.proj
 const schemeName = (id) => schemeOf(id)?.name ?? `Scheme ${id}`;
 /** The scheme's icon as the sidebar shows it, beside its targets' names (Cara, 2026-11-12: "maybe also the scheme icons?"). */
 const iconOf = (id) => (schemeOf(id) ? schemeIcon(schemeOf(id)) : '');
-/** Stages whose key reads wrong to a person: a contraption's wait for someone to start its deploy. */
-const STAGE_NAMES = { call: 'Start' };
+/** Stages whose key reads wrong to a person: a contraption's wait for someone to start its deploy, and a PR's wait for its go (Cara, 2026-11-19: "Land"). */
+const STAGE_NAMES = { call: 'Start', merge: 'Land' };
 /** A stage's name as the land track says it, else the stage itself, capitalised. */
 const stageName = (key) => {
   if (STAGE_NAMES[key]) return STAGE_NAMES[key];
@@ -701,7 +701,7 @@ function tint(row, id) {
 
 // ---------- the chip beside the PR info (take F) ----------
 
-/** The chip for minion `t`: its change's mini track, stage and wait or time left, opening its scheme's page at it; or "folded into Build N". */
+/** The chip for minion `t`: its change's mini track, stage and wait or time left, opening its scheme's page at it; or "merged into Build N". */
 export function releaseChip(t) {
   if (!t || !loaded) return null;
   for (const tv of schemes.get(t.project_id)?.targets ?? []) {
@@ -718,7 +718,7 @@ export function releaseChip(t) {
   }
   if (t.ship?.stage === 'build' && t.build) {
     return h('a', { class: 'rel-chip', href: pageHref(t.project_id), onclick: (e) => { e.stopPropagation(); opening(); } },
-      h('span', { class: 'muted' }, `folded into Build ${t.build}`), h('span', { 'aria-hidden': 'true' }, '›'));
+      h('span', { class: 'muted' }, `merged into Build ${t.build}`), h('span', { 'aria-hidden': 'true' }, '›'));
   }
   return null;
 }

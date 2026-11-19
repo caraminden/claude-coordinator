@@ -38,7 +38,7 @@ const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idl
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
 
 const WAKE_DESCRIPTION =
-  `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as merged: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it merges), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
+  `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as landed: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
 const WAKE_PROPS = {
   commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
   reason: { type: 'string', maxLength: 1000, description: 'What to do once it is live (at most 1,000 characters); it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
@@ -61,17 +61,17 @@ const TITLE = { type: 'string', maxLength: 120, description: 'The short ask, abo
 const stateSchema = (deploys: boolean) => ({
   type: ['string', 'null'],
   enum: ['ready', 'complete', 'try', 'parked', 'blocked', 'outside', ...(deploys ? ['pending-deploy'] : []), null],
-  description: `Where the turn leaves things, for the minions list: ready (a person has to act: merge, pick it up or answer), complete (no work left; it closes by itself once a member has seen it; needs a note in the same call saying what is left: "nothing left" or what to read), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
+  description: `Where the turn leaves things, for the minions list: ready (a person has to act: land, pick it up or answer), complete (no work left; it closes by itself once a member has seen it; needs a note in the same call saying what is left: "nothing left" or what to read), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
 });
 const STATE = stateSchema(true);
-const NOTE = { type: ['string', 'null'], maxLength: 60, description: 'One terse line on where things stand, at most 60 characters, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
+const NOTE = { type: ['string', 'null'], maxLength: 60, description: 'One terse line on where things stand, at most 60 characters, e.g. "needs a pick: tabs or a list" or "landed, live after restart". No names or prefixes.' };
 
 const REPLIES = {
   type: ['array', 'null'],
   items: { type: 'string', maxLength: 40 },
   maxItems: 3,
   description:
-    'Up to 3 one-tap replies, e.g. ["Merge it"], that send that text as the person\'s own message, for when the next step only needs their go (a choice between options is ask_question). They go away once anyone writes or the next turn starts; [] or null clears them.',
+    'Up to 3 one-tap replies, e.g. ["Land it"], that send that text as the person\'s own message, for when the next step only needs their go (a choice between options is ask_question). They go away once anyone writes or the next turn starts; [] or null clears them.',
 };
 
 const BUILD = {
@@ -171,7 +171,7 @@ const DIRECT_TO = {
 const WHEN_CI_PASSES = {
   type: 'boolean',
   description:
-    'true: hold it until CI passes on the commit you pushed (your HEAD), then the server posts it with no turn for you; the CI line reaches you as held mail. For a step that only relays green CI (a merge card, "ready to merge" to the Taskmaster) in a scheme whose PRs run CI. Leave it out when you must look at CI\'s results yourself first (screenshots, test counts), or the scheme lands with land.sh (no PR CI: refused). Push first. CI failing, a new push or a turn still running drops it, and you\'re woken as usual.',
+    'true: hold it until CI passes on the commit you pushed (your HEAD), then the server posts it with no turn for you; the CI line reaches you as held mail. For a step that only relays green CI (a land card, "ready to land" to the Taskmaster) in a scheme whose PRs run CI. Leave it out when you must look at CI\'s results yourself first (screenshots, test counts), or the scheme lands with land.sh (no PR CI: refused). Push first. CI failing, a new push or a turn still running drops it, and you\'re woken as usual.',
 };
 
 const ASK_QUESTION = {
@@ -215,7 +215,7 @@ const ASK_QUESTION = {
           required: ['question', 'options'],
         },
       },
-      kind: { type: 'string', enum: ['merge'], description: '"merge" when the card asks people for the go to merge or land a change (the self-review\'s high-risk card): the minions list then labels it "merge". Leave out otherwise.' },
+      kind: { type: 'string', enum: ['merge', 'land'], description: '"merge" (or "land", the same) when the card asks people for the go to land a change (the self-review\'s high-risk card, a build\'s go card): its chip then reads "land". Leave out otherwise.' },
       to: DIRECT_TO,
       doc: {
         type: 'string', maxLength: 1000,
@@ -350,7 +350,7 @@ const STRIKE_TEXT = {
     type: 'object',
     properties: {
       text: { type: 'string', maxLength: 10000, description: 'The wrong words, verbatim from one of your messages (Markdown and all), as short as still pins down the claim (at most 10,000 characters)' },
-      reason: { type: 'string', maxLength: 1000, description: 'One sentence (at most 1,000 characters) on what proved it wrong and what is right instead; the note shows it after the struck words, e.g. "git log shows abc123 is on main, so #12 is merged."' },
+      reason: { type: 'string', maxLength: 1000, description: 'One sentence (at most 1,000 characters) on what proved it wrong and what is right instead; the note shows it after the struck words, e.g. "git log shows abc123 is on main, so #12 has landed."' },
     },
     required: ['text', 'reason'],
   },
@@ -486,9 +486,9 @@ const TOOLS = [
         message: { type: 'string', maxLength: 100000, description: 'First message to the new minion, at most 100,000 characters' },
         start_after: {
           type: 'integer',
-          description: "A minion number (#N) to chain after: this one is created parked with its message held (messages to it too, read with its brief), and starts by itself on a branch caught up to main once #N is live (or merged, see start_when). If #N is dismissed unmerged it stays parked and you are told; message_ticket with unpark starts it early.",
+          description: "A minion number (#N) to chain after: this one is created parked with its message held (messages to it too, read with its brief), and starts by itself on a branch caught up to main once #N is live (or landed, see start_when). If #N is dismissed without landing it stays parked and you are told; message_ticket with unpark starts it early.",
         },
-        start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
+        start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means landed.' },
         parent: {
           type: ['integer', 'null'],
           description: "The #N this minion is started for: it shows as from #N and inherits its build unless build is given. Default: the minion whose message you are answering; null for none.",
@@ -611,7 +611,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         template: { type: 'string', enum: [...SCHEDULE_TEMPLATES], description: 'Which audit' },
-        notes: { type: 'string', description: 'What this scheme adds to the template, appended under "For <scheme>:", e.g. "Merges wait for a person\'s go." or "Never push."' },
+        notes: { type: 'string', description: 'What this scheme adds to the template, appended under "For <scheme>:", e.g. "Lands wait for a person\'s go." or "Never push."' },
       },
       required: ['template'],
     },
@@ -929,7 +929,7 @@ const DEPLOY_CONTRAPTION = {
 /** Putting an item in the asking person's Mandate (#268): every minion and Taskmaster; the server checks whom for. */
 const MANDATE_ITEM = {
   name: 'mandate_item',
-  description: `Put an item in Mandate (the to-do app) for the person whose own message this turn answers, or clear one. Only that person: a put is refused on a turn started by GitHub, a system message, a Taskmaster or minion relay, a wake or a resume, and for someone not on this scheme or without Mandate. It shows on their Today with this scheme's name and links back to this chat. Put the same key again to update it. Clear it as soon as its cause is gone (done, merged, fixed, no longer needed), on whichever turn finds that out: clearing an item this chat put works on any turn, and one left open keeps nagging them. alert: true rings like an alarm on their phone, so use it only for a real problem that needs them now, never for good news or an FYI (a green build, a merge, a deploy). When they tick, untick, delete or restore it, a "[Mandate]: …" message arrives in this chat. Returns Mandate's answer: 200 { key, state, mine } (state open, ticked, deleted, cleared or none; mine lists fields they edited, which your puts no longer change), or 400 bad_request, 403 off (they switched this scheme's items off) or 429 limit.`,
+  description: `Put an item in Mandate (the to-do app) for the person whose own message this turn answers, or clear one. Only that person: a put is refused on a turn started by GitHub, a system message, a Taskmaster or minion relay, a wake or a resume, and for someone not on this scheme or without Mandate. It shows on their Today with this scheme's name and links back to this chat. Put the same key again to update it. Clear it as soon as its cause is gone (done, landed, fixed, no longer needed), on whichever turn finds that out: clearing an item this chat put works on any turn, and one left open keeps nagging them. alert: true rings like an alarm on their phone, so use it only for a real problem that needs them now, never for good news or an FYI (a green build, a land, a deploy). When they tick, untick, delete or restore it, a "[Mandate]: …" message arrives in this chat. Returns Mandate's answer: 200 { key, state, mine } (state open, ticked, deleted, cleared or none; mine lists fields they edited, which your puts no longer change), or 400 bad_request, 403 off (they switched this scheme's items off) or 429 limit.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -1508,7 +1508,7 @@ const THREAD_TOOLS = [
   },
   {
     name: 'relay_when_live',
-    description: `Queue a note for another scheme's Taskmaster (\`to\` is the scheme's name) or a minion of this scheme (\`to\` is #N), sent as held mail (it wakes nothing) once \`commit\` is live (in a scheme this server doesn't run: merged). Use it instead of asking the Taskmaster to relay something once you are live. Call it before hand_off_land; \`commit\` defaults to your branch's head. Your Taskmaster gets the full text now as held mail, and a one-line note when it goes out. To send one note to several, pass \`to\` as a list rather than calling once each. A dismissed minion's relays still go out, and a failed land leaves them queued: call it with no arguments to list yours (a \`#id\` each), or with \`cancel\` to drop one. Several allowed.`,
+    description: `Queue a note for another scheme's Taskmaster (\`to\` is the scheme's name) or a minion of this scheme (\`to\` is #N), sent as held mail (it wakes nothing) once \`commit\` is live (in a scheme this server doesn't run: landed). Use it instead of asking the Taskmaster to relay something once you are live. Call it before hand_off_land; \`commit\` defaults to your branch's head. Your Taskmaster gets the full text now as held mail, and a one-line note when it goes out. To send one note to several, pass \`to\` as a list rather than calling once each. A dismissed minion's relays still go out, and a failed land leaves them queued: call it with no arguments to list yours (a \`#id\` each), or with \`cancel\` to drop one. Several allowed.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1574,17 +1574,17 @@ const THREAD_TOOLS = [
     ? [{
       name: 'start_preview',
       description:
-        "Start (or restart) a preview of this minion's worktree for people to try before it merges: its server.ts runs on a copy of the app's data, behind the app's login, and never runs turns. Commit first: it serves the worktree as it is now. Returns the link; post it in your reply and set state try. It stops after an hour unused (opening the link starts it again) and goes when the minion is dismissed.",
+        "Start (or restart) a preview of this minion's worktree for people to try before it lands: its server.ts runs on a copy of the app's data, behind the app's login, and never runs turns. Commit first: it serves the worktree as it is now. Returns the link; post it in your reply and set state try. It stops after an hour unused (opening the link starts it again) and goes when the minion is dismissed.",
       inputSchema: { type: 'object', properties: {} },
     }]
     : []),
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the turn ends, once its work is merged and nothing needs deploying${DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it: call this, and if it refuses or the minion stays open, say why.`,
+      `Dismiss this minion when the turn ends, once its work has landed and nothing needs deploying${DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it: call this, and if it refuses or the minion stays open, say why.`,
     inputSchema: {
       type: 'object',
-      properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Merged abc1234; live after the restart"' } },
+      properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Landed abc1234; live after the restart"' } },
     },
   },
   ...ARTIFACT_TOOLS,

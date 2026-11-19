@@ -165,7 +165,7 @@ export const WORDING_MATCHER = '^(mcp__(thread|coordinator)__(message_coordinato
 
 /**
  * The PreToolUse hook every turn gets (src/wording.ts): it refuses once a message, card, note or a
- * .md or .html file written into `shared` that uses a reserved word ("fold") in another sense. `shared`
+ * .md or .html file written into `shared` that uses a retired or misused word ("fold", "merge" for main). `shared`
  * is the scheme's shared folder and the minion's own, since people read the files in both. `sent` is a file in the turn's folder listing the sentences already refused.
  */
 export function wordingHooks(shared: string[], sent: string, script = turnPins().WORDING) {

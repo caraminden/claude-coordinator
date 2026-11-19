@@ -577,8 +577,9 @@ export const ticketRoutes: Route[] = [
       // A secret card (#838): a masked field whose value goes to the secret store, never the chat.
       const secret = body.secret != null && body.questions == null && !doc && !notice ? secretAsk(body.secret) : null;
       const questions = notice || doc || secret ? [] : await cleanQuestions(app, ticket, body.questions);
-      // A card asking for the go to merge or land says so, for the minions list's chip (#575).
-      const kind = oneOf(body.kind ?? null, ['merge'], 'kind') as 'merge' | null;
+      // A card asking for the go to land says so, for the minions list's chip (#575). "land" is the word people read
+      // (Cara, 2026-11-19); it is stored as the older kind "merge".
+      const kind = oneOf(body.kind ?? null, ['merge', 'land'], 'kind') ? 'merge' as const : null;
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
       const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
@@ -1217,7 +1218,7 @@ export const ticketRoutes: Route[] = [
       if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
       const h: Handoff = { summary: str(body.summary, 'Summary', 300), risk: oneOf(body.risk || undefined, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300) };
       if (h.risk === 'high') {
-        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, 'A high-risk change lands only on a person\'s go: name who gave it and when in go, or ask with a merge card first');
+        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, 'A high-risk change lands only on a person\'s go: name who gave it and when in go, or ask with a land card (kind merge) first');
         h.go = str(body.go, 'Go', 200);
       }
       if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');

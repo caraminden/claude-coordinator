@@ -26,7 +26,7 @@ export function listGroupsOf(p) {
   }
 }
 export const STATES = {
-  ready: { label: 'Ready to merge or pick up' },
+  ready: { label: 'Ready to land or pick up' },
   complete: { label: 'Complete: no work left' },
   try: { label: 'Ready for you to try' },
   parked: { label: 'Parked' },

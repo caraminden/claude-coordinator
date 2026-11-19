@@ -29,8 +29,8 @@ from it, you are on your second try).
 After the third strike, stop and ask the user (a card, where the session has a card tool)
 instead of trying a fourth. Keep a one-line log of every failed attempt (what you tried,
 what happened, what you changed next) and put it in the question and the PR. This is the
-one turn that may end on a red test: the question says the branch is red and must not be
-merged until it's answered.
+one turn that may end on a red test: the question says the branch is red and must not
+land until it's answered.
 
 ## Phase 1: Build a feedback loop
 

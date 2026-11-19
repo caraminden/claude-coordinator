@@ -522,7 +522,7 @@ Authorization: Bearer <contraption.key>
   number from another scheme counts as none); 409 when #N is dismissed, which stays dismissed until
   a person reopens it. A minion parked on `start_after` answers the ask but keeps its brief held.
   Answers `202 { scheme, minion, member: true, proposal: false, files }`. It shares the bug and
-  feature rate limit, and isn't a go to merge: only words a person types in Citadel are.
+  feature rate limit, and isn't a go to land: only words a person types in Citadel are.
 - **Data** only files: no message, no wake. It writes a `<time>-ask.json` beside the files holding
   `{ contraption, person, item, summary, text, files, at }`. It needs at least one of files, text,
   summary or item (400). Answers `202 { scheme, member, proposal: false, files, sidecar }`.

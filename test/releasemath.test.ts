@@ -40,7 +40,7 @@ test('columnOf: a PR whose checks run is in Checks; queued, failed or waiting fo
     assert.equal(columnOf(stages, { stage: 'checks', waitingOn: null }), 1);
     assert.equal(columnOf(stages, { stage: 'checks', waitingOn: 'its checks wait for a CI runner' }), 0);
     assert.equal(columnOf(stages, { stage: 'checks', waitingOn: 'its checks failed: the minion fixes them' }), 0);
-    assert.equal(columnOf(stages, { stage: 'merge', waitingOn: 'PR #12 waits for a go to merge' }), 0);
+    assert.equal(columnOf(stages, { stage: 'merge', waitingOn: 'PR #12 waits for a go to land' }), 0);
   }
   // Behind PRs, a contraption's call still waits.
   assert.equal(columnOf(track('checks', 'merge', 'call', 'build'), { stage: 'call', waitingOn: null }), 0);

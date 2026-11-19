@@ -1,5 +1,5 @@
 // Each open build's standing for its header in the minions list (build branches, specs/build-branches.md):
-// how many feeders are folded in and how many are still open, and how far build/<n> is behind main. All
+// how many feeders are merged in and how many are still open, and how far build/<n> is behind main. All
 // git facts, read in the scheme's checkout, cached per scheme and broadcast when they change. A scheme
 // with no build/<n> branch has none, so the list shows its builds as before.
 import { emptyBranch } from './branch.ts';

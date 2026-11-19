@@ -403,23 +403,25 @@ export async function refreshBranch(ticketId) {
   } catch {}
 }
 
-/** "PR #12 · merged" (linked), or for work merged without a PR, the branch and whether main has it. */
+/** "PR #12 · landed" (linked), or for work landed without a PR, the branch and whether main has it. */
 export function renderBranch(status) {
   const el = view.branchEl;
   const parts = [];
+  // Onto main it lands; into a major build's branch it merges (Cara, 2026-11-19: "Land").
+  const done = /^build\//.test(status?.base ?? '') ? 'merged' : 'landed';
   if (status?.pr) {
     const { pr } = status;
-    const state = pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : 'open';
+    const state = pr.state === 'MERGED' ? done : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : 'open';
     parts.push(
       // data-github: this chip is the way to the PR on GitHub, so pointPrLink leaves it be (as the merge card's).
       h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, 'data-github': '', onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
-      h('span', { class: `state ${state}` }, state));
-    if (pr.state === 'OPEN' && status.merged) parts.push(h('span', { title: `Merged into ${status.base}` }, '✓ in main'));
+      h('span', { class: `state ${state === done ? 'merged' : state}` }, state));
+    if (pr.state === 'OPEN' && status.merged) parts.push(h('span', { title: `${done === 'merged' ? 'Merged into' : 'Landed on'} ${status.base}` }, '✓ in main'));
   } else if (status && !status.empty) {
     parts.push(h('span', { class: 'branch', title: status.branch }, status.branch));
     parts.push(status.merged
-      ? h('span', { class: 'state merged', title: `Merged into ${status.base}` }, 'merged')
-      : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} unmerged`));
+      ? h('span', { class: 'state merged', title: `${done === 'merged' ? 'Merged into' : 'Landed on'} ${status.base}` }, done)
+      : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} not ${done}`));
   }
   // Where its change is on the way to release (#626, take F); releases.js redraws the slot as that moves.
   const chip = releaseChip(view.ticket);
@@ -1265,7 +1267,7 @@ function syncHeldBrief() {
   old?.remove();
   const body = markdown(b.text, view.ticket.id);
   const el = h('div', { class: `msg user held-brief ${senderTone(b.from)}`.trim(), 'data-key': key },
-    h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} is ${b.when === 'live' ? 'live' : 'merged'}`))),
+    h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} ${b.when === 'live' ? 'is live' : 'has landed'}`))),
     body);
   if (b.text.length > 500 || b.text.split('\n').length > 8) {
     el.classList.add('clamped');

@@ -24,8 +24,9 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- the words ----------
 
-test('a go is a whole message that only says merge, with at most one PR number', () => {
+test('a go is a whole message that only says land (or the older merge or fold), with at most one PR number', () => {
   for (const [text, pr] of [
+    ['Land it', null], ['ok, land it', null], ['land #12', 12], ['you can land 196', 196], ['Land it please.', null],
     ['Merge it', null], ['fold it', null], ['fold', null], ['merge pls', null], ['pls merge 205', 205], ['Fold it plz', null], ['Merge it.', null], ['ok, merge it', null], ['LGTM, merge it!', null],
     ['go ahead and merge', null], ['ship it', null], ['fold it in', null], ['please merge it', null], ['merge it please', null],
     ['yes merge PR #191', 191], ['you can fold 196', 196], ['ok, you can merge it', null], ['merge #188 please', 188], ['merge 42', 42], ['Merge  PR 7 now', 7], ['  squash it  ', null],

@@ -317,7 +317,7 @@ export class Previews {
       r = await this.boot(key, cwd, async () => {
         const opts = { cwd: repo, timeout: 60_000 };
         try {
-          // Detached, so build/<n> stays free for the feeders' folds to move; nobody edits this worktree, so --force loses nothing.
+          // Detached, so build/<n> stays free for the feeders' merges to move; nobody edits this worktree, so --force loses nothing.
           if (existsSync(join(cwd, '.git'))) await gitAsync('git', ['checkout', '--quiet', '--force', '--detach', tip], { ...opts, cwd });
           else {
             rmSync(cwd, { recursive: true, force: true });

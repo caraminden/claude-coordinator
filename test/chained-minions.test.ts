@@ -133,7 +133,7 @@ test('a merged chain starts once the leader\'s work is on main, live or not', as
   assert.equal(await w.check(), 0, 'committed on its branch only');
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   assert.equal(await w.check(), 1);
-  assert.match(started[0].why, /work is merged$/);
+  assert.match(started[0].why, /work has landed$/);
 });
 
 // #126: a leader whose branch had no commits of its own started its follower once the branch was
@@ -193,11 +193,11 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   assert.equal(await w.check(), 0);
   assert.equal(held.length, 1);
   assert.equal(held[0].c.ticket, follower);
-  assert.match(held[0].why, /^#\d+ was dismissed without its work being merged$/);
+  assert.match(held[0].why, /^#\d+ was dismissed without its work landing$/);
   assert.equal(await w.check(), 0);
   assert.equal(held.length, 1, 'told once');
   assert.equal((await w.follow(leader.id, 'merged')).state, 'unshipped', 'nothing new can chain on it');
-  assert.match(w.heldFor(follower)!, /^#\d+ T's work is merged, and #\d+ T was dismissed without it, so only Unpark starts you$/);
+  assert.match(w.heldFor(follower)!, /^#\d+ T's work has landed, and #\d+ T was dismissed without it, so only Unpark starts you$/);
   assert.equal(w.wakesOn(follower), null, 'held: nothing wakes it by itself, so the list shows it under Parked (#718)');
 
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
@@ -205,9 +205,9 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   assert.equal(started[0].c.ticket, follower);
 });
 
-// Build branches (#592): a feeder folds into build/<n> and closes. That is merged as far as it goes alone,
+// Build branches (#592): a feeder merges into build/<n> and closes. That is merged as far as it goes alone,
 // so a merged chain starts, and a live one waits for the build to land rather than being held as unshipped.
-test('a feeder folded into its build and dismissed is merged for a chain, and live once the build lands', async () => {
+test('a feeder merged into its build and dismissed has landed for a chain, and live once the build lands', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   live.git('branch', 'build/7', 'main');
@@ -256,7 +256,7 @@ test('a leader whose PR was squash-merged counts as merged, and a held chain sta
   assert.equal(await w.check(), 1);
   assert.equal(held.length, 0, 'no false alarm');
   assert.equal(started[0].c.ticket, follower);
-  assert.match(started[0].why, /work is merged$/);
+  assert.match(started[0].why, /work has landed$/);
 
   // A chain held before its leader's PR showed as merged (#87's) starts at the next check.
   reset();
@@ -320,7 +320,7 @@ test('a leader squash-merged into origin/main only, in a repo only the scheme ow
     w.prs = githubPrs((dir) => (dir === scheme ? { GH_TOKEN: 'owner-token' } : undefined));
     store.updateTicket(leader.id, { status: 'closed' });
     assert.equal(await w.check(), 1);
-    assert.equal(held.length, 0, 'no "dismissed without its work being merged"');
+    assert.equal(held.length, 0, 'no "dismissed without its work landing"');
     assert.equal(started[0].c.ticket, follower);
   } finally {
     process.env.PATH = path;
@@ -637,7 +637,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   const next = await create('Next', { start_after: leader.number, start_when: 'merged' });
   assert.equal(next.status, 201);
   assert.equal(next.data.state, 'parked');
-  assert.equal(next.data.note, `starts when #${leader.number} is merged`);
+  assert.equal(next.data.note, `starts when #${leader.number} has landed`);
   assert.ok(next.data.notes.some((n: string) => n.startsWith('Parked: it starts by itself')));
   assert.deepEqual(await said(next.data.id), [], 'its brief is held');
 

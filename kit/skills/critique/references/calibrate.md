@@ -15,7 +15,7 @@ critic's model changes, or Known blind spots grows by three since the last trial
 - **Controls:** 3 to 5 items they passed as they were. These catch a critic that fails everything.
 
 Take them from the rubric's Notes and Calibration board, `critic.md` logs, review pages
-(`artifact_data`), and merged PRs' review comments. Use the artifacts as they were when the person
+(`artifact_data`), and landed PRs' review comments. Use the artifacts as they were when the person
 judged them, not the fixed versions.
 
 ## 2. Hide the answers

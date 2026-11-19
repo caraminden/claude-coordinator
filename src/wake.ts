@@ -70,6 +70,9 @@ export interface Waiter {
   light?: true;
 }
 
+/** How people read a chain's `when` (Cara, 2026-11-19: "Land"): "#3's work has landed" or "... is live". */
+export const chainIs = (when: Chain['when']) => (when === 'merged' ? 'has landed' : 'is live');
+
 /** A minion created parked, whose brief is held until minion `after`'s work is live or merged. */
 export interface Chain {
   ticket: number;
@@ -311,7 +314,7 @@ export class LiveWaiters {
     if (!closed && !(await this.committed(b.repo, b.branch, c.base ? (c.since ?? Infinity) : 0))) return 'wait';
     const landed = await this.landed(b);
     if (!landed) {
-      // A feeder folded into its build (specs/build-branches.md) has shipped as far as it goes alone, and
+      // A feeder merged into its build (specs/build-branches.md) has shipped as far as it goes alone, and
       // closes then: merged means in the build, and live waits for the build to land (where this server runs the code).
       const ref = leader.build ? await buildRefOf(b.repo, leader.build) : null;
       if (ref && (await within(b.repo, ref, b.tip))) return c.when === 'merged' || !(await runs(b.repo, this.head)) ? 'go' : 'wait';
@@ -347,13 +350,13 @@ export class LiveWaiters {
     return this.list().find((w) => w.ticket === ticket)?.reason ?? null;
   }
 
-  /** What `ticket`, parked on start_after, waits for ("#3 Leader's work is merged"), or null when it isn't. */
+  /** What `ticket`, parked on start_after, waits for ("#3 Leader's work has landed"), or null when it isn't. */
   heldFor(ticket: number): string | null {
     const c = this.chains().find((o) => o.ticket === ticket);
     const leader = c && this.store.getTicket(c.after);
     if (!c) return null;
     const who = `#${leader?.number ?? c.after} ${leader?.title ?? ''}`;
-    return c.held ? `${who}'s work is ${c.when}, and ${who} was dismissed without it, so only Unpark starts you` : `${who}'s work is ${c.when}`;
+    return c.held ? `${who}'s work ${chainIs(c.when)}, and ${who} was dismissed without it, so only Unpark starts you` : `${who}'s work ${chainIs(c.when)}`;
   }
 
   /** The brief `ticket` holds until its leader's work is in, for its chat to show read-only; null once it is sent (release) or when there is none. */
@@ -408,8 +411,8 @@ export class LiveWaiters {
     this.store.setSetting(CHAINS, keep);
     const n = (id: number) => `#${this.store.getTicket(id)?.number ?? id}`;
     for (const c of go) this.starting.add(c.ticket);
-    for (const c of go) this.start(c, `${n(c.after)}'s work is ${c.when === 'merged' ? 'merged' : 'live'}`);
-    for (const c of hold) this.hold(c, `${n(c.after)} was dismissed without its work being merged`);
+    for (const c of go) this.start(c, `${n(c.after)}'s work ${chainIs(c.when)}`);
+    for (const c of hold) this.hold(c, `${n(c.after)} was dismissed without its work landing`);
     return go.length;
   }
 

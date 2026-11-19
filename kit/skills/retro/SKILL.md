@@ -74,7 +74,7 @@ Create either file when it is first needed.
    now in two retros.
 8. **Land the fixes in the milestone's PR**, while it is still open, so the owner reviews
    once, with the retro file in it and each edit citing its finding. Only a milestone PR
-   already merged gets a small follow-up PR instead. A process or design rule the owner
+   already landed gets a small follow-up PR instead. A process or design rule the owner
    accepts from the retro also goes in the decisions log Project facts names, if any.
 
 Done when every finding has an edit in the PR or a line in the retro saying why not, the

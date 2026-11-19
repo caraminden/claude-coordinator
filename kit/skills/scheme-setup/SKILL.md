@@ -1,13 +1,13 @@
 ---
 name: scheme-setup
-description: How a setup minion applies an approved onboarding plan to its scheme's repo, from CLAUDE.md with Project facts, the push guard, adapted and new skills and copied rules through to the merge. Use when your brief is an approved setup or tune-up plan.
+description: How a setup minion applies an approved onboarding plan to its scheme's repo, from CLAUDE.md with Project facts, the push guard, adapted and new skills and copied rules through to the land. Use when your brief is an approved setup or tune-up plan.
 ---
 
 # Scheme setup
 
 You are the one setup minion of a new scheme. The Taskmaster has already applied its own part
 of the plan (scheme instructions, settings, properties, `onboarding.md`). Yours is the repo
-files, merged to the scheme's main. The **plan** is your spec: build what it lists, in its
+files, landed on the scheme's main. The **plan** is your spec: build what it lists, in its
 words, and nothing it doesn't.
 
 ## Your bounds
@@ -31,7 +31,7 @@ CLAUDE.md and glossary for the scrub. The tripwire refuses some of these; the re
 
 | Part | Used in |
 |---|---|
-| Shipping answer: PR per change, auto-merge after self-review, or straight to main; and the pusher of main (`tools/land.sh`, or "main stays local") | steps 3, 4, 8 |
+| Shipping answer: PR per change, auto-land after self-review, or straight to main; and the pusher of main (`tools/land.sh`, or "main stays local") | steps 3, 4, 8 |
 | Project facts draft, or the interview answers behind it (stack, tests, high-risk areas) | step 3 |
 | Adapt list: name, kind (skill, agent, rule), source scheme and path, new name, why | step 5 |
 | Write-new list: name, kind, one-line job | step 6 |
@@ -333,23 +333,23 @@ CLAUDE.md names how a change goes live ("deploys with `deploy_contraption`") onl
 
 *Done when* the first deploy went live, or the done note lists registration and first deploy as open with the message you sent.
 
-### 9. Commit and merge
+### 9. Commit and land
 
 Commit with each file named in the message. Run `citadel:self-review`: it never skips
 `CLAUDE.md` or `.claude/`. The guard files you just listed as high risk by file make a setup
 rate high by themselves; the approved plan already listed them, so that alone is no reason to
-stop. A high label for any other reason: stop and ask with a card. Then merge by the plan's
+stop. A high label for any other reason: stop and ask with a card. Then land by the plan's
 shipping answer:
 
 - **PR per change:** push your branch, `gh pr create`, and merge it with `gh pr merge` (the
-  scheme's approval rules turn that into a card for a person). Wait for the merge.
-- **Auto-merge after self-review** or **straight to main**, pusher `tools/land.sh`: commit it
+  scheme's approval rules turn that into a card for a person). Wait for it to land.
+- **Auto-land after self-review** or **straight to main**, pusher `tools/land.sh`: commit it
   with the rest, then run `tools/land.sh` from your worktree. It lands and pushes your own
   setup, and every minion after you lands through it.
 - **Main stays local:** check the main checkout (the first entry of `git worktree list`) is on
   main and clean, then `git -C <that dir> merge --ff-only <your branch>`.
 
-*Done when* `git log -1 main` in the main checkout is your commit (or the PR's merge), and main
+*Done when* `git log -1 main` in the main checkout is your commit (or the PR's merge commit), and main
 is pushed or your note says it stays local.
 
 ## Done note
@@ -357,4 +357,4 @@ is pushed or your note says it stays local.
 Your reply lists: the files written; kit items that covered planned ones (step 2); gaps that
 took a default; the copies recorded (and whether the scheme has the standard upstream check, or it was asked for); scrub
 hits kept; the check command and its result; whether main is pushed; a contraption's registration and first deploy, when still open (step 8); and any command Cara must
-run by hand (a unit install). The Taskmaster's first minions start on your merge by themselves; nothing for you to start.
+run by hand (a unit install). The Taskmaster's first minions start once yours lands, by themselves; nothing for you to start.

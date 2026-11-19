@@ -60,12 +60,12 @@ function checkRows(d, c) {
 export function watchBlock() {
   if (!watch?.length) return '';
   const rows = watch.map((d, i) => {
-    const run = d.checks.filter((c) => c.len !== null).length;
+    const run = d.checks.filter((c) => c.readings.length).length; // a window the next deploy cut short compared nothing
     const worse = d.checks.reduce((n, c) => n + c.readings.filter((r) => r.worse).length, 0);
     const [tone, word] = d.alerted ? ['danger', 'Raised an alert'] : worse ? ['warn', `${worse} worse`] : run ? ['ok', 'Fine'] : ['neutral', 'Not checked yet'];
     return settingsRow({ key: `watch:${d.commit}`, icon: 'eye', hue: d.alerted ? 'danger' : worse ? 'waiting' : 'done', open: i === 0, title: d.commit.slice(0, 8),
-      summary: [toneChip(tone, word), `live ${ago(d.at)} · ${run}/${d.checks.length} checks`] },
-    statTiles([`${run} of ${d.checks.length}`, 'checks run', 'running'], [String(worse), 'readings worse', worse ? 'danger' : 'done']),
+      summary: [toneChip(tone, word), `live ${ago(d.at)} · ${run}/${d.checks.length} checks compared`] },
+    statTiles([`${run} of ${d.checks.length}`, 'checks compared', 'running'], [String(worse), 'readings worse', worse ? 'danger' : 'done']),
     h('div', { class: 'hue-rows' }, ...d.checks.flatMap((c) => checkRows(d, c))))[0];
   });
   return h('section', { class: 'rel-watch' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Post-deploy watch'),

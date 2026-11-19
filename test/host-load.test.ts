@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { hostLoad, jobOfWho, parseHistory, readPressure, schemeOfWho } from '../src/host-load.ts';
+import { appOwners, hostLoad, jobOfWho, parseHistory, readPressure, schemeOfWho } from '../src/host-load.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'host-load-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -80,4 +80,11 @@ test('slot count follows citadel-heavy: no number is 2, a 0 is 1', () => {
   assert.equal(hostLoad(root).slots, 2);
   writeFileSync(join(root, 'slots'), '0\n');
   assert.equal(hostLoad(root).slots, 1);
+});
+
+test('an app counts under its home scheme only for a viewer who can see that scheme', () => {
+  const apps = [{ name: 'twireader', title: 'TWI Reader', home_scheme: 7 }, { name: 'secret-app', title: 'Secret', home_scheme: 9 }, { name: 'loose', title: 'Loose', home_scheme: null }];
+  const owners = appOwners(apps, (id) => id === 7, (id) => ({ 7: 'TWIReader', 9: 'Hidden' })[id]);
+  assert.deepEqual([...owners], [['twireader', 'TWIReader'], ['twi reader', 'TWIReader']]);
+  assert.equal(jobOfWho('secret-app deploy', owners).scheme, 'secret-app'); // its own name, not the hidden scheme's
 });

@@ -40,19 +40,20 @@ export function hostLoadBlock(l) {
   const worst = l.week[0];
   const [week] = settingsRow({ key: 'host-week', icon: 'chart', hue: 'accent', title: 'Waits this week',
     summary: worst ? [`${total.toLocaleString()} jobs · longest`, ' ', schemeTag(worst.scheme), span(worst.longestS)] : 'No heavy jobs ran this week' },
-    worst ? showFirst({ key: 'host-week', items: weekRows(l.week), n: 5, noun: 'schemes', wrap: (rows) => h('table', { class: 'look-table host-week' },
+    worst ? showFirst({ key: 'host-week', items: l.week, n: 5, noun: 'schemes', wrap: (ws) => h('table', { class: 'look-table host-week' },
       h('thead', {}, h('tr', {}, h('th', {}, 'Scheme'), h('th', { class: 'num' }, 'Jobs'), h('th', { class: 'num host-median' }, 'Median'), h('th', {}, 'Longest wait'))),
-      h('tbody', {}, ...rows.flat())) })
+      h('tbody', {}, ...weekRows(ws, l.week))) })
       : emptyCard('No heavy jobs this week', 'Builds and test runs that take a slot show here with how long they waited.', { mark: '·', hue: 'muted' }));
 
   return h('section', { class: 'ci-block ci-host' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Host load'),
     h('div', { class: 'settings-rows' }, slots, line, week));
 }
 
-/** A scheme's row in the waits table, with its parts (its minions, each app's builds) under it once opened. */
-function weekRows(week) {
+/** The shown schemes' rows in the waits table, each with its parts (its minions, each app's builds) under it once opened, built
+ * from `opened` on every draw so "Show all" keeps what a click opened. Bars are against the longest wait of the whole `week`. */
+function weekRows(shown, week) {
   const max = Math.max(...week.map((w) => w.longestS), 1);
-  return week.map((w) => {
+  return shown.flatMap((w) => {
     const cat = schemeHue(w.scheme);
     const name = w.parts
       ? h('button', { type: 'button', class: 'parts-toggle', 'aria-expanded': String(opened.has(w.scheme)), onclick: (e) => {

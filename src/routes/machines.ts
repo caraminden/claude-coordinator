@@ -1,6 +1,6 @@
 // Machines: people list and manage them; a machine's agent connects with its own token; a minion's
 // turn opens sessions to one and sends them messages.
-import { hostLoad, type AppOwners } from '../host-load.ts';
+import { appOwners, hostLoad } from '../host-load.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
@@ -249,13 +249,9 @@ export const machineRoutes: Route[] = [
   // An app's jobs count under its home scheme (#1068: TWIReader and twireader were two rows).
   {
     method: 'GET', path: '/api/host-load', ...people,
-    handler: ({ res, app }) => {
+    handler: ({ res, app, session }) => {
       if (!app.heavyDir) return json(res, 200, null);
-      const owners: AppOwners = new Map();
-      for (const c of app.store.listContraptions()) {
-        const home = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme)?.name;
-        if (home) for (const k of [c.name, c.title]) owners.set(k.toLowerCase(), home);
-      }
+      const owners = appOwners(app.store.listContraptions(), (id) => app.store.canSee(session, id), (id) => app.store.getProject(id)?.name);
       json(res, 200, hostLoad(app.heavyDir, Date.now(), undefined, owners));
     },
   },

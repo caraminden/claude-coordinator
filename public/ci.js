@@ -123,10 +123,11 @@ function runningBlock(s, now, ui) {
   const theirs = running.filter((j) => !names.has(j.runner));
   const where = v.runners === null ? 'Runners' : "GitHub's runners";
   const items = rows.map((r) => r.el);
-  items.push(hueRow({ hue: theirs.length ? 'running' : 'done', lead: theirs.length ? `${theirs.length} running` : 'none',
+  items.push([hueRow({ hue: theirs.length ? 'running' : 'done', lead: theirs.length ? `${theirs.length} running` : 'none',
     meta: theirs.length ? h('button', { type: 'button', class: 'secondary small ci-now-more', 'aria-expanded': String(ui.hostedOpen), onclick: ui.toggleHosted }, ui.hostedOpen ? 'Hide jobs' : 'Show jobs') : null },
-  h('strong', {}, where), ' ', h('span', { class: 'muted' }, theirs.length ? (ui.hostedOpen ? '' : theirs.map((j) => j.name).join(', ')) : 'nothing running')));
-  if (ui.hostedOpen) items.push(...theirs.map((j) => hueRow({ hue: 'running', lead: 'running', meta: since(j) }, h('strong', { title: j.runner }, j.runner), ' ', jobCell(j))));
+  h('strong', {}, where), ' ', h('span', { class: 'muted' }, theirs.length ? (ui.hostedOpen ? '' : theirs.map((j) => j.name).join(', ')) : 'nothing running')),
+  // Its opened jobs are part of the same item, so "Show all" never cuts them off the row that opened them.
+  ...(ui.hostedOpen ? theirs.map((j) => hueRow({ hue: 'running', lead: 'running', meta: since(j) }, h('strong', { title: j.runner }, j.runner), ' ', jobCell(j))) : [])]);
   const queues = v.queues ?? [];
   const head = queues.length ? queues.map(queueWords).join(' · ') : 'nothing queued';
   // The Runners tab's notes (#1019: runners moved onto Overview), for a repo whose runners can't be listed or that has none.

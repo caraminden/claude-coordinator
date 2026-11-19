@@ -22,8 +22,7 @@ export function modelTable() {
   const rows = tierRows().map((r) => hueRow({ hue: FAMILY_HUE.find(([re]) => re.test(r.model))?.[1] ?? 'done' },
     h('div', { class: 'tier-name' }, h('b', {}, r.tier)), h('div', { class: 'tier-work' }, r.work), r.then ? h('div', { class: 'tier-then muted' }, `Stalls: ${r.then}`) : ''));
   return h('div', { class: 'models-table' },
-    // showFirst appends a literal "null" when it has nothing to cut (look.js, not mine to change), so a short table skips it.
-    rows.length > 7 ? showFirst({ key: 'models-tiers', items: rows, n: 6, noun: 'tiers' }) : h('div', { class: 'hue-rows' }, rows),
+    showFirst({ key: 'models-tiers', items: rows, n: 6, noun: 'tiers' }),
     h('p', { class: 'look-prose foot' },
       `A minion's type picks its start when nobody names a model: ${Object.entries(BY_TYPE).map(([type, p]) => `${type} → ${tierLabel(p.model, p.effort)}`).join(', ')}; anything else → ${tierLabel(FALLBACK.model, FALLBACK.effort)}. `,
       'When unsure between two tiers the Taskmaster takes the higher. ',
@@ -44,7 +43,7 @@ export function fableMeterView(w) {
   const draw = () => {
     const mine = w.models.filter((m) => m.name.startsWith('Fable')).reduce((a, m) => a + m.usd, 0);
     const myPct = w.weekUsd ? (mine / w.weekUsd) * 100 : null;
-    const [tone, word] = myPct === null ? ['neutral', 'No meter'] : myPct >= f.capPct ? ['danger', 'Over cap'] : myPct >= f.capPct * 0.8 ? ['warn', 'Near cap'] : ['ok', 'Under cap'];
+    const [tone, word] = f.over ? ['danger', 'Citadel over cap'] : myPct === null ? ['neutral', 'No meter'] : myPct >= f.capPct ? ['danger', 'Over cap'] : myPct >= f.capPct * 0.8 ? ['warn', 'Near cap'] : ['ok', 'Under cap'];
     sum?.replaceChildren(toneChip(tone, word), myPct === null ? 'no weekly meter has priced your plan yet' : `${pctText(myPct)} of your plan · cap ${f.capPct}%`);
     tilesSlot.replaceChildren(statTiles(myPct !== null && [pctText(myPct), 'of your weekly plan on Fable', tone === 'danger' ? 'danger' : tone === 'warn' ? 'waiting' : 'done'], [`${f.capPct}%`, 'weekly cap', 'accent'],
       [costText(f.usd), f.over ? 'Whole Citadel, 7 days (over)' : 'Whole Citadel, 7 days', f.over ? 'danger' : 'held']));

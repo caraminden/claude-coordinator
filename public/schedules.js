@@ -91,9 +91,7 @@ function scheduleRow(s) {
     gateFields(s),
     toggle('Brief', () => h('pre', { class: 'schedule-brief small' }, s.brief)),
     s.runs.length ? toggle(`Last ${s.runs.length} runs`, () => {
-      const items = s.runs.map((r) => runLine(s, r));
-      // showFirst appends a literal "null" when it has nothing to cut (look.js), so a short list skips it.
-      return items.length > 6 ? showFirst({ key: `schedule-runs:${s.id}`, items, n: 5, noun: 'runs' }) : h('div', { class: 'hue-rows' }, items);
+      return showFirst({ key: `schedule-runs:${s.id}`, items: s.runs.map((r) => runLine(s, r)), n: 5, noun: 'runs' });
     }) : '',
     h('div', { class: 'row schedule-actions' },
       h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('[data-schedule]')) }, s.paused ? 'Resume' : 'Pause'),

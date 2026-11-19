@@ -20,6 +20,17 @@ export interface SchemeWaits extends Waits { scheme: string; parts?: WaitsPart[]
 /** An app's name or title, lower-cased, to its home scheme's name (from the contraptions table). */
 export type AppOwners = Map<string, string>;
 
+/** Each app's name and title (lower case) to its home scheme's name, for the schemes `canSee` lets the viewer see:
+ * which scheme owns an app is for its people and admins to know (#1068 review), so a hidden scheme claims nothing. */
+export function appOwners(apps: { name: string; title: string; home_scheme: number | null }[], canSee: (id: number) => boolean, nameOf: (id: number) => string | undefined): AppOwners {
+  const owners: AppOwners = new Map();
+  for (const c of apps) {
+    const home = c.home_scheme === null || !canSee(c.home_scheme) ? undefined : nameOf(c.home_scheme);
+    if (home) for (const k of [c.name, c.title]) owners.set(k.toLowerCase(), home);
+  }
+  return owners;
+}
+
 /**
  * Who ran a heavy job, from citadel-heavy's who string: "Citadel #544 (cara)" is Citadel's turn, "peek-auras deploy"
  * an app's deploy build (src/app-services.ts), "TWIReader APK build" its APK (src/apk-build.ts, the app's title) and

@@ -515,6 +515,8 @@ mock.boards('#takes', { boards: [
       const o = chat(c, ovl, 6);
       o.said('Checking CI on main after the last land.');
       o.put('note', { text: 'CI on main fell back to perigee: the desktop runner is offline.', everyone: true });
+      o.put('note', { text: 'Cleaned up 4 worktrees today, 504 MiB freed', detail: 'ticket/1001-a  120 MiB\nticket/1002-b  384 MiB', everyone: true });
+      o.put('note', { text: '📋 Taskmaster updated the Citadel-wide instructions', everyone: true });
       const opts = [{ label: 'Wait for the desktop', recommended: true }, { label: 'Run on perigee' }];
       o.put('question', { id: hex(), everyone: true, questions: [{ question: 'Hold lands until the desktop runner is back?', header: 'CI', multiSelect: false, options: opts }] });
       return `#/p/${c.project.id}`;

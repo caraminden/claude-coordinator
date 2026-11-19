@@ -147,10 +147,11 @@ Inside Citadel's window your pages are shown in a frame beside the app rail, fro
 
 Your host's login cookie, `cc_app`, is `Partitioned` (CHIPS): in Citadel's frame it lives under the
 site Citadel was opened on. When that isn't `citadel.zip` (Citadel opened at its other hostname),
-Chrome sends a request from `<a download>`, with or without `target="_blank"`, and any new tab,
-outside that partition, with no cookie: the gate answers 401 and Chrome shows "File wasn't available
-on site". A navigation of the frame itself keeps the cookie (#986, proven in headless Chrome
-2026-11-18). So a file people save from your server:
+Chrome sends a request from `<a download>`, with or without `target="_blank"`, outside that
+partition, with no cookie: the gate answers 401 and Chrome shows "File wasn't available on site". A
+plain new tab (`target="_blank"`) goes without it too, and falls back to signing in again through
+Citadel's host. A navigation of the frame itself keeps the cookie (#986, each case run in headless
+Chrome 2026-11-18). So a file people save from your server:
 
 - is linked with a plain `<a href="api/desktop.zip">`, no `download`, no `target`, or opened from
   script with `location.href = 'api/desktop.zip'`;

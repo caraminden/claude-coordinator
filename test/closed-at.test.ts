@@ -47,7 +47,7 @@ test('the backfill reads the last close note and leaves a minion with none empty
   note(a.id, 'Strike: "Cara dismissed this minion." was wrong', 9000);
   note(c.id, 'Claude closed this ticket: done', 7000);
   // Reopened as a release at version 77 runs the backfill at startup.
-  store.setSetting('schema_version', 77);
+  store.setSetting('schema_version', 78);
   store.db.close();
   const again = new Store(join(root, 'backfill.db'));
   const at = (id: number) => again.getTicket(id)!.closed_at;

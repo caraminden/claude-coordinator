@@ -240,6 +240,12 @@ above until it passes. The critic's `ui-screenshots` rubric fails both (`citadel
     One `<header class="cui-topbar">`, first in the page and one row, with no top padding, border or
     `env()` insets of your own: in Citadel's installed app it becomes the title bar, beside Citadel's
     ‹ › ×. [references/base-parts.md](references/base-parts.md#top-bar).
+25. **A download loads in the frame.** #986, 2026-11-18 (Peek Auras' desktop.zip). Link a file of
+    your own server's with a plain `<a href>`, no `download` and no `target`, or set `location.href`
+    from script, and answer it with `Content-Disposition: attachment; filename="…"`. Chrome sends a
+    `download`-attribute request or a new tab without your login cookie, so it gets a 401 ("File
+    wasn't available on site"); a load in the frame keeps it and streams any size. `<a download>` is
+    only for a `blob:` URL your page made. [references/api.md](references/api.md#downloads).
 
 A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
 finding (`citadel:self-review`, "UI findings").

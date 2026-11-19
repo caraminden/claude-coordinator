@@ -143,6 +143,24 @@ Inside Citadel's window your pages are shown in a frame beside the app rail, fro
 (Citadel and your page talk by postMessage, which rail.js does); installed, they're their own app
 (references/installing.md).
 
+### Downloads
+
+Your host's login cookie, `cc_app`, is `Partitioned` (CHIPS): in Citadel's frame it lives under the
+site Citadel was opened on. When that isn't `citadel.zip` (Citadel opened at its other hostname),
+Chrome sends a request from `<a download>`, with or without `target="_blank"`, and any new tab,
+outside that partition, with no cookie: the gate answers 401 and Chrome shows "File wasn't available
+on site". A navigation of the frame itself keeps the cookie (#986, proven in headless Chrome
+2026-11-18). So a file people save from your server:
+
+- is linked with a plain `<a href="api/desktop.zip">`, no `download`, no `target`, or opened from
+  script with `location.href = 'api/desktop.zip'`;
+- is answered with `Content-Disposition: attachment; filename="desktop.zip"`, which names the file and
+  keeps your page in place (a type the browser can't show, like a zip, downloads without it too);
+- streams from your server at any size: nothing is held in the page's memory, unlike fetch → Blob.
+
+An error answer to such a link replaces your page in the frame, so link files that exist. `<a
+download>` stays right for a `blob:` or `data:` URL your page built itself, which no request carries.
+
 ## The identity header
 
 ```
@@ -914,6 +932,10 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 ## What changed since 2026-11-02
 
 Newest first.
+
+- **2026-11-18:** Downloads from your server load in the frame: a plain `<a href>` with no
+  `download` or `target`, answered with `Content-Disposition: attachment`. `<a download>` into your
+  host fails in Chrome when Citadel is opened at its other hostname ("Downloads", contraption-ui rule 25).
 
 - **2026-11-16:** Jobs on a person's machine, usually for its GPU: `POST /api/contraptions/jobs`, `GET` and `stop` on one, with the owner's go card in your home scheme's Taskmaster chat and results in `DATA_DIR/jobs/<id>/` ("Jobs on a person's machine").
 - **2026-11-16:** `$CITADEL_HEAVY <command>` runs a heavy step of your service or timers in a shared

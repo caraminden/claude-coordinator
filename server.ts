@@ -85,11 +85,11 @@ import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
 import { HostJobs } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
-import { dispatch, OldApk, OtherKey, publish } from './src/apk-release.ts';
+import { dispatch, OldApk, OtherKey, pointBranch, publish } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
-import { TargetFinder } from './src/release-targets.ts';
+import { TargetFinder, type Found } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
@@ -685,7 +685,39 @@ const apkReader = new ApkReader({
       return null;
     }
   },
+  // A CI-signed APK's roll back (ADR 0012): its release run on citadel/rollback signs last green, published once signed.
+  pinned: (id, t) => lastGreen.pinned(id, t),
+  rolledBack: (t, run, current, code) => {
+    const pin = lastGreen.pinned(t.projectId, t.id);
+    void publishRun(t, run, current, { code, name: null }, pin?.by ?? 'a roll back', null).then(
+      () => void releases.refresh(),
+      (err) => pin && rollback.failed(t.projectId, t.id, pin.sha, `publishing its signed run ${run.id} failed: ${err?.message ?? err}`),
+    );
+  },
+  rollbackFailed: (t, why) => {
+    const pin = lastGreen.pinned(t.projectId, t.id);
+    if (pin) rollback.failed(t.projectId, t.id, pin.sha, why);
+  },
 });
+/**
+ * Publish release run `run`'s signed APK into `t`'s feed (src/apk-release.ts): the CI store's copy when it has one,
+ * recorded (#663) and told to the scheme's Taskmaster. Throws publish()'s refusals (OldApk, OtherKey). Returns the code.
+ */
+async function publishRun(t: Found, run: Run, current: number, main: { code: number; name: string | null }, by: string, uid: number | null): Promise<number> {
+  const p = store.getProject(t.projectId);
+  const slug = p && repoSlug(p.repo_url);
+  if (!p?.repo_dir || !slug || !t.contraption) throw new Error(`${t.name} has no repo or app to publish into`);
+  const feedFile = join(services.opts.home, '.local/share', t.contraption, 'android', 'latest.json');
+  // The signed APK the run put in the CI store (#658), when it did; else its GitHub artifact.
+  const stored = ciStore.releaseApk(p.id, run.id);
+  const code = await publish({ slug, runId: run.id, feedFile, current, main, as: githubOf(p.repo_dir), stored: (stored && (await ciStore.plain(stored))) ?? undefined });
+  if (stored) store.publishCiFile(stored.id, `${t.contraption}/android`);
+  // Who published what (#663): kept, and told to the scheme's Taskmaster.
+  store.recordApkPublish({ projectId: p.id, contraption: t.contraption, versionCode: code, runId: run.id, by, uid });
+  const who = uid != null && by.startsWith('#') ? `${by} (for ${store.getUser(uid)?.name ?? 'someone'})` : by;
+  tellHome(p.id, `${who} published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${run.id}${run.head_branch === ROLLBACK_BRANCH ? ` (last green, rolled back on ${ROLLBACK_BRANCH})` : ''}.`);
+  return code;
+}
 // Each minion's PR as the PR watcher last saw it, for Main's next release (#627).
 const prs = new Map<number, PrSnapshot>();
 const prDeps = {
@@ -735,7 +767,7 @@ const rollback = new Rollback({
     const t = tv.target.kind === 'apk' ? targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id) : null;
     return t?.contraption && !t.workflow ? `app:${t.contraption}` : null;
   },
-  running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollingBack(tv.current?.version ?? null) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
+  running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollingBack(tv.current?.version ?? null) : tv.target.kind === 'apk' ? apkReader.rollingBack(tv.target.projectId, tv.target.id) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
   starters: {
     contraption: (tv, to, by, uid) => {
       const row = store.getContraption(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '');
@@ -753,6 +785,27 @@ const rollback = new Rollback({
       const build = ciPackageReader.greenBuild(tv.target.projectId, tv.target.id);
       if (!build) throw new HttpError(409, `${tv.target.name} has no build from last green or before it in Citadel's CI store, so there's nothing to hand out.`);
       return { build };
+    },
+    // A CI-signed APK (ADR 0012, Q4 "Yes, now"): point citadel/rollback at last green and start its release workflow
+    // there numbered one past the published build; the APK reader publishes the run once it has signed.
+    apk: async (tv, to) => {
+      const t = targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id);
+      const p = store.getProject(tv.target.projectId);
+      const slug = p && repoSlug(p.repo_url);
+      const cur = tv.current?.number;
+      if (!t?.workflow || !t.contraption || !p?.repo_dir || !slug || !Number.isInteger(cur)) throw new HttpError(409, `${tv.target.name} has no release workflow, published build or GitHub repo to roll back with`);
+      const as = githubOf(p.repo_dir);
+      const code = cur! + 1;
+      await pointBranch(slug, ROLLBACK_BRANCH, to, as);
+      try {
+        await dispatch(slug, t.workflow.replace(/^.*\//, ''), ROLLBACK_BRANCH, as, { version_code: String(code) });
+      } catch (err: any) {
+        if (/Unexpected inputs/i.test(`${err?.stderr ?? ''}${err?.message ?? ''}`)) throw new HttpError(409, `Last green's ${t.workflow.replace(/^.*\//, '')} doesn't take a version_code input yet, so it can't sign last green as build ${code}: its scheme adds the input (ADR 0012), and once that's on last green this button works.`);
+        throw err;
+      }
+      apkReader.started(t);
+      void releases.refresh();
+      return { code };
     },
     // Citadel's server (the every-scheme skill's §1: only the scheme whose repo this server runs has it): deploy.sh
     // --to in a unit of its own, as a landing runs, since its restart ends this server. The next one reads how it went.
@@ -826,17 +879,9 @@ const autoDeploy = new AutoDeploy({
         let said = started;
         if (w.step === 'dispatch') await release();
         else {
-          const feedFile = join(services.opts.home, '.local/share', t.contraption, 'android', 'latest.json');
           try {
-            // The signed APK the run put in the CI store (#658), when it did; else its GitHub artifact.
-            const stored = ciStore.releaseApk(p.id, w.run.id);
-            const code = await publish({ slug, runId: w.run.id, feedFile, current: w.current, main: w.main, as, stored: (stored && (await ciStore.plain(stored))) ?? undefined });
-            if (stored) store.publishCiFile(stored.id, `${t.contraption}/android`);
-            // Who published what (#663): kept, and told to the scheme's Taskmaster.
-            store.recordApkPublish({ projectId: p.id, contraption: t.contraption, versionCode: code, runId: w.run.id, by, uid });
-            const who = uid != null && by.startsWith('#') ? `${by} (for ${store.getUser(uid)?.name ?? 'someone'})` : by;
+            const code = await publishRun(t, w.run, w.current, w.main, by, uid);
             said = `Published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${w.run.id}: installed phones see the update now.`;
-            tellHome(p.id, `${who} published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${w.run.id}.`);
           } catch (err) {
             // A key the published APK wasn't signed with: refused, with nothing changed.
             if (err instanceof OtherKey) throw new HttpError(409, err.message);

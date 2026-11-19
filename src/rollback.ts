@@ -22,7 +22,9 @@ export interface RollbackInfo {
 
 /** One kind's roll back: start a deploy of `sha` (an older commit of its branch), or answer the existing build it holds
  * at (a CI package's). Throws what it refused with. */
-export type Starter = (t: Omit<TargetView, 'testCopies'>, sha: string, by: string, uid: number | null) => void | Pick<Pin, 'build'> | Promise<void | Pick<Pin, 'build'>>;
+export type Starter = (t: Omit<TargetView, 'testCopies'>, sha: string, by: string, uid: number | null) => void | Held | Promise<void | Held>;
+/** What a starter adds to the pin: the existing build it holds at, or the versionCode of the build it started. */
+type Held = Pick<Pin, 'build' | 'code'>;
 
 export interface RollbackDeps {
   lastGreen: LastGreen;
@@ -100,7 +102,7 @@ export class Rollback {
     if (!green || !dir) return null;
     const key = keyOf(projectId, id);
     const running = this.starting.has(key) || this.d.running(tv);
-    const current = tv.current?.version;
+    const current = tv.current?.commit ?? tv.current?.version;
     // Something else deployed over it (a land's deploy of the fix, a person's Deploy): the pin is over.
     let pin = this.d.lastGreen.pinned(projectId, id);
     if (pin && !running && current && current !== (pin.build?.sha ?? pin.sha) && current !== pin.from) {
@@ -123,7 +125,7 @@ export class Rollback {
     const key = keyOf(projectId, id);
     if (this.starting.has(key) || this.d.running(tv)) throw new HttpError(409, `${name} is deploying already: roll back once that has ended.`);
     const dir = this.d.repoDir(projectId);
-    const from = tv.current?.version ?? '';
+    const from = tv.current?.commit ?? tv.current?.version ?? '';
     if (!dir || !/^[0-9a-f]{40}$/.test(from) || (await this.contains(dir, green.sha, from)) !== true || from === green.sha) {
       throw new HttpError(409, `${name} runs ${from.slice(0, 7) || 'nothing Citadel can name'}, which isn't newer than last green ${green.sha.slice(0, 7)}: nothing to roll back.`);
     }
@@ -133,7 +135,7 @@ export class Rollback {
     this.starting.add(key);
     try {
       const held = await start(tv, green.sha, by, uid);
-      if (held?.build) this.d.lastGreen.pin(projectId, id, { sha: green.sha, from, by, build: held.build });
+      if (held?.build || held?.code) this.d.lastGreen.pin(projectId, id, { sha: green.sha, from, by, ...held });
     } catch (err) {
       if (had) this.d.lastGreen.pin(projectId, id, had);
       else this.d.lastGreen.unpin(projectId, id);
@@ -148,6 +150,7 @@ export class Rollback {
     }
     const holds = kind === CITADEL_TARGET
       ? `Until a fix deploys, tools/land.sh refuses lands that touch none of the files ${from.slice(0, 9)} changed; land the fix with LAND_FIX=1 (the land tool's fix: true) if it touches none of them either.`
+      : kind === 'apk' ? `Its release workflow signs last green on the citadel/rollback branch as build ${this.d.lastGreen.pinned(projectId, id)?.code ?? '?'}, and Citadel publishes it once signed, so phones see it as an update. It stays there until main has a newer commit that passes the full suite; main's versionCode then needs a bump past it.`
       : kind === 'ci' ? `Its card shows last green's build as current and Citadel's CI store lists it as pinned (GET /api/projects/${projectId}/ci-files/pins), so an app whose updater reads the pins hands it out. It stays there until main has a newer commit that passes the full suite. Land the fix for what broke.`
       : `It stays there until main has a newer commit that passes the full suite (then auto-deploy ships it), or a person presses Deploy on its card; a minion's or Taskmaster's deploy of it is refused meanwhile. Land the fix for what broke.`;
     const also = of === tv ? '' : ` (from its ${of.target.name} card: its APK build follows the app, numbered one past the published one)`;

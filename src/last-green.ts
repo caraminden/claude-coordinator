@@ -32,6 +32,8 @@ export interface Pin {
   /** A CI package held at last green's existing build (ADR 0012, "Feed, no rebuild"): its run, the commit it built,
    * and its workflow file. Its card shows it as current and apps read it from the CI store's pins. */
   build?: { run: number; sha: string; workflow: string };
+  /** A CI-signed APK signed again at last green (ADR 0012, "Yes, now"): the versionCode its release run was given. */
+  code?: number;
 }
 
 const PASSED = new Set(['success', 'skipped', 'neutral']);

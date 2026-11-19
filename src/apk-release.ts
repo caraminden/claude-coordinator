@@ -48,9 +48,21 @@ export async function signers(apk: string): Promise<string[]> {
   }
 }
 
-/** Start a workflow_dispatch workflow (`file`, its name in .github/workflows) on `ref`. */
-export async function dispatch(slug: string, file: string, ref: string, as: GithubEnv) {
-  await run('gh', ['api', '-X', 'POST', `repos/${slug}/actions/workflows/${encodeURIComponent(file)}/dispatches`, '-f', `ref=${ref}`], { env: asEnv(as), timeout: 30_000 });
+/** Start a workflow_dispatch workflow (`file`, its name in .github/workflows) on `ref`, with `inputs` (ADR 0012's version_code). */
+export async function dispatch(slug: string, file: string, ref: string, as: GithubEnv, inputs: Record<string, string> = {}) {
+  const fields = Object.entries(inputs).flatMap(([k, v]) => ['-f', `inputs[${k}]=${v}`]);
+  await run('gh', ['api', '-X', 'POST', `repos/${slug}/actions/workflows/${encodeURIComponent(file)}/dispatches`, '-f', `ref=${ref}`, ...fields], { env: asEnv(as), timeout: 30_000 });
+}
+
+/** Point branch `branch` on GitHub at commit `sha`, making it when it isn't there: a branch Citadel owns (ADR 0012's citadel/rollback). */
+export async function pointBranch(slug: string, branch: string, sha: string, as: GithubEnv) {
+  const o = { env: asEnv(as), timeout: 30_000 };
+  try {
+    await run('gh', ['api', '-X', 'PATCH', `repos/${slug}/git/refs/heads/${branch}`, '-f', `sha=${sha}`, '-F', 'force=true'], o);
+  } catch (err: any) {
+    if (!/Reference does not exist|Not Found|HTTP 404|HTTP 422/.test(`${err?.stderr ?? ''}${err?.message ?? ''}`)) throw err;
+    await run('gh', ['api', '-X', 'POST', `repos/${slug}/git/refs`, '-f', `ref=refs/heads/${branch}`, '-f', `sha=${sha}`], o);
+  }
 }
 
 /** A signed APK's file name ("mandate-7.apk") as its versionCode, or null when it doesn't carry one. */

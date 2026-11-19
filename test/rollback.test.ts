@@ -149,3 +149,33 @@ test("a CI package's roll back holds it at last green's existing build: the pin 
   assert.match(told[0], /ci-files\/pins/);
   assert.equal(rb.info(tv(X))?.pin?.build?.run, 41, 'its card shows the held build: the pin stays');
 });
+
+test("a CI-signed APK's roll back compares the commit its build was made from, and pins the versionCode it signs", async () => {
+  const store = new Store(join(root, `t-${++dbs}.db`));
+  const lastGreen = new LastGreen(store, contains);
+  const told: string[] = [];
+  let signing = true;
+  const rb = new Rollback({
+    lastGreen, repoDir: () => '/repo', contains, starters: { apk: (t) => ({ code: t.current!.number! + 1 }) },
+    running: () => signing, tell: (_p, text) => told.push(text), changed: () => {},
+    get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+  });
+  store.setSetting('last-green:3', { sha: A, at: 1 });
+  // A version name is no commit: the commit the published build came from is what's compared.
+  const tv = (commit: string, number: number): Omit<TargetView, 'testCopies'> => ({
+    target: { id: 'apk:android-release', projectId: 3, name: 'Android', kind: 'apk', link: null },
+    current: { version: '1.4', commit, number, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} }, next: null, line: [], recent: [],
+  });
+  signing = false;
+  assert.equal(rb.info(tv(B, 5))?.can, false, 'git has not answered yet');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(rb.info(tv(B, 5))?.can, true);
+  assert.equal(await rb.rollBack(tv(B, 5), 'Cara', 1), A);
+  assert.deepEqual([lastGreen.pinned(3, 'apk:android-release')?.code, lastGreen.pinned(3, 'apk:android-release')?.from], [6, B]);
+  assert.match(told[0], /citadel\/rollback branch as build 6/);
+  signing = true;
+  assert.ok(rb.info(tv(B, 5))?.pin, 'held while it signs');
+  signing = false;
+  assert.ok(rb.info(tv(A, 6))?.pin, 'published: last green is current, the pin stays');
+  assert.equal(rb.info(tv(X, 7))?.pin, null, 'another build went out over it: the pin is over');
+});

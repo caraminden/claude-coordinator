@@ -658,7 +658,16 @@ interface Feed {
 export interface ApkDeps extends ActionsDeps {
   /** The contraption's latest.json, or null when it has none. */
   feed: (contraption: string) => Promise<Feed | null>;
+  /** A target's roll back pin (src/last-green.ts): one with a `code` has a release run signing last green (ADR 0012). */
+  pinned?: (projectId: number, target: string) => Pin | null;
+  /** That run signed an APK: publish it (as `current`'s next, `code`). Called once per run. */
+  rolledBack?: (t: Found, run: Run, current: number, code: number) => void;
+  /** That run failed: the roll back didn't go out. */
+  rollbackFailed?: (t: Found, why: string) => void;
 }
+
+/** The branch a CI-signed APK's roll back signs last green on: Citadel's own, pointed at the commit each time (ADR 0012). */
+export const ROLLBACK_BRANCH = 'citadel/rollback';
 
 /** The versionCode and versionName in an app/build.gradle's text. */
 export function gradleVersion(text: string): { code: number; name: string | null } | null {
@@ -683,6 +692,12 @@ export class ApkReader implements Reader {
   private sent = new Map<string, number>();
   /** What is on main since the published APK's commit and touches the app's folder (#764), by target. */
   private ahead = new Map<string, Landed | null>();
+  /** The commit the published APK was built from, by target. */
+  private builtAt = new Map<string, string>();
+  /** Roll back runs already handed on (published or failed), by run id. */
+  private handled = new Set<number>();
+  /** A target's runs on the roll back branch, as a target of their own in the runs cache. */
+  private rb = (t: Found): Found => ({ ...t, id: `${t.id}#rollback`, branch: ROLLBACK_BRANCH });
   constructor(d: ApkDeps) {
     this.d = d;
     this.cache = new RunsCache(d);
@@ -698,8 +713,27 @@ export class ApkReader implements Reader {
       // The published APK's commit: the run Citadel published it from, else (a hand publish) the newest signed run from before
       // latest.json was written.
       const runs = this.cache.runs.get(tkey(t)) ?? [];
+      // Held by a roll back that signs last green again (ADR 0012): its run on the roll back branch, read while pinned.
+      const pin = this.d.pinned?.(t.projectId, t.id);
+      if (pin?.code && t.workflow) {
+        // Read every refresh until it is published: GitHub can take a while to list a dispatched run.
+        if (feed && feed.versionCode < pin.code) this.cache.forget(this.rb(t));
+        await this.cache.read(this.rb(t));
+      }
+      const back = pin?.code ? (this.cache.runs.get(tkey(this.rb(t))) ?? []) : [];
       const pub = feed && t.contraption ? this.d.store.lastApkPublish(t.projectId, t.contraption) : null;
-      const built = !feed ? null : (pub?.version_code === feed.versionCode ? runs.find((r) => r.run.id === pub.run_id) : null) ?? runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at);
+      const built = !feed ? null : (pub?.version_code === feed.versionCode ? [...runs, ...back].find((r) => r.run.id === pub.run_id) : null) ?? runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at);
+      if (built) this.builtAt.set(tkey(t), built.run.head_sha);
+      else this.builtAt.delete(tkey(t));
+      if (pin?.code && feed) {
+        // The newest run of last green there since the press: published once signed, or the roll back ends if it failed.
+        const r = this.backRun(t, pin);
+        if (r && r.run.status === 'completed' && !this.handled.has(r.run.id) && feed.versionCode < pin.code) {
+          this.handled.add(r.run.id);
+          if (shipped(r)) this.d.rolledBack?.(t, r.run, feed.versionCode, pin.code);
+          else this.d.rollbackFailed?.(t, `its release run on ${ROLLBACK_BRANCH} ${r.run.conclusion ?? 'ended'}${r.run.html_url ? `: ${r.run.html_url}` : ''}`);
+        }
+      }
       this.ahead.set(tkey(t), appChanges(t, await this.cache.since(t, built?.run.head_sha ?? null)));
       const p = this.d.store.getProject(t.projectId);
       if (!p?.repo_dir) continue;
@@ -727,9 +761,24 @@ export class ApkReader implements Reader {
     return signed ? { step: 'publish', run: signed.run, current: feed.versionCode, main: { code: main.code, name: main.name } } : { step: 'dispatch', head: main.head };
   }
 
+  /** The newest release run of a roll back's commit on the roll back branch since it was pressed (a minute's clock slack). */
+  private backRun(t: Found, pin: Pin): RunJobs | null {
+    return (this.cache.runs.get(tkey(this.rb(t))) ?? []).find((x) => x.run.head_sha === pin.sha && (ms(x.run.created_at) ?? 0) >= pin.at - 60_000) ?? null;
+  }
+
+  /** A roll back's release run is signing or waits to be published (ADR 0012). */
+  rollingBack(projectId: number, target: string): boolean {
+    const t = this.d.finder.list('apk').find((f) => f.projectId === projectId && f.id === target);
+    const pin = t && this.d.pinned?.(projectId, target);
+    if (!t || !pin?.code) return false;
+    const feed = this.feeds.get(tkey(t));
+    return !!feed && feed.versionCode < pin.code;
+  }
+
   /** A release run was just started for it: read its runs again on the next refresh, and start no other for a while. */
   started(t: Found) {
     this.cache.forget(t);
+    this.cache.forget(this.rb(t));
     this.sent.set(tkey(t), (this.d.now ?? Date.now)());
   }
 
@@ -764,13 +813,26 @@ export class ApkReader implements Reader {
       // Numbered by its versionCode, the counter its app's update banner reads; the versionName stays as the detail.
       const version = main?.code === feed.versionCode && main.name ? main.name : feed.versionName ?? String(feed.versionCode);
       const link = feed.apk && t.contraption ? `/apps/${t.contraption}/android/${feed.apk}` : t.link;
-      const current: Release = { version, number: feed.versionCode, link, changes: [], started: null, live: feed.at, outcome: 'live', stages: {} };
+      const at = this.builtAt.get(tkey(t));
+      const current: Release = { version, number: feed.versionCode, link, changes: [], started: null, live: feed.at, outcome: 'live', stages: {}, ...(at ? { commit: at } : {}) };
       // Its signed runs, as the APKs people could have been given: not releases, so no release number.
       const recent = runs.filter((r) => shipped(r) || failedShip(r)).slice(0, PREVIOUS).map((r) => apkRun(r, shipped(r) ? 'signed' : 'failed', file(r)));
       let lead: Progress | null = null;
       let tryIt: string | null = null;
       const ahead = this.ahead.get(tkey(t));
       const bumped = !!main && main.code > feed.versionCode;
+      const pin = this.d.pinned?.(t.projectId, t.id);
+      if (pin?.code && feed.versionCode < pin.code) {
+        // A roll back signing last green again as build pin.code (ADR 0012).
+        const r = this.backRun(t, pin);
+        if (r && r.run.status !== 'completed') lead = signing(r);
+        else {
+          const text = r && shipped(r) ? `Last green is signed as build ${pin.code}: Citadel publishes it within a minute` : `Last green's release run on ${ROLLBACK_BRANCH} hasn't started yet`;
+          lead = { stage: r && shipped(r) ? 'publish' : 'sign', since: (r && span(r).end) ?? pin.at, usual: null, waitingOn: text, text };
+          if (r && shipped(r)) tryIt = file(r);
+        }
+        return { target: targetOf(t), current, next: nextOf(APK_TRACK, usual, lead, [], pin.code, tryIt), line: [], recent };
+      }
       if (bumped) {
         const signed = runs.find((r) => shipped(r) && !this.old.has(r.run.id) && (ms(r.run.created_at) ?? 0) > feed.at);
         const name = main.name ?? `Release ${main.code}`;

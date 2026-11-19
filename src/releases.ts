@@ -43,6 +43,8 @@ export interface Release {
   outcome: string;
   /** Each stage's length, s. */
   stages: Record<string, number>;
+  /** The commit it was built from when `version` is a version name (a CI-signed APK's): what a roll back compares. */
+  commit?: string;
 }
 
 /** Where a change, or a whole next release, is: its stage, since when, its usual length, and what it waits on. */

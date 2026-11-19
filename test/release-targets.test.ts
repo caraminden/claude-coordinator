@@ -10,7 +10,7 @@ import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
 import type { Pin } from '../src/last-green.ts';
-import { ApkReader, buildWait, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { ApkReader, buildWait, ROLLBACK_BRANCH, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { BEHIND_OLD, CITADEL_TARGET, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
@@ -451,6 +451,65 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   assert.deepEqual(reader.pending(t), { step: 'publish', run: runs[0], current: 5, main: { code: 6, name: '1.5' } });
   reader.tooOld(8);
   assert.deepEqual(reader.pending(t), { step: 'dispatch', head: bumped }, 'a run signed before the bump waits for a new run');
+});
+
+test("a CI-signed APK's roll back (ADR 0012): its run on the roll back branch signs last green, is handed on once to publish, then is the current build", async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Mandate', 'https://github.com/o/mandate');
+  const t: Found = { id: 'apk:android-release', projectId: p.id, name: 'Android', kind: 'apk', link: null, branch: 'main', workflow: '.github/workflows/android-release.yml', contraption: 'mandate' };
+  const now = Date.now(), m = 60_000;
+  const main: Run[] = [run(7, 'completed', 'success', now - 120 * m, now - 112 * m)];
+  const back: Run[] = [];
+  const branches: string[] = [];
+  const actions: Actions = {
+    async workflowRuns(_p, _w, branch) { branches.push(branch); return branch === ROLLBACK_BRANCH ? back : main; },
+    async runJobs() { return []; },
+  };
+  store.recordApkPublish({ projectId: p.id, contraption: 'mandate', versionCode: 5, runId: 7, by: 'Cara', uid: null });
+  let feed = { versionCode: 5, at: now - 100 * m };
+  let pin: Pin | null = null;
+  const handed: [number, number, number][] = [];
+  const failed: string[] = [];
+  const reader = new ApkReader({
+    store, finder: finderOf([t]), actions, now: () => now, feed: async () => feed, pinned: () => pin,
+    rolledBack: (_t, r, current, code) => handed.push([r.id, current, code]), rollbackFailed: (_t, why) => failed.push(why),
+  });
+  await reader.refresh();
+  let [v] = reader.read();
+  assert.equal(v.current?.commit, 'sha7', 'the published build names the commit it was built from');
+  assert.ok(!branches.includes(ROLLBACK_BRANCH), 'the roll back branch is read only while a roll back holds it');
+
+  // Rolled back to last green as build 6: nothing listed yet, then its run signs.
+  pin = { sha: 'shaG', from: 'sha7', by: 'Cara', at: now, code: 6 };
+  await reader.refresh();
+  [v] = reader.read();
+  assert.ok(reader.rollingBack(p.id, t.id));
+  assert.deepEqual([v.next?.number, v.next?.waitingOn], [6, `Last green's release run on ${ROLLBACK_BRANCH} hasn't started yet`]);
+  back.unshift({ ...run(20, 'in_progress', null, now + 1000), head_branch: ROLLBACK_BRANCH, head_sha: 'shaG' });
+  await reader.refresh();
+  [v] = reader.read();
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.number], ['sign', null, 6], 'read again at once, though nothing on main moves');
+  assert.deepEqual(handed, []);
+  back[0] = { ...back[0], status: 'completed', conclusion: 'success', updated_at: iso(now + 9 * m) };
+  await reader.refresh();
+  await reader.refresh();
+  assert.deepEqual(handed, [[20, 5, 6]], 'handed on to publish once, numbered one past the published build');
+
+  // Published: last green is the current build, and nothing waits.
+  store.recordApkPublish({ projectId: p.id, contraption: 'mandate', versionCode: 6, runId: 20, by: 'Cara', uid: null });
+  feed = { versionCode: 6, at: now + 10 * m };
+  await reader.refresh();
+  [v] = reader.read();
+  assert.deepEqual([v.current?.number, v.current?.commit, v.next], [6, 'shaG', null]);
+  assert.ok(!reader.rollingBack(p.id, t.id));
+
+  // A second roll back whose run fails: said once, nothing handed on.
+  pin = { sha: 'shaH', from: 'shaG', by: 'Cara', at: now + 20 * m, code: 7 };
+  back.unshift({ ...run(21, 'completed', 'failure', now + 21 * m, now + 25 * m), head_branch: ROLLBACK_BRANCH, head_sha: 'shaH' });
+  await reader.refresh();
+  await reader.refresh();
+  assert.deepEqual(failed, [`its release run on ${ROLLBACK_BRANCH} failure: https://github.com/o/r/actions/runs/21`]);
+  assert.deepEqual(handed, [[20, 5, 6]]);
 });
 
 test('the APK reader with no latest.json: the newest signed run is the release', async () => {

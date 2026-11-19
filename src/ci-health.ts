@@ -989,6 +989,12 @@ export class CiHealth {
       }
       this.texts.delete(r.id);
     }
+    // A workflow quieted since it went red: its mark goes, with no message (the scheme said the red is expected).
+    for (const w of Object.keys(red)) {
+      const r = newest(w);
+      if (r && !watched(r)) delete red[w];
+    }
+    save();
     // Back to green: the first green run on the branch after the red one (or the red one re-run green), a push's or a PR merge's too.
     for (const [w, was] of Object.entries(red)) {
       const green = [...(onMain.get(Number(w)) ?? []), ...listed.filter((r) => String(r.workflow_id) === w && r.head_branch === branch)]

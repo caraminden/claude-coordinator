@@ -878,6 +878,25 @@ test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on 
   assert.equal(item('ci.open'), null);
 });
 
+test('quieting a workflow after it went red clears its open red on the next poll, with no back-to-green message', async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const told: string[] = [];
+  const health = new CiHealth(w.store, { ...w.outside, tell: (_p: { name: string }, text: string) => (told.push(text), true) });
+  w.store.setProjectSettings(w.peek.id, { ci_quiet: '' });
+  w.gh.mainRuns = [runOf({ id: 9101, event: 'workflow_dispatch', workflow_id: 7, name: 'Desktop', path: '.github/workflows/desktop.yml', head_sha: '9101abcdef', conclusion: 'failure', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  await health.tick(NOW);
+  assert.ok(w.puts.filter(([, key]) => key === 'ci.red:7').at(-1)?.[2], 'open red item');
+  assert.equal(told.length, 1);
+
+  w.store.setProjectSettings(w.peek.id, { ci_quiet: 'desktop.yml' });
+  await health.tick(NOW + 5 * MIN);
+  assert.equal(w.puts.filter(([, key]) => key === 'ci.red:7').at(-1)?.[2], null, 'quieted: the item clears');
+  assert.equal(told.length, 1, 'and says nothing');
+  await health.tick(NOW + 10 * MIN);
+  assert.equal(told.length, 1);
+});
+
 test('orphanRuns: queued land/** runs over an hour old that no landing holds', () => {
   const old = (f: Partial<Run>) => runOf({ status: 'queued', conclusion: null, head_branch: 'land/ticket/550-x', created_at: iso(ORPHAN_MS + MIN), ...f });
   const orphan = old({ id: 1 });

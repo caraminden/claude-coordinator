@@ -156,6 +156,24 @@ export function ago(ms) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+/**
+ * When a minion was dismissed (#1072), in Pacific: "2:14 PM PST" today, "Nov 17" before today; `full` is the date and time for a tooltip.
+ * Null when the time isn't known (dismissed before it was kept, and no close note to read it from).
+ */
+export function dismissedWhen(ms) {
+  if (!ms) return null;
+  const o = { timeZone: 'America/Los_Angeles' };
+  const day = (t) => new Date(t).toLocaleDateString('en-CA', o);
+  const year = (t) => day(t).slice(0, 4);
+  const d = new Date(ms);
+  return {
+    short: day(ms) === day(Date.now())
+      ? d.toLocaleTimeString('en-US', { ...o, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+      : d.toLocaleDateString('en-US', { ...o, month: 'short', day: 'numeric', ...(year(ms) !== year(Date.now()) ? { year: 'numeric' } : {}) }),
+    full: d.toLocaleString('en-US', { ...o, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
+  };
+}
+
 // ---------- files threads show ----------
 
 // What the server will serve from a thread's folders, by extension (mirrors src/artifacts.ts).

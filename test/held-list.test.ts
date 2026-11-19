@@ -15,6 +15,7 @@ testPins();
 const root = mkdtempSync(join(tmpdir(), 'held-list-'));
 after(async () => {
   await stopTurns(root);
+  await until('every session save to end', async () => ![...Array(500).keys()].some((id) => (runner as any).lanes.busy(id)));
   rmSync(root, { recursive: true, force: true });
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');

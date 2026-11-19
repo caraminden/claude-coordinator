@@ -12,6 +12,7 @@ import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { lines } from './approvals.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import { GLOBAL_OWNER } from './properties.ts';
+import { offSkills } from './skills.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
 import { advisedModel, tableText } from '../public/model-table.js';
 import type { QueuedMessage } from './runner.ts';
@@ -161,6 +162,12 @@ export function minionRulesLines(project: Project): string[] {
   if (project.gh_runners === 'ok') lines.push('GitHub\'s own runners (set in its Minion rules): CI on them (CI_RUNNER=github, or a workflow dispatched there) is fine here and needs no one\'s go.');
   else if (project.gh_runners === 'never') lines.push('GitHub\'s own runners (set in its Minion rules): never use them in this scheme, since they cost Actions minutes (no CI_RUNNER=github, no workflow dispatched there); stay on this scheme\'s own runners, and if there are none, say so rather than switching.');
   else if (project.gh_runners === 'ask') lines.push('GitHub\'s own runners (set in its Minion rules): CI on them (CI_RUNNER=github, or a workflow dispatched there) costs Actions minutes, so ask a person first, with a card.');
+  const off = offSkills(project);
+  if (off.length) {
+    // Cara, 2026-11-19 (Build 4's Q10): with the pre-ship review off, every ship waits for a person's go.
+    const review = off.includes('self-review') ? ' With `citadel:self-review` off, nothing labels a change\'s risk, so every ship waits for a person\'s go: ask with a card (kind ship) and ship only on it.' : '';
+    lines.push(`Kit skills turned off in this scheme (on its Skills page): ${off.map((s) => `\`citadel:${s}\``).join(', ')}. They aren't loaded in its turns: skip any step, here or in another skill, that says to open or run one, and don't brief a Grunt to use one.${review}`);
+  }
   return lines;
 }
 

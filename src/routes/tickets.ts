@@ -20,6 +20,7 @@ import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { needsGo } from '../../public/shipping.js';
+import { offSkills } from '../skills.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
@@ -1239,9 +1240,14 @@ export const ticketRoutes: Route[] = [
         : { summary: str(body.summary, 'Summary', 300), risk: oneOf(body.risk, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300) };
       // The scheme's go threshold (#1043, Shipping in Minion rules): from that label up, a change ships only on a person's go.
       // A feeder's merge into its build branch is covered by the build's go card (buildLines in prompts.ts).
-      const goFrom = app.store.getProject(ticket.project_id)?.go_from ?? 'high';
+      const project = app.store.getProject(ticket.project_id);
+      const goFrom = project?.go_from ?? 'high';
       if (body.into === undefined && needsGo(goFrom, h.risk)) {
         if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, unlabelled ? `Not handed off: ${unlabelled}, so this ship waits for a person's go. Ask with a ship card (kind ship), then hand it off again with go naming who gave it and when` : `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first`);
+        h.go = str(body.go, 'Go', 200);
+      } else if (body.into === undefined && project && offSkills(project).includes('self-review')) {
+        // Cara's Q10 (#1062, ADR 0014): with self-review off nothing labels a change's risk, so every ship waits for a person's go.
+        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, "This scheme has turned self-review off, so every change ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first");
         h.go = str(body.go, 'Go', 200);
       }
       if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');

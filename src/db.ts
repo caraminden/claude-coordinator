@@ -119,6 +119,8 @@ export interface Project {
   msg_hold_h: number;
   /** 1 while the members' pass on Minion rules after setup is open (#1046): onboarding done sets it, "Looks right" clears it. */
   rules_review: number;
+  /** Kit skills this scheme turned off on its Skills page (#1062), space-separated folder names under kit/skills ('' = every kit skill on, the default). */
+  skills_off: string;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -293,6 +295,8 @@ export interface Ticket {
   /** Its picks from the scheme's optional plugin folders (#361), one per line; '' for none. */
   plugin_dirs: string;
   last_activity: string | null;
+  /** When it was dismissed (ms), set on dismiss and cleared on reopen (#1072); null while open, and for one dismissed before this was kept whose close note can't be found. */
+  closed_at: number | null;
   /** Whose turn it last ran (users.id; src/access.ts turnPerson): set when a minion is made, then at each turn's start. */
   person_id: number | null;
   /** A Taskmaster's person (#919): users.id of whose own it is; NULL for the Overlord, which before a scheme's split is its only Taskmaster. */
@@ -1283,6 +1287,7 @@ export class StateDb {
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['contraptions', 'static_paths', 'ALTER TABLE contraptions ADD COLUMN static_paths TEXT'],
+  ['tickets', 'closed_at', 'ALTER TABLE tickets ADD COLUMN closed_at INTEGER'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
   // shortcut: tag is retired (#254) and nothing writes it; the column stays so a rollback still boots, drop it in a later release.
@@ -1336,6 +1341,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'go_from', "ALTER TABLE projects ADD COLUMN go_from TEXT NOT NULL DEFAULT 'high'"],
   ['projects', 'try_first', "ALTER TABLE projects ADD COLUMN try_first TEXT NOT NULL DEFAULT 'never'"],
   ['projects', 'rules_review', 'ALTER TABLE projects ADD COLUMN rules_review INTEGER NOT NULL DEFAULT 0'],
+  ['projects', 'skills_off', "ALTER TABLE projects ADD COLUMN skills_off TEXT NOT NULL DEFAULT ''"],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
@@ -1444,7 +1450,9 @@ export const SCHEMA_HISTORY = [
   [75, 'projects.msg_loop_limit, msg_loop_min, msg_cold_min, msg_hold_h (#1059)'],
   [76, 'projects.rules_review (#1046)'],
   [77, 'flake_events (#1063)'],
-  [78, 'review_entries, review_versions; repo rubric files imported once (#1051)'],
+  [78, 'projects.skills_off (#1062)'],
+  [79, 'tickets.closed_at, backfilled from the close notes (#1072)'],
+  [80, 'review_entries, review_versions; repo rubric files imported once (#1051)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1472,6 +1480,12 @@ export function titleWithoutBuild(title: string, build: number): string {
 
 /** How long without an action before the Taskmaster chat shows the recap: AWAY_MS in public/recap.js. */
 export const RECAP_AWAY_MS = 6 * 60 * 60 * 1000;
+
+/** One event of skillTimeline (src/skills.ts): what it called (space-separated), and 0/1 flags. */
+export interface SkillEvent { id: number; ticket_id: number; at: number; skills: string | null; agents: string | null; edit: number; error: number; ship: number; result: number; grunt: number }
+/** A minion in skillTimeline (src/skills.ts): its type property and the id of its newest "Shipped" note in the window (null if none). */
+export interface SkillTicket { id: number; project_id: number; number: number | null; title: string; kind: string; type: string | null; shipped: number | null }
+export interface SkillTimeline { events: SkillEvent[]; tickets: SkillTicket[] }
 
 export class Store {
   db: DatabaseSync;
@@ -1538,6 +1552,7 @@ export class Store {
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.dropEarlyPeekAurasBuilds();
+    this.closedAtFromNotes();
     this.shippingFromRules();
     this.lendingLists();
     this.noteSchemaVersion();
@@ -1594,6 +1609,21 @@ export class Store {
     if ((this.getSetting<number>('schema_version') ?? 0) >= 21) return;
     this.props.backfillOther();
     this.db.prepare(`UPDATE projects SET list_groups = '["area: balance"]' WHERE name = 'Delve' AND list_groups = '[]'`).run();
+  }
+
+  /**
+   * closed_at for minions dismissed before it was kept (#1072): the time of the last note a dismissal wrote
+   * (runner.close's texts). One with no such note stays empty. Once, before 79.
+   */
+  private closedAtFromNotes() {
+    if ((this.getSetting<number>('schema_version') ?? 0) >= 79) return;
+    this.db.exec(`UPDATE tickets SET closed_at = (
+        SELECT max(e.created_at) FROM events e WHERE e.ticket_id = tickets.id AND e.kind = 'note'
+          AND (json_extract(e.data, '$.text') LIKE '% dismissed this minion.'
+            OR json_extract(e.data, '$.text') LIKE 'Claude dismissed this minion%'
+            OR json_extract(e.data, '$.text') LIKE 'Closed: % saw its result'
+            OR json_extract(e.data, '$.text') LIKE 'Claude closed this ticket%'))
+      WHERE status = 'closed' AND closed_at IS NULL`);
   }
 
   /**
@@ -1852,7 +1882,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review' | 'skills_off'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).
@@ -2470,7 +2500,10 @@ export class Store {
     const sets = keys.map((k) => `${k} = ?`).join(', ');
     const values = keys.map((k) => fields[k] ?? null);
     const before = fields.status ? this.getTicket(id)?.status : undefined;
-    this.db.prepare(`UPDATE tickets SET ${sets}, updated_at = ? WHERE id = ?`).run(...values, Date.now(), id);
+    const now = Date.now();
+    // The dismissal's time (#1072): stamped when it goes closed, cleared when it opens again.
+    const closing = fields.status === 'closed' ? (before === 'closed' ? '' : ', closed_at = ?') : fields.status ? ', closed_at = NULL' : '';
+    this.db.prepare(`UPDATE tickets SET ${sets}${closing}, updated_at = ? WHERE id = ?`).run(...values, ...(closing === ', closed_at = ?' ? [now] : []), now, id);
     // Dismissing moves the stage to done, reopening back to in-progress.
     if (before && fields.status) this.props.statusChanged(id, before, fields.status);
   }

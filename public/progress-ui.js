@@ -1,5 +1,5 @@
 // The progress readout under a chat's head: the step line, its meter and the plan's steps. The pure half is progress.js.
-import { h, isCoordinator, statusLabel, view } from './base.js';
+import { dismissedWhen, h, isCoordinator, statusLabel, view } from './base.js';
 import { threadRefs, usage } from './core.js';
 import { rowState, workingBy } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
@@ -220,7 +220,10 @@ export function leftText(est) {
 
 /** A chat's state in words, as its head shows it. */
 export function headState(t) {
-  return (isCoordinator(t) && !workingBy(t) ? statusLabel(t) : rowState(t, usage).label) + (t.queued ? ` · ${t.queued} queued` : '');
+  const label = isCoordinator(t) && !workingBy(t) ? statusLabel(t) : rowState(t, usage).label;
+  // A dismissed minion says when (#1072).
+  const when = label === 'Dismissed' ? dismissedWhen(t.closed_at) : null;
+  return (when ? `Dismissed ${when.short}` : label) + (t.queued ? ` · ${t.queued} queued` : '');
 }
 
 /** Whether the running turn's init event has arrived: until then the per-turn state is still the last turn's. */

@@ -76,7 +76,9 @@ const devCopy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(comman
 const ciFailures = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v ci-failures) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
 // citadel-replay (#836) runs from the pin, its replay.ts and contraption-args.ts beside it: with no arguments, its usage.
 const replay = require('node:child_process').spawnSync('citadel-replay', [], { encoding: 'utf8' });
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, replay: { status: replay.status, stderr: replay.stderr } }));
+// The kit's skills as this turn sees them, read while its folder still exists (#1062).
+const kitSkills = args.includes('--plugin-dir') ? require('node:fs').readdirSync(require('node:path').join(args[args.indexOf('--plugin-dir') + 1], 'skills')) : null;
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, kitSkills, replay: { status: replay.status, stderr: replay.stderr } }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 const initErrors = require('node:fs').existsSync(${JSON.stringify(join(root, 'init-errors'))}) ? JSON.parse(readFileSync(${JSON.stringify(join(root, 'init-errors'))}, 'utf8')) : {};
@@ -177,6 +179,22 @@ test('every turn of every scheme loads its own pinned copy of the kit, and share
     assert.equal(t.settings.autoCompactWindow, 180000);
     assert.equal(t.settings.bashOutputMaxChars, 12000);
   }
+});
+
+test("a scheme's off kit skills (#1062) are left out of its turns' kit copy and denied, for minions and the Taskmaster", async () => {
+  const p = store.createProject(`Skills off ${Math.random()}`, null);
+  store.setProjectSettings(p.id, { skills_off: 'grilling self-review' });
+  for (const kind of ['ticket', 'coordinator'] as const) {
+    const t = await turn(kind, 'connected', {}, undefined, p.id);
+    assert.ok(!t.kitSkills.includes('self-review') && !t.kitSkills.includes('grilling'), `${kind}: pruned`);
+    assert.ok(t.kitSkills.includes('bug-fixing'), `${kind}: the rest stay`);
+    for (const rule of ['Skill(citadel:grilling)', 'Skill(citadel:self-review)']) assert.ok(t.settings.permissions.deny.includes(rule), `${kind}: ${rule}`);
+    assert.match(t.system, /Kit skills turned off in this scheme[^\n]*`citadel:grilling`, `citadel:self-review`[^\n]*every ship waits for a person's go/, kind);
+  }
+  const plain = await turn('ticket', 'connected');
+  assert.ok(plain.kitSkills.includes('self-review'), "another scheme's turn keeps it");
+  assert.ok(!plain.settings.permissions.deny.some((r: string) => r.startsWith('Skill(')));
+  assert.doesNotMatch(plain.system, /Kit skills turned off/);
 });
 
 test("a minion asks before merging through a GitHub MCP server, beside its scheme's approval rules; a Taskmaster doesn't", async () => {

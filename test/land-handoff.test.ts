@@ -498,7 +498,12 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.match((await (await handOff({ ...body, into: 'build/2', deploy: 'no' })).json()).error, /^deploy must be/, "a feeder's merge into its build is covered by the build's go card");
     store.setProjectSettings(project.id, { go_from: 'never' });
     assert.match((await (await handOff({ ...body, risk: 'high', deploy: 'no' })).json()).error, /^deploy must be/, 'with no go needed, a high one gets past the go check to the next one');
-    store.setProjectSettings(project.id, { go_from: 'high' });
+    store.setProjectSettings(project.id, { go_from: 'high', skills_off: 'self-review' });
+    const unreviewed = await handOff(body);
+    assert.equal(unreviewed.status, 400, 'with self-review off nothing labels the risk, so a low change needs a go too (#1062, Q10)');
+    assert.match((await unreviewed.json()).error, /turned self-review off/);
+    assert.match((await (await handOff({ ...body, go: 'Josh, 2026-11-19 10:00 PST', deploy: 'no' })).json()).error, /^deploy must be/, 'a named go gets it past');
+    store.setProjectSettings(project.id, { skills_off: '' });
 
     const full = await handOff({ ...body, into: 'build/2', full: true });
     assert.equal(full.status, 400, "a build minion's take-in of main stays in its turn");

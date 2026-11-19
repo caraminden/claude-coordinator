@@ -35,6 +35,7 @@ import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
 import { mergedAfter, mergedPage } from '../history.ts';
+import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
@@ -705,10 +706,10 @@ export const projectRoutes: Route[] = [
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill, gh_runners, the shot_* settings, ship_path, go_from and try_first; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'rules_review', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'repo_url'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'rules_review', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'repo_url', 'skills_off'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review' | 'skills_off'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -749,6 +750,12 @@ export const projectRoutes: Route[] = [
       if (body.rules_review !== undefined) {
         if (typeof body.rules_review !== 'boolean') throw new HttpError(400, 'rules_review must be true or false');
         settings.rules_review = body.rules_review ? 1 : 0;
+      }
+      // Kit skills turned off on the Skills page (#1062): any member, nothing locked (Josh, 2026-11-19); only skills the kit has.
+      if (body.skills_off !== undefined) {
+        const kit = new Set(listSkills(KIT_DIR, null).filter((i) => i.kind === 'skill').map((i) => i.slug));
+        if (!Array.isArray(body.skills_off) || body.skills_off.some((s: unknown) => typeof s !== 'string' || !kit.has(s))) throw new HttpError(400, 'skills_off must be a list of the kit\'s skill names');
+        settings.skills_off = [...new Set(body.skills_off as string[])].sort().join(' ');
       }
       if (body.try_first !== undefined) settings.try_first = required(body.try_first, values(TRY_FIRST), 'try_first') as Project['try_first'];
       if ((settings.ship_path ?? project.ship_path) === 'pr-person' && settings.go_from !== undefined && settings.go_from !== 'all') {
@@ -843,6 +850,14 @@ export const projectRoutes: Route[] = [
         if (coordinator && (['ship_path', 'go_from', 'try_first'] as const).some((k) => settings[k] !== undefined)) {
           const now = { ...project, ...settings };
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set Shipping to: ${label(SHIP_PATHS, now.ship_path)}; a person's go: ${label(GO_FROM, now.go_from).toLowerCase()}; try it first: ${label(TRY_FIRST, now.try_first).toLowerCase()}. It applies from each minion's next turn and wins over the scheme instructions. If those still describe shipping differently, offer the members a card to bring them in line.` });
+        }
+        if (coordinator && settings.skills_off !== undefined) {
+          const was = new Set(offSkills(project));
+          const now = offSkills({ skills_off: settings.skills_off });
+          const off = now.filter((x) => !was.has(x));
+          const on = [...was].filter((x) => !now.includes(x));
+          const named = (xs: string[]) => xs.map((x) => `citadel:${x}`).join(', ');
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} ${[off.length ? `turned off ${named(off)}` : '', on.length ? `turned back on ${named(on)}` : ''].filter(Boolean).join(' and ')} on the Skills page. It applies from each minion's next turn.` });
         }
         if (coordinator && settings.default_effort !== undefined) {
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });

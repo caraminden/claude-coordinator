@@ -96,6 +96,7 @@ import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder, type Found } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
+import { skillRoutes } from './src/routes/skills.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
 import { writeOffThread } from './src/db-writer.ts';
@@ -1308,7 +1309,7 @@ runner.onStatusTrailer = (id, fields) => {
 };
 // What a minion armed for CI goes out when CI passes, with no turn (#715).
 github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;

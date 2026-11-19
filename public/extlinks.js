@@ -92,7 +92,7 @@ export function setFirefoxOn(on) {
  * per app host, and a browser that blocks third-party cookies never gets the copy; upgrade to a handoff from Citadel.
  */
 export function mirrorFirefox(on) {
-  try { document.cookie = `${KEY}=${on ? 1 : ''}; Path=/; Max-Age=${on ? 31536000 : 0}; SameSite=None; Secure`; } catch {}
+  try { document.cookie = `${KEY}=${on ? 1 : ''}; Path=/; Max-Age=${on ? 2592000 : 0}; SameSite=None; Secure`; } catch {}
 }
 export const mirroredOn = () => {
   try { return firefoxAvailable() && document.cookie.split('; ').includes(`${KEY}=1`); } catch { return false; }

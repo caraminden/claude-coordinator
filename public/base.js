@@ -164,11 +164,12 @@ export function dismissedWhen(ms) {
   if (!ms) return null;
   const o = { timeZone: 'America/Los_Angeles' };
   const day = (t) => new Date(t).toLocaleDateString('en-CA', o);
+  const year = (t) => day(t).slice(0, 4);
   const d = new Date(ms);
   return {
     short: day(ms) === day(Date.now())
       ? d.toLocaleTimeString('en-US', { ...o, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
-      : d.toLocaleDateString('en-US', { ...o, month: 'short', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) }),
+      : d.toLocaleDateString('en-US', { ...o, month: 'short', day: 'numeric', ...(year(ms) !== year(Date.now()) ? { year: 'numeric' } : {}) }),
     full: d.toLocaleString('en-US', { ...o, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
   };
 }

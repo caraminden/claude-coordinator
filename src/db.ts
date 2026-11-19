@@ -1606,10 +1606,6 @@ export class Store {
   }
 
   /**
-   * Peek Auras' Windows Builds 1277-1291 were recorded live when windows.yml passed, before desktop.yml let PCs take them (#1019;
-   * Cara, 2026-11-18: "Remove them"). Once, before 69, and only rows that are exactly those builds.
-   */
-  /**
    * closed_at for minions dismissed before it was kept (#1072): the time of the last note a dismissal wrote
    * (runner.close's texts). One with no such note stays empty. Once, before 79.
    */
@@ -1617,10 +1613,17 @@ export class Store {
     if ((this.getSetting<number>('schema_version') ?? 0) >= 79) return;
     this.db.exec(`UPDATE tickets SET closed_at = (
         SELECT max(e.created_at) FROM events e WHERE e.ticket_id = tickets.id AND e.kind = 'note'
-          AND (e.data LIKE '%dismissed this minion%' OR e.data LIKE '%so it dismissed this minion%' OR e.data LIKE '%Closed: % saw its result%'))
+          AND (json_extract(e.data, '$.text') LIKE '% dismissed this minion.'
+            OR json_extract(e.data, '$.text') LIKE 'Claude dismissed this minion%'
+            OR json_extract(e.data, '$.text') LIKE 'Closed: % saw its result'
+            OR json_extract(e.data, '$.text') LIKE 'Claude closed this ticket%'))
       WHERE status = 'closed' AND closed_at IS NULL`);
   }
 
+  /**
+   * Peek Auras' Windows Builds 1277-1291 were recorded live when windows.yml passed, before desktop.yml let PCs take them (#1019;
+   * Cara, 2026-11-18: "Remove them"). Once, before 69, and only rows that are exactly those builds.
+   */
   private dropEarlyPeekAurasBuilds() {
     if ((this.getSetting<number>('schema_version') ?? 0) >= 69) return;
     this.db.prepare(`DELETE FROM releases WHERE target = 'ci:windows:release' AND outcome = 'live'

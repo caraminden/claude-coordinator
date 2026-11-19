@@ -9,7 +9,8 @@
 //   LAND_REDO                     land.sh -> the copy that starts over after main went back (unset again before any child, like LAND_REBASED).
 //   LAND_FIX                      a person -> land.sh: "this branch fixes the commit whose deploy was rolled back"; the suite a landing runs inherits it.
 //   CITADEL_TEST_PROGRESS(_TO)    citadel-heavy and run-tests.sh -> citadel-node -> its reporter: where a run's counts go.
-export const SCRIPT_ENV = ['DEPLOY_LOCKED', 'DEPLOY_TESTED', 'DEPLOY_TIMES', 'DEPLOY_QUEUE_TICKET', 'CITADEL_HEAVY_HELD', 'LAND_REBASED', 'LAND_REDO', 'LAND_FIX', 'CITADEL_TEST_PROGRESS', 'CITADEL_TEST_PROGRESS_TO'] as const;
+//   CITADEL_TEST_ALWAYS           land.sh's smoke check -> citadel-test: rerun a failed file without the always-tests (#1012).
+export const SCRIPT_ENV = ['DEPLOY_LOCKED', 'DEPLOY_TESTED', 'DEPLOY_TIMES', 'DEPLOY_QUEUE_TICKET', 'CITADEL_HEAVY_HELD', 'LAND_REBASED', 'LAND_REDO', 'LAND_FIX', 'CITADEL_TEST_PROGRESS', 'CITADEL_TEST_PROGRESS_TO', 'CITADEL_TEST_ALWAYS'] as const;
 
 /**
  * `process.env` without the variables the scripts export and without a person's own DEPLOY_*, LAND_* and

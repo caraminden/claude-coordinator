@@ -14,8 +14,9 @@
 //                   found in a changed file. All files together stop within 540 s (inside a 600 s Bash call).
 // Runners, picked per test file: node --test (the package.json test script's launcher and flags kept), vitest,
 // cargo test (one crate's test target, through citadel-heavy when it is on PATH, sharing the worktree's target/
-// so only workspace crates rebuild), pytest (the worktree's .venv when there is one). --cmd overrides the
-// runner with a shell command run in the file's folder ({file} is the file's path there); its output is read with
+// so only workspace crates rebuild), pytest (the worktree's .venv when there is one; a module that resolves into the branch's checkout is skipped, not run),
+// shell tests (tools/*-test.sh: run with bash, the exit status decides). --cmd overrides the
+// runner with a shell command run through sh -c from the scratch tree's root ({file} is the file's absolute path there); its output is read with
 // every parser, and with none matching, its exit status decides for the whole file.
 // Exit: 0 nothing passes on the base, 1 something does, 2 a usage or setup error. Never the full suite.
 import { spawnSync } from 'node:child_process';
@@ -24,7 +25,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export type Runner = 'node' | 'vitest' | 'cargo' | 'pytest' | 'cmd';
+export type Runner = 'node' | 'vitest' | 'cargo' | 'pytest' | 'sh' | 'cmd';
 export type Result = { name: string; ok: boolean | 'skip' };
 type Change = { status: string; path: string; old: string };
 type Entry = { path: string; runner: Runner | null; why?: string; cases: string[] | null; spliced?: boolean };
@@ -32,6 +33,8 @@ type Verdict = { kind: 'flag' | 'red' | 'skipped'; label: string; detail: string
 
 const BUDGET = 540; // seconds for all files together
 const JS_TEST = /(?:\.(?:test|spec)|[-_]test)\.[cm]?[jt]sx?$/;
+const JS_DASH_TEST = /[-_]test\.[cm]?[jt]sx?$/; // also names a helper (self-test.ts): a test file only where the package's test script runs it
+const SH_TEST = /(?:[-_]test|^test[-_].*)\.sh$/;
 const PY_TEST = /(?:^test_.*|_test)\.py$/;
 // A test file by its name in any language (math_test.rb, test_x.lua, FooTest.php), as against a helper or fixture.
 const ANY_TEST = /^tests?[_.-]|[._-](?:tests?|spec)\.\w+$|Tests?\.\w+$/;
@@ -41,12 +44,20 @@ const OTHER_TEST: [RegExp, string][] = [
   [/_test\.go$/, 'Go tests'],
 ];
 
-/** A path that belongs to the tests: a test file, or anything in a test folder (helpers, fixtures). */
-export function isTestPath(p: string): boolean {
+/**
+ * A path that belongs to the tests: a test file, or anything in a test folder (helpers, fixtures). A `-test.ts` name
+ * alone isn't enough (self-test.ts is a helper): the package's test `script` has to run that folder or file, `rel` being
+ * the path from the package's folder.
+ */
+export function isTestPath(p: string, script = '', rel = p): boolean {
   const parts = p.split('/');
   const name = parts.at(-1)!;
   if (parts.slice(0, -1).some((s) => ['test', 'tests', '__tests__', 'spec', 'testdata', 'fixtures'].includes(s))) return true;
-  return JS_TEST.test(name) || PY_TEST.test(name) || /(?:^|\/)tests?\.rs$/.test(p) || /_test\.go$/.test(name) || /Tests?\.cs$/.test(name);
+  if (JS_DASH_TEST.test(name) && !/\.(?:test|spec)\./.test(name)) {
+    const d = dirname(rel);
+    return script.split(/\s+/).some((a) => a === rel || (d !== '.' && (a.replace(/\/$/, '') === d || a.startsWith(d + '/'))));
+  }
+  return SH_TEST.test(name) || JS_TEST.test(name) || PY_TEST.test(name) || /(?:^|\/)tests?\.rs$/.test(p) || /_test\.go$/.test(name) || /Tests?\.cs$/.test(name);
 }
 
 /** Lines of a Rust file from its trailing `#[cfg(test)] mod … {` to the end, or null when its tests aren't that shape. */
@@ -202,6 +213,45 @@ export function nodeCommand(script: string, file: string): string[] {
   return [launcher, '--test', '--test-force-exit', '--test-reporter=tap', ...flags.map((f) => f.replace(/^['"]|['"]$/g, '')), file];
 }
 
+/** The test script of the package.json nearest above a path ('' when none), and the path from that package's folder. */
+function pkgScript(root: string, path: string): string {
+  const dir = nearest(root, path, ['package.json']);
+  if (dir === null) return '';
+  try {
+    return JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8')).scripts?.test ?? '';
+  } catch {
+    return '';
+  }
+}
+function pkgRel(root: string, path: string): string {
+  return relative(nearest(root, path, ['package.json']) ?? '.', path);
+}
+
+/** PYTHONPATH for the base's tree: its folder (and src/), then what the caller had, minus entries inside the branch's checkout. */
+export function pyPath(cwd: string, root: string, inherited: string | undefined, hasSrc: boolean): string {
+  const keep = (inherited ?? '').split(':').filter((e) => e && e !== root && !e.startsWith(root + '/'));
+  return [...(hasSrc ? [join(cwd, 'src')] : []), cwd, ...keep].join(':');
+}
+
+/** Modules whose probe line ("MOD name path") resolves inside the branch's checkout, not the base's tree. */
+export function pyLeaks(out: string, root: string, tree: string): string[] {
+  const inside = (p: string, d: string) => p === d || p.startsWith(d + '/');
+  return out.split('\n').flatMap((l) => {
+    const m = /^MOD (\S+) (\S+)$/.exec(l);
+    return m && inside(m[2], root) && !inside(m[2], tree) ? [m[1]] : [];
+  });
+}
+
+const PY_PROBE = `import sys, os, importlib.util
+for d in sys.argv[1:]:
+    if not os.path.isdir(d): continue
+    for n in os.listdir(d):
+        m = n[:-3] if n.endswith('.py') else n if os.path.isfile(os.path.join(d, n, '__init__.py')) else None
+        if m and m.isidentifier() and not m.startswith('test'):
+            s = importlib.util.find_spec(m)
+            print('MOD', m, getattr(s, 'origin', None) or '-')
+`;
+
 function plan(root: string, base: string, changes: Change[], cmd: string | null): { entries: Entry[]; writes: Map<string, string> } {
   const entries: Entry[] = [];
   const writes = new Map<string, string>();
@@ -211,7 +261,7 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
     const baseText = c.status === 'A' ? null : show(root, base, c.old);
     const lang = langOf(c.path);
     // A Rust source file holding its own tests: only its test module comes from HEAD.
-    if (!isTestPath(c.path) && c.path.endsWith('.rs') && /^#\[cfg\(test\)\]/m.test(head)) {
+    if (!isTestPath(c.path, pkgScript(root, c.path), pkgRel(root, c.path)) && c.path.endsWith('.rs') && /^#\[cfg\(test\)\]/m.test(head)) {
       const h = rustTestTail(head);
       const headTail = h === null ? null : head.split('\n').slice(h).join('\n');
       const b = baseText === null ? null : rustTestTail(baseText);
@@ -230,13 +280,13 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
       entries.push({ path: c.path, runner: cmd ? 'cmd' : 'cargo', cases: changedCases(baseText, head, 'rs'), spliced: true });
       continue;
     }
-    if (!isTestPath(c.path)) continue;
+    if (!isTestPath(c.path, pkgScript(root, c.path), pkgRel(root, c.path))) continue;
     writes.set(c.path, head);
     const name = basename(c.path);
     const other = OTHER_TEST.find(([re]) => re.test(name));
     let runner: Runner | null = null;
     let why: string | undefined;
-    if (cmd && (JS_TEST.test(name) || PY_TEST.test(name) || c.path.endsWith('.rs') || other || ANY_TEST.test(name))) runner = 'cmd';
+    if (cmd && (JS_TEST.test(name) || PY_TEST.test(name) || SH_TEST.test(name) || c.path.endsWith('.rs') || other || ANY_TEST.test(name))) runner = 'cmd';
     else if (JS_TEST.test(name)) {
       const dir = nearest(root, c.path, ['package.json']);
       const script: string = dir === null ? '' : (JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8')).scripts?.test ?? '');
@@ -245,6 +295,7 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
     } else if (PY_TEST.test(name)) runner = 'pytest';
     else if (c.path.endsWith('.rs') && (/(?:^|\/)tests\/[^/]+\.rs$/.test(c.path) || /(?:^|\/)tests\/[^/]+\/main\.rs$/.test(c.path) || /(?:^|\/)src\/.*tests?\.rs$/.test(c.path))) runner = 'cargo';
     else if (other) why = `${other[1]} are not supported yet: run it on the base by hand`;
+    else if (SH_TEST.test(name)) runner = 'sh';
     else if (ANY_TEST.test(name)) why = 'no runner for this kind of test file: run it on the base by hand';
     else continue; // a helper or fixture: copied in, run through the tests that use it
     entries.push({ path: c.path, runner, why, cases: lang && runner ? changedCases(baseText, head, lang) : null });
@@ -366,9 +417,8 @@ function runOne(root: string, tree: string, e: Entry, cmd: string | null, limit:
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.NODE_TEST_CONTEXT; // set inside a node --test run, it makes a nested node --test talk to a parent that isn't there
   if (e.runner === 'cmd') {
-    const dir = dirname(e.path);
-    cwd = join(tree, dir);
-    argv = ['sh', '-c', cmd!.replaceAll('{file}', `'${basename(e.path).replace(/'/g, `'\\''`)}'`)];
+    // From the tree's root, so a `cd app && …` works; {file} is absolute, so it still points at the file after that cd.
+    argv = ['sh', '-c', cmd!.replaceAll('{file}', `'${join(tree, e.path).replace(/'/g, `'\\''`)}'`)];
   } else if (e.runner === 'node' || e.runner === 'vitest') {
     const dir = nearest(root, e.path, ['package.json']) ?? '.';
     cwd = join(tree, dir);
@@ -394,9 +444,15 @@ function runOne(root: string, tree: string, e: Entry, cmd: string | null, limit:
     const dir = nearest(root, e.path, ['pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini']) ?? '.';
     cwd = join(tree, dir);
     const venv = [join(root, dir, '.venv/bin/python'), join(root, '.venv/bin/python')].find(existsSync);
-    env.PYTHONPATH = [cwd, process.env.PYTHONPATH].filter(Boolean).join(':');
+    env.PYTHONPATH = pyPath(cwd, root, process.env.PYTHONPATH, existsSync(join(cwd, 'src')));
     argv = [venv ?? 'python3', '-m', 'pytest', '-rA', '-q', '-p', 'no:cacheprovider', relative(dir, e.path)];
     if (spawnSync(argv[0], ['-c', 'import pytest'], { cwd }).status !== 0) return `pytest isn't installed for ${argv[0]}`;
+    // A shared venv can hold the branch's own package (an editable install): then the run would test the branch, not the base.
+    const probe = spawnSync(argv[0], ['-c', PY_PROBE, cwd, join(cwd, 'src')], { cwd, env, encoding: 'utf8' });
+    const leaks = pyLeaks(probe.stdout ?? '', root, tree);
+    if (leaks.length) return `python imports ${leaks.join(', ')} from the branch's checkout (a shared venv), not the base: run it on the base by hand`;
+  } else if (e.runner === 'sh') {
+    argv = ['bash', e.path];
   } else {
     const cargo = onPath('cargo') ?? [join(homedir(), '.cargo/bin/cargo')].find(existsSync);
     if (!cargo) return "cargo isn't installed here";
@@ -411,7 +467,7 @@ function runOne(root: string, tree: string, e: Entry, cmd: string | null, limit:
   if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') return `${argv[0]} isn't installed here`;
   const timedOut = (r.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
   const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
-  const parsed = e.runner !== 'cmd' || parseResults(out).length > 0;
+  const parsed = (e.runner !== 'cmd' && e.runner !== 'sh') || parseResults(out).length > 0;
   return { status: r.status, out, timedOut, parsed, shown: argv.map((a) => (a.startsWith(root) ? relative(root, a) || '.' : a)).join(' ') };
 }
 

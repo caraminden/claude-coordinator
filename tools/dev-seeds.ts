@@ -541,6 +541,23 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}`;
     },
   },
+  'relay-tracking': {
+    about: 'the Taskmaster chat after one minion queued the same relay to 8 minions, one call each (#1001): 8 queued "for your tracking" rows then 8 went-out rows, to see them collapse into groups',
+    seed(c) {
+      const tm = taskmaster(c);
+      const sender = minion(c, 'Peek Auras relay');
+      const to = Array.from({ length: 8 }, (_, i) => minion(c, `Receiver ${i + 1}`));
+      const w = chat(c, tm, 4);
+      w.asked('Did the relay go to every feeder?');
+      const who = `#${sender.number} ${sender.title}`;
+      const note = (text: string) => w.put('user_message', { author: who, mail: true, text: `(for your tracking; nothing to do) ${text}` });
+      for (const m of to) note(`#${sender.number} will send this to #${m.number} once 9cef328 is live: From #${sender.number}: the new aura route is live; rebase before you touch it.`);
+      w.said('Those are queued.');
+      for (const m of to) note(`#${sender.number}'s relay to #${m.number} went out`);
+      note(`#${sender.number} cancelled its relay to #${to[0].number}.`);
+      return `#/p/${c.project.id}`;
+    },
+  },
   'side-thread': {
     about: 'a minion mid-turn with side threads (#932): yours answered with a follow-up, and Josh\'s still looking; and an idle minion whose Ask on the side shows the cold cost first',
     seed(c) {

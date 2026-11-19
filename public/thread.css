@@ -157,6 +157,9 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
 .msg.ask > .msg { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; padding: 0.6rem 0.85rem; }
 /* Copies of minion-to-minion messages in the Taskmaster's chat, one collapsed row per run (thread.js addMinionCopy). */
 .mcopies > .mc-list { padding: 0 0.85rem 0.6rem; display: grid; gap: 0.3rem; font-size: 0.9em; }
+/* A group of tracking notes (#1001): each note is its own collapsed row inside, clipped to the column. */
+.mcopies.tracked > .mc-list { grid-template-columns: minmax(0, 1fr); padding: 0 0.5rem 0.6rem; }
+.mcopies.tracked > .mc-list > .msg { min-width: 0; margin: 0; }
 .mcopies .mc-row { display: flex; gap: 0.5rem; align-items: baseline; }
 .mcopies .mc-who { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
 .mcopies .mc-text { min-width: 0; overflow-wrap: anywhere; }

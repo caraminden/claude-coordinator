@@ -898,6 +898,55 @@ test('a deploy refuses a folder with local changes, another origin, a missing br
   }
 });
 
+// #1016: Roll back to last green deploys an older commit of the branch through the same two slots and health check,
+// and refuses one off the branch, or past a change to a path its manifest lists under migrations.
+test('a roll back deploys an older commit of its branch, but not one off it or past its migrations', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const first = r.push({ 'citadel-app.json': appManifest([], { migrations: ['db/'] }) });
+    services.deploy(c, 'Cara', [], undefined, { to: first });
+    assert.match((await done(name)).said.join('\n'), /has never been deployed, so there is nothing to roll back/);
+    services.deploy(c, 'Cara');
+    assert.equal((await done(name)).state, 'deployed');
+    const green = r.push({ 'app.txt': 'green' });
+    services.deploy(c, 'Cara');
+    await done(name);
+    r.push({ 'app.txt': 'broken' });
+    services.deploy(c, 'Cara');
+    await done(name);
+
+    services.deploy(c, 'Cara', [], undefined, { to: green });
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.equal(d.to, green);
+    assert.equal(readFileSync(join(liveSlot(name), 'app.txt'), 'utf8'), 'green');
+
+    // A commit its branch doesn't hold.
+    const work = join(root, 'work', `cara/${name}`);
+    git(work, 'commit', '--quiet', '--allow-empty', '-m', 'off the branch');
+    git(work, 'push', '--quiet', 'origin', 'HEAD:side');
+    services.deploy(c, 'Cara', [], undefined, { to: git(work, 'rev-parse', 'HEAD') });
+    assert.match((await done(name)).said.join('\n'), /isn't on cara\/.*'s main, so nothing changed/);
+
+    // Its data's shape moved on after first: refused, and green still runs.
+    mkdirSync(join(work, 'db'), { recursive: true });
+    git(work, 'reset', '--quiet', '--hard', 'HEAD~1');
+    r.push({ 'db/0002.sql': 'alter' });
+    services.deploy(c, 'Cara');
+    await done(name);
+    services.deploy(c, 'Cara', [], undefined, { to: first });
+    const refused = await done(name);
+    assert.equal(refused.state, 'failed');
+    assert.match(refused.said.join('\n'), /Its migrations changed since .* \(db\/0002\.sql\), so going back could leave its data/);
+    assert.notEqual(git(liveSlot(name), 'rev-parse', 'HEAD'), first);
+  } finally {
+    svc.close();
+  }
+});
+
 // #915: a member's private repo is out of the box's login's reach; only their own GitHub link gets in.
 test("a deploy clones and fetches with its home scheme owner's GitHub link, which never reaches the build, .git/config or the log", async () => {
   const name = `app${++repoN}`;

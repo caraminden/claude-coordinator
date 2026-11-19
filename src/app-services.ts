@@ -40,6 +40,8 @@ export interface Manifest {
   build_timeout: number;
   /** Settings warns when DATA_DIR grows past this many GB (#847); null: no warning. */
   disk_warn_gb: number | null;
+  /** Paths in its repo whose change means the data moved on (#1016): a roll back past one is refused. */
+  migrations: string[];
 }
 
 /** An app's DATA_DIR size, from the last background measure (#847). */
@@ -96,7 +98,9 @@ export function parseManifest(text: string): Manifest {
   if (m.build !== undefined && (!Array.isArray(m.build) || m.build.length > 20 || !m.build.every((b: unknown) => isText(b, 2000)))) throw new Error('build must be a list of at most 20 shell commands, like ["npm ci", "npm run build"]');
   if (m.build_timeout !== undefined && !(Number.isInteger(m.build_timeout) && m.build_timeout >= 1 && m.build_timeout <= 60)) throw new Error('build_timeout must be whole minutes from 1 to 60');
   if (m.disk_warn_gb !== undefined && !(typeof m.disk_warn_gb === 'number' && m.disk_warn_gb > 0 && m.disk_warn_gb <= 1e6)) throw new Error('disk_warn_gb must be a number of GB above 0');
-  return { start: command(m.start, 'start'), workdir: relDir(m.workdir, 'workdir'), env, timers, health: m.health ?? null, build: m.build ?? [], build_timeout: m.build_timeout ?? 20, disk_warn_gb: m.disk_warn_gb ?? null };
+  if (m.migrations !== undefined && (!Array.isArray(m.migrations) || m.migrations.length > 20)) throw new Error('migrations must be a list of at most 20 paths in the repo, like ["src/migrations", "src/schema.ts"]');
+  const migrations = (m.migrations ?? []).map((v: unknown) => relDir(v, 'each of migrations'));
+  return { start: command(m.start, 'start'), workdir: relDir(m.workdir, 'workdir'), env, timers, health: m.health ?? null, build: m.build ?? [], build_timeout: m.build_timeout ?? 20, disk_warn_gb: m.disk_warn_gb ?? null, migrations };
 }
 
 /** The first line of every unit file Citadel writes; it touches no other. */
@@ -257,6 +261,8 @@ export interface DeployHooks {
   uid?: number | null;
   /** It starts again a deploy a Citadel restart cut short: cut short again, it is left for a person. */
   resumed?: boolean;
+  /** A roll back (#1016): deploy this older commit of its branch, not the branch's head. */
+  to?: string;
 }
 
 /** A deploy cut short by a Citadel restart or crash, from its marker (#847). */
@@ -265,6 +271,8 @@ export interface Interrupted {
   by: string;
   uid: number | null;
   resumed: boolean;
+  /** It was a roll back to this commit (#1016). */
+  to?: string;
 }
 
 /** The user unit an app's build steps run in, one at a time (#847): not citadel-app-…, which a timer named build would be. */
@@ -676,7 +684,7 @@ export class AppServices {
       if (typeof m.log === 'string' && dirname(m.log) === join(this.opts.logDir, name)) {
         await appendFile(m.log, `== interrupted: Citadel stopped (a restart or a crash) while this deploy ran; found at ${new Date().toISOString()}\n`).catch(() => {});
       }
-      found.push({ name, by: typeof m.by === 'string' ? m.by : 'Citadel', uid: typeof m.uid === 'number' ? m.uid : null, resumed: m.resumed === true });
+      found.push({ name, by: typeof m.by === 'string' ? m.by : 'Citadel', uid: typeof m.uid === 'number' ? m.uid : null, resumed: m.resumed === true, ...(typeof m.to === 'string' && /^[0-9a-f]{40}$/.test(m.to) && { to: m.to }) });
     }
     return found;
   }
@@ -770,7 +778,7 @@ export class AppServices {
       view.said.push(line);
       await appendFile(view.log, `== ${line}\n`);
     };
-    await writeFile(join(dirname(view.log), DEPLOYING), JSON.stringify({ by: view.by, uid: hooks.uid ?? null, resumed: !!hooks.resumed, log: view.log }));
+    await writeFile(join(dirname(view.log), DEPLOYING), JSON.stringify({ by: view.by, uid: hooks.uid ?? null, resumed: !!hooks.resumed, log: view.log, ...(hooks.to && { to: hooks.to }) }));
     if (hooks.resumed) await say('Started again: a Citadel restart cut the last deploy short.');
     await this.awaitOlderBuild(row.name, say);
     /** Run a command, its output into the log; its exit code (124 when it ran out of time). */
@@ -824,6 +832,7 @@ export class AppServices {
     }
     if (link === null && !existsSync(folder)) {
       if (inTheWay()) throw new Error(`${slots} is there but ${folder} isn't: move it away first.`);
+      if (hooks.to) throw new Error(`${row.name} has never been deployed, so there is nothing to roll back.`);
       next = a;
       await mkdir(slots, { recursive: true });
       await say(`Cloning ${repo} (${view.branch}) into ${next}.`);
@@ -859,8 +868,17 @@ export class AppServices {
       }
       await say(`Fetching ${repo} ${view.branch}.`);
       if (await network(['git', 'fetch', '--quiet', 'origin', view.branch], next)) throw new Error(`Fetching ${repo} failed: see the log.`);
-      const to = await git(next, 'rev-parse', 'FETCH_HEAD');
-      if (!(await git(next, 'merge-base', '--is-ancestor', prev, to).then(() => true, () => false))) {
+      let to = await git(next, 'rev-parse', 'FETCH_HEAD');
+      const inBranch = (ancestor: string, commit: string) => git(next, 'merge-base', '--is-ancestor', ancestor, commit).then(() => true, () => false);
+      if (hooks.to) {
+        // A roll back (#1016) goes to an older commit of the branch, never one off it; nor past a change to the data's shape.
+        if (!(await inBranch(hooks.to, to))) throw new Error(`${short(hooks.to)} isn't on ${repo}'s ${view.branch}, so nothing changed.`);
+        const paths = (await this.manifest(row, old).catch(() => null))?.migrations ?? [];
+        const moved = paths.length ? (await git(next, 'diff', '--name-only', hooks.to, prev, '--', ...paths)).split('\n').filter(Boolean) : [];
+        if (moved.length) throw new Error(`Its migrations changed since ${short(hooks.to)} (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? `, ${moved.length - 5} more` : ''}), so going back could leave its data in a shape that code can't read. Nothing changed: fix forward instead.`);
+        await say(`Rolling back to ${short(hooks.to)}${prev ? ` from ${short(prev)}` : ''}.`);
+        to = hooks.to;
+      } else if (!(await inBranch(prev, to))) {
         throw new Error(`${old} has commits ${repo}'s ${view.branch} doesn't: a deploy only goes forward, so nothing changed.`);
       }
       await git(next, 'checkout', '--detach', '--quiet', to);

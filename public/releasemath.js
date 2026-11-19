@@ -36,7 +36,7 @@ export function columnOf(stages, c) {
 }
 
 /**
- * What people call a release: "Release 14", "#14" where space is short. A target with its own names (#764: Peek's "Build 997")
+ * What people call a release (Cara, 2026-11-12: "a numbered build/release system instead of commit hashes"): "Release 14", "#14" where space is short. A target with its own names (#764: Peek's "Build 997")
  * sends `name`. With no number: a try that failed is "a failed try"; a next not numbered yet keeps its name.
  */
 export const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : r.name ?? `Release ${r.number}`)

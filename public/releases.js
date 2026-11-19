@@ -100,10 +100,6 @@ const etaTitle = (eta, since) => (eta <= Date.now() && since
   ? `Taking longer than usual: this stage and the rest usually take ~${shortSpan(eta - since)}; this stage started ${shortSpan(Date.now() - since)} ago`
   : '');
 
-/**
- * What people call a release (Cara, 2026-11-12: "a numbered build/release system instead of commit hashes"): "Release 14",
- * "#14" where space is short; a try that never went live has no number, so it's "a failed try".
- */
 /** The commit or version name behind it, shown small on its card for whoever wants it (no hover: Cara, 2026-11-12, "if you want more info, click"). */
 const releaseDetail = (r) => (r.version ? (isSha(r.version) ? `commit ${r.version.slice(0, 7)}` : `version ${r.version}`) : '');
 

@@ -333,3 +333,29 @@ test('the releases table: an older database gets it on open, and a row reads bac
   store.deleteProject(p.id);
   assert.deepEqual(store.listReleases(p.id, 't', 5), [], "a scheme's releases go with it");
 });
+
+test("opening the database before 69 drops only Peek Auras' Windows Builds 1277-1291 recorded live too early (#1019)", () => {
+  const path = join(root, 'early-builds.db');
+  const store = new Store(path);
+  const peek = store.createProject('Peek Auras', null);
+  const other = store.createProject('Other', null);
+  const add = (project: number, target: string, version: string, outcome = 'live') =>
+    store.addRelease({ project_id: project, target, version, changes: '[]', started_at: 1, live_at: 2, outcome, stages: '{}' });
+  for (const n of [1275, 1277, 1279, 1282, 1284, 1286, 1289, 1291, 1292]) add(peek.id, 'ci:windows:release', `run:${n}`);
+  add(peek.id, 'app:peek-auras', 'run:1277');
+  add(other.id, 'ci:windows:release', 'run:1279');
+  add(peek.id, 'ci:windows:release', 'run:1280', 'failed');
+  store.setSetting('schema_version', 68);
+  store.db.close();
+  const left = () => (again.db.prepare('SELECT project_id, target, version FROM releases ORDER BY id').all() as { project_id: number; target: string; version: string }[])
+    .map((r) => `${r.project_id === peek.id ? 'peek' : 'other'} ${r.target} ${r.version}`);
+  let again = new Store(path);
+  assert.deepEqual(left(), ['peek ci:windows:release run:1275', 'peek ci:windows:release run:1292', 'peek app:peek-auras run:1277',
+    'other ci:windows:release run:1279', 'peek ci:windows:release run:1280']);
+  // Once: a build recorded again later stays.
+  again.addRelease({ project_id: peek.id, target: 'ci:windows:release', version: 'run:1291', changes: '[]', started_at: 3, live_at: 4, outcome: 'live', stages: '{}' });
+  again.db.close();
+  again = new Store(path);
+  assert.ok(left().includes('peek ci:windows:release run:1291'));
+  again.db.close();
+});

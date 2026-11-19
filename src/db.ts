@@ -1354,6 +1354,7 @@ export const SCHEMA_HISTORY = [
   [66, 'machine_jobs, machine_job_kinds, machines.jobs and job_settings (#857)'],
   [67, 'turn_grunts (#948)'],
   [68, 'contraptions.static_paths (#987)'],
+  [69, "drop Peek Auras' Windows Builds 1277-1291 recorded live before PCs could take them (#1019)"],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1440,6 +1441,7 @@ export class Store {
     this.memory = new Memory(this);
     this.serverLoginOwnerOnly();
     this.groupByType();
+    this.dropEarlyPeekAurasBuilds();
     this.lendingLists();
     this.noteSchemaVersion();
   }
@@ -1495,6 +1497,17 @@ export class Store {
     if ((this.getSetting<number>('schema_version') ?? 0) >= 21) return;
     this.props.backfillOther();
     this.db.prepare(`UPDATE projects SET list_groups = '["area: balance"]' WHERE name = 'Delve' AND list_groups = '[]'`).run();
+  }
+
+  /**
+   * Peek Auras' Windows Builds 1277-1291 were recorded live when windows.yml passed, before desktop.yml let PCs take them (#1019;
+   * Cara, 2026-11-18: "Remove them"). Once, before 69, and only rows that are exactly those builds.
+   */
+  private dropEarlyPeekAurasBuilds() {
+    if ((this.getSetting<number>('schema_version') ?? 0) >= 69) return;
+    this.db.prepare(`DELETE FROM releases WHERE target = 'ci:windows:release' AND outcome = 'live'
+      AND project_id IN (SELECT id FROM projects WHERE name = 'Peek Auras')
+      AND version IN ('run:1277', 'run:1279', 'run:1282', 'run:1284', 'run:1286', 'run:1289', 'run:1291')`).run();
   }
 
   /** Whose subscription the server's own Claude login is: the first admin, the one Citadel made at its first start. */

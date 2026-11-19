@@ -1,7 +1,7 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
 import { account, ago, api, h, noAutofill, icon, view } from './base.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
-import { firefoxControls, settingsRow, settingsTabs } from './settings.js';
+import { firefoxControls, settingsHelp, settingsRow, settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -12,6 +12,14 @@ function head(title, meta) {
       h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' }, meta));
+}
+
+// Rows left open, by key, across the redraws every change here causes.
+const openRows = new Set();
+function personRow(key, opts, ...body) {
+  const [row] = settingsRow({ ...opts, open: openRows.has(key) }, ...body);
+  row.addEventListener('toggle', () => openRows[row.open ? 'add' : 'delete'](key));
+  return row;
 }
 
 const page = (...children) => h('section', { class: 'artifacts-main people-main' }, ...children);
@@ -34,9 +42,10 @@ function githubLine(m) {
 export function membersPage() {
   const p = view.project;
   const owns = !!account;
-  const list = h('div', { class: 'people-list' });
+  const list = h('div', { class: 'people-list settings-rows' });
   const pick = h('select', { 'aria-label': 'Person to add' });
   const add = h('form', { class: 'row people-add' }, pick, h('button', { type: 'submit' }, 'Add'));
+  const addRow = h('div', { class: 'settings-rows', hidden: true }, settingsRow({ icon: 'plugplus', hue: 'done', title: 'Add someone', summary: 'Someone already in Citadel' }, add)[0]);
   let shown = [];
   // Adding and removing show at once; the server's list replaces ours when it answers. A refusal puts the list
   // back as it was, unless a later click changed it, then reloads it, since a GitHub refusal still took the
@@ -60,18 +69,18 @@ export function membersPage() {
   const render = (members, people) => {
     shown = members;
     const inIt = new Set(members.map((m) => m.id));
-    list.replaceChildren(...members.map((m) => h('div', { class: 'person-row' },
-      h('span', { class: 'text' }, h('span', { class: 'name' }, m.name), h('span', { class: 'meta' }, m.owner ? `${m.login} · owner` : m.login), githubLine(m)),
-      owns && !m.owner && h('button', {
+    list.replaceChildren(...members.map((m) => personRow(`m:${m.id}`, { icon: 'user', hue: m.owner ? 'held' : 'accent', title: m.name, summary: m.owner ? `${m.login} · owner` : m.login },
+      githubLine(m) || h('p', { class: 'muted small' }, m.owner ? 'Owns this scheme.' : 'No GitHub push access set up for them here.'),
+      owns && !m.owner && h('div', { class: 'settings-row-actions' }, h('button', {
         type: 'button', class: 'secondary small',
         onclick: () => {
           if (!confirm(`Take ${m.name} out of ${p.name}? They stop seeing it at once.`)) return;
           change((list) => list.filter((x) => x.id !== m.id), () => api(`api/projects/${p.id}/members/${m.id}`, { method: 'DELETE' }), `take ${m.name} out of ${p.name}`, people);
         },
-      }, 'Remove'))));
+      }, 'Remove')))));
     const others = people.filter((x) => !inIt.has(x.id));
     pick.replaceChildren(...others.map((x) => h('option', { value: x.id }, `${x.name} (${x.login})`)));
-    add.hidden = !owns || !others.length;
+    addRow.hidden = !owns || !others.length;
     add.onsubmit = (e) => {
       e.preventDefault();
       const who = people.find((x) => x.id === Number(pick.value));
@@ -82,12 +91,13 @@ export function membersPage() {
   };
   Promise.all([api(`api/projects/${p.id}/members`), api('api/people')]).then(([members, people]) => render(members, people)).catch(fail);
   return page(
-    head('Members', 'Only the people here see this scheme, its minions and its files. Anyone in it adds minions, chats, and changes its members and settings.'),
-    list, add,
-    h('h3', { class: 'settings-label' }, 'Just for you'),
-    h('p', { class: 'muted small' }, 'Hiding takes the scheme out of your scheme lists, Needs-you badges and notifications. You stay in it, and its link still opens it.'),
-    hideButton(p),
-    account?.admin && h('p', { class: 'muted small' }, 'To add someone new to Citadel, invite them under People first.'));
+    head('Members', settingsHelp('Only the people here see this scheme, its minions and its files.', 'Anyone in it adds minions, chats, and changes its members and settings.')),
+    h('h3', { class: 'settings-section' }, `In ${p.name}`), list, addRow,
+    h('h3', { class: 'settings-section' }, 'Just for you'),
+    h('div', { class: 'settings-rows' }, settingsRow({ icon: 'eye', hue: 'muted', title: 'Hide this scheme', summary: 'Out of your lists, badges and notifications' },
+      settingsHelp('Hiding takes the scheme out of your scheme lists, Needs-you badges and notifications.', 'You stay in it, and its link still opens it.'),
+      hideButton(p))[0]),
+    account?.admin && settingsHelp('To add someone new to Citadel, invite them under People first.'));
 }
 
 /** The link an invite or reset token makes, with a Copy button: shown once, since only its hash is kept. */
@@ -110,7 +120,7 @@ export function peoplePage() {
   name.oninput = () => { login.placeholder = name.value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '') || 'lowercase, no spaces'; };
   const status = h('span', { class: 'muted', role: 'status' });
   const link = h('div');
-  const list = h('div', { class: 'people-list' });
+  const list = h('div', { class: 'people-list settings-rows' });
   const show = (who, token, what) => link.replaceChildren(linkBox(who, token, what));
   let shown = [];
   const render = (people) => (shown = people, list.replaceChildren(...people.map((u) => {
@@ -141,11 +151,10 @@ export function peoplePage() {
       : !u.server_login && u.claude !== 'linked' ? ['warn', 'Needs linking', `${claude}: their messages wait in the chat until they link it in Your account`]
       : u.github?.failed ? ['warn', 'Needs linking', 'GitHub needs linking again']
       : ['ok', 'Ready', 'They can sign in and their messages start turns'];
-    return h('div', { class: 'person-row' },
-      h('span', { class: 'text' },
-        h('span', { class: 'name' }, u.name, u.admin ? ' · admin' : '', ' ', h('span', { class: 'cui-chip state-chip', 'data-tone': tone, title: tip }, word)),
-        h('span', { class: 'meta' }, [u.login, state, claude, u.week && `week ${Math.round(u.week.utilization * 100)}%`, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · '))),
-      h('span', { class: 'person-actions' },
+    const hue = { ok: 'done', warn: 'waiting', danger: 'danger', info: 'accent' }[tone] ?? 'muted';
+    return personRow(`u:${u.id}`, { icon: 'user', hue, title: `${u.name}${u.admin ? ' · admin' : ''}`, summary: `${word} · ${u.login}` },
+      h('p', { class: 'muted small', title: tip }, [state, claude, u.week && `week ${Math.round(u.week.utilization * 100)}%`, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · ')),
+      h('span', { class: 'settings-row-actions' },
       turns && h('label', { class: 'small turns-toggle', title: 'Your messages start and steer turns on the server\'s Claude login. Off: they run on the Claude you link in Your account.' }, turns, 'Turns'),
       h('button', {
         type: 'button', class: 'secondary small',
@@ -197,11 +206,13 @@ export function peoplePage() {
     r.settings_url ? h('p', {}, h('a', { href: r.settings_url, target: '_blank', rel: 'noopener' }, 'Open the App\'s settings on GitHub')) : '')))
     .catch((err) => refused.replaceChildren(h('p', { class: 'error', role: 'status' }, `Couldn't check for refused GitHub links (${err.message}); reload the page to try again.`)));
   return page(
-    head('People', 'Everyone who can sign in to Citadel. Each person sees only the schemes they own or were added to, and can make schemes of their own.'),
-    refused, form, link, list,
-    h('p', { class: 'muted small' },
-      'Each person\'s messages start turns on their own Claude plan, which they link in Settings → Your account. Until they do, they can still read, write and add minions; their messages wait in the chat. ',
-      'Turns: whether your messages run on this server\'s own Claude login, which is your subscription.'));
+    head('People', settingsHelp('Everyone who can sign in to Citadel.', 'Each person sees only the schemes they own or were added to, and can make schemes of their own.')),
+    refused,
+    h('div', { class: 'settings-rows' }, settingsRow({ icon: 'plugplus', hue: 'done', title: 'Invite someone', summary: 'Name and login; you send them the link' }, form)[0]),
+    link,
+    h('h3', { class: 'settings-section' }, 'Everyone'), list,
+    settingsHelp('Each person\'s messages start turns on their own Claude plan, which they link in Your account.',
+      'Until they do, they can still read, write and add minions; their messages wait in the chat. Turns: whether your messages run on this server\'s own Claude login, which is your subscription.'));
 }
 
 /**

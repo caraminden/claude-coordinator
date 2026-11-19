@@ -959,8 +959,8 @@ export function machinesPage() {
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, account?.admin
-        ? 'Computers that lend their MCP tools to minions while they are connected, in the schemes listed under Who gets it. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.'
-        : 'Your computers, lending their MCP tools while they are connected to the minion turns you ask for, in the schemes you list under Who gets it. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),
+        ? settingsHelp('Computers that lend their MCP tools to minions while they are connected, in the schemes listed under Who gets it.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.')
+        : settingsHelp('Your computers, lending their MCP tools to the minion turns you ask for, in the schemes you list under Who gets it.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.'))),
     h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add.toggle),
     add.form,
     h('div', { id: 'machine-setup' }),
@@ -1054,7 +1054,7 @@ function renderMachineList() {
   const runners = view.machines.filter((m) => m.runners);
   const ours = view.machines.filter(oursHere);
   const others = view.machines.filter((m) => !m.runners && !ours.includes(m));
-  const group = (title, list) => (list.length ? [h('h4', { class: 'machine-group' }, title), ...list.map(machineLine)] : []);
+  const group = (title, list) => (list.length ? [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...list.map(machineLine))] : []);
   el.replaceChildren(
     ...group(`${scheme}'s minions get`, ours),
     ...group(ours.length ? 'Other machines' : 'Machines', others),
@@ -1225,24 +1225,22 @@ function machineLends(m) {
 
 /** One line of the quiet list (#437, take A): name, reason, status chip (#492), fix button; click it for the rest. */
 function machineLine(m) {
-  const isOpen = view.machineOpen.has(m.id);
-  const toggle = () => {
-    view.machineOpen[isOpen ? 'delete' : 'add'](m.id);
-    renderMachineList();
-  };
   const open = () => {
     view.machineOpen.add(m.id);
     renderMachineList();
   };
   const word = { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
-  const head = h('div', { class: 'machine-head' },
-    h('button', { type: 'button', class: 'machine-open', 'aria-expanded': String(isOpen), onclick: toggle },
-      h('span', { class: 'text' },
-        h('span', { class: 'name' }, m.name),
-        h('span', { class: 'meta' }, machineStatusText(m))),
-      h('span', { class: 'cui-chip state-chip', 'data-tone': { ready: 'ok', fix: 'warn', down: 'danger' }[m.status] ?? 'neutral' }, word)),
-    fixButton(m, open));
-  return h('div', { class: `machine-row machine-line ${m.status}${isOpen ? ' open' : ''}` }, head, isOpen ? machineBody(m) : '');
+  const isOpen = view.machineOpen.has(m.id);
+  // The body is built only while open (its notes keep a draft); opening a closed row redraws the list with it.
+  const [row] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen },
+    ...(isOpen ? [fixButton(m, open) && h('div', { class: 'settings-row-actions' }, fixButton(m, open)), machineBody(m)] : []));
+  row.classList.add('machine-row', 'machine-line', m.status);
+  row.addEventListener('toggle', () => {
+    if (row.open === view.machineOpen.has(m.id)) return;
+    view.machineOpen[row.open ? 'add' : 'delete'](m.id);
+    if (row.open) renderMachineList();
+  });
+  return row;
 }
 
 /** A machine's line opened: what it lends, who gets it, its computer, notes and its buttons. */

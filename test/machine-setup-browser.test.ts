@@ -42,7 +42,7 @@ after(async () => {
 const wait = (what: string, expression: string) => waitFor(page, what, expression);
 const shown = () => page.eval<string[]>('[...document.querySelectorAll("#machine-setup .machine-setup-way:not([hidden]) pre")].map((p) => p.textContent)');
 const pressed = () => page.eval<string>('document.querySelector("#machine-setup [aria-pressed=true]")?.textContent ?? ""');
-const row = (name: string) => `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.name').textContent === ${JSON.stringify(name)})`;
+const row = (name: string) => `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.settings-row-title').textContent === ${JSON.stringify(name)})`;
 const machine = async (name: string) => (await srv.call('/api/machines')).data.find((m: any) => m.name === name);
 
 async function openMachines() {
@@ -64,8 +64,8 @@ async function add(name: string, form = '.machine-add:not(.runners)') {
 /** Open a machine's line, where its ticks and buttons are (#437). */
 async function open(name: string) {
   await wait(`${name}'s line`, `!!${row(name)}`);
-  await page.eval(`(() => { const r = ${row(name)}; if (!r.classList.contains('open')) r.querySelector('.machine-open').click(); })()`);
-  await wait(`${name}'s line to open`, `${row(name)}.classList.contains('open')`);
+  await page.eval(`(() => { const r = ${row(name)}; r.open = true; })()`);
+  await wait(`${name}'s line to open`, `${row(name)}.open && !!${row(name)}.querySelector('.machine-body')`);
 }
 
 test('adding a machine asks its name and nothing about MCP servers or folders, then gives one install line', { skip }, async () => {
@@ -173,8 +173,9 @@ test('Who gets it is one list of scheme chips: + scheme adds one at once, × tak
   const { machine } = (await srv.call('/api/machines', { name: 'chip-box' })).data;
   await openMachines();
   await wait('the machine list', '!!document.querySelector(".machine-row")');
-  const row = `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.name').textContent === 'chip-box')`;
-  await page.eval(`${row}.querySelector('.machine-open').click()`);
+  const row = `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.settings-row-title').textContent === 'chip-box')`;
+  await page.eval(`${row}.open = true`);
+  await wait('chip-box\'s body', `!!${row}.querySelector('.machine-body')`);
   const chips = () => page.eval<string[]>(`[...${row}.querySelectorAll('.scheme-chip > span')].map((c) => c.textContent)`);
   const saved = async () => (await srv.call('/api/machines')).data.find((m: any) => m.id === machine.id).projects;
   assert.deepEqual(await chips(), []);

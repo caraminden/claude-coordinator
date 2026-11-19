@@ -71,7 +71,8 @@ export function readTestCounts(f: string, since: number): TestCounts | null {
 
 const countsText = (c: TestCounts) => `${c.done} of ${c.total} files${c.file ? ` · ${c.file}` : ''}`;
 
-export interface LandTicket { seq: number; proc: string; got: number; label: string; phase: string; mtime: number; tests?: TestCounts | null }
+/** `orders`: its landing follows queue/.order (deploy-queue.sh's 5th ticket line, #1002); one from an older branch doesn't. */
+export interface LandTicket { seq: number; proc: string; got: number; label: string; phase: string; mtime: number; orders?: boolean; tests?: TestCounts | null }
 
 /** The waiting tickets' numbers in the order people set on the Releases page (#1002): queue/.order, as deploy-queue.sh reads it. */
 const readOrder = (q: string) => (read(join(q, '.order')) ?? '').split('\n').filter((l) => /^\d{10}$/.test(l)).map(Number);
@@ -89,9 +90,9 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
   for (const name of files(q).filter((n) => /^\d+$/.test(n)).sort()) {
     const f = join(q, name), text = read(f), at = mtime(f);
     if (text == null || at == null) continue;
-    const [proc = '', got = '0', label = '', phase = ''] = text.split('\n');
+    const [proc = '', got = '0', label = '', phase = '', orders = ''] = text.split('\n');
     if (!alive(proc)) continue;
-    const ticket: LandTicket = { seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at };
+    const ticket: LandTicket = { seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: orders === 'order' };
     const log = /^running the tests/.test(phase) ? 'land-test' : /^deploying: running the tests/.test(phase) ? 'test' : null;
     if (ticket.got > 0 && log) ticket.tests = readTestCounts(join(stateDir, `${log}.progress`), at);
     line.push(ticket);
@@ -321,13 +322,14 @@ export class Waits {
 
   /**
    * Put the waiting landings in this order (#1002, the Releases page): `seqs` first, the ones it leaves out behind them in
-   * the line's order; a holder or a ticket no longer waiting is left out. `note` says who moved what, for the waiters' output.
+   * the line's order; a holder, a ticket no longer waiting or one from an older branch is left out. `note` says who moved what, for the waiters' output.
    * Returns the order written.
    */
   setOrder(seqs: number[], note: string): number[] {
     if (!this.d.deployState) throw new Error('This server has no land line');
     this.poll();
-    const waiting = this.line.filter((t) => t.got === 0).map((t) => t.seq);
+    // Only the landings that follow .order: an older one waits for every lower ticket, so ranking it ahead of one could deadlock.
+    const waiting = this.line.filter((t) => t.got === 0 && t.orders).map((t) => t.seq);
     const order = [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
     if (!order.length) throw new Error('No landing waiting in line to reorder');
     const f = join(this.d.deployState, 'queue', '.order'), tmp = `${f}.tmp${process.pid}`;

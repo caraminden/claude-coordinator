@@ -89,8 +89,10 @@ queue_outside() {
   fi
 }
 
+# The 5th line, "order", says this landing follows .order (#1002): the server lists only those in it. A landing started
+# from an older branch runs the older queue_lock, which waits for every lower ticket, so ranking it could deadlock.
 queue_write() { # <file> <pid and start> <got> <label> <phase>: by a rename, so nobody reads half a ticket
-  printf '%s\n' "$2" "$3" "$4" "$5" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
+  printf '%s\n' "$2" "$3" "$4" "$5" order >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
 }
 
 queue_phase() {

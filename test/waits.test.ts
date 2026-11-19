@@ -35,10 +35,10 @@ function setup() {
     ship: (id) => (ships.has(id) ? { stage: ships.get(id)!, text: '', commit: 'abc1234' } : null),
     alive: (proc) => !dead.has(proc), held: (f) => !free.has(f),
   });
-  /** A land-line ticket as tools/deploy-queue.sh writes it, last written `ago` s before now. */
-  const ticket = (seq: number, label: string, got: number, phase: string, ago: number) => {
+  /** A land-line ticket as tools/deploy-queue.sh writes it, last written `ago` s before now; `orders` false: from a branch before #1002. */
+  const ticket = (seq: number, label: string, got: number, phase: string, ago: number, orders = true) => {
     const f = join(state, 'queue', String(seq).padStart(10, '0'));
-    writeFileSync(f, `${seq}00 77\n${got}\n${label}\n${phase}\n`);
+    writeFileSync(f, `${seq}00 77\n${got}\n${label}\n${phase}\n${orders ? 'order\n' : ''}`);
     utimesSync(f, (now - ago * 1000) / 1000, (now - ago * 1000) / 1000);
     return `${seq}00 77`;
   };
@@ -253,6 +253,14 @@ test('the land line in the order set on the Releases page (#1002): the holder fi
   assert.equal(waits.wait(b.id)!.chip, 'line · 3rd');
   // Only part of the line named (a stale page): those first, the rest keep their order behind.
   assert.deepEqual(waits.setOrder([3], 'Josh moved #3 to land next'), [3, 4, 2, 5]);
+  // A landing from a branch before #1002 runs the old queue_lock (it waits for every lower ticket): never put in the
+  // order, so it can't be ranked ahead of one that waits for it. It lands after the ordered ones.
+  const f = minion();
+  ticket(6, f.branch, 0, 'waiting', 1, false);
+  waits.poll();
+  assert.equal(waits.line.find((t) => t.seq === 6)!.orders, false);
+  assert.deepEqual(waits.setOrder([6, 5], 'Josh moved #6 to land next'), [5, 3, 4, 2]);
+  assert.deepEqual(waits.line.map((t) => t.seq), [1, 5, 3, 4, 2, 6]);
   for (const seq of [2, 3, 4, 5]) dead.add(`${seq}00 77`);
   assert.throws(() => waits.setOrder([3], 'Josh'), /no landing waiting/i, 'all landed or gone meanwhile');
 });

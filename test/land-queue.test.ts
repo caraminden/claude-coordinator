@@ -75,8 +75,10 @@ test('a landing waiting in line rechecks each time main moves, and leaves the li
 
 // Fake work for the line itself: wait in line, note the turn, then hold the lock while $3 runs.
 const queueLib = join(import.meta.dirname, '..', 'tools', 'deploy-queue.sh');
-function waiter(state: string, label: string, work: string, extra: Record<string, string> = {}) {
-  const child = spawn('bash', ['-c', '. "$0"; queue_lock "$1" "$2" || exit 1; echo "$2" >>"$1/order"; eval "$3"; queue_done ok', queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
+// `old`: a landing from a branch before #1002, whose queue_lock waits for every lower ticket and ignores .order.
+const before1002 = `queue_order() { QUEUE_RANK=() QUEUE_ORDER_BY=""; }; queue_write() { printf '%s\\n' "$2" "$3" "$4" "$5" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"; }; `;
+function waiter(state: string, label: string, work: string, extra: Record<string, string> = {}, old = false) {
+  const child = spawn('bash', ['-c', `. "$0"; ${old ? before1002 : ''}queue_lock "$1" "$2" || exit 1; echo "$2" >>"$1/order"; eval "$3"; queue_done ok`, queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
   let stderr = '';
   child.stderr!.on('data', (d) => (stderr += d));
   const exit = new Promise<number | null>((ok) => child.on('close', ok));
@@ -440,7 +442,7 @@ test('the waiters take the lock in the order .order sets, a later one goes to th
     writeFileSync(join(state, 'queue', '.order'), `# Cara moved #4 to the front\n${td}\n${tb}\n`);
     await until('d to see it is next', () => /queue: 2nd in line for the deploy lock, about \d+ min \(ahead: a, starting\)/.test(ws[3].stderr().split('Cara moved')[1] ?? ''));
     assert.match(ws[3].stderr(), /queue: Cara moved #4 to the front/);
-    assert.match(ws[2].stderr(), /queue: Cara moved #4 to the front/);
+    await until('c to say who reordered', () => /queue: Cara moved #4 to the front/.test(ws[2].stderr()));
     ws.push(waiter(state, 'e', 'true'));
     await until("e's ticket", () => issued(state) === 5);
     await until('e to see its place', () => /5th in line/.test(ws[4].stderr()));
@@ -448,6 +450,34 @@ test('the waiters take the lock in the order .order sets, a later one goes to th
     writeFileSync(join(state, 'go'), '');
     for (const w of ws) assert.equal(await w.exit, 0, w.stderr());
     assert.deepEqual(order(state), ['a', 'd', 'b', 'c', 'e']);
+  } finally {
+    writeFileSync(join(state, 'go'), '');
+    for (const w of ws) w.child.kill('SIGKILL');
+  }
+});
+
+// The Releases page's server lists in .order only the tickets marked "order" (src/waits.ts setOrder): a landing from an
+// older branch waits for every lower ticket, so ranking it ahead of one would leave the two waiting on each other.
+test('a landing from a branch before .order keeps its arrival order, and nobody waits on it forever', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
+  const ws = [a];
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    for (const [i, label] of ['b', 'c', 'd'].entries()) {
+      ws.push(waiter(state, label, 'true', {}, label === 'd'));
+      await until(`${label}'s ticket`, () => issued(state) === i + 2);
+    }
+    const ts = tickets(state);
+    const marked = ts.filter((t) => readFileSync(join(state, 'queue', t), 'utf8').split('\n')[4] === 'order');
+    assert.deepEqual(marked, [ts[0], ts[1], ts[2]], 'every ticket but the old one is marked');
+    // What setOrder writes for "Land next on c": the marked waiters only, c first. Had it ranked d (old) first, d would
+    // wait for b and c (lower tickets) while they waited for d.
+    writeFileSync(join(state, 'queue', '.order'), `# Cara moved #3 to land next\n${ts[2]}\n${ts[1]}\n`);
+    await until('b to see the order', () => /queue: Cara moved #3 to land next/.test(ws[1].stderr()));
+    writeFileSync(join(state, 'go'), '');
+    for (const w of ws) assert.equal(await w.exit, 0, w.stderr());
+    assert.deepEqual(order(state), ['a', 'c', 'b', 'd']);
   } finally {
     writeFileSync(join(state, 'go'), '');
     for (const w of ws) w.child.kill('SIGKILL');

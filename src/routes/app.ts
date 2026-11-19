@@ -221,6 +221,7 @@ export const appRoutes: Route[] = [
     if (!waits || !line.length) throw new HttpError(404, 'This scheme has no land line here');
     const moved = line.find((e) => e.seq === body?.moved && !e.holds);
     if (!moved) throw new HttpError(409, 'That landing is no longer waiting in line');
+    if (!moved.movable) throw new HttpError(409, `${moved.name} started from a branch older than reordering, so it lands in its turn`);
     const who = store.getUser(session.uid as number)?.name ?? 'a member';
     const place = seqs.indexOf(moved.seq);
     const note = `${who} moved ${moved.name} ${place === 0 ? 'to land next' : `to ${ordinal(place + 1)} of the waiting landings`}`;

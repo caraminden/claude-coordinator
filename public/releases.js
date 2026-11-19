@@ -426,7 +426,8 @@ function changeList(projectId, tv) {
   const n = tv.next, hl = page?.hl;
   const line = lineInOrder(projectId, tv.line);
   const rows = changeRows({ ...tv, line })
-    .map((r) => ({ ...r, wait: r.i >= 0 && !line[r.i].holds ? line[r.i] : null }));
+    // a landing from a branch older than #1002 can't move
+    .map((r) => ({ ...r, wait: r.i >= 0 && line[r.i].movable ? line[r.i] : null }));
   if (!rows.length) return '';
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
   // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
@@ -466,7 +467,7 @@ function changeList(projectId, tv) {
   }
   /** Land next: the waiter goes to the front of the waiting landings (for a phone or a keyboard, where dragging is clumsy). */
   function landNext(wait) {
-    if (!wait || wait === waiters[0].wait) return '';
+    if (!wait || wait === line.find((e) => !e.holds)) return '';
     const seqs = waiters.map((r) => r.wait.seq);
     return h('button', { type: 'button', class: 'secondary land-next', title: 'Move it to the front of the waiting landings: it lands once the one landing now is done',
       onclick: () => reorderLine(projectId, line, [wait.seq, ...seqs.filter((s) => s !== wait.seq)], wait.seq) }, 'Land next');

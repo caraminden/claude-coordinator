@@ -490,12 +490,12 @@ export function renderUsage(next = usage) {
       ...(accounts ? ['', pickLine(usage, accounts), ...accounts.map((a) => `${a.n === usage.account ? '▸ ' : ''}${a.label}: ${a.usage?.weekly ? `week ${Math.round(a.usage.weekly.utilization * 100)}%` : 'no turns yet'}${a.usage?.session ? `, 5 hours ${Math.round(a.usage.session.utilization * 100)}%` : ''}`)] : []),
     ].filter((line) => line != null).join('\n');
   }
-  for (const el of document.querySelectorAll('.usage:not(.codex)')) renderCodexSwitch(renderCodexMeter(el));
+  for (const el of document.querySelectorAll('.usage:not(.codex)')) renderCodexSwitch(el);
   for (const el of document.querySelectorAll('.codex-toggle')) syncToggle(el);
   for (const el of document.querySelectorAll('.codex-windows')) fillCodexWindows(el);
 }
 
-/** A bar in the Claude bar's look (#342); `.codex` keeps it out of the Claude bars' loops. */
+/** A bar in the Claude bar's look (#342), for Settings' Codex windows; `.codex` keeps it out of the Claude bars' loops. */
 const codexBar = () => h('a', { class: 'usage codex', href: usageHref(), 'aria-label': 'Usage details', hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
 const setBar = (bar, pct, label) => {
   bar.querySelector('.label').textContent = label;
@@ -503,19 +503,6 @@ const setBar = (bar, pct, label) => {
   bar.dataset.level = codexLevel(pct);
 };
 const windowText = (w) => `${windowName(w.windowDurationMins)}: ${w.pct}%${w.resetsAt && w.pct ? `, resets ${when(w.resetsAt * 1000)}` : ''}`;
-
-/** Directly under each Claude bar, Codex's own while either of its windows is above 75% (Josh, 2026-11-05). */
-function renderCodexMeter(meter) {
-  let bar = meter.nextElementSibling?.matches('.usage.codex') ? meter.nextElementSibling : null;
-  if (!bar) meter.after((bar = codexBar()));
-  bar.hidden = !codex || !codexHigh(codex.usage);
-  if (bar.hidden) return bar;
-  const top = codexTop(codex.usage);
-  setBar(bar, top, `Codex ${top}%`);
-  bar.setAttribute('aria-label', `Usage details: Codex ${windowName(codexWindows(codex.usage).find((w) => w.pct === top)?.windowDurationMins).replace(' window', '').toLowerCase()} ${top}%`);
-  bar.title = [...codexWindows(codex.usage).map(windowText), `As of the last Codex read, ${ago(codex.usage.updatedAt)}`].join('\n');
-  return bar;
-}
 
 /** Settings' Codex card: a bar for each window and when it resets, or "No usage yet". */
 export function codexWindowsBlock() {
@@ -568,20 +555,19 @@ export function setCodex(next) {
   renderModelPicker();
 }
 
-/** Under each usage bar (after Codex's), past 90% or while on: the override, Codex's own usage, and after Claude's reset a word that Claude is back. */
-function renderCodexSwitch(bar) {
-  let sw = bar.nextElementSibling?.classList.contains('codex-switch') ? bar.nextElementSibling : null;
+/** Under each usage bar, past 90% or while on: the override, Codex's own usage, and after Claude's reset a word that Claude is back. */
+function renderCodexSwitch(meter) {
+  let sw = meter.nextElementSibling?.classList.contains('codex-switch') ? meter.nextElementSibling : null;
   if (!sw) {
     sw = h('div', { class: 'codex-switch', hidden: true }, codexToggle(), h('span', { class: 'codex-usage' }), h('span', { class: 'claude-back' }, "Claude's back"));
-    bar.after(sw);
+    meter.after(sw);
   }
   sw.hidden = !codex || !(codex.on || claudeHigh());
   if (sw.hidden) return;
   sw.querySelector('.claude-back').hidden = !codex.on || claudeHigh();
   const top = codexTop(codex.usage);
   const cu = sw.querySelector('.codex-usage');
-  // Codex's own bar above says it already.
-  cu.hidden = !codex.on || top == null || !bar.hidden;
+  cu.hidden = !codex.on || top == null;
   if (cu.hidden) return;
   cu.textContent = `Codex ${top}%`;
   cu.dataset.level = codexLevel(top);

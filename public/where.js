@@ -3,6 +3,7 @@
 import { account, api, costText, h, icon, threadHref, view } from './base.js';
 import { settingsTabs } from './settings.js';
 import { costDetail } from './cost.js';
+import { codexWindowsBlock } from './core.js';
 
 /** A share of the weekly limit (all your accounts together), "4.2%", or null while no meter can price it. */
 function share(usd, weekUsd) {
@@ -98,7 +99,9 @@ export function usagePage() {
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.')),
-    pick, slot, account?.admin ? costDetail() : '');
+    pick, slot,
+    h('h3', {}, 'Codex'), codexWindowsBlock(),
+    account?.admin ? costDetail() : '');
 }
 
 let pickedRange = 'week';

@@ -177,29 +177,29 @@ test('a reply that asks a choice in prose with no card this turn is sent back; a
   assert.equal((await ask('Should a follow-up retry it once Claude is back?'))?.decision, 'block');
   assert.equal((await ask('Fixed.\n\nIf you want it, say the word.'))?.decision, 'block');
   // A card posted this turn, even before the last tool result, covers the question.
-  assert.equal(await ask('Should I merge it?', tool('mcp__thread__ask_question'), result), null);
-  assert.equal(await ask('Should I merge it?', tool('mcp__thread__propose_plan'), result), null);
+  assert.equal(await ask('Should I land it?', tool('mcp__thread__ask_question'), result), null);
+  assert.equal(await ask('Should I land it?', tool('mcp__thread__propose_plan'), result), null);
   const meta = line({ type: 'user', isMeta: true, message: { role: 'user', content: 'Base directory for this skill' } });
-  assert.equal(await ask('Should I merge it?', tool('mcp__thread__ask_question'), meta), null, 'a skill\'s meta entry is no new prompt');
+  assert.equal(await ask('Should I land it?', tool('mcp__thread__ask_question'), meta), null, 'a skill\'s meta entry is no new prompt');
   // A card from an earlier turn does not.
   const earlier = [tool('mcp__thread__ask_question'), result, user];
-  assert.equal((await ask('Should I merge it?', ...earlier))?.decision, 'block');
-  assert.equal(await ask('Should I merge it?\n\nSee [the card below](#/p/2/t/9?e=4).'), null);
-  assert.equal(await ask('Should I merge it?\n<!-- status: {"state":"ready","note":"x","replies":["Merge it"]} -->'), null);
+  assert.equal((await ask('Should I land it?', ...earlier))?.decision, 'block');
+  assert.equal(await ask('Should I land it?\n\nSee [the card below](#/p/2/t/9?e=4).'), null);
+  assert.equal(await ask('Should I land it?\n<!-- status: {"state":"ready","note":"x","replies":["Land it"]} -->'), null);
   assert.equal(await ask('Picked Ctrl+`; nothing needed from you.'), null);
-  assert.equal(await ask('Cara asked "should I merge it?" and I did.'), null);
-  assert.equal(await ask('Notes:\n\n```\nshould I merge it?\n```'), null);
+  assert.equal(await ask('Cara asked "should I land it?" and I did.'), null);
+  assert.equal(await ask('Notes:\n\n```\nshould I land it?\n```'), null);
   // Only the last two paragraphs are read.
-  assert.equal(await ask('Should I merge it?\n\nOne.\n\nTwo.\n\nThree.'), null);
+  assert.equal(await ask('Should I land it?\n\nOne.\n\nTwo.\n\nThree.'), null);
   // KEEP and the once-per-prompt marker work as for the other findings.
   const marker = join(root, 'nudged-card');
   const p = join(root, 'tp.jsonl');
   writeFileSync(p, user);
-  const input = { last_assistant_message: 'Should I merge it?', transcript_path: p, prompt_id: 'a' };
+  const input = { last_assistant_message: 'Should I land it?', transcript_path: p, prompt_id: 'a' };
   assert.equal((await check(input, { ...cfg, nudged: marker }))?.decision, 'block');
   assert.equal(await check(input, { ...cfg, nudged: marker }), null);
   // No readable transcript: say nothing rather than guess.
-  assert.equal(await check({ last_assistant_message: 'Should I merge it?' }, cfg), null);
+  assert.equal(await check({ last_assistant_message: 'Should I land it?' }, cfg), null);
 });
 
 test('a reply that says the minion is closing is sent back unless close_self was called and the status line keeps nothing open', async () => {

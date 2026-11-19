@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { type Chain, githubPrs, LiveWaiters, mergedPr, mergedPrOf, type PrMerge, startChained } from '../src/wake.ts';
+import { type Chain, chainIs, githubPrs, LiveWaiters, mergedPr, mergedPrOf, type PrMerge, startChained } from '../src/wake.ts';
 import { bootServer, stopTurns, stopProcs, testPins } from './helpers.ts';
 testPins();
 
@@ -160,7 +160,7 @@ for (const when of ['merged', 'live'] as const) {
     live.git('merge', '-q', '--ff-only', leader.branch); // as land.sh fast-forwards main
     if (when === 'live') assert.equal(await w.check(), 0, 'merged, but the server still runs the old commit');
     assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
-    assert.match(started[0].why, new RegExp(`work is ${when}$`));
+    assert.match(started[0].why, new RegExp(`work ${chainIs(when)}$`));
   });
 }
 
@@ -476,11 +476,11 @@ for (const when of ['merged', 'live'] as const) {
     store.updateTicket(leader.id, { status: 'closed' });
     if (when === 'live') {
       assert.equal(await w.check(), 0, 'on main, but the server still runs the old commit');
-      assert.equal(held.length, 0, 'not dismissed unshipped: its work is merged');
+      assert.equal(held.length, 0, 'not dismissed unshipped: its work has landed');
     }
     assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
     assert.equal(held.length, 0);
-    assert.match(started[0].why, new RegExp(`work is ${when}$`));
+    assert.match(started[0].why, new RegExp(`work ${chainIs(when)}$`));
   });
 }
 
@@ -525,10 +525,10 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
 `);
   chmodSync(fake, 0o755);
   const runner = new Runner(store, () => {}, () => ({}), fake);
-  runner.heldFor = (id) => (id === t.id ? "#1 Leader's work is merged" : null);
+  runner.heldFor = (id) => (id === t.id ? "#1 Leader's work has landed" : null);
   const t = store.createTicket({ project_id: citadel.id, title: 'Parked', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
-  store.updateTicket(t.id, { status: 'idle', state: 'parked', note: 'starts when #1 is merged' });
+  store.updateTicket(t.id, { status: 'idle', state: 'parked', note: 'starts when #1 has landed' });
   runner.send(t.id, 'Cara', 'what is this?');
   for (let i = 0; store.getTicket(t.id)!.status !== 'running'; i++) {
     assert.ok(i < 250, 'the turn starts');
@@ -542,7 +542,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   }
   const after = store.getTicket(t.id)!;
   assert.equal(after.status, 'idle');
-  assert.deepEqual([after.state, after.note], ['parked', 'starts when #1 is merged']);
+  assert.deepEqual([after.state, after.note], ['parked', 'starts when #1 has landed']);
 });
 
 test("a chained minion's branch is caught up after the turn running in its worktree ends, never under it, and before its brief's turn (#468 S07-2)", async () => {

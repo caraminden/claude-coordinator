@@ -1,4 +1,4 @@
-// The wording check (#313): "fold" means merging work, and nothing else reaches people (Cara, 2026-11-04).
+// The wording check (#313, #1021): "fold" is retired, and "merge" is only for a build branch, never main (Cara, 2026-11-19).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -14,7 +14,7 @@ import { checkCall, misusedWords } from '../src/wording.ts';
 
 const flagged = (text: string) => misusedWords(text).map((f) => f.word);
 
-test('flags fold in any other sense: Peek Auras #34\'s handoff, and the brief that asked for this check', () => {
+test('flags fold in every sense, the old gos included: Peek Auras #34\'s handoff, and the brief that asked for this check', () => {
   assert.deepEqual(flagged('**Folding in (core tooling)**'), ['Folding in']);
   assert.deepEqual(flagged('The Taskmaster starts a fold-in minion.'), ['fold-in']);
   assert.deepEqual(flagged('Then refit everything in the fold.'), ['fold']);
@@ -23,24 +23,39 @@ test('flags fold in any other sense: Peek Auras #34\'s handoff, and the brief th
   assert.deepEqual(flagged(brief), ['fold']);
   assert.equal(misusedWords(brief)[0].sentence, "Follow that pattern, or fold this check into the same hook if that's cleaner.");
   assert.deepEqual(flagged('It folds the old notes in. Then we folded them again.'), ['folds', 'folded']);
+  for (const old of ['fold it', 'Looks good, fold it and deploy.', 'fold #196 into build 8', 'Fold 196.', 'It was folded into main yesterday.', 'Fold the PR when CI is green.']) {
+    assert.equal(flagged(old).length, 1, old);
+  }
 });
 
-test('allows fold for merging, gos, and words that only contain it', () => {
+test('leaves fold alone in words that only contain it, quoted, or as code', () => {
   for (const ok of [
-    'fold it', 'Fold it.', 'Looks good, fold it and deploy.', 'fold #196 into build 8', 'Fold 196.', 'It was folded into main yesterday.',
-    'the folder', 'scaffold the page', 'casefold the names', 'unfold, manifold, twofold',
+    'the folder', 'scaffold the page', 'casefold the names', 'case-fold the names', 'unfold, manifold, twofold',
     'Use `fold` here.', 'Before:\n```\nthe fold\n```\nafter.', 'Open src/fold-panel.ts and ticket/313-check-for-misused-fold.',
-    '"Fold" means merging work.', 'The word \'fold\' is reserved.',
-    'Ready when you are: once the review is green, fold the branch.', 'Fold the PR when CI is green.',
-    'We can fold this one when it lands.',
+    '"Fold" is retired.', 'The word \'fold\' is retired.',
+  ]) assert.deepEqual(flagged(ok), [], ok);
+});
+
+test('flags merge said of main: gos, "to main", "ready to merge", merged PRs and the merge card', () => {
+  for (const [text, word] of [
+    ['Merge it?', 'Merge it'], ['So merge this.', 'merge this'], ['Merge #196 when ready.', 'Merge #196'], ['merge PR 12 now', 'merge PR 12'],
+    ['Ready to merge.', 'Ready to merge'], ['PR #12 merged.', 'PR #12 merged'], ['PR 12 was merged an hour ago.', 'PR 12 was merged'],
+    ['It was merged to main yesterday.', 'merged to main'], ['I merged the fix into main.', 'merged the fix into main'],
+    ['Review this, then merge it into main.', 'merge it into main'], ['Only merged PRs count.', 'merged PRs'], ['It asks with a merge card.', 'merge card'],
+  ]) assert.deepEqual(flagged(text), [word], text);
+});
+
+test('leaves merge alone for a build, git, and every shape that can\'t be told from git\'s', () => {
+  for (const ok of [
+    'Merge it into Build 3.', 'PR #12 merged into the build.', 'Merged into Build 3, not live until the build lands',
+    'Merge it, the feeder is green.', 'Merge them with git.', 'There was a merge conflict.', 'merged the branches', 'the merge commit',
+    'Land it.', 'Ready to land.', 'PR #12 landed.', '`merge it`', '"merge it" still counts as a go.',
   ]) assert.deepEqual(flagged(ok), [], ok);
 });
 
 test('nearby means the same sentence or within 8 words, not further', () => {
-  assert.deepEqual(flagged('Main is green. Fold this in.'), []);
-  assert.deepEqual(flagged('Main is green and everything else looks fine to me now. Fold this in.'), ['Fold']);
-  // "fold it" followed by "into" isn't a go.
-  assert.deepEqual(flagged('Fold it into the plan.'), ['Fold']);
+  assert.deepEqual(flagged('The build is green. Merge it.'), []);
+  assert.deepEqual(flagged('The build is green and everything else looks fine to me now. Merge it.'), ['Merge it']);
 });
 
 test('HTML: tags, scripts and code are not prose', () => {
@@ -60,14 +75,18 @@ test('a message, card or note is refused once per sentence, with the sentence an
   assert.equal(v?.hookSpecificOutput.permissionDecision, 'deny');
   const why = v!.hookSpecificOutput.permissionDecisionReason;
   assert.ok(why.includes('"Please start a fold-in minion for the new data."'), why);
-  assert.match(why, /means only merging work/);
+  assert.match(why, /no longer says "fold"/);
+  assert.match(why, /"land" for a change going onto main/);
   assert.match(why, /a collapsed section/);
   // Sent again as it was: through, so a false alarm never loops.
   assert.equal(checkCall(msg, cfg), null);
   // A new sentence in the same turn gets its own refusal; nested card text counts.
   const card = { tool_name: 'mcp__thread__ask_question', tool_input: { questions: [{ question: 'Which?', options: [{ label: 'Fold the legend' }, { label: 'Keep it' }] }] } };
   assert.equal(checkCall(card, cfg)?.hookSpecificOutput.permissionDecision, 'deny');
-  assert.equal(checkCall({ tool_name: 'mcp__coordinator__update_ticket', tool_input: { ticket_id: 3, note: 'merged, fold #3 next' } }, cfg), null);
+  assert.equal(checkCall({ tool_name: 'mcp__coordinator__update_ticket', tool_input: { ticket_id: 3, note: 'landed, land #3 next' } }, cfg), null);
+  const merge = checkCall({ tool_name: 'mcp__thread__message_coordinator', tool_input: { text: 'PR #40 is ready to merge.' } }, cfg)!.hookSpecificOutput.permissionDecisionReason;
+  assert.match(merge, /- "PR #40 is ready to merge\." \(ready to merge\)/);
+  assert.match(merge, /"ready to land"/);
 });
 
 test('only .md and .html writes into a shared folder are checked', () => {
@@ -85,7 +104,7 @@ test('the final reply is sent back in the link check\'s send-back, so the rewrit
   assert.equal(v?.decision, 'block');
   assert.ok(v!.reason.startsWith(SENT_BACK), v!.reason);
   assert.match(v!.reason, /- "The legend now sits in a fold\." \(fold\)/);
-  assert.equal(await check({ last_assistant_message: 'Done, fold it when ready.' }, { cwd: root, roots: [root] }), null);
+  assert.equal(await check({ last_assistant_message: 'Done, land it when ready.' }, { cwd: root, roots: [root] }), null);
 });
 
 test('the hook script prints a deny decision, or nothing', () => {

@@ -1,8 +1,9 @@
-// The wording check: words Citadel keeps for one meaning (Cara, 2026-11-04: "fold" is merging work and
-// nothing else), sent back before they reach people (#313). Three places use it: the Stop hook
-// (link-check.ts) checks a turn's final reply, and this file's PreToolUse hook (wordingHooks in
-// turn-launch.ts) checks the messages and cards a session sends and the .md and .html files it writes into
-// the scheme's shared folders. Each sentence is sent back once; a rewrite that still trips it goes out.
+// The wording check: words Citadel says one way, sent back before they reach people (#313). A change going onto
+// main "lands", a feeder going into a major build "merges", and "fold" is retired (Cara, 2026-11-19: picked "Land"
+// and, for fold, "Retire it"). Three places use it: the Stop hook (link-check.ts) checks a turn's final reply, and
+// this file's PreToolUse hook (wordingHooks in turn-launch.ts) checks the messages and cards a session sends and the
+// .md and .html files it writes into the scheme's shared folders. Each sentence is sent back once; a rewrite that
+// still trips it goes out.
 //
 // Run as a hook: node wording.ts '<config json>' < PreToolUse hook input; prints a "deny" decision or nothing.
 import { resolve, sep } from 'node:path';
@@ -11,27 +12,44 @@ import { deny, readSent, runHook, saveSent, toolStrings } from './pre-tool-hook.
 export interface Reserved {
   /** The word as people know it, named in the send-back. */
   term: string;
-  /** What it means in Citadel, for the send-back's "why". */
-  means: string;
-  /** Its forms, matched case-insensitively at word boundaries (so "folder", "scaffold" and "casefold" don't count). */
+  /** Why it's sent back, the send-back's first line. */
+  why: string;
+  /** Its forms or phrases, matched case-insensitively at word boundaries (so "folder", "scaffold" and "casefold" don't count). */
   match: RegExp;
-  /** A word that, in the same sentence or within WINDOW words, shows the reserved meaning. */
-  allow: RegExp;
-  /** Text starting at the match that's a go in the reserved sense ("fold it", "fold #196"). */
-  go?: RegExp;
+  /** A word that, in the same sentence or within WINDOW words, makes the use fine; none for a retired word. */
+  allow?: RegExp;
   /** What to write instead. */
   suggest: string;
 }
 
-/** The reserved words. Another one is one more row. */
+const MERGE = String.raw`merg(?:e|es|ed|ing)`;
+const INTO = String.raw`(?!\s+(?:in(?:to)?|with)\b)`;
+
+/** The words Citadel says one way. Another one is one more row. */
 export const RESERVED: Reserved[] = [
   {
     term: 'fold',
-    means: 'merging work (a minion\'s branch into main or into a major build)',
-    match: /\bfold(?:s|ed|ing)?\b(?:[- ]in\b)?/gi,
-    allow: /^(?:merg(?:e|es|ed|ing)|branch(?:es)?|main|builds?|PRs?|land(?:s|ed|ing)?)$/i,
-    go: /^fold(?:s|ed)?\s+(?:it\b(?!\s+in(?:to)?\b)|#?\d+\b)/i,
-    suggest: '"a collapsed section" or "hidden behind a toggle" for UI; "add to", "merge into the plan" or "refit" otherwise',
+    why: 'Citadel no longer says "fold" (Cara, 2026-11-19, "Retire it")',
+    // Not "case-fold": that's text, not work.
+    match: /(?<!\bcase-)\bfold(?:s|ed|ing)?\b(?:[- ]in\b)?/gi,
+    suggest: '"land" for a change going onto main, "merge into the build" for a feeder, "a collapsed section" or "hidden behind a toggle" for UI, and "add to" or "refit" otherwise',
+  },
+  {
+    term: 'merge',
+    why: 'A change going onto main "lands" (Cara, 2026-11-19, picked "Land"); "merge" is only for a branch going into a major build, or a raw git step',
+    // Only the shapes that can't mean a build: "merge it" / "merge #12" / "PR #12 merged" with no "into" after, "merged
+    // to main", "ready to merge", "merged PRs", "the merge card". A bare "merged" or "the merge" is left alone: it's
+    // as often git's as ours.
+    match: new RegExp([
+      String.raw`\b${MERGE}\s+(?:it|this|that|them|(?:PR\s*)?#\d+|PR\s+\d+)\b${INTO}`,
+      String.raw`\b${MERGE}\b(?:\s+\S+){0,4}?\s+(?:in)?to\s+main\b`,
+      String.raw`\bready\s+to\s+merge\b${INTO}`,
+      String.raw`\bPR\s*#?\d+\s+(?:(?:was|is|has\s+been|got)\s+)?merged\b${INTO}`,
+      String.raw`\bmerged\s+PRs?\b`,
+      String.raw`\bmerge\s+(?:card|chip|go|button)s?\b`,
+    ].join('|'), 'gi'),
+    allow: /^(?:builds?|feeders?|git)$/i,
+    suggest: '"land it", "landed on main", "ready to land", "landed PRs" or "the land card"; "merge into Build <n>" for a feeder',
   },
 ];
 
@@ -83,7 +101,7 @@ function quote(sentence: string, at: number): string {
   return `${i > 0 ? '…' : ''}${s.slice(i, i + 160).trim()}${i + 160 < s.length ? '…' : ''}`;
 }
 
-/** The reserved words `text` uses in some other sense, one per sentence and term. */
+/** The reserved words `text` uses the wrong way, one per sentence and term. */
 export function misusedWords(text: string, html = false): Misuse[] {
   const p = prose(text, html);
   const found: Misuse[] = [];
@@ -94,9 +112,12 @@ export function misusedWords(text: string, html = false): Misuse[] {
         const at = start + m.index;
         // Quoted, it's about the word itself ('"fold" means merging').
         if (/["'“‘]$/.test(p.slice(0, at)) && /^["'”’]/.test(p.slice(at + m[0].length))) continue;
-        if (r.go?.test(p.slice(at))) continue;
+        if (!r.allow) {
+          found.push({ term: r.term, word: m[0], sentence: quote(sentence, m.index) });
+          break;
+        }
         const near = [...words(sentence), ...words(p.slice(Math.max(0, at - 200), at)).slice(-WINDOW), ...words(p.slice(at + m[0].length, at + m[0].length + 200)).slice(0, WINDOW)];
-        if (near.some((w) => r.allow.test(w))) continue;
+        if (near.some((w) => r.allow!.test(w))) continue;
         found.push({ term: r.term, word: m[0], sentence: quote(sentence, m.index) });
         break;
       }
@@ -111,7 +132,7 @@ export function explain(found: Misuse[]): string {
   for (const r of RESERVED) {
     const mine = found.filter((f) => f.term === r.term);
     if (!mine.length) continue;
-    lines.push(`In Citadel "${r.term}" means only ${r.means}, and nothing near these says so:`);
+    lines.push(`${r.why}:`);
     for (const f of mine) lines.push(`- "${f.sentence}" (${f.word})`);
     lines.push(`Say ${r.suggest}. Quoting someone's words? Put them in backticks.`);
   }
@@ -147,7 +168,7 @@ export function checkCall(input: { tool_name?: string; tool_input?: any }, cfg: 
   // No record to stop the next try, so let it through rather than loop.
   if (!saveSent(cfg.sent, [...sent, ...fresh.map(key)])) return null;
   const what = /^mcp__/.test(String(input.tool_name)) ? 'This message' : 'This file';
-  return deny(`[wording] ${what} wasn't sent: people would read a reserved word in the wrong sense.\n${explain(fresh)}\nRewrite it and send it again.`);
+  return deny(`[wording] ${what} wasn't sent: people would read a word Citadel says another way.\n${explain(fresh)}\nRewrite it and send it again.`);
 }
 
 runHook(import.meta, checkCall);

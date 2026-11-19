@@ -21,5 +21,5 @@ test('a minion prompt carries the finishing-work lines in its cached system part
   const p = build('ticket');
   assert.match(p, /Finish the work before you end the turn/);
   assert.match(p, /a summary that announces the next step/);
-  assert.match(p, /risky or destructive actions and high-risk merges wait for a person's go/);
+  assert.match(p, /risky or destructive actions and high-risk lands wait for a person's go/);
 });

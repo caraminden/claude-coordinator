@@ -68,6 +68,7 @@ export function buildOf(name: string, inside: string[] | null): { platform: stri
   const has = (re: RegExp) => !!inside?.some((n) => re.test(n));
   // A Chrome extension zip has its manifest at the root (or in one folder); a Windows build, an .exe; an APK may come zipped.
   const platform = /\.(apk|aab)$/.test(lower) ? 'Android'
+    : /\.xpi$/.test(lower) ? (has(/^manifest\.json$/) ? 'Firefox' : null)
     : !/\.zip$/.test(lower) ? null
     : has(/^([^/]+\/)?manifest\.json$/) ? 'Chrome'
     : has(/\.exe$/i) ? 'Windows'
@@ -426,14 +427,14 @@ export class TargetFinder {
   private async files(p: Project): Promise<BuildFile[]> {
     const out: BuildFile[] = [];
     for (const a of this.d.store.listArtifacts(p.id)) {
-      if (a.missing || !/\.(apk|aab|zip)$/i.test(a.path)) continue;
+      if (a.missing || !/\.(apk|aab|zip|xpi)$/i.test(a.path)) continue;
       const t = this.d.store.getTicket(a.ticket_id);
       const abs = isAbsolute(a.path) ? a.path : t?.cwd ? join(t.cwd, a.path) : null;
       const st = abs ? await stat(abs).catch(() => null) : null;
       if (!t || !abs || !st?.isFile()) continue;
       const key = `${abs}:${st.mtimeMs}`;
       this.seenBuilds.add(key);
-      if (!this.builds.has(key)) this.builds.set(key, buildOf(basename(abs), /\.zip$/i.test(abs) ? await zipNames(abs) : null));
+      if (!this.builds.has(key)) this.builds.set(key, buildOf(basename(abs), /\.(zip|xpi)$/i.test(abs) ? await zipNames(abs) : null));
       const b = this.builds.get(key);
       if (b) out.push({ ticketId: t.id, number: t.number ?? t.id, path: a.path, abs, name: basename(abs), at: a.created_at, ...b });
     }

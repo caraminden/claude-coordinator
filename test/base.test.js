@@ -29,6 +29,8 @@ test('fileKind goes by extension, whatever its case, ignoring a query or fragmen
   assert.equal(fileKind('clip.webm'), 'video');
   assert.equal(fileKind('out.tar'), 'download');
   assert.equal(fileKind('build/app-release.APK'), 'download');
+  assert.equal(fileKind('ext/fst-v1.2.xpi'), 'download');
+  assert.equal(fileKind('ext.CRX'), 'download');
   assert.equal(fileKind('run.exe'), null);
   assert.equal(fileKind('Makefile'), null);
   assert.equal(fileExt('a/b/shot.png'), 'PNG');

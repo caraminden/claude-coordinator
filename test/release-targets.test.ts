@@ -661,6 +661,10 @@ test('buildOf: an APK, a Chrome extension, a Windows build and a zipped APK by w
   assert.equal(buildOf('Delve-ticket-70-exe-e889baa9-windows.zip', ['Delve.exe'])?.release, false, "a minion's branch build is a test copy");
   assert.equal(buildOf('FuckSpamTexts-0.4.zip', ['FuckSpamTexts-0.4.apk'])?.platform, 'Android');
   assert.equal(buildOf('art-pack.zip', ['a.png', 'deep/x/manifest.json']), null, 'a zip of anything else, or a manifest buried deeper, is no build');
+  assert.deepEqual(buildOf('fuckspamtexts-messages-web-v1.2.xpi', ['manifest.json', 'popup.js']), { platform: 'Firefox', release: true, version: '1.2' });
+  assert.equal(buildOf('fuckspamtexts-v1.2.xpi', ['a/b/manifest.json']), null, 'an .xpi has its manifest at the root');
+  assert.equal(buildOf('fuckspamtexts-v1.2.xpi', null), null, 'an unreadable .xpi is no build');
+  assert.equal(buildOf('fuckspamtexts-debug-v1.2.xpi', ['manifest.json'])?.release, false);
   assert.equal(buildOf('notes.md', null), null);
 });
 

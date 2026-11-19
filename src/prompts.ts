@@ -122,7 +122,7 @@ function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string
     `You can show people files (documents, images, GIFs, videos, web pages, PDFs, and zip or other archives to download) by linking them in your reply with a path ${where}; the app turns those links into previews that open the file in place of the chat:`,
     '- Link files by absolute path: a `../` link resolves against your working directory and breaks at the wrong depth.',
     '- `![caption](path)` shows an inline preview: use it for images, GIFs and videos.',
-    '- `[title](path)` shows a card: use it for documents, web pages and PDFs. A card for a .zip, .7z, .tar, .gz or .apk file downloads it when clicked.',
+    '- `[title](path)` shows a card: use it for documents, web pages and PDFs. A card for a .zip, .7z, .tar, .gz, .apk, .xpi, .crx downloads it when clicked.',
     ticket.kind === 'coordinator' ? '' : '- To point at part of a picture (where to click, what changed), draw on it with mark_image rather than describe where.',
     filesDir ? filesLine(filesDir) : '',
     'Linking a file is the only way people see it; they cannot browse your folders. Files you link are also listed in the scheme\'s artifacts, so link only what is meant for people, not files you made for your own use (test pages, scratch notes, fixtures).',

@@ -49,6 +49,9 @@ export const FILE_TYPES: Record<string, { kind: FileKind; mime: string; artifact
   '.tgz': { kind: 'download', mime: 'application/octet-stream', artifact: true },
   // Android's own type, so a phone's browser offers to install the app once it has downloaded.
   '.apk': { kind: 'download', mime: 'application/vnd.android.package-archive', artifact: true },
+  // Firefox offers to install an add-on served with its own type.
+  '.xpi': { kind: 'download', mime: 'application/x-xpinstall', artifact: true },
+  '.crx': { kind: 'download', mime: 'application/x-chrome-extension', artifact: true },
 };
 
 export function fileType(path: string) {

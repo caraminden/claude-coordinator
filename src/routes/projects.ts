@@ -6,6 +6,7 @@ import { basename, join } from 'node:path';
 import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
+import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { askerKey, buildOwnerKey, EFFORTS, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
@@ -1058,6 +1059,13 @@ export const projectRoutes: Route[] = [
     handler: ({ res, url, app, project }) => json(res, 200, app.store.briefStarts(project.id, url.searchParams.get('path') ?? '')),
   },
 
+  // The plugin folders in the scheme's repo, for the Minion rules page's picker (#1041). Saving them stays admin-only (PATCH).
+  {
+    method: 'GET', path: '/api/projects/:project/plugins', who: ['person'],
+    async handler({ res, project }) {
+      json(res, 200, { plugins: project.repo_dir ? await findPlugins(project.repo_dir) : [] });
+    },
+  },
   // The property registry: everyone reads it; people and the Taskmaster change it, minions propose.
   {
     method: 'GET', path: '/api/projects/:project/properties', who: ['person', 'taskmaster', 'minion'],

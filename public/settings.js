@@ -1,11 +1,12 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs (the Machines page is settings-machines.js).
-import { account, ago, api, h, icon, listGroupsOf, me, schemeIcon, view } from './base.js';
+import { account, ago, api, h, icon, me, schemeIcon, view } from './base.js';
 import { openHash } from './core.js';
 import { firefoxAvailable, firefoxOn, setFirefoxOn } from './extlinks.js';
 import { renderSidebar } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { instructionCost } from './prompt-cost.js';
+import { elsewhereRows, pickers } from './minion-rules.js';
 
 // ---------- push notifications ----------
 
@@ -193,11 +194,7 @@ export function onProjectUpdate(project) {
   view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
   if (view.projectId !== project.id) return;
   view.project = project;
-  for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs'], ['optional-plugin-dirs', 'optional_plugin_dirs'], ['list-groups', 'list_groups'], ['ci-quiet', 'ci_quiet'], ['ci-watch', 'ci_watch']]) {
-    const el = document.getElementById(id);
-    if (el && !el.hasAttribute('data-draft')) el.value = settingText(project, key);
-    el?.dispatchEvent(new Event('settings-refresh'));
-  }
+  for (const el of document.querySelectorAll('[data-rules-row]')) el.dispatchEvent(new Event('settings-refresh'));
   document.getElementById('land-mode')?.dispatchEvent(new Event('settings-refresh'));
   renderSidebar(); // its promoted groups may have changed
   const text = document.getElementById('instructions-text');
@@ -313,9 +310,6 @@ export function projectTitle(project) {
   return wrap;
 }
 
-const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
-/** A settings field's text: list_groups is stored as a JSON list and edited one per line. */
-const settingText = (p, key) => (key === 'list_groups' ? listGroupsOf(p).join('\n') : p[key] ?? '');
 
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
 // The side menu (#995, Cara picked "Side menu, rows that open"): three groups, each its own hue, every page with an
@@ -477,85 +471,37 @@ export function settingsHelp(first, ...rest) {
   return h('p', { class: 'muted small settings-help' }, first, more, ' ', btn);
 }
 
-/** Main panel: Minion rules, the scheme's approval rules, plugin folders, list groups and CI lists, a row each. */
+/** Reads what the pickers list (plugin folders, the property registry, CI's workflows, the schedule count), then redraws them. */
+function loadRulesData(rules, elsewhere) {
+  const id = view.projectId;
+  Promise.allSettled([api(`api/projects/${id}/plugins`), api(`api/projects/${id}/properties`), api('api/ci'), api(`api/projects/${id}/schedules`)]).then(([pl, pr, ci, sc]) => {
+    if (pl.value) rules.data.found = pl.value.plugins;
+    if (pr.value) rules.data.registry = pr.value.keys.filter((k) => k.value_kind === 'enum' && k.status === 'active').map((k) => ({ key: k.key, values: k.values.filter((v) => v.status !== 'proposed' && v.status !== 'archived').map((v) => v.value) }));
+    if (ci.value) rules.data.workflows = ci.value.schemes.find((s) => s.id === id)?.view.workflows ?? [];
+    if (sc.value && elsewhere[0]?.isConnected) elsewhere[0].replaceWith(...elsewhereRows(sc.value.schedules.filter((x) => !x.paused).length).slice(0, 1));
+    rules.refreshAll();
+  });
+}
+
+/** Main panel: Minion rules, each setting a row of pickers (public/minion-rules.js) with typed entry as the fallback. */
 export function approvalsEditor() {
   const p = view.project;
-  const admin = !!account?.admin;
-  const same = (a, b) => splitLines(a).join('\n') === splitLines(b).join('\n');
-  // One row per setting, with its own Save and Discard: only what that row holds is sent.
-  const setting = ({ id, key, placeholder, rows = 3, title, ic, hue, unit, examples = [], caution = '', readOnly = false, help }) => {
-    const t = h('textarea', { id, class: 'instructions-text settings-list', spellcheck: 'false', rows, placeholder, 'aria-label': title });
-    t.value = settingText(p, key);
-    t.readOnly = readOnly;
-    const status = h('span', { class: 'muted small', role: 'status' });
-    const save = h('button', { type: 'button' }, 'Save');
-    const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
-    const [row, sum] = settingsRow({ icon: ic, hue, title },
-      ...help,
-      t,
-      examples.length && !readOnly ? h('div', { class: 'settings-examples' }, h('span', { class: 'muted small' }, 'Add an example:'),
-        examples.map((x) => h('button', { type: 'button', class: 'chip', title: 'Add this line to the list', onclick: () => {
-          if (splitLines(t.value).includes(x)) return t.focus();
-          t.value = [t.value.trimEnd(), x].filter(Boolean).join('\n');
-          t.dispatchEvent(new Event('input'));
-        } }, '+ ', h('code', {}, x)))) : '',
-      caution ? h('p', { class: 'cui-notice small' }, caution) : '',
-      readOnly ? h('p', { class: 'muted small' }, 'Only an admin changes these.') : h('div', { class: 'settings-row-actions' }, save, discard, status));
-    // The summary says what the row holds, or that it has changed and isn't saved; the field is marked as a draft only
-    // while it differs, so someone else's save still shows otherwise.
-    const sync = () => {
-      const dirty = !same(t.value, settingText(view.project, key));
-      t.toggleAttribute('data-draft', dirty);
-      row.classList.toggle('changed', dirty);
-      const n = splitLines(settingText(view.project, key));
-      sum.textContent = dirty ? 'Changed, not saved yet' : n.length ? `${n.length} ${unit}${n.length > 1 ? 's' : ''}: ${n.join(', ')}` : `No ${unit}s yet`;
-      save.disabled = discard.disabled = !dirty;
-    };
-    t.addEventListener('input', () => { status.textContent = ''; row.classList.remove('saved'); sync(); });
-    t.addEventListener('settings-refresh', sync); // onProjectUpdate: a save, ours or someone else's
-    // Saved at once: the field stops counting as a draft; a refusal turns it back into one (the text stays) with a toast to retry.
-    save.onclick = () => {
-      // list_groups goes as a list; the project keeps it as JSON.
-      const body = { [key]: key === 'list_groups' ? splitLines(t.value) : t.value };
-      const mine = { [key]: key === 'list_groups' ? JSON.stringify(body[key]) : t.value };
-      saveProject(p, mine, body, `save ${title.toLowerCase()}`, (saved) => {
-        status.textContent = saved ? 'Saved. Minions pick this up on their next turn.' : 'Not saved.';
-        row.classList.toggle('saved', saved);
-        sync();
-      });
-    };
-    discard.onclick = () => { t.value = settingText(view.project, key); t.dispatchEvent(new Event('input')); };
-    sync();
-    return row;
-  };
+  const rules = pickers({ settingsRow, settingsHelp, saveProject });
+  const elsewhere = elsewhereRows(null);
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
-    settingsSection('Approvals',
-      setting({ id: 'approval-rules', key: 'approval_rules', rows: 5, placeholder: 'Bash(gh pr merge:*)\nmcp__*__merge_pull_request', title: 'Needs approval', ic: 'shield', hue: 'waiting', unit: 'rule',
-        examples: ['Bash(gh pr merge:*)', 'mcp__*__merge_pull_request'], caution: 'Bash rules match how a command starts: they catch mistakes, not a determined workaround.',
-        help: [settingsHelp('Tool calls that wait for Approve or Deny in the minion\'s chat.', 'One Claude Code permission rule per line; everything else runs without asking.')] })),
+    settingsSection('Approvals', rules.approvals()),
+    settingsSection('Shipping', fastModeRow(p)),
     // Plugins load code from any folder on the server, so only an admin changes them.
-    settingsSection('Plugins',
-      setting({ id: 'plugin-dirs', key: 'plugin_dirs', placeholder: 'tools/mods/delve', title: 'Plugin folders', ic: 'plug', hue: 'held', unit: 'folder', examples: ['tools/mods/delve'], readOnly: !admin,
-        help: [settingsHelp('Claude Code plugins every minion loads.', '(', h('code', {}, '--plugin-dir'), ') One folder per line, relative to the repo root or absolute; a folder that is not there is skipped.')] }),
-      setting({ id: 'optional-plugin-dirs', key: 'optional_plugin_dirs', placeholder: 'tools/plugins/devtools', title: 'Optional plugin folders', ic: 'plugplus', hue: 'held', unit: 'folder', examples: ['tools/plugins/devtools'], readOnly: !admin,
-        help: [settingsHelp('Plugins too costly for every minion: one loads them only when picked.', 'The Taskmaster picks them when it starts the minion, or you do in the Plugins picker beside Send.')] })),
-    settingsSection('Minions list',
-      setting({ id: 'list-groups', key: 'list_groups', placeholder: 'area: balance', title: 'List groups', ic: 'rows', hue: 'teal', unit: 'group',
-        help: [settingsHelp(['Values of this scheme\'s own properties, one per line, like ', h('code', {}, 'area: balance'), '.'],
-          'Minions outside a build that carry one get their own group at the top of the minions list; one that matches two sits in the first.')] })),
-    settingsSection('CI',
-      setting({ id: 'ci-quiet', key: 'ci_quiet', placeholder: 'drift.yml', title: 'Quiet CI workflows', ic: 'belloff', hue: 'running', unit: 'workflow',
-        help: [settingsHelp(['Workflows listed here, like ', h('code', {}, 'drift.yml'), ', are left unwatched.'],
-          'Every other workflow that goes red on the default branch wakes the Taskmaster, puts a quiet item in Mandate and rings if no fix minion starts within an hour. One workflow file per line. A minion that dispatched a run on its own branch still hears its result.')] }),
-      setting({ id: 'ci-watch', key: 'ci_watch', placeholder: 'desktop.yml', title: 'Watched CI workflows', ic: 'eye', hue: 'running', unit: 'workflow',
-        help: [settingsHelp(['Watched even when it is in the quiet list above, like ', h('code', {}, 'desktop.yml'), '.'],
-          'When a workflow listed here goes red on the default branch (the push when a change ships included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line.')] }),
-      fastModeRow(p)));
+    settingsSection('Minions', rules.listGroups(), rules.effort()),
+    settingsSection('Plugins', rules.plugins()),
+    settingsSection('CI', rules.ci()),
+    settingsSection('Elsewhere', ...elsewhere));
+  loadRulesData(rules, elsewhere);
   return section;
 }
 

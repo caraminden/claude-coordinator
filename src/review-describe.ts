@@ -5,9 +5,16 @@
 import { execFile } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
-import { BUILT_INS, isKit, whenText, type ReviewEntry } from './review-set.ts';
+import { BUILT_INS, isKit, onFailText, whenText, type OnFail, type ReviewEntry } from './review-set.ts';
 
-export interface Proposal { slug: string; name: string; version: number; before: string; after: string; why: string }
+/** How it works with the others (Q7, phase 3), which the agent may set on a scheme's own entries besides the body. */
+export interface Settings { gate?: 'block' | 'advise' | null; panel?: string | null; on_fail?: OnFail[] | null }
+export interface Proposal { slug: string; name: string; version: number; before: string; after: string; why: string; settings?: Settings; settings_before?: Settings }
+
+/** Settings as lines for the before and after view: "gate: block", "on_fail: professor after 2 fails". */
+export function settingsText(s: Settings): string {
+  return [s.gate !== undefined ? `gate: ${s.gate ?? 'none'}` : '', s.panel !== undefined ? `panel: ${s.panel ?? 'none'}` : '', s.on_fail !== undefined ? `on_fail: ${s.on_fail?.length ? onFailText(s.on_fail) : 'the default'}` : ''].filter(Boolean).join('\n');
+}
 
 /** The cheap tier for a known-shape edit (Citadel-wide "Usage, effort and models"): Sonnet at medium. */
 const ARGS = ['-p', '--output-format', 'json', '--model', 'sonnet', '--effort', 'medium', '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence'];
@@ -17,13 +24,14 @@ const TIMEOUT_MS = 4 * 60_000;
 export function describePrompt(ask: string, entries: ReviewEntry[]): string {
   const set = entries.map((e) => {
     const kit = isKit(e) ? BUILT_INS.find((b) => b.slug === e.slug) : undefined;
-    return { slug: e.slug, name: e.name, kind: e.kind, on: e.enabled, trial: e.trial, when: kit?.when ?? (whenText(e.triggers) || 'ask'), ...(kit ? { kit: kit.what } : {}), ...(e.extends ? { extends_kit_starter: e.extends } : {}), body: e.body };
+    return { slug: e.slug, name: e.name, kind: e.kind, stage: e.stage, on: e.enabled, trial: e.trial, when: kit?.when ?? (whenText(e.triggers) || 'ask'), ...(kit ? { kit: kit.what } : { gate: e.gate, panel: e.panel, on_fail: e.on_fail }), ...(e.extends ? { extends_kit_starter: e.extends } : {}), body: e.body };
   });
   return [
-    "You edit a scheme's review set: the reviewers and critics that judge its work in Citadel. Each entry's `body` is a rubric in its own text: optional frontmatter (between --- lines; never name, extends, when, model, effort, trial, gate or calibrated, which the page owns), then its sections (## Blockers, ## Scale, ## Known blind spots and the like). An entry with `kit` is one of the kit's own reviewers: its text stays in the kit, and its body holds only this scheme's additions, read with it. An entry with `extends_kit_starter` adds to that kit starter the same way.",
+    "You edit a scheme's review set: the reviewers and critics that judge its work in Citadel. Each entry's `body` is a rubric in its own text: optional frontmatter (between --- lines; never name, extends, when, model, effort, trial, gate or calibrated, which the page owns), then its sections (## Blockers, ## Scale, ## Known blind spots and the like). An entry with `kit` is one of the kit's own reviewers: its text stays in the kit, and its body holds only this scheme's additions, read with it. An entry with `extends_kit_starter` adds to that kit starter the same way. The list is in run order: within a stage, later entries see earlier ones' verdicts.",
+    'Besides the body, an entry that isn\'t `kit` has three settings for how it works with the others, which you may change too: `gate` ("block": its fail holds the ship; "advise": it only reports; an entry on trial only advises), `panel` (a name: the entries of a stage with the same panel judge the same work at once, and one of kind "referee" in it merges their verdicts; null for none), and `on_fail` (hand-offs as [{"after": failed rounds, "to": "professor", "person" or another entry\'s slug}], rising; null for the default: professor after 2, a person after 3).',
     `A person asked for this change:\n<ask>\n${ask}\n</ask>`,
     `The set:\n${JSON.stringify(set, null, 1)}`,
-    'Propose the smallest edits to entries\' bodies that do what they asked, in their words and the entries\' own style, keeping everything else as written. Only entries in the set, at most 4. Reply with JSON only, no fences: {"edits": [{"slug": "<slug>", "body": "<the whole new body>", "why": "<one plain line on what changed>"}], "note": "<one line for the person: what you did, or why there is nothing to change (the ask isn\'t about these entries, or needs a switch on the page instead)>"}',
+    'Propose the smallest edits to entries\' bodies that do what they asked, in their words and the entries\' own style, keeping everything else as written. Only entries in the set, at most 4. Reply with JSON only, no fences: {"edits": [{"slug": "<slug>", "body": "<the whole new body, or leave it out to keep it>", "settings": {"gate"?, "panel"?, "on_fail"?: only the ones you change}, "why": "<one plain line on what changed>"}], "note": "<one line for the person: what you did, or why there is nothing to change (the ask isn\'t about these entries, or needs a switch on the page instead)>"}',
   ].join('\n\n');
 }
 
@@ -41,9 +49,18 @@ export function readProposals(reply: string, entries: ReviewEntry[]): { note: st
   const proposals: Proposal[] = [];
   for (const ed of Array.isArray(data?.edits) ? data.edits.slice(0, 4) : []) {
     const e = entries.find((x) => x.slug === ed?.slug);
-    if (!e || typeof ed.body !== 'string' || ed.body.length > 200_000 || ed.body.trim() === e.body.trim()) continue;
-    if (proposals.some((p) => p.slug === e.slug)) continue;
-    proposals.push({ slug: e.slug, name: e.name, version: e.version, before: e.body, after: ed.body.trim(), why: typeof ed.why === 'string' ? ed.why.trim().slice(0, 300) : '' });
+    if (!e || proposals.some((p) => p.slug === e.slug)) continue;
+    const body = typeof ed.body === 'string' && ed.body.length <= 200_000 && ed.body.trim() !== e.body.trim() ? ed.body.trim() : null;
+    // Only a scheme's own entries have settings (a kit entry's are the kit's); the save checks each value as the page's would.
+    const settings: Settings = {};
+    const was: Settings = {};
+    const set = ed.settings && typeof ed.settings === 'object' && !isKit(e) ? ed.settings : {};
+    if (set.gate !== undefined && (set.gate === null || set.gate === 'block' || set.gate === 'advise') && set.gate !== e.gate) [settings.gate, was.gate] = [set.gate, e.gate];
+    if (set.panel !== undefined && (set.panel === null || typeof set.panel === 'string') && (set.panel?.trim() || null) !== e.panel) [settings.panel, was.panel] = [set.panel?.trim() || null, e.panel];
+    if (set.on_fail !== undefined && (set.on_fail === null || Array.isArray(set.on_fail)) && JSON.stringify(set.on_fail) !== JSON.stringify(e.on_fail)) [settings.on_fail, was.on_fail] = [set.on_fail, e.on_fail];
+    const changed = Object.keys(settings).length > 0;
+    if (body === null && !changed) continue;
+    proposals.push({ slug: e.slug, name: e.name, version: e.version, before: e.body, after: body ?? e.body, why: typeof ed.why === 'string' ? ed.why.trim().slice(0, 300) : '', ...(changed ? { settings, settings_before: was } : {}) });
   }
   return { note, proposals };
 }

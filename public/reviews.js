@@ -442,7 +442,9 @@ async function describe(ask) {
 
 function proposal(ask, p) {
   const row = (op, text) => h('div', { class: op === '+' ? 'add' : op === '-' ? 'del' : 'same' }, `${op === ' ' ? '\u00a0' : op} ${text}`);
-  const runs = collapseRuns(diffLines(p.before, p.after)).map((r) => r.gap
+  // Settings (phase 3: gate, panel, hand-offs) diff as lines above the body's.
+  const sets = (o) => Object.entries(o ?? {}).map(([k, v]) => `${k}: ${k === 'on_fail' ? (v?.length ? v.map((x) => `${x.to} after ${x.after}`).join(', ') : 'the default') : v ?? 'none'}`).join('\n');
+  const runs = collapseRuns(diffLines(`${sets(p.settings_before)}${p.settings ? '\n\n' : ''}${p.before}`, `${sets(p.settings)}${p.settings ? '\n\n' : ''}${p.after}`)).map((r) => r.gap
     ? h('details', { class: 'gap' }, h('summary', {}, `${r.gap.length} unchanged line${r.gap.length === 1 ? '' : 's'}`), ...r.gap.map((o) => row(' ', o.text)))
     : row(r.op, r.text));
   const drop = () => { ask.proposals = ask.proposals.filter((x) => x !== p); draw(); };
@@ -451,7 +453,7 @@ function proposal(ask, p) {
     b.disabled = true;
     const s = state; // a scheme switch during the save leaves the new scheme's entries alone
     try {
-      const saved = await api(url(p.slug), { method: 'PATCH', body: { body: p.after, version: p.version, note: `Described: ${p.ask}`.slice(0, 200) } });
+      const saved = await api(url(p.slug), { method: 'PATCH', body: { body: p.after, ...p.settings, version: p.version, note: `Described: ${p.ask}`.slice(0, 200) } });
       const i = s.entries?.findIndex((x) => x.slug === p.slug) ?? -1;
       if (i >= 0) s.entries[i] = saved;
       ask.applied.push(`Applied. Version ${saved.version} of ${saved.name}; History can undo it.`);

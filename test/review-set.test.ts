@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { readProposals } from '../src/review-describe.ts';
 import { BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-'));
@@ -355,4 +356,20 @@ test("the requester's words: off by default, the minion's first message in the b
   assert.doesNotMatch(renderEntry(e, { requester: words }), /requester's words/);
   const on = set.save(3, 'ui', { context: { requester: true } }, 'Josh', 'x');
   assert.match(renderEntry(on, { requester: words }), /## The requester's words\n\nWhat Cara asked this minion for, in their own words \(the brief may quote them\):\n\n> Make the tree glow\.\n> Softly\./);
+});
+
+test("the describe agent may change a scheme entry's gate, panel and hand-offs, never a kit entry's", () => {
+  const { set } = fresh();
+  set.ensureBuiltIns(3);
+  set.create(3, { slug: 'ui', name: 'UI', body: '# UI' }, 'Josh');
+  const reply = JSON.stringify({ note: 'ok', edits: [
+    { slug: 'ui', settings: { panel: 'Taste', on_fail: [{ after: 1, to: 'person' }], gate: 'advise' }, why: 'Panel' },
+    { slug: 'finding-checker', settings: { gate: 'block' } },
+    { slug: 'ui', body: 'second edit of the same entry is dropped' },
+  ] });
+  const { proposals } = readProposals(reply, set.list(3));
+  assert.equal(proposals.length, 1, 'a settings-only edit of a kit entry proposes nothing');
+  assert.deepEqual(proposals[0].settings, { gate: 'advise', panel: 'Taste', on_fail: [{ after: 1, to: 'person' }] });
+  assert.deepEqual(proposals[0].settings_before, { gate: null, panel: null, on_fail: null });
+  assert.equal(proposals[0].after, '# UI', 'the body is kept when the edit leaves it out');
 });

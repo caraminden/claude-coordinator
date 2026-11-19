@@ -23,6 +23,7 @@ test('views() gives each row what view() does, reading the scheme, the waits, th
     if (i % 5 === 0) store.props.set('minion', t.id, project.id, { type: 'bug' }, 'Cara');
     return store.getTicket(t.id)!;
   });
+  store.props.set('minion', tickets[0].id, project.id, { assigned: 'josh' }, 'Cara');
   store.setSetting('net-resumes', [{ ticket: tickets[3].id, queued: [{ id: 7, author: 'Cara', text: 'x', images: [] }] }]);
   store.setSetting('limit-resumes', [{ ticket: tickets[6].id, at: 123, accounts: null }]);
   const runner = new Runner(store, () => {}, () => ({}), 'true');
@@ -31,8 +32,9 @@ test('views() gives each row what view() does, reading the scheme, the waits, th
   assert.ok(one.some((v) => (v.properties as any).type === 'bug') && one.some((v) => v.payer?.name === 'Josh'));
   assert.equal(one[3].queued, 1);
   assert.equal(one[6].limit_resume_at, 123);
+  assert.ok(one[0].touched.includes(josh.id), 'an open row counts its assignee as touching it');
 
-  const calls: Record<string, number> = { getProject: 0, getUser: 0, forTarget: 0, waits: 0 };
+  const calls: Record<string, number> = { getProject: 0, getUser: 0, forTarget: 0, forTargets: 0, waits: 0 };
   const count = (obj: any, name: string, key = name, when: (...a: any[]) => boolean = () => true) => {
     const f = obj[name].bind(obj);
     obj[name] = (...a: any[]) => (when(...a) && calls[key]++, f(...a));
@@ -40,8 +42,9 @@ test('views() gives each row what view() does, reading the scheme, the waits, th
   count(store, 'getProject');
   count(store, 'getUser');
   count(store.props, 'forTarget');
+  count(store.props, 'forTargets');
   count(store, 'getSetting', 'waits', (k: string) => k === 'net-resumes' || k === 'limit-resumes');
   assert.deepEqual(runner.views(tickets), one);
   // Once for the list, not once (or twice) per row: 60 rows.
-  assert.ok(calls.getProject <= 1 && calls.getUser <= 4 && calls.forTarget === 0 && calls.waits <= 2, JSON.stringify(calls));
+  assert.ok(calls.getProject <= 1 && calls.getUser <= 4 && calls.forTarget === 0 && calls.forTargets === 1 && calls.waits <= 2, JSON.stringify(calls));
 });

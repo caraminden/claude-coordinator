@@ -745,7 +745,6 @@ export class Runner {
     return this.queues.get(ticketId)?.length ?? 0;
   }
 
-  /** A ticket as the API shows it: plus queued messages and its task-list steps. */
   /**
    * view() for a list's rows (#1029): what rows share (the scheme, the waits, the people) is read once, and every
    * row's properties in one query. Read per row, Citadel's ~1,000 dismissed minions held the server 0.4 s a page load.
@@ -757,6 +756,7 @@ export class Runner {
     return tickets.map((t) => this.view(t, { once, properties: properties.get(t.id)! }));
   }
 
+  /** A ticket as the API shows it: plus queued messages and its task-list steps. */
   view(ticket: Ticket, list?: { once: <T>(key: string, read: () => T) => T; properties: Record<string, string | number | string[]> }) {
     const once = list?.once ?? (<T>(_key: string, read: () => T) => read());
     const project = once(`project:${ticket.project_id}`, () => this.store.getProject(ticket.project_id));

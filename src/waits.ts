@@ -118,13 +118,13 @@ export function readQueue(q: string, orderAt: number, alive = procAlive): LandTi
  * holder, a ticket no longer waiting or one from an older branch is left out (an older one waits for every lower
  * ticket, so ranking it ahead of one could deadlock). `note` says who moved what, for the waiters' output. Returns the order written.
  */
-export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string, moved?: number): number[] {
+export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string | ((order: number[]) => string), moved?: number): number[] {
   const waiting = line.filter((t) => t.got === 0 && t.orders).map((t) => t.seq);
   const order = moved != null && waiting.includes(moved) ? moveIn(waiting, seqs, moved) : [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
   if (!order.length) throw new Error('No landing waiting in line to reorder');
   const f = join(q, '.order'), tmp = `${f}.tmp${process.pid}`;
   // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
-  writeFileSync(tmp, `# ${note.replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
+  writeFileSync(tmp, `# ${(typeof note === 'string' ? note : note(order)).replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
   renameSync(tmp, f);
   return order;
 }
@@ -365,7 +365,7 @@ export class Waits {
    * the line's order (given `moved`, only it moves: moveIn); a holder, a ticket no longer waiting or one from an older branch
    * is left out. `note` says who moved what, for the waiters' output. Returns the order written.
    */
-  setOrder(seqs: number[], note: string, moved?: number): number[] {
+  setOrder(seqs: number[], note: string | ((order: number[]) => string), moved?: number): number[] {
     if (!this.d.deployState) throw new Error('This server has no land line');
     this.poll();
     const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note, moved);

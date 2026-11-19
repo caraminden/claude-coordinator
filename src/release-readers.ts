@@ -797,17 +797,19 @@ export function landProgress(output: string, since: number): Progress {
   return { stage: 'land', since, usual: null, waitingOn: null, text: 'landing: tests, then onto main' };
 }
 
+/** A scheme's land line: the kit's land template's tickets, in its main checkout's git folder (#1007). */
+export const landQueue = (repo: string) => join(repo, '.git', 'land-queue');
+/** That line's tickets, in its order: their 8th line (index 7) is "order" when their land.sh follows .order. */
+export const schemeLine = (repo: string) => readQueue(landQueue(repo), 7);
+
+/** Why no landing in a scheme's line can move yet (#1007): the land.sh on its main predates reordering. */
+export const OLD_SCHEME_LAND = "Can't move yet: this scheme's land script is older than reordering, so its landings go in turn until it copies the kit's newer one";
+
 /**
  * Minions handed off to land (#764), on their way before they reach main: in line for the land lock, then landing.
  * Each goes on the targets its branch's files ship on, ahead of their own stages, from the hand-off until main has it
  * (then a reader has it as on main). Not for Citadel's own scheme (its land line has them) or Main (it ships at merge).
  */
-/** A scheme's land line: the kit's land template's tickets, in its main checkout's git folder (#1007). */
-export const landQueue = (repo: string) => join(repo, '.git', 'land-queue');
-
-/** Why no landing in a scheme's line can move yet (#1007): the land.sh on its main predates reordering. */
-export const OLD_SCHEME_LAND = "Can't move yet: this scheme's land script is older than reordering, so its landings go in turn until it copies the kit's newer one";
-
 export class LandsInFlight {
   private d: LandDeps;
   /** When each was first seen landing (ms), so a poll doesn't move it. */
@@ -841,7 +843,7 @@ export class LandsInFlight {
         // Whether the scheme's own land.sh follows .order yet: until it does, no landing in its line can move.
         let script = '';
         try { script = readFileSync(join(p.repo_dir!, 'tools', 'land.sh'), 'utf8'); } catch { /* none: no line to read either */ }
-        lines.set(p.id, { line: readQueue(landQueue(p.repo_dir!), 7), current: /^queue_order\(\)/m.test(script) });
+        lines.set(p.id, { line: schemeLine(p.repo_dir!), current: /^queue_order\(\)/m.test(script) });
       }
       return lines.get(p.id)!;
     };

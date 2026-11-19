@@ -9,10 +9,11 @@ import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
-import { ApkReader, buildWait, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, LandsInFlight, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { ApkReader, buildWait, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { CITADEL_TARGET, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
+import { writeOrder } from '../src/waits.ts';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
 const root = mkdtempSync(join(tmpdir(), 'release-targets-'));
@@ -1097,4 +1098,9 @@ test("each target's part of a scheme's land line, in the line's order, with why 
   writeFileSync(join(repo, 'tools', 'land.sh'), '#!/usr/bin/env bash\nqueue_order() {\n  :\n}\n');
   const now = look();
   assert.deepEqual(now.line, [['#1', true, false, ''], ['#4', false, true, ''], ['#2', false, true, ''], ['#3', false, false, OLD_LAND]]);
+  // The route's write, as the route makes it: Land next on #2 puts it first in the scheme's .order, and the line follows.
+  const order = writeOrder(landQueue(repo), schemeLine(repo), [2, 4], (o) => `Cara moved #2 to ${o.indexOf(2) ? 'later' : 'land next'}`, 2);
+  assert.deepEqual(order, [2, 4]);
+  assert.equal(readFileSync(join(q, '.order'), 'utf8'), '# Cara moved #2 to land next\n0000000002\n0000000004\n');
+  assert.deepEqual(look().line.map(([name]) => name), ['#1', '#2', '#4', '#3']);
 });

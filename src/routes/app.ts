@@ -11,9 +11,9 @@ import { mayReceive } from '../access.ts';
 import { randomUUID } from 'node:crypto';
 import { clientIp, HttpError, isSecure, json, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { optOutKey } from '../replay-keep.ts';
-import { ordinal, readQueue, writeOrder } from '../waits.ts';
+import { ordinal, writeOrder } from '../waits.ts';
 import { CITADEL_TARGET } from '../releases.ts';
-import { landQueue } from '../release-readers.ts';
+import { landQueue, schemeLine } from '../release-readers.ts';
 
 const MAX_CLIENTS = 100;
 
@@ -229,15 +229,18 @@ export const appRoutes: Route[] = [
     if (!moved) throw new HttpError(409, 'That landing is no longer waiting in line');
     if (!moved.movable) throw new HttpError(409, `${moved.name}: ${moved.why ?? 'it can\'t move'}`);
     const who = store.getUser(session.uid as number)?.name ?? 'a member';
-    const place = seqs.indexOf(moved.seq);
-    const note = `${who} moved ${moved.name} ${place === 0 ? 'to land next' : `to ${ordinal(place + 1)} of the waiting landings`}`;
+    // Its place in the order written: a target shows only part of the line, so where it's dropped there isn't always that.
+    const note = (order: number[]) => {
+      const place = order.indexOf(moved.seq);
+      return `${who} moved ${moved.name} ${place === 0 ? 'to land next' : `to ${ordinal(place + 1)} of the waiting landings`}`;
+    };
     let order: number[];
     try {
-      order = own ? waits!.setOrder(seqs, note, moved.seq) : writeOrder(landQueue(repo!), readQueue(landQueue(repo!), 7), seqs, note, moved.seq);
+      order = own ? waits!.setOrder(seqs, note, moved.seq) : writeOrder(landQueue(repo!), schemeLine(repo!), seqs, note, moved.seq);
     } catch (err) {
       throw new HttpError(409, (err as Error).message);
     }
-    console.log(`Land line: ${note} (${order.join(', ')})`);
+    console.log(`Land line: ${note(order)} (${order.join(', ')})`);
     releases.poll();
     return json(res, 200, { order });
   } },

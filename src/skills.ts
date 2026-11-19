@@ -48,11 +48,15 @@ export function pruneKit(kitDir: string, off: readonly string[]): void {
   for (const s of off) if (NAME.test(s)) rmSync(join(kitDir, 'skills', s), { recursive: true, force: true });
 }
 
-/** Split a description into what it does and when to use it: sentences opening "Use", "Open", "Also for/when" or "Only when" are the trigger. */
+/** Split a description into what it does and when to use it: sentences opening "Use", "Open", "Also for/when" or "Only when", and a leading "Before …:" clause, are the trigger. */
 export function splitDescription(text: string): { what: string; trigger: string } {
   const sentences = text.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+(?=[A-Z])/);
   const isTrigger = (s: string) => /^(Use\b|Open\b|Also (for|when|use)\b|Only when\b|TRIGGER\b)/.test(s);
-  return { what: sentences.filter((s) => !isTrigger(s)).join(' '), trigger: sentences.filter(isTrigger).join(' ') };
+  // "Before shipping your own branch: a Grunt reviews…" opens with its trigger as a clause.
+  const lead = /^((?:Before|After) [^:]{3,80}):\s+(.+)$/.exec(sentences[0]);
+  if (lead) sentences.splice(0, 1, `${lead[1]}.`, lead[2][0].toUpperCase() + lead[2].slice(1));
+  const trigger = sentences.filter((s, i) => isTrigger(s) || (lead && i === 0));
+  return { what: sentences.filter((s) => !trigger.includes(s)).join(' '), trigger: trigger.join(' ') };
 }
 
 function read(path: string): string | null {

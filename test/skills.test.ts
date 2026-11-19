@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { KIT_DIR, listSkills, skillTimeline, skillUsage, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
-import { bootServer, stopProcs } from './helpers.ts';
+import { bootServer, stopProcs, until } from './helpers.ts';
 
 // The Skills page (#1062): the list, the usage walk over a scheme's events, and the per-scheme Off switch.
 const root = mkdtempSync(join(tmpdir(), 'skills-'));
@@ -19,6 +19,7 @@ after(async () => {
 test('a description splits into what it does and its trigger sentences', () => {
   assert.deepEqual(splitDescription('Reviews a diff. Use when shipping. Also for "how risky is this".'), { what: 'Reviews a diff.', trigger: 'Use when shipping. Also for "how risky is this".' });
   assert.deepEqual(splitDescription('Only when a person asks.'), { what: '', trigger: 'Only when a person asks.' });
+  assert.deepEqual(splitDescription('Before shipping your branch: a Grunt reviews the diff. Also for "how risky".'), { what: 'A Grunt reviews the diff.', trigger: 'Before shipping your branch. Also for "how risky".' });
 });
 
 test('the list has every kit skill and Grunt type, and a scheme repo\'s own', () => {
@@ -28,7 +29,7 @@ test('the list has every kit skill and Grunt type, and a scheme repo\'s own', ()
   const items = listSkills(KIT_DIR, repo);
   const self = items.find((i) => i.name === 'citadel:self-review')!;
   assert.equal(self.source, 'kit');
-  assert.ok(self.trigger.startsWith('Use') || self.trigger.startsWith('Also'), self.trigger);
+  assert.ok(self.trigger.startsWith('Before shipping'), self.trigger);
   assert.ok(items.some((i) => i.kind === 'agent' && i.name === 'citadel:reviewer'));
   assert.deepEqual(items.filter((i) => i.source === 'scheme'), [{ name: 'release-notes', kind: 'skill', source: 'scheme', slug: 'release-notes', what: 'Writes notes.', trigger: 'Use before a release.' }]);
 });
@@ -146,4 +147,17 @@ test('the page lists the skills, and a member turns a kit skill off and on, with
   const notes = (await call(`/api/tickets/${again.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
   assert.ok(notes.includes('Cara turned off citadel:grilling, citadel:self-review on the Skills page. It applies from each minion\'s next turn.'), notes.join('\n'));
   assert.ok(notes.includes('Cara turned back on citadel:self-review on the Skills page. It applies from each minion\'s next turn.'));
+});
+
+test('+ New skill starts a minion with the edited brief as its first message (the dialog\'s request)', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'New skill scheme' } });
+  const brief = 'Build a new skill, `weekly-digest`, in this scheme\'s repo, as .claude/skills/weekly-digest/SKILL.md.\n\nOpen `citadel:writing-for-agents` first and follow it.';
+  const made = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'New skill: weekly-digest', message: brief, properties: { type: 'feature' } } });
+  assert.equal(made.status, 201);
+  await until('the first turn to end', async () => (await call(`/api/tickets/${made.data.id}`)).data.ticket.status !== 'running');
+  const { data } = await call(`/api/tickets/${made.data.id}`);
+  assert.equal(data.ticket.title, 'New skill: weekly-digest');
+  assert.equal(data.ticket.properties.type, 'feature');
+  const events = (await call(`/api/tickets/${made.data.id}/events?after=0`)).data;
+  assert.equal(JSON.parse(events.find((e: any) => e.kind === 'user_message').data).text, brief);
 });

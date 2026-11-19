@@ -97,7 +97,7 @@ function row(item) {
     : item.kind === 'agent' ? h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, 'Kit Grunt')
       : off ? h('span', { class: 'cui-chip', 'data-tone': 'warn' }, 'Off here') : h('span', { class: 'cui-chip', 'data-tone': 'ok' }, 'Default, recommended');
   const stats = u
-    ? `${u.runs} ${u.runs === 1 ? 'run' : 'runs'} in ${u.minions} ${u.minions === 1 ? 'minion' : 'minions'} · ${pct(u.shipped, u.runs)} in minions that shipped after`
+    ? `${u.runs} ${u.runs === 1 ? 'run' : 'runs'} in ${u.minions} ${u.minions === 1 ? 'minion' : 'minions'} · ${u.shipped} of ${u.runs} followed by a ship`
     : `Not used ${scope === 'all' ? 'in any scheme' : 'here'} in the last ${data.days} days`;
   return h('article', { class: `sk-row${off ? ' off' : ''}` },
     h('div', { class: 'sk-top' }, h('span', { class: 'sk-name' }, item.name), chip, h('span', { class: 'spacer' }), sw),

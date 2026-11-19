@@ -675,6 +675,40 @@ mock.boards('#takes', { boards: [
       return route(c, t, first);
     },
   },
+  skills: {
+    about: "the Skills page (#1062): the Seeded scheme's minions running kit skills and Grunts over a few turns (edits, an error, ships), a repo folder with a skill of its own, and grilling turned off",
+    seed(c) {
+      const repo = join(c.dataDir, 'seeded-repo');
+      mkdirSync(join(repo, '.claude', 'skills', 'release-notes'), { recursive: true });
+      writeFileSync(join(repo, '.claude', 'skills', 'release-notes', 'SKILL.md'), '---\nname: release-notes\ndescription: Writes the release notes from the shipped minions since the last release. Use before cutting a release.\n---\n');
+      c.store.setProjectRepoDir(c.project.id, repo);
+      c.store.setProjectSettings(c.project.id, { skills_off: 'grilling' });
+      const turn = (t: Ticket, steps: ((w: ReturnType<typeof chat>) => void)[], shipped: boolean) => {
+        const w = chat(c, t, 40);
+        for (const step of steps) step(w);
+        if (shipped) w.put('note', { text: 'Shipped 1a2b3c4 to main' });
+      };
+      const skill = (name: string) => (w: ReturnType<typeof chat>) => w.call('Skill', { skill: `citadel:${name}` }, `Launching skill: citadel:${name}`);
+      const grunt = (type?: string) => (w: ReturnType<typeof chat>) => w.call('Agent', { description: 'Review the diff', prompt: '…', ...(type ? { subagent_type: type } : {}) }, 'Done.');
+      const edit = (w: ReturnType<typeof chat>) => w.call('Edit', { file_path: '/repo/src/app.ts', old_string: 'a', new_string: 'b' });
+      const fail = (w: ReturnType<typeof chat>) => {
+        const id = w.call('Bash', { command: 'npm test' }, null);
+        w.put('claude', { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: '2 tests failed' }] } });
+      };
+      const ship = (w: ReturnType<typeof chat>) => w.call('mcp__thread__hand_off_land', { summary: 'the fix', risk: 'low' });
+      const end = (w: ReturnType<typeof chat>) => w.done('Done.');
+      const bug1 = minion(c, 'Export drops the last row', { status: 'closed' }, 'bug');
+      turn(bug1, [skill('bug-fixing'), grunt('Explore'), edit, fail, skill('diagnosing-bugs'), edit, skill('self-review'), grunt('citadel:reviewer'), ship, end], true);
+      const bug2 = minion(c, 'Login loops on Safari', { status: 'closed' }, 'bug');
+      turn(bug2, [skill('bug-fixing'), edit, skill('self-review'), grunt('citadel:reviewer'), ship, end], true);
+      const feat = minion(c, 'Dark mode toggle', { status: 'closed' }, 'feature');
+      turn(feat, [skill('grilling'), end, skill('docs-and-mocks'), edit, skill('subagents'), grunt(), edit, skill('self-review'), grunt('citadel:reviewer'), ship, end], true);
+      const idea = minion(c, 'Ideas for onboarding', {}, 'ideation');
+      turn(idea, [skill('docs-and-mocks'), skill('subagents'), grunt('Explore'), grunt('Explore'), end], false);
+      turn(taskmaster(c), [skill('subagents'), grunt('Explore'), end], false);
+      return `#/p/${c.project.id}/skills (Settings → Skills in "${c.project.name}")`;
+    },
+  },
   memory: {
     about: "Settings → Memory (#1058): the Seeded scheme with a repo folder and six Claude Code memory notes in the server login's config dir, one naming a closed minion, two with dates (one passed, one soon), and an index",
     seed(c) {

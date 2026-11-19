@@ -355,6 +355,30 @@ test('a landing waiting in line rechecks each time main moves, and leaves the li
   }
 });
 
+test('the waiters follow land-queue/.order (#1007): the ones it names first, the rest in arrival order; the holder stays', async () => {
+  const q = queueSetup(4);
+  const lands: ReturnType<typeof q.land>[] = [];
+  try {
+    for (let i = 1; i <= 4; i++) {
+      lands.push(q.land(i));
+      await until(`landing ${i}'s ticket`, () => q.issued() === i);
+    }
+    await until('the 4th to see its place', () => /4th in line/.test(lands[3].stderr()));
+    const [t1, , , t4] = q.tickets();
+    assert.equal(readFileSync(join(q.state, 'land-queue', t4), 'utf8').split('\n')[7], 'order', 'its ticket says it follows .order');
+    // The Releases page's write: the 4th to land next, and the holder named too (it stays first whatever .order says).
+    writeFileSync(join(q.state, 'land-queue', '.order'), `# Cara moved ticket/4-x to land next\n${t4}\n${t1}\n`);
+    await until('the 4th to move up', () => /queue: Cara moved ticket\/4-x to land next\nqueue: 2nd in line for the land lock/.test(lands[3].stderr()));
+    await until('the 2nd to move back', () => /queue: 3rd in line for the land lock[^\n]*\(ahead: ticket\/1-x/.test(lands[1].stderr()));
+  } finally {
+    q.open();
+  }
+  const codes = await Promise.all(lands.map((l) => l.exit));
+  codes.forEach((code, i) => assert.equal(code, 0, `landing ${i + 1}: ${lands[i].stderr()}`));
+  assert.deepEqual(q.landed(), ['f1.txt: 1', 'f4.txt: 4', 'f2.txt: 2', 'f3.txt: 3']);
+  assert.doesNotMatch(lands[0].stderr(), /Cara moved/, 'the holder is not told: it stays where it is');
+});
+
 test('a waiter that is killed leaves the line, and the one behind it goes next', async () => {
   const q = queueSetup(3);
   const a = q.land(1);
@@ -506,9 +530,10 @@ test('a waiter that is stopped (SIGSTOP) is passed over: the one behind it takes
     writeFileSync(gate.a, '');
     assert.equal(await a.exit, 0, a.stderr());
     await until('c to take the lock past the stopped b', () => /got the land lock/.test(cs()), 15_000);
-    // Awake again while the one that passed it has the lock: that is a landing in line, not one older than the line.
+    // Awake again while the one that passed it has the lock: that is a landing in line, not one older than the line, and
+    // as the holder it is ahead of every waiter (#1007).
     process.kill(b.child.pid!, 'SIGCONT');
-    await until('b to say what it waits for now', () => /next in line for the land lock \(ahead: ticket\/3-x, running the check since/.test(bs()));
+    await until('b to say what it waits for now', () => /2nd in line for the land lock, about \d+ min \(ahead: ticket\/3-x, running the check since/.test(bs()));
     assert.doesNotMatch(bs(), /older than the line/);
     writeFileSync(gate.c, '');
     assert.equal(await c.exit, 0, cs());

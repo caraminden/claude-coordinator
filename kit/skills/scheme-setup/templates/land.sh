@@ -182,11 +182,15 @@ fi
 #   queue_phase <text>              say what this one is doing now: the waiters' sign of progress
 #   queue_done [ok]                 leave the line; ok: it went all the way, so its time counts
 #                                   toward the waiters' estimate
-# A ticket is seven lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits),
+# A ticket is eight lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits),
 # its label, its phase, the commit it built ("-" while it has none, "skip" when it can't land where
 # it sits; see "The stack"), CI's verdict on that commit ("-", running, green or red) and the commit
-# it built on ("-" while it has none; both for "Batches"). A ticket whose process is gone is deleted
-# by whoever waits behind it.
+# it built on ("-" while it has none; both for "Batches"), and "order": it follows .order (below). A ticket whose
+# process is gone is deleted by whoever waits behind it.
+# The line's order (#1007) is the holder, then the waiters <.git>/land-queue/.order names (written by Citadel's
+# Releases page: a "# " line saying who set it, then ticket numbers, front first), then the rest in arrival order.
+# Citadel lists only tickets with the "order" line in it: a landing from an older branch runs a land.sh that waits for
+# every lower ticket, so ranking it could leave two waiting on each other.
 # A land.sh from a branch older than the line takes the flock directly; the head of the line waits
 # for it like for anyone else.
 # The same line as Citadel's own tools/deploy-queue.sh, kept inline so a scheme copies one file: a
@@ -252,7 +256,7 @@ QUEUE_STALL=$((CHECK_LIMIT * BUILDERS + CI_LIMIT * (1 + BISECT) + ${LAND_QUEUE_S
 # frozen cgroup) or hung. Shorter than QUEUE_STALL, so the one waiting refuses before the ones behind it give up.
 CHECK_WAIT=$((CHECK_LIMIT * BUILDERS + ${LAND_QUEUE_SLACK:-300} / 2))
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
-QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID='' Q_LINE=()
+QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID='' Q_LINE=() Q_ORDER=() Q_BY=''
 
 # "<pid> <start time>" of a live process, or nothing. The start time tells a reused pid apart.
 queue_proc() {
@@ -279,7 +283,7 @@ queue_state() {
 }
 
 queue_write() { # <file> <pid and start> <got> <label> <phase> <commit> <verdict> <base>: by a rename, so nobody reads half a ticket
-  printf '%s\n' "$2" "$3" "$4" "$5" "$6" "$7" "$8" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
+  printf '%s\n' "$2" "$3" "$4" "$5" "$6" "$7" "$8" order >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
 }
 
 queue_set() { # <line, from 0> <text>: change one line of this landing's ticket
@@ -303,6 +307,22 @@ queue_done() {
     { tail -n 4 "$took" 2>/dev/null; echo $(($(date +%s) - l[1])); } >"$took.tmp$$" && mv -f "$took.tmp$$" "$took"
   fi 2>/dev/null
   rm -f "$t"
+}
+
+# The tickets in line order (the header at "The line's order"), as Q_ORDER, and who set .order, as Q_ORDER_BY.
+queue_order() {
+  local t l i=0 keys=()
+  local -A rank=()
+  Q_ORDER=() Q_ORDER_BY=''
+  [ ! -f "$Q_DIR/.order" ] || while read -r t; do
+    if [[ $t =~ ^[0-9]{10}$ ]]; then rank[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then Q_ORDER_BY=${t#\# }; fi
+  done <"$Q_DIR/.order" 2>/dev/null || true
+  for t in "$Q_DIR"/[0-9]*; do
+    t=${t##*/}
+    [[ $t =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue # not a ticket half-written, or the glob itself
+    if [ "${l[1]:-0}" != 0 ]; then keys+=("0 $t"); elif [ -n "${rank[$t]:-}" ]; then keys+=("1$(printf '%010d' "${rank[$t]}") $t"); else keys+=("2 $t"); fi
+  done
+  [ ${#keys[@]} = 0 ] || mapfile -t Q_ORDER < <(printf '%s\n' "${keys[@]}" | LC_ALL=C sort | cut -d' ' -f2)
 }
 
 queue_ordinal() {
@@ -337,14 +357,22 @@ queue_join() {
     echo "$n"
   )
   QUEUE_TICKET="$Q_DIR/$Q_N" Q_SINCE=$SECONDS
+  queue_order
+  Q_BY=$Q_ORDER_BY # an order set before this joined is no news to it
 }
 
 queue_look() {
   local q=$Q_DIR t l ahead=0 head="" headname="" headpid="" sig typical sum count line detail look
   Q_PRED='' Q_PREDNAME='' Q_LINE=()
-  for t in "$q"/[0-9]*; do
-    [[ ${t##*/} =~ ^[0-9]+$ ]] || continue # not a ticket half-written, or the glob itself
-    [[ ${t##*/} < $Q_N ]] || break
+  queue_order
+  if [ "$Q_ORDER_BY" != "$Q_BY" ]; then
+    Q_BY=$Q_ORDER_BY
+    # Said before its place, which follows at once (Citadel reads the place from the last "queue:" line).
+    [ -z "$Q_BY" ] || [ -n "$Q_HELD" ] || { echo "queue: $Q_BY" >&2; Q_LAST=''; }
+  fi
+  for t in "${Q_ORDER[@]}"; do
+    [ "$t" != "$Q_N" ] || break
+    t=$q/$t
     mapfile -t l 2>/dev/null <"$t" || continue
     # Its process is gone (killed, or its turn was stopped): it leaves the line.
     if [ -z "${l[0]:-}" ] || [ "$(queue_proc "${l[0]%% *}")" != "${l[0]}" ]; then
@@ -950,7 +978,7 @@ batch_add() { # <label> <commit> <verdict> <base> <pid and start>: the next in l
 }
 
 batch_look() {
-  local e t l label sha ver bas pid
+  local e t l label sha ver bas pid behind=''
   B_AT=1 B_N=0 B_LABEL=('') B_SHA=('') B_VER=('') B_BASE=('') B_PID=('') B_RED=''
   for e in "${Q_LINE[@]}"; do
     read -r label sha ver bas pid <<<"$e"
@@ -959,9 +987,10 @@ batch_look() {
   done
   batch_add "$branch" "${tip:--}" "$verdict" "${base:--}" "$Q_ME"
   B_NUM=$B_AT B_I=$B_N
-  for t in "$Q_DIR"/[0-9]*; do
+  for t in "${Q_ORDER[@]}"; do
     [ "$B_N" -lt "$CI_BATCH" ] || break
-    [[ ${t##*/} =~ ^[0-9]+$ ]] && [[ ${t##*/} > $Q_N ]] && mapfile -t l 2>/dev/null <"$t" || continue
+    [ -n "$behind" ] || { [ "$t" != "$Q_N" ] || behind=1; continue; } # the ones behind this one, in queue_look's order
+    mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue
     [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && [ "${l[4]:-}" != skip ] || continue
     if [ "${l[1]:-0}" = 0 ] && [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; then continue; fi
     [ -n "${l[5]:-}" ] || break # older than batches: the next batch

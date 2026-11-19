@@ -651,6 +651,29 @@ test('batches: three share one run on the top commit; main moves once, straight 
   }
 });
 
+test('batches: the line follows land-queue/.order (#1007), so the batches form in the order set and land in it', async () => {
+  const c = ciSetup(4, { stack: '1', batch: '2', check: gated });
+  try {
+    const [a, b, d, e] = await c.lands(1, 2, 3, 4);
+    const [, t2, t3, t4] = c.tickets();
+    writeFileSync(join(c.state, 'land-queue', '.order'), `# Cara moved ticket/4-x to land next\n${t4}\n${t2}\n${t3}\n`);
+    await until('the 4th to move up', () => /queue: Cara moved ticket\/4-x to land next\nqueue: 2nd in line/.test(e.stderr()));
+    c.open();
+    // Each batch's top pushes; every run is green.
+    const all = [a, b, d, e];
+    const seen = new Set<string>();
+    while (all.some((l) => l.child.exitCode === null)) {
+      for (const sha of all.flatMap(c.sent)) if (!seen.has(sha)) { seen.add(sha); c.verdict(sha, GREEN); }
+      await sleep(50);
+    }
+    for (const l of all) assert.equal(await l.exit, 0, l.stderr());
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f4.txt: 4', 'f2.txt: 2', 'f3.txt: 3']);
+    assert.match(a.stderr(), /landed in a batch with ticket\/4-x/);
+  } finally {
+    c.stop();
+  }
+});
+
 test('batches: a red top bisects; the bottom lands, the bad middle is refused on main, and the top builds again and lands on its own run', async () => {
   const c = ciSetup(3, { stack: '1', batch: '3', check: gated });
   try {

@@ -137,7 +137,7 @@ test('the Codex line under the Claude bar reads a 5-hour window past its reset a
   const inADay = Math.floor(Date.now() / 1000) + 86400;
   await page.eval(`renderUsage({ weekly: { utilization: 0.95, resetsAt: Date.now() + 86400000 }, updatedAt: new Date().toISOString() })`);
   await page.eval(`setCodex({ on: true, usage: { primary: { usedPercent: 99, windowDurationMins: 300, resetsAt: ${hourAgo} }, secondary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: ${inADay} }, updatedAt: new Date().toISOString() } })`);
-  assert.equal(await page.eval(`document.querySelector('.usage.codex').hidden`), true, "Codex's own bar hides: nothing above 75%");
+  assert.equal(await page.eval(`document.querySelector('.usage.codex')`), null, "no Codex bar in the top-left (Cara, 2026-11-18); Settings → Usage has its windows");
   const line = await page.eval<{ text: string; level: string; title: string; hidden: boolean }>(`(({ textContent: text, dataset, title, hidden }) => ({ text, level: dataset.level, title, hidden }))(document.querySelector('.codex-usage'))`);
   assert.equal(line.hidden, false);
   assert.equal(line.text, 'Codex 40%');

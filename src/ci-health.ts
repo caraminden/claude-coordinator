@@ -726,7 +726,8 @@ export class CiHealth {
       delete red[w];
       save();
       // #1074: its fix minion was held open on this; deleted first, so the hold is gone as it closes.
-      if (was.rerun?.ticket != null) this.dismissFix(was.rerun.ticket, `${workflowFile(green)} is green on ${branch} again (${runUrl(slug, green)}, on ${short(green.head_sha)}), so it dismissed this fix minion.`);
+      const fix = was.rerun?.ticket ?? this.heldFix(p, was);
+      if (fix != null) this.dismissFix(fix, `${workflowFile(green)} is green on ${branch} again (${runUrl(slug, green)}, on ${short(green.head_sha)}), so it dismissed this fix minion.`);
     }
     for (const [w, mark] of Object.entries(red)) await this.rerun(p, slug, branch, Number(w), mark, onMain.get(Number(w)) ?? [], as, now, save);
     if (pruned) save();
@@ -813,17 +814,22 @@ export class CiHealth {
     const file = workflowFile(runs.find((r) => r.id === mark.run) ?? runs[0] ?? ({ name: 'its workflow' } as Run));
     const re = mark.rerun?.ticket === t.id ? mark.rerun : undefined;
     if (re && !re.failed) {
-      const seen = runs.filter((r) => r.head_sha === re.sha && (!re.dispatched || at(r.created_at) >= re.at - 60_000)).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
-      if (seen && seen.id !== re.run) {
+      // Ours is the first dispatched run since: GitHub runs the branch's tip when it starts it, which can be past re.sha.
+      const seen = re.dispatched
+        ? runs.filter((r) => r.event === 'workflow_dispatch' && at(r.created_at) >= re.at - 60_000).sort((a, b) => at(a.created_at) - at(b.created_at))[0]
+        : runs.filter((r) => r.head_sha === re.sha).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
+      if (seen && (seen.id !== re.run || seen.head_sha !== re.sha)) {
         re.run = seen.id;
+        re.sha = seen.head_sha;
         save();
       }
-      if (seen?.status === 'completed' && seen.conclusion === 'failure') {
+      // Cancelled or timed out counts too: the minion hears, rather than waiting on a run that never goes green.
+      if (seen?.status === 'completed' && seen.conclusion !== 'success') {
+        const text = await this.runText(p, slug, seen, as, 'minion');
         re.failed = true;
         save(); // before sending, so a restart can't wake it twice
-        const text = await this.runText(p, slug, seen, as, 'minion');
         this.deps.held?.(t.id, null);
-        this.deps.wake?.(t.id, `The ${file} re-run on ${branch} after your fix went live failed, so ${branch} is still red and this minion stays open until it's green. Fix it and ship again; Citadel re-runs ${file} once that's live.
+        this.deps.wake?.(t.id, `The ${file} re-run on ${branch} after your fix went live ended ${seen.conclusion ?? 'without a verdict'}, so ${branch} is still red and this minion stays open until it's green. Fix it and ship again; Citadel re-runs ${file} once that's live.
 ${text}`);
         return;
       }
@@ -838,8 +844,10 @@ ${text}`);
     const there = runs.filter((r) => r.head_sha === head).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
     const red = runs.find((r) => r.id === mark.run) ?? ({ id: mark.run, workflow_id: w } as Run);
     const jobs = there ? [] : await this.jobs(slug, red, as);
+    // CI_RUNNER=github moves a workflow onto GitHub's runners (the kit's convention), which the red's own jobs can't show.
+    const toGithub = !there && String((await this.read(`repos/${slug}/actions/variables/CI_RUNNER`, as, true))?.value ?? '').toLowerCase() === 'github';
     if (there) next.run = there.id;
-    else if (!jobs.length || jobs.some((j) => !j.labels.some((l) => l.toLowerCase() === 'self-hosted'))) next.hosted = true;
+    else if (toGithub || !jobs.length || jobs.some((j) => !j.labels.some((l) => l.toLowerCase() === 'self-hosted'))) next.hosted = true;
     else next.dispatched = true;
     mark.rerun = next;
     save(); // before dispatching, so a restart can't dispatch twice
@@ -853,6 +861,12 @@ ${text}`);
       save();
     }
     this.deps.held?.(t.id, next.hosted || next.error ? `waiting on a person to re-run ${file} on ${branch}` : `waiting on the ${file} re-run on ${branch} (${short(head)})`);
+  }
+
+  /** The fix minion its live deploy held (runner's deployLive note) before any re-run was recorded, or null. */
+  private heldFix(p: Project, mark: RedMark): number | null {
+    const t = this.fixTicket(p, mark);
+    return t && t.status !== 'closed' && t.state === 'outside' && /waiting on .*re-run/.test(t.note ?? '') ? t.id : null;
   }
 
   /** A fix minion's re-run went green: dismiss it (deps.dismiss decides when, as a deploy's dismissal does). */

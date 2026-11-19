@@ -1056,7 +1056,8 @@ const ciHealth = new CiHealth(store, {
 runner.ciHold = (id) => {
   const held = ciHealth.hold(id);
   const t = held ? store.getTicket(id) : null;
-  if (t) ciHealth.soon(t.project_id);
+  // Only as its deploy goes live, not at every close_self or turn end: two extra looks per scheme cost API calls.
+  if (t?.state === 'pending-deploy') ciHealth.soon(t.project_id);
   return held;
 };
 if (!BOOT_CHECK) ciHealth.start();

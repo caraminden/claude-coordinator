@@ -44,7 +44,7 @@ import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoot
 import { homeApp, makeKey } from './app.ts';
 import { machineNotes, patchMachine } from './machines.ts';
 import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } from './projects.ts';
-import { pacificTime, parseWakeTime, type Relay } from '../wake.ts';
+import { pacificTime, parseWakeTime, type Relay, relayDests } from '../wake.ts';
 import { gitOut } from '../git.ts';
 import { MachineJobs } from '../machine-jobs.ts';
 
@@ -1314,28 +1314,41 @@ export const ticketRoutes: Route[] = [
       }
       if (body.to == null) return json(res, 200, { relays: mine() });
       const text = str(body.text, 'Text', 10_000);
-      const target = String(body.to).trim();
-      let to: Relay['to'];
-      if (/^#?\d+$/.test(target)) {
-        const n = Number(target.replace('#', ''));
-        const m = store.getTicketByNumber(ticket.project_id, n);
-        if (!m || m.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
-        if (m.id === ticket.id) throw new HttpError(400, 'That is you');
-        to = { minion: m.id, number: m.number };
-      } else {
-        const { project } = schemeTarget(app, ticket, target);
-        to = { scheme: project.name, taskmaster: (await ensureCoordinatorFor(app, project, null)).id }; // not for a member: the Overlord (#919)
+      const targets = [...new Set((Array.isArray(body.to) ? body.to : [body.to]).map((t: unknown) => String(t).trim()).filter(Boolean))] as string[];
+      if (!targets.length) throw new HttpError(400, 'Say who it is for in `to`');
+      if (targets.length > 20) throw new HttpError(400, 'At most 20 recipients in one call');
+      const tos: Relay['to'][] = [];
+      for (const target of targets) {
+        if (/^#?\d+$/.test(target)) {
+          const n = Number(target.replace('#', ''));
+          const m = store.getTicketByNumber(ticket.project_id, n);
+          if (!m || m.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
+          if (m.id === ticket.id) throw new HttpError(400, 'That is you');
+          tos.push({ minion: m.id, number: m.number });
+        } else {
+          const { project } = schemeTarget(app, ticket, target);
+          tos.push({ scheme: project.name, taskmaster: (await ensureCoordinatorFor(app, project, null)).id }); // not for a member: the Overlord (#919)
+        }
       }
       const commit = body.commit == null || body.commit === ''
         ? (ticket.cwd ? await gitOut(['rev-parse', 'HEAD'], ticket.cwd) : null)
         : await waiters.resolve(String(body.commit), store.getProject(ticket.project_id)?.repo_dir ?? null, !!(await waiters.elsewhere(ticket.id)));
       if (!commit) throw new HttpError(400, body.commit ? `No commit ${String(body.commit).slice(0, 40)} in the live checkout or the scheme's repo` : 'No commit to wait for: commit the work first, or give a commit');
-      const dest = 'scheme' in to ? to.scheme : `#${to.number}`;
-      const { queued, relay } = await waiters.addRelay({ ticket: ticket.id, to, text, commit });
+      const added = [];
+      for (const to of tos) added.push({ to, ...(await waiters.addRelay({ ticket: ticket.id, to, text, commit })) });
       const taskmaster = store.ownerCoordinator(ticket);
-      if (queued && taskmaster) runner.leaveMail(taskmaster.id, `#${ticket.number} ${ticket.title}`, `(for your tracking; nothing to do) #${ticket.number} will send this to ${dest} once ${commit.slice(0, 7)} is live: ${text}`);
-      runner.emit(ticket.id, 'note', { text: `${queued ? `Relay to ${dest} queued until ${commit.slice(0, 7)} is live` : `Relay to ${dest} sent: ${commit.slice(0, 7)} was live already`}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
-      return json(res, 201, { queued, id: relay.id, commit, to: dest, relays: mine() });
+      const queuedRs = added.filter((a) => a.queued).map((a) => a.relay);
+      const sentRs = added.filter((a) => !a.queued).map((a) => a.relay);
+      const dest = relayDests(added.map((a) => a.relay));
+      // One note for the whole call, naming every recipient (#1001).
+      if (queuedRs.length && taskmaster) runner.leaveMail(taskmaster.id, `#${ticket.number} ${ticket.title}`, `(for your tracking; nothing to do) #${ticket.number} will send this to ${relayDests(queuedRs)} once ${commit.slice(0, 7)} is live: ${text}`);
+      if (sentRs.length) waiters.sent(sentRs);
+      const short = text.length > 200 ? text.slice(0, 200) + '…' : text;
+      if (queuedRs.length) runner.emit(ticket.id, 'note', { text: `Relay to ${relayDests(queuedRs)} queued until ${commit.slice(0, 7)} is live: ${short}` });
+      if (sentRs.length) runner.emit(ticket.id, 'note', { text: `Relay to ${relayDests(sentRs)} sent: ${commit.slice(0, 7)} was live already: ${short}` });
+      const queued = queuedRs.length > 0;
+      const relay = added[0].relay;
+      return json(res, 201, { queued, id: relay.id, ids: queuedRs.map((r) => r.id), commit, to: dest, relays: mine() });
     },
   },
   {

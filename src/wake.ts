@@ -36,6 +36,29 @@ export interface Relay {
   commit: string;
 }
 
+/** Relays split into runs from one minion with the same text and commit, in order: they share their Taskmaster notes. */
+export function groupRelays(rs: Relay[]): Relay[][] {
+  const groups = new Map<string, Relay[]>();
+  for (const r of rs) {
+    const key = JSON.stringify([r.ticket, r.commit, r.text]);
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  return [...groups.values()];
+}
+
+/** Where relays go, for a note: minion numbers as ranges ("#579–#586", "#3, #5–#7"), then scheme names. */
+export function relayDests(rs: Relay[]): string {
+  const nums = [...new Set(rs.flatMap((r) => ('minion' in r.to ? [r.to.number] : [])))].sort((a, b) => a - b);
+  const runs: string[] = [];
+  for (let i = 0; i < nums.length;) {
+    let j = i;
+    while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+    runs.push(j - i >= 2 ? `#${nums[i]}–#${nums[j]}` : nums.slice(i, j + 1).map((n) => `#${n}`).join(', '));
+    i = j + 1;
+  }
+  return [...runs, ...new Set(rs.flatMap((r) => ('scheme' in r.to ? [r.to.scheme] : [])))].join(', ');
+}
+
 /** A minion waiting for a commit to be live, or (commit null) for the next deploy after `since`. */
 export interface Waiter {
   ticket: number;
@@ -197,6 +220,8 @@ export class LiveWaiters {
   hold: (c: Chain, why: string) => void = () => {};
   /** A relay is live: leave its text as held mail (set by the server, which owns the runner). */
   deliver: (r: Relay) => void = () => {};
+  /** Relays just delivered together (one minion, same text and commit): the sender's Taskmaster hears of them in one note. */
+  sent: (rs: Relay[]) => void = () => {};
   /** The commit the server runs now: what it booted from, then what its front end last reloaded to. */
   head: string | null;
   /** The check waiting for its turn, if any, and the end of the newest one: checks run one at a time. */
@@ -429,6 +454,13 @@ export class LiveWaiters {
         this.deliver(r);
       } catch (err) {
         console.error(`Relaying #${r.ticket}'s note failed:`, err);
+      }
+    }
+    for (const batch of groupRelays(go)) {
+      try {
+        this.sent(batch);
+      } catch (err) {
+        console.error(`Noting #${batch[0].ticket}'s relays failed:`, err);
       }
     }
   }

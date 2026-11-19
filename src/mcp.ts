@@ -1507,11 +1507,11 @@ const THREAD_TOOLS = [
   },
   {
     name: 'relay_when_live',
-    description: `Queue a note for another scheme's Taskmaster (\`to\` is the scheme's name) or a minion of this scheme (\`to\` is #N), sent as held mail (it wakes nothing) once \`commit\` is live (in a scheme this server doesn't run: merged). Use it instead of asking the Taskmaster to relay something once you are live. Call it before hand_off_land; \`commit\` defaults to your branch's head. Your Taskmaster gets the full text now as held mail, and a one-line note when it goes out. A dismissed minion's relays still go out, and a failed land leaves them queued: call it with no arguments to list yours (a \`#id\` each), or with \`cancel\` to drop one. Several allowed.`,
+    description: `Queue a note for another scheme's Taskmaster (\`to\` is the scheme's name) or a minion of this scheme (\`to\` is #N), sent as held mail (it wakes nothing) once \`commit\` is live (in a scheme this server doesn't run: merged). Use it instead of asking the Taskmaster to relay something once you are live. Call it before hand_off_land; \`commit\` defaults to your branch's head. Your Taskmaster gets the full text now as held mail, and a one-line note when it goes out. To send one note to several, pass \`to\` as a list rather than calling once each. A dismissed minion's relays still go out, and a failed land leaves them queued: call it with no arguments to list yours (a \`#id\` each), or with \`cancel\` to drop one. Several allowed.`,
     inputSchema: {
       type: 'object',
       properties: {
-        to: { type: 'string', description: "Another scheme's name, or #N for a minion of this scheme" },
+        to: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' }, maxItems: 20 }], description: "Another scheme's name, or #N for a minion of this scheme; a list (at most 20) sends the same note to each in one call, and your Taskmaster gets one note for all of them" },
         text: { type: 'string', maxLength: 10000, description: 'The note, self-contained (at most 10,000 characters)' },
         commit: { type: 'string', description: "Optional: the commit to wait for (a hash); your branch's head if left out" },
         cancel: { type: 'number', description: 'Drop your pending relay with this id instead' },

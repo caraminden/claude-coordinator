@@ -33,7 +33,7 @@ import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { type Chain, githubPrs, LiveWaiters, pacificTime, runsRepo, startChained, TimedWakes } from './src/wake.ts';
+import { type Chain, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
@@ -473,8 +473,11 @@ waiters.deliver = (r) => {
     const author = `${own.name} #${from.number} (relayed once live)`;
     runner.leaveMail(r.to.taskmaster, author, asData(author, r.text));
   } else runner.leaveMail(r.to.minion, `${who} (relayed once live)`, r.text);
-  const taskmaster = store.ownerCoordinator(from);
-  if (taskmaster) runner.leaveMail(taskmaster.id, who, `(for your tracking; nothing to do) #${from.number}'s relay to ${'scheme' in r.to ? r.to.scheme : `#${r.to.number}`} went out`);
+};
+waiters.sent = (rs) => {
+  const from = store.getTicket(rs[0].ticket);
+  const taskmaster = from && store.ownerCoordinator(from);
+  if (from && taskmaster) runner.leaveMail(taskmaster.id, `#${from.number} ${from.title}`, `(for your tracking; nothing to do) #${from.number}'s relay to ${relayDests(rs)} went out`);
 };
 runner.heldFor = (id) => waiters.heldFor(id);
 runner.heldBrief = (id) => waiters.heldBrief(id);

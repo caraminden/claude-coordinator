@@ -891,7 +891,21 @@ function drawEvent(event, scroll) {
       }
       if (data.need) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'What the sender said this message needs' }, `need: ${data.need}`));
       markQueued(bubble, view.ticket);
-      nodes.push(bubble);
+      if (data.mail && TRACKING.test(data.text ?? '')) {
+        // A run of "for your tracking" notes from one minion is one collapsed row, each note behind it (#1001).
+        const pending = new Set(view.pendingMessages.map((m) => m.el));
+        let prev = log.lastElementChild;
+        while (prev && pending.has(prev)) prev = prev.previousElementSibling;
+        bubble.dataset.tracking = data.author;
+        if (prev?.matches('.mcopies.tracked') && prev.dataset.author === data.author) addTracked(prev, bubble);
+        else if (prev?.dataset.tracking === data.author) {
+          // The second note: the lone one above joins a new group row.
+          const group = newTracked(data.author);
+          prev.replaceWith(group);
+          group.dataset.at = prev.dataset.at;
+          addTracked(addTracked(group, prev), bubble);
+        } else nodes.push(bubble);
+      } else nodes.push(bubble);
     }
   } else if (event.kind === 'unqueued') {
     // Taken back before its turn: not what the next turn works on.
@@ -1169,6 +1183,26 @@ function addMinionCopy(group, data, event) {
   const all = [...nums].sort((a, b) => a - b).map((n) => `#${n}`).join(', ');
   group.querySelector('.who').textContent = `${count} message${count === 1 ? '' : 's'} between ${all}`;
   group.dataset.at ??= event.created_at;
+  return group;
+}
+
+/** Held mail the Taskmaster only keeps for tracking: the server's wording for a note that needs nothing done. */
+const TRACKING = /^\(for your tracking; nothing to do\)/;
+
+/** An empty group row for one sender's tracking notes; addTracked fills it. */
+function newTracked(author) {
+  const row = h('details', { class: 'msg coord mcopies tracked', 'data-author': author }, h('summary', {}, h('span', { class: 'who' }), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
+  return row;
+}
+
+/** One tracking note's own row into its group: the count and the sender in the summary, the newest note as the preview. */
+function addTracked(group, bubble) {
+  const list = group.querySelector('.mc-list');
+  list.append(bubble);
+  const count = list.children.length;
+  const sender = group.dataset.author.replace(/\s.*$/, '');
+  group.querySelector('.who').textContent = `${count} tracking note${count === 1 ? '' : 's'} from ${sender}`;
+  group.querySelector('.preview').textContent = bubble.querySelector('.preview')?.textContent.replace(TRACKING, '').trim() ?? '';
   return group;
 }
 

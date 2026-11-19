@@ -138,3 +138,35 @@ test('through the tool: a live commit goes out at once to a scheme Taskmaster, w
   assert.match(mail(BTM.id).at(-1).author, /A #1 \(relayed once live\)/);
   assert.match(mail(TM.id).at(-1).text, /relay to B went out/);
 });
+
+test('in process: same-text relays from one minion going out together make one sent() batch', async () => {
+  const batches: Relay[][] = [];
+  const head = git('rev-parse', 'HEAD');
+  git('checkout', '-q', '-b', 'workb');
+  const c = commit();
+  git('checkout', '-q', 'main');
+  const w = new LiveWaiters(store, repo, head, () => {});
+  w.deliver = () => {};
+  w.sent = (rs) => batches.push(rs);
+  const m3 = mk('Third');
+  for (const m of [M2, m3]) await w.addRelay({ ticket: M1.id, to: { minion: m.id, number: m.number }, text: 'same', commit: c });
+  await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number }, text: 'other', commit: c });
+  git('merge', '-q', '--ff-only', 'workb');
+  await w.check(git('rev-parse', 'HEAD'));
+  assert.deepEqual(batches.map((b) => b.map((r) => r.text)).sort(), [['other'], ['same', 'same']]);
+});
+
+test('through the tool: `to` as a list queues one Taskmaster note naming every recipient, and one went-out note', async () => {
+  const [m2, m3, m4] = [mk('Second'), mk('Third'), mk('Fourth')]; // consecutive numbers: a range in the note
+  git('checkout', '-q', '-b', 'workc');
+  const c = commit();
+  git('checkout', '-q', 'main');
+  const before = mail(TM.id).length;
+  const r = await tool(M1.id, 'relay_when_live', { to: [m2, m3, m4].map((m) => `#${m.number}`), text: 'to all', commit: c });
+  assert.equal(r.error, false, r.text);
+  const notes = mail(TM.id).slice(before);
+  assert.equal(notes.length, 1, 'one queued note');
+  assert.match(notes[0].text, new RegExp(`#${M1.number} will send this to #${m2.number}–#${m4.number} once ${c.slice(0, 7)} is live: to all`));
+  assert.equal(mail(m2.id).filter((m) => m.text === 'to all').length, 0, 'nothing sent yet');
+  git('merge', '-q', '--ff-only', 'workc');
+});

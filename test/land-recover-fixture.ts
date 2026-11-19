@@ -38,6 +38,7 @@ import { test } from 'node:test';
 const { TEST_MARK: mark, TEST_GATE: gate, TEST_FAIL: fail } = process.env;
 test('ok', async () => {
   if (mark) appendFileSync(mark, 'run\\n');
+  // poll-ok: a fixture run by the land tests in a temp dir; it can't import ./wait.ts
   while (gate && !existsSync(gate)) await new Promise((r) => setTimeout(r, 50));
   if (fail) throw new Error('red');
 });
@@ -51,6 +52,7 @@ if (mark) {
   const up = (pid: number) => Number(readFileSync('/proc/' + pid + '/stat', 'utf8').split(') ').pop()!.split(' ')[1]);
   const parent = process.ppid;
   writeFileSync(mark, String(readFileSync('/proc/' + parent + '/comm', 'utf8').trim() === 'timeout' ? up(parent) : parent));
+  // poll-ok: a fixture run by the land tests in a temp dir; it can't import ./wait.ts
   while (gate && !existsSync(gate)) await new Promise((r) => setTimeout(r, 50));
 }
 // BOOT_BROKEN: a file outside every checkout, so the check fails whatever the commit (a broken box, not a bad change).

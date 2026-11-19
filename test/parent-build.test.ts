@@ -7,6 +7,7 @@ import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, stopTurns } from './helpers.ts';
+import { until } from './wait.ts';
 
 // A minion started for another minion (#273) records it as its parent and rides its build, unless the
 // create says otherwise. The Taskmaster names the parent with `parent`; left out, it is the minion
@@ -123,7 +124,7 @@ test('a new minion rides its parent\'s build unless the create sets one', async 
 
   // Left out, the parent is the minion whose relay the Taskmaster's turn answers; null opts out.
   assert.equal((await as(withBuild.id, 'POST', `/api/tickets/${withBuild.id}/coordinator`, { text: 'start a follow-up', need: 'start' })).status, 202);
-  for (let i = 0; i < 250 && !existsSync(tokenFile); i++) await new Promise((r) => setTimeout(r, 20));
+  await until('the token file', async () => existsSync(tokenFile), 5000);
   assert.ok(existsSync(tokenFile), 'the relay started a Taskmaster turn');
   t = await made({});
   assert.deepEqual([t.parent, t.build], [1, 8]);

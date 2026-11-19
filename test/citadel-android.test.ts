@@ -5,6 +5,7 @@ import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { until } from './wait.ts';
 
 // tools/citadel-android (#381): the screen lock and its lease, against a stub adb and a throwaway lock folder.
 const helper = join(import.meta.dirname, '..', 'tools', 'citadel-android');
@@ -86,7 +87,7 @@ test('another caller waits for the holder, says who it is, and goes once the hol
   b.stderr!.on('data', (d) => (err += d));
   const done = new Promise<number | null>((r) => b.on('close', r));
   try {
-    for (let i = 0; i < 200 && !/has it/.test(err); i++) await new Promise((r) => setTimeout(r, 25));
+    await until('the stderr to say it has it', async () => /has it/.test(err), 5000);
     assert.match(err, /waiting for the screen: Peek #1 \(josh\) has it/);
     assert.ok(!existsSync(png), 'it waits');
   } finally {
@@ -123,7 +124,7 @@ function serve(locks: string) {
 }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 async function emulatorPid() {
-  for (let i = 0; i < 200 && !existsSync(join(sdk, 'emu.pid')); i++) await new Promise((r) => setTimeout(r, 25));
+  await until('emu.pid', async () => existsSync(join(sdk, 'emu.pid')), 5000);
   return Number(readFileSync(join(sdk, 'emu.pid'), 'utf8'));
 }
 
@@ -132,7 +133,7 @@ test('serve stops the emulator once nobody has used it for the idle time, and en
   const s = serve(locks);
   const pid = await emulatorPid();
   try {
-    for (let i = 0; i < 200 && !/emu kill/.test(existsSync(calls) ? readFileSync(calls, 'utf8') : ''); i++) await new Promise((r) => setTimeout(r, 10));
+    await until('the emu kill call', async () => /emu kill/.test(existsSync(calls) ? readFileSync(calls, 'utf8') : ''), 2000);
     // While it stops, the screen stays taken: a step arriving now waits instead of meeting a dying emulator.
     assert.equal(spawnSync('flock', ['-n', join(locks, 'android.lock'), 'true']).status, 1);
     assert.equal(await s.done, 0);
@@ -157,7 +158,7 @@ test('serve waits for a step that holds the screen before it stops the emulator'
   const release = join(root, 'release');
   const step: ChildProcess = spawn('flock', [join(locks, 'android.lock'), 'sh', '-c', `touch '${held}'; while [ ! -e '${release}' ]; do sleep 0.1; done`], { stdio: 'ignore' });
   const stepDone = new Promise((r) => step.on('close', r));
-  for (let i = 0; i < 200 && !existsSync(held); i++) await new Promise((r) => setTimeout(r, 25));
+  await until('the held file', async () => existsSync(held), 5000);
   const s = serve(locks);
   const pid = await emulatorPid();
   try {
@@ -232,10 +233,10 @@ test('sms goes through serve to the console with the host token, and serve refus
     // Anything running as this account can write a request; serve checks it again and the console never sees it.
     got.length = 0;
     writeFileSync(join(locks, 'android.req.forged'), 'sms\n555\nhi\rkill\n');
-    for (let i = 0; i < 200 && !existsSync(join(locks, 'android.out.forged')); i++) await new Promise((r) => setTimeout(r, 25));
+    await until('the forged answer file', async () => existsSync(join(locks, 'android.out.forged')), 5000);
     assert.match(readFileSync(join(locks, 'android.out.forged'), 'utf8'), /^KO: .*control character/);
     writeFileSync(join(locks, 'android.req.other'), 'avd name\n\n\n');
-    for (let i = 0; i < 200 && !existsSync(join(locks, 'android.out.other')); i++) await new Promise((r) => setTimeout(r, 25));
+    await until('the other answer file', async () => existsSync(join(locks, 'android.out.other')), 5000);
     assert.equal(readFileSync(join(locks, 'android.out.other'), 'utf8'), 'KO: unknown step\n');
 
     // serve can read what turns can't: a request that links to the token (or a hard link to it) is refused
@@ -243,7 +244,7 @@ test('sms goes through serve to the console with the host token, and serve refus
     const answer = async (id: string) => {
       // A planted link already "exists": wait for the plain file serve leaves in its place.
       const isAnswer = () => { try { return lstatSync(join(locks, `android.out.${id}`)).isFile(); } catch { return false; } };
-      for (let i = 0; i < 200 && !isAnswer(); i++) await new Promise((r) => setTimeout(r, 25));
+      await until('the answer', async () => isAnswer(), 5000);
       return readFileSync(join(locks, `android.out.${id}`), 'utf8');
     };
     symlinkSync(join(home, '.emulator_console_auth_token'), join(locks, 'android.req.link'));
@@ -262,7 +263,7 @@ test('sms goes through serve to the console with the host token, and serve refus
     // down from a turn that can't read the token (its own adb emu kill is refused) goes through serve too.
     got.length = 0;
     const d = spawn(helper, ['down'], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'a', ADB_STUB_NO_TOKEN: '1' }, stdio: 'ignore' });
-    for (let i = 0; i < 400 && !got.includes('kill'); i++) await new Promise((r) => setTimeout(r, 25));
+    await until('the kill call', async () => got.includes('kill'), 10000);
     assert.deepEqual(got.slice(0, 2), ['auth sekrit', 'kill']);
     // The stub console stops nothing, so down would wait on; the stub emulator going ends it.
     spawnSync(join(sdk, 'platform-tools', 'adb'), ['emu', 'kill'], { env });
@@ -346,7 +347,7 @@ test('up starts the far emulator through the starter and points the adb server h
     assert.match(r.stderr, /up after \d+s \(emulator-5554\)/);
     assert.match(told, /0012host:emulator:5555/);
     // The finished step marks the emulator used too: that is all its idle stop on the desktop can see.
-    for (let i = 0; i < 100 && asked < 2; i++) await new Promise((res) => setTimeout(res, 25));
+    await until('two asks', async () => asked >= 2, 2500);
     assert.ok(asked >= 2, `the starter heard ${asked} time(s)`);
   } finally {
     rmSync(join(sdk, 'far-up'), { force: true });
@@ -425,7 +426,7 @@ test('adb-serve keeps the adb server here and answers console steps with the tok
   const s = spawn(helper, ['adb-serve'], { env: { ...env, HOME: home, CITADEL_HEAVY_DIR: locks, CITADEL_ANDROID_CONSOLE_PORT: port }, stdio: 'ignore' });
   const done = new Promise((r) => s.on('close', r));
   try {
-    for (let i = 0; i < 200 && !existsSync(calls); i++) await new Promise((r) => setTimeout(r, 25));
+    await until('the calls file', async () => existsSync(calls), 5000);
     // The server's own scan is off: through the tunnel it would knock on a stopped emulator every second.
     assert.match(readFileSync(calls, 'utf8'), /^start-server scan<=5553$/m);
     const r = await runAsync(['sms', '5551234', 'hello'], { CITADEL_HEAVY_DIR: locks });

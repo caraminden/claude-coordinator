@@ -15,6 +15,7 @@ import type { AddressInfo } from 'node:net';
 import { join, normalize } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, type Browser, type Page } from './browser.ts';
+import { until } from './wait.ts';
 
 const bin = chromium();
 const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
@@ -77,7 +78,7 @@ after(async () => {
 
 async function open(): Promise<Page> {
   const page = await browser.page(base);
-  for (let i = 0; i < 100 && !(await page.eval('window.ready')); i++) await new Promise((r) => setTimeout(r, 20));
+  await until('the page to be ready', async () => await page.eval('window.ready'), 2000);
   assert.equal(await page.eval('window.ready'), true, 'the chat code loaded');
   return page;
 }

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { codexLock, LOCK_ENV, MARGIN_S, SERIAL_FILE, startTime, tokenLife } from '../src/codex-lock.ts';
+import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'codex-lock-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -90,7 +91,7 @@ test('a token inside the margin is refreshed under the lock: three runs at once 
 test('a refresh is over before the lock is let go', async () => {
   const dir = home(600);
   const first = codexLock(dir, () => {}, opts(dir, { FAKE_MS: '500' }));
-  while (!refreshes(dir).length) await new Promise((r) => setTimeout(r, 20));
+  await until('a token refresh', async () => refreshes(dir).length);
   assert.deepEqual(refreshes(dir), ['start']);
   assert.ok(locked(dir), 'held while it refreshes');
   await first;

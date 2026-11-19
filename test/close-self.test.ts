@@ -6,8 +6,8 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { closeSelfResult } from '../src/mcp.ts';
 import { Runner } from '../src/runner.ts';
-import { until } from './wait.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // A stand-in for `claude -p`: waits until a release file appears, takes it, then ends the turn the way
@@ -278,7 +278,7 @@ test("a person's keep-open state cancels the close and the next turn is told; th
     await endTurn(id, 'ok');
     rmSync(join(root, 'prompts.log'), { force: true });
     runner.send(id, 'Cara', 'next');
-    while (!readFileSync(join(root, 'prompts.log'), { encoding: 'utf8', flag: 'a+' }).includes('next')) await new Promise((r) => setTimeout(r, 20));
+    await until('the next prompt', async () => readFileSync(join(root, 'prompts.log'), { encoding: 'utf8', flag: 'a+' }).includes('next'));
     const told = /close_self in your last turn was cancelled: its state is ready/.test(readFileSync(join(root, 'prompts.log'), 'utf8'));
     assert.equal(told, byOther, String(byOther));
     await endTurn(id, 'ok');

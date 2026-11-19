@@ -10,6 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { extname, join, normalize } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
+import { until } from './wait.ts';
 
 const bin = chromium();
 const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
@@ -271,9 +272,9 @@ test("a framed app copies Citadel's switch into a cookie on its own host, and cl
     return String(await page.eval(`window.echo.cookie`));
   };
   await say(true);
-  for (const end = Date.now() + 5000; Date.now() < end && !(await cookie()).includes('citadel-open-in-firefox=1'); await new Promise((r) => setTimeout(r, 100)));
+  await until('the firefox cookie', async () => (await cookie()).includes('citadel-open-in-firefox=1'), 5000);
   assert.match(await cookie(), /citadel-open-in-firefox=1/);
   await say(false);
-  for (const end = Date.now() + 5000; Date.now() < end && (await cookie()).includes('citadel-open-in-firefox'); await new Promise((r) => setTimeout(r, 100)));
+  await until('the firefox cookie to clear', async () => !((await cookie()).includes('citadel-open-in-firefox')), 5000);
   assert.doesNotMatch(await cookie(), /citadel-open-in-firefox/);
 });

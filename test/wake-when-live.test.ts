@@ -9,6 +9,7 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { LiveWaiters, type PrMerge } from '../src/wake.ts';
 import { bootServer, REPO, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // wake_when_live: a waiter is messaged once the server runs a commit containing its commit (or, with
@@ -126,7 +127,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   for (let i = 0; i < 10; i++) {
     await w.add(id, null, `wake ${i}`);
     await w.check(commit());
-    while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 10));
+    await until('the turn to stop', async () => !runner.isRunning(id));
   }
   const said = store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
   assert.equal(said.length, 10);

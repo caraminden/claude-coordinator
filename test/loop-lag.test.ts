@@ -5,13 +5,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ioStalledUs, namedStacks, openersOf, watchLoopLag } from '../src/loop-lag.ts';
+import { until } from './wait.ts';
 
 const spin = (ms: number) => {
   const until = performance.now() + ms;
   while (performance.now() < until); // synchronous work, as a git call on the event loop is
 };
 const waitFor = async (ok: () => boolean, ms = 5000) => {
-  for (const end = Date.now() + ms; !ok() && Date.now() < end;) await new Promise((r) => setTimeout(r, 20));
+  await until('the condition', async () => ok(), ms);
 };
 
 test('a stall of the event loop is logged with its length, and a free loop logs nothing', async () => {

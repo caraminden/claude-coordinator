@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // pending-deploy: the state outlasts a new turn, and a deploy that went live dismisses the minion,
@@ -56,7 +57,7 @@ async function endTurn(id: number, outcome: 'ok' | 'error') {
   const live = (runner as any).turns.get(id);
   rmSync(join(root, 'release'), { force: true });
   writeFileSync(join(root, 'release'), outcome);
-  while ((runner as any).turns.get(id) === live) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to change', async () => (runner as any).turns.get(id) !== live);
   rmSync(join(root, 'release'), { force: true });
 }
 
@@ -150,7 +151,7 @@ test('a message queued behind the turn defers the dismissal to the end of that t
   runner.send(id, 'Josh', 'second');
   await endTurn(id, 'ok');
   // The first turn has ended; the queued one starts once the first one's session is saved (#250).
-  while (!runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to start', async () => runner.isRunning(id));
   assert.notEqual(status(id), 'closed');
   await endTurn(id, 'ok');
   assert.equal(status(id), 'closed');

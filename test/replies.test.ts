@@ -29,7 +29,7 @@ test('a new turn clears the replies, whoever started it', async () => {
   store.updateTicket(t.id, { status: 'idle', replies: JSON.stringify(['Merge it']) });
   assert.deepEqual(runner.view(store.getTicket(t.id)!).replies, ['Merge it']);
   runner.send(t.id, 'GitHub', 'CI passed', [], {});
-  for (const end = Date.now() + 5000; runner.isRunning(t.id) && Date.now() < end; ) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to stop', async () => !runner.isRunning(t.id), 5000);
   assert.equal(store.getTicket(t.id)!.replies, null);
   assert.deepEqual(runner.view(store.getTicket(t.id)!).replies, []);
 

@@ -13,6 +13,7 @@ import { verifyIdentity } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, freePort, type Booted } from './helpers.ts';
+import { until } from './wait.ts';
 
 const DOMAIN = 'apps.test';
 const APP = `stub.${DOMAIN}`;
@@ -234,7 +235,7 @@ test('the kit\'s client (ui/upload.js) pauses, resumes after a reload from where
 
     // Paused once the first chunk is in: it stays at that offset.
     const first = startUpload(endpoint, file, { folder: 'inbox/Kit', onChange: (u: any) => u.sent >= CHUNK_SIZE && u.pause() });
-    for (let i = 0; i < 100 && first.state !== 'paused'; i++) await new Promise((r) => setTimeout(r, 20));
+    await until('the upload to pause', async () => first.state === 'paused', 2000);
     assert.equal(first.state, 'paused');
     const id = JSON.parse([...stored.values()][0]).id;
     assert.equal((await ask(`127.0.0.1:${port}`, 'GET', `/api/projects/${project}/shared/uploads/${id}`, { Cookie: srv.cookie })).body.offset, CHUNK_SIZE);
@@ -251,7 +252,7 @@ test('the kit\'s client (ui/upload.js) pauses, resumes after a reload from where
     // Cancelled: done answers null and the server lets it go.
     const third = startUpload(endpoint, new File([data], 'gone.bin'), { onChange: (u: any) => u.sent > 0 && u.cancel() });
     assert.equal(await third.done, null);
-    for (let i = 0; i < 50 && readdirSync(join(root, 'data', 'chunked')).length; i++) await new Promise((r) => setTimeout(r, 20));
+    await until('the chunked dir to empty', async () => !readdirSync(join(root, 'data', 'chunked')).length, 1000);
     assert.deepEqual(readdirSync(join(root, 'data', 'chunked')), []);
   } finally {
     Object.assign(globalThis, { fetch: plain, XMLHttpRequest: undefined, localStorage: undefined });

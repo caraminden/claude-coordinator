@@ -10,8 +10,8 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { until } from './wait.ts';
 import { agentToken, bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
+import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'overlord-'));
 const data = join(root, 'data');
@@ -74,7 +74,7 @@ const cards = (ticketId: number) => events(ticketId).filter((e) => e.kind === 'q
 test("the Overlord hears of every start, and gets a card when one reads like another person's open minion", async () => {
   // Josh's minion has to be indexed before a look-alike can be found.
   const hits = async () => (await (await fetch(`${srv.base}/api/projects/${Shared.id}/memory?q=${encodeURIComponent('retry loop land.sh')}&scope=minions`, { headers: { Cookie: cookie } })).json()).hits ?? [];
-  for (let i = 0; i < 100 && !(await hits()).some((h: any) => h.ticket_id === joshWork.id); i++) await new Promise((r) => setTimeout(r, 100));
+  await until('the hit', async () => (await hits()).some((h: any) => h.ticket_id === joshWork.id), 10000);
 
   const twin = await start(Shared.id, 'Fix the retry loop in land.sh after a refused push');
   const heard = await until(`mail naming #${twin.number}`, () => { const m = mail(overlord.id); return m.some((t) => t.includes(`#${twin.number}`)) && m; });

@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { type Chain, chainIs, githubPrs, LiveWaiters, mergedPr, mergedPrOf, type PrMerge, startChained } from '../src/wake.ts';
 import { bootServer, stopTurns, stopProcs, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Chained minions: one created parked, whose brief is held until the minion it follows (its leader)
@@ -622,7 +623,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   // The brief that starts a minion is marked, so the chat shows it unfolded; later messages aren't.
   const briefs = async (id: number) => (await messages(id)).map((m: any) => !!m.brief);
   const idle = async (id: number) => {
-    while ((await call(`/api/tickets/${id}`)).data.ticket.status === 'running') await new Promise((r) => setTimeout(r, 20));
+    await until('the ticket to stop running', async () => (await call(`/api/tickets/${id}`)).data.ticket.status !== 'running');
   };
 
   const { data: p } = await call('/api/projects', { name: 'Scheme' });

@@ -6,6 +6,7 @@ import { after, beforeEach, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_WAKES, pacificTime, parseWakeTime, TimedWakes } from '../src/wake.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // wake_at (#722): timed wakes, in the settings table, sent to the asker's own chat.
@@ -96,7 +97,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   wakes.add(id, Date.now() + 100, 'mid-turn wake', 'Cara'); // real clock, real timer: it comes due while the turn runs
   await new Promise((r) => setTimeout(r, 250));
   assert.equal(runner.queued(id), 1);
-  while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to stop', async () => !runner.isRunning(id));
   const said = store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).text);
   assert.equal(said.length, 2);
   assert.match(said[1], /mid-turn wake/);

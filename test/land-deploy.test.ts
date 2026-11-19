@@ -160,7 +160,7 @@ test('deploy.sh told DEPLOY_LOCKED without the lock on fd 9 takes the lock itsel
       // Someone else holds the lock for a while: the deploy must wait for it rather than go ahead.
       const holder = spawn('flock', [lock, 'sleep', '2'], { stdio: 'ignore' });
       const released = new Promise((ok) => holder.once('exit', ok));
-      while (spawnSync('flock', ['-n', lock, 'true']).status === 0) await new Promise((ok) => setTimeout(ok, 20));
+      await until('the lock to be held', async () => spawnSync('flock', ['-n', lock, 'true']).status !== 0);
       const script = join(r.dir, 'leaky.sh');
       writeFileSync(script, `${fd9}exec bash ${JSON.stringify(join(import.meta.dirname, '..', 'tools', 'deploy.sh'))}\n`);
       let holderDone = false;
@@ -186,6 +186,7 @@ test('a land killed while the deploy tests the live checkout puts the checkout a
   writeFileSync(join(r.source, 'test', 'slow.test.mjs'), `import { existsSync, realpathSync, writeFileSync } from 'node:fs';
 if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(process.env.DEPLOY_LIVE)) {
   writeFileSync(process.env.KILL_MARK + '.started', '');
+  // poll-ok: this runs in a fixture child in a temp dir and can't import ./wait.ts
   for (const end = Date.now() + 60000; !existsSync(process.env.KILL_MARK + '.release') && Date.now() < end;) await new Promise((r) => setTimeout(r, 50));
   writeFileSync(process.env.KILL_MARK + '.done', '');
 }

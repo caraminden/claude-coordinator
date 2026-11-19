@@ -821,7 +821,7 @@ test('two landings both land while other jobs hold every heavy slot', async () =
   // A stand-in for someone's cargo build, holding the only slot until this test stops it.
   const build = spawn('flock', [join(heavy, 'slot-0'), 'sleep', '600'], { detached: true, stdio: 'ignore' });
   try {
-    while (spawnSync('flock', ['-n', join(heavy, 'slot-0'), 'true']).status === 0) await new Promise((ok) => setTimeout(ok, 50));
+    await until('the lock to be held', async () => spawnSync('flock', ['-n', join(heavy, 'slot-0'), 'true']).status !== 0);
     const extra = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), CITADEL_HEAVY_DIR: heavy };
     const [a, b] = await Promise.all([landAsync(r.wt, extra, 60_000), landAsync(wt2, extra, 60_000)]);
     assert.equal(a.status, 0, `first landing: ${a.stderr}`);

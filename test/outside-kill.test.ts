@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Delve #14's claude was SIGTERMed by its own `pkill`, and the chat showed only a stderr warning and
@@ -44,10 +45,10 @@ async function turn(text: string, stop = false) {
   runner.send(t.id, 'Cara', text);
   if (stop) {
     // Once claude is up: a stop before it starts has no process to signal yet.
-    for (let i = 0; i < 500 && !store.listEvents(t.id).some((e) => e.kind === 'claude'); i++) await new Promise((r) => setTimeout(r, 20));
+    await until('the first claude event', async () => store.listEvents(t.id).some((e) => e.kind === 'claude'), 10000);
     runner.stop(t.id);
   }
-  for (let i = 0; i < 500 && runner.isRunning(t.id); i++) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to stop', async () => !runner.isRunning(t.id), 10000);
   assert.ok(!runner.isRunning(t.id), 'the turn ended');
   const errors = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
   return { ticket: store.getTicket(t.id)!, errors };
@@ -96,11 +97,11 @@ test('a turn killed together with its wrapper (no exit record) fails the turn ra
   runner.onTurnError = (_id: number, why: string) => failed.push(why);
   try {
     runner.send(t.id, 'Cara', 'wait');
-    for (let i = 0; i < 500 && !store.listEvents(t.id).some((e) => e.kind === 'claude'); i++) await new Promise((r) => setTimeout(r, 20));
+    await until('the first claude event', async () => store.listEvents(t.id).some((e) => e.kind === 'claude'), 10000);
     const pids = JSON.parse(readFileSync(join((runner as any).turns.get(t.id).dir, 'pid.json'), 'utf8'));
     process.kill(pids.wrapper, 'SIGKILL');
     process.kill(-pids.claude, 'SIGKILL');
-    for (let i = 0; i < 500 && runner.isRunning(t.id); i++) await new Promise((r) => setTimeout(r, 20));
+    await until('the turn to stop', async () => !runner.isRunning(t.id), 10000);
     assert.ok(!runner.isRunning(t.id), 'the turn ended');
     assert.equal(store.getTicket(t.id)!.status, 'error');
     const errors = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
@@ -119,7 +120,7 @@ test('a stop before claude has started signals it as soon as it starts, not at t
   assert.ok(!existsSync(join(dir, 'pid.json')), 'stopped before the wrapper started claude');
   const started = Date.now();
   runner.stop(t.id);
-  for (let i = 0; i < 500 && runner.isRunning(t.id); i++) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to stop', async () => !runner.isRunning(t.id), 10000);
   assert.ok(!runner.isRunning(t.id), 'the turn ended');
   assert.ok(Date.now() - started < 8000, `ended after ${Date.now() - started} ms`);
   assert.equal(store.getTicket(t.id)!.status, 'idle');

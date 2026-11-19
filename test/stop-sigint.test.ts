@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // AG-04: SIGTERM leaves claude's turn unfinished with no result, so a stopped turn recorded no cost.
@@ -45,10 +46,10 @@ async function stopped(text: string) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
   runner.send(t.id, 'Cara', text);
-  for (let i = 0; i < 500 && !store.listEvents(t.id).some((e) => e.kind === 'claude'); i++) await new Promise((r) => setTimeout(r, 20));
+  await until('the first claude event', async () => store.listEvents(t.id).some((e) => e.kind === 'claude'), 10000);
   const at = Date.now();
   runner.stop(t.id);
-  for (let i = 0; i < 500 && runner.isRunning(t.id); i++) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to stop', async () => !runner.isRunning(t.id), 10000);
   assert.ok(!runner.isRunning(t.id), 'the turn ended');
   return { id: t.id, took: Date.now() - at, ticket: store.getTicket(t.id)! };
 }
@@ -78,11 +79,11 @@ test('a second Stop does not push the SIGKILL out', async () => {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
   runner.send(t.id, 'Cara', 'ignore-sigterm');
-  for (let i = 0; i < 500 && !store.listEvents(t.id).some((e) => e.kind === 'claude'); i++) await new Promise((r) => setTimeout(r, 20));
+  await until('the first claude event', async () => store.listEvents(t.id).some((e) => e.kind === 'claude'), 10000);
   const at = Date.now();
   runner.stop(t.id);
   await new Promise((r) => setTimeout(r, 700));
   runner.stop(t.id);
-  for (let i = 0; i < 500 && runner.isRunning(t.id); i++) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to stop', async () => !runner.isRunning(t.id), 10000);
   assert.ok(Date.now() - at < 2100, `killed ${Date.now() - at} ms after the first Stop`);
 });

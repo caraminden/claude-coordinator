@@ -150,7 +150,7 @@ test('a call that lands while idle-check is stopping the editor waits for the st
   const stopped = join(s.dir, 'stopped');
   // Stands in for idle-check under its lock: it has decided, and the stop takes a moment.
   const idle = spawn('flock', ['-x', join(s.dir, 'stop.lock'), 'sh', '-c', `touch '${held}'; sleep 0.3; printf 'ActiveState=inactive\\nFreezerState=running\\n' >'${s.dir}/show'; touch '${stopped}'`], { stdio: 'ignore' });
-  for (let i = 0; i < 100 && !existsSync(held); i++) await new Promise((r) => setTimeout(r, 10));
+  await until('the held file', async () => existsSync(held), 1000);
   assert.ok(existsSync(held));
   const c = clock(NOW);
   // Connected until the stop lands; after that, only once something has started the unit again.

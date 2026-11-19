@@ -25,6 +25,8 @@ test('parseDecisions reads parenthetical attributions with the rule they back', 
   assert.ok(got[0].quotes.includes('Ship'));
   assert.deepEqual([got[1].rule, got[1].quote, got[1].own], ['Who decides in a scheme', 'anyone who is assigned to a scheme should have the same authority to make decisions', false]);
   assert.equal(got[1].line, 5);
+  // At the very start of a text, the rule keeps its first letter.
+  assert.equal(parseDecisions('Ship, not land (Cara, 2026-11-19: "Ship"). More.', NAMES)[0].rule, 'Ship, not land');
 });
 
 test('two attributions in one paren, a bare quoted one, and a bare mention that is not a decision', () => {

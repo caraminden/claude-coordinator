@@ -99,7 +99,8 @@ export function parseDecisions(text: string, names: string[], opts: { title?: st
   matches.forEach((m, k) => {
     // Skip "Cara's 2026-…" (a reference, read as refs below) and a date that is part of a longer token.
     if (text[m.end] === '-' || /\d/.test(text[m.end] ?? '')) return;
-    const paraStart = Math.max(text.lastIndexOf('\n\n', m.start) + 2, 0);
+    const gap = text.lastIndexOf('\n\n', m.start);
+    const paraStart = gap < 0 ? 0 : gap + 2;
     let paraEnd = text.indexOf('\n\n', m.end);
     if (paraEnd < 0) paraEnd = text.length;
     // Inside an open paren of the same paragraph?

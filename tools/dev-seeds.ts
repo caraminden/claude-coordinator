@@ -733,6 +733,34 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}/memory (Settings → Memory in "${c.project.name}")`;
     },
   },
+  decisions: {
+    about: "Settings → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
+    seed(c) {
+      SCENARIOS.memory.seed(c);
+      if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });
+      const repo = c.store.getProject(c.project.id)!.repo_dir!;
+      const env = { ...process.env, GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid' };
+      const sh = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore', env });
+      const put = (path: string, text: string) => { mkdirSync(join(repo, path, '..'), { recursive: true }); writeFileSync(join(repo, path), text); };
+      rmSync(join(repo, '.git'), { recursive: true, force: true });
+      execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+      put('CLAUDE.md', '# CLAUDE.md\n\n- **Decisions log (ADRs):** `docs/adr/`.\n- Screens are checked at two widths (Josh, 2026-11-12: "desktop and phone, every time").\n');
+      put('.claude/rules/words.md', '# Words\n\n- Say land for a change reaching main (Cara, 2026-11-19, picked "Land" and, for `fold`, "Retire it").\n- Old CI rule (Cara, 2026-11-10: "Keep failing, log it").\n');
+      put('docs/adr/0001-ci-red.md', '# 0001: A red CI run fails the land\n\nDate: 2026-11-10.\nCara, 2026-11-10, on #12\'s card: "Keep failing, log it".\n');
+      sh('add', '-A');
+      sh('commit', '-qm', 'Rules and the first ADR');
+      put('docs/adr/0002-rerun-flakes.md', '# 0002: A red run that is red only on flakes gets one fresh run\n\nDate: 2026-11-15.\nCara, 2026-11-15, on #31\'s card: "Rerun CI on flake-only red".\n\nThis reverses Cara\'s 2026-11-10 "Keep failing, log it" for the CI gate.\n');
+      sh('add', '-A');
+      sh('commit', '-qm', 'ADR 0002');
+      c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
+      c.store.setProjectInstructions(c.project.id, '## Shipping\nShip small fixes without asking (Cara, 2026-10-27: "move fast").\n\n## Pictures\nImages by code (Cara, 2026-11-14: "image via code should ABSOLUTELY be the default").\n', c.who);
+      const land = 'Land, not merge (Cara, 2026-11-19, picked "Land" and, for `fold`, "Retire it": "fold was just for major builds"). A change going onto main is "landing".\n\n- No reflow without input (Cara, 2026-11-16: "UI reflowing without a user input should be avoided").\n- Fable only for the hardest work (Josh, 2026-11-13: "only for really complex or high risk things").\n';
+      const ship = land.replace(/^Land, not merge \([^\n]*/, 'Ship, not land or merge (Cara, 2026-11-19: she first picked "Land", then later that day, on #1020\'s card, picked `Ship` over keeping "land"; for `fold` she picked "Retire it": "fold was just for major builds"). A change going onto main is "shipping".');
+      c.store.setAppInstructions(land, c.who);
+      c.store.setAppInstructions(ship, 'Taskmaster');
+      return `#/p/${c.project.id}/decisions (Settings → Decisions in "${c.project.name}")`;
+    },
+  },
   ci: {
     about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), a queue, runs and runners with what they run, desktop load, each run linking its minion (#1019), a quieted workflow with a red verdict, greyed (#990), the queued jobs of the landing minion as one row (#1019); the CI chip turns red',
     seed(c) {

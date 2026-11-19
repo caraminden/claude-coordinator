@@ -54,6 +54,34 @@
 .rv-bodytext { font-family: var(--mono, ui-monospace, monospace); font-size: 0.85em; resize: vertical; }
 /* With an edit open the detail takes the wider share, so the body reads at a useful width. */
 .rv-body:has(.rv-form) { grid-template-columns: minmax(0, 1fr) minmax(20rem, 32rem); }
+/* Phase 2 (#1052): the describe box over the columns, its proposals, and the detail's judging controls. */
+.rv-ask { display: flex; flex-direction: column; gap: 0.5rem; margin: 0 0 1rem; }
+.rv-ask-row { display: flex; gap: 0.5rem; margin: 0; }
+.rv-ask-row .cui-input { flex: 1; min-width: 0; }
+.rv-ask-note, .rv-applied { margin: 0; font-size: 0.92em; }
+.rv-applied { padding: 0.45rem 0.7rem; border: 1px solid var(--done); border-radius: 8px; background: var(--panel); }
+.rv-proposal { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem 0.75rem; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); }
+.rv-proposal .instructions-diff { margin: 0; max-height: 18rem; overflow: auto; }
+.rv-proposal .instructions-diff .gap summary { cursor: pointer; }
+.rv-warn { margin: 0; padding: 0.45rem 0.65rem; border-radius: 8px; font-size: 0.9em; background: color-mix(in srgb, var(--waiting-tint) 16%, var(--panel)); }
+.rv-warn.is-off { border: 1px solid var(--waiting); }
+.rv-judging { display: flex; flex-direction: column; gap: 0.5rem; }
+.rv-seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.rv-seg button { min-height: 0; padding: 0.3rem 0.7rem; border: 0; background: none; color: var(--ink); font: inherit; font-size: 0.9em; cursor: pointer; }
+.rv-seg button + button { border-left: 1px solid var(--line); }
+.rv-seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.rv-seg button:disabled { cursor: not-allowed; opacity: 0.55; }
+.rv-lenses { cursor: default; }
+.rv-lens-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rv-lens-list li { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0; border-top: 1px solid var(--line); }
+.rv-lens-list li.off .rv-lens-name { opacity: 0.6; }
+.rv-lens-name { flex: 1; min-width: 0; min-height: 0; padding: 0.3rem 0.35rem; margin-left: -0.35rem; border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.rv-lens-name:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.rv-lens-list li.on .rv-lens-name { color: var(--accent); font-weight: 600; }
+.rv-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9em; }
+.rv-check input { flex: none; width: auto; min-height: 0; margin: 0; }
+.rv-check:has(input:disabled) { opacity: 0.55; }
+.rv-added { margin: 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 800px) {
   .rv-scheme, .rv-head .close-view.wide-only { display: none; }

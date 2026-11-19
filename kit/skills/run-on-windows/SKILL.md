@@ -61,7 +61,8 @@ regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s
    `rig.ts run corner` is #890's: at three window widths no control sits under the caption buttons, and they sit
    on the page colour, not white. `rig.ts run hint` checks #890's one-time ⌃ note stays away with the title
    bar hidden. Edge's app window has no ⌃ (the title bar is always hidden), so the side with it showing can't be
-   driven here.
+   driven here. `rig.ts run contraption-window` is #988's: a contraption's page at top level (an app's own
+   window) keeps a link to its own app and sends an outside one to Firefox (accept the prompt; shot `window link`).
    - A new check is a file in `checks/`, using `checks/lib.js`'s helpers (`openFixture`, `click`, `drag`,
      `expect`, `snap`).
    - A new fixture page is a file in `fixture/`, opened with `openFixture('<file>')`.

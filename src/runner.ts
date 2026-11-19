@@ -1036,13 +1036,43 @@ export class Runner {
           ...log.kept.map((k) => `- ${k}`),
         ].filter(Boolean).join('\n');
         console.log(`${p.name}: ${text}`);
-        const coordinator = this.store.getOverlord(p.id);
-        if (coordinator) this.emit(coordinator.id, 'note', { text, everyone: true });
+        this.dailyCleanupNote(p.id, now, log);
       }
     } finally {
       this.sweepingWorktrees = false;
     }
     return done;
+  }
+
+  /**
+   * One cleanup note per scheme per Pacific day on its Overlord chat (#1055): the day's removed and kept add up in a
+   * setting (so a restart keeps them), and the day's note is rewritten in place. The headline is one line; the list
+   * sits in the note's collapsed detail.
+   */
+  private dailyCleanupNote(projectId: number, now: number, log: { removed: string[]; kept: string[]; bytes: number }) {
+    const coordinator = this.store.getOverlord(projectId);
+    if (!coordinator) return;
+    const day = new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const key = `worktree-cleanup-note:${projectId}`;
+    const saved = this.store.getSetting<{ day: string; event: number; removed: string[]; kept: string[]; bytes: number }>(key);
+    const total = saved && saved.day === day ? saved : { day, event: 0, removed: [], kept: [], bytes: 0 };
+    total.removed.push(...log.removed);
+    total.kept.push(...log.kept.filter((k) => !total.kept.includes(k)));
+    total.bytes += log.bytes;
+    const n = total.removed.length;
+    const text = `${n ? `Cleaned up ${n} worktree${n === 1 ? '' : 's'} today, ${size(total.bytes)} freed` : 'No worktrees removed today'}${total.kept.length ? ` · ${total.kept.length} kept` : ''}`;
+    const detail = [
+      n ? 'Removed (branches kept; a reopen brings a minion\'s back):' : '',
+      ...total.removed.map((r) => `- ${r}`),
+      total.kept.length ? 'Kept:' : '',
+      ...total.kept.map((k) => `- ${k}`),
+    ].filter(Boolean).join('\n');
+    const existing = total.event ? this.store.listEvents(coordinator.id).find((e) => e.id === total.event) : undefined;
+    if (existing) {
+      this.store.setEventData(existing.id, { ...JSON.parse(existing.data), text, detail });
+      this.emit(coordinator.id, 'note_edit', { event: existing.id, text, detail });
+    } else total.event = this.emit(coordinator.id, 'note', { text, detail, everyone: true }).id;
+    this.store.setSetting(key, total);
   }
 
   /**

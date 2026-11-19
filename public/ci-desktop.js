@@ -1,4 +1,4 @@
-// The CI desktop cards on the CI page's Runners tab (#534, moved there from Machines by #968): each PC that hosts CI runners, as src/ci-load.ts sees it: a
+// The CI desktop cards on the CI page's Overview, behind its CI desktop load toggle (#534, moved there from Machines by #968, onto Overview by #1019): each PC that hosts CI runners, as src/ci-load.ts sees it: a
 // verdict, what it is doing now, the last 24 hours, and each pool of runners with its queue (public/ci.js reads them).
 import { ago, h } from './base.js';
 
@@ -112,6 +112,13 @@ export function pcCard(pc) {
     cpu.some((v) => v !== null) ? chart(pc, 'CPU', [{ key: 'cpu', label: 'average', values: cpu }, { key: 'peak', label: 'peak', values: pc.series.map((s) => s[2]) }], 100, '%') : '',
     pc.pools.length ? chart(pc, 'CI jobs', [{ key: 'running', label: 'running', values: pc.series.map((s) => s[3]), step: true }, { key: 'waiting', label: 'waiting', values: pc.series.map((s) => s[4]), step: true }], jobsMax % 2 ? jobsMax + 1 : jobsMax, '') : '',
     pools(pc));
+}
+
+/** A PC's one line for the collapsed CI desktop load (#1019, Cara 2026-11-18: "just showing CPU and Memory"): its dot, name, CPU and memory. */
+export function pcLine(pc) {
+  const now = pc.now;
+  return [h('span', { class: `dot ${DOT[pc.verdict.kind] ?? 'asleep'}` }), h('span', { class: 'ci-run-word' }, 'load'), h('span', { class: 'ci-run-name' }, pc.host),
+    h('span', { class: 'ci-run-who muted' }, now ? `CPU ${Math.round(now.cpu)}% · Memory ${Math.round((1 - now.mem_free / now.mem_total) * 100)}%` : 'no sample in the last day')];
 }
 
 /** What the CI chip warns of (Cara, 2026-11-11): CI overloading the PC, a crash under load, or a PC that stopped reporting in the last day. */

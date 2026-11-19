@@ -8,9 +8,11 @@ import { openNewScheme } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { releaseRows, releasesLink } from './releases.js';
+import { ciChip } from './ci.js';
 
 let hiddenOpen = false; // whether the shelf's Hidden section is unfolded, kept across redraws
 let othersOpen = false; // the same for its Other schemes section
+let schemesChip = null; // the CI chip beside Releases
 
 // Your schemes: ones you own or were added to and haven't hidden. Admin reach (the flag, or the Citadel scheme) opens the
 // rest too, but they sit apart under Other schemes, never mixed into yours (#674). A list from before #674 has no flag: yours.
@@ -125,7 +127,9 @@ export function renderSchemesShelf() {
     h('summary', {}, `Hidden (${hidden.length})`),
     hidden.map((p) => row(p, h('button', { type: 'button', class: 'scheme-hide', title: `Show ${p.name} in your lists again`, onclick: () => setHidden(p, false) }, 'Unhide')))) : null;
   folded?.addEventListener('toggle', () => (hiddenOpen = folded.open));
-  el.replaceChildren(h('h3', {}, 'Schemes', h('span', { class: 'spacer' }), releasesLink()),
+  // One chip per shelf, kept across redraws: a new one would read /api/ci again (Cara, 2026-11-18: the CI button "next to the Releases button").
+  if (!schemesChip?.isConnected) schemesChip = ciChip();
+  el.replaceChildren(h('h3', {}, 'Schemes', h('span', { class: 'spacer' }), schemesChip, releasesLink()),
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),

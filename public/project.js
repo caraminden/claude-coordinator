@@ -1,7 +1,7 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
-import { ciChip, ciPage } from './ci.js';
+import { ciPage } from './ci.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, notificationsPage, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
@@ -167,8 +167,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const shelf = h('details', { class: 'shelf', open: panelOpen('shelf') },
     h('summary', { title: 'Show or hide the overview' }, projectTitle(project)),
     h('section', { class: 'account' },
-      // The CI chip by the usage meter (#968, Cara: "Chip by the usage meter"), its dot the CI page's worst.
-      h('div', { class: 'meter-row' }, usageMeter(), ciChip(projectId)),
+      // The CI chip moved beside Releases over the scheme list (#1019, Cara 2026-11-18: "move the CI button with the dot next to the Releases button").
+      h('div', { class: 'meter-row' }, usageMeter()),
       // Settings shows in the header beside the scheme; who is signed in sits with Sign out along the box's foot.
       h('div', { class: 'foot' },
         h('span', { class: 'who' }, me),
@@ -213,7 +213,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'notifications' ? notificationsPage()
     : main.kind === 'usage' ? usagePage()
     : main.kind === 'releases' ? releasesPage()
-    : main.kind === 'ci' ? ciPage(projectId)
+    : main.kind === 'ci' ? ciPage(projectId, main.tab)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket);

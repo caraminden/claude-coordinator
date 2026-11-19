@@ -1,10 +1,10 @@
 // The CI page (#968, Cara 2026-11-18: "maybe mandate could link to a ci status/issues page within citadel"; layout B,
 // "Scheme list on the left, detail on the right", with "the CI box performance page from machines" in it): every
-// scheme with CI, its open problems with what, why and the fix, each workflow's verdict on main, the queue, recent runs
-// and its runners, plus the CI desktop's load. It reads /api/ci (src/ci-health.ts snapshot) and changes nothing.
-// The CI chip by the usage meter ("Chip by the usage meter") opens it, its dot the worst of what the page shows.
+// scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
+// what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
+// (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
 import { ago, api, h, view } from './base.js';
-import { pcCard, trouble } from './ci-desktop.js';
+import { pcCard, pcLine, trouble } from './ci-desktop.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
 
@@ -82,7 +82,7 @@ function runningNow(s, now, ui) {
   const rows = own.map((r) => {
     const j = running.find((x) => x.runner === r.name);
     const word = r.status === 'offline' ? 'offline' : j || r.busy || r.job ? 'busy' : 'idle';
-    return h('div', { class: 'ci-run ci-now' },
+    return h('div', { class: 'ci-run ci-now', title: `${r.name}: ${r.labels.join(', ')}` },
       h('span', { class: `dot ${{ offline: 'down', busy: 'running', idle: 'ready' }[word]}` }),
       h('span', { class: 'ci-run-word' }, word),
       h('span', { class: 'ci-run-name', title: r.name }, r.name),
@@ -103,12 +103,34 @@ function runningNow(s, now, ui) {
     h('span', { class: 'dot running' }), h('span', { class: 'ci-run-word' }, 'running'), h('span', { class: 'ci-run-name', title: j.runner }, j.runner), jobCell(j), age(j))));
   const queues = v.queues ?? [];
   const head = queues.length ? queues.map(queueWords).join(' · ') : 'nothing queued';
+  // The Runners tab's notes (#1019: runners moved onto Overview), for a repo whose runners can't be listed or that has none.
+  const note = v.runners === null ? "CI health can't list this repo's runners: it needs a repo admin's linked GitHub."
+    : !own.length ? "No self-hosted runners; jobs run on GitHub's." : '';
   return h('section', { class: 'ci-block' },
-    h('div', { class: 'ci-block-head' }, h('h4', {}, 'Running now'), h('span', { class: 'muted small ci-queues', title: head }, head)),
+    h('div', { class: 'ci-block-head' }, h('h4', {}, 'Runners and what they run'), h('span', { class: 'muted small ci-queues', title: head }, head)),
+    note ? h('p', { class: 'muted small' }, note) : '',
     h('div', { class: 'ci-runs' }, ...rows));
 }
 
-function overview(s, now, ui) {
+const LOAD_OPEN = 'ci-load-open';
+
+/**
+ * CI desktop load (#1019, Cara 2026-11-18: "a collapsed version (something like just showing CPU and Memory) ... that can be expanded
+ * for the full details"): a line per PC, opened by a click to its cards in place. Collapsed by default, remembered per device.
+ */
+function desktopLoad(pcs, ui) {
+  if (!pcs.length) return '';
+  const open = ui.loadOpen;
+  return h('section', { class: 'ci-block ci-desktops' }, h('h4', {}, 'CI desktop load'),
+    h('div', { class: 'ci-runs' }, h('button', { type: 'button', class: 'ci-run ci-now ci-load-toggle', 'aria-expanded': String(open), onclick: ui.toggleLoad },
+      h('span', { class: 'dot asleep' }), h('span', { class: 'ci-run-word' }, open ? 'hide' : 'details'),
+      h('span', { class: 'ci-run-name' }, open ? 'Hide the details' : `${pcs.length} desktop${pcs.length === 1 ? '' : 's'}`),
+      h('span', { class: 'ci-run-who muted' }, open ? '' : 'charts, pools and queue'), h('span', { class: 'ci-run-age muted' }, open ? '▴' : '▾')),
+    ...pcs.map((pc) => h('div', { class: 'ci-run ci-now', title: pc.verdict.text }, ...pcLine(pc), h('span', { class: 'ci-run-age' })))),
+    ...(open ? pcs.map(pcCard) : []));
+}
+
+function overview(s, pcs, now, ui) {
   const v = s.view;
   return [
     h('section', { class: 'ci-block' }, h('h4', {}, 'Open problems'),
@@ -124,29 +146,16 @@ function overview(s, now, ui) {
         h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'), ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name),
         whoCell(j), h('span', { class: 'ci-run-age muted' }, ago(Date.parse(j.since))))))
         : h('p', { class: 'muted' }, 'No job is waiting.')),
-  ];
-}
-
-function runners(s, pcs) {
-  const list = s.view.runners;
-  return [
-    h('section', { class: 'ci-block' }, h('h4', {}, `${s.name}'s runners`),
-      list === null ? h('p', { class: 'muted' }, "CI health can't list this repo's runners: it needs a repo admin's linked GitHub.")
-        : !list.length ? h('p', { class: 'muted' }, 'No self-hosted runners; jobs run on GitHub\'s.')
-          : h('div', { class: 'ci-runs' }, ...list.map((r) => h('div', { class: 'ci-run' },
-            h('span', { class: `dot ${r.status === 'offline' ? 'down' : r.busy || r.job ? 'running' : 'ready'}` }),
-            h('span', { class: 'ci-run-word' }, r.status === 'offline' ? 'offline' : r.busy || r.job ? 'busy' : 'idle'),
-            h('span', { class: 'ci-run-name' }, r.name),
-            h('span', { class: 'ci-run-branch muted' }, r.status === 'offline' ? (r.offlineSince ? `since ${when(r.offlineSince)}` : '') : r.job ?? ''),
-            h('span', { class: 'ci-run-age muted' }, r.labels.filter((l) => !/^(self-hosted|windows|linux|x64|arm64)$/i.test(l)).join(', ')))))),
-    pcs.length ? h('section', { class: 'ci-block ci-desktops' }, h('h4', {}, 'CI desktop load'), ...pcs.map(pcCard)) : '',
+    desktopLoad(pcs, ui),
   ];
 }
 
 /** The page: `projectId` is the scheme it opened from, selected first. */
-export function ciPage(projectId) {
+export function ciPage(projectId, startTab = 'overview') {
   let picked = projectId;
-  let tab = 'overview';
+  // Runs is History and Runners joined Overview (#1019), so their old links land where those now are.
+  let tab = startTab === 'runs' || startTab === 'history' ? 'history' : 'overview';
+  let loadOpen = localStorage.getItem(LOAD_OPEN) === '1';
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
   let hostedOpen = false; // Running now's row for GitHub's runners opens to a row per job, on a click only
@@ -175,15 +184,17 @@ export function ciPage(projectId) {
     list.replaceChildren(...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); list.querySelector('.ci-more')?.focus(); } },
       h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide all clear' : `${hidden.length} all clear`),
       h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '');
-    const tabs = [['overview', 'Overview'], ['runs', 'Runs'], ['runners', 'Runners']];
+    const tabs = [['overview', 'Overview'], ['history', 'History']];
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, s.name), ext(`https://github.com/${s.view.slug}/actions`, `${s.view.slug} on GitHub`),
         h('span', { class: 'muted small' }, `read ${ago(s.view.at)}`)),
       h('div', { class: 'ci-tabs', role: 'tablist' }, ...tabs.map(([k, label]) =>
         h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), class: tab === k ? 'on' : '', onclick: () => { tab = k; draw(); } }, label))),
-      ...(tab === 'overview' ? overview(s, Date.now(), { hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); } })
-        : tab === 'runs' ? [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map(runRow)) : h('p', { class: 'muted' }, 'No runs in the last day.'))]
-          : runners(s, data.pcs)));
+      ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
+        hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); },
+        loadOpen, toggleLoad: () => { loadOpen = !loadOpen; localStorage.setItem(LOAD_OPEN, loadOpen ? '1' : '0'); draw(); detail.querySelector('.ci-load-toggle')?.focus(); },
+      })
+        : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map(runRow)) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));
   };
   let tried = false;
   const load = async () => {

@@ -918,6 +918,14 @@ releases are named. `release.needs` lists workflow files that must also be green
 before a build counts as reaching people (#1019): a CI target whose installer only goes out once
 another workflow passes lists that workflow here, or its minions leave Deploying too early.
 
+**A target is live only when the people it's for can get that version** (Cara, 2026-11-18:
+"Released should mean actually released"). Check each target against the path people really
+update by: a PC updater, an app's update banner, a store, a download link. If that path waits on
+anything after the build (another workflow, a publish step, a feed), the target must wait on it
+too: `release.needs` for another workflow. Citadel doesn't wait on every workflow by default,
+because a newer push often cancels a run, schedules and path filters skip commits, and an unrelated
+red would hold a real release. So name what your updater gates on.
+
 ## Limits at a glance
 
 | What | Limit |
@@ -954,6 +962,7 @@ another workflow passes lists that workflow here, or its minions leave Deploying
 
 Newest first.
 
+- **2026-11-18:** The rule for release targets: a target is live only when its people can get that version ("Release targets").
 - **2026-11-18:** A release target can wait on other workflows: `targets[].release.needs` in
   `citadel-app.json` ("Release targets").
 - **2026-11-18:** Downloads from your server load in the frame: a plain `<a href>` with no

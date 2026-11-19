@@ -922,7 +922,7 @@ test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on 
   assert.equal(item('ci.open'), null);
 });
 
-test("a red whose first fix minion closed names the open one fixing it now, else the newest (#1074, Josh 2026-11-19)", async () => {
+test("a red whose first fix minion closed names the open one fixing it now (the first open), else the newest (#1074, Josh 2026-11-19)", async () => {
   const w = outsideWorld();
   w.quietDelve();
   const health = new CiHealth(w.store, { ...w.outside, tell: () => true });
@@ -942,10 +942,16 @@ test("a red whose first fix minion closed names the open one fixing it now, else
   assert.equal(item('ci.open') ?? null, null, 'an open fix minion keeps it from ringing');
   assert.match(health.hold(now.id)!, /run 9601/);
   assert.equal(health.hold(first.id), null);
+  // A later minion that only quotes the run doesn't take the hold from the open fix minion.
+  const review = w.minion(w.peek.id, 'ticket/9-review');
+  w.store.addEvent(review.id, 'user_message', { text: 'Review what went wrong in run 9601' });
+  assert.match(health.hold(now.id)!, /run 9601/);
+  assert.equal(health.hold(review.id), null);
+  w.store.updateTicket(review.id, { status: 'closed' });
   w.store.updateTicket(now.id, { status: 'closed' });
   await health.tick(NOW + 2 * HOUR + 5 * MIN);
-  // Both closed: the newest (9602 came after both closed, so it rings, naming the second).
-  assert.match(item('ci.open')!, new RegExp(`still red after fix minion #${now.number} closed`));
+  // All closed: the newest (9602 came after they closed, so it rings, naming it).
+  assert.match(item('ci.open')!, new RegExp(`still red after fix minion #${review.number} closed`));
 });
 
 test("a red's fix minion is held open; once its fix is on main the workflow is dispatched once per fix, and green dismisses it (#1074)", async () => {

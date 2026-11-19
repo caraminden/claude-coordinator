@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parseProjectFacts, parseRule, pinFor } from '../src/repo-setup.ts';
 
-const home = '/home/cara/.local/share/claude-coordinator/projects';
-const real = (id: number) => { try { return readFileSync(`${home}/${id}/repo/CLAUDE.md`, 'utf8'); } catch { return null; } };
-
-// Real shapes: Citadel's (bullets wrapped onto indented lines) and Peek Auras' (a long first bullet).
-for (const [name, id, first, last] of [['Citadel', 2, 'Check commands', 'Numbered things'], ['Peek Auras', 3, 'Check commands', null]] as const) {
-  test(`parses ${name}'s Project facts`, (t) => {
-    const md = real(id);
-    if (!md) return t.skip('repo not on this machine');
-    const facts = parseProjectFacts(md)!;
+// Inline fixtures in the real shapes (CI runners don't have the repos, and a skip is red there): Citadel's
+// (bullets wrapped onto indented lines) and Peek Auras' (a long first bullet).
+const long = 'npm test (node --test test/ through tools/citadel-node, failing if it leaves processes running); a UI change is also checked in a dev copy';
+const fixtures = {
+  Citadel: `# CLAUDE.md\n\n## Project facts\n\n- **Check commands:** \`npm test\` (\`node --test test/\` through\n  \`tools/citadel-node\`, so it escapes ananicy's idle rule); a UI change is also checked\n  in a dev copy.\n- **Front end:** \`public/\`, plain JS.\n- **Numbered things:** none.\n\n## Skills\n`,
+  'Peek Auras': `# CLAUDE.md\n\n## Project facts\n\n- **Check commands:** ${long}\n- **Front end:** none.\n\n## Other\n`,
+};
+for (const [name, first, last] of [['Citadel', 'Check commands', 'Numbered things'], ['Peek Auras', 'Check commands', null]] as const) {
+  test(`parses ${name}'s Project facts`, () => {
+    const facts = parseProjectFacts(fixtures[name])!;
     assert.equal(facts[0].label, first);
     assert.ok(facts[0].value.length > 40, 'continuation lines are folded in');
     if (last) assert.ok(facts.some((f) => f.label === last));

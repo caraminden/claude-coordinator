@@ -615,10 +615,9 @@ export const projectRoutes: Route[] = [
       const number = url.searchParams.has('number') ? Number(url.searchParams.get('number')) : null;
       const all = app.store.listTickets(project.id).filter((t) => t.kind === 'ticket');
       const dismissed = all.filter((t) => t.status === 'closed').length;
-      const tickets = all
+      const tickets = app.runner.views(all
         .filter((t) => which === 'open' ? t.status !== 'closed' : which === 'closed' ? t.status === 'closed' : true)
-        .filter((t) => number === null || t.number === number)
-        .map((t) => app.runner.view(t));
+        .filter((t) => number === null || t.number === number));
       // When this person last looked at each thread, so rows they have already seen can be shown quieter.
       const seen = caller ? {} : app.store.seenTimes(session.name, project.id);
       // People's notes (#146) are for people only: a minion or the Taskmaster gets none.
@@ -664,14 +663,12 @@ export const projectRoutes: Route[] = [
     method: 'GET', path: '/api/projects/:project/tickets', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
     handler({ res, url, app, project, caller }) {
       const closed = url.searchParams.get('include_closed') === '1';
-      const tickets = app.store
-        .listTickets(project.id)
-        .filter((t) => t.kind === 'ticket' && (closed || t.status !== 'closed'))
-        .map((t) => {
-          const v = app.runner.view(t);
-          // A minion also gets each one's worktree (#783), to find who owns a file; the Taskmaster's read_ticket shows it.
-          return { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), ...(caller && caller.kind !== 'coordinator' && t.cwd ? { worktree: t.cwd } : {}) };
-        });
+      const listed = app.store.listTickets(project.id).filter((t) => t.kind === 'ticket' && (closed || t.status !== 'closed'));
+      const tickets = app.runner.views(listed).map((v, i) => {
+        const t = listed[i];
+        // A minion also gets each one's worktree (#783), to find who owns a file; the Taskmaster's read_ticket shows it.
+        return { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k as keyof typeof v]])), ...(caller && caller.kind !== 'coordinator' && t.cwd ? { worktree: t.cwd } : {}) };
+      });
       // Yesterday's contraption errors for the Taskmaster's look at the scheme (#835); none when there were none.
       const errors = app.errorDigest?.summary(project.id) ?? null;
       return json(res, 200, { tickets, scheme: project.name, ...(errors ? { errors } : {}) });

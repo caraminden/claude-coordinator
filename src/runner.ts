@@ -746,20 +746,35 @@ export class Runner {
   }
 
   /** A ticket as the API shows it: plus queued messages and its task-list steps. */
-  view(ticket: Ticket) {
+  /**
+   * view() for a list's rows (#1029): what rows share (the scheme, the waits, the people) is read once, and every
+   * row's properties in one query. Read per row, Citadel's ~1,000 dismissed minions held the server 0.4 s a page load.
+   */
+  views(tickets: Ticket[]) {
+    const memo = new Map<string, unknown>();
+    const once = <T>(key: string, read: () => T): T => (memo.has(key) ? memo.get(key) : (memo.set(key, read()), memo.get(key))) as T;
+    const properties = this.store.props.forTargets('minion', tickets.map((t) => t.id));
+    return tickets.map((t) => this.view(t, { once, properties: properties.get(t.id)! }));
+  }
+
+  view(ticket: Ticket, list?: { once: <T>(key: string, read: () => T) => T; properties: Record<string, string | number | string[]> }) {
+    const once = list?.once ?? (<T>(_key: string, read: () => T) => read());
+    const project = once(`project:${ticket.project_id}`, () => this.store.getProject(ticket.project_id));
+    const net = once(NET_RESUMES, () => this.netResumes()).find((w) => w.ticket === ticket.id) ?? null;
+    const limit = once(LIMIT_RESUMES, () => this.limitResumes()).find((w) => w.ticket === ticket.id) ?? null;
     const closed = ticket.status === 'closed';
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
     const p = closed ? null : this.progressFor(ticket.id);
     const { total, done } = p ? stepInfo(p) : { total: 0, done: 0 };
     // What steps took against their guesses (#571), which both bars scale the guesses by.
-    const ratio = closed ? 1 : this.stepRatio(ticket.project_id);
+    const ratio = closed ? 1 : once(`ratio:${ticket.project_id}`, () => this.stepRatio(ticket.project_id));
     // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     return {
       // A network wait's held messages are queued too: they go first into its resume (takeQueue).
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), held_ids: (this.store.getSetting<QueuedMessage[]>(mailKey(ticket.id)) ?? []).flatMap((m) => m.id ?? []), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (net?.queued?.length ?? 0), held_ids: (this.store.getSetting<QueuedMessage[]>(mailKey(ticket.id)) ?? []).flatMap((m) => m.id ?? []), queued_ids: [...(net?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
@@ -770,9 +785,9 @@ export class Runner {
       spend_alert: this.spendAlert(ticket),
       step_ratio: ratio,
       // When it resumes by itself after the usage limit, if it waits for that.
-      limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
+      limit_resume_at: limit?.at ?? null,
       // With several accounts all limited, each one's reset (#819), for the banner.
-      limit_accounts: this.limitWait(ticket.id)?.accounts ?? null,
+      limit_accounts: limit?.accounts ?? null,
       approvals: this.approvals.waiting(ticket.id),
       // Parked on start_after: what it waits for, for Start now.
       parked_for: this.heldFor(ticket.id),
@@ -783,9 +798,9 @@ export class Runner {
       pending_card_at: cards[0]?.created_at ?? null,
       // Its cards waiting on people with the links that open them, for read_ticket and list_tickets (#400).
       open_cards: this.cardLinks(ticket, false, cards),
-      properties: this.store.props.forTarget('minion', ticket.id),
+      properties: list?.properties ?? this.store.props.forTarget('minion', ticket.id),
       // Who touched it and hasn't left (#919): their Taskmasters hear its updates; the page offers them Leave.
-      touched: ticket.kind === 'ticket' && !closed ? this.store.touchedBy(ticket) : [],
+      touched: ticket.kind === 'ticket' && !closed ? this.store.touchedBy(ticket, list?.properties) : [],
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
       wait: closed ? null : this.wait(ticket.id),
@@ -796,16 +811,16 @@ export class Runner {
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).
       host_cost: this.store.ticketCost(ticket.id, true),
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
-      payer: this.payerView(ticket.person_id),
+      payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id)),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
       // When its last turn ended, for the composer's cold-wake hint (#413).
       last_turn_end: this.store.lastTurnEnd(ticket.id),
       // A Taskmaster's fresh start under way (#406), which hides the chat's Fresh session button.
       fresh_pending: !!this.store.getSetting<FreshState>(freshKey(ticket.id)),
       // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
-      default_effort: turnSettings({ ...ticket, effort: null }, this.store.getProject(ticket.project_id) ?? { default_effort: '' }).effort,
+      default_effort: turnSettings({ ...ticket, effort: null }, project ?? { default_effort: '' }).effort,
       // What the composer's Plugins picker offers (#361): the scheme's optional plugin folders, for a minion.
-      optional_plugin_dirs: ticket.kind === 'coordinator' ? [] : lines(this.store.getProject(ticket.project_id)?.optional_plugin_dirs),
+      optional_plugin_dirs: ticket.kind === 'coordinator' ? [] : lines(project?.optional_plugin_dirs),
     };
   }
 

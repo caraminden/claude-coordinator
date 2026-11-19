@@ -275,18 +275,24 @@ export class Registry {
 
   /** A minion's or artifact's properties: key → value, or a list for multi keys. */
   forTarget(type: TargetType, id: number): Record<string, string | number | string[]> {
+    return this.forTargets(type, [id]).get(id)!;
+  }
+
+  /** forTarget for many targets in one query (a minions list, #1029): each id's record, {} when it has none. */
+  forTargets(type: TargetType, ids: number[]): Map<number, Record<string, string | number | string[]>> {
     const rows = this.db
       .prepare(
-        `SELECT k.key, k.multi, k.value_kind, p.value FROM properties p JOIN property_keys k ON k.id = p.key_id
-         WHERE p.target_type = ? AND p.target_id = ? ORDER BY k.scope IS NOT NULL, k.id, p.rowid`,
+        `SELECT p.target_id, k.key, k.multi, k.value_kind, p.value FROM properties p JOIN property_keys k ON k.id = p.key_id
+         WHERE p.target_type = ? AND p.target_id IN (SELECT value FROM json_each(?)) ORDER BY k.scope IS NOT NULL, k.id, p.rowid`,
       )
-      .all(type, id) as { key: string; multi: number; value_kind: ValueKind; value: string }[];
-    const out: Record<string, string | number | string[]> = {};
+      .all(type, JSON.stringify(ids)) as { target_id: number; key: string; multi: number; value_kind: ValueKind; value: string }[];
+    const all = new Map(ids.map((id) => [id, {} as Record<string, string | number | string[]>]));
     for (const r of rows) {
+      const out = all.get(r.target_id)!;
       if (r.multi) ((out[r.key] ??= []) as string[]).push(r.value);
       else out[r.key] = r.value_kind === 'integer' ? Number(r.value) : r.value;
     }
-    return out;
+    return all;
   }
 
   // ── Setting ────────────────────────────────────────────────────────────

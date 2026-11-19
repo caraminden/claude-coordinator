@@ -2267,10 +2267,9 @@ export class Store {
   }
 
   /** Everyone touching a minion: the recorded ones plus its requester and assignee, less those who left. */
-  touchedBy(ticket: Pick<Ticket, 'id'>): number[] {
+  touchedBy(ticket: Pick<Ticket, 'id'>, props = this.props.forTarget('minion', ticket.id)): number[] {
     const rows = this.db.prepare('SELECT user_id, left_at FROM ticket_touches WHERE ticket_id = ?').all(ticket.id) as { user_id: number; left_at: number | null }[];
     const left = new Set(rows.filter((r) => r.left_at != null).map((r) => r.user_id));
-    const props = this.props.forTarget('minion', ticket.id);
     const ids = [...rows.map((r) => r.user_id), this.personId(props.requestedBy), this.personId(props.assigned)];
     return [...new Set(ids)].filter((id): id is number => id != null && !left.has(id));
   }

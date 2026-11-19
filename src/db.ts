@@ -2438,6 +2438,10 @@ export class Store {
   }
 
 
+  getEvent(id: number): EventRow | undefined {
+    return this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined;
+  }
+
   /** Replace an event's data, for cards whose status lives in the card (plans). */
   setEventData(id: number, data: unknown) {
     this.db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify(data), id);

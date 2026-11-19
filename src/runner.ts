@@ -1067,10 +1067,10 @@ export class Runner {
       total.kept.length ? 'Kept:' : '',
       ...total.kept.map((k) => `- ${k}`),
     ].filter(Boolean).join('\n');
-    const existing = total.event ? this.store.listEvents(coordinator.id).find((e) => e.id === total.event) : undefined;
+    const existing = total.event ? this.store.getEvent(total.event) : undefined;
     if (existing) {
       this.store.setEventData(existing.id, { ...JSON.parse(existing.data), text, detail });
-      this.emit(coordinator.id, 'note_edit', { event: existing.id, text, detail });
+      this.emit(coordinator.id, 'note_edit', { event: existing.id, text, detail, everyone: true });
     } else total.event = this.emit(coordinator.id, 'note', { text, detail, everyone: true }).id;
     this.store.setSetting(key, total);
   }

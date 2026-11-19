@@ -277,6 +277,7 @@ test('one cleanup note per scheme per Pacific day: a second sweep the same day a
   assert.equal(count(), 1, 'same day: still one note');
   const note = dailyNote(s.coordinator);
   assert.match(note.text, /^Cleaned up 2 worktrees today/);
+  assert.equal(store.listEvents(s.coordinator).filter((e) => e.kind === 'note_edit').length, 1, 'open chats get the edit live');
   assert.match(note.detail, new RegExp(`#${a.number} `));
   assert.match(note.detail, new RegExp(`#${b.number} `));
   const c = minion(s, null); store.updateTicket(c.id, { status: 'closed' }); store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 + DAY - 4 * DAY, c.id);

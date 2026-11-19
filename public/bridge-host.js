@@ -116,7 +116,9 @@ async function onMessage(e) {
   try {
     if (req.op === 'link') {
       // A page's link to another site: Firefox when this device's switch says so (extlinks.js, #988), else the page opens its own tab.
-      const opened = firefoxOn() && !!firefoxLink(req.url, location.href, [location.hostname]) && launchFirefox(req.url);
+      // Only for a click in a frame (a tab's click can't be seen from here), like send and draw.
+      const clicked = !!frame.iframe && (!navigator.userActivation || navigator.userActivation.isActive);
+      const opened = clicked && firefoxOn() && !!firefoxLink(req.url, location.href, [location.hostname]) && launchFirefox(req.url);
       return reply({ ok: true, result: { opened } });
     }
     if (req.op === 'draw') {

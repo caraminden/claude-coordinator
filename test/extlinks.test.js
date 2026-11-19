@@ -28,7 +28,7 @@ test('only http(s) links are ever rewritten', () => {
   }
 });
 
-test('a link with credentials or a control character is left alone', () => {
+test('a link with credentials is left alone, and a control character is percent-encoded', () => {
   assert.equal(firefoxLink('https://user:pw@example.com/', base, own), null);
   assert.equal(firefoxLink('https://example.com/a\u0000b', base, own), 'citadel-firefox:https://example.com/a%00b');
 });

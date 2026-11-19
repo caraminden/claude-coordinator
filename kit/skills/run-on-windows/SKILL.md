@@ -81,7 +81,10 @@ CDP `PWA.install` opens in a tab, so the driver installs through Edge's own addr
 `scripts/firefox-link/` (`check.ps1`, `t.html`) proves the `citadel-firefox:` protocol on its own: an Edge app
 window, a real mouse click, then the window title and Firefox's command lines. `rig.ts run firefox` (in the WCO
 rig, `checks/firefox.js`) proves Citadel's "Open links in Firefox" switch in the installed app and in a framed
-contraption; read Firefox's command lines on the box after it.
+contraption, with real clicks and the "Open this app?" prompt accepted. It asserts nothing itself: look at its
+`firefox links` shot (Firefox's tabs for the top link and the frame link, none for the off case), after the one-time
+setup (`public/citadel-firefox-link.ps1`) on the box; `%LOCALAPPDATA%\Citadel\open-in-firefox.ps1` stays installed there.
+The driver falls back to an Edge tab when the install dialog never comes (the overlay check then fails: ignore it).
 
 ## What you get back
 

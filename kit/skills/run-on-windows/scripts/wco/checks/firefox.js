@@ -1,8 +1,8 @@
 // #988: "Open links in Firefox". In the installed app, with the switch on, a real click on an external link (in
 // Citadel's own page, and in a framed contraption) asks the browser to open citadel-firefox:, whose "Open this
-// app?" prompt we accept; with the switch off the prompt never comes. Firefox's command lines are read after, on
-// the box afterwards, since the driver can't list processes: expect -url https://example.org/top-link-on and
-// /frame-link there, and no /top-link-off. (The prompt's "Open" button can't be told from other buttons named open.)
+// app?" prompt we accept; with the switch off the link opens in Edge as before. It asserts nothing itself: what
+// proves it is the 'firefox links' shot (Firefox's tabs: /top-link-on and /frame-link, no /top-link-off), or the
+// box's handler logging its argument. Needs the one-time setup on the box (public/citadel-firefox-link.ps1).
 const ANCHOR = `const a = document.createElement('a'); a.id = 'ff-test'; a.href = 'https://example.org/top-link-' + (localStorage.getItem('citadel-open-in-firefox') ? 'on' : 'off'); a.target = '_blank'; a.textContent = 'External link in Citadel'; a.style.cssText = 'position:fixed;left:200px;top:200px;z-index:99999;font-size:28px;background:#fff'; document.body.append(a); return 1`;
 // A link that opens in Edge (switch off) lands in a browser window that then covers the app: close those tabs.
 const tidy = async () => {
@@ -10,15 +10,7 @@ const tidy = async () => {
   await home();
 };
 const location_origin = await ev('return location.origin');
-const prompt = async () => {
-  for (let i = 0; i < 8; i++) {
-    const r = await mouse('uia-list .');
-    if (/Open|Always allow/i.test(r)) return r;
-    await sleep(500);
-  }
-  return '';
-};
-const accept = async () => { await snap('prompt'); note('prompt', (await prompt()).slice(0, 0)); await mouse('uia-click ^Always allow'); note(await mouse('uia-click ^Open$')); await sleep(2500); };
+const accept = async () => { await snap('prompt'); await mouse('uia-click ^Always allow'); note(await mouse('uia-click ^Open$')); await sleep(2500); };
 await home();
 await go('#/p/99999');
 await tidy();

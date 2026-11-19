@@ -1231,14 +1231,13 @@ function machineLine(m) {
   };
   const word = { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
   const isOpen = view.machineOpen.has(m.id);
-  // The body is built only while open (its notes keep a draft); opening a closed row redraws the list with it.
+  const fix = fixButton(m, open);
   const [row] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen },
-    ...(isOpen ? [fixButton(m, open) && h('div', { class: 'settings-row-actions' }, fixButton(m, open)), machineBody(m)] : []));
+    fix && h('div', { class: 'settings-row-actions' }, fix), machineBody(m));
   row.classList.add('machine-row', 'machine-line', m.status);
   row.addEventListener('toggle', () => {
     if (row.open === view.machineOpen.has(m.id)) return;
     view.machineOpen[row.open ? 'add' : 'delete'](m.id);
-    if (row.open) renderMachineList();
   });
   return row;
 }

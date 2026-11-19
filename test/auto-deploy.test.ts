@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { AUTO_BY, AutoDeploy, QUIET_MS } from '../src/auto-deploy.ts';
 import { Store } from '../src/db.ts';
+import { LastGreen } from '../src/last-green.ts';
 import type { Found } from '../src/release-targets.ts';
 import type { SchemeReleases, TargetView } from '../src/releases.ts';
 
@@ -26,8 +27,9 @@ function world() {
   let refuse: string | null = null;
   const tv = (t: Found): Omit<TargetView, 'testCopies'> => ({ target: { id: t.id, projectId: t.projectId, name: t.name, kind: t.kind, link: t.link }, current: null, next: null, line: [], recent: [] });
   const view = (): SchemeReleases[] => [{ projectId: 3, targets: [app, ci].map((t) => ({ ...tv(t), testCopies: [] })), testCopies: [] }];
+  const held = new LastGreen(store);
   const auto = new AutoDeploy({
-    store, targets: () => [app, ci], view, now: () => now,
+    store, targets: () => [app, ci], view, now: () => now, held,
     failed: (t, why) => failed.push(`${t.id}: ${why}`),
     deployers: {
       contraption: {
@@ -41,7 +43,7 @@ function world() {
     },
   });
   return {
-    auto, started, failed, app: tv(app), ci: tv(ci),
+    auto, started, failed, held, app: tv(app), ci: tv(ci),
     set: (o: { head?: string; waits?: boolean; refuse?: string | null }) => {
       if (o.head !== undefined) head = o.head;
       if (o.waits !== undefined) waits = o.waits;
@@ -145,4 +147,22 @@ test('a deploy still starting (an APK downloading) is not started twice, and its
   await first;
   assert.equal(starts, 1);
   assert.equal(auto.info(tv)?.can, true, 'settled: the reader decides again');
+});
+
+// Roll back to last green (#1016): a pinned target waits for the fix. Auto-deploy leaves it be, a minion's deploy is
+// refused, and a person's Deploy ships main and lets go of the pin.
+test('a target rolled back to last green is left alone by auto-deploy and minions, until a person deploys it', async () => {
+  const w = world();
+  w.held.pin(3, 'app:peek', { sha: 'aaa', from: 'bbb', by: 'Cara' });
+  await w.auto.tick();
+  w.pass(QUIET_MS + 1000);
+  await w.auto.tick();
+  assert.deepEqual(w.started, [], 'no auto-deploy while pinned');
+  assert.equal(w.auto.info(w.app)?.due, null);
+  assert.equal(w.auto.info(w.app)?.can, true, "the card's Deploy still shows");
+  await assert.rejects(w.auto.deployNow(3, 'app:peek', '#12', null), /rolled back to last green aaa by Cara/);
+  assert.deepEqual(w.started, []);
+  await w.auto.deployNow(3, 'app:peek', 'Josh', null);
+  assert.deepEqual(w.started, ['app:peek by Josh at aaa']);
+  assert.equal(w.held.pinned(3, 'app:peek'), null, "a person's deploy let go of the pin");
 });

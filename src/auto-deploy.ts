@@ -8,6 +8,7 @@ import type { Store } from './db.ts';
 import { HttpError } from './http.ts';
 import type { Found, Kind } from './release-targets.ts';
 import type { SchemeReleases, TargetView } from './releases.ts';
+import type { LastGreen } from './last-green.ts';
 
 /** How long a target's main must sit still before it deploys by itself. */
 export const QUIET_MS = 5 * 60_000;
@@ -49,6 +50,8 @@ export interface AutoDeployDeps {
   failed: (t: Found, why: string) => void;
   /** False where deploys can't run (a dev copy, a preview, a boot check): nothing deploys by itself there. */
   enabled?: () => boolean;
+  /** Targets a Roll back to last green pinned (#1016): auto-deploy leaves them be, a person's deploy lets go, a minion's is refused. */
+  held?: Pick<LastGreen, 'pinned' | 'unpin'>;
   now?: () => number;
 }
 
@@ -109,7 +112,7 @@ export class AutoDeploy {
     const can = deployer.waits(t, tv) && !this.starting.has(key);
     const auto = this.isOn(tv.target.projectId, tv.target.id);
     const m = this.moved.get(key);
-    const due = can && auto && m && this.saved().tried[key] !== m.head ? m.at + QUIET_MS : null;
+    const due = can && auto && m && this.saved().tried[key] !== m.head && !this.d.held?.pinned(t.projectId, t.id) ? m.at + QUIET_MS : null;
     return { can, auto, due };
   }
 
@@ -120,13 +123,18 @@ export class AutoDeploy {
     if (!t || !deployer) throw new HttpError(404, `${target} has no release step Citadel can start`);
     const key = keyOf(projectId, target);
     if (this.starting.has(key)) throw new HttpError(409, `${t.name} is being deployed already`);
+    const pin = this.d.held?.pinned(projectId, target);
+    // A minion's deploy (by "#N", the land's deploy of its scheme's apps too) waits for the fix; a person's is the override.
+    if (pin && by.startsWith('#')) throw new HttpError(409, `${t.name} was rolled back to last green ${pin.sha.slice(0, 9)} by ${pin.by}, and stays there until main has a newer commit that passes the full suite, then auto-deploy ships it. A person's Deploy on its Releases card ships main now.`);
     // Held from here, before the first await, so two presses at once start one deploy.
     this.starting.add(key);
     try {
       const head = await deployer.head(t);
       // A person's deploy counts as this commit's try: if it rolls back, auto-deploy waits for main to move.
       if (head) this.mark(key, head);
-      return (await deployer.start(t, by, uid)) ?? undefined;
+      const said = (await deployer.start(t, by, uid)) ?? undefined;
+      if (pin) this.d.held!.unpin(projectId, target);
+      return said;
     } finally {
       this.starting.delete(key);
     }
@@ -171,7 +179,7 @@ export class AutoDeploy {
           this.moved.set(key, { head, at: now });
           continue;
         }
-        if (now - m.at < QUIET_MS || !this.isOn(t.projectId, t.id) || this.saved().tried[key] === head || this.starting.has(key)) continue;
+        if (now - m.at < QUIET_MS || !this.isOn(t.projectId, t.id) || this.saved().tried[key] === head || this.starting.has(key) || this.d.held?.pinned(t.projectId, t.id)) continue;
         this.mark(key, head);
         // Not awaited: a slow start (an APK downloading) mustn't hold up the other targets' checks.
         this.starting.add(key);

@@ -279,10 +279,10 @@ const CITADEL_TARGET_ID = 'citadel-server';
 
 function schemeCards(projectId, alone) {
   const s = schemes.get(projectId);
-  if (!s) return alone ? [h('p', { class: 'muted rel-empty' }, `Nothing ships from ${schemeName(projectId)} yet: no release, preview or test copy.`)] : [];
+  if (!s) return alone ? [claimsBlock(projectId, redraw), h('p', { class: 'muted rel-empty' }, `Nothing ships from ${schemeName(projectId)} yet: no release, preview or test copy.`)] : [claimsBlock(projectId, redraw)];
   return [
     claimsBlock(projectId, redraw),
-    ...s.targets.map((tv) => [targetCard(projectId, tv, alone), tv.target.id === CITADEL_TARGET_ID ? watchBlock() : '']),
+    ...s.targets.flatMap((tv) => [targetCard(projectId, tv, alone), tv.target.id === CITADEL_TARGET_ID ? watchBlock() : '']),
     // On its own page the scheme's name is in the heading; among every scheme's cards, it leads each card's title.
     s.testCopies.length ? h('article', { class: 'rel-card' },
       h('header', {}, h('h3', {}, iconOf(projectId), alone ? 'Test copies' : `${schemeName(projectId)} test copies`)), copyList(s.testCopies)) : '',
